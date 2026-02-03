@@ -1,4 +1,5 @@
 pub mod database;
+pub mod import;
 pub mod metadata;
 pub mod models;
 
