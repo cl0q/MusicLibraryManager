@@ -6,6 +6,7 @@ pub mod import;
 pub mod metadata;
 pub mod models;
 pub mod search;
+pub mod transcode;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
