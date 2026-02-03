@@ -64,5 +64,8 @@ backoff = { version = "0.4", features = ["tokio"] }
 # Streaming utilities
 futures-util = "0.3"
 
+# Audio codec detection (for transcode decision logic)
+symphonia = { version = "0.5.5", features = ["all"] }
+
 [dev-dependencies]
 tempfile = "3.24.0"
