@@ -12,7 +12,7 @@ This roadmap transforms the unreliable streaming2ipod system into a production-g
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Library Foundation** - Database schema, atomic file operations, local import, search
+- [x] **Phase 1: Library Foundation** - Database schema, atomic file operations, local import, search
 - [ ] **Phase 2: Download Infrastructure** - Single-source pipeline with dabmusic.xyz and YouTube fallback
 - [ ] **Phase 3: Multi-Source Aggregation** - Spotify, Apple Music, SoundCloud API integration with deduplication
 - [ ] **Phase 4: Playlist Management** - Create, edit, reorder playlists with order preservation
@@ -39,11 +39,11 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 5 plans in 3 waves
 
 Plans:
-- [ ] 01-01-PLAN.md — Database schema and connection management with foreign key enforcement
-- [ ] 01-02-PLAN.md — Metadata extraction with lofty and path sanitization
-- [ ] 01-03-PLAN.md — Local file import with recursive scanning and batch transactions
-- [ ] 01-04-PLAN.md — Full-text search with Tantivy indexing and fuzzy matching
-- [ ] 01-05-PLAN.md — Duplicate detection with quality comparison
+- [x] 01-01-PLAN.md — Database schema and connection management with foreign key enforcement
+- [x] 01-02-PLAN.md — Metadata extraction with lofty and path sanitization
+- [x] 01-03-PLAN.md — Local file import with recursive scanning and batch transactions
+- [x] 01-04-PLAN.md — Full-text search with Tantivy indexing and fuzzy matching
+- [x] 01-05-PLAN.md — Duplicate detection with quality comparison
 
 ### Phase 2: Download Infrastructure
 **Goal**: Prove download pipeline works reliably with single-source downloads before multi-source complexity
@@ -175,8 +175,8 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Library Foundation | 0/5 | Ready for execution | - |
-| 2. Download Infrastructure | 0/3 | Not started | - |
+| 1. Library Foundation | 5/5 | ✓ Complete | 2026-02-03 |
+| 2. Download Infrastructure | 0/3 | Ready for planning | - |
 | 3. Multi-Source Aggregation | 0/3 | Not started | - |
 | 4. Playlist Management | 0/2 | Not started | - |
 | 5. Device Sync | 0/3 | Not started | - |
@@ -184,4 +184,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 7. Enhancements | 0/2 | Not started | - |
 
 ---
-*Last updated: 2026-02-03 after Phase 1 planning*
+*Last updated: 2026-02-03 after Phase 1 execution complete*

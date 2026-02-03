@@ -9,12 +9,12 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Library Foundation
 
-- [ ] **LIB-01**: User can import existing local music files into library via directory scan
-- [ ] **LIB-02**: System reads and writes metadata (ID3v2 for MP3/AAC, Vorbis for FLAC)
-- [ ] **LIB-03**: User can search library by artist, album, or title
-- [ ] **LIB-04**: System detects duplicate tracks via metadata matching
-- [ ] **LIB-05**: Files are organized in Artist/Album/Track directory structure
-- [ ] **LIB-06**: SoundCloud content stored in dedicated folder (different content nature)
+- [x] **LIB-01**: User can import existing local music files into library via directory scan
+- [x] **LIB-02**: System reads and writes metadata (ID3v2 for MP3/AAC, Vorbis for FLAC)
+- [x] **LIB-03**: User can search library by artist, album, or title
+- [x] **LIB-04**: System detects duplicate tracks via metadata matching
+- [x] **LIB-05**: Files are organized in Artist/Album/Track directory structure
+- [x] **LIB-06**: SoundCloud content stored in dedicated folder (different content nature)
 
 ### Source Integration
 
@@ -29,8 +29,8 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **DL-02**: System downloads 248kbps AAC from SoundCloud via scdl with Go+ auth
 - [ ] **DL-03**: System falls back to YouTube when track not found on primary sources
 - [ ] **DL-04**: System transcodes FLAC to 248kbps AAC M4A for device copies
-- [ ] **DL-05**: Download operations are atomic (no partial/corrupt files)
-- [ ] **DL-06**: Downloads are idempotent (can resume, won't re-download completed)
+- [x] **DL-05**: Download operations are atomic (no partial/corrupt files)
+- [x] **DL-06**: Downloads are idempotent (can resume, won't re-download completed)
 - [ ] **DL-07**: System handles API rate limits gracefully with backoff
 
 ### Playlist Management
@@ -101,14 +101,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| LIB-01 | Phase 1 | Pending |
-| LIB-02 | Phase 1 | Pending |
-| LIB-03 | Phase 1 | Pending |
-| LIB-04 | Phase 1 | Pending |
-| LIB-05 | Phase 1 | Pending |
-| LIB-06 | Phase 1 | Pending |
-| DL-05 | Phase 1 | Pending |
-| DL-06 | Phase 1 | Pending |
+| LIB-01 | Phase 1 | Complete |
+| LIB-02 | Phase 1 | Complete |
+| LIB-03 | Phase 1 | Complete |
+| LIB-04 | Phase 1 | Complete |
+| LIB-05 | Phase 1 | Complete |
+| LIB-06 | Phase 1 | Complete |
+| DL-05 | Phase 1 | Complete |
+| DL-06 | Phase 1 | Complete |
 | DL-01 | Phase 2 | Pending |
 | DL-03 | Phase 2 | Pending |
 | DL-04 | Phase 2 | Pending |
@@ -145,4 +145,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-02-03*
-*Last updated: 2026-02-03 after roadmap creation*
+*Last updated: 2026-02-03 after Phase 1 completion*

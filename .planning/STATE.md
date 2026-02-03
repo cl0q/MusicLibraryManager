@@ -5,7 +5,7 @@
 See: .planning/PROJECT.md (updated 2026-02-03)
 
 **Core value:** Like a song anywhere and it reliably ends up in your owned library and on your devices in high quality
-**Current focus:** Phase 1 - Library Foundation (Rust rewrite)
+**Current focus:** Phase 2 - Download Infrastructure
 
 ## Current Position
 
@@ -94,10 +94,10 @@ None yet.
 
 ### Blockers/Concerns
 
-**Phase 1 (Library Foundation):** COMPLETE
-- ~~lofty API differs from Mutagen~~ RESOLVED: Using ItemKey::AlbumArtist for album artist
-- ~~tantivy differs from Whoosh~~ RESOLVED: Tantivy indexer built, LIKE-based candidate retrieval for now
+**Phase 1 (Library Foundation):** ✓ VERIFIED
 - All 5 plans executed: schema, metadata, import, search, duplicates
+- 20/20 must-haves verified, 86 tests passing
+- Verification report: .planning/phases/01-library-foundation/01-VERIFICATION.md
 
 **Phase 2 (Download Infrastructure):**
 - dabmusic.xyz API documentation gap (HIGH severity) — needs investigation during planning
@@ -118,4 +118,4 @@ Stopped at: Completed 01-05-PLAN.md (Phase 1 complete)
 Resume file: None
 
 ---
-*Last updated: 2026-02-03 after completing 01-05-PLAN.md*
+*Last updated: 2026-02-03 after Phase 1 verification complete*
