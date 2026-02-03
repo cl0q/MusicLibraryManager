@@ -21,7 +21,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::import::import_directory,
-            commands::search::search_library
+            commands::search::search_library,
+            commands::duplicate::detect_duplicates
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
