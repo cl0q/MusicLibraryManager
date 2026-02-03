@@ -24,7 +24,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::import::import_directory,
             commands::search::search_library,
-            commands::duplicate::detect_duplicates
+            commands::duplicate::detect_duplicates,
+            commands::download::download_tracks,
+            commands::download::retry_failed_downloads,
+            commands::download::get_retry_queue_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

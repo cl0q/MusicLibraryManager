@@ -38,10 +38,6 @@ impl BatchResult {
             skipped: 0,
         }
     }
-
-    fn total(&self) -> u32 {
-        self.succeeded + self.failed + self.skipped
-    }
 }
 
 /// Orchestrates downloads across DAB and YouTube sources
@@ -384,16 +380,6 @@ mod tests {
         assert_eq!(result.succeeded, 0);
         assert_eq!(result.failed, 0);
         assert_eq!(result.skipped, 0);
-        assert_eq!(result.total(), 0);
-    }
-
-    #[test]
-    fn test_batch_result_total() {
-        let mut result = BatchResult::new();
-        result.succeeded = 5;
-        result.failed = 2;
-        result.skipped = 1;
-        assert_eq!(result.total(), 8);
     }
 
     #[tokio::test]
