@@ -10,27 +10,27 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 1 of 7 (Library Foundation)
-Plan: 2 of 3 in current phase
+Plan: 3 of 3 in current phase
 Status: In progress
-Last activity: 2026-02-03 - Completed 01-02-PLAN.md (FAT32 Filename Sanitization)
+Last activity: 2026-02-03 - Completed 01-03-PLAN.md (Import Pipeline)
 
-Progress: [██░░░░░░░░] 20%
+Progress: [███░░░░░░░] 30%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 2
-- Average duration: 3.5 min
-- Total execution time: 0.12 hours
+- Total plans completed: 3
+- Average duration: 3.7 min
+- Total execution time: 0.18 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01-library-foundation | 2 | 7 min | 3.5 min |
+| 01-library-foundation | 3 | 11 min | 3.7 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (3 min), 01-02 (4 min)
+- Last 5 plans: 01-01 (3 min), 01-02 (4 min), 01-03 (4 min)
 - Trend: Stable (~3-4 min per plan)
 
 *Updated after each plan completion*
@@ -59,6 +59,12 @@ Recent decisions affecting current work:
 - Return 'unknown' placeholder for empty/invalid input
 - TDD workflow: failing tests -> implementation -> refactor
 
+**From 01-03:**
+- Metadata fallbacks: album_artist -> artist -> "Various Artists"; title -> filename; album -> "Unknown Album"
+- Continue-on-error import: collect failures and report at end
+- UNIQUE constraint violations reported as "File already imported"
+- Reference-in-place model: store original paths, no file copying
+
 ### Pending Todos
 
 None yet.
@@ -85,9 +91,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-03 12:18
-Stopped at: Completed 01-02-PLAN.md (FAT32 Filename Sanitization)
+Last session: 2026-02-03 14:15
+Stopped at: Completed 01-03-PLAN.md (Import Pipeline)
 Resume file: None
 
 ---
-*Last updated: 2026-02-03 after 01-02 completion*
+*Last updated: 2026-02-03 after 01-03 completion*
