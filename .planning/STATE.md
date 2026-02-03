@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 1 of 7 (Library Foundation)
-Plan: 4 of 5 in current phase
-Status: In progress
-Last activity: 2026-02-03 — Completed 01-04-PLAN.md (Full-Text Search)
+Plan: 5 of 5 in current phase
+Status: Phase complete
+Last activity: 2026-02-03 — Completed 01-05-PLAN.md (Duplicate Detection)
 
-Progress: [████████░░] 80%
+Progress: [██████████] 100% (Phase 1 complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4
-- Average duration: 4m 58s
-- Total execution time: 0.33 hours
+- Total plans completed: 5
+- Average duration: 4m 34s
+- Total execution time: 0.38 hours
 
 *Updated after each plan completion*
 
@@ -54,6 +54,8 @@ Recent decisions affecting current work:
 - **Two-pass search** — Database LIKE for candidates, fuzzy scoring for ranking (2026-02-03)
 - **Multi-strategy scoring** — Jaro-Winkler + Levenshtein + token matching for different error types (2026-02-03)
 - **0.75 fuzzy threshold** — Balances precision/recall, relaxed from Python's 0.80 for Jaro-Winkler (2026-02-03)
+- **Mutable connection for mark_duplicates** — with_transaction requires &mut Connection (2026-02-03)
+- **AIFF in lossless formats** — Learning from Python implementation preserved (2026-02-03)
 - 248kbps AAC target (matches SoundCloud Go+ quality)
 - Rockbox for iPod (enables direct filesystem sync)
 - YouTube as fallback (acceptable quality tradeoff)
@@ -92,9 +94,10 @@ None yet.
 
 ### Blockers/Concerns
 
-**Phase 1 (Library Foundation):**
+**Phase 1 (Library Foundation):** COMPLETE
 - ~~lofty API differs from Mutagen~~ RESOLVED: Using ItemKey::AlbumArtist for album artist
 - ~~tantivy differs from Whoosh~~ RESOLVED: Tantivy indexer built, LIKE-based candidate retrieval for now
+- All 5 plans executed: schema, metadata, import, search, duplicates
 
 **Phase 2 (Download Infrastructure):**
 - dabmusic.xyz API documentation gap (HIGH severity) — needs investigation during planning
@@ -110,9 +113,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-03T15:27:00Z
-Stopped at: Completed 01-04-PLAN.md
+Last session: 2026-02-03T15:33:30Z
+Stopped at: Completed 01-05-PLAN.md (Phase 1 complete)
 Resume file: None
 
 ---
-*Last updated: 2026-02-03 after completing 01-04-PLAN.md*
+*Last updated: 2026-02-03 after completing 01-05-PLAN.md*
