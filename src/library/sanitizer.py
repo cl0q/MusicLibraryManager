@@ -19,9 +19,6 @@ Uses pathvalidate library for core sanitization with custom handling for:
 from pathvalidate import sanitize_filename as pv_sanitize
 
 
-# FAT32 invalid characters that need replacement
-FAT32_INVALID_CHARS = frozenset(['/', '\\', '<', '>', ':', '"', '|', '?', '*'])
-
 # Windows reserved names (case-insensitive)
 WINDOWS_RESERVED_NAMES = frozenset([
     'CON', 'PRN', 'AUX', 'NUL',
@@ -29,8 +26,33 @@ WINDOWS_RESERVED_NAMES = frozenset([
     'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'
 ])
 
+# Placeholder for invalid/empty filenames
+UNKNOWN_PLACEHOLDER = "unknown"
 
-def sanitize_filename(name: str | None, max_length: int = 255) -> str:
+# FAT32 path component max length
+MAX_COMPONENT_LENGTH = 255
+
+
+def _is_reserved_name(name: str) -> bool:
+    """
+    Check if a filename is a Windows reserved name.
+
+    Handles both plain names (CON) and names with extensions (CON.txt).
+
+    Args:
+        name: The filename to check
+
+    Returns:
+        True if the base name (without extension) is reserved, False otherwise.
+    """
+    if "." in name:
+        base = name.rsplit(".", 1)[0]
+    else:
+        base = name
+    return base.upper() in WINDOWS_RESERVED_NAMES
+
+
+def sanitize_filename(name: str | None, max_length: int = MAX_COMPONENT_LENGTH) -> str:
     """
     Sanitize a single filename component for FAT32 compatibility.
 
@@ -54,26 +76,12 @@ def sanitize_filename(name: str | None, max_length: int = 255) -> str:
     """
     # Handle None and empty input
     if name is None or not name.strip():
-        return "unknown"
+        return UNKNOWN_PLACEHOLDER
 
     # Check for Windows reserved names BEFORE any processing
     # Need to handle both plain names (CON) and names with extensions (CON.txt)
     original_name = name.strip()
-    is_reserved = False
-    reserved_base = ""
-    reserved_ext = ""
-
-    # Split into base and extension for reserved name check
-    if "." in original_name:
-        parts = original_name.rsplit(".", 1)
-        if len(parts) == 2:
-            reserved_base = parts[0]
-            reserved_ext = "." + parts[1]
-    else:
-        reserved_base = original_name
-
-    if reserved_base.upper() in WINDOWS_RESERVED_NAMES:
-        is_reserved = True
+    is_reserved = _is_reserved_name(original_name)
 
     # Use pathvalidate for core sanitization (invalid chars replacement)
     # platform="universal" handles FAT32 constraints
@@ -93,7 +101,7 @@ def sanitize_filename(name: str | None, max_length: int = 255) -> str:
     # Handle case where sanitization resulted in only underscores or empty
     stripped_underscores = sanitized.replace("_", "").strip()
     if not sanitized or sanitized.isspace() or not stripped_underscores:
-        return "unknown"
+        return UNKNOWN_PLACEHOLDER
 
     # Handle Windows reserved names - prefix with underscore
     # We check the ORIGINAL name for reserved status, then apply prefix
