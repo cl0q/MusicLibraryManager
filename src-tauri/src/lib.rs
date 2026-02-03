@@ -1,12 +1,14 @@
 pub mod auth;
 pub mod commands;
 pub mod database;
+pub mod dedup;
 pub mod download;
 pub mod duplicate;
 pub mod import;
 pub mod metadata;
 pub mod models;
 pub mod search;
+pub mod sources;
 pub mod transcode;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

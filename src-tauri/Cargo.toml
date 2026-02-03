@@ -44,6 +44,9 @@ tantivy = "0.22"
 # Fuzzy matching
 strsim = "0.11"
 
+# Regex for string normalization
+regex = "1"
+
 # Progress indication (for CLI/logging)
 indicatif = "0.17"
 

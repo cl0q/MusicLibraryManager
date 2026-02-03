@@ -2353,6 +2353,7 @@ dependencies = [
  "lofty",
  "log",
  "oauth2",
+ "regex",
  "reqwest 0.12.28",
  "rusqlite",
  "sanitize-filename",
