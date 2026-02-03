@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 2 of 7 (Download Infrastructure)
-Plan: 3 of 3 in current phase
+Plan: 4 of 4 in current phase
 Status: Phase complete
-Last activity: 2026-02-03 — Completed 02-03-PLAN.md (Audio Transcoding)
+Last activity: 2026-02-03 — Completed 02-04-PLAN.md (Download Orchestration)
 
-Progress: [█████████████░░░░░░░] 73% (8 of 11 total plans complete)
+Progress: [█████████████████░░░] 82% (9 of 11 total plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 8
-- Average duration: 4m 18s
-- Total execution time: 0.57 hours
+- Total plans completed: 9
+- Average duration: 4m 17s
+- Total execution time: 0.64 hours
 
 *Updated after each plan completion*
 
@@ -66,6 +66,11 @@ Recent decisions affecting current work:
 - **libfdk_aac with fallback** — Primary encoder for quality, fallback to native AAC (2026-02-03)
 - **Preserve lossy <248kbps** — Skip transcoding to avoid generation loss (2026-02-03)
 - **Codec-based lossless detection** — Read actual codec from headers not file extension (2026-02-03)
+- **Max 3 retry attempts** — Prevents unbounded queue growth, drops permanently failing tracks (2026-02-03)
+- **Sequential batch processing** — One download at a time, simpler rate limiting, easier debug (2026-02-03)
+- **Atomic queue writes** — Temp file + rename prevents corruption on crash (2026-02-03)
+- **Continue on download failure** — Queue failed tracks, don't block batch (2026-02-03)
+- **Preserve FLAC on transcode failure** — Only retry transcode, avoid re-download (2026-02-03)
 - 248kbps AAC target (matches SoundCloud Go+ quality)
 - Rockbox for iPod (enables direct filesystem sync)
 - YouTube as fallback (acceptable quality tradeoff)
@@ -110,8 +115,10 @@ None yet.
 - Verification report: .planning/phases/01-library-foundation/01-VERIFICATION.md
 
 **Phase 2 (Download Infrastructure):** ✓ COMPLETE
-- All 3 plans executed: dabmusic API, YouTube extraction, audio transcoding
+- All 4 plans executed: dabmusic API, YouTube extraction, audio transcoding, download orchestration
 - FFmpeg required for transcode (to be documented in Phase 5 device sync setup)
+- yt-dlp CLI required for YouTube downloads (to be documented in Phase 5)
+- 116 tests passing (26 in download module)
 - Next: Phase 3 multi-source aggregation can begin
 
 **Phase 3 (Multi-Source Aggregation):**
@@ -124,9 +131,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-03T20:09:49Z
-Stopped at: Completed 02-03-PLAN.md (Audio Transcoding) - Phase 2 complete
+Last session: 2026-02-03T20:17:59Z
+Stopped at: Completed 02-04-PLAN.md (Download Orchestration) - Phase 2 complete
 Resume file: None
 
 ---
-*Last updated: 2026-02-03 after completing 02-03-PLAN.md*
+*Last updated: 2026-02-03 after completing 02-04-PLAN.md*
