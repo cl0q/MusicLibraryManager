@@ -18,7 +18,10 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![commands::import::import_directory])
+        .invoke_handler(tauri::generate_handler![
+            commands::import::import_directory,
+            commands::search::search_library
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
