@@ -5,15 +5,15 @@
 //!
 //! ## Supported Sources
 //!
-//! - Spotify: Liked songs and playlists via OAuth 2.0 with PKCE
-//! - SoundCloud: (Planned for 03-03)
+//! - SoundCloud: Liked tracks and playlists via OAuth 2.1 with mandatory PKCE
+//! - Spotify: (Planned for 03-02)
 //!
 //! ## Authentication
 //!
-//! All sources use OAuth 2.0 Authorization Code flow with PKCE.
+//! All sources use OAuth 2.0/2.1 Authorization Code flow with PKCE.
 //! Refresh tokens are stored securely in the system keychain via
 //! the `auth` module.
 
-pub mod spotify;
+pub mod soundcloud;
 
-pub use spotify::{SpotifyClient, SpotifyError};
+pub use soundcloud::{SoundCloudClient, SoundCloudError};
