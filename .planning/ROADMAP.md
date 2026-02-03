@@ -68,7 +68,7 @@ Plans:
 - [x] 02-04-PLAN.md — Retry queue persistence and batch orchestration
 
 ### Phase 3: Multi-Source Aggregation
-**Goal**: Integrate Spotify, Apple Music, and SoundCloud APIs with deduplication across sources
+**Goal**: Integrate Spotify and SoundCloud APIs with deduplication across sources
 
 **Depends on**: Phase 2
 
@@ -81,12 +81,14 @@ Plans:
   4. System tracks which tracks came from which source (many-to-many relationship)
   5. System detects duplicate tracks across sources and prevents duplicate downloads
 
-**Plans**: TBD
+**Plans**: 5 plans in 3 waves
 
 Plans:
-- [ ] 03-01: TBD during planning
-- [ ] 03-02: TBD during planning
-- [ ] 03-03: TBD during planning
+- [ ] 03-01-PLAN.md — Schema migration and OAuth token infrastructure
+- [ ] 03-02-PLAN.md — Spotify API integration with incremental sync
+- [ ] 03-03-PLAN.md — SoundCloud API integration with incremental sync
+- [ ] 03-04-PLAN.md — Duplicate detection with normalization and fuzzy matching
+- [ ] 03-05-PLAN.md — Tauri commands and human verification
 
 ### Phase 4: Playlist Management
 **Goal**: User can create, edit, and reorder playlists with order preservation guaranteed
@@ -178,11 +180,11 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 |-------|----------------|--------|-----------|
 | 1. Library Foundation | 5/5 | ✓ Complete | 2026-02-03 |
 | 2. Download Infrastructure | 4/4 | ✓ Complete | 2026-02-03 |
-| 3. Multi-Source Aggregation | 0/3 | Not started | - |
+| 3. Multi-Source Aggregation | 0/5 | Planned | - |
 | 4. Playlist Management | 0/2 | Not started | - |
 | 5. Device Sync | 0/3 | Not started | - |
 | 6. Desktop UI | 0/3 | Not started | - |
 | 7. Enhancements | 0/2 | Not started | - |
 
 ---
-*Last updated: 2026-02-03 after Phase 2 execution complete*
+*Last updated: 2026-02-03 after Phase 3 planning*
