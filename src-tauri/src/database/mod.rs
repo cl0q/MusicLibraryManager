@@ -1,0 +1,28 @@
+//! Database module for music library storage.
+//!
+//! Provides SQLite database access with:
+//! - Schema management (tracks table with metadata fields)
+//! - Connection management with foreign key enforcement
+//! - Transaction wrappers for atomic operations
+//!
+//! # Example
+//! ```ignore
+//! use std::path::Path;
+//! use music_library_manager::database::{get_connection, with_transaction};
+//!
+//! // Open or create database
+//! let conn = get_connection(Path::new("library.db"))?;
+//!
+//! // Perform atomic operations
+//! with_transaction(&conn, |tx| {
+//!     tx.execute("INSERT INTO tracks ...", [])?;
+//!     Ok(())
+//! })?;
+//! ```
+
+pub mod connection;
+pub mod schema;
+
+// Re-export commonly used items
+pub use connection::{get_connection, get_memory_connection, with_transaction, DatabaseError, Result};
+pub use schema::initialize_schema;
