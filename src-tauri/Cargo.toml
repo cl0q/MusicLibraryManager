@@ -57,5 +57,12 @@ anyhow = "1"
 # Date/time
 chrono = { version = "0.4", features = ["serde"] }
 
+# HTTP client (for download infrastructure)
+reqwest = { version = "0.12", features = ["json", "stream"] }
+backoff = { version = "0.4", features = ["tokio"] }
+
+# Streaming utilities
+futures-util = "0.3"
+
 [dev-dependencies]
 tempfile = "3.24.0"
