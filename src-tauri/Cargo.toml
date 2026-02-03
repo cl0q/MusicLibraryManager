@@ -57,6 +57,11 @@ anyhow = "1"
 # Date/time
 chrono = { version = "0.4", features = ["serde"] }
 
+# OAuth token management
+oauth2 = "5.0"
+keyring = "3.6"
+unicode-normalization = "0.1"
+
 # HTTP client (for download infrastructure)
 reqwest = { version = "0.12", features = ["json", "stream"] }
 backoff = { version = "0.4", features = ["tokio"] }
