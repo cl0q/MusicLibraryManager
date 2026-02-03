@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 
 ## Current Position
 
-Phase: 1 of 7 (Library Foundation)
-Plan: 5 of 5 in current phase
-Status: Phase complete
-Last activity: 2026-02-03 — Completed 01-05-PLAN.md (Duplicate Detection)
+Phase: 2 of 7 (Download Infrastructure)
+Plan: 1 of 3 in current phase
+Status: In progress
+Last activity: 2026-02-03 — Completed 02-01-PLAN.md (DAB API Client)
 
-Progress: [██████████] 100% (Phase 1 complete)
+Progress: [███████████░░░░░░░░░] 55% (6 of 11 total plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 5
-- Average duration: 4m 34s
-- Total execution time: 0.38 hours
+- Total plans completed: 6
+- Average duration: 4m 16s
+- Total execution time: 0.43 hours
 
 *Updated after each plan completion*
 
@@ -56,6 +56,10 @@ Recent decisions affecting current work:
 - **0.75 fuzzy threshold** — Balances precision/recall, relaxed from Python's 0.80 for Jaro-Winkler (2026-02-03)
 - **Mutable connection for mark_duplicates** — with_transaction requires &mut Connection (2026-02-03)
 - **AIFF in lossless formats** — Learning from Python implementation preserved (2026-02-03)
+- **404 as permanent error** — No retry, enables fast YouTube fallback (2026-02-03)
+- **Streaming downloads to disk** — FLAC files can be 30-50MB, avoid OOM (2026-02-03)
+- **Atomic write pattern** — Temp file + rename prevents partial files (2026-02-03)
+- **backoff crate for retry** — Battle-tested exponential backoff vs manual loops (2026-02-03)
 - 248kbps AAC target (matches SoundCloud Go+ quality)
 - Rockbox for iPod (enables direct filesystem sync)
 - YouTube as fallback (acceptable quality tradeoff)
@@ -113,9 +117,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-03T15:33:30Z
-Stopped at: Completed 01-05-PLAN.md (Phase 1 complete)
+Last session: 2026-02-03T20:00:34Z
+Stopped at: Completed 02-01-PLAN.md (DAB API Client)
 Resume file: None
 
 ---
-*Last updated: 2026-02-03 after Phase 1 verification complete*
+*Last updated: 2026-02-03 after completing 02-01-PLAN.md*
