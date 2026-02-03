@@ -1,10 +1,13 @@
 use anyhow::{Context, Result};
 use std::fs::File;
 use std::path::Path;
-use symphonia::core::codecs::{CodecType, CODEC_TYPE_AAC, CODEC_TYPE_ALAC, CODEC_TYPE_FLAC, CODEC_TYPE_MP3, CODEC_TYPE_OPUS, CODEC_TYPE_VORBIS, CODEC_TYPE_WAVPACK};
+use symphonia::core::codecs::{CodecType, CODEC_TYPE_ALAC, CODEC_TYPE_FLAC, CODEC_TYPE_WAVPACK};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
+
+#[cfg(test)]
+use symphonia::core::codecs::{CODEC_TYPE_AAC, CODEC_TYPE_MP3, CODEC_TYPE_OPUS, CODEC_TYPE_VORBIS};
 
 /// Represents detected audio format with codec and quality information
 #[derive(Debug, Clone, PartialEq)]
