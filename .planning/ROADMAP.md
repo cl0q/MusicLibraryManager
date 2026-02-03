@@ -59,12 +59,13 @@ Plans:
   4. Download operations can be interrupted and resumed without re-downloading completed files
   5. System handles API rate limits gracefully with backoff and retry logic
 
-**Plans**: TBD
+**Plans**: 4 plans in 3 waves
 
 Plans:
-- [ ] 02-01: TBD during planning
-- [ ] 02-02: TBD during planning
-- [ ] 02-03: TBD during planning
+- [ ] 02-01-PLAN.md — DAB API client with exponential backoff retry logic
+- [ ] 02-02-PLAN.md — YouTube fallback with yt-dlp integration
+- [ ] 02-03-PLAN.md — Transcode pipeline with format detection and 248kbps AAC encoding
+- [ ] 02-04-PLAN.md — Retry queue persistence and batch orchestration
 
 ### Phase 3: Multi-Source Aggregation
 **Goal**: Integrate Spotify, Apple Music, and SoundCloud APIs with deduplication across sources
@@ -176,7 +177,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Library Foundation | 5/5 | ✓ Complete | 2026-02-03 |
-| 2. Download Infrastructure | 0/3 | Ready for planning | - |
+| 2. Download Infrastructure | 0/4 | Ready for execution | - |
 | 3. Multi-Source Aggregation | 0/3 | Not started | - |
 | 4. Playlist Management | 0/2 | Not started | - |
 | 5. Device Sync | 0/3 | Not started | - |
@@ -184,4 +185,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 7. Enhancements | 0/2 | Not started | - |
 
 ---
-*Last updated: 2026-02-03 after Phase 1 execution complete*
+*Last updated: 2026-02-03 after Phase 2 planning complete*
