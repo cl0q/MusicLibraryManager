@@ -36,14 +36,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. System detects duplicate tracks via metadata matching and alerts user
   5. File operations are atomic (no corrupt files from interrupted operations)
 
-**Plans**: 5 plans
+**Plans**: TBD (Rust rewrite)
 
 Plans:
-- [ ] 01-01-PLAN.md — Database foundation with SQLite schema and CRUD
-- [ ] 01-02-PLAN.md — FAT32 filename sanitization (TDD)
-- [ ] 01-03-PLAN.md — Metadata extraction and import pipeline
-- [ ] 01-04-PLAN.md — Duplicate detection with quality hierarchy (TDD)
-- [ ] 01-05-PLAN.md — Search infrastructure with Whoosh and fuzzy matching
+- [ ] 01-01: TBD during planning (Rust + Tauri)
+- [ ] 01-02: TBD during planning
+- [ ] 01-03: TBD during planning
 
 ### Phase 2: Download Infrastructure
 **Goal**: Prove download pipeline works reliably with single-source downloads before multi-source complexity
@@ -175,7 +173,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Library Foundation | 0/5 | Not started | - |
+| 1. Library Foundation | 0/? | Needs planning (Rust rewrite) | - |
 | 2. Download Infrastructure | 0/3 | Not started | - |
 | 3. Multi-Source Aggregation | 0/3 | Not started | - |
 | 4. Playlist Management | 0/2 | Not started | - |
@@ -184,4 +182,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 7. Enhancements | 0/2 | Not started | - |
 
 ---
-*Last updated: 2026-02-03 after Phase 1 planning*
+*Last updated: 2026-02-03 after Rust+Tauri rewrite decision*

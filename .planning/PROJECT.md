@@ -84,11 +84,32 @@ The old system's problems:
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Python for core logic | Existing tooling (scdl, mutagen, ffmpeg wrappers) is Python | — Pending |
+| Rust for core logic | Performance, reliability, single binary distribution | ✓ Decided 2026-02-03 |
+| Tauri for UI | Web UI flexibility + Rust backend, small binaries, native webview | ✓ Decided 2026-02-03 |
 | 248kbps AAC target | Matches SoundCloud Go+ quality, good balance of size/quality | — Pending |
 | Rockbox for iPod | Enables direct filesystem sync, avoids iTunes complexity | — Pending |
 | YouTube as fallback | Acceptable quality tradeoff for tracks not on dabmusic | — Pending |
-| UI framework TBD | Cross-platform desired; options: Tauri, Electron, SwiftUI (macOS-only) | — Pending |
+
+## Tech Stack
+
+**Backend (Rust):**
+- `rusqlite` — SQLite database
+- `lofty` — Audio metadata extraction (like Mutagen)
+- `tantivy` — Full-text search (like Whoosh)
+- `strsim` or `fuzzy-matcher` — Fuzzy string matching
+- `indicatif` — Progress bars
+- `tokio` — Async runtime
+- `serde` — Serialization
+
+**Frontend (Tauri + Web):**
+- Tauri v2 — Desktop app framework
+- TypeScript + React — UI components
+- Tailwind CSS — Styling
+- shadcn/ui — Component library (clean, modern look)
+
+**External tools (invoked via CLI):**
+- `ffmpeg` — Audio transcoding
+- `yt-dlp` — YouTube downloads
 
 ---
-*Last updated: 2026-02-03 after initialization*
+*Last updated: 2026-02-03 after Rust+Tauri decision*

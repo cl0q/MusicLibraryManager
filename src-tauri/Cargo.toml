@@ -1,0 +1,58 @@
+[package]
+name = "music-library-manager"
+version = "0.1.0"
+description = "Unified music library manager with streaming service aggregation"
+authors = ["olli"]
+license = "MIT"
+repository = ""
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "music_library_manager"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2" }
+
+[dependencies]
+# Tauri
+tauri = { version = "2" }
+tauri-plugin-log = "2"
+tauri-plugin-shell = "2"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Logging
+log = "0.4"
+tracing = "0.1"
+
+# Database
+rusqlite = { version = "0.34", features = ["bundled"] }
+
+# Audio metadata
+lofty = "0.22"
+
+# Full-text search
+tantivy = "0.22"
+
+# Fuzzy matching
+strsim = "0.11"
+
+# Progress indication (for CLI/logging)
+indicatif = "0.17"
+
+# Path sanitization
+sanitize-filename = "0.6"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
