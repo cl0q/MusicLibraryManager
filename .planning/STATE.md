@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 3 of 7 (Multi-Source Aggregation)
-Plan: 1 of 3 in current phase
+Plan: 4 of 6 in current phase (plans 01, 04 complete)
 Status: In progress
-Last activity: 2026-02-03 — Completed 03-01-PLAN.md (Multi-Source Foundation)
+Last activity: 2026-02-03 — Completed 03-04-PLAN.md (Track Normalization & Dedup)
 
-Progress: [██████████████████░░] 91% (10 of 11 total plans complete)
+Progress: [██████████████░░░░░░] 73% (11 of 15 total plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 10
-- Average duration: 4m 20s
-- Total execution time: 0.72 hours
+- Total plans completed: 11
+- Average duration: 4m 28s
+- Total execution time: 0.82 hours
 
 *Updated after each plan completion*
 
@@ -77,6 +77,9 @@ Recent decisions affecting current work:
 - **Schema version 2 for Phase 3** — PRAGMA user_version tracking for safe migrations (2026-02-03)
 - **Keychain service name: com.musiclibrarymanager** — Consistent identifier for keyring entries (2026-02-03)
 - **Proactive token refresh 5 minutes before expiration** — Industry best practice for OAuth (2026-02-03)
+- **Featuring substitution before punctuation removal** — Ampersand stripped by normalize(), must substitute first (2026-02-03)
+- **70/30 title/artist weighting for similarity** — Title is more discriminating than artist for duplicate detection (2026-02-03)
+- **LazyLock for compiled regex patterns** — Zero-cost after first use, thread-safe static initialization (2026-02-03)
 
 ### Learnings from Python Implementation
 
@@ -126,7 +129,8 @@ None yet.
 
 **Phase 3 (Multi-Source Aggregation):** IN PROGRESS
 - Plan 01 complete: schema extensions, OAuth token management
-- 131 tests passing (18 new in plan 01)
+- Plan 04 complete: track normalization and fuzzy duplicate detection
+- 168 tests passing (22 in dedup module)
 - Apple Music MusicKit authentication flow needs hands-on testing
 - SoundCloud unofficial API carries breakage risk (MEDIUM-HIGH) — requires abstraction layer
 
@@ -136,9 +140,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-03T22:36:00Z
-Stopped at: Completed 03-01-PLAN.md (Multi-Source Foundation)
+Last session: 2026-02-03T22:46:49Z
+Stopped at: Completed 03-04-PLAN.md (Track Normalization & Dedup)
 Resume file: None
 
 ---
-*Last updated: 2026-02-03 after completing 03-01-PLAN.md*
+*Last updated: 2026-02-03 after completing 03-04-PLAN.md*
