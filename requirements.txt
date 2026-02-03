@@ -1,0 +1,31 @@
+# MusicLibraryManager - Phase 1 Dependencies
+# Core dependencies for library foundation
+
+# Audio metadata reading/writing (ID3v2, Vorbis, APEv2)
+# Industry standard, zero dependencies, supports MP3, FLAC, AAC
+mutagen>=1.46
+
+# Fuzzy string matching for search tolerance
+# C++ implementation for performance, multiple similarity algorithms
+rapidfuzz>=3.4
+
+# Full-text search and metadata indexing
+# Pure Python, schema-based, ideal for structured music metadata
+whoosh>=2.7
+
+# Atomic file operations for safety
+# Prevents corrupt files from interrupted writes
+atomicwrites>=1.4
+
+# Cross-platform filename validation/sanitization
+# Handles Windows, POSIX, FAT32 filesystem constraints
+pathvalidate>=3.2
+
+# Progress bar feedback for imports
+tqdm>=4.65
+
+# Environment variable configuration from .env files
+python-dotenv>=1.0
+
+# Optional: lightweight metadata reading (Mutagen preferred for writes)
+tinytag>=1.9
