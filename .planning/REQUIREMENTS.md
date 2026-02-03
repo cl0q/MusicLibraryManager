@@ -101,48 +101,48 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| LIB-01 | TBD | Pending |
-| LIB-02 | TBD | Pending |
-| LIB-03 | TBD | Pending |
-| LIB-04 | TBD | Pending |
-| LIB-05 | TBD | Pending |
-| LIB-06 | TBD | Pending |
-| SRC-01 | TBD | Pending |
-| SRC-02 | TBD | Pending |
-| SRC-03 | TBD | Pending |
-| SRC-04 | TBD | Pending |
-| DL-01 | TBD | Pending |
-| DL-02 | TBD | Pending |
-| DL-03 | TBD | Pending |
-| DL-04 | TBD | Pending |
-| DL-05 | TBD | Pending |
-| DL-06 | TBD | Pending |
-| DL-07 | TBD | Pending |
-| PL-01 | TBD | Pending |
-| PL-02 | TBD | Pending |
-| PL-03 | TBD | Pending |
-| PL-04 | TBD | Pending |
-| PL-05 | TBD | Pending |
-| PL-06 | TBD | Pending |
-| SYNC-01 | TBD | Pending |
-| SYNC-02 | TBD | Pending |
-| SYNC-03 | TBD | Pending |
-| SYNC-04 | TBD | Pending |
-| SYNC-05 | TBD | Pending |
-| UI-01 | TBD | Pending |
-| UI-02 | TBD | Pending |
-| UI-03 | TBD | Pending |
-| UI-04 | TBD | Pending |
-| UI-05 | TBD | Pending |
-| ENH-01 | TBD | Pending |
-| ENH-02 | TBD | Pending |
-| ENH-03 | TBD | Pending |
+| LIB-01 | Phase 1 | Pending |
+| LIB-02 | Phase 1 | Pending |
+| LIB-03 | Phase 1 | Pending |
+| LIB-04 | Phase 1 | Pending |
+| LIB-05 | Phase 1 | Pending |
+| LIB-06 | Phase 1 | Pending |
+| DL-05 | Phase 1 | Pending |
+| DL-06 | Phase 1 | Pending |
+| DL-01 | Phase 2 | Pending |
+| DL-03 | Phase 2 | Pending |
+| DL-04 | Phase 2 | Pending |
+| DL-07 | Phase 2 | Pending |
+| SRC-01 | Phase 3 | Pending |
+| SRC-02 | Phase 3 | Pending |
+| SRC-03 | Phase 3 | Pending |
+| SRC-04 | Phase 3 | Pending |
+| DL-02 | Phase 3 | Pending |
+| PL-01 | Phase 4 | Pending |
+| PL-02 | Phase 4 | Pending |
+| PL-03 | Phase 4 | Pending |
+| PL-04 | Phase 4 | Pending |
+| PL-05 | Phase 4 | Pending |
+| PL-06 | Phase 4 | Pending |
+| SYNC-01 | Phase 5 | Pending |
+| SYNC-02 | Phase 5 | Pending |
+| SYNC-03 | Phase 5 | Pending |
+| SYNC-04 | Phase 5 | Pending |
+| SYNC-05 | Phase 5 | Pending |
+| UI-01 | Phase 6 | Pending |
+| UI-02 | Phase 6 | Pending |
+| UI-03 | Phase 6 | Pending |
+| UI-04 | Phase 6 | Pending |
+| UI-05 | Phase 6 | Pending |
+| ENH-01 | Phase 7 | Pending |
+| ENH-02 | Phase 7 | Pending |
+| ENH-03 | Phase 7 | Pending |
 
 **Coverage:**
 - v1 requirements: 33 total
-- Mapped to phases: 0
-- Unmapped: 33
+- Mapped to phases: 33
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-03*
-*Last updated: 2026-02-03 after initial definition*
+*Last updated: 2026-02-03 after roadmap creation*
