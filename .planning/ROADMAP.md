@@ -13,7 +13,7 @@ This roadmap transforms the unreliable streaming2ipod system into a production-g
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Library Foundation** - Database schema, atomic file operations, local import, search
-- [ ] **Phase 2: Download Infrastructure** - Single-source pipeline with dabmusic.xyz and YouTube fallback
+- [x] **Phase 2: Download Infrastructure** - Single-source pipeline with dabmusic.xyz and YouTube fallback
 - [ ] **Phase 3: Multi-Source Aggregation** - Spotify, Apple Music, SoundCloud API integration with deduplication
 - [ ] **Phase 4: Playlist Management** - Create, edit, reorder playlists with order preservation
 - [ ] **Phase 5: Device Sync** - Incremental sync to Rockbox iPod with M3U8 playlist generation
@@ -62,10 +62,10 @@ Plans:
 **Plans**: 4 plans in 3 waves
 
 Plans:
-- [ ] 02-01-PLAN.md — DAB API client with exponential backoff retry logic
-- [ ] 02-02-PLAN.md — YouTube fallback with yt-dlp integration
-- [ ] 02-03-PLAN.md — Transcode pipeline with format detection and 248kbps AAC encoding
-- [ ] 02-04-PLAN.md — Retry queue persistence and batch orchestration
+- [x] 02-01-PLAN.md — DAB API client with exponential backoff retry logic
+- [x] 02-02-PLAN.md — YouTube fallback with yt-dlp integration
+- [x] 02-03-PLAN.md — Transcode pipeline with format detection and 248kbps AAC encoding
+- [x] 02-04-PLAN.md — Retry queue persistence and batch orchestration
 
 ### Phase 3: Multi-Source Aggregation
 **Goal**: Integrate Spotify, Apple Music, and SoundCloud APIs with deduplication across sources
@@ -177,7 +177,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Library Foundation | 5/5 | ✓ Complete | 2026-02-03 |
-| 2. Download Infrastructure | 0/4 | Ready for execution | - |
+| 2. Download Infrastructure | 4/4 | ✓ Complete | 2026-02-03 |
 | 3. Multi-Source Aggregation | 0/3 | Not started | - |
 | 4. Playlist Management | 0/2 | Not started | - |
 | 5. Device Sync | 0/3 | Not started | - |
@@ -185,4 +185,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 7. Enhancements | 0/2 | Not started | - |
 
 ---
-*Last updated: 2026-02-03 after Phase 2 planning complete*
+*Last updated: 2026-02-03 after Phase 2 execution complete*

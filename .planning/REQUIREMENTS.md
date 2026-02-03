@@ -25,13 +25,13 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Download Pipeline
 
-- [ ] **DL-01**: System downloads FLAC files from dabmusic.xyz for Spotify tracks
+- [x] **DL-01**: System downloads FLAC files from dabmusic.xyz for Spotify tracks
 - [ ] **DL-02**: System downloads 248kbps AAC from SoundCloud via scdl with Go+ auth
-- [ ] **DL-03**: System falls back to YouTube when track not found on primary sources
-- [ ] **DL-04**: System transcodes FLAC to 248kbps AAC M4A for device copies
+- [x] **DL-03**: System falls back to YouTube when track not found on primary sources
+- [x] **DL-04**: System transcodes FLAC to 248kbps AAC M4A for device copies
 - [x] **DL-05**: Download operations are atomic (no partial/corrupt files)
 - [x] **DL-06**: Downloads are idempotent (can resume, won't re-download completed)
-- [ ] **DL-07**: System handles API rate limits gracefully with backoff
+- [x] **DL-07**: System handles API rate limits gracefully with backoff
 
 ### Playlist Management
 
