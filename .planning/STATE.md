@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 2 of 7 (Download Infrastructure)
-Plan: 1 of 3 in current phase
+Plan: 2 of 3 in current phase
 Status: In progress
-Last activity: 2026-02-03 — Completed 02-01-PLAN.md (DAB API Client)
+Last activity: 2026-02-03 — Completed 02-02-PLAN.md (YouTube Audio Extraction)
 
-Progress: [███████████░░░░░░░░░] 55% (6 of 11 total plans complete)
+Progress: [████████████░░░░░░░░] 64% (7 of 11 total plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 6
-- Average duration: 4m 16s
-- Total execution time: 0.43 hours
+- Total plans completed: 7
+- Average duration: 4m 12s
+- Total execution time: 0.49 hours
 
 *Updated after each plan completion*
 
@@ -60,6 +60,8 @@ Recent decisions affecting current work:
 - **Streaming downloads to disk** — FLAC files can be 30-50MB, avoid OOM (2026-02-03)
 - **Atomic write pattern** — Temp file + rename prevents partial files (2026-02-03)
 - **backoff crate for retry** — Battle-tested exponential backoff vs manual loops (2026-02-03)
+- **CLI invocation over yt-dlp crate** — Direct yt-dlp CLI call avoids rusqlite version conflict (2026-02-03)
+- **Ignore integration tests by default** — CI compatibility without external dependencies (2026-02-03)
 - 248kbps AAC target (matches SoundCloud Go+ quality)
 - Rockbox for iPod (enables direct filesystem sync)
 - YouTube as fallback (acceptable quality tradeoff)
@@ -117,9 +119,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-03T20:00:34Z
-Stopped at: Completed 02-01-PLAN.md (DAB API Client)
+Last session: 2026-02-03T21:01:24Z
+Stopped at: Completed 02-02-PLAN.md (YouTube Audio Extraction)
 Resume file: None
 
 ---
-*Last updated: 2026-02-03 after completing 02-01-PLAN.md*
+*Last updated: 2026-02-03 after completing 02-02-PLAN.md*
