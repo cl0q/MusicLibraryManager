@@ -12,7 +12,8 @@ use crate::database::connection::Result;
 /// - Version 1: Phase 1 schema (tracks table)
 /// - Version 2: Phase 3 schema (sources, track_sources, last_sync_timestamps, variant_of)
 /// - Version 3: Phase 4 schema (playlists, playlist_tracks, playlist_tags)
-pub const CURRENT_SCHEMA_VERSION: i32 = 3;
+/// - Version 4: Phase 5 schema (sync_profiles, sync_profile_tracks, sync_profile_playlists, sync_profile_rules, sync_state)
+pub const CURRENT_SCHEMA_VERSION: i32 = 4;
 
 /// SQL schema for the music library database (Phase 1 - base schema).
 ///
@@ -146,6 +147,70 @@ ORDER BY id DESC
 LIMIT 100;
 ";
 
+/// SQL schema for Phase 5 device sync tables.
+///
+/// Contains:
+/// - `sync_profiles` table: Device sync profiles with custom names and output folders
+/// - `sync_profile_tracks` table: Manually added tracks to profiles
+/// - `sync_profile_playlists` table: Entire playlists added to profiles
+/// - `sync_profile_rules` table: Query rules for dynamic track selection
+/// - `sync_state` table: Incremental sync state tracking per profile
+pub const PHASE5_SCHEMA_SQL: &str = "
+-- Sync profiles table: Device sync profiles with custom names
+CREATE TABLE IF NOT EXISTS sync_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,           -- Profile display name (e.g., 'iPod Classic', 'iPhone')
+    output_folder TEXT NOT NULL,         -- Local staging folder path
+    date_created TEXT DEFAULT CURRENT_TIMESTAMP,
+    date_modified TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Sync profile tracks table: Manually added individual tracks
+CREATE TABLE IF NOT EXISTS sync_profile_tracks (
+    profile_id INTEGER NOT NULL,
+    track_id INTEGER NOT NULL,
+    PRIMARY KEY (profile_id, track_id),
+    FOREIGN KEY (profile_id) REFERENCES sync_profiles(id) ON DELETE CASCADE,
+    FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_sync_profile_tracks_profile ON sync_profile_tracks(profile_id);
+
+-- Sync profile playlists table: Include all tracks from selected playlists
+CREATE TABLE IF NOT EXISTS sync_profile_playlists (
+    profile_id INTEGER NOT NULL,
+    playlist_id INTEGER NOT NULL,
+    PRIMARY KEY (profile_id, playlist_id),
+    FOREIGN KEY (profile_id) REFERENCES sync_profiles(id) ON DELETE CASCADE,
+    FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_sync_profile_playlists_profile ON sync_profile_playlists(profile_id);
+
+-- Sync profile rules table: Query-based track selection
+CREATE TABLE IF NOT EXISTS sync_profile_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL,
+    field TEXT NOT NULL,                 -- 'genre' | 'source' | 'date_added' | 'artist' | 'bitrate' | 'tag'
+    operator TEXT NOT NULL,              -- 'eq' | 'ne' | 'gt' | 'lt' | 'contains' | 'in'
+    value TEXT NOT NULL,                 -- Filter value
+    FOREIGN KEY (profile_id) REFERENCES sync_profiles(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_sync_profile_rules_profile ON sync_profile_rules(profile_id);
+
+-- Sync state table: Incremental sync state tracking
+CREATE TABLE IF NOT EXISTS sync_state (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL,
+    track_id INTEGER NOT NULL,
+    synced_checksum TEXT,                -- SHA256 of transcoded file at sync time
+    synced_size INTEGER,                 -- File size in bytes
+    synced_timestamp TEXT,               -- ISO 8601 timestamp
+    UNIQUE(profile_id, track_id),
+    FOREIGN KEY (profile_id) REFERENCES sync_profiles(id) ON DELETE CASCADE,
+    FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_sync_state_profile ON sync_state(profile_id);
+";
+
 /// Get the current schema version from the database.
 pub fn get_schema_version(conn: &Connection) -> Result<i32> {
     let version: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -193,6 +258,13 @@ fn migrate_to_v3(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Run Phase 5 migrations: create device sync tables.
+fn migrate_to_v4(conn: &Connection) -> Result<()> {
+    // Create Phase 5 tables (IF NOT EXISTS makes this safe to re-run)
+    conn.execute_batch(PHASE5_SCHEMA_SQL)?;
+    Ok(())
+}
+
 /// Initialize the database schema with versioned migrations.
 ///
 /// Creates all tables and indexes, applying migrations as needed.
@@ -225,6 +297,12 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
     if get_schema_version(conn)? < 3 {
         migrate_to_v3(conn)?;
         set_schema_version(conn, 3)?;
+    }
+
+    // Apply Phase 5 migrations if needed
+    if get_schema_version(conn)? < 4 {
+        migrate_to_v4(conn)?;
+        set_schema_version(conn, 4)?;
     }
 
     Ok(())
