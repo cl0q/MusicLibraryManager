@@ -465,7 +465,7 @@ mod tests {
 
         let profiles = list_sync_profiles(&conn).unwrap();
         assert_eq!(profiles.len(), 2);
-        // Sorted alphabetically
+        // Sorted by name (ORDER BY name): iPhone < iPod
         assert_eq!(profiles[0].name, "iPhone");
         assert_eq!(profiles[1].name, "iPod");
     }
