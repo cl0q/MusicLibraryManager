@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 
 ## Current Position
 
-Phase: 4 of 7 (Playlist Management) — VERIFIED ✓
-Plan: 5 of 5 in current phase
-Status: Phase verified, ready for Phase 5
-Last activity: 2026-02-04 — Phase 4 verified (5/6 must-haves auto-verified, UI needs human check)
+Phase: 5 of 7 (Device Sync) — IN PROGRESS
+Plan: 1 of 4 in current phase
+Status: Plan 05-01 complete - sync profile model established
+Last activity: 2026-02-04 — Completed 05-01-PLAN.md (Sync Profile Model)
 
-Progress: [████████████████████] 100% (20 of 20 concrete plans complete)
+Progress: [████████████████████░] 95% (21 of 22 concrete plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 20
-- Average duration: 13m 48s
-- Total execution time: 4.62 hours
+- Total plans completed: 21
+- Average duration: 15m 35s
+- Total execution time: 5.49 hours
 
 *Updated after each plan completion*
 
@@ -109,6 +109,12 @@ Recent decisions affecting current work:
 - **find_or_create_track pattern** — Check external_id first, then fuzzy match by title/artist similarity, create phantom track if not found (2026-02-04)
 - **Idempotent add_liked_track** — Safe to call multiple times with same track, prevents duplicate entries in liked playlists (2026-02-04)
 - **External_id format for playlist tracking** — spotify:playlist:{id} and soundcloud:{id} stored in playlists.external_id for refresh operations (2026-02-04)
+- **Schema version 4 for Phase 5** — Sync profiles, sync_profile_tracks, sync_profile_playlists, sync_profile_rules, sync_state tables (2026-02-04)
+- **Three-source union for profile content** — Manual tracks + playlists + query rules combined via HashSet for deduplicated track IDs (2026-02-04)
+- **Query-time content resolution** — get_all_track_ids() computes union on each call for dynamic smart-playlist-like behavior (2026-02-04)
+- **Field/operator/value filter rule structure** — Extensible query pattern supporting eq/ne/gt/lt/contains/in operators across genre/artist/bitrate/date_added/source/tag (2026-02-04)
+- **DTO computed statistics** — SyncProfileDto.from_profile() runs database queries to compute track counts rather than storing redundant data (2026-02-04)
+- **rusqlite::Result for collect()** — Used rusqlite's Result type instead of custom Result alias for query_map iterator conversions (2026-02-04)
 
 ### Learnings from Python Implementation
 
@@ -181,15 +187,21 @@ None yet.
 - @hello-pangea/dnd for drag-drop reordering
 - Next: Phase 5 Device Sync
 
-**Phase 5 (Device Sync):**
+**Phase 5 (Device Sync):** IN PROGRESS
+- Plan 05-01 (Sync Profile Model): ✓ COMPLETE
+  - Schema version 4 with five sync tables
+  - SyncProfile model with get_all_track_ids() union resolution (manual + playlists + rules)
+  - Tauri IPC DTOs with computed statistics
+  - 9 unit tests passing
+- Plan 05-02 (Transcode Cache): READY TO START
 - Rockbox M3U8 compatibility specifics unknown (relative vs absolute paths, encoding)
 - Need actual iPod for filesystem testing (FAT32, character encoding edge cases)
 
 ## Session Continuity
 
 Last session: 2026-02-04
-Stopped at: Phase 4 verified, ready for Phase 5
+Stopped at: Completed 05-01-PLAN.md (Sync Profile Model)
 Resume file: None
 
 ---
-*Last updated: 2026-02-04 after Phase 4 verification*
+*Last updated: 2026-02-04 after completing Plan 05-01*
