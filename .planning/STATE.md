@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 
 ## Current Position
 
-Phase: 5 of 7 (Device Sync) — IN PROGRESS
-Plan: 4 of 4 in current phase
-Status: Plan 05-04 complete - Incremental sync orchestration
-Last activity: 2026-02-04 — Completed 05-04-PLAN.md (Incremental Sync Orchestration)
+Phase: 5 of 7 (Device Sync) — COMPLETE
+Plan: 5 of 5 in current phase
+Status: Phase complete - ready for verification
+Last activity: 2026-02-04 — Completed 05-05-PLAN.md (Tauri Commands & React UI)
 
-Progress: [█████████████████████] 100% (24 of 24 concrete plans complete)
+Progress: [█████████████████████████] 100% (25 of 25 concrete plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 24
-- Average duration: 18m 3s
-- Total execution time: 7.23 hours
+- Total plans completed: 25
+- Average duration: 21m 52s
+- Total execution time: 9.11 hours
 
 *Updated after each plan completion*
 
@@ -90,6 +90,9 @@ Recent decisions affecting current work:
 - **SoundCloud downloads to aac_dir** — scdl produces AAC already, no FLAC staging needed (2026-02-04)
 - **find_most_recent_audio_file for scdl output** — scdl filenames unpredictable; search by modification time (2026-02-04)
 - **spawn_blocking + block_on for rusqlite in async Tauri commands** — Connection is !Send; spawn_blocking keeps it on one thread, block_on re-enters runtime (2026-02-04)
+- **10 Tauri sync commands** — create/list/get/delete profiles, add track/playlist/rule, detect devices, preview/execute sync (2026-02-04)
+- **React sync UI with profile management** — SyncProfiles component for create/list/delete profiles, navigation to sync preview (2026-02-04)
+- **Sync preview with space validation** — SyncPreview component shows detailed file list, size calculation, device space check before execution (2026-02-04)
 - **OAuthState with Mutex for PKCE verifiers** — Temporary storage between auth URL generation and code exchange command invocations (2026-02-04)
 - **default_user placeholder for startup sync** — Single-user desktop app; multi-user deferred to Phase 6 (2026-02-04)
 - **Schema version 3 for Phase 4** — Playlists, playlist_tracks, playlist_tags tables with fractional indexing (2026-02-04)
@@ -225,16 +228,21 @@ None yet.
   - Space validation with 50MB buffer requirement
   - High-level orchestration: preview_sync(), sync_profile_to_folder()
   - 9 unit tests passing, 54 total sync module tests passing
-  - Next: Ready for Phase 6 UI or additional Phase 5 commands
+- Plan 05-05 (Tauri Commands & React UI): ✓ COMPLETE
+  - 10 Tauri commands for sync operations (create/list/get/delete profiles, add track/playlist/rule, detect devices, preview/execute sync)
+  - SyncProfiles.tsx component for profile management
+  - SyncPreview.tsx component for sync preview and execution
+  - Human verification checkpoint approved
+- Phase 5 verification pending: Need actual iPod for integration testing
 - M3U8 UTF-8 encoding with Rockbox untested (should work but needs verification with device)
 - FAT32 long filename edge cases (255 char limit enforced but not tested with actual device)
-- Need actual iPod for integration testing (device detection works in unit tests with mock filesystems)
+- Ready for Phase 6 (Desktop UI) or Phase 5 verification
 
 ## Session Continuity
 
 Last session: 2026-02-04
-Stopped at: Completed 05-04-PLAN.md (Incremental Sync Orchestration)
+Stopped at: Completed 05-05-PLAN.md (Tauri Commands & React UI)
 Resume file: None
 
 ---
-*Last updated: 2026-02-04 after completing Plan 05-04*
+*Last updated: 2026-02-04 after completing Plan 05-05*
