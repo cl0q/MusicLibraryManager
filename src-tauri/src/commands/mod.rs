@@ -7,6 +7,13 @@
 //! - download_tracks: Batch download tracks from DAB/YouTube
 //! - retry_failed_downloads: Retry failed downloads from queue
 //! - get_retry_queue_status: Get current retry queue status
+//! - spotify_auth_url: Generate Spotify OAuth URL with PKCE
+//! - spotify_exchange_code: Exchange Spotify authorization code for tokens
+//! - sync_spotify: Trigger incremental Spotify sync
+//! - soundcloud_auth_url: Generate SoundCloud OAuth URL with PKCE
+//! - soundcloud_exchange_code: Exchange SoundCloud authorization code for tokens
+//! - sync_soundcloud: Trigger incremental SoundCloud sync
+//! - check_duplicates: Fuzzy duplicate detection across sources
 //!
 //! Commands are registered in lib.rs via tauri::generate_handler![]
 
@@ -14,9 +21,14 @@ pub mod download;
 pub mod duplicate;
 pub mod import;
 pub mod search;
+pub mod sources;
 
 // Re-export commands for registration
 pub use download::{download_tracks, get_retry_queue_status, retry_failed_downloads};
 pub use duplicate::detect_duplicates;
 pub use import::import_directory;
 pub use search::search_library;
+pub use sources::{
+    check_duplicates, soundcloud_auth_url, soundcloud_exchange_code, spotify_auth_url,
+    spotify_exchange_code, sync_soundcloud, sync_spotify, OAuthState,
+};

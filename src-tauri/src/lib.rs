@@ -11,12 +11,15 @@ pub mod search;
 pub mod sources;
 pub mod transcode;
 
+use commands::sources::OAuthState;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Load .env file if present (non-fatal if missing)
     let _ = dotenvy::dotenv();
 
     tauri::Builder::default()
+        .manage(OAuthState::default())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -33,7 +36,14 @@ pub fn run() {
             commands::duplicate::detect_duplicates,
             commands::download::download_tracks,
             commands::download::retry_failed_downloads,
-            commands::download::get_retry_queue_status
+            commands::download::get_retry_queue_status,
+            commands::sources::spotify_auth_url,
+            commands::sources::spotify_exchange_code,
+            commands::sources::sync_spotify,
+            commands::sources::soundcloud_auth_url,
+            commands::sources::soundcloud_exchange_code,
+            commands::sources::sync_soundcloud,
+            commands::sources::check_duplicates,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
