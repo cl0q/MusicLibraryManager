@@ -10,6 +10,7 @@ pub mod models;
 pub mod search;
 pub mod sources;
 pub mod startup;
+pub mod sync;
 pub mod transcode;
 
 use commands::sources::OAuthState;
