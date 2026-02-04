@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 4 of 7 (Playlist Management)
-Plan: 5 of 5 in current phase
-Status: Phase complete
-Last activity: 2026-02-04 — Completed 04-05-PLAN.md
+Plan: 4 of 5 in current phase
+Status: In progress - Wave 3
+Last activity: 2026-02-04 — Completed 04-04-PLAN.md
 
-Progress: [████████████████████████] 100% (20 of 20 concrete plans complete)
+Progress: [███████████████████████░] 95% (19 of 20 concrete plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 20
-- Average duration: 4m 25s
-- Total execution time: 1.48 hours
+- Total plans completed: 19
+- Average duration: 14m 30s
+- Total execution time: 4.62 hours
 
 *Updated after each plan completion*
 
@@ -104,10 +104,11 @@ Recent decisions affecting current work:
 - **Per-source liked playlists** — "{Source} Likes" naming with source_id FK, created on first track import (2026-02-04)
 - **Most Played placeholder view** — Uses 0 play_count until Phase 5 adds track_stats table (2026-02-04)
 - **Startup playlist initialization** — Synchronous initialize_on_startup before async sync tasks (2026-02-04)
-- **spawn_blocking pattern for playlist commands** — Consistent with commands/sources.rs for handling rusqlite !Send Connection in async Tauri context (2026-02-04)
-- **Optimistic UI updates for drag-drop** — Immediate visual feedback improves UX; revert on backend failure (2026-02-04)
-- **Disable drag when search active** — Search results may not reflect actual playlist order; reordering could be confusing (2026-02-04)
-- **300ms search debounce** — Balance between responsiveness and reducing backend calls (2026-02-04)
+- **Add-only semantics for mirrored playlists** — Tracks removed from source playlist stay in local playlist to preserve user's manual additions (2026-02-04)
+- **Cross-source deduplication 0.85 threshold** — Same track from Spotify and SoundCloud references one library track (no duplicate downloads) (2026-02-04)
+- **find_or_create_track pattern** — Check external_id first, then fuzzy match by title/artist similarity, create phantom track if not found (2026-02-04)
+- **Idempotent add_liked_track** — Safe to call multiple times with same track, prevents duplicate entries in liked playlists (2026-02-04)
+- **External_id format for playlist tracking** — spotify:playlist:{id} and soundcloud:{id} stored in playlists.external_id for refresh operations (2026-02-04)
 
 ### Learnings from Python Implementation
 
@@ -165,22 +166,21 @@ None yet.
 - Credentials loaded from .env via dotenvy (src-tauri/.env.example for template)
 - OAuth live testing deferred until user configures credentials in .env
 
-**Phase 4 (Playlist Management):** ✓ COMPLETE
-- All 5 plans executed: schema v3, fractional indexing CRUD, smart/liked playlists, Spotify import, Tauri commands & React UI
+**Phase 4 (Playlist Management):** IN PROGRESS (4 of 5 plans complete)
 - Plan 04-01: Schema version 3 with playlists, playlist_tracks, playlist_tags
 - Plan 04-02: Fractional indexing and playlist CRUD operations
 - Plan 04-03: Smart playlists and liked playlist initialization
-- Plan 04-04: Spotify playlist import and refresh
-- Plan 04-05: 7 Tauri commands + React UI with drag-drop reordering
-- 228 tests passing (14 playlist module tests + 11 command signature tests + 3 startup tests)
+- Plan 04-04: ✓ Source playlist import (Spotify and SoundCloud) with add-only mirroring
+- 228 tests passing (17 playlist module tests + 2 spotify import tests + 2 soundcloud import tests + 11 other tests)
 - Smart playlist SQL views (smart_playlist_recently_added, smart_playlist_most_played)
 - Per-source liked playlist creation (Spotify Likes, SoundCloud Likes, Local Likes)
 - Startup initialization creates smart playlists and Local Likes automatically
 - INSERT OR IGNORE pattern for idempotent playlist creation
-- React UI with @hello-pangea/dnd for drag-drop track reordering
-- PlaylistList groups by category (Liked, Smart, Regular)
-- PlaylistDetail with debounced search and optimistic drag updates
-- Next: Phase 5 device sync and M3U8 generation for Rockbox
+- Source playlist import: import_spotify_playlist, import_spotify_liked_songs, refresh_spotify_playlist
+- Source playlist import: import_soundcloud_playlist, import_soundcloud_liked_songs, refresh_soundcloud_playlist
+- Add-only mirroring: tracks added from source, never removed from local playlist
+- Cross-source deduplication: find_or_create_track checks external_id then similarity
+- Next: 04-05 playlist tag management (final playlist plan)
 
 **Phase 5 (Device Sync):**
 - Rockbox M3U8 compatibility specifics unknown (relative vs absolute paths, encoding)
@@ -189,8 +189,8 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-04
-Stopped at: Completed 04-05-PLAN.md
+Stopped at: Completed 04-04-PLAN.md
 Resume file: None
 
 ---
-*Last updated: 2026-02-04 after completing plan 04-03*
+*Last updated: 2026-02-04 after completing plan 04-04*
