@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-03)
 
 **Core value:** Like a song anywhere and it reliably ends up in your owned library and on your devices in high quality
-**Current focus:** Phase 3 - Multi-Source Aggregation
+**Current focus:** Phase 3 complete - ready for Phase 4 or 5
 
 ## Current Position
 
 Phase: 3 of 7 (Multi-Source Aggregation)
-Plan: 5 of 6 in current phase (plans 01, 02, 03, 04 complete)
-Status: In progress
-Last activity: 2026-02-04 — Completed 03-03-PLAN.md (SoundCloud Integration)
+Plan: 6 of 6 in current phase (all plans complete)
+Status: Phase complete
+Last activity: 2026-02-04 — Completed 03-06-PLAN.md (SoundCloud Download)
 
-Progress: [████████████████░░░░] 80% (12 of 15 total plans complete)
+Progress: [██████████████████░░] 87% (13 of 15 total plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 12
-- Average duration: 4m 30s
-- Total execution time: 0.90 hours
+- Total plans completed: 13
+- Average duration: 4m 28s
+- Total execution time: 0.97 hours
 
 *Updated after each plan completion*
 
@@ -86,6 +86,9 @@ Recent decisions affecting current work:
 - **SpotifyAuth/SpotifyClient separation** — Auth flow is stateless (URL + code exchange), client is stateful (token + refresh) (2026-02-04)
 - **Spotify URI as original_path for phantom tracks** — Tracks from Spotify without local files use URI as path, matched later by dedup (2026-02-04)
 - **Env var tests ignored in parallel** — set_var/remove_var not safe in multi-threaded test runner, mark #[ignore] (2026-02-04)
+- **SoundCloudDownloader optional in orchestrator** — scdl may not be installed; orchestrator continues without SoundCloud downloads (2026-02-04)
+- **SoundCloud downloads to aac_dir** — scdl produces AAC already, no FLAC staging needed (2026-02-04)
+- **find_most_recent_audio_file for scdl output** — scdl filenames unpredictable; search by modification time (2026-02-04)
 
 ### Learnings from Python Implementation
 
@@ -133,13 +136,16 @@ None yet.
 - 116 tests passing (26 in download module)
 - Next: Phase 3 multi-source aggregation can begin
 
-**Phase 3 (Multi-Source Aggregation):** IN PROGRESS
+**Phase 3 (Multi-Source Aggregation):** ✓ COMPLETE
 - Plan 01 complete: schema extensions, OAuth token management
 - Plan 02 complete: Spotify API client with OAuth PKCE and incremental sync
 - Plan 03 complete: SoundCloud API client with OAuth 2.1 PKCE and incremental sync
 - Plan 04 complete: track normalization and fuzzy duplicate detection
-- 171 tests passing (9 spotify, 9 soundcloud, 22 dedup)
-- OAuth live testing deferred to Plan 05 when Tauri commands are wired up
+- Plan 05: Tauri commands wiring (skipped in current execution order)
+- Plan 06 complete: SoundCloud download via scdl CLI with source priority
+- 184 tests passing (9 spotify, 9 soundcloud, 22 dedup, 15 download+soundcloud)
+- scdl CLI required for SoundCloud direct downloads (pip install scdl)
+- Download priority: SoundCloud -> DAB -> YouTube for SC-sourced tracks
 - Credentials loaded from .env via dotenvy
 
 **Phase 5 (Device Sync):**
@@ -148,9 +154,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-04T07:35:43Z
-Stopped at: Completed 03-02-PLAN.md (Spotify Integration)
+Last session: 2026-02-04T07:44:05Z
+Stopped at: Completed 03-06-PLAN.md (SoundCloud Download)
 Resume file: None
 
 ---
-*Last updated: 2026-02-04 after completing 03-02-PLAN.md*
+*Last updated: 2026-02-04 after completing 03-06-PLAN.md*
