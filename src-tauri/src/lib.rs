@@ -13,6 +13,9 @@ pub mod transcode;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Load .env file if present (non-fatal if missing)
+    let _ = dotenvy::dotenv();
+
     tauri::Builder::default()
         .setup(|app| {
             if cfg!(debug_assertions) {
