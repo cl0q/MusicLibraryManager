@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 5 of 7 (Device Sync) — IN PROGRESS
-Plan: 2 of 4 in current phase
-Status: Plan 05-02 complete - shared transcode cache implemented
-Last activity: 2026-02-04 — Completed 05-02-PLAN.md (Shared Transcode Cache)
+Plan: 3 of 4 in current phase
+Status: Plan 05-03 complete - Rockbox device detection and M3U8 playlist generation
+Last activity: 2026-02-04 — Completed 05-03-PLAN.md (Rockbox Device Detection)
 
-Progress: [████████████████████░] 96% (22 of 23 concrete plans complete)
+Progress: [█████████████████████] 100% (23 of 23 concrete plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 22
-- Average duration: 18m 47s
-- Total execution time: 6.39 hours
+- Total plans completed: 23
+- Average duration: 18m 13s
+- Total execution time: 6.97 hours
 
 *Updated after each plan completion*
 
@@ -120,6 +120,10 @@ Recent decisions affecting current work:
 - **Windows always copies files** — Symlinks require elevated privileges, copying is more reliable (2026-02-04)
 - **SHA256 for checksums** — Industry-standard cryptographic hash for file change detection in sync state tracking (2026-02-04)
 - **64KB buffer for file operations** — Fixed memory usage regardless of file size, efficient for typical 5-10MB AAC files (2026-02-04)
+- **df/wmic for disk space** — std::process::Command avoids unsafe FFI and external crates, subprocess overhead negligible (2026-02-04)
+- **Relative M3U8 paths** — Rockbox requires relative paths from device root, format Artist/Album/Track.m4a (2026-02-04)
+- **album_artist in M3U8 paths** — Matches profile folder structure for consistent file resolution (2026-02-04)
+- **#EXTINF format with artist - title** — Industry standard M3U8 metadata format, duration defaults to 0 if missing (2026-02-04)
 
 ### Learnings from Python Implementation
 
@@ -203,15 +207,23 @@ None yet.
   - SHA256 checksum computation for sync state tracking
   - Profile path builder with FAT32-safe sanitized names
   - 12 unit tests passing
-  - Next: Plan 05-03 (Device Filesystem Operations)
-- Rockbox M3U8 compatibility specifics unknown (relative vs absolute paths, encoding)
-- Need actual iPod for filesystem testing (FAT32, character encoding edge cases)
+- Plan 05-03 (Rockbox Device Detection): ✓ COMPLETE
+  - RockboxDevice detection via .rockbox directory marker
+  - Platform-specific mount scanning (macOS /Volumes, Linux /mnt and /media, Windows drive letters)
+  - Disk space query using df on Unix, wmic on Windows
+  - M3U8 playlist generation with #EXTM3U header and relative paths
+  - FAT32-safe filename sanitization in playlist paths
+  - 15 unit tests passing (5 device, 10 playlist)
+  - Next: Plan 05-04 (Transfer Orchestration)
+- M3U8 UTF-8 encoding with Rockbox untested (should work but needs verification with device)
+- FAT32 long filename edge cases (255 char limit enforced but not tested with actual device)
+- Need actual iPod for integration testing (device detection works in unit tests with mock filesystems)
 
 ## Session Continuity
 
 Last session: 2026-02-04
-Stopped at: Completed 05-02-PLAN.md (Shared Transcode Cache)
+Stopped at: Completed 05-03-PLAN.md (Rockbox Device Detection)
 Resume file: None
 
 ---
-*Last updated: 2026-02-04 after completing Plan 05-02*
+*Last updated: 2026-02-04 after completing Plan 05-03*
