@@ -70,6 +70,9 @@ pub enum SpotifyError {
     #[error("Database error: {0}")]
     DatabaseError(#[from] rusqlite::Error),
 
+    #[error("Playlist database error: {0}")]
+    PlaylistDatabaseError(#[from] crate::database::connection::DatabaseError),
+
     #[error("Rate limited, retry after {0} seconds")]
     RateLimited(u64),
 
@@ -601,6 +604,252 @@ impl SpotifyClient {
 
         Ok((playlist_count, total_tracks))
     }
+
+    /// Get a specific playlist with full details.
+    ///
+    /// # Arguments
+    /// * `playlist_id` - Spotify playlist ID
+    ///
+    /// # Returns
+    /// * `Ok(SpotifyPlaylist)` - Playlist object with metadata
+    /// * `Err(SpotifyError)` - If API call fails
+    pub async fn get_playlist(&mut self, playlist_id: &str) -> Result<SpotifyPlaylist> {
+        let url = format!("{}/playlists/{}", API_BASE, playlist_id);
+        let response = self.get(&url).await?;
+        let playlist: SpotifyPlaylist = response.json().await?;
+        Ok(playlist)
+    }
+
+    /// Get tracks from a specific playlist.
+    ///
+    /// # Arguments
+    /// * `playlist_id` - Spotify playlist ID
+    ///
+    /// # Returns
+    /// * `Ok(Vec<SyncedTrack>)` - List of tracks with metadata
+    /// * `Err(SpotifyError)` - If API call fails
+    pub async fn get_playlist_tracks(&mut self, playlist_id: &str) -> Result<Vec<SyncedTrack>> {
+        let mut tracks = Vec::new();
+        let mut next_url = Some(format!(
+            "{}/playlists/{}/tracks?limit={}",
+            API_BASE, playlist_id, PAGE_SIZE
+        ));
+
+        while let Some(url) = next_url {
+            let response = self.get(&url).await?;
+            let data: PlaylistTracksResponse = response.json().await?;
+
+            for item in data.items {
+                // Skip local files (track is null)
+                if let Some(track) = item.track {
+                    let artist = track
+                        .artists
+                        .iter()
+                        .map(|a| a.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+
+                    tracks.push(SyncedTrack {
+                        spotify_id: track.id,
+                        spotify_uri: track.uri,
+                        title: track.name,
+                        artist,
+                        album: track.album.name,
+                        duration_secs: track.duration_ms / 1000,
+                        added_at: item.added_at.unwrap_or_default(),
+                    });
+                }
+            }
+
+            next_url = data.next;
+        }
+
+        Ok(tracks)
+    }
+}
+
+// ============================================================================
+// Playlist Import Functions
+// ============================================================================
+
+/// Import a specific Spotify playlist into the library.
+///
+/// Creates a local mirrored playlist and adds all tracks from the Spotify playlist.
+/// Tracks are deduplicated against existing library tracks.
+///
+/// # Arguments
+/// * `conn` - Database connection
+/// * `client` - Authenticated Spotify client
+/// * `spotify_playlist_id` - Spotify playlist ID
+/// * `source_id` - Database ID of the Spotify source
+///
+/// # Returns
+/// * `Ok(playlist_id)` - ID of created local playlist
+/// * `Err(SpotifyError)` - If API call or database operation fails
+pub async fn import_spotify_playlist(
+    conn: &Connection,
+    client: &mut SpotifyClient,
+    spotify_playlist_id: &str,
+    source_id: i64,
+) -> Result<i64> {
+    // Fetch playlist metadata from Spotify
+    let playlist = client.get_playlist(spotify_playlist_id).await?;
+
+    // Create local playlist
+    use crate::database::playlist::create_playlist;
+    use crate::models::PlaylistCategory;
+
+    let playlist_id = create_playlist(
+        conn,
+        playlist.name.clone(),
+        Some(format!("Imported from Spotify")),
+        vec![],
+        PlaylistCategory::Regular,
+    )?;
+
+    // Store external_id for future refresh
+    let external_id = format!("spotify:playlist:{}", spotify_playlist_id);
+    conn.execute(
+        "UPDATE playlists SET external_id = ?, source_id = ? WHERE id = ?",
+        rusqlite::params![external_id, source_id, playlist_id],
+    )?;
+
+    // Fetch tracks from playlist
+    let tracks = client.get_playlist_tracks(spotify_playlist_id).await?;
+
+    // Add each track to the playlist with deduplication
+    for track in tracks {
+        let track_id = find_or_create_track(conn, &track, source_id)?;
+
+        // Add to playlist
+        use crate::database::playlist::add_track_to_playlist;
+        add_track_to_playlist(conn, playlist_id, track_id)?;
+    }
+
+    Ok(playlist_id)
+}
+
+/// Import Spotify liked songs into a "Spotify Likes" playlist.
+///
+/// Creates or gets the "Spotify Likes" playlist and adds all liked tracks.
+/// Uses incremental sync to only fetch new liked songs.
+///
+/// # Arguments
+/// * `conn` - Database connection
+/// * `client` - Authenticated Spotify client
+/// * `source_id` - Database ID of the Spotify source
+///
+/// # Returns
+/// * `Ok(count)` - Number of new tracks added
+/// * `Err(SpotifyError)` - If API call or database operation fails
+pub async fn import_spotify_liked_songs(
+    conn: &Connection,
+    client: &mut SpotifyClient,
+    source_id: i64,
+) -> Result<usize> {
+    // Get or create "Spotify Likes" playlist
+    use crate::database::playlist::get_or_create_liked_playlist;
+    let playlist_id = get_or_create_liked_playlist(conn, "spotify", source_id)?;
+
+    // Get last sync timestamp
+    let last_sync = get_last_sync_timestamp(conn, &client.user_id, "spotify")?
+        .unwrap_or_else(|| (chrono::Utc::now() - chrono::TimeDelta::days(365)).to_rfc3339());
+
+    let last_sync_dt = chrono::DateTime::parse_from_rfc3339(&last_sync)
+        .unwrap_or_else(|_| chrono::Utc::now().into());
+
+    let mut added_count = 0;
+    let mut next_url = Some(format!("{}/me/tracks?limit={}", API_BASE, PAGE_SIZE));
+
+    // Paginate through liked songs
+    while let Some(ref url) = next_url {
+        let response = client.get(url).await?;
+        let data: SavedTracksResponse = response.json().await?;
+
+        let mut found_old_track = false;
+        for item in data.items {
+            let added_at = chrono::DateTime::parse_from_rfc3339(&item.added_at)
+                .unwrap_or_else(|_| chrono::Utc::now().into());
+
+            // Only process tracks added since last sync
+            if added_at > last_sync_dt {
+                let track = SyncedTrack::from(&item);
+                let track_id = find_or_create_track(conn, &track, source_id)?;
+
+                // Add to liked playlist
+                use crate::database::playlist::add_liked_track;
+                add_liked_track(conn, playlist_id, track_id, &item.added_at)?;
+                added_count += 1;
+            } else {
+                found_old_track = true;
+                break;
+            }
+        }
+
+        if found_old_track {
+            break;
+        }
+        next_url = data.next;
+    }
+
+    // Update last sync timestamp
+    set_last_sync_timestamp(conn, &client.user_id, "spotify", &chrono::Utc::now().to_rfc3339())?;
+
+    Ok(added_count)
+}
+
+/// Refresh a Spotify playlist with new tracks from source.
+///
+/// Fetches current tracks from Spotify and adds any new tracks to the local playlist.
+/// Uses add-only semantics (tracks removed from Spotify remain in local playlist).
+///
+/// # Arguments
+/// * `conn` - Database connection
+/// * `client` - Authenticated Spotify client
+/// * `playlist_id` - Local playlist ID to refresh
+///
+/// # Returns
+/// * `Ok(count)` - Number of new tracks added
+/// * `Err(SpotifyError)` - If API call or database operation fails
+pub async fn refresh_spotify_playlist(
+    conn: &Connection,
+    client: &mut SpotifyClient,
+    playlist_id: i64,
+) -> Result<usize> {
+    // Get external_id from playlists
+    let external_id: String = conn.query_row(
+        "SELECT external_id FROM playlists WHERE id = ?",
+        [playlist_id],
+        |row| row.get(0),
+    )?;
+
+    // Extract Spotify playlist ID from external_id
+    let spotify_playlist_id = external_id
+        .strip_prefix("spotify:playlist:")
+        .ok_or_else(|| SpotifyError::ApiError("Invalid external_id format".to_string()))?;
+
+    // Get source_id
+    let source_id: i64 = conn.query_row(
+        "SELECT source_id FROM playlists WHERE id = ?",
+        [playlist_id],
+        |row| row.get(0),
+    )?;
+
+    // Fetch current tracks from Spotify
+    let tracks = client.get_playlist_tracks(spotify_playlist_id).await?;
+
+    // Build source_tracks with track_id and source position
+    let mut source_tracks = Vec::new();
+    for (idx, track) in tracks.iter().enumerate() {
+        let track_id = find_or_create_track(conn, track, source_id)?;
+        source_tracks.push((track_id, idx));
+    }
+
+    // Refresh playlist with add-only semantics
+    use crate::database::playlist::refresh_mirrored_playlist;
+    let added_count = refresh_mirrored_playlist(conn, playlist_id, source_tracks)?;
+
+    Ok(added_count)
 }
 
 // ============================================================================
@@ -715,6 +964,101 @@ fn insert_synced_tracks(
     }
 
     Ok(())
+}
+
+/// Find or create a track in the library with deduplication.
+///
+/// Searches for existing track by external_id first, then by similarity.
+/// If found, returns existing track_id. Otherwise creates new phantom track.
+///
+/// # Arguments
+/// * `conn` - Database connection
+/// * `track` - Synced track from Spotify
+/// * `source_id` - Source ID for track_sources relationship
+///
+/// # Returns
+/// * `Ok(track_id)` - ID of found or created track
+/// * `Err` if database operation fails
+fn find_or_create_track(
+    conn: &Connection,
+    track: &SyncedTrack,
+    source_id: i64,
+) -> Result<i64> {
+    // First, check if track already exists by external_id
+    let existing: Option<i64> = conn
+        .query_row(
+            "SELECT track_id FROM track_sources WHERE external_id = ?",
+            [&track.spotify_uri],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    if let Some(track_id) = existing {
+        return Ok(track_id);
+    }
+
+    // Check for duplicate by similarity (use dedup module)
+    use crate::dedup::calculate_similarity;
+
+    let similar: Option<i64> = conn
+        .query_row(
+            "SELECT id, title, artist FROM tracks
+             WHERE title LIKE ? OR artist LIKE ?
+             LIMIT 50",
+            rusqlite::params![
+                format!("%{}%", &track.title[..track.title.len().min(10)]),
+                format!("%{}%", &track.artist[..track.artist.len().min(10)])
+            ],
+            |row| {
+                let id: i64 = row.get(0)?;
+                let title: String = row.get(1)?;
+                let artist: String = row.get(2)?;
+
+                let similarity = calculate_similarity(&track.title, &track.artist, &title, &artist);
+                if similarity >= 0.85 {
+                    Ok(Some(id))
+                } else {
+                    Ok(None)
+                }
+            },
+        )
+        .optional()?
+        .flatten();
+
+    if let Some(track_id) = similar {
+        // Found similar track, create track_sources relationship
+        conn.execute(
+            "INSERT OR IGNORE INTO track_sources (track_id, source_id, external_id, added_at)
+             VALUES (?, ?, ?, ?)",
+            rusqlite::params![track_id, source_id, &track.spotify_uri, &track.added_at],
+        )?;
+        return Ok(track_id);
+    }
+
+    // No existing track found, create new phantom track
+    conn.execute(
+        "INSERT INTO tracks (artist, album_artist, album, title, format, original_path, duration)
+         VALUES (?, ?, ?, ?, 'spotify', ?, ?)",
+        rusqlite::params![
+            &track.artist,
+            &track.artist, // album_artist = artist for now
+            &track.album,
+            &track.title,
+            &track.spotify_uri, // Use URI as "path" for Spotify tracks
+            track.duration_secs as i64,
+        ],
+    )?;
+
+    let track_id = conn.last_insert_rowid();
+
+    // Insert into track_sources
+    conn.execute(
+        "INSERT INTO track_sources (track_id, source_id, external_id, added_at)
+         VALUES (?, ?, ?, ?)",
+        rusqlite::params![track_id, source_id, &track.spotify_uri, &track.added_at],
+    )?;
+
+    Ok(track_id)
 }
 
 // ============================================================================
@@ -1003,5 +1347,138 @@ mod tests {
         for p in playlists {
             println!("  - {} ({} tracks)", p.name, p.tracks.total);
         }
+    }
+
+    #[test]
+    fn test_find_or_create_track_new() {
+        let conn = get_memory_connection().unwrap();
+
+        // Create source
+        conn.execute(
+            "INSERT INTO sources (name, user_id, enabled) VALUES ('spotify', 'test_user', 1)",
+            [],
+        )
+        .unwrap();
+        let source_id = conn.last_insert_rowid();
+
+        let track = SyncedTrack {
+            spotify_id: "track123".to_string(),
+            spotify_uri: "spotify:track:track123".to_string(),
+            title: "Test Song".to_string(),
+            artist: "Test Artist".to_string(),
+            album: "Test Album".to_string(),
+            duration_secs: 180,
+            added_at: "2026-02-03T12:00:00Z".to_string(),
+        };
+
+        let track_id = find_or_create_track(&conn, &track, source_id).unwrap();
+        assert!(track_id > 0);
+
+        // Verify track was created
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tracks WHERE title = 'Test Song'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+
+        // Verify track_sources relationship
+        let ts_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM track_sources WHERE external_id = 'spotify:track:track123'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(ts_count, 1);
+    }
+
+    #[test]
+    fn test_find_or_create_track_existing_by_external_id() {
+        let conn = get_memory_connection().unwrap();
+
+        // Create source
+        conn.execute(
+            "INSERT INTO sources (name, user_id, enabled) VALUES ('spotify', 'test_user', 1)",
+            [],
+        )
+        .unwrap();
+        let source_id = conn.last_insert_rowid();
+
+        let track = SyncedTrack {
+            spotify_id: "track123".to_string(),
+            spotify_uri: "spotify:track:track123".to_string(),
+            title: "Test Song".to_string(),
+            artist: "Test Artist".to_string(),
+            album: "Test Album".to_string(),
+            duration_secs: 180,
+            added_at: "2026-02-03T12:00:00Z".to_string(),
+        };
+
+        // Create track first time
+        let track_id1 = find_or_create_track(&conn, &track, source_id).unwrap();
+
+        // Create same track again
+        let track_id2 = find_or_create_track(&conn, &track, source_id).unwrap();
+
+        // Should return same track_id
+        assert_eq!(track_id1, track_id2);
+
+        // Should still only have one track
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    #[ignore] // Requires Spotify credentials
+    async fn test_import_spotify_playlist_integration() {
+        // This test would require:
+        // - Valid Spotify credentials
+        // - A test playlist ID
+        // - Network access
+        let conn = get_memory_connection().unwrap();
+        let mut client = SpotifyClient::new("test_user").await.unwrap();
+
+        // Create source
+        conn.execute(
+            "INSERT INTO sources (name, user_id, enabled) VALUES ('spotify', 'test_user', 1)",
+            [],
+        )
+        .unwrap();
+        let source_id = conn.last_insert_rowid();
+
+        // Would need actual playlist ID
+        // let playlist_id = import_spotify_playlist(&conn, &mut client, "test_playlist_id", source_id).await.unwrap();
+        // println!("Imported playlist: {}", playlist_id);
+    }
+
+    #[tokio::test]
+    #[ignore] // Requires Spotify credentials
+    async fn test_import_spotify_liked_songs_integration() {
+        let conn = get_memory_connection().unwrap();
+        let mut client = SpotifyClient::new("test_user").await.unwrap();
+
+        conn.execute(
+            "INSERT INTO sources (name, user_id, enabled) VALUES ('spotify', 'test_user', 1)",
+            [],
+        )
+        .unwrap();
+        let source_id = conn.last_insert_rowid();
+
+        let count = import_spotify_liked_songs(&conn, &mut client, source_id)
+            .await
+            .unwrap();
+        println!("Imported {} liked songs", count);
+    }
+
+    #[tokio::test]
+    #[ignore] // Requires Spotify credentials
+    async fn test_refresh_spotify_playlist_integration() {
+        let conn = get_memory_connection().unwrap();
+        let mut client = SpotifyClient::new("test_user").await.unwrap();
+
+        // Would need to first import a playlist, then refresh it
+        // let added = refresh_spotify_playlist(&conn, &mut client, playlist_id).await.unwrap();
+        // println!("Added {} new tracks on refresh", added);
     }
 }
