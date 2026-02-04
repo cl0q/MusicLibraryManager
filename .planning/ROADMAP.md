@@ -139,7 +139,7 @@ Plans:
 - [x] 05-05-PLAN.md — Tauri commands and React UI for sync management
 
 ### Phase 6: Desktop UI
-**Goal**: Cross-platform PySide6 dashboard with library browser, progress tracking, and sync controls
+**Goal**: Cross-platform desktop UI with Tauri + React for library browser, dashboard, playlists, sync, and downloads
 
 **Depends on**: Phase 5
 
@@ -152,12 +152,14 @@ Plans:
   4. User can view and edit playlists visually with drag-and-drop reordering
   5. UI runs on macOS, Windows, and Linux with native look and feel
 
-**Plans**: TBD
+**Plans**: 5 plans in 3 waves
 
 Plans:
-- [ ] 06-01: TBD during planning
-- [ ] 06-02: TBD during planning
-- [ ] 06-03: TBD during planning
+- [ ] 06-01-PLAN.md — App layout, routing, sidebar navigation, status bar, toast notifications
+- [ ] 06-02-PLAN.md — Dashboard page with stats cards and real-time activity feed
+- [ ] 06-03-PLAN.md — Library browser with virtualized table, sorting, and filtering
+- [ ] 06-04-PLAN.md — Downloads page with queue view and real-time progress tracking
+- [ ] 06-05-PLAN.md — Context menus, track detail view, and component integration
 
 ### Phase 7: Enhancements
 **Goal**: Add quality-of-life features for better duplicate detection and audio quality
@@ -189,8 +191,8 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. Multi-Source Aggregation | 6/6 | ✓ Complete | 2026-02-04 |
 | 4. Playlist Management | 5/5 | ✓ Complete | 2026-02-04 |
 | 5. Device Sync | 5/5 | ✓ Complete | 2026-02-04 |
-| 6. Desktop UI | 0/3 | Not started | - |
+| 6. Desktop UI | 0/5 | Not started | - |
 | 7. Enhancements | 0/2 | Not started | - |
 
 ---
-*Last updated: 2026-02-04 after Phase 5 completion*
+*Last updated: 2026-02-04 after Phase 6 planning*
