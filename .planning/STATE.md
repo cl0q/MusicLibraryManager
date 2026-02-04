@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 4 of 7 (Playlist Management)
-Plan: 3 of 4 in current phase
-Status: In progress
-Last activity: 2026-02-04 — Completed 04-03-PLAN.md
+Plan: 5 of 5 in current phase
+Status: Phase complete
+Last activity: 2026-02-04 — Completed 04-05-PLAN.md
 
-Progress: [████████████████████████] 100% (18 of 18 concrete plans complete)
+Progress: [████████████████████████] 100% (20 of 20 concrete plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 18
-- Average duration: 4m 30s
-- Total execution time: 1.35 hours
+- Total plans completed: 20
+- Average duration: 4m 25s
+- Total execution time: 1.48 hours
 
 *Updated after each plan completion*
 
@@ -104,6 +104,10 @@ Recent decisions affecting current work:
 - **Per-source liked playlists** — "{Source} Likes" naming with source_id FK, created on first track import (2026-02-04)
 - **Most Played placeholder view** — Uses 0 play_count until Phase 5 adds track_stats table (2026-02-04)
 - **Startup playlist initialization** — Synchronous initialize_on_startup before async sync tasks (2026-02-04)
+- **spawn_blocking pattern for playlist commands** — Consistent with commands/sources.rs for handling rusqlite !Send Connection in async Tauri context (2026-02-04)
+- **Optimistic UI updates for drag-drop** — Immediate visual feedback improves UX; revert on backend failure (2026-02-04)
+- **Disable drag when search active** — Search results may not reflect actual playlist order; reordering could be confusing (2026-02-04)
+- **300ms search debounce** — Balance between responsiveness and reducing backend calls (2026-02-04)
 
 ### Learnings from Python Implementation
 
@@ -161,16 +165,22 @@ None yet.
 - Credentials loaded from .env via dotenvy (src-tauri/.env.example for template)
 - OAuth live testing deferred until user configures credentials in .env
 
-**Phase 4 (Playlist Management):** IN PROGRESS
-- Plan 04-01 complete: Schema version 3 with playlists, playlist_tracks, playlist_tags
-- Plan 04-02 complete: Fractional indexing and playlist CRUD operations
-- Plan 04-03 complete: Smart playlists and liked playlist initialization
-- 216 tests passing (13 playlist module tests + 3 startup tests)
+**Phase 4 (Playlist Management):** ✓ COMPLETE
+- All 5 plans executed: schema v3, fractional indexing CRUD, smart/liked playlists, Spotify import, Tauri commands & React UI
+- Plan 04-01: Schema version 3 with playlists, playlist_tracks, playlist_tags
+- Plan 04-02: Fractional indexing and playlist CRUD operations
+- Plan 04-03: Smart playlists and liked playlist initialization
+- Plan 04-04: Spotify playlist import and refresh
+- Plan 04-05: 7 Tauri commands + React UI with drag-drop reordering
+- 228 tests passing (14 playlist module tests + 11 command signature tests + 3 startup tests)
 - Smart playlist SQL views (smart_playlist_recently_added, smart_playlist_most_played)
 - Per-source liked playlist creation (Spotify Likes, SoundCloud Likes, Local Likes)
 - Startup initialization creates smart playlists and Local Likes automatically
 - INSERT OR IGNORE pattern for idempotent playlist creation
-- Next: 04-04 playlist tag management and playlist sync from sources
+- React UI with @hello-pangea/dnd for drag-drop track reordering
+- PlaylistList groups by category (Liked, Smart, Regular)
+- PlaylistDetail with debounced search and optimistic drag updates
+- Next: Phase 5 device sync and M3U8 generation for Rockbox
 
 **Phase 5 (Device Sync):**
 - Rockbox M3U8 compatibility specifics unknown (relative vs absolute paths, encoding)
@@ -179,7 +189,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-04
-Stopped at: Completed 04-03-PLAN.md
+Stopped at: Completed 04-05-PLAN.md
 Resume file: None
 
 ---
