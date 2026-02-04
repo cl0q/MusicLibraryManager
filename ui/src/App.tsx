@@ -3,6 +3,7 @@ import ToastProvider from "./components/Notifications/ToastProvider";
 import MainLayout from "./layouts/MainLayout";
 import Dashboard from "./pages/Dashboard";
 import LibraryBrowser from "./pages/LibraryBrowser";
+import TrackDetail from "./pages/TrackDetail";
 import Downloads from "./pages/Downloads";
 
 // Placeholder components for routes (will be implemented in later plans)
@@ -52,6 +53,10 @@ const router = createBrowserRouter([
       {
         path: "library",
         element: <LibraryBrowser />,
+      },
+      {
+        path: "library/:trackId",
+        element: <TrackDetail />,
       },
       {
         path: "playlists",
