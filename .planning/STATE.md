@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 
 ## Current Position
 
-Phase: 6 of 7 (Desktop UI) — Gap closure in progress
-Plan: 6 of 7 in current phase
-Status: Completed gap closure plan 06-06 (Dashboard Stats)
-Last activity: 2026-02-04 — Completed 06-06-PLAN.md (Dashboard Stats Gap Closure)
+Phase: 6 of 7 (Desktop UI) — Phase complete
+Plan: 7 of 7 in current phase
+Status: Completed gap closure plan 06-07 (Sync Operations & Real-Time Feedback)
+Last activity: 2026-02-05 — Completed 06-07-PLAN.md (Sync Operations Gap Closure)
 
-Progress: [████████████████████████████████] 100.0% (31 of 31 concrete plans complete)
+Progress: [████████████████████████████████] 100.0% (32 of 32 concrete plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 31
-- Average duration: 18m 18s
-- Total execution time: 9.45 hours
+- Total plans completed: 32
+- Average duration: 17m 53s
+- Total execution time: 9.54 hours
 
 *Updated after each plan completion*
 
@@ -162,6 +162,11 @@ Recent decisions affecting current work:
 - **formatBytes utility** — Standard byte formatting (B/KB/MB/GB/TB) with 2 decimal places for human readability (2026-02-04)
 - **formatRelativeTime utility** — Relative time display (m/h/d ago) for recent events, full date for older (2026-02-04)
 - **sync:completed event for auto-refresh** — Dashboard listens for sync events to update last sync time in real-time (2026-02-04)
+- **tauri::Emitter trait for event emission** — Rust backend uses app.emit() for real-time sync progress events (2026-02-05)
+- **Optional AppHandle in sync_profile_to_folder** — Event emission optional for test compatibility, production passes Some(&app) (2026-02-05)
+- **useSyncProgress hook for real-time sync tracking** — Map-based state keyed by profile_id, auto-removes completed operations after 3 seconds (2026-02-05)
+- **Four sync event types** — sync:started, sync:progress, sync:completed, sync:failed for comprehensive operation tracking (2026-02-05)
+- **StatusBar combines download and sync operations** — Unified operation display using useDownloadProgress and useSyncProgress hooks (2026-02-05)
 
 ### Learnings from Python Implementation
 
@@ -307,12 +312,25 @@ None yet.
   - All 7 routes working: /, /library, /library/:trackId, /playlists, /playlists/:id, /sync, /downloads
   - Removed leftover Vite template CSS, added color-scheme meta tag
   - Human verification checkpoint approved
+- Plan 06-06 (Dashboard Stats - Gap Closure): ✓ COMPLETE
+  - Added get_library_storage_size and get_last_sync_time Tauri commands
+  - StatsCards now fetches real storage size and last sync time
+  - StatsCards listens for sync:completed to auto-refresh last sync time
+  - Dashboard stats now show live data instead of placeholders
+- Plan 06-07 (Sync Operations - Gap Closure): ✓ COMPLETE
+  - Rust backend emits sync:started, sync:progress, sync:completed events via tauri::Emitter
+  - Dashboard "Sync Now" button calls execute_sync_cmd with first available profile
+  - Sync page profile selection triggers actual sync with toast notifications
+  - useSyncProgress hook tracks real-time sync operations
+  - StatusBar displays live operations from useDownloadProgress and useSyncProgress
+  - Auto-removes completed operations after 3 seconds
+  - All Phase 6 verification gaps closed (Gap 1: Sync Operations, Gap 4: StatusBar)
 
 ## Session Continuity
 
-Last session: 2026-02-04
-Stopped at: Completed 06-06-PLAN.md (Dashboard Stats Gap Closure)
+Last session: 2026-02-05
+Stopped at: Completed 06-07-PLAN.md (Sync Operations Gap Closure)
 Resume file: None
 
 ---
-*Last updated: 2026-02-04 after completing Plan 06-06 (Gap closure - Dashboard stats implementation)*
+*Last updated: 2026-02-05 after completing Plan 06-07 (Gap closure - Sync operations implementation)*
