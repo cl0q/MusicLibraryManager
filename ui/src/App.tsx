@@ -1,5 +1,5 @@
 import { createBrowserRouter, RouterProvider } from "react-router";
-import { Toaster } from "sonner";
+import ToastProvider from "./components/Notifications/ToastProvider";
 import MainLayout from "./layouts/MainLayout";
 
 // Placeholder components for routes (will be implemented in later plans)
@@ -105,7 +105,7 @@ const router = createBrowserRouter([
 function App() {
   return (
     <>
-      <Toaster position="bottom-right" richColors />
+      <ToastProvider />
       <RouterProvider router={router} />
     </>
   );
