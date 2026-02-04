@@ -9,19 +9,19 @@
  * - Track list with drag handles
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   DragDropContext,
   Droppable,
   Draggable,
-  DropResult,
+  type DropResult,
 } from '@hello-pangea/dnd';
 import {
   getPlaylistTracks,
   searchPlaylistTracks,
   reorderPlaylistTrack,
-  Playlist,
-  Track,
+  type Playlist,
+  type Track,
 } from '../../hooks/usePlaylists';
 
 interface PlaylistDetailProps {
@@ -39,7 +39,7 @@ export default function PlaylistDetail({
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchDebounceTimer, setSearchDebounceTimer] = useState<
-    NodeJS.Timeout | undefined
+    ReturnType<typeof setTimeout> | undefined
   >();
 
   useEffect(() => {

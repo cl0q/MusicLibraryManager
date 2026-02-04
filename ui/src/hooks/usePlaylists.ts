@@ -9,7 +9,7 @@
  * - Reordering tracks via drag-drop
  */
 
-import { invoke } from '@tauri-apps/api/tauri';
+import { invoke } from '@tauri-apps/api/core';
 
 /**
  * Playlist category enum matching Rust model.

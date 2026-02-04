@@ -11,8 +11,8 @@
  * - Formats file sizes as KB/MB/GB
  */
 
-import React, { useState, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/tauri';
+import { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 
 export interface RockboxDevice {
   mount_point: string;

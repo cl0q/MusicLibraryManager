@@ -9,8 +9,8 @@
  * - Card-based layout consistent with PlaylistList component
  */
 
-import React, { useState, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/tauri';
+import { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 
 export interface SyncProfileDto {
   id: number;

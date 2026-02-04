@@ -8,11 +8,11 @@
  * - Click to navigate to detail view
  */
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   getPlaylists,
   createPlaylist,
-  Playlist,
+  type Playlist,
 } from '../../hooks/usePlaylists';
 
 interface PlaylistListProps {
