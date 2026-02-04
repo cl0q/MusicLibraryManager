@@ -58,6 +58,13 @@ pub fn run() {
             commands::sources::soundcloud_exchange_code,
             commands::sources::sync_soundcloud,
             commands::sources::check_duplicates,
+            commands::playlist::create_playlist_command,
+            commands::playlist::get_playlists_command,
+            commands::playlist::get_playlist_tracks_command,
+            commands::playlist::search_playlist_tracks_command,
+            commands::playlist::add_track_to_playlist_command,
+            commands::playlist::remove_track_from_playlist_command,
+            commands::playlist::reorder_playlist_track_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

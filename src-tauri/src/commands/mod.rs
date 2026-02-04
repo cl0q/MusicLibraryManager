@@ -20,6 +20,7 @@
 pub mod download;
 pub mod duplicate;
 pub mod import;
+pub mod playlist;
 pub mod search;
 pub mod sources;
 
@@ -27,6 +28,11 @@ pub mod sources;
 pub use download::{download_tracks, get_retry_queue_status, retry_failed_downloads};
 pub use duplicate::detect_duplicates;
 pub use import::import_directory;
+pub use playlist::{
+    add_track_to_playlist_command, create_playlist_command, get_playlist_tracks_command,
+    get_playlists_command, remove_track_from_playlist_command, reorder_playlist_track_command,
+    search_playlist_tracks_command,
+};
 pub use search::search_library;
 pub use sources::{
     check_duplicates, soundcloud_auth_url, soundcloud_exchange_code, spotify_auth_url,

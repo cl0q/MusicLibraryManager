@@ -361,6 +361,69 @@ pub fn get_playlist_tracks(conn: &Connection, playlist_id: i64) -> Result<Vec<Tr
     Ok(tracks)
 }
 
+/// Search for tracks within a playlist using case-insensitive LIKE queries.
+///
+/// Searches title, artist, and album fields with wildcards.
+/// Maintains playlist order (by position).
+///
+/// # Arguments
+/// * `conn` - Database connection
+/// * `playlist_id` - ID of playlist to search within
+/// * `query` - Search query string
+///
+/// # Returns
+/// * `Ok(Vec<Track>)` - Matching tracks in playlist order
+/// * `Err` if database operation fails
+pub fn search_playlist_tracks(
+    conn: &Connection,
+    playlist_id: i64,
+    query: &str,
+) -> Result<Vec<Track>> {
+    let search_pattern = format!("%{}%", query);
+
+    let mut stmt = conn.prepare(
+        "SELECT t.id, t.artist, t.album_artist, t.album, t.title, t.genre, t.year,
+                t.bitrate, t.duration, t.format, t.original_path,
+                COALESCE(t.organized_path, '') as organized_path,
+                t.is_duplicate, t.date_added
+         FROM tracks t
+         JOIN playlist_tracks pt ON t.id = pt.track_id
+         WHERE pt.playlist_id = ?1
+           AND (t.title LIKE ?2 OR t.artist LIKE ?2 OR t.album LIKE ?2)
+         ORDER BY pt.position",
+    )?;
+
+    let tracks = stmt
+        .query_map(
+            rusqlite::params![playlist_id, search_pattern],
+            |row| {
+                let metadata = TrackMetadata::new(
+                    row.get(1)?, // artist
+                    row.get(2)?, // album_artist
+                    row.get(3)?, // album
+                    row.get(4)?, // title
+                    row.get(5)?, // genre
+                    row.get(6)?, // year
+                    row.get(7)?, // bitrate
+                    row.get(8)?, // duration
+                    row.get(9)?, // format
+                    row.get(10)?, // original_path
+                );
+
+                Ok(Track {
+                    id: Some(row.get(0)?),
+                    metadata,
+                    organized_path: row.get(11)?,
+                    is_duplicate: row.get::<_, i32>(12)? != 0,
+                    date_added: row.get(13)?,
+                })
+            },
+        )?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    Ok(tracks)
+}
+
 // Smart playlists and liked playlists functions
 
 /// Helper function to capitalize first letter of a string.
@@ -1006,6 +1069,65 @@ mod tests {
 
         // Verify only the moved track's position changed (1 UPDATE)
         // We can't directly test the UPDATE count, but we verify logical correctness
+    }
+
+    #[test]
+    fn test_search_playlist_tracks() {
+        use crate::database::get_memory_connection;
+
+        let conn = get_memory_connection().unwrap();
+
+        let playlist_id = create_playlist(
+            &conn,
+            "Test".to_string(),
+            None,
+            vec![],
+            PlaylistCategory::Regular,
+        )
+        .unwrap();
+
+        // Insert tracks with different metadata
+        let tracks_data = vec![
+            ("Daft Punk", "Random Access Memories", "Get Lucky"),
+            ("Daft Punk", "Discovery", "One More Time"),
+            ("Justice", "Cross", "D.A.N.C.E."),
+            ("The Weeknd", "After Hours", "Blinding Lights"),
+        ];
+
+        for (artist, album, title) in tracks_data {
+            conn.execute(
+                "INSERT INTO tracks (artist, album_artist, album, title, format, original_path)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![artist, artist, album, title, "mp3", format!("/{}.mp3", title)],
+            )
+            .unwrap();
+
+            add_track_to_playlist(&conn, playlist_id, conn.last_insert_rowid()).unwrap();
+        }
+
+        // Search by artist
+        let results = search_playlist_tracks(&conn, playlist_id, "Daft Punk").unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].metadata.title, "Get Lucky");
+        assert_eq!(results[1].metadata.title, "One More Time");
+
+        // Search by title (partial)
+        let results = search_playlist_tracks(&conn, playlist_id, "Light").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].metadata.title, "Blinding Lights");
+
+        // Search by album
+        let results = search_playlist_tracks(&conn, playlist_id, "Cross").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].metadata.artist, "Justice");
+
+        // Search with no matches
+        let results = search_playlist_tracks(&conn, playlist_id, "xyz123").unwrap();
+        assert_eq!(results.len(), 0);
+
+        // Case-insensitive search
+        let results = search_playlist_tracks(&conn, playlist_id, "daft punk").unwrap();
+        assert_eq!(results.len(), 2);
     }
 
     #[test]
