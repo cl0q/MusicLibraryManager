@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Library Foundation** - Database schema, atomic file operations, local import, search
 - [x] **Phase 2: Download Infrastructure** - Single-source pipeline with dabmusic.xyz and YouTube fallback
 - [x] **Phase 3: Multi-Source Aggregation** - Spotify, Apple Music, SoundCloud API integration with deduplication
-- [ ] **Phase 4: Playlist Management** - Create, edit, reorder playlists with order preservation
+- [x] **Phase 4: Playlist Management** - Create, edit, reorder playlists with order preservation
 - [ ] **Phase 5: Device Sync** - Incremental sync to Rockbox iPod with M3U8 playlist generation
 - [ ] **Phase 6: Desktop UI** - PySide6 dashboard with library browser and real-time progress
 - [ ] **Phase 7: Enhancements** - Acoustic fingerprinting, artwork, ReplayGain normalization
@@ -109,11 +109,11 @@ Plans:
 **Plans**: 5 plans in 3 waves
 
 Plans:
-- [ ] 04-01-PLAN.md — Database schema and models with fractional indexing for playlist ordering
-- [ ] 04-02-PLAN.md — Core playlist operations (create, add/remove tracks, reorder with O(1) updates)
-- [ ] 04-03-PLAN.md — Smart playlists (Recently Added, Most Played) and per-source liked playlists
-- [ ] 04-04-PLAN.md — Source playlist import from Spotify/SoundCloud with add-only mirroring
-- [ ] 04-05-PLAN.md — Tauri commands and React UI with drag-drop reordering
+- [x] 04-01-PLAN.md — Database schema and models with fractional indexing for playlist ordering
+- [x] 04-02-PLAN.md — Core playlist operations (create, add/remove tracks, reorder with O(1) updates)
+- [x] 04-03-PLAN.md — Smart playlists (Recently Added, Most Played) and per-source liked playlists
+- [x] 04-04-PLAN.md — Source playlist import from Spotify/SoundCloud with add-only mirroring
+- [x] 04-05-PLAN.md — Tauri commands and React UI with drag-drop reordering
 
 ### Phase 5: Device Sync
 **Goal**: Incremental sync to Rockbox iPod with M3U8 playlists and filesystem copy
@@ -185,10 +185,10 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 1. Library Foundation | 5/5 | ✓ Complete | 2026-02-03 |
 | 2. Download Infrastructure | 4/4 | ✓ Complete | 2026-02-03 |
 | 3. Multi-Source Aggregation | 6/6 | ✓ Complete | 2026-02-04 |
-| 4. Playlist Management | 0/5 | Not started | - |
+| 4. Playlist Management | 5/5 | ✓ Complete | 2026-02-04 |
 | 5. Device Sync | 0/3 | Not started | - |
 | 6. Desktop UI | 0/3 | Not started | - |
 | 7. Enhancements | 0/2 | Not started | - |
 
 ---
-*Last updated: 2026-02-04 after Phase 3 completion*
+*Last updated: 2026-02-04 after Phase 4 completion*
