@@ -2,19 +2,9 @@ import { createBrowserRouter, RouterProvider } from "react-router";
 import ToastProvider from "./components/Notifications/ToastProvider";
 import MainLayout from "./layouts/MainLayout";
 import Dashboard from "./pages/Dashboard";
+import LibraryBrowser from "./pages/LibraryBrowser";
 
 // Placeholder components for routes (will be implemented in later plans)
-
-function Library() {
-  return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Library</h1>
-      <p className="text-gray-600 dark:text-gray-400">
-        Library browser coming soon...
-      </p>
-    </div>
-  );
-}
 
 function Playlists() {
   return (
@@ -71,7 +61,7 @@ const router = createBrowserRouter([
       },
       {
         path: "library",
-        element: <Library />,
+        element: <LibraryBrowser />,
       },
       {
         path: "playlists",
