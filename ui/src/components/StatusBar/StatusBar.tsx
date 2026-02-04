@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { useDownloadProgress, useSyncProgress } from "../../hooks/useTauriEvents";
 
 interface Operation {
   id: string;
+  type: "download" | "sync";
   name: string;
   status: string;
   progress: number;
@@ -11,15 +13,29 @@ interface Operation {
 export default function StatusBar() {
   const [isExpanded, setIsExpanded] = useState(false);
 
-  // Placeholder operations (will be connected to Tauri events in later plans)
-  const [operations] = useState<Operation[]>([
-    {
-      id: "1",
-      name: "Example operation",
-      status: "completed",
-      progress: 100,
-    },
-  ]);
+  const downloads = useDownloadProgress();
+  const syncs = useSyncProgress();
+
+  const operations: Operation[] = [
+    ...Array.from(downloads.values()).map((download) => ({
+      id: `download-${download.track_id}`,
+      type: "download" as const,
+      name: `Downloading track ${download.track_id}`,
+      progress: download.progress,
+      status: download.status,
+      eta: download.eta,
+    })),
+    ...Array.from(syncs.values()).map((sync) => ({
+      id: `sync-${sync.profile_id}`,
+      type: "sync" as const,
+      name: `Syncing profile ${sync.profile_id}`,
+      progress: sync.total_files > 0
+        ? Math.round((sync.files_synced / sync.total_files) * 100)
+        : 0,
+      status: sync.status,
+      eta: undefined,
+    })),
+  ];
 
   // Current operation summary for collapsed view
   const activeOperation = operations.find((op) => op.progress < 100);
@@ -97,7 +113,19 @@ export default function StatusBar() {
                       <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
                         {operation.name}
                       </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                      <div
+                        className={`text-xs ${
+                          operation.status === "downloading" ||
+                          operation.status === "transcoding" ||
+                          operation.status === "syncing"
+                            ? "text-blue-600"
+                            : operation.status === "completed"
+                              ? "text-green-600"
+                              : operation.status === "failed"
+                                ? "text-red-600"
+                                : "text-gray-500 dark:text-gray-400"
+                        }`}
+                      >
                         {operation.status}
                         {operation.eta && ` • ETA: ${operation.eta}`}
                       </div>

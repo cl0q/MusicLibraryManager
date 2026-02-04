@@ -72,3 +72,93 @@ export function useDownloadProgress() {
 
   return downloads;
 }
+
+/**
+ * Hook for listening to sync progress events
+ * @returns Map of sync operations keyed by profile_id
+ */
+export function useSyncProgress() {
+  const [syncs, setSyncs] = useState<Map<number, {
+    profile_id: number;
+    status: "syncing" | "completed" | "failed";
+    files_synced: number;
+    total_files: number;
+    error?: string;
+  }>>(new Map());
+
+  useEffect(() => {
+    const listeners: (() => void)[] = [];
+
+    listen<{ profile_id: number }>("sync:started", (event) => {
+      setSyncs((prev) => {
+        const next = new Map(prev);
+        next.set(event.payload.profile_id, {
+          profile_id: event.payload.profile_id,
+          status: "syncing",
+          files_synced: 0,
+          total_files: 0,
+        });
+        return next;
+      });
+    }).then((unlisten) => listeners.push(unlisten));
+
+    listen<{ profile_id: number; files_synced: number; total_files: number }>(
+      "sync:progress",
+      (event) => {
+        setSyncs((prev) => {
+          const next = new Map(prev);
+          const existing = next.get(event.payload.profile_id);
+          if (existing) {
+            next.set(event.payload.profile_id, {
+              ...existing,
+              files_synced: event.payload.files_synced,
+              total_files: event.payload.total_files,
+            });
+          }
+          return next;
+        });
+      }
+    ).then((unlisten) => listeners.push(unlisten));
+
+    listen<{ profile_id: number }>("sync:completed", (event) => {
+      setSyncs((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(event.payload.profile_id);
+        if (existing) {
+          next.set(event.payload.profile_id, {
+            ...existing,
+            status: "completed",
+          });
+        }
+        setTimeout(() => {
+          setSyncs((current) => {
+            const updated = new Map(current);
+            updated.delete(event.payload.profile_id);
+            return updated;
+          });
+        }, 3000);
+        return next;
+      });
+    }).then((unlisten) => listeners.push(unlisten));
+
+    listen<{ profile_id: number; error: string }>("sync:failed", (event) => {
+      setSyncs((prev) => {
+        const next = new Map(prev);
+        next.set(event.payload.profile_id, {
+          profile_id: event.payload.profile_id,
+          status: "failed",
+          files_synced: 0,
+          total_files: 0,
+          error: event.payload.error,
+        });
+        return next;
+      });
+    }).then((unlisten) => listeners.push(unlisten));
+
+    return () => {
+      listeners.forEach((unlisten) => unlisten());
+    };
+  }, []);
+
+  return syncs;
+}
