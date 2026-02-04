@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 4 of 7 (Playlist Management)
-Plan: 2 of 4 in current phase
+Plan: 3 of 4 in current phase
 Status: In progress
-Last activity: 2026-02-04 — Completed 04-02-PLAN.md
+Last activity: 2026-02-04 — Completed 04-03-PLAN.md
 
-Progress: [█████████████████████░░] 100% (17 of 17 concrete plans complete)
+Progress: [████████████████████████] 100% (18 of 18 concrete plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 17
-- Average duration: 4m 24s
-- Total execution time: 1.24 hours
+- Total plans completed: 18
+- Average duration: 4m 30s
+- Total execution time: 1.35 hours
 
 *Updated after each plan completion*
 
@@ -99,6 +99,11 @@ Recent decisions affecting current work:
 - **position_between algorithm** — Lexicographic midpoint generation handles all four insertion cases (2026-02-04)
 - **O(1) reorder operations** — Only moved track's position updated, no cascading changes needed (2026-02-04)
 - **Transaction pattern with execute_batch** — Explicit BEGIN/COMMIT for atomic multi-table writes (2026-02-04)
+- **SQL views for smart playlists** — Auto-updating views query tracks table with date/stats filtering (2026-02-04)
+- **INSERT OR IGNORE for idempotent initialization** — All playlist creation functions safe to call multiple times (2026-02-04)
+- **Per-source liked playlists** — "{Source} Likes" naming with source_id FK, created on first track import (2026-02-04)
+- **Most Played placeholder view** — Uses 0 play_count until Phase 5 adds track_stats table (2026-02-04)
+- **Startup playlist initialization** — Synchronous initialize_on_startup before async sync tasks (2026-02-04)
 
 ### Learnings from Python Implementation
 
@@ -159,11 +164,13 @@ None yet.
 **Phase 4 (Playlist Management):** IN PROGRESS
 - Plan 04-01 complete: Schema version 3 with playlists, playlist_tracks, playlist_tags
 - Plan 04-02 complete: Fractional indexing and playlist CRUD operations
-- 203 tests passing (13 new playlist tests: 7 fractional indexing + 6 CRUD)
-- Fractional indexing with base-62 alphabet, position_between algorithm
-- O(1) reorder operations (only moved track's position updated)
-- Transaction pattern with execute_batch for atomic multi-table writes
-- Next: 04-03 smart playlists and liked playlists
+- Plan 04-03 complete: Smart playlists and liked playlist initialization
+- 216 tests passing (13 playlist module tests + 3 startup tests)
+- Smart playlist SQL views (smart_playlist_recently_added, smart_playlist_most_played)
+- Per-source liked playlist creation (Spotify Likes, SoundCloud Likes, Local Likes)
+- Startup initialization creates smart playlists and Local Likes automatically
+- INSERT OR IGNORE pattern for idempotent playlist creation
+- Next: 04-04 playlist tag management and playlist sync from sources
 
 **Phase 5 (Device Sync):**
 - Rockbox M3U8 compatibility specifics unknown (relative vs absolute paths, encoding)
@@ -172,8 +179,8 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-04
-Stopped at: Completed 04-02-PLAN.md
+Stopped at: Completed 04-03-PLAN.md
 Resume file: None
 
 ---
-*Last updated: 2026-02-04 after completing plan 04-02*
+*Last updated: 2026-02-04 after completing plan 04-03*
