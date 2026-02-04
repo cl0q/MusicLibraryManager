@@ -1,5 +1,8 @@
 use crate::download::dab::{DabClient, DownloadResult as DabDownloadResult};
 use crate::download::queue::{QueueItem, RetryQueue};
+use crate::download::soundcloud::{
+    SoundCloudDownloadRequest, SoundCloudDownloadResult, SoundCloudDownloader,
+};
 use crate::download::youtube::{YoutubeClient, YoutubeDownloadResult};
 use crate::transcode::{transcode_audio, TranscodeResult};
 use anyhow::{Context, Result};
@@ -17,6 +20,10 @@ pub struct DownloadRequest {
     pub artist: String,
     /// Track title for metadata and file organization
     pub title: String,
+    /// SoundCloud permalink URL (if track sourced from SoundCloud)
+    pub soundcloud_url: Option<String>,
+    /// User ID for SoundCloud auth token retrieval
+    pub user_id: Option<String>,
 }
 
 /// Result of a batch download operation
@@ -52,6 +59,7 @@ impl BatchResult {
 pub struct DownloadOrchestrator {
     dab_client: DabClient,
     youtube_client: YoutubeClient,
+    soundcloud_downloader: Option<SoundCloudDownloader>,
     retry_queue: RetryQueue,
     flac_dir: PathBuf,
     aac_dir: PathBuf,
@@ -75,9 +83,22 @@ impl DownloadOrchestrator {
         let mut retry_queue = RetryQueue::new(queue_path);
         retry_queue.load().context("Failed to load retry queue")?;
 
+        // SoundCloud downloader is optional (requires scdl CLI)
+        let soundcloud_downloader = match SoundCloudDownloader::new() {
+            Ok(dl) => {
+                log::info!("scdl available: SoundCloud downloads enabled");
+                Some(dl)
+            }
+            Err(e) => {
+                log::info!("scdl not available, SoundCloud direct downloads disabled: {}", e);
+                None
+            }
+        };
+
         Ok(Self {
             dab_client: DabClient::new()?,
             youtube_client: YoutubeClient::new()?,
+            soundcloud_downloader,
             retry_queue,
             flac_dir,
             aac_dir,
@@ -126,29 +147,67 @@ impl DownloadOrchestrator {
             let mut downloaded_path: Option<PathBuf> = None;
             let mut source = "unknown";
 
-            // Step 1: Try DAB Music API
-            if let Some(track_id) = &request.track_id {
-                log::info!("Attempting DAB download with track_id: {}", track_id);
-                match self.dab_client.download_stream(track_id, &flac_path).await {
-                    Ok(DabDownloadResult::Success(path)) => {
-                        log::info!("DAB download succeeded");
-                        downloaded_path = Some(path);
-                        source = "dab";
+            // Step 0: Try SoundCloud direct download (if track has SoundCloud URL)
+            if let (Some(sc_url), Some(user_id)) =
+                (&request.soundcloud_url, &request.user_id)
+            {
+                if let Some(ref sc_downloader) = self.soundcloud_downloader {
+                    log::info!("Attempting SoundCloud direct download: {}", sc_url);
+                    let sc_request = SoundCloudDownloadRequest {
+                        track_url: sc_url.clone(),
+                        user_id: user_id.clone(),
+                        output_dir: self.aac_dir.clone(),
+                        track_id: request.track_id.clone().unwrap_or_else(|| sc_url.clone()),
+                    };
+
+                    match sc_downloader.download_track(&sc_request).await {
+                        Ok(SoundCloudDownloadResult::Success(path)) => {
+                            log::info!("SoundCloud download succeeded: {}", path.display());
+                            downloaded_path = Some(path);
+                            source = "soundcloud";
+                        }
+                        Ok(SoundCloudDownloadResult::NotFound) => {
+                            log::info!(
+                                "SoundCloud track not available for download, falling back to DAB"
+                            );
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "SoundCloud download failed: {}, falling back to DAB",
+                                e
+                            );
+                        }
                     }
-                    Ok(DabDownloadResult::NotFound) => {
-                        log::info!("DAB returned NotFound (404), falling back to YouTube");
-                    }
-                    Err(e) => {
-                        log::error!("DAB download failed: {}", e);
-                        let queue_item = QueueItem::new(
-                            request.track_id.clone().unwrap_or_else(|| request.query.clone()),
-                            request.query.clone(),
-                            "dab".to_string(),
-                            e.to_string(),
-                        );
-                        self.retry_queue.add(queue_item)?;
-                        result.failed += 1;
-                        continue; // Skip to next track
+                } else {
+                    log::info!("scdl not available, skipping SoundCloud direct download");
+                }
+            }
+
+            // Step 1: Try DAB Music API (if SoundCloud didn't succeed)
+            if downloaded_path.is_none() {
+                if let Some(track_id) = &request.track_id {
+                    log::info!("Attempting DAB download with track_id: {}", track_id);
+                    match self.dab_client.download_stream(track_id, &flac_path).await {
+                        Ok(DabDownloadResult::Success(path)) => {
+                            log::info!("DAB download succeeded");
+                            downloaded_path = Some(path);
+                            source = "dab";
+                        }
+                        Ok(DabDownloadResult::NotFound) => {
+                            log::info!("DAB returned NotFound (404), falling back to YouTube");
+                        }
+                        Err(e) => {
+                            log::error!("DAB download failed: {}", e);
+                            let queue_item = QueueItem::new(
+                                request.track_id.clone().unwrap_or_else(|| request.query.clone()),
+                                request.query.clone(),
+                                "dab".to_string(),
+                                e.to_string(),
+                            );
+                            self.retry_queue.add(queue_item)?;
+                            result.failed += 1;
+                            continue; // Skip to next track
+                        }
                     }
                 }
             }
@@ -368,10 +427,31 @@ mod tests {
             query: "Artist - Title".to_string(),
             artist: "Artist".to_string(),
             title: "Title".to_string(),
+            soundcloud_url: None,
+            user_id: None,
         };
 
         assert_eq!(request.track_id, Some("track123".to_string()));
         assert_eq!(request.query, "Artist - Title");
+        assert!(request.soundcloud_url.is_none());
+    }
+
+    #[test]
+    fn test_download_request_with_soundcloud() {
+        let request = DownloadRequest {
+            track_id: None,
+            query: "Artist - SoundCloud Track".to_string(),
+            artist: "Artist".to_string(),
+            title: "SoundCloud Track".to_string(),
+            soundcloud_url: Some("https://soundcloud.com/artist/track".to_string()),
+            user_id: Some("user123".to_string()),
+        };
+
+        assert!(request.soundcloud_url.is_some());
+        assert_eq!(
+            request.soundcloud_url.unwrap(),
+            "https://soundcloud.com/artist/track"
+        );
     }
 
     #[test]
@@ -430,6 +510,8 @@ mod tests {
             query: "Artist - Title".to_string(),
             artist: "Artist".to_string(),
             title: "Title".to_string(),
+            soundcloud_url: None,
+            user_id: None,
         };
 
         let result = orchestrator.download_batch(vec![request]).await.unwrap();

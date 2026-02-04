@@ -113,12 +113,35 @@ mod tests {
             query: "Artist - Title".to_string(),
             artist: "Artist".to_string(),
             title: "Title".to_string(),
+            soundcloud_url: None,
+            user_id: None,
         };
 
         // Verify serialization (required for Tauri IPC)
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("track123"));
         assert!(json.contains("Artist - Title"));
+    }
+
+    #[test]
+    fn test_download_request_with_soundcloud_serialization() {
+        let request = DownloadRequest {
+            track_id: None,
+            query: "Artist - SC Track".to_string(),
+            artist: "Artist".to_string(),
+            title: "SC Track".to_string(),
+            soundcloud_url: Some("https://soundcloud.com/artist/sc-track".to_string()),
+            user_id: Some("user123".to_string()),
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("soundcloud.com"));
+        assert!(json.contains("user123"));
+
+        // Verify deserialization round-trip
+        let deserialized: DownloadRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.soundcloud_url, request.soundcloud_url);
+        assert_eq!(deserialized.user_id, request.user_id);
     }
 
     #[test]
