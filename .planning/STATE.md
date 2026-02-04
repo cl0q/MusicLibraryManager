@@ -83,6 +83,9 @@ Recent decisions affecting current work:
 - **OAuth 2.1 mandatory PKCE S256 for SoundCloud** — Deadline passed Oct 1 2024, always use PkceCodeChallenge::new_random_sha256() (2026-02-04)
 - **external_id format soundcloud:{id}** — Consistent provenance tracking in track_sources, parallel to spotify:track:{id} (2026-02-04)
 - **dotenvy for .env credential loading** — Credentials in .env file loaded at app startup, no shell env vars needed (2026-02-04)
+- **SpotifyAuth/SpotifyClient separation** — Auth flow is stateless (URL + code exchange), client is stateful (token + refresh) (2026-02-04)
+- **Spotify URI as original_path for phantom tracks** — Tracks from Spotify without local files use URI as path, matched later by dedup (2026-02-04)
+- **Env var tests ignored in parallel** — set_var/remove_var not safe in multi-threaded test runner, mark #[ignore] (2026-02-04)
 
 ### Learnings from Python Implementation
 
@@ -135,7 +138,7 @@ None yet.
 - Plan 02 complete: Spotify API client with OAuth PKCE and incremental sync
 - Plan 03 complete: SoundCloud API client with OAuth 2.1 PKCE and incremental sync
 - Plan 04 complete: track normalization and fuzzy duplicate detection
-- 171 tests passing (9 in SoundCloud module, 22 in dedup module)
+- 171 tests passing (9 spotify, 9 soundcloud, 22 dedup)
 - OAuth live testing deferred to Plan 05 when Tauri commands are wired up
 - Credentials loaded from .env via dotenvy
 
@@ -145,9 +148,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-04T07:35:44Z
-Stopped at: Completed 03-03-PLAN.md (SoundCloud Integration)
+Last session: 2026-02-04T07:35:43Z
+Stopped at: Completed 03-02-PLAN.md (Spotify Integration)
 Resume file: None
 
 ---
-*Last updated: 2026-02-04 after completing 03-03-PLAN.md*
+*Last updated: 2026-02-04 after completing 03-02-PLAN.md*
