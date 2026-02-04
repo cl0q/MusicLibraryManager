@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 5 of 7 (Device Sync) — IN PROGRESS
-Plan: 1 of 4 in current phase
-Status: Plan 05-01 complete - sync profile model established
-Last activity: 2026-02-04 — Completed 05-01-PLAN.md (Sync Profile Model)
+Plan: 2 of 4 in current phase
+Status: Plan 05-02 complete - shared transcode cache implemented
+Last activity: 2026-02-04 — Completed 05-02-PLAN.md (Shared Transcode Cache)
 
-Progress: [████████████████████░] 95% (21 of 22 concrete plans complete)
+Progress: [████████████████████░] 96% (22 of 23 concrete plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 21
-- Average duration: 15m 35s
-- Total execution time: 5.49 hours
+- Total plans completed: 22
+- Average duration: 18m 47s
+- Total execution time: 6.39 hours
 
 *Updated after each plan completion*
 
@@ -115,6 +115,11 @@ Recent decisions affecting current work:
 - **Field/operator/value filter rule structure** — Extensible query pattern supporting eq/ne/gt/lt/contains/in operators across genre/artist/bitrate/date_added/source/tag (2026-02-04)
 - **DTO computed statistics** — SyncProfileDto.from_profile() runs database queries to compute track counts rather than storing redundant data (2026-02-04)
 - **rusqlite::Result for collect()** — Used rusqlite's Result type instead of custom Result alias for query_map iterator conversions (2026-02-04)
+- **Track ID as cache filename** — {track_id}.m4a simpler than content hashing, stable reference once assigned (2026-02-04)
+- **Hardlink-first strategy on Unix** — Hardlinks save disk space when cache and profile on same filesystem, copy fallback for cross-filesystem (2026-02-04)
+- **Windows always copies files** — Symlinks require elevated privileges, copying is more reliable (2026-02-04)
+- **SHA256 for checksums** — Industry-standard cryptographic hash for file change detection in sync state tracking (2026-02-04)
+- **64KB buffer for file operations** — Fixed memory usage regardless of file size, efficient for typical 5-10MB AAC files (2026-02-04)
 
 ### Learnings from Python Implementation
 
@@ -193,15 +198,20 @@ None yet.
   - SyncProfile model with get_all_track_ids() union resolution (manual + playlists + rules)
   - Tauri IPC DTOs with computed statistics
   - 9 unit tests passing
-- Plan 05-02 (Transcode Cache): READY TO START
+- Plan 05-02 (Shared Transcode Cache): ✓ COMPLETE
+  - TranscodeCache with platform-aware file linking (hardlinks on Unix, copies on Windows)
+  - SHA256 checksum computation for sync state tracking
+  - Profile path builder with FAT32-safe sanitized names
+  - 12 unit tests passing
+  - Next: Plan 05-03 (Device Filesystem Operations)
 - Rockbox M3U8 compatibility specifics unknown (relative vs absolute paths, encoding)
 - Need actual iPod for filesystem testing (FAT32, character encoding edge cases)
 
 ## Session Continuity
 
 Last session: 2026-02-04
-Stopped at: Completed 05-01-PLAN.md (Sync Profile Model)
+Stopped at: Completed 05-02-PLAN.md (Shared Transcode Cache)
 Resume file: None
 
 ---
-*Last updated: 2026-02-04 after completing Plan 05-01*
+*Last updated: 2026-02-04 after completing Plan 05-02*
