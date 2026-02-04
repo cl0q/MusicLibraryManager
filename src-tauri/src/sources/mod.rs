@@ -5,8 +5,8 @@
 //!
 //! ## Supported Sources
 //!
+//! - Spotify: Liked songs and playlists via OAuth 2.0 with PKCE
 //! - SoundCloud: Liked tracks and playlists via OAuth 2.1 with mandatory PKCE
-//! - Spotify: (Planned for 03-02)
 //!
 //! ## Authentication
 //!
@@ -15,5 +15,7 @@
 //! the `auth` module.
 
 pub mod soundcloud;
+pub mod spotify;
 
 pub use soundcloud::{SoundCloudClient, SoundCloudError};
+pub use spotify::{SpotifyClient, SpotifyError};
