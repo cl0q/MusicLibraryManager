@@ -443,8 +443,6 @@ pub fn get_smart_playlist_tracks(
                     duration: None,
                     format: String::new(),
                     original_path: String::new(),
-                    organized_path: String::new(),
-                    variant_of: None,
                 },
                 organized_path: String::new(),
                 is_duplicate: false,
