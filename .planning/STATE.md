@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 3 of 7 (Multi-Source Aggregation)
-Plan: 4 of 6 in current phase (plans 01, 04 complete)
+Plan: 5 of 6 in current phase (plans 01, 02, 03, 04 complete)
 Status: In progress
-Last activity: 2026-02-03 — Completed 03-04-PLAN.md (Track Normalization & Dedup)
+Last activity: 2026-02-04 — Completed 03-03-PLAN.md (SoundCloud Integration)
 
-Progress: [██████████████░░░░░░] 73% (11 of 15 total plans complete)
+Progress: [████████████████░░░░] 80% (12 of 15 total plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 11
-- Average duration: 4m 28s
-- Total execution time: 0.82 hours
+- Total plans completed: 12
+- Average duration: 4m 30s
+- Total execution time: 0.90 hours
 
 *Updated after each plan completion*
 
@@ -80,6 +80,9 @@ Recent decisions affecting current work:
 - **Featuring substitution before punctuation removal** — Ampersand stripped by normalize(), must substitute first (2026-02-03)
 - **70/30 title/artist weighting for similarity** — Title is more discriminating than artist for duplicate detection (2026-02-03)
 - **LazyLock for compiled regex patterns** — Zero-cost after first use, thread-safe static initialization (2026-02-03)
+- **OAuth 2.1 mandatory PKCE S256 for SoundCloud** — Deadline passed Oct 1 2024, always use PkceCodeChallenge::new_random_sha256() (2026-02-04)
+- **external_id format soundcloud:{id}** — Consistent provenance tracking in track_sources, parallel to spotify:track:{id} (2026-02-04)
+- **dotenvy for .env credential loading** — Credentials in .env file loaded at app startup, no shell env vars needed (2026-02-04)
 
 ### Learnings from Python Implementation
 
@@ -129,10 +132,12 @@ None yet.
 
 **Phase 3 (Multi-Source Aggregation):** IN PROGRESS
 - Plan 01 complete: schema extensions, OAuth token management
+- Plan 02 complete: Spotify API client with OAuth PKCE and incremental sync
+- Plan 03 complete: SoundCloud API client with OAuth 2.1 PKCE and incremental sync
 - Plan 04 complete: track normalization and fuzzy duplicate detection
-- 168 tests passing (22 in dedup module)
-- Apple Music MusicKit authentication flow needs hands-on testing
-- SoundCloud unofficial API carries breakage risk (MEDIUM-HIGH) — requires abstraction layer
+- 171 tests passing (9 in SoundCloud module, 22 in dedup module)
+- OAuth live testing deferred to Plan 05 when Tauri commands are wired up
+- Credentials loaded from .env via dotenvy
 
 **Phase 5 (Device Sync):**
 - Rockbox M3U8 compatibility specifics unknown (relative vs absolute paths, encoding)
@@ -140,9 +145,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-03T22:46:49Z
-Stopped at: Completed 03-04-PLAN.md (Track Normalization & Dedup)
+Last session: 2026-02-04T07:35:44Z
+Stopped at: Completed 03-03-PLAN.md (SoundCloud Integration)
 Resume file: None
 
 ---
-*Last updated: 2026-02-03 after completing 03-04-PLAN.md*
+*Last updated: 2026-02-04 after completing 03-03-PLAN.md*
