@@ -129,12 +129,14 @@ Plans:
   4. System tracks sync state per device and shows what's synced vs pending
   5. User can preview what will sync before syncing (dry run mode)
 
-**Plans**: TBD
+**Plans**: 5 plans in 4 waves
 
 Plans:
-- [ ] 05-01: TBD during planning
-- [ ] 05-02: TBD during planning
-- [ ] 05-03: TBD during planning
+- [ ] 05-01-PLAN.md — Sync profile model and database schema with content resolution
+- [ ] 05-02-PLAN.md — Shared transcode cache with platform-aware file linking
+- [ ] 05-03-PLAN.md — Rockbox device detection and M3U8 playlist generation
+- [ ] 05-04-PLAN.md — Incremental sync orchestration with dry-run and state tracking
+- [ ] 05-05-PLAN.md — Tauri commands and React UI for sync management
 
 ### Phase 6: Desktop UI
 **Goal**: Cross-platform PySide6 dashboard with library browser, progress tracking, and sync controls
