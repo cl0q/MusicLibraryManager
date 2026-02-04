@@ -10,6 +10,7 @@ import {
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { Track } from "../../types/library";
 import { formatDuration, formatDate, formatQuality } from "../../utils/formatter";
+import RowContextMenu, { useRowContextMenu } from "./RowContextMenu";
 
 interface LibraryTableProps {
   tracks: Track[];
@@ -93,7 +94,9 @@ const columns = [
 
 export default function LibraryTable({ tracks }: LibraryTableProps) {
   const [sorting, setSorting] = useState<SortingState>([]);
+  const [contextMenuTrack, setContextMenuTrack] = useState<Track | null>(null);
   const tableContainerRef = useRef<HTMLDivElement>(null);
+  const { displayMenu } = useRowContextMenu();
 
   const table = useReactTable({
     data: tracks,
@@ -125,64 +128,73 @@ export default function LibraryTable({ tracks }: LibraryTableProps) {
       : 0;
 
   return (
-    <div
-      ref={tableContainerRef}
-      className="overflow-auto h-full border border-gray-200 dark:border-gray-700 rounded-lg"
-    >
-      <table className="w-full border-collapse">
-        <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0 z-10">
-          {table.getHeaderGroups().map((headerGroup) => (
-            <tr key={headerGroup.id}>
-              {headerGroup.headers.map((header) => (
-                <th
-                  key={header.id}
-                  className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 select-none"
-                  onClick={header.column.getToggleSortingHandler()}
-                >
-                  <div className="flex items-center gap-2">
-                    {flexRender(
-                      header.column.columnDef.header,
-                      header.getContext()
-                    )}
-                    {header.column.getIsSorted() && (
-                      <span className="text-blue-600 dark:text-blue-400">
-                        {header.column.getIsSorted() === "asc" ? "↑" : "↓"}
-                      </span>
-                    )}
-                  </div>
-                </th>
-              ))}
-            </tr>
-          ))}
-        </thead>
-        <tbody>
-          {paddingTop > 0 && (
-            <tr>
-              <td style={{ height: `${paddingTop}px` }} />
-            </tr>
-          )}
-          {virtualRows.map((virtualRow) => {
-            const row = rows[virtualRow.index];
-            return (
-              <tr
-                key={row.id}
-                className="border-t border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
-              >
-                {row.getVisibleCells().map((cell) => (
-                  <td key={cell.id} className="px-4 py-2">
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </td>
+    <>
+      <div
+        ref={tableContainerRef}
+        className="overflow-auto h-full border border-gray-200 dark:border-gray-700 rounded-lg"
+      >
+        <table className="w-full border-collapse">
+          <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0 z-10">
+            {table.getHeaderGroups().map((headerGroup) => (
+              <tr key={headerGroup.id}>
+                {headerGroup.headers.map((header) => (
+                  <th
+                    key={header.id}
+                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 select-none"
+                    onClick={header.column.getToggleSortingHandler()}
+                  >
+                    <div className="flex items-center gap-2">
+                      {flexRender(
+                        header.column.columnDef.header,
+                        header.getContext()
+                      )}
+                      {header.column.getIsSorted() && (
+                        <span className="text-blue-600 dark:text-blue-400">
+                          {header.column.getIsSorted() === "asc" ? "↑" : "↓"}
+                        </span>
+                      )}
+                    </div>
+                  </th>
                 ))}
               </tr>
-            );
-          })}
-          {paddingBottom > 0 && (
-            <tr>
-              <td style={{ height: `${paddingBottom}px` }} />
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
+            ))}
+          </thead>
+          <tbody>
+            {paddingTop > 0 && (
+              <tr>
+                <td style={{ height: `${paddingTop}px` }} />
+              </tr>
+            )}
+            {virtualRows.map((virtualRow) => {
+              const row = rows[virtualRow.index];
+              const track = row.original;
+              return (
+                <tr
+                  key={row.id}
+                  className="border-t border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setContextMenuTrack(track);
+                    displayMenu(e, track);
+                  }}
+                >
+                  {row.getVisibleCells().map((cell) => (
+                    <td key={cell.id} className="px-4 py-2">
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+            {paddingBottom > 0 && (
+              <tr>
+                <td style={{ height: `${paddingBottom}px` }} />
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <RowContextMenu track={contextMenuTrack} />
+    </>
   );
 }
