@@ -9,6 +9,7 @@ pub mod metadata;
 pub mod models;
 pub mod search;
 pub mod sources;
+pub mod startup;
 pub mod transcode;
 
 use commands::sources::OAuthState;
@@ -28,6 +29,19 @@ pub fn run() {
                         .build(),
                 )?;
             }
+
+            // Run startup tasks in background (auto-sync on app open)
+            // Uses spawn_blocking to handle rusqlite !Send Connection
+            tauri::async_runtime::spawn(async {
+                // Run startup sync in a blocking thread since the sync methods
+                // hold rusqlite::Connection (which is !Send) across await points
+                let handle = tokio::runtime::Handle::current();
+                let _ = tokio::task::spawn_blocking(move || {
+                    handle.block_on(startup::run_startup_tasks());
+                })
+                .await;
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
