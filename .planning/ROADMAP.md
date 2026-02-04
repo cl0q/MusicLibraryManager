@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Library Foundation** - Database schema, atomic file operations, local import, search
 - [x] **Phase 2: Download Infrastructure** - Single-source pipeline with dabmusic.xyz and YouTube fallback
-- [ ] **Phase 3: Multi-Source Aggregation** - Spotify, Apple Music, SoundCloud API integration with deduplication
+- [x] **Phase 3: Multi-Source Aggregation** - Spotify, Apple Music, SoundCloud API integration with deduplication
 - [ ] **Phase 4: Playlist Management** - Create, edit, reorder playlists with order preservation
 - [ ] **Phase 5: Device Sync** - Incremental sync to Rockbox iPod with M3U8 playlist generation
 - [ ] **Phase 6: Desktop UI** - PySide6 dashboard with library browser and real-time progress
@@ -81,14 +81,15 @@ Plans:
   4. System tracks which tracks came from which source (many-to-many relationship)
   5. System detects duplicate tracks across sources and prevents duplicate downloads
 
-**Plans**: 5 plans in 3 waves
+**Plans**: 6 plans in 3 waves
 
 Plans:
-- [ ] 03-01-PLAN.md — Schema migration and OAuth token infrastructure
-- [ ] 03-02-PLAN.md — Spotify API integration with incremental sync
-- [ ] 03-03-PLAN.md — SoundCloud API integration with incremental sync
-- [ ] 03-04-PLAN.md — Duplicate detection with normalization and fuzzy matching
-- [ ] 03-05-PLAN.md — Tauri commands and human verification
+- [x] 03-01-PLAN.md — Schema migration and OAuth token infrastructure
+- [x] 03-02-PLAN.md — Spotify API integration with incremental sync
+- [x] 03-03-PLAN.md — SoundCloud API integration with incremental sync
+- [x] 03-04-PLAN.md — Duplicate detection with normalization and fuzzy matching
+- [x] 03-05-PLAN.md — Tauri commands and auto-sync on startup
+- [x] 03-06-PLAN.md — SoundCloud direct download via scdl CLI
 
 ### Phase 4: Playlist Management
 **Goal**: User can create, edit, and reorder playlists with order preservation guaranteed
@@ -180,11 +181,11 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 |-------|----------------|--------|-----------|
 | 1. Library Foundation | 5/5 | ✓ Complete | 2026-02-03 |
 | 2. Download Infrastructure | 4/4 | ✓ Complete | 2026-02-03 |
-| 3. Multi-Source Aggregation | 0/5 | Planned | - |
+| 3. Multi-Source Aggregation | 6/6 | ✓ Complete | 2026-02-04 |
 | 4. Playlist Management | 0/2 | Not started | - |
 | 5. Device Sync | 0/3 | Not started | - |
 | 6. Desktop UI | 0/3 | Not started | - |
 | 7. Enhancements | 0/2 | Not started | - |
 
 ---
-*Last updated: 2026-02-03 after Phase 3 planning*
+*Last updated: 2026-02-04 after Phase 3 completion*

@@ -18,15 +18,15 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Source Integration
 
-- [ ] **SRC-01**: System fetches liked songs, saved albums, and playlists from Spotify API
-- [ ] **SRC-02**: System fetches likes and playlists from SoundCloud API
-- [ ] **SRC-03**: User can refresh source data on demand
-- [ ] **SRC-04**: System tracks which tracks came from which source
+- [x] **SRC-01**: System fetches liked songs, saved albums, and playlists from Spotify API
+- [x] **SRC-02**: System fetches likes and playlists from SoundCloud API
+- [x] **SRC-03**: User can refresh source data on demand
+- [x] **SRC-04**: System tracks which tracks came from which source
 
 ### Download Pipeline
 
 - [x] **DL-01**: System downloads FLAC files from dabmusic.xyz for Spotify tracks
-- [ ] **DL-02**: System downloads 248kbps AAC from SoundCloud via scdl with Go+ auth
+- [x] **DL-02**: System downloads 248kbps AAC from SoundCloud via scdl with Go+ auth
 - [x] **DL-03**: System falls back to YouTube when track not found on primary sources
 - [x] **DL-04**: System transcodes FLAC to 248kbps AAC M4A for device copies
 - [x] **DL-05**: Download operations are atomic (no partial/corrupt files)
@@ -109,15 +109,15 @@ Which phases cover which requirements. Updated during roadmap creation.
 | LIB-06 | Phase 1 | Complete |
 | DL-05 | Phase 1 | Complete |
 | DL-06 | Phase 1 | Complete |
-| DL-01 | Phase 2 | Pending |
-| DL-03 | Phase 2 | Pending |
-| DL-04 | Phase 2 | Pending |
-| DL-07 | Phase 2 | Pending |
-| SRC-01 | Phase 3 | Pending |
-| SRC-02 | Phase 3 | Pending |
-| SRC-03 | Phase 3 | Pending |
-| SRC-04 | Phase 3 | Pending |
-| DL-02 | Phase 3 | Pending |
+| DL-01 | Phase 2 | Complete |
+| DL-03 | Phase 2 | Complete |
+| DL-04 | Phase 2 | Complete |
+| DL-07 | Phase 2 | Complete |
+| SRC-01 | Phase 3 | Complete |
+| SRC-02 | Phase 3 | Complete |
+| SRC-03 | Phase 3 | Complete |
+| SRC-04 | Phase 3 | Complete |
+| DL-02 | Phase 3 | Complete |
 | PL-01 | Phase 4 | Pending |
 | PL-02 | Phase 4 | Pending |
 | PL-03 | Phase 4 | Pending |
@@ -145,4 +145,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-02-03*
-*Last updated: 2026-02-03 after Phase 1 completion*
+*Last updated: 2026-02-04 after Phase 3 completion*
