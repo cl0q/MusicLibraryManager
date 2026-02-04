@@ -127,6 +127,23 @@ CREATE TABLE IF NOT EXISTS playlist_tags (
     FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_tag ON playlist_tags(tag);
+
+-- Smart playlist views for auto-generated playlists
+
+-- Recently Added: tracks added in last 30 days, sorted newest first
+CREATE VIEW IF NOT EXISTS smart_playlist_recently_added AS
+SELECT id, artist, album, title, date_added
+FROM tracks
+WHERE date_added >= datetime('now', '-30 days')
+ORDER BY date_added DESC;
+
+-- Most Played: top 100 tracks by play count (populated in Phase 5 via Rockbox stats)
+-- Note: track_stats table will be added in Phase 5; using placeholder view for now
+CREATE VIEW IF NOT EXISTS smart_playlist_most_played AS
+SELECT id, artist, album, title, 0 AS play_count
+FROM tracks
+ORDER BY id DESC
+LIMIT 100;
 ";
 
 /// Get the current schema version from the database.
