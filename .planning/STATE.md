@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 
 ## Current Position
 
-Phase: 6 of 7 (Desktop UI) — IN PROGRESS
-Plan: 4 of 5 in current phase
-Status: Downloads page with real-time progress tracking complete
-Last activity: 2026-02-04 — Completed 06-04-PLAN.md (Downloads Page)
+Phase: 6 of 7 (Desktop UI) — PHASE COMPLETE
+Plan: 5 of 5 in current phase (all plans complete)
+Status: Phase 6 complete - full desktop UI with all features integrated
+Last activity: 2026-02-04 — Completed 06-05-PLAN.md (Context Menus & Component Integration)
 
-Progress: [███████████████████████████░░░] 96.7% (29 of 30 concrete plans complete)
+Progress: [████████████████████████████████] 100.0% (30 of 30 concrete plans complete)
 
 ## Tech Stack Change
 
@@ -150,6 +150,12 @@ Recent decisions affecting current work:
 - **Client-side filtering with useMemo** — Instant search responsiveness for <100k tracks, simpler than server-side filtering (2026-02-04)
 - **40px row height with 5 row overscan** — Standard table density with smooth virtual scrolling (2026-02-04)
 - **Empty query returns all tracks** — search_library("") fetches entire library, consistent search UX pattern (2026-02-04)
+- **react-contexify for context menus** — Lightweight library with dark mode support for library table right-click actions (2026-02-04)
+- **wavesurfer.js for audio visualization** — Established library for waveform rendering in track detail page (2026-02-04)
+- **Tauri opener plugin for file reveal** — plugin:opener|reveal_item_in_dir invocation opens native file manager to track location (2026-02-04)
+- **convertFileSrc for Tauri audio URLs** — @tauri-apps/api/core function converts local paths to Tauri-compatible URLs for WaveSurfer (2026-02-04)
+- **Page wrapper pattern for component integration** — Thin wrapper pages route existing Phase 3-5 components into MainLayout (2026-02-04)
+- **color-scheme meta tag** — <meta name="color-scheme" content="dark light" /> enables proper OS dark mode detection (2026-02-04)
 
 ### Learnings from Python Implementation
 
@@ -256,7 +262,7 @@ None yet.
 - M3U8 UTF-8 encoding with Rockbox untested (should work but needs verification with device)
 - FAT32 long filename edge cases (255 char limit enforced but not tested with actual device)
 
-**Phase 6 (Desktop UI):** IN PROGRESS
+**Phase 6 (Desktop UI):** ✓ COMPLETE
 - Plan 06-01 (App Shell & Navigation): ✓ COMPLETE
   - React Router configuration with 5 routes (/, /library, /playlists, /playlists/:id, /sync, /downloads)
   - MainLayout with persistent sidebar (240px fixed width, 5 navigation sections)
@@ -288,12 +294,19 @@ None yet.
   - Extended DownloadProgressEvent with source, current_step, speed, eta, file_size
   - Failed download handling with error messages and retry button
   - Event listener cleanup on unmount
+- Plan 06-05 (Context Menus & Component Integration): ✓ COMPLETE
+  - RowContextMenu component with 6 actions (View Details, Add to Playlist, Download, Sync to Device, Add to Library, Reveal in File Manager)
+  - TrackDetail page with MetadataPanel and WaveformView using wavesurfer.js
+  - Integration of Phase 3-5 components (PlaylistList, PlaylistDetail, SyncProfiles) via page wrappers
+  - All 7 routes working: /, /library, /library/:trackId, /playlists, /playlists/:id, /sync, /downloads
+  - Removed leftover Vite template CSS, added color-scheme meta tag
+  - Human verification checkpoint approved
 
 ## Session Continuity
 
 Last session: 2026-02-04
-Stopped at: Completed 06-03-PLAN.md (Library Browser) and 06-04-PLAN.md (Downloads Page)
+Stopped at: Completed 06-05-PLAN.md (Context Menus & Component Integration) - Phase 6 complete
 Resume file: None
 
 ---
-*Last updated: 2026-02-04 after completing Plans 06-03 and 06-04*
+*Last updated: 2026-02-04 after completing Plan 06-05 (Phase 6 complete - all 30 concrete plans finished)*

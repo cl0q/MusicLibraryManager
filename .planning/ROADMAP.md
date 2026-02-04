@@ -17,7 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: Multi-Source Aggregation** - Spotify, Apple Music, SoundCloud API integration with deduplication
 - [x] **Phase 4: Playlist Management** - Create, edit, reorder playlists with order preservation
 - [x] **Phase 5: Device Sync** - Incremental sync to Rockbox iPod with M3U8 playlist generation
-- [ ] **Phase 6: Desktop UI** - PySide6 dashboard with library browser and real-time progress
+- [x] **Phase 6: Desktop UI** - Tauri + React dashboard with library browser and real-time progress
 - [ ] **Phase 7: Enhancements** - Acoustic fingerprinting, artwork, ReplayGain normalization
 
 ## Phase Details
@@ -155,11 +155,11 @@ Plans:
 **Plans**: 5 plans in 3 waves
 
 Plans:
-- [ ] 06-01-PLAN.md — App layout, routing, sidebar navigation, status bar, toast notifications
-- [ ] 06-02-PLAN.md — Dashboard page with stats cards and real-time activity feed
-- [ ] 06-03-PLAN.md — Library browser with virtualized table, sorting, and filtering
-- [ ] 06-04-PLAN.md — Downloads page with queue view and real-time progress tracking
-- [ ] 06-05-PLAN.md — Context menus, track detail view, and component integration
+- [x] 06-01-PLAN.md — App layout, routing, sidebar navigation, status bar, toast notifications
+- [x] 06-02-PLAN.md — Dashboard page with stats cards and real-time activity feed
+- [x] 06-03-PLAN.md — Library browser with virtualized table, sorting, and filtering
+- [x] 06-04-PLAN.md — Downloads page with queue view and real-time progress tracking
+- [x] 06-05-PLAN.md — Context menus, track detail view, and component integration
 
 ### Phase 7: Enhancements
 **Goal**: Add quality-of-life features for better duplicate detection and audio quality
@@ -191,8 +191,8 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. Multi-Source Aggregation | 6/6 | ✓ Complete | 2026-02-04 |
 | 4. Playlist Management | 5/5 | ✓ Complete | 2026-02-04 |
 | 5. Device Sync | 5/5 | ✓ Complete | 2026-02-04 |
-| 6. Desktop UI | 0/5 | Not started | - |
+| 6. Desktop UI | 5/5 | ✓ Complete | 2026-02-04 |
 | 7. Enhancements | 0/2 | Not started | - |
 
 ---
-*Last updated: 2026-02-04 after Phase 6 planning*
+*Last updated: 2026-02-04 after completing Phase 6*
