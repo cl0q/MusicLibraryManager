@@ -9,7 +9,10 @@
 //! Fractional indexing uses string-based positions for unlimited reordering
 //! without cascading updates. Only the moved track's position is updated.
 
+use rusqlite::{Connection, OptionalExtension};
+
 use crate::database::connection::Result;
+use crate::models::{PlaylistCategory, Track, TrackMetadata};
 
 /// Base-62 alphabet for fractional indexing (alphanumeric).
 const ALPHABET: &str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
@@ -132,6 +135,420 @@ fn midpoint_position_string(left: &str, right: &str) -> Result<String> {
     }
 }
 
+/// Create a new playlist with tags.
+///
+/// Uses transaction pattern for atomic operation.
+/// Inserts into playlists table and playlist_tags table.
+///
+/// # Arguments
+/// * `conn` - Database connection
+/// * `name` - Playlist name
+/// * `description` - Optional description
+/// * `tags` - Vector of tag strings
+/// * `category` - PlaylistCategory enum (Liked, Smart, or Regular)
+///
+/// # Returns
+/// * `Ok(playlist_id)` - ID of created playlist
+/// * `Err` if database operation fails
+pub fn create_playlist(
+    conn: &Connection,
+    name: String,
+    description: Option<String>,
+    tags: Vec<String>,
+    category: PlaylistCategory,
+) -> Result<i64> {
+    // Start transaction
+    conn.execute_batch("BEGIN")?;
+
+    // Insert playlist
+    conn.execute(
+        "INSERT INTO playlists (name, description, category, is_liked, is_smart, is_pinned)
+         VALUES (?1, ?2, ?3, 0, 0, 0)",
+        rusqlite::params![name, description, category.to_string()],
+    )?;
+
+    let playlist_id = conn.last_insert_rowid();
+
+    // Insert tags
+    for tag in tags {
+        conn.execute(
+            "INSERT INTO playlist_tags (playlist_id, tag) VALUES (?1, ?2)",
+            rusqlite::params![playlist_id, tag],
+        )?;
+    }
+
+    // Commit transaction
+    conn.execute_batch("COMMIT")?;
+
+    Ok(playlist_id)
+}
+
+/// Add a track to a playlist (appends to end with fractional indexing).
+///
+/// Queries the last position in the playlist and generates a new position after it.
+/// Uses UNIQUE constraint to prevent duplicate (playlist_id, track_id) pairs.
+///
+/// # Arguments
+/// * `conn` - Database connection
+/// * `playlist_id` - ID of playlist
+/// * `track_id` - ID of track to add
+///
+/// # Returns
+/// * `Ok(())` if track added successfully
+/// * `Err` if track already in playlist or database operation fails
+pub fn add_track_to_playlist(conn: &Connection, playlist_id: i64, track_id: i64) -> Result<()> {
+    // Query last position in playlist
+    let last_position: Option<String> = conn
+        .query_row(
+            "SELECT position FROM playlist_tracks
+             WHERE playlist_id = ?1
+             ORDER BY position DESC
+             LIMIT 1",
+            [playlist_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    // Generate new position (append after last)
+    let new_position = position_between(last_position.as_deref(), None)?;
+
+    // Insert track with new position
+    conn.execute(
+        "INSERT INTO playlist_tracks (playlist_id, track_id, position)
+         VALUES (?1, ?2, ?3)",
+        rusqlite::params![playlist_id, track_id, new_position],
+    )?;
+
+    Ok(())
+}
+
+/// Remove a track from a playlist.
+///
+/// Deletes the playlist_tracks entry. Does NOT update positions of remaining tracks
+/// (fractional indexing advantage - no cascading updates needed).
+///
+/// # Arguments
+/// * `conn` - Database connection
+/// * `playlist_id` - ID of playlist
+/// * `track_id` - ID of track to remove
+///
+/// # Returns
+/// * `Ok(())` if track removed successfully (or wasn't in playlist)
+/// * `Err` if database operation fails
+pub fn remove_track_from_playlist(
+    conn: &Connection,
+    playlist_id: i64,
+    track_id: i64,
+) -> Result<()> {
+    conn.execute(
+        "DELETE FROM playlist_tracks
+         WHERE playlist_id = ?1 AND track_id = ?2",
+        rusqlite::params![playlist_id, track_id],
+    )?;
+
+    Ok(())
+}
+
+/// Reorder a track within a playlist via drag-drop.
+///
+/// Updates only the moved track's position (O(1) database operation).
+/// Computes new position between after_track and before_track.
+///
+/// # Arguments
+/// * `conn` - Database connection
+/// * `playlist_id` - ID of playlist
+/// * `track_id` - ID of track to reorder
+/// * `after_track_id` - Optional ID of track to insert after (None = insert at beginning)
+/// * `before_track_id` - Optional ID of track to insert before (None = insert at end)
+///
+/// # Returns
+/// * `Ok(())` if track reordered successfully
+/// * `Err` if database operation fails
+pub fn reorder_playlist_track(
+    conn: &Connection,
+    playlist_id: i64,
+    track_id: i64,
+    after_track_id: Option<i64>,
+    before_track_id: Option<i64>,
+) -> Result<()> {
+    // Get positions of after_track and before_track
+    let after_position: Option<String> = if let Some(after_id) = after_track_id {
+        conn.query_row(
+            "SELECT position FROM playlist_tracks
+             WHERE playlist_id = ?1 AND track_id = ?2",
+            rusqlite::params![playlist_id, after_id],
+            |row| row.get(0),
+        )
+        .optional()?
+    } else {
+        None
+    };
+
+    let before_position: Option<String> = if let Some(before_id) = before_track_id {
+        conn.query_row(
+            "SELECT position FROM playlist_tracks
+             WHERE playlist_id = ?1 AND track_id = ?2",
+            rusqlite::params![playlist_id, before_id],
+            |row| row.get(0),
+        )
+        .optional()?
+    } else {
+        None
+    };
+
+    // Compute new position between after and before
+    let new_position = position_between(after_position.as_deref(), before_position.as_deref())?;
+
+    // Update only the moved track's position (O(1) operation)
+    conn.execute(
+        "UPDATE playlist_tracks
+         SET position = ?1
+         WHERE playlist_id = ?2 AND track_id = ?3",
+        rusqlite::params![new_position, playlist_id, track_id],
+    )?;
+
+    Ok(())
+}
+
+/// Get all tracks in a playlist, ordered by position.
+///
+/// Joins playlist_tracks with tracks table, ordering by fractional position.
+///
+/// # Arguments
+/// * `conn` - Database connection
+/// * `playlist_id` - ID of playlist
+///
+/// # Returns
+/// * `Ok(Vec<Track>)` - Tracks in playlist order
+/// * `Err` if database operation fails
+pub fn get_playlist_tracks(conn: &Connection, playlist_id: i64) -> Result<Vec<Track>> {
+    let mut stmt = conn.prepare(
+        "SELECT t.id, t.artist, t.album_artist, t.album, t.title, t.genre, t.year,
+                t.bitrate, t.duration, t.format, t.original_path,
+                COALESCE(t.organized_path, '') as organized_path,
+                t.is_duplicate, t.date_added
+         FROM tracks t
+         JOIN playlist_tracks pt ON t.id = pt.track_id
+         WHERE pt.playlist_id = ?1
+         ORDER BY pt.position",
+    )?;
+
+    let tracks = stmt
+        .query_map([playlist_id], |row| {
+            let metadata = TrackMetadata::new(
+                row.get(1)?, // artist
+                row.get(2)?, // album_artist
+                row.get(3)?, // album
+                row.get(4)?, // title
+                row.get(5)?, // genre
+                row.get(6)?, // year
+                row.get(7)?, // bitrate
+                row.get(8)?, // duration
+                row.get(9)?, // format
+                row.get(10)?, // original_path
+            );
+
+            Ok(Track {
+                id: Some(row.get(0)?),
+                metadata,
+                organized_path: row.get(11)?,
+                is_duplicate: row.get::<_, i32>(12)? != 0,
+                date_added: row.get(13)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    Ok(tracks)
+}
+
+// Smart playlists and liked playlists functions
+
+/// Helper function to capitalize first letter of a string.
+fn capitalize(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+    }
+}
+
+/// Create smart playlists (Recently Added, Most Played).
+///
+/// Inserts two smart playlists with is_smart=1 and is_pinned=1.
+/// Uses INSERT OR IGNORE for idempotent operation (safe to call multiple times).
+///
+/// # Arguments
+/// * `conn` - Database connection
+///
+/// # Returns
+/// * `Ok(())` if playlists created successfully
+/// * `Err` if database operation fails
+pub fn create_smart_playlists(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO playlists (name, category, is_smart, is_pinned) VALUES (?, ?, 1, 1)",
+        ["Recently Added", "smart"],
+    )?;
+
+    conn.execute(
+        "INSERT OR IGNORE INTO playlists (name, category, is_smart, is_pinned) VALUES (?, ?, 1, 1)",
+        ["Most Played", "smart"],
+    )?;
+
+    Ok(())
+}
+
+/// Get tracks for a smart playlist by querying the corresponding view.
+///
+/// # Arguments
+/// * `conn` - Database connection
+/// * `playlist_name` - Name of smart playlist ("Recently Added" or "Most Played")
+/// * `limit` - Optional limit on number of tracks returned
+///
+/// # Returns
+/// * `Ok(Vec<Track>)` with track data from the view
+/// * `Err` if playlist_name is invalid or query fails
+pub fn get_smart_playlist_tracks(
+    conn: &Connection,
+    playlist_name: &str,
+    limit: Option<i32>,
+) -> Result<Vec<Track>> {
+    let view_name = match playlist_name {
+        "Recently Added" => "smart_playlist_recently_added",
+        "Most Played" => "smart_playlist_most_played",
+        _ => {
+            return Err(rusqlite::Error::InvalidQuery.into());
+        }
+    };
+
+    let query = if let Some(lim) = limit {
+        format!("SELECT * FROM {} LIMIT {}", view_name, lim)
+    } else {
+        format!("SELECT * FROM {}", view_name)
+    };
+
+    let mut stmt = conn.prepare(&query)?;
+    let tracks = stmt
+        .query_map([], |row| {
+            let artist: String = row.get(1)?;
+            Ok(Track {
+                id: Some(row.get(0)?),
+                metadata: TrackMetadata {
+                    artist: artist.clone(),
+                    album_artist: artist, // Views don't include album_artist, use artist
+                    album: row.get(2)?,
+                    title: row.get(3)?,
+                    genre: None,
+                    year: None,
+                    bitrate: None,
+                    duration: None,
+                    format: String::new(),
+                    original_path: String::new(),
+                    organized_path: String::new(),
+                    variant_of: None,
+                },
+                organized_path: String::new(),
+                is_duplicate: false,
+                date_added: Some(row.get(4)?),
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    Ok(tracks)
+}
+
+/// Create a liked playlist for a specific source.
+///
+/// Generates playlist name as "{Source} Likes" (e.g., "Spotify Likes").
+/// Uses INSERT OR IGNORE for idempotent operation.
+///
+/// # Arguments
+/// * `conn` - Database connection
+/// * `source_name` - Name of the source (e.g., "spotify", "soundcloud")
+/// * `source_id` - Database ID of the source
+///
+/// # Returns
+/// * `Ok(playlist_id)` if playlist created successfully
+/// * `Err` if database operation fails
+pub fn create_liked_playlist_for_source(
+    conn: &Connection,
+    source_name: &str,
+    source_id: i64,
+) -> Result<i64> {
+    let playlist_name = format!("{} Likes", capitalize(source_name));
+
+    conn.execute(
+        "INSERT OR IGNORE INTO playlists (name, category, is_liked, is_pinned, source_id) VALUES (?, ?, 1, 1, ?)",
+        rusqlite::params![&playlist_name, "liked", source_id],
+    )?;
+
+    // Get the playlist ID
+    let playlist_id: i64 = conn.query_row(
+        "SELECT id FROM playlists WHERE source_id = ? AND is_liked = 1",
+        [source_id],
+        |row| row.get(0),
+    )?;
+
+    Ok(playlist_id)
+}
+
+/// Get or create a liked playlist for a specific source.
+///
+/// Checks if a liked playlist already exists for the source.
+/// If it exists, returns the playlist_id. If not, creates it.
+///
+/// # Arguments
+/// * `conn` - Database connection
+/// * `source_name` - Name of the source (e.g., "spotify", "soundcloud")
+/// * `source_id` - Database ID of the source
+///
+/// # Returns
+/// * `Ok(playlist_id)` - ID of existing or newly created playlist
+/// * `Err` if database operation fails
+pub fn get_or_create_liked_playlist(
+    conn: &Connection,
+    source_name: &str,
+    source_id: i64,
+) -> Result<i64> {
+    // Try to get existing playlist
+    let existing = conn.query_row(
+        "SELECT id FROM playlists WHERE source_id = ? AND is_liked = 1",
+        [source_id],
+        |row| row.get::<_, i64>(0),
+    );
+
+    match existing {
+        Ok(id) => Ok(id),
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            // Doesn't exist, create it
+            create_liked_playlist_for_source(conn, source_name, source_id)
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Create the "Local Likes" playlist for locally-sourced liked tracks.
+///
+/// Uses INSERT OR IGNORE for idempotent operation.
+///
+/// # Returns
+/// * `Ok(playlist_id)` if playlist created successfully
+/// * `Err` if database operation fails
+pub fn create_local_likes_playlist(conn: &Connection) -> Result<i64> {
+    conn.execute(
+        "INSERT OR IGNORE INTO playlists (name, category, is_liked, is_pinned) VALUES (?, ?, 1, 1)",
+        ["Local Likes", "liked"],
+    )?;
+
+    // Get the playlist ID
+    let playlist_id: i64 = conn.query_row(
+        "SELECT id FROM playlists WHERE name = 'Local Likes' AND is_liked = 1",
+        [],
+        |row| row.get(0),
+    )?;
+
+    Ok(playlist_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,5 +632,314 @@ mod tests {
         let mid3 = midpoint_position_string("a", "b").unwrap();
         assert!(mid3.as_str() > "a");
         assert!(mid3.as_str() < "b");
+    }
+
+    #[test]
+    fn test_create_playlist_with_tags() {
+        use crate::database::get_memory_connection;
+
+        let conn = get_memory_connection().unwrap();
+
+        // Create playlist with tags
+        let playlist_id = create_playlist(
+            &conn,
+            "My Playlist".to_string(),
+            Some("Test description".to_string()),
+            vec!["rock".to_string(), "workout".to_string()],
+            PlaylistCategory::Regular,
+        )
+        .unwrap();
+
+        // Verify playlist created
+        let (name, description, category): (String, Option<String>, String) = conn
+            .query_row(
+                "SELECT name, description, category FROM playlists WHERE id = ?1",
+                [playlist_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+
+        assert_eq!(name, "My Playlist");
+        assert_eq!(description, Some("Test description".to_string()));
+        assert_eq!(category, "regular");
+
+        // Verify tags created
+        let tag_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM playlist_tags WHERE playlist_id = ?1",
+                [playlist_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(tag_count, 2);
+    }
+
+    #[test]
+    fn test_add_track_to_playlist() {
+        use crate::database::get_memory_connection;
+
+        let conn = get_memory_connection().unwrap();
+
+        // Create playlist
+        let playlist_id = create_playlist(
+            &conn,
+            "Test Playlist".to_string(),
+            None,
+            vec![],
+            PlaylistCategory::Regular,
+        )
+        .unwrap();
+
+        // Insert tracks
+        conn.execute(
+            "INSERT INTO tracks (artist, album_artist, album, title, format, original_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["Artist 1", "Artist 1", "Album", "Track 1", "mp3", "/path1.mp3"],
+        )
+        .unwrap();
+        let track1_id = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO tracks (artist, album_artist, album, title, format, original_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["Artist 2", "Artist 2", "Album", "Track 2", "mp3", "/path2.mp3"],
+        )
+        .unwrap();
+        let track2_id = conn.last_insert_rowid();
+
+        conn.execute(
+            "INSERT INTO tracks (artist, album_artist, album, title, format, original_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["Artist 3", "Artist 3", "Album", "Track 3", "mp3", "/path3.mp3"],
+        )
+        .unwrap();
+        let track3_id = conn.last_insert_rowid();
+
+        // Add tracks to playlist
+        add_track_to_playlist(&conn, playlist_id, track1_id).unwrap();
+        add_track_to_playlist(&conn, playlist_id, track2_id).unwrap();
+        add_track_to_playlist(&conn, playlist_id, track3_id).unwrap();
+
+        // Verify positions are ordered
+        let positions: Vec<String> = conn
+            .prepare("SELECT position FROM playlist_tracks WHERE playlist_id = ?1 ORDER BY position")
+            .unwrap()
+            .query_map([playlist_id], |row| row.get(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(positions.len(), 3);
+        assert!(positions[0] < positions[1]);
+        assert!(positions[1] < positions[2]);
+    }
+
+    #[test]
+    fn test_add_track_duplicate_fails() {
+        use crate::database::get_memory_connection;
+
+        let conn = get_memory_connection().unwrap();
+
+        let playlist_id = create_playlist(
+            &conn,
+            "Test".to_string(),
+            None,
+            vec![],
+            PlaylistCategory::Regular,
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO tracks (artist, album_artist, album, title, format, original_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["Artist", "Artist", "Album", "Track", "mp3", "/path.mp3"],
+        )
+        .unwrap();
+        let track_id = conn.last_insert_rowid();
+
+        // Add track first time - should succeed
+        add_track_to_playlist(&conn, playlist_id, track_id).unwrap();
+
+        // Add same track again - should fail due to UNIQUE constraint
+        let result = add_track_to_playlist(&conn, playlist_id, track_id);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_remove_track_from_playlist() {
+        use crate::database::get_memory_connection;
+
+        let conn = get_memory_connection().unwrap();
+
+        let playlist_id = create_playlist(
+            &conn,
+            "Test".to_string(),
+            None,
+            vec![],
+            PlaylistCategory::Regular,
+        )
+        .unwrap();
+
+        // Insert 3 tracks
+        for i in 1..=3 {
+            conn.execute(
+                "INSERT INTO tracks (artist, album_artist, album, title, format, original_path)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![
+                    format!("Artist {}", i),
+                    format!("Artist {}", i),
+                    "Album",
+                    format!("Track {}", i),
+                    "mp3",
+                    format!("/path{}.mp3", i)
+                ],
+            )
+            .unwrap();
+
+            add_track_to_playlist(&conn, playlist_id, conn.last_insert_rowid()).unwrap();
+        }
+
+        // Get middle track ID
+        let track_ids: Vec<i64> = conn
+            .prepare("SELECT track_id FROM playlist_tracks WHERE playlist_id = ?1 ORDER BY position")
+            .unwrap()
+            .query_map([playlist_id], |row| row.get(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+
+        let middle_track_id = track_ids[1];
+
+        // Get positions before removal
+        let positions_before: Vec<String> = conn
+            .prepare("SELECT position FROM playlist_tracks WHERE playlist_id = ?1 ORDER BY position")
+            .unwrap()
+            .query_map([playlist_id], |row| row.get(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+
+        // Remove middle track
+        remove_track_from_playlist(&conn, playlist_id, middle_track_id).unwrap();
+
+        // Verify only 2 tracks remain
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM playlist_tracks WHERE playlist_id = ?1",
+                [playlist_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 2);
+
+        // Verify positions of remaining tracks are unchanged
+        let positions_after: Vec<String> = conn
+            .prepare("SELECT position FROM playlist_tracks WHERE playlist_id = ?1 ORDER BY position")
+            .unwrap()
+            .query_map([playlist_id], |row| row.get(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(positions_after[0], positions_before[0]); // First track unchanged
+        assert_eq!(positions_after[1], positions_before[2]); // Third track unchanged
+    }
+
+    #[test]
+    fn test_reorder_playlist_track() {
+        use crate::database::get_memory_connection;
+
+        let conn = get_memory_connection().unwrap();
+
+        let playlist_id = create_playlist(
+            &conn,
+            "Test".to_string(),
+            None,
+            vec![],
+            PlaylistCategory::Regular,
+        )
+        .unwrap();
+
+        // Insert 3 tracks
+        let mut track_ids = Vec::new();
+        for i in 1..=3 {
+            conn.execute(
+                "INSERT INTO tracks (artist, album_artist, album, title, format, original_path)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![
+                    format!("Artist {}", i),
+                    format!("Artist {}", i),
+                    "Album",
+                    format!("Track {}", i),
+                    "mp3",
+                    format!("/path{}.mp3", i)
+                ],
+            )
+            .unwrap();
+
+            let track_id = conn.last_insert_rowid();
+            track_ids.push(track_id);
+            add_track_to_playlist(&conn, playlist_id, track_id).unwrap();
+        }
+
+        // Move track 3 between track 1 and track 2
+        reorder_playlist_track(&conn, playlist_id, track_ids[2], Some(track_ids[0]), Some(track_ids[1])).unwrap();
+
+        // Verify new order
+        let ordered_ids: Vec<i64> = conn
+            .prepare("SELECT track_id FROM playlist_tracks WHERE playlist_id = ?1 ORDER BY position")
+            .unwrap()
+            .query_map([playlist_id], |row| row.get(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(ordered_ids, vec![track_ids[0], track_ids[2], track_ids[1]]);
+
+        // Verify only the moved track's position changed (1 UPDATE)
+        // We can't directly test the UPDATE count, but we verify logical correctness
+    }
+
+    #[test]
+    fn test_get_playlist_tracks() {
+        use crate::database::get_memory_connection;
+
+        let conn = get_memory_connection().unwrap();
+
+        let playlist_id = create_playlist(
+            &conn,
+            "Test".to_string(),
+            None,
+            vec![],
+            PlaylistCategory::Regular,
+        )
+        .unwrap();
+
+        // Insert tracks
+        let titles = vec!["Track A", "Track B", "Track C"];
+        for title in &titles {
+            conn.execute(
+                "INSERT INTO tracks (artist, album_artist, album, title, format, original_path)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params!["Artist", "Artist", "Album", title, "mp3", format!("/{}.mp3", title)],
+            )
+            .unwrap();
+
+            add_track_to_playlist(&conn, playlist_id, conn.last_insert_rowid()).unwrap();
+        }
+
+        // Get tracks in order
+        let tracks = get_playlist_tracks(&conn, playlist_id).unwrap();
+
+        assert_eq!(tracks.len(), 3);
+        assert_eq!(tracks[0].metadata.title, "Track A");
+        assert_eq!(tracks[1].metadata.title, "Track B");
+        assert_eq!(tracks[2].metadata.title, "Track C");
+
+        // Verify they're ordered by position
+        for i in 0..tracks.len() - 1 {
+            assert!(tracks[i].id < tracks[i + 1].id || tracks[i].metadata.title < tracks[i + 1].metadata.title);
+        }
     }
 }
