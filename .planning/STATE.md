@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 5 of 7 (Device Sync) — IN PROGRESS
-Plan: 3 of 4 in current phase
-Status: Plan 05-03 complete - Rockbox device detection and M3U8 playlist generation
-Last activity: 2026-02-04 — Completed 05-03-PLAN.md (Rockbox Device Detection)
+Plan: 4 of 4 in current phase
+Status: Plan 05-04 complete - Incremental sync orchestration
+Last activity: 2026-02-04 — Completed 05-04-PLAN.md (Incremental Sync Orchestration)
 
-Progress: [█████████████████████] 100% (23 of 23 concrete plans complete)
+Progress: [█████████████████████] 100% (24 of 24 concrete plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 23
-- Average duration: 18m 13s
-- Total execution time: 6.97 hours
+- Total plans completed: 24
+- Average duration: 18m 3s
+- Total execution time: 7.23 hours
 
 *Updated after each plan completion*
 
@@ -124,6 +124,10 @@ Recent decisions affecting current work:
 - **Relative M3U8 paths** — Rockbox requires relative paths from device root, format Artist/Album/Track.m4a (2026-02-04)
 - **album_artist in M3U8 paths** — Matches profile folder structure for consistent file resolution (2026-02-04)
 - **#EXTINF format with artist - title** — Industry standard M3U8 metadata format, duration defaults to 0 if missing (2026-02-04)
+- **50MB space buffer for sync** — Safety margin prevents out-of-space failures during sync operations (2026-02-04)
+- **SHA256 checksums for change detection** — Industry standard cryptographic hash enables reliable incremental sync (2026-02-04)
+- **Sync preview returns full file list** — User needs to see exactly what will be synced before committing (2026-02-04)
+- **Auto-clean stale sync_state entries** — Tracks removed from profile automatically removed from sync_state for accuracy (2026-02-04)
 
 ### Learnings from Python Implementation
 
@@ -196,7 +200,7 @@ None yet.
 - @hello-pangea/dnd for drag-drop reordering
 - Next: Phase 5 Device Sync
 
-**Phase 5 (Device Sync):** IN PROGRESS
+**Phase 5 (Device Sync):** ✓ COMPLETE
 - Plan 05-01 (Sync Profile Model): ✓ COMPLETE
   - Schema version 4 with five sync tables
   - SyncProfile model with get_all_track_ids() union resolution (manual + playlists + rules)
@@ -214,7 +218,14 @@ None yet.
   - M3U8 playlist generation with #EXTM3U header and relative paths
   - FAT32-safe filename sanitization in playlist paths
   - 15 unit tests passing (5 device, 10 playlist)
-  - Next: Plan 05-04 (Transfer Orchestration)
+- Plan 05-04 (Incremental Sync Orchestration): ✓ COMPLETE
+  - Sync preview computation with dry-run mode (compute_sync_preview)
+  - Incremental sync execution with SHA256 change detection (execute_sync)
+  - Sync state persistence for resumption support (update_sync_state)
+  - Space validation with 50MB buffer requirement
+  - High-level orchestration: preview_sync(), sync_profile_to_folder()
+  - 9 unit tests passing, 54 total sync module tests passing
+  - Next: Ready for Phase 6 UI or additional Phase 5 commands
 - M3U8 UTF-8 encoding with Rockbox untested (should work but needs verification with device)
 - FAT32 long filename edge cases (255 char limit enforced but not tested with actual device)
 - Need actual iPod for integration testing (device detection works in unit tests with mock filesystems)
@@ -222,8 +233,8 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-04
-Stopped at: Completed 05-03-PLAN.md (Rockbox Device Detection)
+Stopped at: Completed 05-04-PLAN.md (Incremental Sync Orchestration)
 Resume file: None
 
 ---
-*Last updated: 2026-02-04 after completing Plan 05-03*
+*Last updated: 2026-02-04 after completing Plan 05-04*
