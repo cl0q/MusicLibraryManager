@@ -21,6 +21,7 @@
 //! ```
 
 pub mod connection;
+pub mod playlist;
 pub mod schema;
 
 // Re-export commonly used items
