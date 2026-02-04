@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 6 of 7 (Desktop UI) — IN PROGRESS
-Plan: 2 of 5 in current phase
-Status: Dashboard with real-time updates complete
-Last activity: 2026-02-04 — Completed 06-02-PLAN.md (Dashboard Home Screen)
+Plan: 4 of 5 in current phase
+Status: Downloads page with real-time progress tracking complete
+Last activity: 2026-02-04 — Completed 06-04-PLAN.md (Downloads Page)
 
-Progress: [███████████████████████████░░░] 90.0% (27 of 30 concrete plans complete)
+Progress: [███████████████████████████░░░] 96.7% (29 of 30 concrete plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 27
-- Average duration: 21m 01s
-- Total execution time: 9.22 hours
+- Total plans completed: 29
+- Average duration: 19m 41s
+- Total execution time: 9.30 hours
 
 *Updated after each plan completion*
 
@@ -143,6 +143,9 @@ Recent decisions affecting current work:
 - **Activity feed 50-event limit** — Maximum 50 events retained to prevent unbounded memory growth (2026-02-04)
 - **Relative time formatting** — Dashboard timestamps use "just now", "Xm ago", "Xh ago", "Xd ago" for human readability (2026-02-04)
 - **Activity type color coding** — Visual differentiation: green (track_added), blue (sync_completed), purple (download_completed), red (error) (2026-02-04)
+- **Map-based download state** — Map<string, DownloadProgressEvent> for O(1) updates by track_id during real-time progress events (2026-02-04)
+- **Download display sort priority** — Active downloads first (downloading/transcoding), then failed, completed, queued for user awareness (2026-02-04)
+- **Separate queue status API** — Retry queue (pending_count, failed_count) tracked independently from real-time progress events (2026-02-04)
 
 ### Learnings from Python Implementation
 
@@ -267,13 +270,26 @@ None yet.
   - ActivityFeed component: real-time updates via library:activity events, color-coded by type
   - Responsive grid layouts (1 col mobile, 3-5 cols desktop)
   - Event-driven UI update pattern established for entire app
-  - Ready for Plan 06-03 (Library Browser)
+- Plan 06-03 (Library Browser): ✓ COMPLETE
+  - LibraryBrowser page with search and data management
+  - LibraryTable component with TanStack Table and virtualized scrolling
+  - FilterBar component with search and quality filter dropdown
+  - useLibrary hook for track data fetching and filtering
+  - Sortable columns (title, artist, album, quality, duration, date)
+  - Performance: Virtualized rendering handles large libraries efficiently
+- Plan 06-04 (Downloads Page): ✓ COMPLETE
+  - Downloads page at /downloads route with real-time progress tracking
+  - DownloadQueue component showing detailed per-item status
+  - useDownloadQueue hook managing state via Tauri download:progress events
+  - Extended DownloadProgressEvent with source, current_step, speed, eta, file_size
+  - Failed download handling with error messages and retry button
+  - Event listener cleanup on unmount
 
 ## Session Continuity
 
 Last session: 2026-02-04
-Stopped at: Completed 06-02-PLAN.md (Dashboard Home Screen)
+Stopped at: Completed 06-04-PLAN.md (Downloads Page)
 Resume file: None
 
 ---
-*Last updated: 2026-02-04 after completing Plan 06-02*
+*Last updated: 2026-02-04 after completing Plan 06-04*
