@@ -3,6 +3,7 @@ import ToastProvider from "./components/Notifications/ToastProvider";
 import MainLayout from "./layouts/MainLayout";
 import Dashboard from "./pages/Dashboard";
 import LibraryBrowser from "./pages/LibraryBrowser";
+import Downloads from "./pages/Downloads";
 
 // Placeholder components for routes (will be implemented in later plans)
 
@@ -34,17 +35,6 @@ function Sync() {
       <h1 className="text-2xl font-bold mb-4">Sync</h1>
       <p className="text-gray-600 dark:text-gray-400">
         Sync controls coming soon...
-      </p>
-    </div>
-  );
-}
-
-function Downloads() {
-  return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Downloads</h1>
-      <p className="text-gray-600 dark:text-gray-400">
-        Download queue coming soon...
       </p>
     </div>
   );
