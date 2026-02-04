@@ -57,6 +57,9 @@ pub enum SoundCloudError {
     #[error("Database error: {0}")]
     DatabaseError(#[from] rusqlite::Error),
 
+    #[error("Playlist database error: {0}")]
+    PlaylistDatabaseError(#[from] crate::database::connection::DatabaseError),
+
     #[error("JSON parse error: {0}")]
     ParseError(#[from] serde_json::Error),
 
@@ -493,6 +496,32 @@ impl SoundCloudClient {
 
         Ok(added_count)
     }
+
+    /// Get a specific SoundCloud playlist.
+    ///
+    /// # Arguments
+    /// * `playlist_id` - SoundCloud playlist ID
+    ///
+    /// # Returns
+    /// * `Ok(SoundCloudPlaylist)` - Playlist with tracks
+    /// * `Err(SoundCloudError)` - If API call fails
+    pub async fn get_playlist(&self, playlist_id: &str) -> Result<SoundCloudPlaylist> {
+        let url = format!("{}/playlists/{}", API_BASE, playlist_id);
+        self.api_get(&url).await
+    }
+
+    /// Get tracks from a SoundCloud playlist.
+    ///
+    /// # Arguments
+    /// * `playlist_id` - SoundCloud playlist ID
+    ///
+    /// # Returns
+    /// * `Ok(Vec<SoundCloudTrack>)` - List of tracks
+    /// * `Err(SoundCloudError)` - If API call fails
+    pub async fn get_playlist_tracks(&self, playlist_id: &str) -> Result<Vec<SoundCloudTrack>> {
+        let playlist = self.get_playlist(playlist_id).await?;
+        Ok(playlist.tracks)
+    }
 }
 
 /// Get the last sync timestamp for a source.
@@ -603,6 +632,109 @@ fn insert_track_from_soundcloud(
     Ok(true)
 }
 
+/// Find or create a track in the library with deduplication.
+///
+/// Searches for existing track by external_id first, then by similarity.
+/// If found, returns existing track_id. Otherwise creates new phantom track.
+///
+/// # Arguments
+/// * `conn` - Database connection
+/// * `track` - SoundCloud track
+/// * `source_id` - Source ID for track_sources relationship
+/// * `added_at` - ISO 8601 timestamp when track was added
+///
+/// # Returns
+/// * `Ok(track_id)` - ID of found or created track
+/// * `Err` if database operation fails
+fn find_or_create_soundcloud_track(
+    conn: &Connection,
+    track: &SoundCloudTrack,
+    source_id: i64,
+    added_at: &str,
+) -> Result<i64> {
+    let external_id = format!("soundcloud:{}", track.id);
+
+    // Check if track already exists by external_id
+    let existing: Option<i64> = conn
+        .query_row(
+            "SELECT track_id FROM track_sources WHERE external_id = ?",
+            [&external_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    if let Some(track_id) = existing {
+        return Ok(track_id);
+    }
+
+    // Check for duplicate by similarity
+    use crate::dedup::calculate_similarity;
+
+    let similar: Option<i64> = conn
+        .query_row(
+            "SELECT id, title, artist FROM tracks
+             WHERE title LIKE ? OR artist LIKE ?
+             LIMIT 50",
+            rusqlite::params![
+                format!("%{}%", &track.title[..track.title.len().min(10)]),
+                format!("%{}%", &track.user.username[..track.user.username.len().min(10)])
+            ],
+            |row| {
+                let id: i64 = row.get(0)?;
+                let title: String = row.get(1)?;
+                let artist: String = row.get(2)?;
+
+                let similarity = calculate_similarity(&track.title, &track.user.username, &title, &artist);
+                if similarity >= 0.85 {
+                    Ok(Some(id))
+                } else {
+                    Ok(None)
+                }
+            },
+        )
+        .optional()?
+        .flatten();
+
+    if let Some(track_id) = similar {
+        // Found similar track, create track_sources relationship
+        conn.execute(
+            "INSERT OR IGNORE INTO track_sources (track_id, source_id, external_id, added_at)
+             VALUES (?, ?, ?, ?)",
+            rusqlite::params![track_id, source_id, &external_id, added_at],
+        )?;
+        return Ok(track_id);
+    }
+
+    // No existing track found, create new phantom track
+    let duration_secs = track.duration / 1000;
+
+    conn.execute(
+        "INSERT INTO tracks (artist, album_artist, album, title, genre, duration, format, original_path)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        rusqlite::params![
+            track.user.username,
+            track.user.username,
+            "SoundCloud",
+            track.title,
+            track.genre,
+            duration_secs as i64,
+            "soundcloud",
+            track.permalink_url,
+        ],
+    )?;
+
+    let track_id = conn.last_insert_rowid();
+
+    // Insert into track_sources
+    conn.execute(
+        "INSERT INTO track_sources (track_id, source_id, external_id, added_at)
+         VALUES (?, ?, ?, ?)",
+        rusqlite::params![track_id, source_id, &external_id, added_at],
+    )?;
+
+    Ok(track_id)
+}
+
 /// Convenience function to sync the full SoundCloud library.
 ///
 /// Syncs both liked tracks and playlists.
@@ -623,6 +755,182 @@ pub async fn sync_soundcloud_library(
     let likes_count = client.sync_likes(user_id, conn).await?;
     let playlists_count = client.sync_playlists(user_id, conn).await?;
     Ok(likes_count + playlists_count)
+}
+
+/// Import a specific SoundCloud playlist into the library.
+///
+/// Creates a local mirrored playlist and adds all tracks from the SoundCloud playlist.
+/// Tracks are deduplicated against existing library tracks.
+///
+/// # Arguments
+/// * `conn` - Database connection
+/// * `client` - Authenticated SoundCloud client
+/// * `sc_playlist_id` - SoundCloud playlist ID
+/// * `source_id` - Database ID of the SoundCloud source
+///
+/// # Returns
+/// * `Ok(playlist_id)` - ID of created local playlist
+/// * `Err(SoundCloudError)` - If API call or database operation fails
+pub async fn import_soundcloud_playlist(
+    conn: &Connection,
+    client: &SoundCloudClient,
+    sc_playlist_id: &str,
+    source_id: i64,
+) -> Result<i64> {
+    // Fetch playlist from SoundCloud
+    let playlist = client.get_playlist(sc_playlist_id).await?;
+
+    // Create local playlist
+    use crate::database::playlist::create_playlist;
+    use crate::models::PlaylistCategory;
+
+    let playlist_id = create_playlist(
+        conn,
+        playlist.title.clone(),
+        Some("Imported from SoundCloud".to_string()),
+        vec![],
+        PlaylistCategory::Regular,
+    )?;
+
+    // Store external_id for future refresh
+    let external_id = format!("soundcloud:{}", sc_playlist_id);
+    conn.execute(
+        "UPDATE playlists SET external_id = ?, source_id = ? WHERE id = ?",
+        rusqlite::params![external_id, source_id, playlist_id],
+    )?;
+
+    // Add tracks to playlist with deduplication
+    for track in &playlist.tracks {
+        let track_id = find_or_create_soundcloud_track(conn, track, source_id, &track.created_at)?;
+
+        // Add to playlist
+        use crate::database::playlist::add_track_to_playlist;
+        add_track_to_playlist(conn, playlist_id, track_id)?;
+    }
+
+    Ok(playlist_id)
+}
+
+/// Import SoundCloud liked tracks into a "SoundCloud Likes" playlist.
+///
+/// Creates or gets the "SoundCloud Likes" playlist and adds all liked tracks.
+/// Uses incremental sync to only fetch new liked songs.
+///
+/// # Arguments
+/// * `conn` - Database connection
+/// * `client` - Authenticated SoundCloud client
+/// * `source_id` - Database ID of the SoundCloud source
+/// * `user_id` - User identifier for sync timestamp
+///
+/// # Returns
+/// * `Ok(count)` - Number of new tracks added
+/// * `Err(SoundCloudError)` - If API call or database operation fails
+pub async fn import_soundcloud_liked_songs(
+    conn: &Connection,
+    client: &mut SoundCloudClient,
+    source_id: i64,
+    user_id: &str,
+) -> Result<usize> {
+    // Get or create "SoundCloud Likes" playlist
+    use crate::database::playlist::get_or_create_liked_playlist;
+    let playlist_id = get_or_create_liked_playlist(conn, "soundcloud", source_id)?;
+
+    // Get last sync timestamp
+    let last_sync = get_last_sync_timestamp(conn, user_id, "soundcloud")?
+        .unwrap_or_else(|| (chrono::Utc::now() - chrono::TimeDelta::days(365)).to_rfc3339());
+
+    let mut added_count = 0;
+    let mut next_url = Some(format!("{}/me/favorites?limit=50", API_BASE));
+
+    while let Some(ref url) = next_url {
+        let response: SoundCloudCollection<SoundCloudLike> = client.api_get(url).await?;
+
+        for like in response.collection {
+            let liked_at = chrono::DateTime::parse_from_rfc3339(&like.created_at)
+                .map_err(|e| SoundCloudError::DateParseError(format!("{}: {}", e, like.created_at)))?;
+
+            // Only process tracks liked since last sync
+            if liked_at.to_rfc3339() > last_sync {
+                let track_id = find_or_create_soundcloud_track(conn, &like.track, source_id, &like.created_at)?;
+
+                // Add to liked playlist
+                use crate::database::playlist::add_liked_track;
+                add_liked_track(conn, playlist_id, track_id, &like.created_at)?;
+                added_count += 1;
+            } else {
+                // Stop when we hit old tracks
+                next_url = None;
+                break;
+            }
+        }
+
+        // Continue to next page if we haven't stopped
+        if next_url.is_some() {
+            next_url = response.next_href;
+        }
+    }
+
+    // Update last sync timestamp
+    set_last_sync_timestamp(conn, user_id, "soundcloud", &chrono::Utc::now().to_rfc3339())?;
+
+    Ok(added_count)
+}
+
+/// Refresh a SoundCloud playlist with new tracks from source.
+///
+/// Fetches current tracks from SoundCloud and adds any new tracks to the local playlist.
+/// Uses add-only semantics (tracks removed from SoundCloud remain in local playlist).
+///
+/// # Arguments
+/// * `conn` - Database connection
+/// * `client` - Authenticated SoundCloud client
+/// * `playlist_id` - Local playlist ID to refresh
+///
+/// # Returns
+/// * `Ok(count)` - Number of new tracks added
+/// * `Err(SoundCloudError)` - If API call or database operation fails
+pub async fn refresh_soundcloud_playlist(
+    conn: &Connection,
+    client: &SoundCloudClient,
+    playlist_id: i64,
+) -> Result<usize> {
+    // Get external_id from playlists
+    let external_id: String = conn.query_row(
+        "SELECT external_id FROM playlists WHERE id = ?",
+        [playlist_id],
+        |row| row.get(0),
+    )?;
+
+    // Extract SoundCloud playlist ID from external_id
+    let sc_playlist_id = external_id
+        .strip_prefix("soundcloud:")
+        .ok_or_else(|| SoundCloudError::ApiError {
+            status: 0,
+            message: "Invalid external_id format".to_string(),
+        })?;
+
+    // Get source_id
+    let source_id: i64 = conn.query_row(
+        "SELECT source_id FROM playlists WHERE id = ?",
+        [playlist_id],
+        |row| row.get(0),
+    )?;
+
+    // Fetch current tracks from SoundCloud
+    let tracks = client.get_playlist_tracks(sc_playlist_id).await?;
+
+    // Build source_tracks with track_id and source position
+    let mut source_tracks = Vec::new();
+    for (idx, track) in tracks.iter().enumerate() {
+        let track_id = find_or_create_soundcloud_track(conn, track, source_id, &track.created_at)?;
+        source_tracks.push((track_id, idx));
+    }
+
+    // Refresh playlist with add-only semantics
+    use crate::database::playlist::refresh_mirrored_playlist;
+    let added_count = refresh_mirrored_playlist(conn, playlist_id, source_tracks)?;
+
+    Ok(added_count)
 }
 
 #[cfg(test)]
@@ -866,5 +1174,154 @@ mod tests {
 
         let count = client.sync_likes("test_user", &conn).await.unwrap();
         println!("Synced {} liked tracks", count);
+    }
+
+    #[test]
+    fn test_find_or_create_soundcloud_track_new() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::database::schema::initialize_schema(&conn).unwrap();
+
+        // Create source
+        conn.execute(
+            "INSERT INTO sources (name, user_id, enabled) VALUES ('soundcloud', 'test_user', 1)",
+            [],
+        )
+        .unwrap();
+        let source_id = conn.last_insert_rowid();
+
+        let track = SoundCloudTrack {
+            id: 123456,
+            title: "Test Track".to_string(),
+            user: SoundCloudUser {
+                id: 789,
+                username: "TestArtist".to_string(),
+                avatar_url: None,
+                permalink_url: None,
+            },
+            duration: 180000,
+            created_at: "2024-01-15T10:30:00Z".to_string(),
+            permalink_url: "https://soundcloud.com/testartist/test-track".to_string(),
+            downloadable: false,
+            genre: Some("Electronic".to_string()),
+            description: None,
+        };
+
+        let track_id = find_or_create_soundcloud_track(&conn, &track, source_id, "2024-02-01T00:00:00Z").unwrap();
+        assert!(track_id > 0);
+
+        // Verify track was created
+        let count: i32 = conn
+            .query_row("SELECT COUNT(*) FROM tracks WHERE title = 'Test Track'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+
+        // Verify track_sources relationship
+        let ts_count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM track_sources WHERE external_id = 'soundcloud:123456'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(ts_count, 1);
+    }
+
+    #[test]
+    fn test_find_or_create_soundcloud_track_existing() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::database::schema::initialize_schema(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO sources (name, user_id, enabled) VALUES ('soundcloud', 'test_user', 1)",
+            [],
+        )
+        .unwrap();
+        let source_id = conn.last_insert_rowid();
+
+        let track = SoundCloudTrack {
+            id: 123456,
+            title: "Test Track".to_string(),
+            user: SoundCloudUser {
+                id: 789,
+                username: "TestArtist".to_string(),
+                avatar_url: None,
+                permalink_url: None,
+            },
+            duration: 180000,
+            created_at: "2024-01-15T10:30:00Z".to_string(),
+            permalink_url: "https://soundcloud.com/testartist/test-track".to_string(),
+            downloadable: false,
+            genre: Some("Electronic".to_string()),
+            description: None,
+        };
+
+        // Create track first time
+        let track_id1 = find_or_create_soundcloud_track(&conn, &track, source_id, "2024-02-01T00:00:00Z").unwrap();
+
+        // Create same track again
+        let track_id2 = find_or_create_soundcloud_track(&conn, &track, source_id, "2024-02-01T00:00:00Z").unwrap();
+
+        // Should return same track_id
+        assert_eq!(track_id1, track_id2);
+
+        // Should still only have one track
+        let count: i32 = conn
+            .query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    #[ignore] // Requires SoundCloud credentials
+    async fn test_import_soundcloud_playlist_integration() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::database::schema::initialize_schema(&conn).unwrap();
+
+        let client = SoundCloudClient::new().unwrap();
+
+        conn.execute(
+            "INSERT INTO sources (name, user_id, enabled) VALUES ('soundcloud', 'test_user', 1)",
+            [],
+        )
+        .unwrap();
+        let source_id = conn.last_insert_rowid();
+
+        // Would need actual playlist ID
+        // let playlist_id = import_soundcloud_playlist(&conn, &client, "test_playlist_id", source_id).await.unwrap();
+        // println!("Imported playlist: {}", playlist_id);
+    }
+
+    #[tokio::test]
+    #[ignore] // Requires SoundCloud credentials
+    async fn test_import_soundcloud_liked_songs_integration() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::database::schema::initialize_schema(&conn).unwrap();
+
+        let mut client = SoundCloudClient::new().unwrap();
+
+        conn.execute(
+            "INSERT INTO sources (name, user_id, enabled) VALUES ('soundcloud', 'test_user', 1)",
+            [],
+        )
+        .unwrap();
+        let source_id = conn.last_insert_rowid();
+
+        let count = import_soundcloud_liked_songs(&conn, &mut client, source_id, "test_user")
+            .await
+            .unwrap();
+        println!("Imported {} liked songs", count);
+    }
+
+    #[tokio::test]
+    #[ignore] // Requires SoundCloud credentials
+    async fn test_refresh_soundcloud_playlist_integration() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::database::schema::initialize_schema(&conn).unwrap();
+
+        let client = SoundCloudClient::new().unwrap();
+
+        // Would need to first import a playlist, then refresh it
+        // let added = refresh_soundcloud_playlist(&conn, &client, playlist_id).await.unwrap();
+        // println!("Added {} new tracks on refresh", added);
     }
 }
