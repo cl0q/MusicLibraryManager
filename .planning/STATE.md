@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 6 of 7 (Desktop UI) — IN PROGRESS
-Plan: 1 of 5 in current phase
-Status: App shell complete
-Last activity: 2026-02-04 — Completed 06-01-PLAN.md (App Shell & Navigation)
+Plan: 2 of 5 in current phase
+Status: Dashboard with real-time updates complete
+Last activity: 2026-02-04 — Completed 06-02-PLAN.md (Dashboard Home Screen)
 
-Progress: [██████████████████████████░░░░] 86.7% (26 of 30 concrete plans complete)
+Progress: [███████████████████████████░░░] 90.0% (27 of 30 concrete plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 26
-- Average duration: 21m 22s
-- Total execution time: 9.18 hours
+- Total plans completed: 27
+- Average duration: 21m 01s
+- Total execution time: 9.22 hours
 
 *Updated after each plan completion*
 
@@ -138,6 +138,11 @@ Recent decisions affecting current work:
 - **Status bar expanded height 240px** — Enough space for 5-7 operations visible without dominating screen (2026-02-04)
 - **Type-only imports with 'type' keyword** — TypeScript verbatimModuleSyntax compliance requires explicit type-only imports (2026-02-04)
 - **Tauri v2 uses @tauri-apps/api/core** — Invoke function moved from api/tauri (v1) to api/core (v2) (2026-02-04)
+- **invokeTauriCommand result tuple** — Returns { ok, data?, error? } for consistent error handling across all Tauri commands (2026-02-04)
+- **Event listener cleanup pattern** — All useEffect event listeners return unlisten() cleanup function to prevent memory leaks (2026-02-04)
+- **Activity feed 50-event limit** — Maximum 50 events retained to prevent unbounded memory growth (2026-02-04)
+- **Relative time formatting** — Dashboard timestamps use "just now", "Xm ago", "Xh ago", "Xd ago" for human readability (2026-02-04)
+- **Activity type color coding** — Visual differentiation: green (track_added), blue (sync_completed), purple (download_completed), red (error) (2026-02-04)
 
 ### Learnings from Python Implementation
 
@@ -254,13 +259,21 @@ None yet.
   - Type definitions for Track, Album, Artist, ActivityEvent, DownloadProgressEvent
   - Typed Tauri command wrappers for playlists, sync, search, import, downloads
   - Fixed pre-existing bugs in Phase 4/5 components (Tauri v2 imports, TypeScript verbatimModuleSyntax)
-  - Ready for Plan 06-02 (Dashboard)
+- Plan 06-02 (Dashboard Home Screen): ✓ COMPLETE
+  - Dashboard page with Quick Actions (Sync Now button), stats cards, and activity feed
+  - useTauriCommand hook for generic command invocation with error handling
+  - useTauriEvents hooks (useActivityFeed, useDownloadProgress) with proper cleanup
+  - StatsCards component: Track Count, Storage Size, Sources Connected, Last Sync, Pending Downloads
+  - ActivityFeed component: real-time updates via library:activity events, color-coded by type
+  - Responsive grid layouts (1 col mobile, 3-5 cols desktop)
+  - Event-driven UI update pattern established for entire app
+  - Ready for Plan 06-03 (Library Browser)
 
 ## Session Continuity
 
 Last session: 2026-02-04
-Stopped at: Completed 06-01-PLAN.md (App Shell & Navigation)
+Stopped at: Completed 06-02-PLAN.md (Dashboard Home Screen)
 Resume file: None
 
 ---
-*Last updated: 2026-02-04 after completing Plan 06-01*
+*Last updated: 2026-02-04 after completing Plan 06-02*
