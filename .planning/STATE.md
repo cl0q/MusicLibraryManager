@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 
 ## Current Position
 
-Phase: 5 of 7 (Device Sync) — COMPLETE
-Plan: 5 of 5 in current phase
-Status: Phase complete - ready for verification
-Last activity: 2026-02-04 — Completed 05-05-PLAN.md (Tauri Commands & React UI)
+Phase: 6 of 7 (Desktop UI) — IN PROGRESS
+Plan: 1 of 5 in current phase
+Status: App shell complete
+Last activity: 2026-02-04 — Completed 06-01-PLAN.md (App Shell & Navigation)
 
-Progress: [█████████████████████████] 100% (25 of 25 concrete plans complete)
+Progress: [██████████████████████████░░░░] 86.7% (26 of 30 concrete plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 25
-- Average duration: 21m 52s
-- Total execution time: 9.11 hours
+- Total plans completed: 26
+- Average duration: 21m 22s
+- Total execution time: 9.18 hours
 
 *Updated after each plan completion*
 
@@ -131,6 +131,13 @@ Recent decisions affecting current work:
 - **SHA256 checksums for change detection** — Industry standard cryptographic hash enables reliable incremental sync (2026-02-04)
 - **Sync preview returns full file list** — User needs to see exactly what will be synced before committing (2026-02-04)
 - **Auto-clean stale sync_state entries** — Tracks removed from profile automatically removed from sync_state for accuracy (2026-02-04)
+- **React Router for desktop UI** — Client-side routing with nested routes for five main sections (Dashboard, Library, Playlists, Sync, Downloads) (2026-02-04)
+- **Sonner for toast notifications** — Modern, clean UX with built-in dark mode support and good DX (2026-02-04)
+- **Sidebar 240px width** — Standard side navigation width balancing visibility with content space (2026-02-04)
+- **Clickable status bar header** — Expand/collapse via click interaction for user discovery without dedicated button (2026-02-04)
+- **Status bar expanded height 240px** — Enough space for 5-7 operations visible without dominating screen (2026-02-04)
+- **Type-only imports with 'type' keyword** — TypeScript verbatimModuleSyntax compliance requires explicit type-only imports (2026-02-04)
+- **Tauri v2 uses @tauri-apps/api/core** — Invoke function moved from api/tauri (v1) to api/core (v2) (2026-02-04)
 
 ### Learnings from Python Implementation
 
@@ -236,13 +243,24 @@ None yet.
 - Phase 5 verification pending: Need actual iPod for integration testing
 - M3U8 UTF-8 encoding with Rockbox untested (should work but needs verification with device)
 - FAT32 long filename edge cases (255 char limit enforced but not tested with actual device)
-- Ready for Phase 6 (Desktop UI) or Phase 5 verification
+
+**Phase 6 (Desktop UI):** IN PROGRESS
+- Plan 06-01 (App Shell & Navigation): ✓ COMPLETE
+  - React Router configuration with 5 routes (/, /library, /playlists, /playlists/:id, /sync, /downloads)
+  - MainLayout with persistent sidebar (240px fixed width, 5 navigation sections)
+  - Sidebar with active state highlighting, Spotify/Linear aesthetic
+  - StatusBar with expand/collapse (collapsed 40px, expanded 240px)
+  - Toast notifications via Sonner
+  - Type definitions for Track, Album, Artist, ActivityEvent, DownloadProgressEvent
+  - Typed Tauri command wrappers for playlists, sync, search, import, downloads
+  - Fixed pre-existing bugs in Phase 4/5 components (Tauri v2 imports, TypeScript verbatimModuleSyntax)
+  - Ready for Plan 06-02 (Dashboard)
 
 ## Session Continuity
 
 Last session: 2026-02-04
-Stopped at: Completed 05-05-PLAN.md (Tauri Commands & React UI)
+Stopped at: Completed 06-01-PLAN.md (App Shell & Navigation)
 Resume file: None
 
 ---
-*Last updated: 2026-02-04 after completing Plan 05-05*
+*Last updated: 2026-02-04 after completing Plan 06-01*
