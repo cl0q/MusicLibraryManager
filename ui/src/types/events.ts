@@ -13,4 +13,9 @@ export interface DownloadProgressEvent {
   status: "queued" | "downloading" | "transcoding" | "completed" | "failed";
   progress: number;
   error?: string;
+  source?: string;
+  current_step?: string;
+  speed?: string;
+  eta?: string;
+  file_size?: number;
 }
