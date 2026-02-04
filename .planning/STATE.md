@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-03)
 
 **Core value:** Like a song anywhere and it reliably ends up in your owned library and on your devices in high quality
-**Current focus:** Phase 3 complete - ready for Phase 4 or 5
+**Current focus:** Phase 3 complete - all 6 plans done, ready for Phase 4
 
 ## Current Position
 
 Phase: 3 of 7 (Multi-Source Aggregation)
-Plan: 6 of 6 in current phase (all plans complete)
+Plan: 6 of 6 in current phase (all plans complete including 03-05)
 Status: Phase complete
-Last activity: 2026-02-04 — Completed 03-06-PLAN.md (SoundCloud Download)
+Last activity: 2026-02-04 — Completed 03-05-PLAN.md (Tauri Commands & Auto-Sync)
 
-Progress: [██████████████████░░] 87% (13 of 15 total plans complete)
+Progress: [████████████████████] 100% (15 of 15 concrete plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 13
-- Average duration: 4m 28s
-- Total execution time: 0.97 hours
+- Total plans completed: 15
+- Average duration: 4m 24s
+- Total execution time: 1.10 hours
 
 *Updated after each plan completion*
 
@@ -89,6 +89,9 @@ Recent decisions affecting current work:
 - **SoundCloudDownloader optional in orchestrator** — scdl may not be installed; orchestrator continues without SoundCloud downloads (2026-02-04)
 - **SoundCloud downloads to aac_dir** — scdl produces AAC already, no FLAC staging needed (2026-02-04)
 - **find_most_recent_audio_file for scdl output** — scdl filenames unpredictable; search by modification time (2026-02-04)
+- **spawn_blocking + block_on for rusqlite in async Tauri commands** — Connection is !Send; spawn_blocking keeps it on one thread, block_on re-enters runtime (2026-02-04)
+- **OAuthState with Mutex for PKCE verifiers** — Temporary storage between auth URL generation and code exchange command invocations (2026-02-04)
+- **default_user placeholder for startup sync** — Single-user desktop app; multi-user deferred to Phase 6 (2026-02-04)
 
 ### Learnings from Python Implementation
 
@@ -141,12 +144,13 @@ None yet.
 - Plan 02 complete: Spotify API client with OAuth PKCE and incremental sync
 - Plan 03 complete: SoundCloud API client with OAuth 2.1 PKCE and incremental sync
 - Plan 04 complete: track normalization and fuzzy duplicate detection
-- Plan 05: Tauri commands wiring (skipped in current execution order)
+- Plan 05 complete: Tauri commands for OAuth/sync, auto-sync on startup
 - Plan 06 complete: SoundCloud download via scdl CLI with source priority
-- 184 tests passing (9 spotify, 9 soundcloud, 22 dedup, 15 download+soundcloud)
+- 185 tests passing (9 spotify, 9 soundcloud, 22 dedup, 6 commands/sources, 1 startup)
 - scdl CLI required for SoundCloud direct downloads (pip install scdl)
 - Download priority: SoundCloud -> DAB -> YouTube for SC-sourced tracks
 - Credentials loaded from .env via dotenvy
+- OAuth live testing deferred until user configures credentials in .env
 
 **Phase 5 (Device Sync):**
 - Rockbox M3U8 compatibility specifics unknown (relative vs absolute paths, encoding)
@@ -154,9 +158,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-04T07:44:05Z
-Stopped at: Completed 03-06-PLAN.md (SoundCloud Download)
+Last session: 2026-02-04T08:23:21Z
+Stopped at: Completed 03-05-PLAN.md (Tauri Commands & Auto-Sync)
 Resume file: None
 
 ---
-*Last updated: 2026-02-04 after completing 03-06-PLAN.md*
+*Last updated: 2026-02-04 after completing 03-05-PLAN.md*
