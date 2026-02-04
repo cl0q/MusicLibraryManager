@@ -81,6 +81,17 @@ export async function get_last_sync_time(): Promise<string | null> {
   return invoke<string | null>("get_last_sync_time");
 }
 
+export interface SyncResult {
+  files_added: number;
+  files_updated: number;
+  files_removed: number;
+  playlists_created: number;
+}
+
+export async function execute_sync_cmd(profile_id: string): Promise<SyncResult> {
+  return invoke<SyncResult>("execute_sync_cmd", { profileId: Number(profile_id) });
+}
+
 export async function detect_rockbox_devices_cmd(): Promise<RockboxDevice[]> {
   return invoke<RockboxDevice[]>("detect_rockbox_devices");
 }

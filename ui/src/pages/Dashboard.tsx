@@ -2,23 +2,33 @@ import { useState } from "react";
 import { toast } from "sonner";
 import StatsCards from "../components/Dashboard/StatsCards";
 import ActivityFeed from "../components/Dashboard/ActivityFeed";
-import { invokeTauriCommand } from "../hooks/useTauriCommand";
+import { execute_sync_cmd, list_sync_profiles } from "../utils/tauri-commands";
 
 export default function Dashboard() {
   const [isSyncing, setIsSyncing] = useState(false);
 
   const handleSyncNow = async () => {
     setIsSyncing(true);
-    toast.info("Sync triggered");
 
-    // TODO: This will be properly implemented when we have sync profiles
-    // For now, just show a placeholder message
-    const result = await invokeTauriCommand("list_sync_profiles");
+    try {
+      const profiles = await list_sync_profiles();
+      if (profiles.length === 0) {
+        toast.error("No sync profiles configured. Create one in the Sync tab.");
+        setIsSyncing(false);
+        return;
+      }
 
-    if (result.ok) {
-      toast.success("Sync functionality coming soon");
-    } else {
-      toast.error(`Error: ${result.error}`);
+      const profile = profiles[0];
+      toast.info(`Starting sync for ${profile.name}...`);
+
+      const result = await execute_sync_cmd(profile.id);
+
+      toast.success(
+        `Sync complete! Added: ${result.files_added}, Updated: ${result.files_updated}, Removed: ${result.files_removed}`
+      );
+    } catch (error) {
+      console.error("Sync failed:", error);
+      toast.error(`Sync failed: ${error}`);
     }
 
     setIsSyncing(false);
