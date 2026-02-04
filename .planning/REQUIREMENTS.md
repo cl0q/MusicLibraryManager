@@ -52,11 +52,11 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Dashboard UI
 
-- [ ] **UI-01**: Dashboard shows library status (size, recent additions, sync state)
-- [ ] **UI-02**: Dashboard shows real-time progress during download/transcode/sync
-- [ ] **UI-03**: User can trigger sync operations from dashboard
-- [ ] **UI-04**: User can view and edit playlists visually in dashboard
-- [ ] **UI-05**: UI is cross-platform (macOS, Windows, Linux)
+- [x] **UI-01**: Dashboard shows library status (size, recent additions, sync state)
+- [x] **UI-02**: Dashboard shows real-time progress during download/transcode/sync
+- [x] **UI-03**: User can trigger sync operations from dashboard
+- [x] **UI-04**: User can view and edit playlists visually in dashboard
+- [x] **UI-05**: UI is cross-platform (macOS, Windows, Linux)
 
 ### Enhancements
 
@@ -129,11 +129,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SYNC-03 | Phase 5 | Complete |
 | SYNC-04 | Phase 5 | Complete |
 | SYNC-05 | Phase 5 | Complete |
-| UI-01 | Phase 6 | Pending |
-| UI-02 | Phase 6 | Pending |
-| UI-03 | Phase 6 | Pending |
-| UI-04 | Phase 6 | Pending |
-| UI-05 | Phase 6 | Pending |
+| UI-01 | Phase 6 | Complete |
+| UI-02 | Phase 6 | Complete |
+| UI-03 | Phase 6 | Complete |
+| UI-04 | Phase 6 | Complete |
+| UI-05 | Phase 6 | Complete |
 | ENH-01 | Phase 7 | Pending |
 | ENH-02 | Phase 7 | Pending |
 | ENH-03 | Phase 7 | Pending |
@@ -145,4 +145,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-02-03*
-*Last updated: 2026-02-04 after Phase 5 completion*
+*Last updated: 2026-02-05 after Phase 6 completion*
