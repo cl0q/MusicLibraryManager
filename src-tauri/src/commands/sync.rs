@@ -268,12 +268,13 @@ pub async fn preview_sync_cmd(
 ///
 /// # Arguments
 /// * `profile_id` - ID of sync profile to execute
+/// * `app` - Tauri AppHandle for event emission
 ///
 /// # Returns
 /// * `Ok(SyncResult)` - Counts of successful and failed operations
 /// * `Err(String)` - If profile not found, insufficient space, or sync fails
 #[tauri::command]
-pub async fn execute_sync_cmd(profile_id: i64) -> Result<SyncResult, String> {
+pub async fn execute_sync_cmd(profile_id: i64, app: tauri::AppHandle) -> Result<SyncResult, String> {
     tokio::task::spawn_blocking(move || {
         let db_path = PathBuf::from("music_library.db");
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
@@ -281,7 +282,7 @@ pub async fn execute_sync_cmd(profile_id: i64) -> Result<SyncResult, String> {
         // Use default cache directory (could be made configurable in Phase 6)
         let cache_dir = PathBuf::from("transcode_cache");
 
-        crate::sync::sync_profile_to_folder(&conn, profile_id, cache_dir)
+        crate::sync::sync_profile_to_folder(&conn, profile_id, cache_dir, Some(&app))
             .map_err(|e| format!("Failed to execute sync: {}", e))
     })
     .await
@@ -383,6 +384,6 @@ mod tests {
 
     #[test]
     fn test_execute_sync_cmd_signature() {
-        let _f: fn(i64) -> _ = execute_sync_cmd;
+        let _f: fn(i64, tauri::AppHandle) -> _ = execute_sync_cmd;
     }
 }

@@ -19,3 +19,28 @@ export interface DownloadProgressEvent {
   eta?: string;
   file_size?: number;
 }
+
+// Sync event types for real-time sync progress tracking
+export interface SyncStartedEvent {
+  profile_id: number;
+}
+
+export interface SyncProgressEvent {
+  profile_id: number;
+  files_synced: number;
+  total_files: number;
+}
+
+export interface SyncCompletedEvent {
+  profile_id: number;
+  result: {
+    files_added: number;
+    files_updated: number;
+    files_removed: number;
+  };
+}
+
+export interface SyncFailedEvent {
+  profile_id: number;
+  error: string;
+}

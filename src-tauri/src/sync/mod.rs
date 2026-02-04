@@ -13,6 +13,7 @@
 use anyhow::Result;
 use rusqlite::Connection;
 use std::path::PathBuf;
+use tauri::Emitter;
 
 pub mod cache;
 pub mod device;
@@ -63,6 +64,7 @@ pub fn preview_sync(
 /// * `conn` - Database connection
 /// * `profile_id` - ID of sync profile to execute
 /// * `cache_dir` - Path to transcode cache directory
+/// * `app` - Optional Tauri AppHandle for event emission
 ///
 /// # Returns
 /// * `Ok(SyncResult)` with counts of successful and failed operations
@@ -71,9 +73,15 @@ pub fn sync_profile_to_folder(
     conn: &Connection,
     profile_id: i64,
     cache_dir: PathBuf,
+    app: Option<&tauri::AppHandle>,
 ) -> Result<SyncResult> {
     let profile = profile::get_sync_profile(conn, profile_id)?;
     let cache = TranscodeCache::new(cache_dir)?;
+
+    // Emit sync started event
+    if let Some(app) = app {
+        let _ = app.emit("sync:started", serde_json::json!({ "profile_id": profile_id }));
+    }
 
     // 1. Compute preview
     let preview = progress::compute_sync_preview(conn, &profile, &cache, None)?;
@@ -81,8 +89,29 @@ pub fn sync_profile_to_folder(
     // 2. Execute file sync
     let result = progress::execute_sync(conn, &profile, &cache, &preview)?;
 
+    // Emit sync progress event (after file sync completes)
+    if let Some(app) = app {
+        let _ = app.emit("sync:progress", serde_json::json!({
+            "profile_id": profile_id,
+            "files_synced": result.synced_count,
+            "total_files": result.synced_count
+        }));
+    }
+
     // 3. Generate M3U8 playlists for profile
     sync_playlists(conn, &profile)?;
+
+    // Emit sync completed event
+    if let Some(app) = app {
+        let _ = app.emit("sync:completed", serde_json::json!({
+            "profile_id": profile_id,
+            "result": {
+                "files_added": result.synced_count,
+                "files_updated": 0,
+                "files_removed": 0
+            }
+        }));
+    }
 
     Ok(result)
 }
@@ -236,7 +265,7 @@ mod tests {
         fs::write(&cache2, b"audio 2").unwrap();
 
         // Execute sync
-        let result = sync_profile_to_folder(&conn, profile_id, cache_dir).unwrap();
+        let result = sync_profile_to_folder(&conn, profile_id, cache_dir, None).unwrap();
 
         // Verify files synced
         assert_eq!(result.synced_count, 2);
