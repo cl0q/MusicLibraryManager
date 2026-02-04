@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 4 of 7 (Playlist Management)
-Plan: 1 of 4 in current phase
+Plan: 2 of 4 in current phase
 Status: In progress
-Last activity: 2026-02-04 — Completed 04-01-PLAN.md
+Last activity: 2026-02-04 — Completed 04-02-PLAN.md
 
-Progress: [████████████████████░░░] 94% (16 of 17 concrete plans complete)
+Progress: [█████████████████████░░] 100% (17 of 17 concrete plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 16
-- Average duration: 4m 18s
-- Total execution time: 1.15 hours
+- Total plans completed: 17
+- Average duration: 4m 24s
+- Total execution time: 1.24 hours
 
 *Updated after each plan completion*
 
@@ -95,6 +95,10 @@ Recent decisions affecting current work:
 - **Schema version 3 for Phase 4** — Playlists, playlist_tracks, playlist_tags tables with fractional indexing (2026-02-04)
 - **Fractional indexing for playlist ordering** — TEXT column for position eliminates rebalancing, supports unlimited reordering (2026-02-04)
 - **PlaylistCategory enum** — Type-safe representation of liked/smart/regular playlist types (2026-02-04)
+- **String-based fractional indexing** — Base-62 alphanumeric alphabet with delimiter for midpoint calculation (2026-02-04)
+- **position_between algorithm** — Lexicographic midpoint generation handles all four insertion cases (2026-02-04)
+- **O(1) reorder operations** — Only moved track's position updated, no cascading changes needed (2026-02-04)
+- **Transaction pattern with execute_batch** — Explicit BEGIN/COMMIT for atomic multi-table writes (2026-02-04)
 
 ### Learnings from Python Implementation
 
@@ -154,10 +158,12 @@ None yet.
 
 **Phase 4 (Playlist Management):** IN PROGRESS
 - Plan 04-01 complete: Schema version 3 with playlists, playlist_tracks, playlist_tags
-- 190 tests passing (5 new playlist model tests)
-- Fractional indexing support in playlist_tracks.position (TEXT column)
-- PlaylistCategory enum for type-safe playlist categorization
-- Next: 04-02 core playlist operations (CRUD, track management)
+- Plan 04-02 complete: Fractional indexing and playlist CRUD operations
+- 203 tests passing (13 new playlist tests: 7 fractional indexing + 6 CRUD)
+- Fractional indexing with base-62 alphabet, position_between algorithm
+- O(1) reorder operations (only moved track's position updated)
+- Transaction pattern with execute_batch for atomic multi-table writes
+- Next: 04-03 smart playlists and liked playlists
 
 **Phase 5 (Device Sync):**
 - Rockbox M3U8 compatibility specifics unknown (relative vs absolute paths, encoding)
@@ -166,8 +172,8 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-04
-Stopped at: Completed 04-01-PLAN.md
+Stopped at: Completed 04-02-PLAN.md
 Resume file: None
 
 ---
-*Last updated: 2026-02-04 after completing plan 04-01*
+*Last updated: 2026-02-04 after completing plan 04-02*
