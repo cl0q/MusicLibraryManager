@@ -77,6 +77,10 @@ export async function list_sync_profiles(): Promise<SyncProfile[]> {
   return invoke<SyncProfile[]>("list_sync_profiles");
 }
 
+export async function get_last_sync_time(): Promise<string | null> {
+  return invoke<string | null>("get_last_sync_time");
+}
+
 export async function detect_rockbox_devices_cmd(): Promise<RockboxDevice[]> {
   return invoke<RockboxDevice[]>("detect_rockbox_devices");
 }

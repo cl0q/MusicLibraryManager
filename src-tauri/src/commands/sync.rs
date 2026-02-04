@@ -288,6 +288,49 @@ pub async fn execute_sync_cmd(profile_id: i64) -> Result<SyncResult, String> {
     .map_err(|e| format!("Task join error: {}", e))?
 }
 
+/// Get the most recent sync timestamp across all sync profiles.
+///
+/// Queries sync_state table for latest synced_timestamp.
+///
+/// # Returns
+/// * `Ok(Some(String))` - ISO 8601 timestamp of most recent sync
+/// * `Ok(None)` - If no syncs have been performed yet
+/// * `Err(String)` - If database query fails
+///
+/// # Example (TypeScript)
+/// ```typescript
+/// const lastSync = await invoke("get_last_sync_time");
+/// if (lastSync) {
+///     console.log(`Last synced: ${new Date(lastSync).toLocaleDateString()}`);
+/// } else {
+///     console.log("Never synced");
+/// }
+/// ```
+#[tauri::command]
+pub async fn get_last_sync_time() -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let db_path = PathBuf::from("music_library.db");
+        let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+
+        let result: Result<String, rusqlite::Error> = conn.query_row(
+            "SELECT synced_timestamp FROM sync_state
+             WHERE synced_timestamp IS NOT NULL
+             ORDER BY synced_timestamp DESC
+             LIMIT 1",
+            [],
+            |row| row.get(0),
+        );
+
+        match result {
+            Ok(timestamp) => Ok(Some(timestamp)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(format!("Failed to query last sync time: {}", e)),
+        }
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

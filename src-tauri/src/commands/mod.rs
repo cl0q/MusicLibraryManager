@@ -51,6 +51,6 @@ pub use sources::{
 };
 pub use sync::{
     add_playlist_to_profile, add_rule_to_profile, add_track_to_profile, create_sync_profile,
-    delete_sync_profile, detect_rockbox_devices_cmd, execute_sync_cmd, get_sync_profile,
-    list_sync_profiles, preview_sync_cmd,
+    delete_sync_profile, detect_rockbox_devices_cmd, execute_sync_cmd, get_last_sync_time,
+    get_sync_profile, list_sync_profiles, preview_sync_cmd,
 };

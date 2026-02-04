@@ -77,6 +77,7 @@ pub fn run() {
             commands::sync::detect_rockbox_devices_cmd,
             commands::sync::preview_sync_cmd,
             commands::sync::execute_sync_cmd,
+            commands::sync::get_last_sync_time,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
