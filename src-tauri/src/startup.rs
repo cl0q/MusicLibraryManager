@@ -16,7 +16,8 @@
 
 use std::path::PathBuf;
 
-use crate::database::get_connection;
+use crate::database::{get_connection, initialize_schema};
+use crate::database::playlist::{create_smart_playlists, create_local_likes_playlist};
 use crate::sources::soundcloud::SoundCloudClient;
 use crate::sources::spotify::SpotifyClient;
 
@@ -26,6 +27,52 @@ use crate::sources::spotify::SpotifyClient;
 /// When multi-user support is added (Phase 6+), this should come from
 /// app configuration or last-logged-in user state.
 const DEFAULT_USER_ID: &str = "default_user";
+
+/// Initialize database and playlists on startup.
+///
+/// Runs before async sync tasks to ensure database schema and
+/// smart playlists are ready. Called synchronously.
+///
+/// Tasks:
+/// - Initialize database schema (idempotent)
+/// - Create smart playlists (Recently Added, Most Played)
+/// - Create Local Likes playlist
+///
+/// This function logs warnings on failure but doesn't propagate errors.
+pub fn initialize_on_startup() {
+    log::info!("Initializing database and playlists...");
+
+    let db_path = PathBuf::from("music_library.db");
+    let conn = match get_connection(&db_path) {
+        Ok(c) => c,
+        Err(e) => {
+            log::error!("Failed to connect to database: {}", e);
+            return;
+        }
+    };
+
+    // Initialize schema (idempotent)
+    if let Err(e) = initialize_schema(&conn) {
+        log::error!("Failed to initialize schema: {}", e);
+        return;
+    }
+
+    // Create smart playlists (idempotent)
+    if let Err(e) = create_smart_playlists(&conn) {
+        log::warn!("Failed to create smart playlists: {}", e);
+    } else {
+        log::info!("Smart playlists initialized");
+    }
+
+    // Create Local Likes playlist (idempotent)
+    if let Err(e) = create_local_likes_playlist(&conn) {
+        log::warn!("Failed to create Local Likes playlist: {}", e);
+    } else {
+        log::info!("Local Likes playlist initialized");
+    }
+
+    log::info!("Database initialization complete");
+}
 
 /// Run startup tasks when app opens.
 ///
@@ -39,6 +86,9 @@ const DEFAULT_USER_ID: &str = "default_user";
 /// This function never returns an error - all failures are logged as warnings.
 pub async fn run_startup_tasks() {
     log::info!("Running startup tasks...");
+
+    // Initialize database and playlists first (synchronous)
+    initialize_on_startup();
 
     // Attempt Spotify sync
     if std::env::var("SPOTIFY_CLIENT_ID").is_ok()
@@ -131,6 +181,51 @@ mod tests {
     #[test]
     fn test_default_user_id_is_set() {
         assert!(!DEFAULT_USER_ID.is_empty());
+    }
+
+    #[test]
+    fn test_initialize_on_startup() {
+        use tempfile::tempdir;
+
+        // Create temporary directory for test database
+        let temp_dir = tempdir().unwrap();
+        let db_path = temp_dir.path().join("music_library.db");
+
+        // Change to temp directory so initialize_on_startup creates db there
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp_dir.path()).unwrap();
+
+        // Run initialization
+        initialize_on_startup();
+
+        // Restore original directory
+        std::env::set_current_dir(original_dir).unwrap();
+
+        // Verify database was created
+        assert!(db_path.exists());
+
+        // Verify playlists were created
+        let conn = get_connection(&db_path).unwrap();
+
+        // Check smart playlists exist
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM playlists WHERE is_smart = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 2); // Recently Added + Most Played
+
+        // Check Local Likes exists
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM playlists WHERE name = 'Local Likes' AND is_liked = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
     }
 
     #[tokio::test]
