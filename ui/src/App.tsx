@@ -1,18 +1,9 @@
 import { createBrowserRouter, RouterProvider } from "react-router";
 import ToastProvider from "./components/Notifications/ToastProvider";
 import MainLayout from "./layouts/MainLayout";
+import Dashboard from "./pages/Dashboard";
 
 // Placeholder components for routes (will be implemented in later plans)
-function Dashboard() {
-  return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Dashboard</h1>
-      <p className="text-gray-600 dark:text-gray-400">
-        Dashboard content coming soon...
-      </p>
-    </div>
-  );
-}
 
 function Library() {
   return (
