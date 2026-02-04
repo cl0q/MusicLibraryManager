@@ -152,7 +152,7 @@ Plans:
   4. User can view and edit playlists visually with drag-and-drop reordering
   5. UI runs on macOS, Windows, and Linux with native look and feel
 
-**Plans**: 5 plans in 3 waves
+**Plans**: 7 plans in 4 waves
 
 Plans:
 - [x] 06-01-PLAN.md — App layout, routing, sidebar navigation, status bar, toast notifications
@@ -160,6 +160,8 @@ Plans:
 - [x] 06-03-PLAN.md — Library browser with virtualized table, sorting, and filtering
 - [x] 06-04-PLAN.md — Downloads page with queue view and real-time progress tracking
 - [x] 06-05-PLAN.md — Context menus, track detail view, and component integration
+- [ ] 06-06-PLAN.md — Gap closure: dashboard stats (storage size, last sync time)
+- [ ] 06-07-PLAN.md — Gap closure: sync operations trigger and StatusBar wiring
 
 ### Phase 7: Enhancements
 **Goal**: Add quality-of-life features for better duplicate detection and audio quality
@@ -191,7 +193,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. Multi-Source Aggregation | 6/6 | ✓ Complete | 2026-02-04 |
 | 4. Playlist Management | 5/5 | ✓ Complete | 2026-02-04 |
 | 5. Device Sync | 5/5 | ✓ Complete | 2026-02-04 |
-| 6. Desktop UI | 5/5 | ✓ Complete | 2026-02-04 |
+| 6. Desktop UI | 5/7 | ◆ Gap closure | 2026-02-04 |
 | 7. Enhancements | 0/2 | Not started | - |
 
 ---
