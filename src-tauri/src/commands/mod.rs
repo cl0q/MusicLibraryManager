@@ -14,6 +14,16 @@
 //! - soundcloud_exchange_code: Exchange SoundCloud authorization code for tokens
 //! - sync_soundcloud: Trigger incremental SoundCloud sync
 //! - check_duplicates: Fuzzy duplicate detection across sources
+//! - create_sync_profile: Create new sync profile
+//! - list_sync_profiles: Get all sync profiles with statistics
+//! - get_sync_profile: Get single sync profile by ID
+//! - delete_sync_profile: Delete sync profile and associated data
+//! - add_track_to_profile: Add track to sync profile
+//! - add_playlist_to_profile: Add playlist to sync profile
+//! - add_rule_to_profile: Add filter rule to sync profile
+//! - detect_rockbox_devices_cmd: Detect connected Rockbox devices
+//! - preview_sync_cmd: Preview sync operations (dry-run)
+//! - execute_sync_cmd: Execute full sync to device/folder
 //!
 //! Commands are registered in lib.rs via tauri::generate_handler![]
 
@@ -23,6 +33,7 @@ pub mod import;
 pub mod playlist;
 pub mod search;
 pub mod sources;
+pub mod sync;
 
 // Re-export commands for registration
 pub use download::{download_tracks, get_retry_queue_status, retry_failed_downloads};
@@ -37,4 +48,9 @@ pub use search::search_library;
 pub use sources::{
     check_duplicates, soundcloud_auth_url, soundcloud_exchange_code, spotify_auth_url,
     spotify_exchange_code, sync_soundcloud, sync_spotify, OAuthState,
+};
+pub use sync::{
+    add_playlist_to_profile, add_rule_to_profile, add_track_to_profile, create_sync_profile,
+    delete_sync_profile, detect_rockbox_devices_cmd, execute_sync_cmd, get_sync_profile,
+    list_sync_profiles, preview_sync_cmd,
 };

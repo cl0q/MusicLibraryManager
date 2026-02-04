@@ -66,6 +66,16 @@ pub fn run() {
             commands::playlist::add_track_to_playlist_command,
             commands::playlist::remove_track_from_playlist_command,
             commands::playlist::reorder_playlist_track_command,
+            commands::sync::create_sync_profile,
+            commands::sync::list_sync_profiles,
+            commands::sync::get_sync_profile,
+            commands::sync::delete_sync_profile,
+            commands::sync::add_track_to_profile,
+            commands::sync::add_playlist_to_profile,
+            commands::sync::add_rule_to_profile,
+            commands::sync::detect_rockbox_devices_cmd,
+            commands::sync::preview_sync_cmd,
+            commands::sync::execute_sync_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
