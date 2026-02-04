@@ -62,6 +62,50 @@ pub async fn search_library(query: String) -> Result<Vec<SearchResult>, String> 
     Ok(results)
 }
 
+/// Get total storage size of all tracks in the library.
+///
+/// Calculates total bytes by summing file sizes from original_path column.
+/// Skips files that cannot be accessed (moved/deleted).
+///
+/// # Returns
+/// * `Ok(u64)` - Total bytes of all accessible track files
+/// * `Err(String)` - If database query fails
+///
+/// # Example (TypeScript)
+/// ```typescript
+/// const bytes = await invoke("get_library_storage_size");
+/// const gb = (bytes / (1024 ** 3)).toFixed(2);
+/// console.log(`Library size: ${gb} GB`);
+/// ```
+#[tauri::command]
+pub async fn get_library_storage_size() -> Result<u64, String> {
+    tokio::task::spawn_blocking(move || {
+        let db_path = PathBuf::from("music_library.db");
+        let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+
+        let mut stmt = conn
+            .prepare("SELECT original_path FROM tracks")
+            .map_err(|e| format!("Failed to prepare query: {}", e))?;
+
+        let paths: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .map_err(|e| format!("Failed to query tracks: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let mut total_size: u64 = 0;
+        for path in paths {
+            if let Ok(metadata) = std::fs::metadata(&path) {
+                total_size += metadata.len();
+            }
+        }
+
+        Ok(total_size)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

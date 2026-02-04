@@ -44,7 +44,7 @@ pub use playlist::{
     get_playlists_command, remove_track_from_playlist_command, reorder_playlist_track_command,
     search_playlist_tracks_command,
 };
-pub use search::search_library;
+pub use search::{get_library_storage_size, search_library};
 pub use sources::{
     check_duplicates, soundcloud_auth_url, soundcloud_exchange_code, spotify_auth_url,
     spotify_exchange_code, sync_soundcloud, sync_spotify, OAuthState,

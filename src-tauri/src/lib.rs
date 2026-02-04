@@ -48,6 +48,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::import::import_directory,
             commands::search::search_library,
+            commands::search::get_library_storage_size,
             commands::duplicate::detect_duplicates,
             commands::download::download_tracks,
             commands::download::retry_failed_downloads,

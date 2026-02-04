@@ -64,6 +64,10 @@ export async function search_library(query: string): Promise<Track[]> {
   return invoke<Track[]>("search_library", { query });
 }
 
+export async function get_library_storage_size(): Promise<number> {
+  return invoke<number>("get_library_storage_size");
+}
+
 export async function import_directory(path: string): Promise<number> {
   return invoke<number>("import_directory", { path });
 }
