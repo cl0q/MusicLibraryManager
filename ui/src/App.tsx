@@ -5,41 +5,9 @@ import Dashboard from "./pages/Dashboard";
 import LibraryBrowser from "./pages/LibraryBrowser";
 import TrackDetail from "./pages/TrackDetail";
 import Downloads from "./pages/Downloads";
-
-// Placeholder components for routes (will be implemented in later plans)
-
-function Playlists() {
-  return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Playlists</h1>
-      <p className="text-gray-600 dark:text-gray-400">
-        Playlists view coming soon...
-      </p>
-    </div>
-  );
-}
-
-function PlaylistDetail() {
-  return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Playlist Detail</h1>
-      <p className="text-gray-600 dark:text-gray-400">
-        Playlist detail view coming soon...
-      </p>
-    </div>
-  );
-}
-
-function Sync() {
-  return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Sync</h1>
-      <p className="text-gray-600 dark:text-gray-400">
-        Sync controls coming soon...
-      </p>
-    </div>
-  );
-}
+import Playlists from "./pages/Playlists";
+import PlaylistDetailPage from "./pages/PlaylistDetailPage";
+import Sync from "./pages/Sync";
 
 const router = createBrowserRouter([
   {
@@ -64,7 +32,7 @@ const router = createBrowserRouter([
       },
       {
         path: "playlists/:id",
-        element: <PlaylistDetail />,
+        element: <PlaylistDetailPage />,
       },
       {
         path: "sync",
