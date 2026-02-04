@@ -16,7 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Download Infrastructure** - Single-source pipeline with dabmusic.xyz and YouTube fallback
 - [x] **Phase 3: Multi-Source Aggregation** - Spotify, Apple Music, SoundCloud API integration with deduplication
 - [x] **Phase 4: Playlist Management** - Create, edit, reorder playlists with order preservation
-- [ ] **Phase 5: Device Sync** - Incremental sync to Rockbox iPod with M3U8 playlist generation
+- [x] **Phase 5: Device Sync** - Incremental sync to Rockbox iPod with M3U8 playlist generation
 - [ ] **Phase 6: Desktop UI** - PySide6 dashboard with library browser and real-time progress
 - [ ] **Phase 7: Enhancements** - Acoustic fingerprinting, artwork, ReplayGain normalization
 
@@ -132,11 +132,11 @@ Plans:
 **Plans**: 5 plans in 4 waves
 
 Plans:
-- [ ] 05-01-PLAN.md — Sync profile model and database schema with content resolution
-- [ ] 05-02-PLAN.md — Shared transcode cache with platform-aware file linking
-- [ ] 05-03-PLAN.md — Rockbox device detection and M3U8 playlist generation
-- [ ] 05-04-PLAN.md — Incremental sync orchestration with dry-run and state tracking
-- [ ] 05-05-PLAN.md — Tauri commands and React UI for sync management
+- [x] 05-01-PLAN.md — Sync profile model and database schema with content resolution
+- [x] 05-02-PLAN.md — Shared transcode cache with platform-aware file linking
+- [x] 05-03-PLAN.md — Rockbox device detection and M3U8 playlist generation
+- [x] 05-04-PLAN.md — Incremental sync orchestration with dry-run and state tracking
+- [x] 05-05-PLAN.md — Tauri commands and React UI for sync management
 
 ### Phase 6: Desktop UI
 **Goal**: Cross-platform PySide6 dashboard with library browser, progress tracking, and sync controls
@@ -188,9 +188,9 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 2. Download Infrastructure | 4/4 | ✓ Complete | 2026-02-03 |
 | 3. Multi-Source Aggregation | 6/6 | ✓ Complete | 2026-02-04 |
 | 4. Playlist Management | 5/5 | ✓ Complete | 2026-02-04 |
-| 5. Device Sync | 0/3 | Not started | - |
+| 5. Device Sync | 5/5 | ✓ Complete | 2026-02-04 |
 | 6. Desktop UI | 0/3 | Not started | - |
 | 7. Enhancements | 0/2 | Not started | - |
 
 ---
-*Last updated: 2026-02-04 after Phase 4 completion*
+*Last updated: 2026-02-04 after Phase 5 completion*

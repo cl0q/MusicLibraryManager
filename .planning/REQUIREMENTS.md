@@ -44,11 +44,11 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Device Sync
 
-- [ ] **SYNC-01**: System copies transcoded files to device via filesystem
-- [ ] **SYNC-02**: System generates M3U8 playlists with Rockbox-compatible paths
-- [ ] **SYNC-03**: Sync is incremental (only new/changed files transfer)
-- [ ] **SYNC-04**: System tracks sync state per device
-- [ ] **SYNC-05**: User can see what will sync before syncing (dry run)
+- [x] **SYNC-01**: System copies transcoded files to device via filesystem
+- [x] **SYNC-02**: System generates M3U8 playlists with Rockbox-compatible paths
+- [x] **SYNC-03**: Sync is incremental (only new/changed files transfer)
+- [x] **SYNC-04**: System tracks sync state per device
+- [x] **SYNC-05**: User can see what will sync before syncing (dry run)
 
 ### Dashboard UI
 
@@ -124,11 +124,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PL-04 | Phase 4 | Complete |
 | PL-05 | Phase 4 | Complete |
 | PL-06 | Phase 4 | Complete |
-| SYNC-01 | Phase 5 | Pending |
-| SYNC-02 | Phase 5 | Pending |
-| SYNC-03 | Phase 5 | Pending |
-| SYNC-04 | Phase 5 | Pending |
-| SYNC-05 | Phase 5 | Pending |
+| SYNC-01 | Phase 5 | Complete |
+| SYNC-02 | Phase 5 | Complete |
+| SYNC-03 | Phase 5 | Complete |
+| SYNC-04 | Phase 5 | Complete |
+| SYNC-05 | Phase 5 | Complete |
 | UI-01 | Phase 6 | Pending |
 | UI-02 | Phase 6 | Pending |
 | UI-03 | Phase 6 | Pending |
@@ -145,4 +145,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-02-03*
-*Last updated: 2026-02-04 after Phase 4 completion*
+*Last updated: 2026-02-04 after Phase 5 completion*
