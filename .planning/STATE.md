@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 
 ## Current Position
 
-Phase: 3 of 7 (Multi-Source Aggregation) — VERIFIED ✓
-Plan: 6 of 6 in current phase
-Status: Phase verified, ready for Phase 4
-Last activity: 2026-02-04 — Phase 3 verified (5/5 must-haves passed)
+Phase: 4 of 7 (Playlist Management)
+Plan: 1 of 4 in current phase
+Status: In progress
+Last activity: 2026-02-04 — Completed 04-01-PLAN.md
 
-Progress: [████████████████████] 100% (15 of 15 concrete plans complete)
+Progress: [████████████████████░░░] 94% (16 of 17 concrete plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 15
-- Average duration: 4m 24s
-- Total execution time: 1.10 hours
+- Total plans completed: 16
+- Average duration: 4m 18s
+- Total execution time: 1.15 hours
 
 *Updated after each plan completion*
 
@@ -92,6 +92,9 @@ Recent decisions affecting current work:
 - **spawn_blocking + block_on for rusqlite in async Tauri commands** — Connection is !Send; spawn_blocking keeps it on one thread, block_on re-enters runtime (2026-02-04)
 - **OAuthState with Mutex for PKCE verifiers** — Temporary storage between auth URL generation and code exchange command invocations (2026-02-04)
 - **default_user placeholder for startup sync** — Single-user desktop app; multi-user deferred to Phase 6 (2026-02-04)
+- **Schema version 3 for Phase 4** — Playlists, playlist_tracks, playlist_tags tables with fractional indexing (2026-02-04)
+- **Fractional indexing for playlist ordering** — TEXT column for position eliminates rebalancing, supports unlimited reordering (2026-02-04)
+- **PlaylistCategory enum** — Type-safe representation of liked/smart/regular playlist types (2026-02-04)
 
 ### Learnings from Python Implementation
 
@@ -148,7 +151,13 @@ None yet.
 - Download priority: SoundCloud -> DAB -> YouTube for SC-sourced tracks
 - Credentials loaded from .env via dotenvy (src-tauri/.env.example for template)
 - OAuth live testing deferred until user configures credentials in .env
-- Next: Phase 4 Playlist Management
+
+**Phase 4 (Playlist Management):** IN PROGRESS
+- Plan 04-01 complete: Schema version 3 with playlists, playlist_tracks, playlist_tags
+- 190 tests passing (5 new playlist model tests)
+- Fractional indexing support in playlist_tracks.position (TEXT column)
+- PlaylistCategory enum for type-safe playlist categorization
+- Next: 04-02 core playlist operations (CRUD, track management)
 
 **Phase 5 (Device Sync):**
 - Rockbox M3U8 compatibility specifics unknown (relative vs absolute paths, encoding)
@@ -157,8 +166,8 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-04
-Stopped at: Phase 3 verified, ready for Phase 4
+Stopped at: Completed 04-01-PLAN.md
 Resume file: None
 
 ---
-*Last updated: 2026-02-04 after Phase 3 verification*
+*Last updated: 2026-02-04 after completing plan 04-01*
