@@ -146,6 +146,10 @@ Recent decisions affecting current work:
 - **Map-based download state** — Map<string, DownloadProgressEvent> for O(1) updates by track_id during real-time progress events (2026-02-04)
 - **Download display sort priority** — Active downloads first (downloading/transcoding), then failed, completed, queued for user awareness (2026-02-04)
 - **Separate queue status API** — Retry queue (pending_count, failed_count) tracked independently from real-time progress events (2026-02-04)
+- **TanStack React Table + Virtual for library browser** — Handles 10k+ tracks with smooth scrolling via virtualization (2026-02-04)
+- **Client-side filtering with useMemo** — Instant search responsiveness for <100k tracks, simpler than server-side filtering (2026-02-04)
+- **40px row height with 5 row overscan** — Standard table density with smooth virtual scrolling (2026-02-04)
+- **Empty query returns all tracks** — search_library("") fetches entire library, consistent search UX pattern (2026-02-04)
 
 ### Learnings from Python Implementation
 
@@ -288,8 +292,8 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-04
-Stopped at: Completed 06-04-PLAN.md (Downloads Page)
+Stopped at: Completed 06-03-PLAN.md (Library Browser) and 06-04-PLAN.md (Downloads Page)
 Resume file: None
 
 ---
-*Last updated: 2026-02-04 after completing Plan 06-04*
+*Last updated: 2026-02-04 after completing Plans 06-03 and 06-04*
