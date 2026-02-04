@@ -11,7 +11,8 @@ use crate::database::connection::Result;
 /// - Version 0: Initial state (no schema)
 /// - Version 1: Phase 1 schema (tracks table)
 /// - Version 2: Phase 3 schema (sources, track_sources, last_sync_timestamps, variant_of)
-pub const CURRENT_SCHEMA_VERSION: i32 = 2;
+/// - Version 3: Phase 4 schema (playlists, playlist_tracks, playlist_tags)
+pub const CURRENT_SCHEMA_VERSION: i32 = 3;
 
 /// SQL schema for the music library database (Phase 1 - base schema).
 ///
@@ -80,6 +81,54 @@ CREATE TABLE IF NOT EXISTS last_sync_timestamps (
 );
 ";
 
+/// SQL schema for Phase 4 playlist management tables.
+///
+/// Contains:
+/// - `playlists` table: User-created and synced playlists with categorization
+/// - `playlist_tracks` table: Track membership in playlists with fractional indexing for ordering
+/// - `playlist_tags` table: Flexible tagging system for playlist organization
+pub const PHASE4_SCHEMA_SQL: &str = "
+-- Playlists table: User-created and synced playlists
+CREATE TABLE IF NOT EXISTS playlists (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    category TEXT NOT NULL,          -- 'liked' | 'smart' | 'regular'
+    is_liked INTEGER DEFAULT 0,      -- 1 if this is the Liked Songs playlist
+    is_smart INTEGER DEFAULT 0,      -- 1 if this is a smart playlist with rules
+    is_pinned INTEGER DEFAULT 0,     -- 1 if pinned to top of UI
+    cover_image_path TEXT,           -- Local cover image path
+    cover_image_url TEXT,            -- Remote cover image URL
+    source_id INTEGER,               -- FK to sources.id if synced from external source
+    external_id TEXT,                -- External playlist ID if mirrored from source
+    date_created TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_playlist_category ON playlists(category);
+
+-- Playlist tracks table: Track membership with fractional indexing
+CREATE TABLE IF NOT EXISTS playlist_tracks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    playlist_id INTEGER NOT NULL,
+    track_id INTEGER NOT NULL,
+    position TEXT NOT NULL,          -- Fractional index for stable ordering
+    added_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(playlist_id, track_id),   -- Prevent duplicate track references
+    FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+    FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_playlist_position ON playlist_tracks(playlist_id, position);
+
+-- Playlist tags table: Flexible tagging for organization
+CREATE TABLE IF NOT EXISTS playlist_tags (
+    playlist_id INTEGER NOT NULL,
+    tag TEXT NOT NULL,
+    PRIMARY KEY (playlist_id, tag),
+    FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_tag ON playlist_tags(tag);
+";
+
 /// Get the current schema version from the database.
 pub fn get_schema_version(conn: &Connection) -> Result<i32> {
     let version: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -120,6 +169,13 @@ fn migrate_to_v2(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Run Phase 4 migrations: create playlist management tables.
+fn migrate_to_v3(conn: &Connection) -> Result<()> {
+    // Create Phase 4 tables (IF NOT EXISTS makes this safe to re-run)
+    conn.execute_batch(PHASE4_SCHEMA_SQL)?;
+    Ok(())
+}
+
 /// Initialize the database schema with versioned migrations.
 ///
 /// Creates all tables and indexes, applying migrations as needed.
@@ -145,7 +201,13 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
     // Apply Phase 3 migrations if needed
     if get_schema_version(conn)? < 2 {
         migrate_to_v2(conn)?;
-        set_schema_version(conn, CURRENT_SCHEMA_VERSION)?;
+        set_schema_version(conn, 2)?;
+    }
+
+    // Apply Phase 4 migrations if needed
+    if get_schema_version(conn)? < 3 {
+        migrate_to_v3(conn)?;
+        set_schema_version(conn, 3)?;
     }
 
     Ok(())
