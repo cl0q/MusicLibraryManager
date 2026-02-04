@@ -630,6 +630,96 @@ mod tests {
     }
 
     #[test]
+    fn test_execute_sync_links_files() {
+        let conn = get_memory_connection().unwrap();
+        initialize_schema(&conn).unwrap();
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create profile
+        let profile_id = create_sync_profile(
+            &conn,
+            "Test".to_string(),
+            temp_dir.path().join("profile"),
+        )
+        .unwrap();
+
+        // Add track to profile
+        let track_id = create_test_track(&conn, "Track 1");
+        add_manual_track(&conn, profile_id, track_id).unwrap();
+
+        // Create cache with file
+        let cache_dir = temp_dir.path().join("cache");
+        let cache = TranscodeCache::new(cache_dir.clone()).unwrap();
+        let cache_path = cache.get_cache_path(track_id, Path::new("/test/Track_1.flac"));
+        fs::write(&cache_path, b"test audio data").unwrap();
+
+        // Get profile
+        let profile = crate::sync::profile::get_sync_profile(&conn, profile_id).unwrap();
+
+        // Compute preview
+        let preview = compute_sync_preview(&conn, &profile, &cache, Some(100_000_000)).unwrap();
+
+        // Execute sync
+        let result = execute_sync(&conn, &profile, &cache, &preview).unwrap();
+
+        // Should have synced 1 file
+        assert_eq!(result.synced_count, 1);
+        assert_eq!(result.failed_count, 0);
+
+        // Verify file was linked to profile folder
+        let track = get_track(&conn, track_id).unwrap();
+        let dest_path = cache.build_profile_path(&profile.output_folder, &track).unwrap();
+        assert!(dest_path.exists());
+    }
+
+    #[test]
+    fn test_execute_sync_updates_state() {
+        let conn = get_memory_connection().unwrap();
+        initialize_schema(&conn).unwrap();
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create profile
+        let profile_id = create_sync_profile(
+            &conn,
+            "Test".to_string(),
+            temp_dir.path().join("profile"),
+        )
+        .unwrap();
+
+        // Add track
+        let track_id = create_test_track(&conn, "Track 1");
+        add_manual_track(&conn, profile_id, track_id).unwrap();
+
+        // Create cache
+        let cache_dir = temp_dir.path().join("cache");
+        let cache = TranscodeCache::new(cache_dir.clone()).unwrap();
+        let cache_path = cache.get_cache_path(track_id, Path::new("/test/Track_1.flac"));
+        fs::write(&cache_path, b"test audio data").unwrap();
+
+        // Get profile
+        let profile = crate::sync::profile::get_sync_profile(&conn, profile_id).unwrap();
+
+        // Compute and execute sync
+        let preview = compute_sync_preview(&conn, &profile, &cache, Some(100_000_000)).unwrap();
+        execute_sync(&conn, &profile, &cache, &preview).unwrap();
+
+        // Verify sync_state was updated
+        let synced = get_synced_tracks(&conn, profile_id).unwrap();
+        assert_eq!(synced.len(), 1);
+        assert!(synced.contains(&track_id));
+
+        // Verify checksum was stored
+        let mut stmt = conn
+            .prepare("SELECT synced_checksum FROM sync_state WHERE profile_id = ? AND track_id = ?")
+            .unwrap();
+        let checksum: String = stmt
+            .query_row([profile_id, track_id], |row| row.get(0))
+            .unwrap();
+        assert!(!checksum.is_empty());
+        assert_eq!(checksum.len(), 64); // SHA256 is 64 hex chars
+    }
+
+    #[test]
     fn test_clean_removed_tracks() {
         let conn = get_memory_connection().unwrap();
         initialize_schema(&conn).unwrap();
