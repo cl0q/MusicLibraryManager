@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 
 ## Current Position
 
-Phase: 6 of 7 (Desktop UI) — PHASE COMPLETE
-Plan: 5 of 5 in current phase (all plans complete)
-Status: Phase 6 complete - full desktop UI with all features integrated
-Last activity: 2026-02-04 — Completed 06-05-PLAN.md (Context Menus & Component Integration)
+Phase: 6 of 7 (Desktop UI) — Gap closure in progress
+Plan: 6 of 7 in current phase
+Status: Completed gap closure plan 06-06 (Dashboard Stats)
+Last activity: 2026-02-04 — Completed 06-06-PLAN.md (Dashboard Stats Gap Closure)
 
-Progress: [████████████████████████████████] 100.0% (30 of 30 concrete plans complete)
+Progress: [████████████████████████████████] 100.0% (31 of 31 concrete plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 29
-- Average duration: 19m 41s
-- Total execution time: 9.30 hours
+- Total plans completed: 31
+- Average duration: 18m 18s
+- Total execution time: 9.45 hours
 
 *Updated after each plan completion*
 
@@ -156,6 +156,12 @@ Recent decisions affecting current work:
 - **convertFileSrc for Tauri audio URLs** — @tauri-apps/api/core function converts local paths to Tauri-compatible URLs for WaveSurfer (2026-02-04)
 - **Page wrapper pattern for component integration** — Thin wrapper pages route existing Phase 3-5 components into MainLayout (2026-02-04)
 - **color-scheme meta tag** — <meta name="color-scheme" content="dark light" /> enables proper OS dark mode detection (2026-02-04)
+- **File size sum from original_path** — Dashboard storage stat calculated from actual file system metadata, not database field (2026-02-04)
+- **Skip missing files in storage calculation** — Tracks may be moved/deleted; sum available files without failing entire query (2026-02-04)
+- **Global last sync from sync_state DESC** — Most recent synced_timestamp across all profiles for dashboard display (2026-02-04)
+- **formatBytes utility** — Standard byte formatting (B/KB/MB/GB/TB) with 2 decimal places for human readability (2026-02-04)
+- **formatRelativeTime utility** — Relative time display (m/h/d ago) for recent events, full date for older (2026-02-04)
+- **sync:completed event for auto-refresh** — Dashboard listens for sync events to update last sync time in real-time (2026-02-04)
 
 ### Learnings from Python Implementation
 
@@ -305,8 +311,8 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-04
-Stopped at: Completed 06-05-PLAN.md (Context Menus & Component Integration) - Phase 6 complete
+Stopped at: Completed 06-06-PLAN.md (Dashboard Stats Gap Closure)
 Resume file: None
 
 ---
-*Last updated: 2026-02-04 after completing Plan 06-05 (Phase 6 complete - all 30 concrete plans finished)*
+*Last updated: 2026-02-04 after completing Plan 06-06 (Gap closure - Dashboard stats implementation)*
