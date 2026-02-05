@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 7 of 7 (Enhancements)
-Plan: 1 of 4 in current phase
+Plan: 2 of 6 in current phase
 Status: In progress
-Last activity: 2026-02-05 — Completed 07-01-PLAN.md (Phase 7 Foundation Layer)
+Last activity: 2026-02-05 — Completed 07-02-PLAN.md (Acoustic Fingerprinting)
 
-Progress: [█████████████████████████████████] 100.0% (33 of 33 concrete plans complete)
+Progress: [█████████████████████████████████] 100.0% (34 of 34 concrete plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 33
-- Average duration: 17m 26s
-- Total execution time: 9.61 hours
+- Total plans completed: 34
+- Average duration: 21m 35s
+- Total execution time: 12.23 hours
 
 *Updated after each plan completion*
 
@@ -117,6 +117,11 @@ Recent decisions affecting current work:
 - **Shared PCM decode pipeline** — Single decode_to_pcm function using Symphonia for both fingerprinting and ReplayGain to avoid code duplication (2026-02-05)
 - **Clone codec_params before decode loop** — Cloning codec params avoids borrow checker issues with format.next_packet() during decode (2026-02-05)
 - **Graceful decode error handling** — Skip corrupted packets and recreate decoder on ResetRequired instead of failing entire file (2026-02-05)
+- **BLOB storage for fingerprints** — Raw u32 fingerprint data stored as BLOB with little-endian encoding for platform independence (2026-02-05)
+- **Base64 encoding for AcoustID API** — Converts raw u32 fingerprints to base64 strings for api.acoustid.org submission (2026-02-05)
+- **0.5 default duplicate threshold** — Conservative threshold for fingerprint-based duplicate detection balances precision/recall (2026-02-05)
+- **Segment-based fingerprint scoring** — Similarity score is ratio of longest matching segment to shorter fingerprint length (2026-02-05)
+- **Configuration::preset_test2() for Chromaprint** — Consistent fingerprint configuration for reproducible results (2026-02-05)
 - **Three-source union for profile content** — Manual tracks + playlists + query rules combined via HashSet for deduplicated track IDs (2026-02-04)
 - **Query-time content resolution** — get_all_track_ids() computes union on each call for dynamic smart-playlist-like behavior (2026-02-04)
 - **Field/operator/value filter rule structure** — Extensible query pattern supporting eq/ne/gt/lt/contains/in operators across genre/artist/bitrate/date_added/source/tag (2026-02-04)
@@ -340,12 +345,28 @@ None yet.
   - Phase 7 dependencies added: rusty-chromaprint, ebur128, musicbrainz_rs, image
   - 2 unit tests for decoder, 3 new tests for schema migration
   - All 13 schema tests passing, cargo check passes with new dependencies
+- Plan 07-02 (Acoustic Fingerprinting): ✓ COMPLETE
+  - Chromaprint fingerprint generation from PCM samples using rusty-chromaprint
+  - fingerprint_track() decodes audio and generates fingerprint
+  - BLOB storage with little-endian u32 encoding for database persistence
+  - save_fingerprint() and load_fingerprint() with roundtrip verification
+  - get_unfingerprinted_tracks() for incremental processing
+  - batch_fingerprint() for bulk operations with error tracking
+  - AcoustID client with compress_fingerprint() and lookup_acoustid()
+  - Base64 encoding for api.acoustid.org submission
+  - save_acoustid_result() for MusicBrainz recording ID persistence
+  - Local matcher with compare_fingerprints() returning 0.0-1.0 similarity score
+  - are_duplicates() with 0.5 default threshold
+  - find_fingerprint_duplicates() for O(n) duplicate detection
+  - 13 unit tests: 4 chromaprint, 4 acoustid, 5 matcher
+  - All tests passing, AcoustID requires ACOUSTID_API_KEY in .env for live use
+  - Fixed lofty WriteOptions import path (Rule 3 blocking issue)
 
 ## Session Continuity
 
 Last session: 2026-02-05
-Stopped at: Completed 07-01-PLAN.md (Phase 7 Foundation Layer)
+Stopped at: Completed 07-02-PLAN.md (Acoustic Fingerprinting)
 Resume file: None
 
 ---
-*Last updated: 2026-02-05 after completing Plan 07-01 (Phase 7 Foundation Layer)*
+*Last updated: 2026-02-05 after completing Plan 07-02 (Acoustic Fingerprinting)*
