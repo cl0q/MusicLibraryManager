@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 7 of 7 (Enhancements)
-Plan: 3 of 6 in current phase
+Plan: 5 of 6 in current phase
 Status: In progress
-Last activity: 2026-02-05 — Completed 07-03-PLAN.md (Artwork Fetching & Embedding)
+Last activity: 2026-02-05 — Completed 07-05-PLAN.md (Fingerprint Dedup & Review Queue)
 
-Progress: [█████████████████████████████████] 100.0% (35 of 35 concrete plans complete)
+Progress: [█████████████████████████████████] 100.0% (37 of 37 concrete plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 34
-- Average duration: 21m 35s
-- Total execution time: 12.23 hours
+- Total plans completed: 35
+- Average duration: 21m 10s
+- Total execution time: 12.33 hours
 
 *Updated after each plan completion*
 
@@ -176,6 +176,11 @@ Recent decisions affecting current work:
 - **useSyncProgress hook for real-time sync tracking** — Map-based state keyed by profile_id, auto-removes completed operations after 3 seconds (2026-02-05)
 - **Four sync event types** — sync:started, sync:progress, sync:completed, sync:failed for comprehensive operation tracking (2026-02-05)
 - **StatusBar combines download and sync operations** — Unified operation display using useDownloadProgress and useSyncProgress hooks (2026-02-05)
+- **Fingerprint conflicts flagged when metadata differs** — title OR artist similarity < 0.7 triggers "metadata_conflict" action_type (2026-02-05)
+- **Auto-merge duplicates when metadata agrees** — Quality comparison (lossless > lossy, then bitrate) determines which to keep (2026-02-05)
+- **0.4 fingerprint similarity threshold** — Fingerprint duplicate detection threshold balances precision/recall (2026-02-05)
+- **Best-effort fingerprinting on import** — Post-commit processing, failures logged via log::warn, don't block import (2026-02-05)
+- **Review queue stores JSON details** — Both tracks with full metadata (title, artist, album, format, bitrate) for user audit (2026-02-05)
 
 ### Learnings from Python Implementation
 
@@ -381,12 +386,24 @@ None yet.
   - Best-effort tagging: sync continues even if gain values not calculated
   - Library originals stay pristine: tags written only to synced copies
   - 7 unit tests passing (5 analyzer, 2 tagger)
+- Plan 07-05 (Fingerprint Dedup & Review Queue): ✓ COMPLETE
+  - dedup/fingerprint.rs: fingerprint-based duplicate detection with quality comparison
+  - detect_fingerprint_duplicates: compare fingerprints with 0.4+ threshold
+  - process_fingerprint_duplicate: auto-merge or flag based on metadata similarity
+  - Metadata conflicts (title/artist < 0.7) flagged with "metadata_conflict" action type
+  - Auto-decisions log kept/marked tracks with full quality comparison
+  - Quality comparison: lossless > lossy, then bitrate (using transcode::format)
+  - Review queue: add_to_review_queue, get_review_queue, resolve_review_item
+  - deep_scan_library: O(n²) full library comparison with stats
+  - Import pipeline integration: post-commit fingerprinting and duplicate detection
+  - Best-effort fingerprinting: failures logged, don't block import
+  - 5 unit tests: add queue, resolve, metadata conflict, auto-keep, skip existing
 
 ## Session Continuity
 
 Last session: 2026-02-05
-Stopped at: Completed 07-04-PLAN.md (ReplayGain Loudness Analysis)
+Stopped at: Completed 07-05-PLAN.md (Fingerprint Dedup & Review Queue)
 Resume file: None
 
 ---
-*Last updated: 2026-02-05 after completing Plan 07-04 (ReplayGain Loudness Analysis)*
+*Last updated: 2026-02-05 after completing Plan 07-05 (Fingerprint Dedup & Review Queue)*
