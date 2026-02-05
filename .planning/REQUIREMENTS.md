@@ -60,9 +60,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Enhancements
 
-- [ ] **ENH-01**: System uses acoustic fingerprinting (AcoustID/Chromaprint) for better duplicate detection
-- [ ] **ENH-02**: System fetches and embeds album artwork automatically
-- [ ] **ENH-03**: System applies ReplayGain for consistent volume across tracks
+- [x] **ENH-01**: System uses acoustic fingerprinting (AcoustID/Chromaprint) for better duplicate detection
+- [x] **ENH-02**: System fetches and embeds album artwork automatically
+- [x] **ENH-03**: System applies ReplayGain for consistent volume across tracks
 
 ## v2 Requirements
 
@@ -134,15 +134,15 @@ Which phases cover which requirements. Updated during roadmap creation.
 | UI-03 | Phase 6 | Complete |
 | UI-04 | Phase 6 | Complete |
 | UI-05 | Phase 6 | Complete |
-| ENH-01 | Phase 7 | Pending |
-| ENH-02 | Phase 7 | Pending |
-| ENH-03 | Phase 7 | Pending |
+| ENH-01 | Phase 7 | Complete |
+| ENH-02 | Phase 7 | Complete |
+| ENH-03 | Phase 7 | Complete |
 
 **Coverage:**
 - v1 requirements: 33 total
 - Mapped to phases: 33
-- Unmapped: 0
+- Complete: 33/33 (100%)
 
 ---
 *Requirements defined: 2026-02-03*
-*Last updated: 2026-02-05 after Phase 6 completion*
+*Last updated: 2026-02-05 — ALL v1 REQUIREMENTS COMPLETE*
