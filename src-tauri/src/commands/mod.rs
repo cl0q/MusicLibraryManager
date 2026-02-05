@@ -24,11 +24,19 @@
 //! - detect_rockbox_devices_cmd: Detect connected Rockbox devices
 //! - preview_sync_cmd: Preview sync operations (dry-run)
 //! - execute_sync_cmd: Execute full sync to device/folder
+//! - fingerprint_library_cmd: Batch generate Chromaprint fingerprints
+//! - fetch_artwork_cmd: Batch fetch album artwork
+//! - analyze_replaygain_cmd: Batch analyze ReplayGain values
+//! - deep_scan_cmd: Fingerprint-based duplicate detection
+//! - get_review_queue_cmd: Retrieve review queue entries
+//! - resolve_review_item_cmd: Approve/reject/dismiss review items
+//! - get_review_queue_count_cmd: Get pending review count for sidebar badge
 //!
 //! Commands are registered in lib.rs via tauri::generate_handler![]
 
 pub mod download;
 pub mod duplicate;
+pub mod enhancements;
 pub mod import;
 pub mod playlist;
 pub mod search;
@@ -38,6 +46,10 @@ pub mod sync;
 // Re-export commands for registration
 pub use download::{download_tracks, get_retry_queue_status, retry_failed_downloads};
 pub use duplicate::detect_duplicates;
+pub use enhancements::{
+    analyze_replaygain_cmd, deep_scan_cmd, fetch_artwork_cmd, fingerprint_library_cmd,
+    get_review_queue_cmd, get_review_queue_count_cmd, resolve_review_item_cmd,
+};
 pub use import::import_directory;
 pub use playlist::{
     add_track_to_playlist_command, create_playlist_command, get_playlist_tracks_command,

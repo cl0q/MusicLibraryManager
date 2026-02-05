@@ -82,6 +82,13 @@ pub fn run() {
             commands::sync::preview_sync_cmd,
             commands::sync::execute_sync_cmd,
             commands::sync::get_last_sync_time,
+            commands::enhancements::fingerprint_library_cmd,
+            commands::enhancements::fetch_artwork_cmd,
+            commands::enhancements::analyze_replaygain_cmd,
+            commands::enhancements::deep_scan_cmd,
+            commands::enhancements::get_review_queue_cmd,
+            commands::enhancements::resolve_review_item_cmd,
+            commands::enhancements::get_review_queue_count_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
