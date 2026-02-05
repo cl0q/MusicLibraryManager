@@ -5,6 +5,7 @@ pub mod database;
 pub mod dedup;
 pub mod download;
 pub mod duplicate;
+pub mod fingerprint;
 pub mod import;
 pub mod metadata;
 pub mod models;
