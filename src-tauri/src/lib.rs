@@ -10,7 +10,7 @@ pub mod fingerprint;
 pub mod import;
 pub mod metadata;
 pub mod models;
-// pub mod replaygain;
+pub mod replaygain;
 pub mod search;
 pub mod sources;
 pub mod startup;
