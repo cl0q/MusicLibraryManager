@@ -18,7 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 4: Playlist Management** - Create, edit, reorder playlists with order preservation
 - [x] **Phase 5: Device Sync** - Incremental sync to Rockbox iPod with M3U8 playlist generation
 - [x] **Phase 6: Desktop UI** - Tauri + React dashboard with library browser and real-time progress
-- [ ] **Phase 7: Enhancements** - Acoustic fingerprinting, artwork, ReplayGain normalization
+- [x] **Phase 7: Enhancements** - Acoustic fingerprinting, artwork, ReplayGain normalization
 
 ## Phase Details
 
@@ -178,12 +178,12 @@ Plans:
 **Plans**: 6 plans in 4 waves
 
 Plans:
-- [ ] 07-01-PLAN.md — Database schema v5 migration and shared audio PCM decoder
-- [ ] 07-02-PLAN.md — Acoustic fingerprinting (Chromaprint + AcoustID + local comparison)
-- [ ] 07-03-PLAN.md — Album artwork fetching, caching, and embedding
-- [ ] 07-04-PLAN.md — ReplayGain analysis and sync pipeline integration
-- [ ] 07-05-PLAN.md — Fingerprint-based dedup and review queue logic
-- [ ] 07-06-PLAN.md — Tauri commands, review queue UI, and integration
+- [x] 07-01-PLAN.md — Database schema v5 migration and shared audio PCM decoder
+- [x] 07-02-PLAN.md — Acoustic fingerprinting (Chromaprint + AcoustID + local comparison)
+- [x] 07-03-PLAN.md — Album artwork fetching, caching, and embedding
+- [x] 07-04-PLAN.md — ReplayGain analysis and sync pipeline integration
+- [x] 07-05-PLAN.md — Fingerprint-based dedup and review queue logic
+- [x] 07-06-PLAN.md — Tauri commands, review queue UI, and integration
 
 ## Progress
 
@@ -198,7 +198,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 4. Playlist Management | 5/5 | ✓ Complete | 2026-02-04 |
 | 5. Device Sync | 5/5 | ✓ Complete | 2026-02-04 |
 | 6. Desktop UI | 7/7 | ✓ Complete | 2026-02-05 |
-| 7. Enhancements | 0/6 | Not started | - |
+| 7. Enhancements | 6/6 | ✓ Complete | 2026-02-05 |
 
 ---
-*Last updated: 2026-02-05 after planning Phase 7 enhancements*
+*Last updated: 2026-02-05 after completing Phase 7 enhancements — MILESTONE COMPLETE*
