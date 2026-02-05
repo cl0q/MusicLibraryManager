@@ -137,6 +137,8 @@ pub fn import_batch(conn: &mut Connection, files: Vec<PathBuf>) -> DbResult<Impo
 /// Generates organized paths and inserts tracks. The entire batch
 /// either commits successfully or rolls back completely.
 ///
+/// After successful batch insert, fingerprints each track and checks for duplicates.
+///
 /// # Arguments
 /// * `conn` - Database connection
 /// * `metadata_list` - List of extracted metadata to save
@@ -145,23 +147,64 @@ pub fn import_batch(conn: &mut Connection, files: Vec<PathBuf>) -> DbResult<Impo
 /// * `Ok(usize)` - Number of tracks successfully inserted
 /// * `Err(DatabaseError)` - Transaction failed (rolled back)
 fn save_batch(conn: &mut Connection, metadata_list: Vec<TrackMetadata>) -> DbResult<usize> {
-    with_transaction(conn, |tx| {
+    // Track IDs and paths for fingerprinting after commit
+    let mut inserted_tracks: Vec<(i64, String)> = Vec::new();
+
+    let count = with_transaction(conn, |tx| {
         let mut count = 0;
 
         for metadata in metadata_list {
-            insert_track(tx, &metadata)?;
+            let track_id = insert_track(tx, &metadata)?;
+            inserted_tracks.push((track_id, metadata.original_path.clone()));
             count += 1;
         }
 
         Ok(count)
-    })
+    })?;
+
+    // FINGERPRINT INTEGRATION POINT
+    // After successful transaction commit, fingerprint each newly imported track
+    // This is best-effort: fingerprinting failures are logged but don't block import
+    for (track_id, path) in inserted_tracks {
+        // Fingerprint the new track (best-effort, non-blocking)
+        match crate::fingerprint::chromaprint::fingerprint_track(std::path::Path::new(&path)) {
+            Ok((fp, duration)) => {
+                if let Err(e) = crate::fingerprint::chromaprint::save_fingerprint(conn, track_id, &fp, duration) {
+                    log::warn!("Failed to save fingerprint for track {}: {}", track_id, e);
+                }
+
+                // Check for fingerprint duplicates
+                match crate::dedup::fingerprint::detect_fingerprint_duplicates(conn, track_id) {
+                    Ok(dups) => {
+                        for (dup_id, score) in dups {
+                            if let Err(e) = crate::dedup::fingerprint::process_fingerprint_duplicate(conn, track_id, dup_id, score) {
+                                log::warn!("Failed to process fingerprint duplicate for track {}: {}", track_id, e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to detect fingerprint duplicates for track {}: {}", track_id, e);
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to fingerprint track during import: {} - {}", path, e);
+            }
+        }
+    }
+
+    Ok(count)
 }
 
 /// Insert a single track into the database.
 ///
 /// Generates the organized path from metadata and inserts all fields.
 /// Uses the schema from 01-01: tracks table with metadata fields.
-fn insert_track(tx: &Transaction, metadata: &TrackMetadata) -> Result<(), DatabaseError> {
+///
+/// # Returns
+/// * `Ok(i64)` - Track ID of the newly inserted track
+/// * `Err(DatabaseError)` - If insert fails
+fn insert_track(tx: &Transaction, metadata: &TrackMetadata) -> Result<i64, DatabaseError> {
     let organized_path = generate_organized_path(metadata);
 
     tx.execute(
@@ -182,7 +225,7 @@ fn insert_track(tx: &Transaction, metadata: &TrackMetadata) -> Result<(), Databa
         ],
     )?;
 
-    Ok(())
+    Ok(tx.last_insert_rowid())
 }
 
 #[cfg(test)]
