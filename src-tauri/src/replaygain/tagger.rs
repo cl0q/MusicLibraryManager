@@ -6,7 +6,7 @@ use lofty::config::WriteOptions;
 use lofty::file::AudioFile;
 use lofty::prelude::*;
 use lofty::probe::Probe;
-use lofty::tag::{ItemKey, ItemValue, Tag, TagItem, TagType};
+use lofty::tag::{ItemKey, ItemValue, Tag, TagItem};
 use std::path::Path;
 use thiserror::Error;
 

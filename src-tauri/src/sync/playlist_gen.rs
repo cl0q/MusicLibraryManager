@@ -3,7 +3,7 @@
 //! Generates RFC-compliant M3U8 playlists with relative paths that work
 //! with Rockbox firmware on iPods and other supported devices.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use anyhow::{Result, Context};
