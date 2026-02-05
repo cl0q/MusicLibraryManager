@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 
 ## Current Position
 
-Phase: 6 of 7 (Desktop UI) — Phase complete
-Plan: 7 of 7 in current phase
-Status: Completed gap closure plan 06-07 (Sync Operations & Real-Time Feedback)
-Last activity: 2026-02-05 — Completed 06-07-PLAN.md (Sync Operations Gap Closure)
+Phase: 7 of 7 (Enhancements)
+Plan: 1 of 4 in current phase
+Status: In progress
+Last activity: 2026-02-05 — Completed 07-01-PLAN.md (Phase 7 Foundation Layer)
 
-Progress: [████████████████████████████████] 100.0% (32 of 32 concrete plans complete)
+Progress: [█████████████████████████████████] 100.0% (33 of 33 concrete plans complete)
 
 ## Tech Stack Change
 
@@ -29,9 +29,9 @@ New project structure:
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 32
-- Average duration: 17m 53s
-- Total execution time: 9.54 hours
+- Total plans completed: 33
+- Average duration: 17m 26s
+- Total execution time: 9.61 hours
 
 *Updated after each plan completion*
 
@@ -113,6 +113,10 @@ Recent decisions affecting current work:
 - **Idempotent add_liked_track** — Safe to call multiple times with same track, prevents duplicate entries in liked playlists (2026-02-04)
 - **External_id format for playlist tracking** — spotify:playlist:{id} and soundcloud:{id} stored in playlists.external_id for refresh operations (2026-02-04)
 - **Schema version 4 for Phase 5** — Sync profiles, sync_profile_tracks, sync_profile_playlists, sync_profile_rules, sync_state tables (2026-02-04)
+- **Schema version 5 for Phase 7** — Fingerprints, artwork, replaygain, review_queue tables with indexes (2026-02-05)
+- **Shared PCM decode pipeline** — Single decode_to_pcm function using Symphonia for both fingerprinting and ReplayGain to avoid code duplication (2026-02-05)
+- **Clone codec_params before decode loop** — Cloning codec params avoids borrow checker issues with format.next_packet() during decode (2026-02-05)
+- **Graceful decode error handling** — Skip corrupted packets and recreate decoder on ResetRequired instead of failing entire file (2026-02-05)
 - **Three-source union for profile content** — Manual tracks + playlists + query rules combined via HashSet for deduplicated track IDs (2026-02-04)
 - **Query-time content resolution** — get_all_track_ids() computes union on each call for dynamic smart-playlist-like behavior (2026-02-04)
 - **Field/operator/value filter rule structure** — Extensible query pattern supporting eq/ne/gt/lt/contains/in operators across genre/artist/bitrate/date_added/source/tag (2026-02-04)
@@ -326,11 +330,22 @@ None yet.
   - Auto-removes completed operations after 3 seconds
   - All Phase 6 verification gaps closed (Gap 1: Sync Operations, Gap 4: StatusBar)
 
+**Phase 7 (Enhancements):** IN PROGRESS
+- Plan 07-01 (Foundation Layer): ✓ COMPLETE
+  - Schema version 5 with fingerprints, artwork, replaygain, review_queue tables
+  - PHASE7_SCHEMA_SQL constant with 4 new tables and 2 indexes
+  - migrate_to_v5() function for automatic v4→v5 upgrade
+  - Shared audio PCM decoder (decode_to_pcm) using Symphonia
+  - Returns (Vec<i16>, sample_rate, channels) for fingerprinting and ReplayGain
+  - Phase 7 dependencies added: rusty-chromaprint, ebur128, musicbrainz_rs, image
+  - 2 unit tests for decoder, 3 new tests for schema migration
+  - All 13 schema tests passing, cargo check passes with new dependencies
+
 ## Session Continuity
 
 Last session: 2026-02-05
-Stopped at: Completed 06-07-PLAN.md (Sync Operations Gap Closure)
+Stopped at: Completed 07-01-PLAN.md (Phase 7 Foundation Layer)
 Resume file: None
 
 ---
-*Last updated: 2026-02-05 after completing Plan 06-07 (Gap closure - Sync operations implementation)*
+*Last updated: 2026-02-05 after completing Plan 07-01 (Phase 7 Foundation Layer)*
