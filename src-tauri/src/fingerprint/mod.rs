@@ -10,4 +10,6 @@ pub mod chromaprint;
 pub mod matcher;
 
 // Re-export key functions
+pub use acoustid::lookup_acoustid;
 pub use chromaprint::{batch_fingerprint, fingerprint_track};
+pub use matcher::compare_fingerprints;

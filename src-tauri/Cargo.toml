@@ -86,6 +86,8 @@ rusty-chromaprint = "0.3"
 ebur128 = "0.1"
 musicbrainz_rs = "0.12"
 image = "0.25"
+urlencoding = "2.1"
+base64 = "0.22"
 
 [dev-dependencies]
 tempfile = "3.24.0"

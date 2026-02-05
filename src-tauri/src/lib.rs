@@ -1,3 +1,4 @@
+pub mod artwork;
 pub mod audio;
 pub mod auth;
 pub mod commands;
@@ -9,6 +10,7 @@ pub mod fingerprint;
 pub mod import;
 pub mod metadata;
 pub mod models;
+// pub mod replaygain;
 pub mod search;
 pub mod sources;
 pub mod startup;
