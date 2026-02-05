@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-03)
 ## Current Position
 
 Phase: 7 of 7 (Enhancements)
-Plan: 2 of 6 in current phase
+Plan: 3 of 6 in current phase
 Status: In progress
-Last activity: 2026-02-05 — Completed 07-02-PLAN.md (Acoustic Fingerprinting)
+Last activity: 2026-02-05 — Completed 07-03-PLAN.md (Artwork Fetching & Embedding)
 
-Progress: [█████████████████████████████████] 100.0% (34 of 34 concrete plans complete)
+Progress: [█████████████████████████████████] 100.0% (35 of 35 concrete plans complete)
 
 ## Tech Stack Change
 
@@ -361,12 +361,32 @@ None yet.
   - 13 unit tests: 4 chromaprint, 4 acoustid, 5 matcher
   - All tests passing, AcoustID requires ACOUSTID_API_KEY in .env for live use
   - Fixed lofty WriteOptions import path (Rule 3 blocking issue)
+- Plan 07-03 (Artwork Fetching & Embedding): ✓ COMPLETE
+  - MusicBrainz release group search by artist + album
+  - Cover Art Archive client for 500px and 1200px artwork
+  - Local file-based artwork cache with track_id naming
+  - Database state tracking in artwork table
+  - Extract embedded artwork from audio files
+  - Resize artwork maintaining aspect ratio
+  - 7 unit tests passing
+- Plan 07-04 (ReplayGain Loudness Analysis): ✓ COMPLETE
+  - EBU R128 loudness analysis producing ReplayGain 2.0 gain/peak values
+  - analyze_loudness: computes gain/peak using ebur128 with -18 LUFS reference
+  - analyze_track: single track analysis via decode_to_pcm
+  - analyze_album: multi-track album gain using loudness_global_multiple
+  - Database persistence: save_track_gain, save_album_gain, get_track_gain
+  - Incremental processing: get_unanalyzed_tracks for batch analysis
+  - ReplayGain tag writer using lofty (writes only to synced copies)
+  - Sync pipeline integration: automatic tag writing after file link
+  - Best-effort tagging: sync continues even if gain values not calculated
+  - Library originals stay pristine: tags written only to synced copies
+  - 7 unit tests passing (5 analyzer, 2 tagger)
 
 ## Session Continuity
 
 Last session: 2026-02-05
-Stopped at: Completed 07-02-PLAN.md (Acoustic Fingerprinting)
+Stopped at: Completed 07-04-PLAN.md (ReplayGain Loudness Analysis)
 Resume file: None
 
 ---
-*Last updated: 2026-02-05 after completing Plan 07-02 (Acoustic Fingerprinting)*
+*Last updated: 2026-02-05 after completing Plan 07-04 (ReplayGain Loudness Analysis)*
