@@ -7,10 +7,7 @@
     "frontendDist": "../ui/dist",
     "devUrl": "http://localhost:1420",
     "beforeDevCommand": "cd ../ui && npm run dev",
-    "beforeBuildCommand": "cd ../ui && npm run build",
-    "devWatch": {
-      "ignore": ["*.db", "*.db-journal", "*.db-wal", "*.db-shm"]
-    }
+    "beforeBuildCommand": "cd ../ui && npm run build"
   },
   "app": {
     "windows": [
