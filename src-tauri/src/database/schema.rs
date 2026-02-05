@@ -13,7 +13,8 @@ use crate::database::connection::Result;
 /// - Version 2: Phase 3 schema (sources, track_sources, last_sync_timestamps, variant_of)
 /// - Version 3: Phase 4 schema (playlists, playlist_tracks, playlist_tags)
 /// - Version 4: Phase 5 schema (sync_profiles, sync_profile_tracks, sync_profile_playlists, sync_profile_rules, sync_state)
-pub const CURRENT_SCHEMA_VERSION: i32 = 4;
+/// - Version 5: Phase 7 schema (fingerprints, artwork, replaygain, review_queue)
+pub const CURRENT_SCHEMA_VERSION: i32 = 5;
 
 /// SQL schema for the music library database (Phase 1 - base schema).
 ///
@@ -211,6 +212,66 @@ CREATE TABLE IF NOT EXISTS sync_state (
 CREATE INDEX IF NOT EXISTS idx_sync_state_profile ON sync_state(profile_id);
 ";
 
+/// SQL schema for Phase 7 enhancements tables.
+///
+/// Contains:
+/// - `fingerprints` table: Audio fingerprints for acoustic identification
+/// - `artwork` table: Album/track artwork metadata and paths
+/// - `replaygain` table: ReplayGain loudness normalization data
+/// - `review_queue` table: User review queue for duplicate detection and metadata conflicts
+pub const PHASE7_SCHEMA_SQL: &str = "
+-- Fingerprints table: Audio fingerprints for acoustic identification
+CREATE TABLE IF NOT EXISTS fingerprints (
+    track_id INTEGER PRIMARY KEY,
+    fingerprint BLOB NOT NULL,               -- Chromaprint raw fingerprint data
+    duration_seconds INTEGER NOT NULL,       -- Track duration for fingerprint validation
+    acoustid TEXT,                           -- AcoustID from MusicBrainz lookup
+    musicbrainz_recording_id TEXT,           -- MusicBrainz recording ID from AcoustID
+    fingerprinted_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+);
+
+-- Artwork table: Album/track artwork metadata
+CREATE TABLE IF NOT EXISTS artwork (
+    track_id INTEGER PRIMARY KEY,
+    artwork_path TEXT,                       -- Local path to artwork file
+    source TEXT,                             -- 'embedded' | 'musicbrainz' | 'manual'
+    musicbrainz_release_group_id TEXT,       -- MusicBrainz release group ID
+    resolution TEXT,                         -- Image dimensions (e.g., '500x500')
+    fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+);
+
+-- ReplayGain table: Loudness normalization data
+CREATE TABLE IF NOT EXISTS replaygain (
+    track_id INTEGER PRIMARY KEY,
+    track_gain REAL NOT NULL,                -- Track gain in dB
+    track_peak REAL NOT NULL,                -- Track peak amplitude (0.0-1.0)
+    album_gain REAL,                         -- Album gain in dB (NULL if not analyzed)
+    album_peak REAL,                         -- Album peak amplitude (NULL if not analyzed)
+    analyzed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+);
+
+-- Review queue table: User review queue for conflicts and duplicates
+CREATE TABLE IF NOT EXISTS review_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    action_type TEXT NOT NULL,               -- 'duplicate' | 'metadata_conflict' | 'missing_artwork'
+    track_id INTEGER NOT NULL,
+    related_track_id INTEGER,                -- For duplicate actions: the other track
+    details TEXT NOT NULL,                   -- JSON details for the review action
+    auto_action TEXT,                        -- Suggested automatic action
+    status TEXT DEFAULT 'pending',           -- 'pending' | 'resolved' | 'dismissed'
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    resolved_at TEXT,
+    FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+);
+
+-- Indexes for review queue queries
+CREATE INDEX IF NOT EXISTS idx_review_status ON review_queue(status);
+CREATE INDEX IF NOT EXISTS idx_review_type ON review_queue(action_type);
+";
+
 /// Get the current schema version from the database.
 pub fn get_schema_version(conn: &Connection) -> Result<i32> {
     let version: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -265,6 +326,13 @@ fn migrate_to_v4(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Run Phase 7 migrations: create enhancements tables.
+fn migrate_to_v5(conn: &Connection) -> Result<()> {
+    // Create Phase 7 tables (IF NOT EXISTS makes this safe to re-run)
+    conn.execute_batch(PHASE7_SCHEMA_SQL)?;
+    Ok(())
+}
+
 /// Initialize the database schema with versioned migrations.
 ///
 /// Creates all tables and indexes, applying migrations as needed.
@@ -303,6 +371,12 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
     if get_schema_version(conn)? < 4 {
         migrate_to_v4(conn)?;
         set_schema_version(conn, 4)?;
+    }
+
+    // Apply Phase 7 migrations if needed
+    if get_schema_version(conn)? < 5 {
+        migrate_to_v5(conn)?;
+        set_schema_version(conn, 5)?;
     }
 
     Ok(())
@@ -572,5 +646,54 @@ mod tests {
             .query_row("SELECT title FROM tracks WHERE id = 1", [], |row| row.get(0))
             .unwrap();
         assert_eq!(title, "Track");
+    }
+
+    #[test]
+    fn test_phase7_tables_exist() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&conn).unwrap();
+
+        // Verify Phase 7 tables exist
+        assert!(table_exists(&conn, "fingerprints"));
+        assert!(table_exists(&conn, "artwork"));
+        assert!(table_exists(&conn, "replaygain"));
+        assert!(table_exists(&conn, "review_queue"));
+    }
+
+    #[test]
+    fn test_migration_from_v4_to_v5() {
+        let conn = Connection::open_in_memory().unwrap();
+
+        // Simulate a v4 database (Phase 1-5 schemas)
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        conn.execute_batch(PHASE3_SCHEMA_SQL).unwrap();
+        conn.execute_batch(PHASE4_SCHEMA_SQL).unwrap();
+        conn.execute_batch(PHASE5_SCHEMA_SQL).unwrap();
+        conn.execute_batch("PRAGMA user_version = 4;").unwrap();
+
+        // Verify we're at v4
+        assert_eq!(get_schema_version(&conn).unwrap(), 4);
+
+        // Now run full initialization (should migrate to v5)
+        initialize_schema(&conn).unwrap();
+
+        // Verify migration happened
+        assert_eq!(get_schema_version(&conn).unwrap(), 5);
+
+        // Verify Phase 7 tables exist
+        assert!(table_exists(&conn, "fingerprints"));
+        assert!(table_exists(&conn, "artwork"));
+        assert!(table_exists(&conn, "replaygain"));
+        assert!(table_exists(&conn, "review_queue"));
+    }
+
+    #[test]
+    fn test_review_queue_indexes() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&conn).unwrap();
+
+        // Verify review queue indexes exist
+        assert!(index_exists(&conn, "idx_review_status"));
+        assert!(index_exists(&conn, "idx_review_type"));
     }
 }
