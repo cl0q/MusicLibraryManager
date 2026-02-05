@@ -1,6 +1,29 @@
+import { useState, useEffect } from "react";
 import { NavLink } from "react-router";
+import { getReviewQueueCount } from "../../utils/tauri-commands";
 
 export default function Sidebar() {
+  const [reviewQueueCount, setReviewQueueCount] = useState(0);
+
+  useEffect(() => {
+    const loadCount = async () => {
+      try {
+        const count = await getReviewQueueCount();
+        setReviewQueueCount(count);
+      } catch (err) {
+        console.error("Failed to load review queue count:", err);
+      }
+    };
+
+    // Load initial count
+    loadCount();
+
+    // Poll for count updates every 30 seconds
+    const interval = setInterval(loadCount, 30000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   const navItems = [
     {
       path: "/",
@@ -24,6 +47,7 @@ export default function Sidebar() {
     {
       path: "/library",
       label: "Library",
+      badge: reviewQueueCount > 0 ? reviewQueueCount : undefined,
       icon: (
         <svg
           className="w-5 h-5"
@@ -124,6 +148,11 @@ export default function Sidebar() {
               >
                 {item.icon}
                 <span className="font-medium">{item.label}</span>
+                {item.badge !== undefined && (
+                  <span className="ml-auto px-2 py-0.5 bg-red-500 text-white text-xs rounded-full">
+                    {item.badge}
+                  </span>
+                )}
               </NavLink>
             </li>
           ))}

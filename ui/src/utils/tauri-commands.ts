@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Track } from "../types/library";
+import type { Track, ReviewQueueItem } from "../types/library";
 
 // Playlist types
 export interface Playlist {
@@ -112,4 +112,59 @@ export interface RetryQueueStatus {
 
 export async function get_retry_queue_status(): Promise<RetryQueueStatus> {
   return invoke<RetryQueueStatus>("get_retry_queue_status");
+}
+
+// Enhancement commands
+export interface FingerprintResult {
+  processed: number;
+  failed: number;
+  failures?: Array<{ track_id: number; error: string }>;
+}
+
+export async function fingerprintLibrary(): Promise<FingerprintResult> {
+  return invoke<FingerprintResult>("fingerprint_library_cmd");
+}
+
+export interface ArtworkResult {
+  fetched: number;
+  already_cached: number;
+  not_found: number;
+  failed: number;
+  failures?: Array<{ track_id: number; error: string }>;
+}
+
+export async function fetchArtwork(): Promise<ArtworkResult> {
+  return invoke<ArtworkResult>("fetch_artwork_cmd");
+}
+
+export interface ReplayGainResult {
+  analyzed: number;
+  failed: number;
+  failures?: Array<{ track_id: number; error: string }>;
+}
+
+export async function analyzeReplayGain(): Promise<ReplayGainResult> {
+  return invoke<ReplayGainResult>("analyze_replaygain_cmd");
+}
+
+export interface DeepScanResult {
+  pairs_compared: number;
+  duplicates_found: number;
+  conflicts_flagged: number;
+}
+
+export async function deepScan(): Promise<DeepScanResult> {
+  return invoke<DeepScanResult>("deep_scan_cmd");
+}
+
+export async function getReviewQueue(status?: string): Promise<ReviewQueueItem[]> {
+  return invoke<ReviewQueueItem[]>("get_review_queue_cmd", { status });
+}
+
+export async function resolveReviewItem(reviewId: number, action: string): Promise<void> {
+  return invoke<void>("resolve_review_item_cmd", { reviewId, action });
+}
+
+export async function getReviewQueueCount(): Promise<number> {
+  return invoke<number>("get_review_queue_count_cmd");
 }

@@ -27,3 +27,23 @@ export interface Artist {
   name: string;
   track_count: number;
 }
+
+// Review queue types
+export interface ReviewQueueItem {
+  id: number;
+  action_type: string;
+  track_id: number;
+  related_track_id: number | null;
+  details: string; // JSON string
+  auto_action: string | null;
+  status: string;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+// Enhancement progress types
+export interface EnhancementProgress {
+  current: number;
+  total: number;
+  track_id?: number;
+}
