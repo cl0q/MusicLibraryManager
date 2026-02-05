@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS playlists (
     FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_playlist_category ON playlists(category);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_playlists_name_category ON playlists(name, category);
 
 -- Playlist tracks table: Track membership with fractional indexing
 CREATE TABLE IF NOT EXISTS playlist_tracks (
