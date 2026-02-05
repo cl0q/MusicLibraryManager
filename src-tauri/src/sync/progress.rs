@@ -224,6 +224,23 @@ pub fn execute_sync(
         // Link from cache to profile folder
         match cache.link_to_profile(&cache_path, &dest_path) {
             Ok(_) => {
+                // Write ReplayGain tags to synced copy (library originals stay pristine)
+                // This is best-effort: if gain values haven't been calculated yet, skip silently
+                if let Ok(Some(gain)) = crate::replaygain::analyzer::get_track_gain(conn, file.track_id) {
+                    // Try to get album gain
+                    let (album_gain, album_peak) = get_album_gain(conn, file.track_id);
+                    if let Err(e) = crate::replaygain::tagger::write_gain_tags(
+                        &dest_path,
+                        gain.track_gain,
+                        gain.track_peak,
+                        album_gain,
+                        album_peak,
+                    ) {
+                        log::warn!("Failed to write ReplayGain tags for track {}: {}", file.track_id, e);
+                        // Non-fatal: sync succeeds even if RG tagging fails
+                    }
+                }
+
                 // Update sync_state
                 match update_sync_state(conn, profile.id, file.track_id, &cache_path, cache) {
                     Ok(_) => synced_count += 1,
@@ -281,6 +298,32 @@ pub fn update_sync_state(
     )?;
 
     Ok(())
+}
+
+/// Get album gain values for a track from the database.
+///
+/// # Arguments
+/// * `conn` - Database connection
+/// * `track_id` - Track ID
+///
+/// # Returns
+/// * `(Some(album_gain), Some(album_peak))` - If album gain exists
+/// * `(None, None)` - If album gain not analyzed yet
+fn get_album_gain(conn: &Connection, track_id: i64) -> (Option<f64>, Option<f64>) {
+    let result = conn.query_row(
+        "SELECT album_gain, album_peak FROM replaygain WHERE track_id = ?",
+        [track_id],
+        |row| {
+            let gain: Option<f64> = row.get(0).ok();
+            let peak: Option<f64> = row.get(1).ok();
+            Ok((gain, peak))
+        },
+    );
+
+    match result {
+        Ok((gain, peak)) => (gain, peak),
+        Err(_) => (None, None), // Track not analyzed or no album gain
+    }
 }
 
 /// Get set of track IDs currently synced for a profile.
