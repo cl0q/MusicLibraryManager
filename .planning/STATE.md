@@ -5,16 +5,30 @@
 See: .planning/PROJECT.md (updated 2026-02-05)
 
 **Core value:** Like a song anywhere and it reliably ends up in your owned library and on your devices in high quality
-**Current focus:** Milestone v1.1 — Library Foundation & UX Polish
+**Current focus:** Phase 8 - Library Configuration & Drive Detection
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-02-05 — Milestone v1.1 started
+Phase: 8 of 11 (Library Configuration & Drive Detection)
+Plan: 0 of TBD in current phase
+Status: Ready to plan
+Last activity: 2026-02-05 - v1.1 roadmap created with 4 phases
 
-Progress: v1.0 complete (7 phases, 38 plans) | v1.1 requirements in progress
+Progress: [███████░░░░░░░░░░░░] 39/TBD total plans (v1.0: 39/39, v1.1: 0/TBD)
+
+## Performance Metrics
+
+**Velocity (v1.0):**
+- Total plans completed: 39
+- Total execution time: ~3 days
+- Phases completed: 7
+
+**Current Milestone (v1.1):**
+- Plans completed: 0
+- Average duration: TBD
+- Total execution time: 0 hours
+
+*Updated after each plan completion*
 
 ## Tech Stack
 
@@ -42,30 +56,44 @@ Progress: v1.0 complete (7 phases, 38 plans) | v1.1 requirements in progress
 
 ### Decisions
 
-All v1.0 decisions documented in PROJECT.md Key Decisions table with outcomes marked.
+Decisions are logged in PROJECT.md Key Decisions table.
+Recent decisions affecting current work:
+
+- v1.0: Rust + Tauri stack for performance and reliability
+- v1.0: 248kbps AAC target for device copies
+- v1.0: Fractional indexing for O(1) playlist reorder
+- v1.1: Library = local files only, Remote = undownloaded staging (architectural shift)
 
 ### v1.1 Scope Decisions
 
 - Library/Remote separation is core architectural fix
 - SSD-based library required (external drive)
 - Context menu responsiveness included
-- Similar songs grouping deferred
-- Spotify JSON migration deferred
-- SoundCloud playlists deferred
+- Similar songs grouping deferred to v1.2
+- Spotify JSON migration deferred to v1.2
+- SoundCloud playlists deferred to v1.2
 
 ### Pending Todos
 
-None — defining requirements.
+None yet.
 
 ### Blockers/Concerns
 
-- Need to explore current codebase to understand what's implemented vs broken
+**From v1.0 user testing:**
+- Hardcoded "default" user_id for source creation (needs proper user management)
+- Test compilation blocked by 1-line import fix
+- SoundCloud playlists not syncing (deferred to v1.2)
+
+**v1.1 scope:**
+- Library/Remote separation requires database refactor (track source vs. library state)
+- Drive detection needs platform-specific logic (macOS/Windows/Linux)
+- Context menu performance may need UI architecture changes
 
 ## Session Continuity
 
 Last session: 2026-02-05
-Stopped at: Milestone v1.1 questioning complete, moving to requirements
+Stopped at: ROADMAP.md created, REQUIREMENTS.md traceability updated
 Resume file: None
 
 ---
-*Last updated: 2026-02-05 after v1.1 milestone start*
+*Last updated: 2026-02-05 after v1.1 roadmap creation*

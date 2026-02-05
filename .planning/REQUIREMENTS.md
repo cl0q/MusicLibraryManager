@@ -73,31 +73,31 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| LCFG-01 | — | Pending |
-| LCFG-02 | — | Pending |
-| LCFG-03 | — | Pending |
-| LCFG-04 | — | Pending |
-| REM-01 | — | Pending |
-| REM-02 | — | Pending |
-| REM-03 | — | Pending |
-| REM-04 | — | Pending |
-| LVIEW-01 | — | Pending |
-| LVIEW-02 | — | Pending |
-| LVIEW-03 | — | Pending |
-| ACT-01 | — | Pending |
-| ACT-02 | — | Pending |
-| ACT-03 | — | Pending |
-| ACT-04 | — | Pending |
-| DL-01 | — | Pending |
-| DL-02 | — | Pending |
-| DL-03 | — | Pending |
-| UX-01 | — | Pending |
+| LCFG-01 | Phase 8 | Pending |
+| LCFG-02 | Phase 8 | Pending |
+| LCFG-03 | Phase 8 | Pending |
+| LCFG-04 | Phase 8 | Pending |
+| REM-01 | Phase 9 | Pending |
+| REM-02 | Phase 9 | Pending |
+| REM-03 | Phase 9 | Pending |
+| REM-04 | Phase 9 | Pending |
+| LVIEW-01 | Phase 9 | Pending |
+| LVIEW-02 | Phase 9 | Pending |
+| LVIEW-03 | Phase 9 | Pending |
+| ACT-01 | Phase 10 | Pending |
+| ACT-02 | Phase 10 | Pending |
+| ACT-03 | Phase 10 | Pending |
+| ACT-04 | Phase 10 | Pending |
+| DL-01 | Phase 11 | Pending |
+| DL-02 | Phase 11 | Pending |
+| DL-03 | Phase 11 | Pending |
+| UX-01 | Phase 11 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 19 total
-- Mapped to phases: 0
-- Unmapped: 19
+- Mapped to phases: 19
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-05*
-*Last updated: 2026-02-05 after initial definition*
+*Last updated: 2026-02-05 after roadmap creation*
