@@ -175,11 +175,15 @@ Plans:
   2. System fetches and embeds high-quality album artwork automatically for tracks and albums
   3. System applies ReplayGain for consistent volume across tracks during playback
 
-**Plans**: TBD
+**Plans**: 6 plans in 4 waves
 
 Plans:
-- [ ] 07-01: TBD during planning
-- [ ] 07-02: TBD during planning
+- [ ] 07-01-PLAN.md — Database schema v5 migration and shared audio PCM decoder
+- [ ] 07-02-PLAN.md — Acoustic fingerprinting (Chromaprint + AcoustID + local comparison)
+- [ ] 07-03-PLAN.md — Album artwork fetching, caching, and embedding
+- [ ] 07-04-PLAN.md — ReplayGain analysis and sync pipeline integration
+- [ ] 07-05-PLAN.md — Fingerprint-based dedup and review queue logic
+- [ ] 07-06-PLAN.md — Tauri commands, review queue UI, and integration
 
 ## Progress
 
@@ -194,7 +198,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 4. Playlist Management | 5/5 | ✓ Complete | 2026-02-04 |
 | 5. Device Sync | 5/5 | ✓ Complete | 2026-02-04 |
 | 6. Desktop UI | 7/7 | ✓ Complete | 2026-02-05 |
-| 7. Enhancements | 0/2 | Not started | - |
+| 7. Enhancements | 0/6 | Not started | - |
 
 ---
-*Last updated: 2026-02-05 after completing Phase 6 gap closure*
+*Last updated: 2026-02-05 after planning Phase 7 enhancements*
