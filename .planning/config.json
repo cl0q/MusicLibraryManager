@@ -10,6 +10,6 @@
     "verifier": true
   },
   "git": {
-    "branching_strategy": "phase"
+    "branching_strategy": "none"
   }
 }
