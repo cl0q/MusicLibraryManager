@@ -24,6 +24,17 @@ Like a song anywhere (Spotify, SoundCloud) and it reliably ends up in your owned
 - Desktop UI with virtualized library browser
 - Acoustic fingerprinting, artwork, and ReplayGain
 
+## Current Milestone: v1.1 Library Foundation & UX Polish
+
+**Goal:** Make the local library real — files live on external SSD, remote songs are separated into a staging area, and the UI feels responsive.
+
+**Target features:**
+- SSD-based library with configurable path (required for library access)
+- Library/Remote separation (Library = local files only, Remote = undownloaded staging)
+- Local library works correctly (columns, More Info, context menu actions)
+- Download flow from Remote to Library
+- Context menu responsiveness
+
 ## Requirements
 
 ### Validated
@@ -38,7 +49,7 @@ Like a song anywhere (Spotify, SoundCloud) and it reliably ends up in your owned
 
 ### Active
 
-(Define for next milestone via `/gsd:new-milestone`)
+(Defined in REQUIREMENTS.md for v1.1)
 
 ### Out of Scope
 
@@ -51,15 +62,19 @@ Like a song anywhere (Spotify, SoundCloud) and it reliably ends up in your owned
 
 **v1.0 shipped:** Full MVP with 33 requirements satisfied, 7 phases complete.
 
-**Known tech debt:**
-- Hardcoded database path (configurable in future)
+**v1.1 focus:** User testing revealed architecture mismatch — remote songs mixed into library, no clear SSD-based library concept. This milestone fixes the foundation before adding new features.
+
+**Known issues from user testing:**
+- Library shows remote (undownloaded) songs — should only show local files
+- No way to configure external SSD as library location
+- "More Info" fails on remote songs (no local file)
+- Format column shows "SPOTIFY" instead of audio format
+- Context menu feels slow/unresponsive
+- SoundCloud playlists not syncing (deferred to v1.2)
+
+**Tech debt carried forward:**
 - Hardcoded "default" user_id for source creation
 - Test compilation blocked by 1-line import fix
-
-**Human verification pending:**
-- OAuth flows with real Spotify/SoundCloud accounts
-- Physical Rockbox iPod sync
-- Cross-platform appearance (macOS/Windows/Linux)
 
 ## Key Decisions
 
@@ -82,4 +97,4 @@ Like a song anywhere (Spotify, SoundCloud) and it reliably ends up in your owned
 - **APIs**: dabmusic.xyz requires credentials, SoundCloud needs Go+ for high quality
 
 ---
-*Last updated: 2026-02-05 after v1.0 milestone*
+*Last updated: 2026-02-05 after v1.1 milestone start*

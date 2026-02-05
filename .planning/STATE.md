@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-05)
 
 **Core value:** Like a song anywhere and it reliably ends up in your owned library and on your devices in high quality
-**Current focus:** Planning next milestone
+**Current focus:** Milestone v1.1 — Library Foundation & UX Polish
 
 ## Current Position
 
-Phase: N/A — v1.0 complete, next milestone not started
-Plan: N/A
-Status: Ready to plan next milestone
-Last activity: 2026-02-05 — v1.0 milestone shipped
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-02-05 — Milestone v1.1 started
 
-Progress: v1.0 complete (7 phases, 38 plans)
+Progress: v1.0 complete (7 phases, 38 plans) | v1.1 requirements in progress
 
 ## Tech Stack
 
@@ -44,19 +44,28 @@ Progress: v1.0 complete (7 phases, 38 plans)
 
 All v1.0 decisions documented in PROJECT.md Key Decisions table with outcomes marked.
 
+### v1.1 Scope Decisions
+
+- Library/Remote separation is core architectural fix
+- SSD-based library required (external drive)
+- Context menu responsiveness included
+- Similar songs grouping deferred
+- Spotify JSON migration deferred
+- SoundCloud playlists deferred
+
 ### Pending Todos
 
-None — milestone complete.
+None — defining requirements.
 
 ### Blockers/Concerns
 
-None — ready for next milestone.
+- Need to explore current codebase to understand what's implemented vs broken
 
 ## Session Continuity
 
 Last session: 2026-02-05
-Stopped at: v1.0 milestone completion
+Stopped at: Milestone v1.1 questioning complete, moving to requirements
 Resume file: None
 
 ---
-*Last updated: 2026-02-05 after v1.0 milestone completion*
+*Last updated: 2026-02-05 after v1.1 milestone start*
