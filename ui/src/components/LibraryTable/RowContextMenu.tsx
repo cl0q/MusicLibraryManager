@@ -54,70 +54,112 @@ export function useRowContextMenu() {
   return { displayMenu };
 }
 
-export default function RowContextMenu({ track, onOpenMoreInfo }: RowContextMenuProps) {
-  const navigate = useNavigate();
+export default function RowContextMenu({ track, onConfirm, onOpenMoreInfo }: RowContextMenuProps) {
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [syncProfiles, setSyncProfiles] = useState<SyncProfile[]>([]);
+  const { selectedTracks } = useTrackSelection();
+
+  // Load playlists and sync profiles
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const playlistsData = await invoke<Playlist[]>("get_playlists_command");
+        setPlaylists(playlistsData);
+      } catch (error) {
+        console.error("Failed to load playlists:", error);
+      }
+
+      try {
+        const profilesData = await invoke<SyncProfile[]>("list_sync_profiles");
+        setSyncProfiles(profilesData);
+      } catch (error) {
+        console.error("Failed to load sync profiles:", error);
+      }
+    };
+
+    loadData();
+  }, []);
 
   if (!track) return null;
 
-  const handleViewDetails = () => {
-    navigate(`/library/${track.id}`);
+  // Determine which tracks to operate on (selected or single)
+  const getTargetTracks = (): Track[] => {
+    if (selectedTracks.length > 0) {
+      return selectedTracks;
+    }
+    return [track];
   };
 
-  const handleAddToPlaylist = () => {
-    toast.info("Select playlist from Playlists page");
-  };
+  const handleAddToPlaylist = async (playlistId: number) => {
+    const targetTracks = getTargetTracks();
+    const trackIds = targetTracks.map((t) => t.id).filter((id): id is number => id !== null);
 
-  const handleDownload = async () => {
     try {
-      await invoke("download_tracks", {
-        request: { track_ids: [track.id] },
-      });
-      toast.success("Download started");
+      await Promise.all(
+        trackIds.map((trackId) =>
+          invoke("add_track_to_playlist_command", {
+            playlistId,
+            trackId,
+          })
+        )
+      );
+
+      // Show inline confirmation
+      onConfirm(trackIds);
     } catch (error) {
-      toast.error(`Download failed: ${error}`);
+      toast.error(`Failed to add track(s) to playlist: ${error}`);
     }
   };
 
-  const handleSyncToDevice = () => {
-    toast.info("Select device from Sync page");
-  };
+  const handleAddToSyncProfile = async (profileId: number) => {
+    const targetTracks = getTargetTracks();
+    const trackIds = targetTracks.map((t) => t.id).filter((id): id is number => id !== null);
 
-  const handleAddToLibrary = async () => {
     try {
-      // Fetch sync profiles and add track to first available profile
-      const profiles = await invoke<SyncProfile[]>("list_sync_profiles");
+      await Promise.all(
+        trackIds.map((trackId) =>
+          invoke("add_track_to_profile", {
+            profileId,
+            trackId,
+          })
+        )
+      );
 
-      if (profiles.length === 0) {
-        toast.info("Create a sync profile from Sync page first");
-        return;
-      }
-
-      // Add to first profile
-      await invoke("add_track_to_profile", {
-        profileId: profiles[0].id,
-        trackId: track.id,
-      });
-      toast.success(`Added to ${profiles[0].name}`);
+      // Show inline confirmation
+      onConfirm(trackIds);
     } catch (error) {
-      toast.error(`Failed to add track: ${error}`);
+      toast.error(`Failed to add track(s) to sync profile: ${error}`);
     }
   };
-
-  const localPath = track.organized_path || track.metadata.original_path;
 
   const handleRevealInFileManager = async () => {
+    const localPath = track.organized_path;
     if (!localPath) {
       toast.error("Track has no local file");
       return;
     }
 
     try {
-      // Use the opener plugin to reveal file
       await invoke("reveal_in_file_manager", {
         path: localPath,
       });
     } catch (error) {
       toast.error(`Failed to open file manager: ${error}`);
+    }
+  };
+
+  const handleCopyFilePath = async () => {
+    const localPath = track.organized_path;
+    if (!localPath) {
+      toast.error("Track has no local file");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(localPath);
+      toast.success("File path copied to clipboard");
+    } catch (error) {
+      toast.error(`Failed to copy path: ${error}`);
     }
   };
 
@@ -127,18 +169,44 @@ export default function RowContextMenu({ track, onOpenMoreInfo }: RowContextMenu
     }
   };
 
+  // Track is local if it has organized_path
+  const isLocalTrack = track.organized_path !== null;
+
   return (
     <Menu id={MENU_ID}>
-      <Item onClick={handleViewDetails}>View Details</Item>
+      <Submenu label="Add to Playlist">
+        {playlists.length === 0 ? (
+          <Item disabled>No playlists available</Item>
+        ) : (
+          playlists.map((playlist) => (
+            <Item key={playlist.id} onClick={() => handleAddToPlaylist(playlist.id)}>
+              {playlist.name}
+            </Item>
+          ))
+        )}
+      </Submenu>
+
+      <Submenu label="Add to Sync Profile">
+        {syncProfiles.length === 0 ? (
+          <Item disabled>No sync profiles available</Item>
+        ) : (
+          syncProfiles.map((profile) => (
+            <Item key={profile.id} onClick={() => handleAddToSyncProfile(profile.id)}>
+              {profile.name}
+            </Item>
+          ))
+        )}
+      </Submenu>
+
+      {isLocalTrack && (
+        <>
+          <Separator />
+          <Item onClick={handleRevealInFileManager}>Reveal in File Manager</Item>
+          <Item onClick={handleCopyFilePath}>Copy File Path</Item>
+        </>
+      )}
+
       <Separator />
-      <Item onClick={handleAddToPlaylist}>Add to Playlist</Item>
-      <Item onClick={handleDownload}>Download</Item>
-      <Item onClick={handleSyncToDevice}>Sync to Device</Item>
-      <Item onClick={handleAddToLibrary}>Add to Library</Item>
-      <Separator />
-      <Item onClick={handleRevealInFileManager} disabled={!localPath}>
-        Reveal in File Manager
-      </Item>
       <Item onClick={handleMoreInfo}>More Info</Item>
     </Menu>
   );
