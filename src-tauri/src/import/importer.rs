@@ -22,6 +22,7 @@
 //! }
 //! ```
 
+use rayon::prelude::*;
 use rusqlite::{params, Connection, Transaction};
 use std::path::PathBuf;
 
@@ -31,10 +32,7 @@ use crate::metadata::sanitize::generate_organized_path;
 use crate::models::track::TrackMetadata;
 
 /// Number of files to process per database transaction.
-///
-/// Matches Python implementation: batch size of 50 provides good balance
-/// between commit frequency (for progress visibility) and transaction overhead.
-const BATCH_SIZE: usize = 50;
+const BATCH_SIZE: usize = 500;
 
 /// Result of a batch import operation.
 ///
@@ -87,50 +85,68 @@ pub struct ImportResult {
 /// println!("Imported {} tracks", result.succeeded);
 /// ```
 pub fn import_batch(conn: &mut Connection, files: Vec<PathBuf>) -> DbResult<ImportResult> {
-    let mut total_succeeded = 0;
+    // Configure rayon thread pool: use all cores minus 2 (leave headroom for UI + system)
+    let num_threads = std::thread::available_parallelism()
+        .map(|n| n.get().saturating_sub(2).max(1))
+        .unwrap_or(2);
+
+    log::info!(
+        "Extracting metadata from {} files using {} threads...",
+        files.len(),
+        num_threads
+    );
+
+    // Build a scoped rayon pool so we don't affect global config
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(num_threads)
+        .build()
+        .unwrap_or_else(|_| rayon::ThreadPoolBuilder::new().build().unwrap());
+
+    // Phase 1: Parallel metadata extraction across all files
+    let extraction_results: Vec<Result<TrackMetadata, String>> = pool.install(|| {
+        files
+            .par_iter()
+            .map(|path| {
+                extract_metadata(path)
+                    .map_err(|e| format!("{}: {}", path.display(), e))
+            })
+            .collect()
+    });
+
+    // Separate successes and failures
+    let mut all_metadata: Vec<TrackMetadata> = Vec::new();
     let mut total_failures: Vec<String> = Vec::new();
 
-    // Process in batches to commit incrementally (Python pattern: 50 files per tx)
-    for chunk in files.chunks(BATCH_SIZE) {
-        let mut batch_metadata: Vec<TrackMetadata> = Vec::new();
-        let mut extraction_failures: Vec<String> = Vec::new();
-
-        // Extract metadata with continue-on-error
-        for path in chunk {
-            match extract_metadata(path) {
-                Ok(metadata) => batch_metadata.push(metadata),
-                Err(e) => {
-                    extraction_failures.push(format!("{}: {}", path.display(), e));
-                }
-            }
+    for result in extraction_results {
+        match result {
+            Ok(metadata) => all_metadata.push(metadata),
+            Err(failure) => total_failures.push(failure),
         }
+    }
 
-        // Collect extraction failures
-        total_failures.extend(extraction_failures);
+    log::info!(
+        "Metadata extraction complete: {} succeeded, {} failed. Saving to database...",
+        all_metadata.len(),
+        total_failures.len()
+    );
 
-        // Skip database save if no metadata extracted successfully
-        if batch_metadata.is_empty() {
-            continue;
-        }
+    // Phase 2: Sequential database insertion in batches (SQLite is single-writer)
+    let mut total_succeeded = 0;
 
-        // Atomic transaction for batch
-        match save_batch(conn, batch_metadata) {
+    for batch in all_metadata.chunks(BATCH_SIZE) {
+        match save_batch(conn, batch.to_vec()) {
             Ok(count) => total_succeeded += count,
             Err(e) => {
-                // Mark entire batch as failed on database error
-                for path in chunk {
-                    total_failures.push(format!("{}: database error - {}", path.display(), e));
-                }
+                let batch_size = batch.len();
+                total_failures.push(format!("database error for batch of {}: {}", batch_size, e));
             }
         }
     }
 
-    // Log a summary of failure reasons so the user can see what's going wrong
+    // Log a summary of failure reasons
     if !total_failures.is_empty() {
-        // Count failures by error type
         let mut error_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
         for failure in &total_failures {
-            // Extract error type from "path: error message" format
             let error_type = failure
                 .split(": ")
                 .skip(1)
@@ -353,8 +369,7 @@ mod tests {
 
     #[test]
     fn test_batch_size_constant() {
-        // Verify batch size matches Python implementation
-        assert_eq!(BATCH_SIZE, 50);
+        assert_eq!(BATCH_SIZE, 500);
     }
 
     // ===== insert_track tests =====

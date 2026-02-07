@@ -1,70 +1,45 @@
 //! Import command handler for Tauri frontend integration.
 //!
-//! Provides the import_directory command that can be invoked from the UI
-//! to scan a directory and import audio files to the library.
-//!
-//! # Frontend Usage (TypeScript)
-//! ```typescript
-//! import { invoke } from "@tauri-apps/api/tauri";
-//!
-//! const result = await invoke<ImportResponse>("import_directory", {
-//!     directory: "/path/to/music"
-//! });
-//!
-//! console.log(`Imported ${result.succeeded} files`);
-//! if (result.failed > 0) {
-//!     console.warn(`Failed: ${result.failures.join(", ")}`);
-//! }
-//! ```
+//! Provides the import_directory command that scans a directory and imports
+//! audio files in the background, emitting progress events to the frontend.
 
 use std::path::PathBuf;
 
 use serde::Serialize;
+use tauri::{AppHandle, Emitter};
 
 use crate::database::get_connection;
 use crate::import::{import_batch, scan_directory};
 
-/// Response from import_directory command.
-///
-/// Serialized to JSON for frontend consumption.
-#[derive(Debug, Serialize)]
-pub struct ImportResponse {
-    /// Number of successfully imported files
-    pub succeeded: usize,
-    /// Number of failed imports
-    pub failed: usize,
-    /// Error messages for failed imports
-    pub failures: Vec<String>,
+/// Response from import_directory command (returned immediately).
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportStartedResponse {
+    /// Number of audio files found to import
+    pub file_count: usize,
 }
 
-/// Import audio files from a directory to the library.
+/// Event payload emitted when background import completes.
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportCompleteEvent {
+    pub succeeded: usize,
+    pub failed: usize,
+    pub skipped: usize,
+    pub total: usize,
+    pub failure_summary: Vec<String>,
+}
+
+/// Scan a directory and import audio files in the background.
 ///
-/// Scans the specified directory recursively for audio files,
-/// extracts metadata, and imports to the database.
-///
-/// # Arguments
-/// * `directory` - Path to directory to scan
-///
-/// # Returns
-/// * `Ok(ImportResponse)` - Import result with success/failure counts
-/// * `Err(String)` - Error message if import failed
-///
-/// # Errors
-/// - Directory does not exist or is not a directory
-/// - No audio files found in directory
-/// - Database connection failed
-///
-/// # Example (TypeScript)
-/// ```typescript
-/// const result = await invoke("import_directory", {
-///     directory: "/Users/me/Music"
-/// });
-/// ```
+/// Returns immediately with the number of files found. The actual import
+/// runs on a background thread and emits events:
+/// - `import-complete`: When the import finishes (with result counts)
 #[tauri::command]
-pub async fn import_directory(directory: String) -> Result<ImportResponse, String> {
+pub async fn import_directory(
+    app_handle: AppHandle,
+    directory: String,
+) -> Result<ImportStartedResponse, String> {
     let dir_path = PathBuf::from(&directory);
 
-    // Validate directory exists
     if !dir_path.exists() {
         return Err(format!("Directory does not exist: {}", directory));
     }
@@ -73,35 +48,90 @@ pub async fn import_directory(directory: String) -> Result<ImportResponse, Strin
         return Err(format!("Path is not a directory: {}", directory));
     }
 
-    // Scan for audio files
+    // Scan for audio files (fast, stays on main thread)
     let files = scan_directory(&dir_path).map_err(|e| format!("Scan error: {}", e))?;
 
     let file_count = files.len();
     log::info!("Found {} audio files in {}", file_count, directory);
 
-    // Get database connection
-    // TODO: Phase 6 will make database path configurable
-    // For now, use default path in current working directory
-    let db_path = PathBuf::from("music_library.db");
-    let mut conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+    if file_count == 0 {
+        let _ = app_handle.emit(
+            "import-complete",
+            ImportCompleteEvent {
+                succeeded: 0,
+                failed: 0,
+                skipped: 0,
+                total: 0,
+                failure_summary: vec![],
+            },
+        );
+        return Ok(ImportStartedResponse { file_count: 0 });
+    }
 
-    // Import files
-    let result = import_batch(&mut conn, files).map_err(|e| format!("Import error: {}", e))?;
+    // Spawn background thread for the heavy import work
+    std::thread::spawn(move || {
+        let db_path = PathBuf::from("music_library.db");
+        let mut conn = match get_connection(&db_path) {
+            Ok(c) => c,
+            Err(e) => {
+                log::error!("Import background thread: database error: {}", e);
+                let _ = app_handle.emit(
+                    "import-complete",
+                    ImportCompleteEvent {
+                        succeeded: 0,
+                        failed: file_count,
+                        skipped: 0,
+                        total: file_count,
+                        failure_summary: vec![format!("Database error: {}", e)],
+                    },
+                );
+                return;
+            }
+        };
 
-    let skipped = file_count - result.succeeded - result.failed;
-    log::info!(
-        "Import complete: {} new, {} skipped (already imported), {} failed out of {} total files",
-        result.succeeded,
-        skipped,
-        result.failed,
-        file_count
-    );
+        match import_batch(&mut conn, files) {
+            Ok(result) => {
+                let skipped = file_count - result.succeeded - result.failed;
+                log::info!(
+                    "Import complete: {} new, {} skipped, {} failed out of {} total",
+                    result.succeeded,
+                    skipped,
+                    result.failed,
+                    file_count
+                );
 
-    Ok(ImportResponse {
-        succeeded: result.succeeded,
-        failed: result.failed,
-        failures: result.failures,
-    })
+                // Take only first 20 failures for the event payload
+                let failure_summary: Vec<String> =
+                    result.failures.into_iter().take(20).collect();
+
+                let _ = app_handle.emit(
+                    "import-complete",
+                    ImportCompleteEvent {
+                        succeeded: result.succeeded,
+                        failed: result.failed,
+                        skipped,
+                        total: file_count,
+                        failure_summary,
+                    },
+                );
+            }
+            Err(e) => {
+                log::error!("Import failed: {}", e);
+                let _ = app_handle.emit(
+                    "import-complete",
+                    ImportCompleteEvent {
+                        succeeded: 0,
+                        failed: file_count,
+                        skipped: 0,
+                        total: file_count,
+                        failure_summary: vec![format!("Import error: {}", e)],
+                    },
+                );
+            }
+        }
+    });
+
+    Ok(ImportStartedResponse { file_count })
 }
 
 #[cfg(test)]
@@ -109,20 +139,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_import_response_serialize() {
-        let response = ImportResponse {
-            succeeded: 10,
-            failed: 2,
-            failures: vec!["error1".to_string(), "error2".to_string()],
-        };
-
+    fn test_import_started_response_serialize() {
+        let response = ImportStartedResponse { file_count: 100 };
         let json = serde_json::to_string(&response).unwrap();
-        assert!(json.contains("\"succeeded\":10"));
-        assert!(json.contains("\"failed\":2"));
-        assert!(json.contains("\"failures\""));
+        assert!(json.contains("\"file_count\":100"));
     }
 
-    // Note: Full integration tests for import_directory would require
-    // actual audio files. The underlying scan_directory and import_batch
-    // functions have comprehensive unit tests in their respective modules.
+    #[test]
+    fn test_import_complete_event_serialize() {
+        let event = ImportCompleteEvent {
+            succeeded: 10,
+            failed: 2,
+            skipped: 88,
+            total: 100,
+            failure_summary: vec!["error1".to_string()],
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"succeeded\":10"));
+        assert!(json.contains("\"skipped\":88"));
+    }
 }

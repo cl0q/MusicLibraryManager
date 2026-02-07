@@ -101,15 +101,9 @@ export default function Sources() {
     }
   }, []);
 
-  // Check connection status on mount, window focus, and OAuth completion
+  // Check connection status on mount and OAuth completion (NOT on every focus)
   useEffect(() => {
     checkConnections();
-
-    const handleFocus = () => {
-      checkConnections();
-    };
-
-    window.addEventListener("focus", handleFocus);
 
     // Listen for OAuth complete events from backend
     const unlisten = listen("oauth-complete", () => {
@@ -117,7 +111,6 @@ export default function Sources() {
     });
 
     return () => {
-      window.removeEventListener("focus", handleFocus);
       unlisten.then((fn) => fn());
     };
   }, [checkConnections]);
@@ -228,6 +221,39 @@ export default function Sources() {
     }
   }, []);
 
+  // Listen for background import completion
+  useEffect(() => {
+    const unlisten = listen<{
+      succeeded: number;
+      failed: number;
+      skipped: number;
+      total: number;
+      failure_summary: string[];
+    }>("import-complete", (event) => {
+      const { succeeded, failed, skipped, total } = event.payload;
+      console.log("[Sources] Import complete:", event.payload);
+
+      setLocalLibrary((prev) => ({
+        ...prev,
+        status: "connected",
+        trackCount: (prev.trackCount || 0) + succeeded,
+        lastSyncTime: new Date().toISOString(),
+      }));
+
+      if (succeeded > 0 || failed > 0) {
+        toast.success(
+          `Import complete: ${succeeded} new, ${skipped} already imported, ${failed} failed (${total} total files)`
+        );
+      } else {
+        toast.info("No new tracks to import");
+      }
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
   // Local library handlers
   const handleImportFolder = useCallback(async () => {
     try {
@@ -240,18 +266,9 @@ export default function Sources() {
       }
 
       setLocalLibrary((prev) => ({ ...prev, status: "syncing" }));
-      toast.info("Scanning library for music files...");
 
       const result = await import_directory(config.root_path);
-      const count = typeof result === "number" ? result : 0;
-
-      setLocalLibrary((prev) => ({
-        ...prev,
-        status: "connected",
-        trackCount: (prev.trackCount || 0) + count,
-        lastSyncTime: new Date().toISOString(),
-      }));
-      toast.success(`Scan complete: ${count} tracks imported`);
+      toast.info(`Scanning ${result.file_count.toLocaleString()} audio files in background...`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setLocalLibrary((prev) => ({
