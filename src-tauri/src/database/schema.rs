@@ -822,3 +822,4 @@ mod tests {
         // The test above implicitly verifies this since initialize_schema applies all migrations
     }
 }
+

@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-05)
 
 **Core value:** Like a song anywhere and it reliably ends up in your owned library and on your devices in high quality
-**Current focus:** Phase 9 - Library/Remote Separation
+**Current focus:** Phase 10 - Track Actions & More Info
 
 ## Current Position
 
-Phase: 9 of 11 (Library/Remote Separation)
-Plan: 3 of 4 in current phase
+Phase: 10 of 11 (Track Actions & More Info)
+Plan: 2 of 3 in current phase
 Status: In progress
-Last activity: 2026-02-07 - Completed 09-03-PLAN.md
+Last activity: 2026-02-07 - Completed 10-02-PLAN.md
 
-Progress: [████████░░░░░░░░░░░] 46/TBD total plans (v1.0: 39/39, v1.1: 7/TBD)
+Progress: [████████░░░░░░░░░░░] 48/TBD total plans (v1.0: 39/39, v1.1: 9/TBD)
 
 ## Performance Metrics
 
@@ -24,9 +24,9 @@ Progress: [████████░░░░░░░░░░░] 46/TBD tot
 - Phases completed: 7
 
 **Current Milestone (v1.1):**
-- Plans completed: 7
-- Average duration: 11 min
-- Total execution time: ~79 min
+- Plans completed: 9
+- Average duration: 9 min
+- Total execution time: ~82 min
 
 *Updated after each plan completion*
 
@@ -78,6 +78,9 @@ Recent decisions affecting current work:
 - Phase 9-02: Cloud icon for Remote item (consistent with network/streaming semantics)
 - Phase 9-03: View parameter defaults to 'library' for backward compatibility with existing code
 - Phase 9-03: Format column normalization shows 'Stream' for spotify/soundcloud, actual formats for local files
+- Phase 10-02: More Info panel slides in from right with backdrop overlay (not modal dialog)
+- Phase 10-02: Collapsible sections default to closed except Format Information
+- Phase 10-02: Panel auto-loads ffprobe data with graceful fallback if backend not implemented
 
 ### v1.1 Scope Decisions
 
@@ -106,8 +109,8 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-07
-Stopped at: Completed 09-03-PLAN.md
+Stopped at: Completed 10-02-PLAN.md
 Resume file: None
 
 ---
-*Last updated: 2026-02-07 after 09-03 plan completion*
+*Last updated: 2026-02-07 after 10-02 plan completion*
