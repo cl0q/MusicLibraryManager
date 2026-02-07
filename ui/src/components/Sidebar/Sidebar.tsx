@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
 import { NavLink } from "react-router";
 import { getReviewQueueCount } from "../../utils/tauri-commands";
+import { useLibraryMount } from "../../contexts/LibraryMountContext";
 
 export default function Sidebar() {
   const [reviewQueueCount, setReviewQueueCount] = useState(0);
+  const { isLibraryAvailable } = useLibraryMount();
 
   useEffect(() => {
     const loadCount = async () => {
@@ -28,6 +30,7 @@ export default function Sidebar() {
     {
       path: "/",
       label: "Dashboard",
+      disabled: false,
       icon: (
         <svg
           className="w-5 h-5"
@@ -47,6 +50,7 @@ export default function Sidebar() {
     {
       path: "/sources",
       label: "Sources",
+      disabled: false,
       icon: (
         <svg
           className="w-5 h-5"
@@ -66,6 +70,7 @@ export default function Sidebar() {
     {
       path: "/library",
       label: "Library",
+      disabled: !isLibraryAvailable,
       badge: reviewQueueCount > 0 ? reviewQueueCount : undefined,
       icon: (
         <svg
@@ -86,6 +91,7 @@ export default function Sidebar() {
     {
       path: "/playlists",
       label: "Playlists",
+      disabled: false,
       icon: (
         <svg
           className="w-5 h-5"
@@ -105,6 +111,7 @@ export default function Sidebar() {
     {
       path: "/sync",
       label: "Sync",
+      disabled: false,
       icon: (
         <svg
           className="w-5 h-5"
@@ -124,6 +131,7 @@ export default function Sidebar() {
     {
       path: "/downloads",
       label: "Downloads",
+      disabled: false,
       icon: (
         <svg
           className="w-5 h-5"
@@ -143,6 +151,7 @@ export default function Sidebar() {
     {
       path: "/settings",
       label: "Settings",
+      disabled: false,
       icon: (
         <svg
           className="w-5 h-5"
@@ -184,7 +193,9 @@ export default function Sidebar() {
                 end={item.path === "/"}
                 className={({ isActive }) =>
                   `flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
-                    isActive
+                    item.disabled
+                      ? "opacity-50 text-gray-400 dark:text-gray-600"
+                      : isActive
                       ? "bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-100"
                       : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
                   }`

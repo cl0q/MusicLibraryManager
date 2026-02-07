@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router";
 import { useLibraryTracks } from "../hooks/useLibraryTracks";
 import { useEnhancementProgress } from "../hooks/useEnhancements";
+import { useLibraryMount } from "../contexts/LibraryMountContext";
 import LibraryTable from "../components/LibraryTable/LibraryTable";
 import FilterBar from "../components/LibraryTable/FilterBar";
 import ReviewQueue from "../components/ReviewQueue/ReviewQueue";
@@ -13,9 +15,13 @@ import {
 } from "../utils/tauri-commands";
 
 export default function LibraryBrowser() {
-  const { tracks, loading, filterQuery, setFilterQuery } = useLibraryTracks();
+  const navigate = useNavigate();
+  const { mountState, isLibraryAvailable } = useLibraryMount();
   const [showReviewQueue, setShowReviewQueue] = useState(false);
   const [reviewQueueCount, setReviewQueueCount] = useState(0);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const { tracks, loading, filterQuery, setFilterQuery } = useLibraryTracks(refreshKey);
 
   const fingerprintProgress = useEnhancementProgress("fingerprint");
   const artworkProgress = useEnhancementProgress("artwork");
@@ -33,6 +39,16 @@ export default function LibraryBrowser() {
       }
     };
     loadCount();
+  }, []);
+
+  // Listen for library reconnection events to auto-refresh
+  useEffect(() => {
+    const handleReconnect = () => {
+      // Increment refresh key to trigger re-fetch in useLibraryTracks
+      setRefreshKey((prev) => prev + 1);
+    };
+    window.addEventListener("library-reconnected", handleReconnect);
+    return () => window.removeEventListener("library-reconnected", handleReconnect);
   }, []);
 
   const handleFingerprintLibrary = async () => {
@@ -73,6 +89,46 @@ export default function LibraryBrowser() {
       console.error("Failed to run deep scan:", err);
     }
   };
+
+  // Show disconnected state if library is not available
+  if (!isLibraryAvailable) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full p-6 text-center">
+        <div className="max-w-md space-y-4">
+          {/* Hard drive icon */}
+          <svg
+            className="w-16 h-16 mx-auto text-gray-400"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
+            />
+          </svg>
+          <h2 className="text-xl font-semibold text-gray-700 dark:text-gray-300">
+            {mountState === "not_configured"
+              ? "Library Not Configured"
+              : "Library Drive Not Connected"}
+          </h2>
+          <p className="text-gray-500 dark:text-gray-400">
+            {mountState === "not_configured"
+              ? "Set up your music library location to browse your collection."
+              : "Connect your external drive to access your music library."}
+          </p>
+          <button
+            onClick={() => navigate("/settings")}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            Open Settings
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full p-6 space-y-6">
