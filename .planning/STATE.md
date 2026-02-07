@@ -82,6 +82,9 @@ Recent decisions affecting current work:
 - Phase 10-01: Multi-select uses Cmd/Ctrl+click toggle, Shift+click range (standard desktop UX)
 - Phase 10-01: Inline confirmation uses 2-second green highlight (no toast popups per user requirement)
 - Phase 10-01: File actions (Reveal/Copy Path) only shown when organized_path exists (local tracks only)
+- Phase 10-02: More Info panel slides in from right with backdrop overlay (not modal dialog)
+- Phase 10-02: Collapsible sections default to closed except Format Information
+- Phase 10-02: Panel auto-loads ffprobe data with graceful fallback if backend not implemented
 - Phase 10-03: Reuse track_analysis table from plan 10-02 (parallel execution, schema v8 already created)
 - Phase 10-03: Platform-specific clipboard commands (pbcopy/xclip/clip.exe) for cross-platform support
 - Phase 10-03: FFprobe errors gracefully handled with installation instructions

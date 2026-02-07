@@ -146,9 +146,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 10-01-PLAN.md — Context menu with submenus (playlists, sync profiles), multi-track selection, inline confirmation
-- [ ] 10-02-PLAN.md — More Info side panel with track overview, collapsible sections, auto-load light data
-- [ ] 10-03-PLAN.md — Backend file operations (copy clipboard, ffprobe extraction, track_analysis caching)
+- [x] 10-01-PLAN.md — Context menu with submenus (playlists, sync profiles), multi-track selection, inline confirmation
+- [x] 10-02-PLAN.md — More Info side panel with track overview, collapsible sections, auto-load light data
+- [x] 10-03-PLAN.md — Backend file operations (copy clipboard, ffprobe extraction, track_analysis caching)
 
 #### Phase 11: Download Flow & UX Polish
 **Goal**: Users can download from Remote to Library with responsive UI
@@ -180,5 +180,5 @@ Phases execute in numeric order: 1 → 2 → 3 → ... → 11
 | 7. Enhancements | v1.0 | 6/6 | Complete | 2026-02-05 |
 | 8. Library Configuration & Drive Detection | v1.1 | 4/4 | Complete | 2026-02-07 |
 | 9. Library/Remote Separation | v1.1 | 0/4 | Not started | - |
-| 10. Track Actions & More Info | v1.1 | 0/TBD | Not started | - |
+| 10. Track Actions & More Info | v1.1 | 3/3 | Complete | 2026-02-07 |
 | 11. Download Flow & UX Polish | v1.1 | 0/TBD | Not started | - |
