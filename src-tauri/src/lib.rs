@@ -124,6 +124,7 @@ pub fn run() {
             commands::enhancements::get_review_queue_cmd,
             commands::enhancements::resolve_review_item_cmd,
             commands::enhancements::get_review_queue_count_cmd,
+            commands::files::copy_to_clipboard,
             commands::library_config::select_library_folder,
             commands::library_config::get_subfolders,
             commands::library_config::configure_library,

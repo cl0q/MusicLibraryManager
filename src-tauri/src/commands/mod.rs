@@ -37,6 +37,7 @@
 pub mod download;
 pub mod duplicate;
 pub mod enhancements;
+pub mod files;
 pub mod import;
 pub mod library_config;
 pub mod playlist;
@@ -51,6 +52,7 @@ pub use enhancements::{
     analyze_replaygain_cmd, deep_scan_cmd, fetch_artwork_cmd, fingerprint_library_cmd,
     get_review_queue_cmd, get_review_queue_count_cmd, resolve_review_item_cmd,
 };
+pub use files::copy_to_clipboard;
 pub use import::import_directory;
 pub use library_config::{
     check_library_connection, configure_library, get_library_config,
