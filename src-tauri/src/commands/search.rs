@@ -22,7 +22,9 @@
 use std::path::PathBuf;
 
 use crate::database::get_connection;
-use crate::search::query::{search_tracks, SearchResult};
+use crate::models::track::Track;
+use crate::search::query;
+use crate::search::query::{get_all_tracks, search_tracks, SearchResult};
 
 /// Search the music library with fuzzy matching.
 ///
@@ -60,6 +62,114 @@ pub async fn search_library(query: String) -> Result<Vec<SearchResult>, String> 
     log::info!("Search '{}' returned {} results", query, results.len());
 
     Ok(results)
+}
+
+/// Get all tracks in the library.
+///
+/// Returns all tracks sorted by date_added descending (newest first).
+/// Use this for displaying the full library when no search query is active.
+///
+/// # Returns
+/// * `Ok(Vec<Track>)` - All tracks in the library
+/// * `Err(String)` - Error message if query failed
+///
+/// # Example (TypeScript)
+/// ```typescript
+/// const tracks = await invoke("get_library_tracks");
+/// tracks.forEach(t => console.log(`${t.metadata.artist} - ${t.metadata.title}`));
+/// ```
+#[tauri::command]
+pub async fn get_library_tracks() -> Result<Vec<Track>, String> {
+    let db_path = PathBuf::from("music_library.db");
+
+    let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+
+    let tracks = get_all_tracks(&conn).map_err(|e| format!("Query error: {}", e))?;
+
+    log::info!("get_library_tracks returned {} tracks", tracks.len());
+
+    Ok(tracks)
+}
+
+/// Get only tracks that exist locally on disk (organized_path IS NOT NULL).
+///
+/// Returns local library tracks, excluding undownloaded streaming tracks.
+/// This is used for the Library view in Phase 9.
+///
+/// # Returns
+/// * `Ok(Vec<Track>)` - Local tracks sorted by date_added descending
+/// * `Err(String)` - Error message if query failed
+///
+/// # Example (TypeScript)
+/// ```typescript
+/// const libraryTracks = await invoke("get_library_tracks_only");
+/// console.log(`Library has ${libraryTracks.length} local tracks`);
+/// ```
+#[tauri::command]
+pub async fn get_library_tracks_only() -> Result<Vec<Track>, String> {
+    let db_path = PathBuf::from("music_library.db");
+
+    let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+
+    let tracks = query::get_library_tracks_only(&conn).map_err(|e| format!("Query error: {}", e))?;
+
+    log::info!("get_library_tracks_only returned {} tracks", tracks.len());
+
+    Ok(tracks)
+}
+
+/// Get only streaming tracks not yet downloaded (organized_path IS NULL with track_sources).
+///
+/// Returns remote tracks that have streaming source associations but haven't been downloaded.
+/// This is used for the Remote view in Phase 9.
+///
+/// # Returns
+/// * `Ok(Vec<Track>)` - Remote tracks sorted by date_added descending
+/// * `Err(String)` - Error message if query failed
+///
+/// # Example (TypeScript)
+/// ```typescript
+/// const remoteTracks = await invoke("get_remote_tracks_only");
+/// console.log(`${remoteTracks.length} tracks waiting to be downloaded`);
+/// ```
+#[tauri::command]
+pub async fn get_remote_tracks_only() -> Result<Vec<Track>, String> {
+    let db_path = PathBuf::from("music_library.db");
+
+    let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+
+    let tracks = query::get_remote_tracks_only(&conn).map_err(|e| format!("Query error: {}", e))?;
+
+    log::info!("get_remote_tracks_only returned {} tracks", tracks.len());
+
+    Ok(tracks)
+}
+
+/// Get count of undownloaded streaming tracks for sidebar badge.
+///
+/// Returns the count of remote tracks (organized_path IS NULL with track_sources).
+/// This is used for displaying the badge count in the Remote view.
+///
+/// # Returns
+/// * `Ok(i64)` - Count of remote tracks
+/// * `Err(String)` - Error message if query failed
+///
+/// # Example (TypeScript)
+/// ```typescript
+/// const count = await invoke("get_remote_track_count");
+/// console.log(`Remote badge: ${count}`);
+/// ```
+#[tauri::command]
+pub async fn get_remote_track_count() -> Result<i64, String> {
+    let db_path = PathBuf::from("music_library.db");
+
+    let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+
+    let count = query::count_remote_tracks(&conn).map_err(|e| format!("Query error: {}", e))?;
+
+    log::info!("get_remote_track_count returned {}", count);
+
+    Ok(count)
 }
 
 /// Get total storage size of all tracks in the library.
