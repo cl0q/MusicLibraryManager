@@ -64,6 +64,11 @@ export async function search_library(query: string): Promise<Track[]> {
   return invoke<Track[]>("search_library", { query });
 }
 
+/** Get all tracks in the library (for initial load) */
+export async function get_library_tracks(): Promise<Track[]> {
+  return invoke<Track[]>("get_library_tracks");
+}
+
 export async function get_library_storage_size(): Promise<number> {
   return invoke<number>("get_library_storage_size");
 }
@@ -167,4 +172,109 @@ export async function resolveReviewItem(reviewId: number, action: string): Promi
 
 export async function getReviewQueueCount(): Promise<number> {
   return invoke<number>("get_review_queue_count_cmd");
+}
+
+// ============================================================================
+// Source Connection Commands
+// ============================================================================
+
+export interface SyncResponse {
+  added: number;
+  source: string;
+}
+
+/** Generate Spotify OAuth authorization URL */
+export async function spotify_auth_url(): Promise<string> {
+  return invoke<string>("spotify_auth_url");
+}
+
+/** Exchange Spotify authorization code for tokens */
+export async function spotify_exchange_code(code: string, userId: string): Promise<void> {
+  return invoke<void>("spotify_exchange_code", { code, userId });
+}
+
+/** Sync liked songs from Spotify */
+export async function sync_spotify(userId: string): Promise<SyncResponse> {
+  return invoke<SyncResponse>("sync_spotify", { userId });
+}
+
+/** Generate SoundCloud OAuth authorization URL */
+export async function soundcloud_auth_url(): Promise<string> {
+  return invoke<string>("soundcloud_auth_url");
+}
+
+/** Exchange SoundCloud authorization code for tokens */
+export async function soundcloud_exchange_code(code: string, userId: string): Promise<void> {
+  return invoke<void>("soundcloud_exchange_code", { code, userId });
+}
+
+/** Sync liked tracks from SoundCloud */
+export async function sync_soundcloud(userId: string): Promise<SyncResponse> {
+  return invoke<SyncResponse>("sync_soundcloud", { userId });
+}
+
+/** Check if a source is connected (has stored refresh token) */
+export async function check_source_connected(source: string): Promise<boolean> {
+  return invoke<boolean>("check_source_connected", { source });
+}
+
+/** Disconnect a source by removing its stored refresh token */
+export async function disconnect_source(source: string): Promise<void> {
+  return invoke<void>("disconnect_source", { source });
+}
+
+/** Complete Spotify OAuth flow with local callback server */
+export async function connect_spotify_with_server(): Promise<void> {
+  return invoke<void>("connect_spotify_with_server");
+}
+
+/** Complete SoundCloud OAuth flow with local callback server */
+export async function connect_soundcloud_with_server(): Promise<void> {
+  return invoke<void>("connect_soundcloud_with_server");
+}
+
+// ============================================================================
+// Library Configuration Commands
+// ============================================================================
+
+export interface LibraryConfig {
+  root_path: string | null;
+  scan_folders: string[];
+  download_destination: string;
+  library_id: string | null;
+  configured: boolean;
+}
+
+/** Open native OS folder picker and return selected path */
+export async function select_library_folder(): Promise<string | null> {
+  return invoke<string | null>("select_library_folder");
+}
+
+/** List immediate subdirectories of a path */
+export async function get_subfolders(rootPath: string): Promise<string[]> {
+  return invoke<string[]>("get_subfolders", { rootPath });
+}
+
+/** Configure library with root path, scan folders, and download destination */
+export async function configure_library(
+  rootPath: string,
+  scanFolders: string[],
+  downloadDestination: string
+): Promise<void> {
+  return invoke<void>("configure_library", { rootPath, scanFolders, downloadDestination });
+}
+
+/** Get current library configuration */
+export async function get_library_config(): Promise<LibraryConfig> {
+  return invoke<LibraryConfig>("get_library_config");
+}
+
+/** Check if library drive is currently connected */
+export async function check_library_connection(): Promise<boolean> {
+  return invoke<boolean>("check_library_connection");
+}
+
+/** Get current mount state */
+export async function get_library_mount_state(): Promise<string> {
+  return invoke<string>("get_library_mount_state");
 }

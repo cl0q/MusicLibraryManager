@@ -1,21 +1,24 @@
 import type { Track } from "../../types/library";
-import { formatDuration, formatQuality, formatDate } from "../../utils/formatter";
+import { formatDuration, formatDate } from "../../utils/formatter";
 
 interface MetadataPanelProps {
   track: Track;
 }
 
 export default function MetadataPanel({ track }: MetadataPanelProps) {
-  const metadata = [
-    { label: "Title", value: track.title },
-    { label: "Artist", value: track.artist },
-    { label: "Album", value: track.album },
-    { label: "Album Artist", value: track.album_artist },
-    { label: "Duration", value: formatDuration(track.duration) },
-    { label: "Quality", value: formatQuality(track.quality) },
-    { label: "Source", value: track.source },
-    { label: "Date Added", value: formatDate(new Date(track.date_added).getTime() / 1000) },
-    { label: "Local Path", value: track.local_path || "Not downloaded" },
+  const { metadata: m } = track;
+  const metadataItems = [
+    { label: "Title", value: m.title },
+    { label: "Artist", value: m.artist },
+    { label: "Album", value: m.album },
+    { label: "Album Artist", value: m.album_artist },
+    { label: "Duration", value: formatDuration(m.duration ?? 0) },
+    { label: "Format", value: m.format?.toUpperCase() || "Unknown" },
+    { label: "Bitrate", value: m.bitrate ? `${m.bitrate} kbps` : "-" },
+    { label: "Year", value: m.year?.toString() || "-" },
+    { label: "Genre", value: m.genre || "-" },
+    { label: "Date Added", value: track.date_added ? formatDate(new Date(track.date_added).getTime() / 1000) : "-" },
+    { label: "File Path", value: m.original_path || "Not downloaded" },
   ];
 
   return (
@@ -24,7 +27,7 @@ export default function MetadataPanel({ track }: MetadataPanelProps) {
         Track Information
       </h2>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {metadata.map((item) => (
+        {metadataItems.map((item) => (
           <div key={item.label}>
             <dt className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">
               {item.label}
