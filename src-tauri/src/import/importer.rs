@@ -154,9 +154,11 @@ fn save_batch(conn: &mut Connection, metadata_list: Vec<TrackMetadata>) -> DbRes
         let mut count = 0;
 
         for metadata in metadata_list {
-            let track_id = insert_track(tx, &metadata)?;
-            inserted_tracks.push((track_id, metadata.original_path.clone()));
-            count += 1;
+            if let Some(track_id) = insert_track(tx, &metadata)? {
+                inserted_tracks.push((track_id, metadata.original_path.clone()));
+                count += 1;
+            }
+            // None = duplicate, silently skipped
         }
 
         Ok(count)
@@ -196,19 +198,20 @@ fn save_batch(conn: &mut Connection, metadata_list: Vec<TrackMetadata>) -> DbRes
     Ok(count)
 }
 
-/// Insert a single track into the database.
+/// Insert a single track into the database, skipping duplicates.
 ///
 /// Generates the organized path from metadata and inserts all fields.
-/// Uses the schema from 01-01: tracks table with metadata fields.
+/// Uses INSERT OR IGNORE so duplicate original_path entries are skipped.
 ///
 /// # Returns
-/// * `Ok(i64)` - Track ID of the newly inserted track
+/// * `Ok(Some(i64))` - Track ID of the newly inserted track
+/// * `Ok(None)` - Track already exists (skipped)
 /// * `Err(DatabaseError)` - If insert fails
-fn insert_track(tx: &Transaction, metadata: &TrackMetadata) -> Result<i64, DatabaseError> {
+fn insert_track(tx: &Transaction, metadata: &TrackMetadata) -> Result<Option<i64>, DatabaseError> {
     let organized_path = generate_organized_path(metadata);
 
-    tx.execute(
-        "INSERT INTO tracks (artist, album_artist, album, title, genre, year, bitrate, duration, format, original_path, organized_path)
+    let rows_changed = tx.execute(
+        "INSERT OR IGNORE INTO tracks (artist, album_artist, album, title, genre, year, bitrate, duration, format, original_path, organized_path)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
             metadata.artist,
@@ -225,7 +228,11 @@ fn insert_track(tx: &Transaction, metadata: &TrackMetadata) -> Result<i64, Datab
         ],
     )?;
 
-    Ok(tx.last_insert_rowid())
+    if rows_changed > 0 {
+        Ok(Some(tx.last_insert_rowid()))
+    } else {
+        Ok(None) // Duplicate, skipped
+    }
 }
 
 #[cfg(test)]
@@ -356,7 +363,7 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_track_duplicate_path_fails() {
+    fn test_insert_track_duplicate_path_skipped() {
         let mut conn = get_memory_connection().unwrap();
 
         let metadata1 = TrackMetadata {
@@ -389,8 +396,8 @@ mod tests {
         let result1 = save_batch(&mut conn, vec![metadata1]).unwrap();
         assert_eq!(result1, 1);
 
-        // Second insert should fail (UNIQUE constraint on original_path)
-        let result2 = save_batch(&mut conn, vec![metadata2]);
-        assert!(result2.is_err());
+        // Second insert should be silently skipped (not fail the batch)
+        let result2 = save_batch(&mut conn, vec![metadata2]).unwrap();
+        assert_eq!(result2, 0);
     }
 }
