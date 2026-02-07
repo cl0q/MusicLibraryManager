@@ -6,10 +6,11 @@ import {
   getCoreRowModel,
   getSortedRowModel,
   type SortingState,
+  type ColumnSizingState,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { Track } from "../../types/library";
-import { formatDuration, formatDate, formatQuality } from "../../utils/formatter";
+import { formatDuration, formatDate } from "../../utils/formatter";
 import RowContextMenu, { useRowContextMenu } from "./RowContextMenu";
 
 interface LibraryTableProps {
@@ -19,69 +20,96 @@ interface LibraryTableProps {
 const columnHelper = createColumnHelper<Track>();
 
 const columns = [
-  columnHelper.accessor("title", {
+  columnHelper.accessor((row) => row.metadata.title, {
+    id: "title",
     header: "Title",
+    size: 250,
+    minSize: 100,
+    maxSize: 500,
     cell: (info) => (
-      <div className="font-medium text-gray-900 dark:text-white truncate">
-        {info.getValue()}
+      <div className="font-medium text-gray-900 dark:text-white truncate" title={info.getValue() || "Unknown"}>
+        {info.getValue() || "Unknown"}
       </div>
     ),
   }),
-  columnHelper.accessor("artist", {
+  columnHelper.accessor((row) => row.metadata.artist, {
+    id: "artist",
     header: "Artist",
+    size: 180,
+    minSize: 80,
+    maxSize: 400,
     cell: (info) => (
-      <div className="text-gray-700 dark:text-gray-300 truncate">
-        {info.getValue()}
+      <div className="text-gray-700 dark:text-gray-300 truncate" title={info.getValue() || "Unknown"}>
+        {info.getValue() || "Unknown"}
       </div>
     ),
   }),
-  columnHelper.accessor("album", {
+  columnHelper.accessor((row) => row.metadata.album, {
+    id: "album",
     header: "Album",
+    size: 180,
+    minSize: 80,
+    maxSize: 400,
     cell: (info) => (
-      <div className="text-gray-700 dark:text-gray-300 truncate">
-        {info.getValue()}
+      <div className="text-gray-700 dark:text-gray-300 truncate" title={info.getValue() || "Unknown"}>
+        {info.getValue() || "Unknown"}
       </div>
     ),
   }),
-  columnHelper.accessor("duration", {
+  columnHelper.accessor((row) => row.metadata.duration, {
+    id: "duration",
     header: "Duration",
+    size: 80,
+    minSize: 60,
+    maxSize: 120,
     cell: (info) => (
       <div className="text-gray-600 dark:text-gray-400 text-right tabular-nums">
-        {formatDuration(info.getValue())}
+        {formatDuration(info.getValue() ?? 0)}
       </div>
     ),
   }),
-  columnHelper.accessor("source", {
-    header: "Source",
+  columnHelper.accessor((row) => row.metadata.format, {
+    id: "format",
+    header: "Format",
+    size: 80,
+    minSize: 60,
+    maxSize: 120,
     cell: (info) => {
-      const source = info.getValue();
-      const colorClass =
-        source === "spotify"
-          ? "text-green-600 dark:text-green-400"
-          : source === "soundcloud"
-            ? "text-orange-600 dark:text-orange-400"
-            : "text-gray-600 dark:text-gray-400";
+      const format = info.getValue();
+      const displayFormat =
+        format === "spotify" || format === "soundcloud"
+          ? "Stream"
+          : (format || "Unknown").toUpperCase();
       return (
-        <div className={`${colorClass} capitalize`}>
-          {source}
+        <div className="text-gray-600 dark:text-gray-400 text-sm">
+          {displayFormat}
         </div>
       );
     },
   }),
-  columnHelper.accessor("quality", {
-    header: "Quality",
-    cell: (info) => (
-      <div className="text-gray-600 dark:text-gray-400 text-sm">
-        {formatQuality(info.getValue())}
-      </div>
-    ),
+  columnHelper.accessor((row) => row.metadata.bitrate, {
+    id: "bitrate",
+    header: "Bitrate",
+    size: 90,
+    minSize: 60,
+    maxSize: 120,
+    cell: (info) => {
+      const bitrate = info.getValue();
+      return (
+        <div className="text-gray-600 dark:text-gray-400 text-sm">
+          {bitrate ? `${bitrate} kbps` : "-"}
+        </div>
+      );
+    },
   }),
   columnHelper.accessor("date_added", {
     header: "Date Added",
+    size: 110,
+    minSize: 80,
+    maxSize: 150,
     cell: (info) => {
-      // date_added is stored as string in ISO format from Rust
       const dateStr = info.getValue();
-      // Parse ISO string to timestamp
+      if (!dateStr) return <div className="text-gray-600 dark:text-gray-400 text-sm">-</div>;
       const timestamp = new Date(dateStr).getTime() / 1000;
       return (
         <div className="text-gray-600 dark:text-gray-400 text-sm">
@@ -94,6 +122,7 @@ const columns = [
 
 export default function LibraryTable({ tracks }: LibraryTableProps) {
   const [sorting, setSorting] = useState<SortingState>([]);
+  const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
   const [contextMenuTrack, setContextMenuTrack] = useState<Track | null>(null);
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const { displayMenu } = useRowContextMenu();
@@ -103,10 +132,14 @@ export default function LibraryTable({ tracks }: LibraryTableProps) {
     columns,
     state: {
       sorting,
+      columnSizing,
     },
     onSortingChange: setSorting,
+    onColumnSizingChange: setColumnSizing,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
+    columnResizeMode: "onChange",
+    enableColumnResizing: true,
   });
 
   const { rows } = table.getRowModel();
@@ -133,17 +166,20 @@ export default function LibraryTable({ tracks }: LibraryTableProps) {
         ref={tableContainerRef}
         className="overflow-auto h-full border border-gray-200 dark:border-gray-700 rounded-lg"
       >
-        <table className="w-full border-collapse">
+        <table className="w-full border-collapse table-fixed">
           <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0 z-10">
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
                   <th
                     key={header.id}
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 select-none"
-                    onClick={header.column.getToggleSortingHandler()}
+                    style={{ width: header.getSize() }}
+                    className="relative px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider select-none group"
                   >
-                    <div className="flex items-center gap-2">
+                    <div
+                      className="flex items-center gap-2 cursor-pointer hover:text-gray-700 dark:hover:text-gray-200"
+                      onClick={header.column.getToggleSortingHandler()}
+                    >
                       {flexRender(
                         header.column.columnDef.header,
                         header.getContext()
@@ -154,6 +190,18 @@ export default function LibraryTable({ tracks }: LibraryTableProps) {
                         </span>
                       )}
                     </div>
+                    {/* Resize handle */}
+                    {header.column.getCanResize() && (
+                      <div
+                        onMouseDown={header.getResizeHandler()}
+                        onTouchStart={header.getResizeHandler()}
+                        className={`absolute right-0 top-0 h-full w-1 cursor-col-resize select-none touch-none
+                          ${header.column.getIsResizing()
+                            ? "bg-blue-500"
+                            : "bg-transparent hover:bg-gray-300 dark:hover:bg-gray-600"
+                          }`}
+                      />
+                    )}
                   </th>
                 ))}
               </tr>
@@ -179,7 +227,7 @@ export default function LibraryTable({ tracks }: LibraryTableProps) {
                   }}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-4 py-2">
+                    <td key={cell.id} className="px-4 py-2 overflow-hidden">
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </td>
                   ))}

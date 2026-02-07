@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 import { NavLink } from "react-router";
-import { getReviewQueueCount } from "../../utils/tauri-commands";
+import { getReviewQueueCount, getRemoteTrackCount } from "../../utils/tauri-commands";
 import { useLibraryMount } from "../../contexts/LibraryMountContext";
 
 export default function Sidebar() {
   const [reviewQueueCount, setReviewQueueCount] = useState(0);
+  const [remoteTrackCount, setRemoteTrackCount] = useState(0);
   const { isLibraryAvailable } = useLibraryMount();
 
   useEffect(() => {
@@ -24,6 +25,35 @@ export default function Sidebar() {
     const interval = setInterval(loadCount, 30000);
 
     return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const loadRemoteCount = async () => {
+      try {
+        const count = await getRemoteTrackCount();
+        setRemoteTrackCount(count);
+      } catch (err) {
+        console.error("Failed to load remote track count:", err);
+      }
+    };
+
+    // Load initial count
+    loadRemoteCount();
+
+    // Event listeners for count updates
+    const handleImportComplete = () => loadRemoteCount();
+    const handleSyncComplete = () => loadRemoteCount();
+    const handleDownloadComplete = () => loadRemoteCount();
+
+    window.addEventListener("import-complete", handleImportComplete);
+    window.addEventListener("sync-complete", handleSyncComplete);
+    window.addEventListener("download-complete", handleDownloadComplete);
+
+    return () => {
+      window.removeEventListener("import-complete", handleImportComplete);
+      window.removeEventListener("sync-complete", handleSyncComplete);
+      window.removeEventListener("download-complete", handleDownloadComplete);
+    };
   }, []);
 
   const navItems = [
@@ -84,6 +114,27 @@ export default function Sidebar() {
             strokeLinejoin="round"
             strokeWidth={2}
             d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
+          />
+        </svg>
+      ),
+    },
+    {
+      path: "/remote",
+      label: "Remote",
+      disabled: false,
+      badge: remoteTrackCount > 0 ? remoteTrackCount : undefined,
+      icon: (
+        <svg
+          className="w-5 h-5"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"
           />
         </svg>
       ),
