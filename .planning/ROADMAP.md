@@ -106,10 +106,13 @@ Plans:
   2. App detects when configured library drive is not connected
   3. Library tab shows a message when drive is not connected (blocks access)
   4. Remote tab remains accessible when library drive is not connected
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] 08-01: TBD
+- [ ] 08-01-PLAN.md — Backend foundation: database schema, LibraryConfig model, Tauri commands, marker file
+- [ ] 08-02-PLAN.md — Mount detection service with macOS FSEvents via /Volumes monitoring
+- [ ] 08-03-PLAN.md — Settings UI page, library setup form, first-run wizard modal
+- [ ] 08-04-PLAN.md — Disconnected state UI: mount context, sidebar graying, empty state
 
 #### Phase 9: Library/Remote Separation
 **Goal**: Library shows only local files, Remote shows undownloaded staging
