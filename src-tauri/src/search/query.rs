@@ -58,6 +58,171 @@ const FUZZY_THRESHOLD: f64 = 0.75;
 /// Limits memory usage while providing enough candidates for scoring.
 const MAX_CANDIDATES: usize = 100;
 
+/// Retrieves all tracks from the database.
+///
+/// Returns all tracks sorted by date_added descending (newest first).
+/// Use this for displaying the full library when no search query is active.
+///
+/// # Arguments
+/// * `conn` - Database connection
+///
+/// # Returns
+/// * `Ok(Vec<Track>)` - All tracks sorted by date_added descending
+/// * `Err(DatabaseError)` - If database query failed
+pub fn get_all_tracks(conn: &Connection) -> DbResult<Vec<Track>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, artist, album_artist, album, title, genre, year, bitrate, duration, format, original_path, organized_path, is_duplicate, date_added
+         FROM tracks
+         ORDER BY date_added DESC",
+    )?;
+
+    let tracks: Vec<Track> = stmt
+        .query_map([], |row| {
+            Ok(Track {
+                id: Some(row.get(0)?),
+                metadata: TrackMetadata {
+                    artist: row.get(1)?,
+                    album_artist: row.get(2)?,
+                    album: row.get(3)?,
+                    title: row.get(4)?,
+                    genre: row.get(5)?,
+                    year: row.get(6)?,
+                    bitrate: row.get(7)?,
+                    duration: row.get(8)?,
+                    format: row.get(9)?,
+                    original_path: row.get(10)?,
+                },
+                organized_path: row.get(11)?,
+                is_duplicate: row.get::<_, i32>(12)? != 0,
+                date_added: row.get(13)?,
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(tracks)
+}
+
+/// Get only library tracks (local files with organized_path IS NOT NULL).
+///
+/// Returns tracks that exist locally on disk, excluding undownloaded streaming tracks.
+/// This is used for the Library view in Phase 9.
+///
+/// # Arguments
+/// * `conn` - Database connection
+///
+/// # Returns
+/// * `Ok(Vec<Track>)` - Local tracks sorted by date_added descending
+/// * `Err(DatabaseError)` - If database query failed
+pub fn get_library_tracks_only(conn: &Connection) -> DbResult<Vec<Track>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, artist, album_artist, album, title, genre, year, bitrate, duration, format, original_path, organized_path, is_duplicate, date_added
+         FROM tracks
+         WHERE organized_path IS NOT NULL
+         ORDER BY date_added DESC",
+    )?;
+
+    let tracks: Vec<Track> = stmt
+        .query_map([], |row| {
+            Ok(Track {
+                id: Some(row.get(0)?),
+                metadata: TrackMetadata {
+                    artist: row.get(1)?,
+                    album_artist: row.get(2)?,
+                    album: row.get(3)?,
+                    title: row.get(4)?,
+                    genre: row.get(5)?,
+                    year: row.get(6)?,
+                    bitrate: row.get(7)?,
+                    duration: row.get(8)?,
+                    format: row.get(9)?,
+                    original_path: row.get(10)?,
+                },
+                organized_path: row.get(11)?,
+                is_duplicate: row.get::<_, i32>(12)? != 0,
+                date_added: row.get(13)?,
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(tracks)
+}
+
+/// Get only remote tracks (undownloaded streaming tracks with organized_path IS NULL).
+///
+/// Returns streaming tracks that have source associations but haven't been downloaded yet.
+/// This is used for the Remote view in Phase 9.
+///
+/// Uses INNER JOIN with track_sources to ensure tracks actually have streaming source
+/// associations, avoiding orphaned tracks without sources.
+///
+/// # Arguments
+/// * `conn` - Database connection
+///
+/// # Returns
+/// * `Ok(Vec<Track>)` - Remote tracks sorted by date_added descending
+/// * `Err(DatabaseError)` - If database query failed
+pub fn get_remote_tracks_only(conn: &Connection) -> DbResult<Vec<Track>> {
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT t.id, t.artist, t.album_artist, t.album, t.title, t.genre, t.year, t.bitrate, t.duration, t.format, t.original_path, t.organized_path, t.is_duplicate, t.date_added
+         FROM tracks t
+         INNER JOIN track_sources ts ON t.id = ts.track_id
+         WHERE t.organized_path IS NULL
+         ORDER BY t.date_added DESC",
+    )?;
+
+    let tracks: Vec<Track> = stmt
+        .query_map([], |row| {
+            Ok(Track {
+                id: Some(row.get(0)?),
+                metadata: TrackMetadata {
+                    artist: row.get(1)?,
+                    album_artist: row.get(2)?,
+                    album: row.get(3)?,
+                    title: row.get(4)?,
+                    genre: row.get(5)?,
+                    year: row.get(6)?,
+                    bitrate: row.get(7)?,
+                    duration: row.get(8)?,
+                    format: row.get(9)?,
+                    original_path: row.get(10)?,
+                },
+                organized_path: row.get(11)?,
+                is_duplicate: row.get::<_, i32>(12)? != 0,
+                date_added: row.get(13)?,
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(tracks)
+}
+
+/// Count remote tracks for sidebar badge.
+///
+/// Returns the count of undownloaded streaming tracks (organized_path IS NULL)
+/// that have source associations. Used for displaying badge count in UI.
+///
+/// # Arguments
+/// * `conn` - Database connection
+///
+/// # Returns
+/// * `Ok(i64)` - Count of remote tracks
+/// * `Err(DatabaseError)` - If database query failed
+pub fn count_remote_tracks(conn: &Connection) -> DbResult<i64> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(DISTINCT t.id)
+         FROM tracks t
+         INNER JOIN track_sources ts ON t.id = ts.track_id
+         WHERE t.organized_path IS NULL",
+        [],
+        |row| row.get(0),
+    )?;
+
+    Ok(count)
+}
+
 /// Searches tracks by query with fuzzy matching.
 ///
 /// Two-pass search:
@@ -285,7 +450,7 @@ mod tests {
             "mp3".to_string(),
             format!("/path/to/{}.mp3", title),
         );
-        Track::with_id(id, metadata, format!("{}/{}/{}.mp3", artist, album, title))
+        Track::with_id(id, metadata, Some(format!("{}/{}/{}.mp3", artist, album, title)))
     }
 
     fn insert_test_track(conn: &Connection, track: &Track) {
