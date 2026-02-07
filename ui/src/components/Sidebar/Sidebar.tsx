@@ -242,10 +242,11 @@ export default function Sidebar() {
               <NavLink
                 to={item.path}
                 end={item.path === "/"}
+                onClick={(e) => { if (item.disabled) e.preventDefault(); }}
                 className={({ isActive }) =>
                   `flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
                     item.disabled
-                      ? "opacity-50 text-gray-400 dark:text-gray-600"
+                      ? "opacity-50 text-gray-400 dark:text-gray-600 cursor-not-allowed"
                       : isActive
                       ? "bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-100"
                       : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"

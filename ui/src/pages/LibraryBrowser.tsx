@@ -94,8 +94,8 @@ export default function LibraryBrowser({ view = 'library' }: LibraryBrowserProps
     }
   };
 
-  // Show disconnected state if library is not available
-  if (!isLibraryAvailable) {
+  // Show disconnected state if library is not available (only for library view, not remote)
+  if (view === 'library' && !isLibraryAvailable) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-6 text-center">
         <div className="max-w-md space-y-4">
@@ -137,10 +137,11 @@ export default function LibraryBrowser({ view = 'library' }: LibraryBrowserProps
   return (
     <div className="flex flex-col h-full p-6 space-y-6">
       <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-        Library
+        {view === 'remote' ? 'Remote' : 'Library'}
       </h1>
 
-      {/* Enhancement Actions */}
+      {view === 'library' && (<>
+      {/* Enhancement Actions (library view only) */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
         <h2 className="text-lg font-semibold mb-3 text-gray-900 dark:text-gray-100">
           Enhancement Tools
@@ -244,6 +245,7 @@ export default function LibraryBrowser({ view = 'library' }: LibraryBrowserProps
           </div>
         )}
       </div>
+      </>)}
 
       {/* Library Table */}
       <FilterBar
