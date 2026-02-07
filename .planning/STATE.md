@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 9 of 11 (Library/Remote Separation)
-Plan: 0 of TBD in current phase
-Status: Not started
-Last activity: 2026-02-07 - Completed Phase 8
+Plan: 1 of TBD in current phase
+Status: In progress
+Last activity: 2026-02-07 - Completed 09-01-PLAN.md
 
-Progress: [████████░░░░░░░░░░░] 43/TBD total plans (v1.0: 39/39, v1.1: 4/TBD)
+Progress: [████████░░░░░░░░░░░] 44/TBD total plans (v1.0: 39/39, v1.1: 5/TBD)
 
 ## Performance Metrics
 
@@ -24,9 +24,9 @@ Progress: [████████░░░░░░░░░░░] 43/TBD tot
 - Phases completed: 7
 
 **Current Milestone (v1.1):**
-- Plans completed: 4
-- Average duration: 18 min
-- Total execution time: ~70 min
+- Plans completed: 5
+- Average duration: 15 min
+- Total execution time: ~75 min
 
 *Updated after each plan completion*
 
@@ -69,6 +69,10 @@ Recent decisions affecting current work:
 - Phase 8-01: Marker file is visible mlm-library.json, not hidden dotfile
 - Phase 8-02: Use notify crate's /Volumes watching instead of low-level fsevent bindings
 - Phase 8-02: Mount detection runs in background thread, never blocks app startup
+- Phase 9-01: download_status column uses NULL for never-downloaded, ISO 8601 timestamp for audit
+- Phase 9-01: Remote view uses organized_path IS NULL for filtering (not download_status)
+- Phase 9-01: INNER JOIN with track_sources ensures remote tracks have streaming source associations
+- Phase 9-01: Partial index idx_organized_path_null optimizes remote view queries
 
 ### v1.1 Scope Decisions
 
@@ -97,8 +101,8 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-07
-Stopped at: Completed Phase 8 (all 4 plans), ready for Phase 9
+Stopped at: Completed 09-01-PLAN.md
 Resume file: None
 
 ---
-*Last updated: 2026-02-07 after 08-02 plan completion*
+*Last updated: 2026-02-07 after 09-01 plan completion*
