@@ -58,6 +58,53 @@ const FUZZY_THRESHOLD: f64 = 0.75;
 /// Limits memory usage while providing enough candidates for scoring.
 const MAX_CANDIDATES: usize = 100;
 
+/// Get a single track by its ID.
+///
+/// Returns None if no track with the given ID exists.
+///
+/// # Arguments
+/// * `conn` - Database connection
+/// * `track_id` - Track ID to retrieve
+///
+/// # Returns
+/// * `Ok(Some(Track))` - Track with the given ID
+/// * `Ok(None)` - No track found with the given ID
+/// * `Err(DatabaseError)` - If database query failed
+pub fn get_track_by_id(conn: &Connection, track_id: i64) -> DbResult<Option<Track>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, artist, album_artist, album, title, genre, year, bitrate, duration, format, original_path, organized_path, is_duplicate, date_added
+         FROM tracks
+         WHERE id = ?",
+    )?;
+
+    let result = stmt.query_row([track_id], |row| {
+        Ok(Track {
+            id: Some(row.get(0)?),
+            metadata: TrackMetadata {
+                artist: row.get(1)?,
+                album_artist: row.get(2)?,
+                album: row.get(3)?,
+                title: row.get(4)?,
+                genre: row.get(5)?,
+                year: row.get(6)?,
+                bitrate: row.get(7)?,
+                duration: row.get(8)?,
+                format: row.get(9)?,
+                original_path: row.get(10)?,
+            },
+            organized_path: row.get(11)?,
+            is_duplicate: row.get::<_, i32>(12)? != 0,
+            date_added: row.get(13)?,
+        })
+    });
+
+    match result {
+        Ok(track) => Ok(Some(track)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// Retrieves all tracks from the database.
 ///
 /// Returns all tracks sorted by date_added descending (newest first).

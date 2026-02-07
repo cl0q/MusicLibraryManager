@@ -77,6 +77,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::analysis::get_track_analysis,
             commands::import::import_directory,
             commands::search::search_library,
             commands::search::get_library_storage_size,
