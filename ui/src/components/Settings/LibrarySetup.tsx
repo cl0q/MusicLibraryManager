@@ -122,6 +122,8 @@ export default function LibrarySetup({ onConfigured }: LibrarySetupProps) {
       );
 
       toast.success("Library configuration saved successfully");
+      // Notify LibraryMountContext to refresh state
+      window.dispatchEvent(new CustomEvent("library-configured"));
       onConfigured?.();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

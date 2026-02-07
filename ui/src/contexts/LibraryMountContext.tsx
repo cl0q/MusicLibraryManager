@@ -94,11 +94,18 @@ export function LibraryMountProvider({ children }: LibraryMountProviderProps) {
 
     initialize();
 
-    // Cleanup listener on unmount
+    // Listen for library-configured events (from LibrarySetup after save)
+    const handleConfigured = () => {
+      checkMountState().then(setMountState);
+    };
+    window.addEventListener("library-configured", handleConfigured);
+
+    // Cleanup listeners on unmount
     return () => {
       if (unlisten) {
         unlisten();
       }
+      window.removeEventListener("library-configured", handleConfigured);
     };
   }, []);
 
