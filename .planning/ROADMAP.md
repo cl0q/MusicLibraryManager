@@ -143,10 +143,12 @@ Plans:
   2. Add to playlist works for local tracks
   3. Add to sync profile works for local tracks
   4. Open in file manager works for local tracks
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 10-01: TBD
+- [ ] 10-01-PLAN.md — Context menu with submenus (playlists, sync profiles), multi-track selection, inline confirmation
+- [ ] 10-02-PLAN.md — More Info side panel with track overview, collapsible sections, auto-load light data
+- [ ] 10-03-PLAN.md — Backend file operations (copy clipboard, ffprobe extraction, track_analysis caching)
 
 #### Phase 11: Download Flow & UX Polish
 **Goal**: Users can download from Remote to Library with responsive UI
