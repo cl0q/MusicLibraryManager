@@ -702,17 +702,20 @@ mod tests {
         // Verify we're at v4
         assert_eq!(get_schema_version(&conn).unwrap(), 4);
 
-        // Now run full initialization (should migrate to v5)
+        // Now run full initialization (should migrate to current version)
         initialize_schema(&conn).unwrap();
 
-        // Verify migration happened
-        assert_eq!(get_schema_version(&conn).unwrap(), 5);
+        // Verify migration happened to current version
+        assert_eq!(get_schema_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
 
         // Verify Phase 7 tables exist
         assert!(table_exists(&conn, "fingerprints"));
         assert!(table_exists(&conn, "artwork"));
         assert!(table_exists(&conn, "replaygain"));
         assert!(table_exists(&conn, "review_queue"));
+
+        // Verify Phase 8 tables exist
+        assert!(table_exists(&conn, "app_config"));
     }
 
     #[test]
