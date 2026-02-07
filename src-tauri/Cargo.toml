@@ -20,6 +20,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -60,6 +61,9 @@ anyhow = "1"
 # Date/time
 chrono = { version = "0.4", features = ["serde"] }
 
+# UUID generation for library IDs
+uuid = { version = "1", features = ["v4", "serde"] }
+
 # OAuth token management
 oauth2 = "5.0"
 keyring = "3.6"
@@ -88,6 +92,9 @@ musicbrainz_rs = "0.12"
 image = "0.25"
 urlencoding = "2.1"
 base64 = "0.22"
+tauri-plugin-deep-link = "2.4.7"
+tauri-plugin-single-instance = { version = "2.4.0", features = ["deep-link"] }
+open = "5.3.3"
 
 [dev-dependencies]
 tempfile = "3.24.0"

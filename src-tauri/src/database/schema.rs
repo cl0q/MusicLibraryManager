@@ -14,7 +14,8 @@ use crate::database::connection::Result;
 /// - Version 3: Phase 4 schema (playlists, playlist_tracks, playlist_tags)
 /// - Version 4: Phase 5 schema (sync_profiles, sync_profile_tracks, sync_profile_playlists, sync_profile_rules, sync_state)
 /// - Version 5: Phase 7 schema (fingerprints, artwork, replaygain, review_queue)
-pub const CURRENT_SCHEMA_VERSION: i32 = 5;
+/// - Version 6: Phase 8 schema (app_config table for library configuration)
+pub const CURRENT_SCHEMA_VERSION: i32 = 6;
 
 /// SQL schema for the music library database (Phase 1 - base schema).
 ///
@@ -273,6 +274,19 @@ CREATE INDEX IF NOT EXISTS idx_review_status ON review_queue(status);
 CREATE INDEX IF NOT EXISTS idx_review_type ON review_queue(action_type);
 ";
 
+/// SQL schema for Phase 8 library configuration table.
+///
+/// Contains:
+/// - `app_config` table: Key-value configuration storage for library settings
+pub const PHASE8_SCHEMA_SQL: &str = "
+-- App configuration table: Key-value configuration storage
+CREATE TABLE IF NOT EXISTS app_config (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+";
+
 /// Get the current schema version from the database.
 pub fn get_schema_version(conn: &Connection) -> Result<i32> {
     let version: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -334,6 +348,13 @@ fn migrate_to_v5(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Run Phase 8 migrations: create app configuration table.
+fn migrate_to_v6(conn: &Connection) -> Result<()> {
+    // Create Phase 8 tables (IF NOT EXISTS makes this safe to re-run)
+    conn.execute_batch(PHASE8_SCHEMA_SQL)?;
+    Ok(())
+}
+
 /// Initialize the database schema with versioned migrations.
 ///
 /// Creates all tables and indexes, applying migrations as needed.
@@ -378,6 +399,12 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
     if get_schema_version(conn)? < 5 {
         migrate_to_v5(conn)?;
         set_schema_version(conn, 5)?;
+    }
+
+    // Apply Phase 8 migrations if needed
+    if get_schema_version(conn)? < 6 {
+        migrate_to_v6(conn)?;
+        set_schema_version(conn, 6)?;
     }
 
     Ok(())

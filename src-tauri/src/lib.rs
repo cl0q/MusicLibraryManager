@@ -2,6 +2,7 @@ pub mod artwork;
 pub mod audio;
 pub mod auth;
 pub mod commands;
+pub mod config;
 pub mod database;
 pub mod dedup;
 pub mod download;
@@ -17,6 +18,8 @@ pub mod startup;
 pub mod sync;
 pub mod transcode;
 
+use tauri::Manager;
+
 use commands::sources::OAuthState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -25,6 +28,19 @@ pub fn run() {
     let _ = dotenvy::dotenv();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // When a second instance tries to launch (e.g., from deep link),
+            // this callback runs in the existing instance with the args
+            log::info!("Single instance callback triggered with args: {:?}", args);
+
+            // Focus the main window
+            if let Some(window) = app.get_webview_window("main") {
+                let _: Result<(), tauri::Error> = window.set_focus();
+            }
+        }))
         .manage(OAuthState::default())
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -53,6 +69,7 @@ pub fn run() {
             commands::import::import_directory,
             commands::search::search_library,
             commands::search::get_library_storage_size,
+            commands::search::get_library_tracks,
             commands::duplicate::detect_duplicates,
             commands::download::download_tracks,
             commands::download::retry_failed_downloads,
@@ -64,6 +81,10 @@ pub fn run() {
             commands::sources::soundcloud_exchange_code,
             commands::sources::sync_soundcloud,
             commands::sources::check_duplicates,
+            commands::sources::check_source_connected,
+            commands::sources::disconnect_source,
+            commands::sources::connect_spotify_with_server,
+            commands::sources::connect_soundcloud_with_server,
             commands::playlist::create_playlist_command,
             commands::playlist::get_playlists_command,
             commands::playlist::get_playlist_tracks_command,
