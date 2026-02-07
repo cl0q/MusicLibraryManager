@@ -48,6 +48,9 @@ pub fn run() {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
                         .level(log::LevelFilter::Info)
+                        .level_for("lofty", log::LevelFilter::Error)
+                        .level_for("symphonia_core", log::LevelFilter::Error)
+                        .level_for("symphonia_bundle_mp3", log::LevelFilter::Error)
                         .build(),
                 )?;
             }
