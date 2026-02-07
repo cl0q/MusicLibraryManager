@@ -53,8 +53,8 @@ pub use enhancements::{
 };
 pub use import::import_directory;
 pub use library_config::{
-    check_library_connection, configure_library, get_library_config, get_subfolders,
-    select_library_folder,
+    check_library_connection, configure_library, get_library_config,
+    get_library_mount_state, get_subfolders, select_library_folder,
 };
 pub use playlist::{
     add_track_to_playlist_command, create_playlist_command, get_playlist_tracks_command,

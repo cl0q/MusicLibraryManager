@@ -16,17 +16,20 @@
 
 use std::path::PathBuf;
 
+use crate::config::LibraryConfig;
 use crate::database::{get_connection, initialize_schema};
 use crate::database::playlist::{create_smart_playlists, create_local_likes_playlist};
+use crate::mount::{MountDetector, LibraryMountState};
 use crate::sources::soundcloud::SoundCloudClient;
 use crate::sources::spotify::SpotifyClient;
+use tauri::{Emitter, Manager};
 
 /// Default user ID for startup sync.
 ///
 /// In a single-user desktop app, this is the default user context.
 /// When multi-user support is added (Phase 6+), this should come from
 /// app configuration or last-logged-in user state.
-const DEFAULT_USER_ID: &str = "default_user";
+const DEFAULT_USER_ID: &str = "default";
 
 /// Initialize database and playlists on startup.
 ///
@@ -172,6 +175,63 @@ async fn sync_soundcloud_on_startup() -> Result<usize, String> {
         .sync_likes(DEFAULT_USER_ID, &conn)
         .await
         .map_err(|e| format!("Sync failed: {}", e))
+}
+
+/// Setup mount detection for library drive monitoring.
+///
+/// Called during app setup to initialize background mount detection.
+/// Only activates if library is configured. Does not block startup on failure.
+///
+/// Tasks:
+/// - Load library configuration from database
+/// - Emit initial mount state (Connected/Disconnected/NotConfigured)
+/// - Start background mount detector if library configured
+/// - Store MountDetector in Tauri managed state
+pub fn setup_mount_detection(app_handle: tauri::AppHandle) -> Result<(), String> {
+    log::info!("Setting up mount detection...");
+
+    let db_path = PathBuf::from("music_library.db");
+    let conn = get_connection(&db_path)
+        .map_err(|e| format!("Failed to get database connection: {}", e))?;
+
+    // Load library configuration
+    let config = LibraryConfig::load(&conn)
+        .map_err(|e| format!("Failed to load library config: {}", e))?;
+
+    if !config.is_configured() {
+        log::info!("Library not configured, skipping mount detection");
+        // Emit NotConfigured state
+        let _ = app_handle.emit("library-mount-changed", &LibraryMountState::NotConfigured);
+        return Ok(());
+    }
+
+    let library_root = config.root_path
+        .ok_or_else(|| "Library configured but root_path is None".to_string())?;
+
+    // Check current mount state
+    if library_root.exists() {
+        log::info!("Library drive connected at: {}", library_root.display());
+    } else {
+        log::warn!("Library drive not currently connected: {}", library_root.display());
+        // Emit Disconnected state
+        let _ = app_handle.emit("library-mount-changed", &LibraryMountState::Disconnected);
+    }
+
+    // Start background mount detector
+    match MountDetector::start(app_handle.clone(), library_root.clone()) {
+        Ok(detector) => {
+            // Store detector in managed state
+            app_handle.manage(detector);
+            log::info!("Mount detection started successfully");
+            Ok(())
+        }
+        Err(e) => {
+            // Log error but don't block startup
+            log::error!("Failed to start mount detection: {}", e);
+            log::warn!("Continuing without mount detection");
+            Ok(())
+        }
+    }
 }
 
 #[cfg(test)]

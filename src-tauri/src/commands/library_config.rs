@@ -5,11 +5,13 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use tauri::AppHandle;
+use std::sync::Arc;
+use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::config::{LibraryConfig, create_marker_file, verify_marker_file};
 use crate::database::connection::get_connection;
+use crate::mount::MountDetector;
 
 /// Open native OS folder picker for library selection.
 ///
@@ -168,6 +170,27 @@ pub async fn check_library_connection() -> Result<bool, String> {
     } else {
         Ok(false)
     }
+}
+
+/// Get current library mount state from MountDetector.
+///
+/// Returns the current mount state as a string: "connected", "disconnected", or "not_configured".
+/// If MountDetector is not registered (library not configured at startup), returns "not_configured".
+#[tauri::command]
+pub async fn get_library_mount_state(
+    mount_detector: State<'_, Arc<MountDetector>>,
+) -> Result<String, String> {
+    use crate::mount::LibraryMountState;
+
+    let state = mount_detector.get_state();
+
+    let state_str = match state {
+        LibraryMountState::Connected => "connected",
+        LibraryMountState::Disconnected => "disconnected",
+        LibraryMountState::NotConfigured => "not_configured",
+    };
+
+    Ok(state_str.to_string())
 }
 
 #[cfg(test)]

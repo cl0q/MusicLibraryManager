@@ -52,6 +52,13 @@ pub fn run() {
                 )?;
             }
 
+            // Setup mount detection (synchronous, stores MountDetector in managed state)
+            // Mount detection runs in background thread, doesn't block startup
+            if let Err(e) = startup::setup_mount_detection(app.handle().clone()) {
+                log::error!("Mount detection setup failed: {}", e);
+                // Continue startup even if mount detection fails
+            }
+
             // Run startup tasks in background (auto-sync on app open)
             // Uses spawn_blocking to handle rusqlite !Send Connection
             tauri::async_runtime::spawn(async {
@@ -116,6 +123,7 @@ pub fn run() {
             commands::library_config::configure_library,
             commands::library_config::get_library_config,
             commands::library_config::check_library_connection,
+            commands::library_config::get_library_mount_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

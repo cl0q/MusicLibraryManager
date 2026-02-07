@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createBrowserRouter, RouterProvider } from "react-router";
 import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { toast } from "sonner";
@@ -14,9 +14,11 @@ import Sync from "./pages/Sync";
 import Sources from "./pages/Sources";
 import Settings from "./pages/Settings";
 import OAuthCallback from "./pages/OAuthCallback";
+import FirstRunWizard from "./components/Settings/FirstRunWizard";
 import {
   spotify_exchange_code,
   soundcloud_exchange_code,
+  get_library_config,
 } from "./utils/tauri-commands";
 
 const router = createBrowserRouter([
@@ -69,6 +71,23 @@ const router = createBrowserRouter([
 ]);
 
 function App() {
+  const [showWizard, setShowWizard] = useState(false);
+
+  // Check library configuration on mount
+  useEffect(() => {
+    const checkConfig = async () => {
+      try {
+        const config = await get_library_config();
+        if (!config.configured) {
+          setShowWizard(true);
+        }
+      } catch (err) {
+        console.error("Failed to check library config:", err);
+      }
+    };
+    checkConfig();
+  }, []);
+
   // Handle OAuth deep links (musiclibrary://callback?code=...&state=...)
   useEffect(() => {
     console.log("[DeepLink] Setting up deep link handler");
@@ -141,6 +160,12 @@ function App() {
     <>
       <ToastProvider />
       <RouterProvider router={router} />
+      {showWizard && (
+        <FirstRunWizard
+          onComplete={() => setShowWizard(false)}
+          onSkip={() => setShowWizard(false)}
+        />
+      )}
     </>
   );
 }
