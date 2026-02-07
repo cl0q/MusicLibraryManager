@@ -12,9 +12,11 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import type { Track } from "../../types/library";
 import { formatDuration, formatDate } from "../../utils/formatter";
 import RowContextMenu, { useRowContextMenu } from "./RowContextMenu";
+import { TrackSelectionProvider, useTrackSelection } from "../../contexts/TrackSelectionContext";
 
 interface LibraryTableProps {
   tracks: Track[];
+  onOpenMoreInfo?: (track: Track) => void;
 }
 
 const columnHelper = createColumnHelper<Track>();
@@ -120,12 +122,67 @@ const columns = [
   }),
 ];
 
-export default function LibraryTable({ tracks }: LibraryTableProps) {
+function LibraryTableInner({ tracks, onOpenMoreInfo }: LibraryTableProps) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
   const [contextMenuTrack, setContextMenuTrack] = useState<Track | null>(null);
+  const [confirmedTracks, setConfirmedTracks] = useState<Set<number>>(new Set());
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const { displayMenu } = useRowContextMenu();
+  const { selectedTracks, setSelectedTracks, isSelected } = useTrackSelection();
+
+  // Inline confirmation feedback
+  const showInlineConfirmation = (trackIds: number[]) => {
+    setConfirmedTracks((prev) => {
+      const updated = new Set(prev);
+      trackIds.forEach((id) => updated.add(id));
+      return updated;
+    });
+
+    // Clear confirmation after 2 seconds
+    setTimeout(() => {
+      setConfirmedTracks((prev) => {
+        const updated = new Set(prev);
+        trackIds.forEach((id) => updated.delete(id));
+        return updated;
+      });
+    }, 2000);
+  };
+
+  // Handle row click for multi-select
+  const handleRowClick = (track: Track, event: React.MouseEvent) => {
+    // Prevent selection when clicking on resize handles or sort headers
+    if (event.target instanceof HTMLElement) {
+      const target = event.target as HTMLElement;
+      if (target.closest('th') || target.closest('.cursor-col-resize')) {
+        return;
+      }
+    }
+
+    if (event.metaKey || event.ctrlKey) {
+      // Cmd/Ctrl + click: toggle selection
+      if (isSelected(track.id)) {
+        setSelectedTracks(selectedTracks.filter((t) => t.id !== track.id));
+      } else {
+        setSelectedTracks([...selectedTracks, track]);
+      }
+    } else if (event.shiftKey && selectedTracks.length > 0) {
+      // Shift + click: range selection
+      const lastSelected = selectedTracks[selectedTracks.length - 1];
+      const lastIndex = tracks.findIndex((t) => t.id === lastSelected.id);
+      const currentIndex = tracks.findIndex((t) => t.id === track.id);
+
+      if (lastIndex !== -1 && currentIndex !== -1) {
+        const start = Math.min(lastIndex, currentIndex);
+        const end = Math.max(lastIndex, currentIndex);
+        const rangeSelection = tracks.slice(start, end + 1);
+        setSelectedTracks(rangeSelection);
+      }
+    } else {
+      // Regular click: single selection
+      setSelectedTracks([track]);
+    }
+  };
 
   const table = useReactTable({
     data: tracks,
@@ -216,10 +273,20 @@ export default function LibraryTable({ tracks }: LibraryTableProps) {
             {virtualRows.map((virtualRow) => {
               const row = rows[virtualRow.index];
               const track = row.original;
+              const selected = isSelected(track.id);
+              const confirmed = track.id !== null && confirmedTracks.has(track.id);
+
               return (
                 <tr
                   key={row.id}
-                  className="border-t border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
+                  className={`border-t border-gray-200 dark:border-gray-700 cursor-pointer transition-colors duration-200 ${
+                    confirmed
+                      ? "bg-green-100 dark:bg-green-900/30"
+                      : selected
+                      ? "bg-blue-100 dark:bg-blue-900/30"
+                      : "hover:bg-gray-50 dark:hover:bg-gray-800"
+                  }`}
+                  onClick={(e) => handleRowClick(track, e)}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     setContextMenuTrack(track);
@@ -242,7 +309,15 @@ export default function LibraryTable({ tracks }: LibraryTableProps) {
           </tbody>
         </table>
       </div>
-      <RowContextMenu track={contextMenuTrack} />
+      <RowContextMenu track={contextMenuTrack} onConfirm={showInlineConfirmation} onOpenMoreInfo={onOpenMoreInfo} />
     </>
+  );
+}
+
+export default function LibraryTable({ tracks, onOpenMoreInfo }: LibraryTableProps) {
+  return (
+    <TrackSelectionProvider>
+      <LibraryTableInner tracks={tracks} onOpenMoreInfo={onOpenMoreInfo} />
+    </TrackSelectionProvider>
   );
 }

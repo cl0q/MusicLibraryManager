@@ -6,6 +6,8 @@ import { useLibraryMount } from "../contexts/LibraryMountContext";
 import LibraryTable from "../components/LibraryTable/LibraryTable";
 import FilterBar from "../components/LibraryTable/FilterBar";
 import ReviewQueue from "../components/ReviewQueue/ReviewQueue";
+import MoreInfoPanel from "../components/MoreInfo/MoreInfoPanel";
+import type { Track } from "../types/library";
 import {
   fingerprintLibrary,
   fetchArtwork,
@@ -24,6 +26,8 @@ export default function LibraryBrowser({ view = 'library' }: LibraryBrowserProps
   const [showReviewQueue, setShowReviewQueue] = useState(false);
   const [reviewQueueCount, setReviewQueueCount] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [moreInfoTrack, setMoreInfoTrack] = useState<Track | null>(null);
+  const [moreInfoOpen, setMoreInfoOpen] = useState(false);
 
   const { tracks, loading, filterQuery, setFilterQuery } = useLibraryTracks(view, refreshKey);
 
@@ -92,6 +96,15 @@ export default function LibraryBrowser({ view = 'library' }: LibraryBrowserProps
     } catch (err) {
       console.error("Failed to run deep scan:", err);
     }
+  };
+
+  const handleOpenMoreInfo = (track: Track) => {
+    setMoreInfoTrack(track);
+    setMoreInfoOpen(true);
+  };
+
+  const handleCloseMoreInfo = () => {
+    setMoreInfoOpen(false);
   };
 
   // Show disconnected state if library is not available (only for library view, not remote)
@@ -271,9 +284,12 @@ export default function LibraryBrowser({ view = 'library' }: LibraryBrowserProps
             </div>
           </div>
         ) : (
-          <LibraryTable tracks={tracks} />
+          <LibraryTable tracks={tracks} onOpenMoreInfo={handleOpenMoreInfo} />
         )}
       </div>
+
+      {/* More Info Panel */}
+      <MoreInfoPanel track={moreInfoTrack} isOpen={moreInfoOpen} onClose={handleCloseMoreInfo} />
     </div>
   );
 }
