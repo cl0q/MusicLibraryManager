@@ -305,3 +305,36 @@ export async function check_library_connection(): Promise<boolean> {
 export async function get_library_mount_state(): Promise<string> {
   return invoke<string>("get_library_mount_state");
 }
+
+// ============================================================================
+// Track Analysis Commands (Plan 10-03 backend)
+// ============================================================================
+
+export interface TrackAnalysisData {
+  ffprobe?: {
+    format?: {
+      filename?: string;
+      format_name?: string;
+      format_long_name?: string;
+      duration?: string;
+      size?: string;
+      bit_rate?: string;
+    };
+    streams?: Array<{
+      codec_name?: string;
+      codec_long_name?: string;
+      sample_rate?: string;
+      channels?: number;
+      bit_rate?: string;
+      duration?: string;
+    }>;
+  };
+  fingerprint?: string;
+  waveform_path?: string;
+  spectrogram_path?: string;
+}
+
+/** Get track analysis data (ffprobe, fingerprint, waveform, spectrogram) */
+export async function getTrackAnalysis(trackId: number): Promise<TrackAnalysisData> {
+  return invoke<TrackAnalysisData>("get_track_analysis", { trackId });
+}

@@ -23,6 +23,7 @@
 pub mod connection;
 pub mod playlist;
 pub mod schema;
+pub mod track_analysis;
 
 // Re-export commonly used items
 pub use connection::{get_connection, get_memory_connection, with_transaction, DatabaseError, Result};

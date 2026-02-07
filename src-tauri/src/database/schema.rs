@@ -16,7 +16,8 @@ use crate::database::connection::Result;
 /// - Version 5: Phase 7 schema (fingerprints, artwork, replaygain, review_queue)
 /// - Version 6: Phase 8 schema (app_config table for library configuration)
 /// - Version 7: Phase 9 schema (download_status column, idx_organized_path_null index)
-pub const CURRENT_SCHEMA_VERSION: i32 = 7;
+/// - Version 8: Phase 10 schema (track_analysis table for caching ffprobe/fingerprint/spectrogram data)
+pub const CURRENT_SCHEMA_VERSION: i32 = 8;
 
 /// SQL schema for the music library database (Phase 1 - base schema).
 ///
@@ -298,6 +299,22 @@ pub const PHASE9_SCHEMA_SQL: &str = "
 CREATE INDEX IF NOT EXISTS idx_organized_path_null ON tracks(organized_path) WHERE organized_path IS NULL;
 ";
 
+/// SQL schema for Phase 10 track analysis.
+///
+/// Contains:
+/// - `track_analysis` table: Cache for ffprobe metadata, fingerprints, and spectrogram paths
+pub const PHASE10_SCHEMA_SQL: &str = "
+-- Track analysis table: Cache for technical metadata and analysis data
+CREATE TABLE IF NOT EXISTS track_analysis (
+    track_id INTEGER PRIMARY KEY,
+    ffprobe_output TEXT,                     -- FFprobe JSON output
+    fingerprint TEXT,                         -- Acoustic fingerprint (future use)
+    spectrogram_path TEXT,                    -- Path to generated spectrogram image
+    analysis_timestamp TEXT NOT NULL,         -- ISO 8601 timestamp of last analysis
+    FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+);
+";
+
 /// Get the current schema version from the database.
 pub fn get_schema_version(conn: &Connection) -> Result<i32> {
     let version: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -383,6 +400,13 @@ fn migrate_to_v7(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Run Phase 10 migrations: create track_analysis table.
+fn migrate_to_v8(conn: &Connection) -> Result<()> {
+    // Create Phase 10 tables (IF NOT EXISTS makes this safe to re-run)
+    conn.execute_batch(PHASE10_SCHEMA_SQL)?;
+    Ok(())
+}
+
 /// Initialize the database schema with versioned migrations.
 ///
 /// Creates all tables and indexes, applying migrations as needed.
@@ -439,6 +463,12 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
     if get_schema_version(conn)? < 7 {
         migrate_to_v7(conn)?;
         set_schema_version(conn, 7)?;
+    }
+
+    // Apply Phase 10 migrations if needed
+    if get_schema_version(conn)? < 8 {
+        migrate_to_v8(conn)?;
+        set_schema_version(conn, 8)?;
     }
 
     Ok(())
