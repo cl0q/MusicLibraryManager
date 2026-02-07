@@ -69,6 +69,21 @@ export async function get_library_tracks(): Promise<Track[]> {
   return invoke<Track[]>("get_library_tracks");
 }
 
+/** Get only tracks in the library (organized_path IS NOT NULL) */
+export async function getLibraryTracksOnly(): Promise<Track[]> {
+  return invoke<Track[]>("get_library_tracks_only");
+}
+
+/** Get only remote tracks (organized_path IS NULL with streaming sources) */
+export async function getRemoteTracksOnly(): Promise<Track[]> {
+  return invoke<Track[]>("get_remote_tracks_only");
+}
+
+/** Get count of remote tracks (undownloaded streaming tracks) */
+export async function getRemoteTrackCount(): Promise<number> {
+  return invoke<number>("get_remote_track_count");
+}
+
 export async function get_library_storage_size(): Promise<number> {
   return invoke<number>("get_library_storage_size");
 }
