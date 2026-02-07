@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 9 of 11 (Library/Remote Separation)
-Plan: 2 of 4 in current phase
+Plan: 3 of 4 in current phase
 Status: In progress
-Last activity: 2026-02-07 - Completed 09-02-PLAN.md
+Last activity: 2026-02-07 - Completed 09-03-PLAN.md
 
-Progress: [████████░░░░░░░░░░░] 45/TBD total plans (v1.0: 39/39, v1.1: 6/TBD)
+Progress: [████████░░░░░░░░░░░] 46/TBD total plans (v1.0: 39/39, v1.1: 7/TBD)
 
 ## Performance Metrics
 
@@ -24,9 +24,9 @@ Progress: [████████░░░░░░░░░░░] 45/TBD tot
 - Phases completed: 7
 
 **Current Milestone (v1.1):**
-- Plans completed: 6
-- Average duration: 12 min
-- Total execution time: ~77 min
+- Plans completed: 7
+- Average duration: 11 min
+- Total execution time: ~79 min
 
 *Updated after each plan completion*
 
@@ -76,6 +76,8 @@ Recent decisions affecting current work:
 - Phase 9-02: Remote nav item disabled: false (always accessible, per requirement REM-04)
 - Phase 9-02: Badge updates via event listeners (import-complete, sync-complete, download-complete)
 - Phase 9-02: Cloud icon for Remote item (consistent with network/streaming semantics)
+- Phase 9-03: View parameter defaults to 'library' for backward compatibility with existing code
+- Phase 9-03: Format column normalization shows 'Stream' for spotify/soundcloud, actual formats for local files
 
 ### v1.1 Scope Decisions
 
@@ -104,8 +106,8 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-07
-Stopped at: Completed 09-02-PLAN.md
+Stopped at: Completed 09-03-PLAN.md
 Resume file: None
 
 ---
-*Last updated: 2026-02-07 after 09-02 plan completion*
+*Last updated: 2026-02-07 after 09-03 plan completion*
