@@ -159,10 +159,12 @@ Plans:
   2. User can download multiple songs in batch from Remote view
   3. Downloaded songs move from Remote to Library automatically
   4. Context menu appears immediately on right-click with no delay
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 11-01: TBD
+- [ ] 11-01-PLAN.md — Backend download with progress streaming and download_status updates
+- [ ] 11-02-PLAN.md — Frontend download UI with real-time progress and auto-refresh
+- [ ] 11-03-PLAN.md — Human verification of download flow and context menu responsiveness
 
 ## Progress
 
@@ -181,4 +183,4 @@ Phases execute in numeric order: 1 → 2 → 3 → ... → 11
 | 8. Library Configuration & Drive Detection | v1.1 | 4/4 | Complete | 2026-02-07 |
 | 9. Library/Remote Separation | v1.1 | 0/4 | Not started | - |
 | 10. Track Actions & More Info | v1.1 | 3/3 | Complete | 2026-02-07 |
-| 11. Download Flow & UX Polish | v1.1 | 0/TBD | Not started | - |
+| 11. Download Flow & UX Polish | v1.1 | 0/3 | Not started | - |
