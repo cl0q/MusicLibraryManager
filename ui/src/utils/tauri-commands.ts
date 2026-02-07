@@ -73,8 +73,8 @@ export async function get_library_storage_size(): Promise<number> {
   return invoke<number>("get_library_storage_size");
 }
 
-export async function import_directory(path: string): Promise<number> {
-  return invoke<number>("import_directory", { path });
+export async function import_directory(directory: string): Promise<number> {
+  return invoke<number>("import_directory", { directory });
 }
 
 // Sync profile commands
