@@ -1,26 +1,29 @@
 import { useState, useEffect, useMemo } from "react";
-import { get_library_tracks } from "../utils/tauri-commands";
+import { getLibraryTracksOnly, getRemoteTracksOnly } from "../utils/tauri-commands";
 import type { Track } from "../types/library";
 
 /**
  * Hook to fetch and filter library tracks
+ * @param view Type of tracks to fetch: 'library' (local files) or 'remote' (streaming)
  * @param refreshKey Optional key to trigger re-fetch when changed
  * @returns Object containing filtered tracks, loading state, and filter controls
  */
-export function useLibraryTracks(refreshKey?: number) {
+export function useLibraryTracks(view: 'library' | 'remote' = 'library', refreshKey?: number) {
   const [allTracks, setAllTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterQuery, setFilterQuery] = useState("");
 
-  // Fetch all tracks on mount and when refreshKey changes
+  // Fetch tracks based on view on mount and when view or refreshKey changes
   useEffect(() => {
     async function fetchTracks() {
       try {
         setLoading(true);
-        const tracks = await get_library_tracks();
+        const tracks = view === 'library'
+          ? await getLibraryTracksOnly()
+          : await getRemoteTracksOnly();
         setAllTracks(tracks);
       } catch (error) {
-        console.error("Failed to fetch library tracks:", error);
+        console.error(`Failed to fetch ${view} tracks:`, error);
         setAllTracks([]);
       } finally {
         setLoading(false);
@@ -28,7 +31,7 @@ export function useLibraryTracks(refreshKey?: number) {
     }
 
     fetchTracks();
-  }, [refreshKey]);
+  }, [view, refreshKey]);
 
   // Client-side filtering based on filterQuery
   const filteredTracks = useMemo(() => {

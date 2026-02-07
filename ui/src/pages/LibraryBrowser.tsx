@@ -14,14 +14,18 @@ import {
   getReviewQueueCount,
 } from "../utils/tauri-commands";
 
-export default function LibraryBrowser() {
+interface LibraryBrowserProps {
+  view?: 'library' | 'remote';
+}
+
+export default function LibraryBrowser({ view = 'library' }: LibraryBrowserProps) {
   const navigate = useNavigate();
   const { mountState, isLibraryAvailable } = useLibraryMount();
   const [showReviewQueue, setShowReviewQueue] = useState(false);
   const [reviewQueueCount, setReviewQueueCount] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const { tracks, loading, filterQuery, setFilterQuery } = useLibraryTracks(refreshKey);
+  const { tracks, loading, filterQuery, setFilterQuery } = useLibraryTracks(view, refreshKey);
 
   const fingerprintProgress = useEnhancementProgress("fingerprint");
   const artworkProgress = useEnhancementProgress("artwork");
