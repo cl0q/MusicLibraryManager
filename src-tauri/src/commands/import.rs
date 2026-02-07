@@ -88,10 +88,13 @@ pub async fn import_directory(directory: String) -> Result<ImportResponse, Strin
     // Import files
     let result = import_batch(&mut conn, files).map_err(|e| format!("Import error: {}", e))?;
 
+    let skipped = file_count - result.succeeded - result.failed;
     log::info!(
-        "Import complete: {} succeeded, {} failed",
+        "Import complete: {} new, {} skipped (already imported), {} failed out of {} total files",
         result.succeeded,
-        result.failed
+        skipped,
+        result.failed,
+        file_count
     );
 
     Ok(ImportResponse {

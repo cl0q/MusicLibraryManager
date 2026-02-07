@@ -125,6 +125,36 @@ pub fn import_batch(conn: &mut Connection, files: Vec<PathBuf>) -> DbResult<Impo
         }
     }
 
+    // Log a summary of failure reasons so the user can see what's going wrong
+    if !total_failures.is_empty() {
+        // Count failures by error type
+        let mut error_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for failure in &total_failures {
+            // Extract error type from "path: error message" format
+            let error_type = failure
+                .split(": ")
+                .skip(1)
+                .collect::<Vec<_>>()
+                .join(": ");
+            let short_error = if error_type.len() > 80 {
+                error_type[..80].to_string()
+            } else {
+                error_type
+            };
+            *error_counts.entry(short_error).or_insert(0) += 1;
+        }
+
+        log::warn!(
+            "Import had {} failures. Breakdown by error type:",
+            total_failures.len()
+        );
+        let mut sorted_errors: Vec<_> = error_counts.into_iter().collect();
+        sorted_errors.sort_by(|a, b| b.1.cmp(&a.1));
+        for (error, count) in sorted_errors.iter().take(10) {
+            log::warn!("  {} x {}", count, error);
+        }
+    }
+
     Ok(ImportResult {
         succeeded: total_succeeded,
         failed: total_failures.len(),
