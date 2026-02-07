@@ -40,11 +40,15 @@ const router = createBrowserRouter([
       },
       {
         path: "library",
-        element: <LibraryBrowser />,
+        element: <LibraryBrowser view="library" />,
       },
       {
         path: "library/:trackId",
         element: <TrackDetail />,
+      },
+      {
+        path: "remote",
+        element: <LibraryBrowser view="remote" />,
       },
       {
         path: "playlists",
