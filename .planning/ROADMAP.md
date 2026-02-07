@@ -126,10 +126,13 @@ Plans:
   5. Format column shows audio format (FLAC, AAC, MP3) instead of source name
   6. All library columns show correct metadata from local files
   7. Downloaded songs disappear from Remote and appear in Library
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] 09-01: TBD
+- [ ] 09-01-PLAN.md — Backend query filtering (schema v7, library/remote queries, count command)
+- [ ] 09-02-PLAN.md — Sidebar Remote nav item with badge count and event listeners
+- [ ] 09-03-PLAN.md — Route-based view switching for /library and /remote
+- [ ] 09-04-PLAN.md — Human verification of library/remote separation
 
 #### Phase 10: Track Actions & More Info
 **Goal**: Context menu actions work correctly for local tracks
@@ -174,6 +177,6 @@ Phases execute in numeric order: 1 → 2 → 3 → ... → 11
 | 6. Desktop UI | v1.0 | 6/6 | Complete | 2026-02-05 |
 | 7. Enhancements | v1.0 | 6/6 | Complete | 2026-02-05 |
 | 8. Library Configuration & Drive Detection | v1.1 | 4/4 | Complete | 2026-02-07 |
-| 9. Library/Remote Separation | v1.1 | 0/TBD | Not started | - |
+| 9. Library/Remote Separation | v1.1 | 0/4 | Not started | - |
 | 10. Track Actions & More Info | v1.1 | 0/TBD | Not started | - |
 | 11. Download Flow & UX Polish | v1.1 | 0/TBD | Not started | - |
