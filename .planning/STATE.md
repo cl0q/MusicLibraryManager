@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 8 of 11 (Library Configuration & Drive Detection)
-Plan: 1 of 4 in current phase
+Plan: 2 of 4 in current phase
 Status: In progress
-Last activity: 2026-02-07 - Completed 08-01-PLAN.md
+Last activity: 2026-02-07 - Completed 08-02-PLAN.md
 
-Progress: [███████░░░░░░░░░░░░] 40/TBD total plans (v1.0: 39/39, v1.1: 1/TBD)
+Progress: [███████░░░░░░░░░░░░] 41/TBD total plans (v1.0: 39/39, v1.1: 2/TBD)
 
 ## Performance Metrics
 
@@ -24,9 +24,9 @@ Progress: [███████░░░░░░░░░░░░] 40/TBD tot
 - Phases completed: 7
 
 **Current Milestone (v1.1):**
-- Plans completed: 1
-- Average duration: 8 min
-- Total execution time: 8 min
+- Plans completed: 2
+- Average duration: 10 min
+- Total execution time: 20 min
 
 *Updated after each plan completion*
 
@@ -41,6 +41,7 @@ Progress: [███████░░░░░░░░░░░░] 40/TBD tot
 - ebur128 — ReplayGain analysis
 - tokio — Async runtime
 - uuid — Library ID generation (Phase 8)
+- notify — Filesystem watching for mount detection (Phase 8)
 
 **Frontend (Tauri + Web):**
 - Tauri v2 — Desktop app framework
@@ -66,6 +67,8 @@ Recent decisions affecting current work:
 - v1.1: Library = local files only, Remote = undownloaded staging (architectural shift)
 - Phase 8-01: Store paths relative to library root for portability
 - Phase 8-01: Marker file is visible mlm-library.json, not hidden dotfile
+- Phase 8-02: Use notify crate's /Volumes watching instead of low-level fsevent bindings
+- Phase 8-02: Mount detection runs in background thread, never blocks app startup
 
 ### v1.1 Scope Decisions
 
@@ -94,8 +97,8 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-07
-Stopped at: Completed 08-01-PLAN.md (Library Configuration Backend)
+Stopped at: Completed 08-02-PLAN.md (Mount Detection)
 Resume file: None
 
 ---
-*Last updated: 2026-02-07 after 08-01 plan completion*
+*Last updated: 2026-02-07 after 08-02 plan completion*
