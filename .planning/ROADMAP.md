@@ -110,9 +110,9 @@ Plans:
 
 Plans:
 - [x] 08-01-PLAN.md — Backend foundation: database schema, LibraryConfig model, Tauri commands, marker file
-- [ ] 08-02-PLAN.md — Mount detection service with macOS FSEvents via /Volumes monitoring
-- [ ] 08-03-PLAN.md — Settings UI page, library setup form, first-run wizard modal
-- [ ] 08-04-PLAN.md — Disconnected state UI: mount context, sidebar graying, empty state
+- [x] 08-02-PLAN.md — Mount detection service with macOS FSEvents via /Volumes monitoring
+- [x] 08-03-PLAN.md — Settings UI page, library setup form, first-run wizard modal
+- [x] 08-04-PLAN.md — Disconnected state UI: mount context, sidebar graying, empty state
 
 #### Phase 9: Library/Remote Separation
 **Goal**: Library shows only local files, Remote shows undownloaded staging
@@ -173,7 +173,7 @@ Phases execute in numeric order: 1 → 2 → 3 → ... → 11
 | 5. Device Sync | v1.0 | 5/5 | Complete | 2026-02-05 |
 | 6. Desktop UI | v1.0 | 6/6 | Complete | 2026-02-05 |
 | 7. Enhancements | v1.0 | 6/6 | Complete | 2026-02-05 |
-| 8. Library Configuration & Drive Detection | v1.1 | 1/4 | In progress | - |
+| 8. Library Configuration & Drive Detection | v1.1 | 4/4 | Complete | 2026-02-07 |
 | 9. Library/Remote Separation | v1.1 | 0/TBD | Not started | - |
 | 10. Track Actions & More Info | v1.1 | 0/TBD | Not started | - |
 | 11. Download Flow & UX Polish | v1.1 | 0/TBD | Not started | - |

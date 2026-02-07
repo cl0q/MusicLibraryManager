@@ -9,10 +9,10 @@ Requirements for milestone v1.1: Library Foundation & UX Polish.
 
 ### Library Configuration
 
-- [ ] **LCFG-01**: User can configure a directory as the library location
-- [ ] **LCFG-02**: App detects when library drive is not connected
-- [ ] **LCFG-03**: App blocks Library tab when drive not connected (shows message)
-- [ ] **LCFG-04**: App allows Remote tab access when library drive not connected
+- [x] **LCFG-01**: User can configure a directory as the library location
+- [x] **LCFG-02**: App detects when library drive is not connected
+- [x] **LCFG-03**: App blocks Library tab when drive not connected (shows message)
+- [x] **LCFG-04**: App allows Remote tab access when library drive not connected
 
 ### Remote Staging
 
@@ -73,10 +73,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| LCFG-01 | Phase 8 | Pending |
-| LCFG-02 | Phase 8 | Pending |
-| LCFG-03 | Phase 8 | Pending |
-| LCFG-04 | Phase 8 | Pending |
+| LCFG-01 | Phase 8 | Done |
+| LCFG-02 | Phase 8 | Done |
+| LCFG-03 | Phase 8 | Done |
+| LCFG-04 | Phase 8 | Done |
 | REM-01 | Phase 9 | Pending |
 | REM-02 | Phase 9 | Pending |
 | REM-03 | Phase 9 | Pending |
