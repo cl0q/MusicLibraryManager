@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 9 of 11 (Library/Remote Separation)
-Plan: 1 of TBD in current phase
+Plan: 2 of 4 in current phase
 Status: In progress
-Last activity: 2026-02-07 - Completed 09-01-PLAN.md
+Last activity: 2026-02-07 - Completed 09-02-PLAN.md
 
-Progress: [████████░░░░░░░░░░░] 44/TBD total plans (v1.0: 39/39, v1.1: 5/TBD)
+Progress: [████████░░░░░░░░░░░] 45/TBD total plans (v1.0: 39/39, v1.1: 6/TBD)
 
 ## Performance Metrics
 
@@ -24,9 +24,9 @@ Progress: [████████░░░░░░░░░░░] 44/TBD tot
 - Phases completed: 7
 
 **Current Milestone (v1.1):**
-- Plans completed: 5
-- Average duration: 15 min
-- Total execution time: ~75 min
+- Plans completed: 6
+- Average duration: 12 min
+- Total execution time: ~77 min
 
 *Updated after each plan completion*
 
@@ -73,6 +73,9 @@ Recent decisions affecting current work:
 - Phase 9-01: Remote view uses organized_path IS NULL for filtering (not download_status)
 - Phase 9-01: INNER JOIN with track_sources ensures remote tracks have streaming source associations
 - Phase 9-01: Partial index idx_organized_path_null optimizes remote view queries
+- Phase 9-02: Remote nav item disabled: false (always accessible, per requirement REM-04)
+- Phase 9-02: Badge updates via event listeners (import-complete, sync-complete, download-complete)
+- Phase 9-02: Cloud icon for Remote item (consistent with network/streaming semantics)
 
 ### v1.1 Scope Decisions
 
@@ -101,8 +104,8 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-07
-Stopped at: Completed 09-01-PLAN.md
+Stopped at: Completed 09-02-PLAN.md
 Resume file: None
 
 ---
-*Last updated: 2026-02-07 after 09-01 plan completion*
+*Last updated: 2026-02-07 after 09-02 plan completion*
