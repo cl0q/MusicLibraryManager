@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 ## Current Position
 
 Phase: 8 of 11 (Library Configuration & Drive Detection)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-02-05 - v1.1 roadmap created with 4 phases
+Plan: 1 of 4 in current phase
+Status: In progress
+Last activity: 2026-02-07 - Completed 08-01-PLAN.md
 
-Progress: [███████░░░░░░░░░░░░] 39/TBD total plans (v1.0: 39/39, v1.1: 0/TBD)
+Progress: [███████░░░░░░░░░░░░] 40/TBD total plans (v1.0: 39/39, v1.1: 1/TBD)
 
 ## Performance Metrics
 
@@ -24,9 +24,9 @@ Progress: [███████░░░░░░░░░░░░] 39/TBD tot
 - Phases completed: 7
 
 **Current Milestone (v1.1):**
-- Plans completed: 0
-- Average duration: TBD
-- Total execution time: 0 hours
+- Plans completed: 1
+- Average duration: 8 min
+- Total execution time: 8 min
 
 *Updated after each plan completion*
 
@@ -40,6 +40,7 @@ Progress: [███████░░░░░░░░░░░░] 39/TBD tot
 - rusty-chromaprint — Acoustic fingerprinting
 - ebur128 — ReplayGain analysis
 - tokio — Async runtime
+- uuid — Library ID generation (Phase 8)
 
 **Frontend (Tauri + Web):**
 - Tauri v2 — Desktop app framework
@@ -63,6 +64,8 @@ Recent decisions affecting current work:
 - v1.0: 248kbps AAC target for device copies
 - v1.0: Fractional indexing for O(1) playlist reorder
 - v1.1: Library = local files only, Remote = undownloaded staging (architectural shift)
+- Phase 8-01: Store paths relative to library root for portability
+- Phase 8-01: Marker file is visible mlm-library.json, not hidden dotfile
 
 ### v1.1 Scope Decisions
 
@@ -81,7 +84,6 @@ None yet.
 
 **From v1.0 user testing:**
 - Hardcoded "default" user_id for source creation (needs proper user management)
-- Test compilation blocked by 1-line import fix
 - SoundCloud playlists not syncing (deferred to v1.2)
 
 **v1.1 scope:**
@@ -91,9 +93,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-05
-Stopped at: ROADMAP.md created, REQUIREMENTS.md traceability updated
+Last session: 2026-02-07
+Stopped at: Completed 08-01-PLAN.md (Library Configuration Backend)
 Resume file: None
 
 ---
-*Last updated: 2026-02-05 after v1.1 roadmap creation*
+*Last updated: 2026-02-07 after 08-01 plan completion*
