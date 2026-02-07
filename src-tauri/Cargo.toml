@@ -96,5 +96,8 @@ tauri-plugin-deep-link = "2.4.7"
 tauri-plugin-single-instance = { version = "2.4.0", features = ["deep-link"] }
 open = "5.3.3"
 
+# Phase 8 - Mount detection
+notify = { version = "6", features = ["macos_fsevent"] }
+
 [dev-dependencies]
 tempfile = "3.24.0"
