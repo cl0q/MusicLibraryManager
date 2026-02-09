@@ -7,14 +7,26 @@
 
 use crate::download::orchestrator::{BatchResult, DownloadOrchestrator, DownloadRequest};
 use crate::download::queue::{QueueItem, RetryQueue};
+use serde::Serialize;
 use std::path::PathBuf;
+use tauri::{AppHandle, Emitter, Manager};
+
+/// Progress update payload for channel streaming
+#[derive(Serialize, Clone)]
+pub struct ProgressUpdate {
+    pub current: usize,
+    pub total: usize,
+    pub track_title: String,
+}
 
 /// Download a batch of tracks
 ///
 /// Coordinates downloads from DAB Music API (primary) and YouTube (fallback),
 /// transcodes to AAC, and queues failures for retry.
+/// Streams progress updates via events and emits completion event.
 ///
 /// # Arguments
+/// * `app_handle` - Tauri app handle for event emission
 /// * `requests` - List of tracks to download
 /// * `flac_dir` - Directory for FLAC originals (Lexar SSD)
 /// * `aac_dir` - Directory for AAC transcodes (temp staging)
@@ -23,6 +35,7 @@ use std::path::PathBuf;
 /// * `BatchResult` with success/failure/skipped counts
 #[tauri::command]
 pub async fn download_tracks(
+    app_handle: AppHandle,
     requests: Vec<DownloadRequest>,
     flac_dir: String,
     aac_dir: String,
@@ -34,16 +47,53 @@ pub async fn download_tracks(
         aac_dir
     );
 
+    use crate::database::get_connection;
+
+    // Get database connection
+    let db_path = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?
+        .join("music_library.db");
+
+    let db_conn = get_connection(&db_path)
+        .map_err(|e| format!("Failed to get database connection: {}", e))?;
+
     let mut orchestrator = DownloadOrchestrator::new(
         PathBuf::from(flac_dir),
         PathBuf::from(aac_dir),
     )
     .map_err(|e| format!("Failed to create orchestrator: {}", e))?;
 
-    orchestrator
-        .download_batch(requests)
+    // Create progress callback closure that emits events
+    let app_handle_clone = app_handle.clone();
+    let progress_callback: Option<Box<dyn Fn(usize, usize, &str) + Send + Sync>> = Some(Box::new(
+        move |current: usize, total: usize, track_title: &str| {
+            let update = ProgressUpdate {
+                current,
+                total,
+                track_title: track_title.to_string(),
+            };
+            // Emit progress update event (ignore errors if frontend not listening)
+            let _ = app_handle_clone.emit("download-progress", &update);
+        },
+    ));
+
+    let result = orchestrator
+        .download_batch(requests, progress_callback)
         .await
-        .map_err(|e| format!("Download batch failed: {}", e))
+        .map_err(|e| format!("Download batch failed: {}", e))?;
+
+    // Update download_status for successfully downloaded tracks
+    // This will be implemented in Task 2 and Task 3
+    // For now, we'll leave the placeholder for the database update
+
+    // Emit download-complete event with batch result
+    app_handle
+        .emit("download-complete", &result)
+        .map_err(|e| format!("Failed to emit download-complete event: {}", e))?;
+
+    Ok(result)
 }
 
 /// Retry all failed downloads from the retry queue

@@ -35,6 +35,8 @@ pub struct BatchResult {
     pub failed: u32,
     /// Number of tracks skipped (e.g., already exist)
     pub skipped: u32,
+    /// Track IDs that were successfully downloaded (for database status updates)
+    pub downloaded_track_ids: Vec<i64>,
 }
 
 impl BatchResult {
@@ -43,6 +45,7 @@ impl BatchResult {
             succeeded: 0,
             failed: 0,
             skipped: 0,
+            downloaded_track_ids: Vec::new(),
         }
     }
 }
@@ -118,12 +121,30 @@ impl DownloadOrchestrator {
     /// - Avoids rate limits
     /// - Easier to debug
     /// - Sufficient throughput for typical batches
-    pub async fn download_batch(&mut self, requests: Vec<DownloadRequest>) -> Result<BatchResult> {
+    ///
+    /// # Arguments
+    /// * `requests` - List of tracks to download
+    /// * `progress_callback` - Optional callback for progress updates (current, total, track_title)
+    ///
+    /// # Returns
+    /// * `BatchResult` with downloaded_track_ids for database status updates
+    pub async fn download_batch(
+        &mut self,
+        requests: Vec<DownloadRequest>,
+        progress_callback: Option<Box<dyn Fn(usize, usize, &str) + Send + Sync>>,
+    ) -> Result<BatchResult> {
         let total = requests.len();
         let mut result = BatchResult::new();
 
         for (i, request) in requests.into_iter().enumerate() {
             let progress = i + 1;
+
+            // Call progress callback before processing track
+            if let Some(ref callback) = progress_callback {
+                let track_display = format!("{} - {}", request.artist, request.title);
+                callback(progress, total, &track_display);
+            }
+
             log::info!(
                 "Downloading Track {}/{}: {} - {}...",
                 progress,
@@ -255,10 +276,20 @@ impl DownloadOrchestrator {
                     Ok(TranscodeResult::Transcoded(aac_path)) => {
                         log::info!("Transcoded to: {}", aac_path.display());
                         result.succeeded += 1;
+
+                        // Track successful download for database update
+                        if let Some(track_id) = request.track_id.as_ref().and_then(|id| id.parse::<i64>().ok()) {
+                            result.downloaded_track_ids.push(track_id);
+                        }
                     }
                     Ok(TranscodeResult::Skipped(reason)) => {
                         log::info!("Transcode skipped: {}", reason);
                         result.succeeded += 1; // Original kept, consider success
+
+                        // Track successful download for database update
+                        if let Some(track_id) = request.track_id.as_ref().and_then(|id| id.parse::<i64>().ok()) {
+                            result.downloaded_track_ids.push(track_id);
+                        }
                     }
                     Ok(TranscodeResult::Failed(error)) => {
                         log::error!("Transcode failed: {}", error);
