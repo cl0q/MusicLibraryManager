@@ -169,11 +169,82 @@ export default function RowContextMenu({ track, onConfirm, onOpenMoreInfo }: Row
     }
   };
 
+  const handleDownloadTracks = async () => {
+    const targetTracks = getTargetTracks();
+
+    // Get library config for download destination
+    // First fetch config since context doesn't expose it
+    let config;
+    try {
+      config = await invoke<{
+        root_path: string | null;
+        scan_folders: string[];
+        download_destination: string;
+        library_id: string | null;
+        configured: boolean;
+      }>("get_library_config");
+    } catch (error) {
+      toast.error(`Failed to get library config: ${error}`);
+      return;
+    }
+
+    if (!config.download_destination) {
+      toast.error("Download destination not configured");
+      return;
+    }
+
+    // Map tracks to DownloadRequest format
+    // Note: track_id and soundcloud_url are optional - orchestrator falls back to YouTube search
+    const requests = targetTracks.map((t) => ({
+      track_id: undefined, // Not available in Track struct
+      query: `${t.metadata.artist} ${t.metadata.title}`,
+      artist: t.metadata.artist,
+      title: t.metadata.title,
+      soundcloud_url: undefined, // Not available in Track struct, would need JOIN query
+      user_id: "default", // TODO: Replace with proper user management when implemented
+    }));
+
+    try {
+      // Invoke download command with FLAC and AAC directories
+      const flacDir = config.download_destination;
+      const aacDir = config.download_destination + "_staging"; // Staging for AAC transcodes
+
+      const result = await invoke<{
+        succeeded: number;
+        failed: number;
+        skipped: number;
+      }>("download_tracks", {
+        requests,
+        flacDir,
+        aacDir,
+      });
+
+      // Show success toast
+      const totalRequests = requests.length;
+      toast.success(`Downloaded ${result.succeeded}/${totalRequests} tracks`);
+
+      // Show error toast if any failed
+      if (result.failed > 0) {
+        toast.error(`${result.failed} tracks failed. Check Downloads page.`);
+      }
+    } catch (error) {
+      toast.error(`Download failed: ${error}`);
+    }
+  };
+
   // Track is local if it has organized_path
   const isLocalTrack = track.organized_path !== null;
+  const isRemoteTrack = track.organized_path === null;
 
   return (
     <Menu id={MENU_ID}>
+      {isRemoteTrack && (
+        <>
+          <Item onClick={handleDownloadTracks}>Download</Item>
+          <Separator />
+        </>
+      )}
+
       <Submenu label="Add to Playlist">
         {playlists.length === 0 ? (
           <Item disabled>No playlists available</Item>
