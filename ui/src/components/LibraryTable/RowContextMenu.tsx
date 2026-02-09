@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
 import type { Track } from "../../types/library";
 import { useTrackSelection } from "../../contexts/TrackSelectionContext";
+import { DownloadProgress } from "../Downloads/DownloadProgress";
 
 interface Playlist {
   id: number;
@@ -58,6 +59,7 @@ export default function RowContextMenu({ track, onConfirm, onOpenMoreInfo }: Row
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [syncProfiles, setSyncProfiles] = useState<SyncProfile[]>([]);
   const { selectedTracks } = useTrackSelection();
+  const [isDownloading, setIsDownloading] = useState(false);
 
   // Load playlists and sync profiles
   useEffect(() => {
@@ -205,6 +207,9 @@ export default function RowContextMenu({ track, onConfirm, onOpenMoreInfo }: Row
     }));
 
     try {
+      // Start download progress UI
+      setIsDownloading(true);
+
       // Invoke download command with FLAC and AAC directories
       const flacDir = config.download_destination;
       const aacDir = config.download_destination + "_staging"; // Staging for AAC transcodes
@@ -219,6 +224,9 @@ export default function RowContextMenu({ track, onConfirm, onOpenMoreInfo }: Row
         aacDir,
       });
 
+      // Stop download progress UI
+      setIsDownloading(false);
+
       // Show success toast
       const totalRequests = requests.length;
       toast.success(`Downloaded ${result.succeeded}/${totalRequests} tracks`);
@@ -228,6 +236,7 @@ export default function RowContextMenu({ track, onConfirm, onOpenMoreInfo }: Row
         toast.error(`${result.failed} tracks failed. Check Downloads page.`);
       }
     } catch (error) {
+      setIsDownloading(false);
       toast.error(`Download failed: ${error}`);
     }
   };
@@ -237,15 +246,16 @@ export default function RowContextMenu({ track, onConfirm, onOpenMoreInfo }: Row
   const isRemoteTrack = track.organized_path === null;
 
   return (
-    <Menu id={MENU_ID}>
-      {isRemoteTrack && (
-        <>
-          <Item onClick={handleDownloadTracks}>Download</Item>
-          <Separator />
-        </>
-      )}
+    <>
+      <Menu id={MENU_ID}>
+        {isRemoteTrack && (
+          <>
+            <Item onClick={handleDownloadTracks}>Download</Item>
+            <Separator />
+          </>
+        )}
 
-      <Submenu label="Add to Playlist">
+        <Submenu label="Add to Playlist">
         {playlists.length === 0 ? (
           <Item disabled>No playlists available</Item>
         ) : (
@@ -280,5 +290,8 @@ export default function RowContextMenu({ track, onConfirm, onOpenMoreInfo }: Row
       <Separator />
       <Item onClick={handleMoreInfo}>More Info</Item>
     </Menu>
+
+    <DownloadProgress isDownloading={isDownloading} />
+    </>
   );
 }

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
+import { listen } from "@tauri-apps/api/event";
 import { useLibraryTracks } from "../hooks/useLibraryTracks";
 import { useEnhancementProgress } from "../hooks/useEnhancements";
 import { useLibraryMount } from "../contexts/LibraryMountContext";
@@ -57,6 +58,19 @@ export default function LibraryBrowser({ view = 'library' }: LibraryBrowserProps
     };
     window.addEventListener("library-reconnected", handleReconnect);
     return () => window.removeEventListener("library-reconnected", handleReconnect);
+  }, []);
+
+  // Listen for download-complete events to auto-refresh Remote view
+  useEffect(() => {
+    const unlisten = listen("download-complete", (event) => {
+      console.log("Download complete:", event.payload);
+      // Trigger Remote view refresh
+      setRefreshKey((prev) => prev + 1);
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
   }, []);
 
   const handleFingerprintLibrary = async () => {
