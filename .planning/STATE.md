@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 
 ## Current Position
 
-Phase: 10 of 11 (Track Actions & More Info)
-Plan: 3 of 3 in current phase
-Status: Phase complete
-Last activity: 2026-02-07 - Completed 10-03-PLAN.md
+Phase: 11 of 11 (Download Flow & UX Polish)
+Plan: 1 of TBD in current phase
+Status: In progress
+Last activity: 2026-02-09 - Completed 11-01-PLAN.md
 
-Progress: [████████░░░░░░░░░░░] 49/TBD total plans (v1.0: 39/39, v1.1: 10/TBD)
+Progress: [█████████░░░░░░░░░░] 50/TBD total plans (v1.0: 39/39, v1.1: 11/TBD)
 
 ## Performance Metrics
 
@@ -24,9 +24,9 @@ Progress: [████████░░░░░░░░░░░] 49/TBD tot
 - Phases completed: 7
 
 **Current Milestone (v1.1):**
-- Plans completed: 10
-- Average duration: 9 min
-- Total execution time: ~93 min
+- Plans completed: 11
+- Average duration: 8 min
+- Total execution time: ~97 min
 
 *Updated after each plan completion*
 
@@ -88,6 +88,9 @@ Recent decisions affecting current work:
 - Phase 10-03: Reuse track_analysis table from plan 10-02 (parallel execution, schema v8 already created)
 - Phase 10-03: Platform-specific clipboard commands (pbcopy/xclip/clip.exe) for cross-platform support
 - Phase 10-03: FFprobe errors gracefully handled with installation instructions
+- Phase 11-01: Event-based progress streaming (not IPC channels) for Tauri v2 compatibility
+- Phase 11-01: BatchResult tracks downloaded_track_ids to avoid passing Connection to async functions
+- Phase 11-01: Database updates happen after batch completes (not per-track) for Send/Sync compliance
 
 ### v1.1 Scope Decisions
 
@@ -115,9 +118,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-07
-Stopped at: Completed 10-03-PLAN.md
+Last session: 2026-02-09
+Stopped at: Completed 11-01-PLAN.md
 Resume file: None
 
 ---
-*Last updated: 2026-02-07 after 10-03 plan completion*
+*Last updated: 2026-02-09 after 11-01 plan completion*
