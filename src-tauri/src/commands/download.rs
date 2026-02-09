@@ -85,8 +85,12 @@ pub async fn download_tracks(
         .map_err(|e| format!("Download batch failed: {}", e))?;
 
     // Update download_status for successfully downloaded tracks
-    // This will be implemented in Task 2 and Task 3
-    // For now, we'll leave the placeholder for the database update
+    use crate::database::tracks;
+    for track_id in &result.downloaded_track_ids {
+        tracks::update_download_status(&db_conn, *track_id)
+            .map_err(|e| format!("Failed to update download_status for track {}: {}", track_id, e))?;
+        log::info!("Updated download_status for track {}", track_id);
+    }
 
     // Emit download-complete event with batch result
     app_handle
