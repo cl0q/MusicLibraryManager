@@ -196,14 +196,17 @@ export default function RowContextMenu({ track, onConfirm, onOpenMoreInfo }: Row
     }
 
     // Map tracks to DownloadRequest format
-    // Note: track_id and soundcloud_url are optional - orchestrator falls back to YouTube search
+    // track_id from Track.id, soundcloud_url from original_path when format is "soundcloud"
     const requests = targetTracks.map((t) => ({
-      track_id: undefined, // Not available in Track struct
+      track_id: t.id?.toString() ?? undefined,
       query: `${t.metadata.artist} ${t.metadata.title}`,
       artist: t.metadata.artist,
       title: t.metadata.title,
-      soundcloud_url: undefined, // Not available in Track struct, would need JOIN query
-      user_id: "default", // TODO: Replace with proper user management when implemented
+      soundcloud_url:
+        t.metadata.format === "soundcloud"
+          ? t.metadata.original_path
+          : undefined,
+      user_id: "default",
     }));
 
     try {
