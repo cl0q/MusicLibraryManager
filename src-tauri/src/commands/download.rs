@@ -9,7 +9,7 @@ use crate::download::orchestrator::{BatchResult, DownloadOrchestrator, DownloadR
 use crate::download::queue::{QueueItem, RetryQueue};
 use serde::Serialize;
 use std::path::PathBuf;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 /// Progress update payload for channel streaming
 #[derive(Serialize, Clone)]
@@ -49,13 +49,8 @@ pub async fn download_tracks(
 
     use crate::database::get_connection;
 
-    // Get database connection
-    let db_path = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?
-        .join("music_library.db");
-
+    // Get database connection (same pattern as other commands)
+    let db_path = PathBuf::from("music_library.db");
     let db_conn = get_connection(&db_path)
         .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
