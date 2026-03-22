@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Library Foundation & UX Polish
 status: executing
-stopped_at: Completed 11.1-01-PLAN.md
-last_updated: "2026-03-22T13:53:43.934Z"
+stopped_at: Completed 11.1-03-PLAN.md
+last_updated: "2026-03-22T13:54:18.877Z"
 last_activity: 2026-02-09 - Completed 11-02-PLAN.md
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 17
-  completed_plans: 13
+  completed_plans: 14
 ---
 
 # Project State
@@ -111,6 +111,8 @@ Recent decisions affecting current work:
 - Phase 11-02: LibraryConfig fetched on-demand in download handler (not via context)
 - [Phase 11.1-01]: serde_json added to dev-dependencies explicitly even though it is already a regular dep, for test intent clarity
 - [Phase 11.1-01]: test_search_not_found marked #[ignore] not deleted to preserve live API test for manual use
+- [Phase 11.1-03]: Mock @tauri-apps/api/event directly in tests — mockWindows does not implement transformCallback required by listen()
+- [Phase 11.1-03]: LibraryTable tests check column headers (not row data) — react-virtual needs real layout to render rows, happy-dom returns 0
 
 ### v1.1 Scope Decisions
 
@@ -142,8 +144,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-22T13:53:43.932Z
-Stopped at: Completed 11.1-01-PLAN.md
+Last session: 2026-03-22T13:54:18.875Z
+Stopped at: Completed 11.1-03-PLAN.md
 Resume file: None
 
 ---
