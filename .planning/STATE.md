@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Library Foundation & UX Polish
 status: executing
-stopped_at: Phase 11.1 context gathered
-last_updated: "2026-03-22T13:35:50.325Z"
+stopped_at: Completed 11.1-01-PLAN.md
+last_updated: "2026-03-22T13:53:43.934Z"
 last_activity: 2026-02-09 - Completed 11-02-PLAN.md
 progress:
   total_phases: 5
   completed_phases: 2
-  total_plans: 14
-  completed_plans: 12
+  total_plans: 17
+  completed_plans: 13
 ---
 
 # Project State
@@ -109,6 +109,8 @@ Recent decisions affecting current work:
 - Phase 11-02: Download action only visible for Remote tracks (organized_path IS NULL check)
 - Phase 11-02: DownloadProgress uses event listeners for real-time updates (not polling)
 - Phase 11-02: LibraryConfig fetched on-demand in download handler (not via context)
+- [Phase 11.1-01]: serde_json added to dev-dependencies explicitly even though it is already a regular dep, for test intent clarity
+- [Phase 11.1-01]: test_search_not_found marked #[ignore] not deleted to preserve live API test for manual use
 
 ### v1.1 Scope Decisions
 
@@ -140,9 +142,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-22T13:35:50.315Z
-Stopped at: Phase 11.1 context gathered
-Resume file: .planning/phases/11.1-functional-e2e-test-harness/11.1-CONTEXT.md
+Last session: 2026-03-22T13:53:43.932Z
+Stopped at: Completed 11.1-01-PLAN.md
+Resume file: None
 
 ---
 *Last updated: 2026-02-09 after 11-02 plan completion*

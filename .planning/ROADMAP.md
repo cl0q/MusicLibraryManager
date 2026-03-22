@@ -190,7 +190,7 @@ Phases execute in numeric order: 1 → 2 → 3 → ... → 11
 **Goal:** Regression safety net — backend integration tests for download pipeline and library/remote filtering, frontend component rendering tests for key UI components
 **Requirements**: (no specific IDs — inserted phase for regression coverage)
 **Depends on:** Phase 11
-**Plans:** 3 plans
+**Plans:** 1/3 plans executed
 
 Plans:
 - [ ] 11.1-01-PLAN.md — Backend test infrastructure: tests/common helpers, JSON API fixtures, audio fixtures, fix failing DAB test
