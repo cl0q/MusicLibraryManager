@@ -184,3 +184,15 @@ Phases execute in numeric order: 1 → 2 → 3 → ... → 11
 | 9. Library/Remote Separation | v1.1 | 0/4 | Not started | - |
 | 10. Track Actions & More Info | v1.1 | 3/3 | Complete | 2026-02-07 |
 | 11. Download Flow & UX Polish | v1.1 | 0/3 | Not started | - |
+
+### Phase 11.1: Functional & E2E Test Harness (INSERTED)
+
+**Goal:** Regression safety net — backend integration tests for download pipeline and library/remote filtering, frontend component rendering tests for key UI components
+**Requirements**: (no specific IDs — inserted phase for regression coverage)
+**Depends on:** Phase 11
+**Plans:** 3 plans
+
+Plans:
+- [ ] 11.1-01-PLAN.md — Backend test infrastructure: tests/common helpers, JSON API fixtures, audio fixtures, fix failing DAB test
+- [ ] 11.1-02-PLAN.md — Backend integration tests: library/remote filtering (6 tests) and download pipeline DB transitions (5 tests)
+- [ ] 11.1-03-PLAN.md — Frontend test setup: Vitest + @testing-library/react + 4 component rendering test files
