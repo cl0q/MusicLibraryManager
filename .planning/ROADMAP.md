@@ -196,3 +196,15 @@ Plans:
 - [ ] 11.1-01-PLAN.md — Backend test infrastructure: tests/common helpers, JSON API fixtures, audio fixtures, fix failing DAB test
 - [ ] 11.1-02-PLAN.md — Backend integration tests: library/remote filtering (6 tests) and download pipeline DB transitions (5 tests)
 - [ ] 11.1-03-PLAN.md — Frontend test setup: Vitest + @testing-library/react + 4 component rendering test files
+
+### Phase 12: Import External Playlists
+
+**Goal:** User can import M3U/M3U8 and Spotify JSON playlist files into the music library, with fuzzy track matching and a match preview before confirming playlist creation
+**Requirements**: IMP-01, IMP-02, IMP-03, IMP-04
+**Depends on:** Phase 11
+**Plans:** 3 plans
+
+Plans:
+- [ ] 12-01-PLAN.md — Backend: playlist_importer module (M3U + JSON parsers, fuzzy matching, import command)
+- [ ] 12-02-PLAN.md — Frontend: ImportModal + MatchPreview components, Import button in PlaylistList
+- [ ] 12-03-PLAN.md — Human verification of end-to-end import flow

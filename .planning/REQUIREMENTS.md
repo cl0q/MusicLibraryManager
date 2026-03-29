@@ -48,6 +48,13 @@ Requirements for milestone v1.1: Library Foundation & UX Polish.
 
 Deferred to future milestones.
 
+### Playlist Import
+
+- [ ] **IMP-01**: User can select an M3U or M3U8 file and import it as a playlist
+- [ ] **IMP-02**: User can select a Spotify JSON export file and import it as a playlist
+- [ ] **IMP-03**: Import preview shows matched/unmatched track counts before confirming playlist creation
+- [ ] **IMP-04**: Import creates playlist with matched tracks in original order
+
 ### Similar Songs Grouping
 
 - **SIM-01**: Songs with similar titles grouped with expandable triangle
@@ -92,12 +99,17 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DL-02 | Phase 11 | Pending |
 | DL-03 | Phase 11 | Pending |
 | UX-01 | Phase 11 | Pending |
+| IMP-01 | Phase 12 | Pending |
+| IMP-02 | Phase 12 | Pending |
+| IMP-03 | Phase 12 | Pending |
+| IMP-04 | Phase 12 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 19 total
-- Mapped to phases: 19
+- v1.2 requirements: 4 total (IMP-01 through IMP-04)
+- Mapped to phases: 23
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-05*
-*Last updated: 2026-02-05 after roadmap creation*
+*Last updated: 2026-03-29 — added IMP-01 through IMP-04 for Phase 12*
