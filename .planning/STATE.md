@@ -4,12 +4,12 @@ milestone: v1.1
 milestone_name: Library Foundation & UX Polish
 status: executing
 stopped_at: Completed 11.1-02-PLAN.md
-last_updated: "2026-03-22T14:00:29.525Z"
-last_activity: 2026-02-09 - Completed 11-02-PLAN.md
+last_updated: "2026-03-29T18:49:20.009Z"
+last_activity: 2026-03-29 -- Phase 12 execution started
 progress:
-  total_phases: 5
+  total_phases: 6
   completed_phases: 3
-  total_plans: 17
+  total_plans: 20
   completed_plans: 15
 ---
 
@@ -20,25 +20,27 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-05)
 
 **Core value:** Like a song anywhere and it reliably ends up in your owned library and on your devices in high quality
-**Current focus:** Phase 10 - Track Actions & More Info
+**Current focus:** Phase 12 — import-external-playlists
 
 ## Current Position
 
-Phase: 11 of 11 (Download Flow & UX Polish)
-Plan: 2 of TBD in current phase
-Status: In progress
-Last activity: 2026-02-09 - Completed 11-02-PLAN.md
+Phase: 12 (import-external-playlists) — EXECUTING
+Plan: 1 of 3
+Status: Executing Phase 12
+Last activity: 2026-03-29 -- Phase 12 execution started
 
 Progress: [█████████░░░░░░░░░░] 51/TBD total plans (v1.0: 39/39, v1.1: 12/TBD)
 
 ## Performance Metrics
 
 **Velocity (v1.0):**
+
 - Total plans completed: 39
 - Total execution time: ~3 days
 - Phases completed: 7
 
 **Current Milestone (v1.1):**
+
 - Plans completed: 12
 - Average duration: 8 min
 - Total execution time: ~102 min
@@ -48,6 +50,7 @@ Progress: [█████████░░░░░░░░░░] 51/TBD tot
 ## Tech Stack
 
 **Backend (Rust):**
+
 - rusqlite — SQLite database
 - lofty — Audio metadata extraction
 - tantivy — Full-text search
@@ -59,12 +62,14 @@ Progress: [█████████░░░░░░░░░░] 51/TBD tot
 - notify — Filesystem watching for mount detection (Phase 8)
 
 **Frontend (Tauri + Web):**
+
 - Tauri v2 — Desktop app framework
 - TypeScript + React — UI components
 - TanStack Table — Virtualized data grid
 - shadcn/ui — Component library
 
 **External tools:**
+
 - ffmpeg — Audio transcoding
 - yt-dlp — YouTube downloads
 - scdl — SoundCloud downloads
@@ -127,6 +132,7 @@ Recent decisions affecting current work:
 ### Roadmap Evolution
 
 - Phase 11.1 inserted after Phase 11: Functional & E2E Test Harness (URGENT)
+- Phase 12 added: Import External Playlists
 
 ### Pending Todos
 
@@ -135,10 +141,12 @@ None yet.
 ### Blockers/Concerns
 
 **From v1.0 user testing:**
+
 - Hardcoded "default" user_id for source creation (needs proper user management)
 - SoundCloud playlists not syncing (deferred to v1.2)
 
 **v1.1 scope:**
+
 - Library/Remote separation requires database refactor (track source vs. library state)
 - Drive detection needs platform-specific logic (macOS/Windows/Linux)
 - Context menu performance may need UI architecture changes
