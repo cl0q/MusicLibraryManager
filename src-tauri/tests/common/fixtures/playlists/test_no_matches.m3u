@@ -1,0 +1,5 @@
+#EXTM3U
+#EXTINF:100,Nonexistent Artist - Fake Song Title
+/music/fake/song.mp3
+#EXTINF:200,Another Fake - Not A Real Track
+/music/fake/track.mp3

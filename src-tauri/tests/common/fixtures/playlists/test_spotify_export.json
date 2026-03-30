@@ -1,0 +1,25 @@
+{
+  "type": "playlist",
+  "id": "test_playlist_123",
+  "name": "Test Import Playlist",
+  "tracks": [
+    {
+      "title": "Get Lucky",
+      "artist_names": ["Daft Punk", "Pharrell Williams"],
+      "album_title": "Random Access Memories",
+      "duration_ms": 180000
+    },
+    {
+      "title": "Hey Jude",
+      "artist_names": ["The Beatles"],
+      "album_title": "Past Masters",
+      "duration_ms": 431000
+    },
+    {
+      "title": "Totally Unknown Track",
+      "artist_names": ["Nobody Real"],
+      "album_title": "Fake Album",
+      "duration_ms": 120000
+    }
+  ]
+}

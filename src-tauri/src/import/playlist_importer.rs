@@ -97,15 +97,28 @@ pub fn parse_spotify_json_str(content: &str) -> Result<Vec<ParsedTrack>, String>
             continue;
         }
 
-        let artist = track_obj["artists"]
-            .as_array()
-            .and_then(|a| a.first())
-            .and_then(|a| a["name"].as_str())
-            .unwrap_or("Unknown")
-            .to_string();
+        // Support multiple schemas:
+        //   Real export: { "title": "...", "artist_names": ["..."] }
+        //   Spotify API: { "name": "...", "artists": [{"name": "..."}] }
+        let artist = if let Some(names) = track_obj["artist_names"].as_array() {
+            // Real Spotify export format: artist_names is a string array
+            names.first()
+                .and_then(|n| n.as_str())
+                .unwrap_or("Unknown")
+                .to_string()
+        } else {
+            // Spotify API format: artists is array of {name: string}
+            track_obj["artists"]
+                .as_array()
+                .and_then(|a| a.first())
+                .and_then(|a| a["name"].as_str())
+                .unwrap_or("Unknown")
+                .to_string()
+        };
 
-        let title = track_obj["name"]
+        let title = track_obj["title"]
             .as_str()
+            .or_else(|| track_obj["name"].as_str())
             .unwrap_or("Unknown")
             .to_string();
 

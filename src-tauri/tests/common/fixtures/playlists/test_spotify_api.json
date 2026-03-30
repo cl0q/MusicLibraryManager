@@ -1,0 +1,16 @@
+{
+  "tracks": [
+    {
+      "artists": [{"name": "Daft Punk"}],
+      "name": "Get Lucky",
+      "duration_ms": 180000
+    },
+    {
+      "track": {
+        "artists": [{"name": "The Beatles"}],
+        "name": "Hey Jude",
+        "duration_ms": 431000
+      }
+    }
+  ]
+}
