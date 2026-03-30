@@ -44,6 +44,7 @@ tantivy = "0.22"
 
 # Fuzzy matching
 strsim = "0.11"
+m3u8-rs = "6"
 
 # Regex for string normalization
 regex = "1"
@@ -73,7 +74,7 @@ unicode-normalization = "0.1"
 dotenvy = "0.15"
 
 # HTTP client (for download infrastructure)
-reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest = { version = "0.12", features = ["json", "stream", "cookies"] }
 backoff = { version = "0.4", features = ["tokio"] }
 
 # Streaming utilities
@@ -103,3 +104,5 @@ rayon = "1.10.0"
 [dev-dependencies]
 tempfile = "3.24.0"
 serde_json = "1"
+wiremock = "0.6.5"
+tokio-test = "0.4.5"

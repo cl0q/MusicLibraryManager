@@ -55,7 +55,7 @@ pub use enhancements::{
     get_review_queue_cmd, get_review_queue_count_cmd, resolve_review_item_cmd,
 };
 pub use files::copy_to_clipboard;
-pub use import::import_directory;
+pub use import::{import_directory, import_playlist_command};
 pub use library_config::{
     check_library_connection, configure_library, get_library_config,
     get_library_mount_state, get_subfolders, select_library_folder,

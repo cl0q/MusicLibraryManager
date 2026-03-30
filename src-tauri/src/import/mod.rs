@@ -21,8 +21,13 @@
 //! ```
 
 pub mod importer;
+pub mod playlist_importer;
 pub mod scanner;
 
 // Re-export commonly used items
 pub use importer::{import_batch, ImportResult};
+pub use playlist_importer::{
+    ParsedTrack, MatchResult, ImportPlaylistResult,
+    import_playlist_from_file, parse_m3u_file, parse_spotify_json_str,
+};
 pub use scanner::{scan_directory, ScanError};

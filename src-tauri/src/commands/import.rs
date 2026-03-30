@@ -134,6 +134,22 @@ pub async fn import_directory(
     Ok(ImportStartedResponse { file_count })
 }
 
+/// Import a playlist from a file (M3U, M3U8, or Spotify JSON).
+///
+/// Parses the file, fuzzy-matches tracks against the library,
+/// creates a new Regular playlist, and adds matched tracks in order.
+#[tauri::command]
+pub async fn import_playlist_command(
+    playlist_name: String,
+    file_path: String,
+) -> Result<crate::import::ImportPlaylistResult, String> {
+    let db_path = std::path::PathBuf::from("music_library.db");
+    let mut conn = crate::database::get_connection(&db_path)
+        .map_err(|e| format!("Database error: {}", e))?;
+
+    crate::import::import_playlist_from_file(&mut conn, &playlist_name, &file_path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

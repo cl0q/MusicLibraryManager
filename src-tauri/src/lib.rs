@@ -21,6 +21,7 @@ pub mod transcode;
 
 use tauri::Manager;
 
+use commands::download::DownloadState;
 use commands::sources::OAuthState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -43,6 +44,9 @@ pub fn run() {
             }
         }))
         .manage(OAuthState::default())
+        .manage(DownloadState {
+            queue_path: std::sync::Mutex::new(None),
+        })
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -51,6 +55,54 @@ pub fn run() {
                         .level_for("lofty", log::LevelFilter::Error)
                         .level_for("symphonia_core", log::LevelFilter::Error)
                         .level_for("symphonia_bundle_mp3", log::LevelFilter::Error)
+                        .targets([
+                            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
+                        ])
+                        .format(|out, message, record| {
+                            // Solarized true-color ANSI palette
+                            const RESET: &str = "\x1b[0m";
+                            const BOLD: &str = "\x1b[1m";
+                            const DIM: &str = "\x1b[2m";
+                            // Solarized colors (true color)
+                            const RED: &str = "\x1b[38;2;220;50;47m";
+                            const YELLOW: &str = "\x1b[38;2;181;137;0m";
+                            const BLUE: &str = "\x1b[38;2;38;139;210m";
+                            const CYAN: &str = "\x1b[38;2;42;161;152m";
+                            const VIOLET: &str = "\x1b[38;2;108;113;196m";
+                            const GREEN: &str = "\x1b[38;2;133;153;0m";
+                            const ORANGE: &str = "\x1b[38;2;203;75;22m";
+                            const BASE01: &str = "\x1b[38;2;88;110;117m";
+
+                            let level_color = match record.level() {
+                                log::Level::Error => RED,
+                                log::Level::Warn => ORANGE,
+                                log::Level::Info => BLUE,
+                                log::Level::Debug => CYAN,
+                                log::Level::Trace => VIOLET,
+                            };
+
+                            let level_icon = match record.level() {
+                                log::Level::Error => "✖",
+                                log::Level::Warn => "▲",
+                                log::Level::Info => "●",
+                                log::Level::Debug => "◆",
+                                log::Level::Trace => "…",
+                            };
+
+                            let now = chrono::Local::now().format("%H:%M:%S");
+
+                            // Shorten target: "music_library_manager::download::orchestrator" → "download::orchestrator"
+                            let target = record.target();
+                            let short_target = target
+                                .strip_prefix("music_library_manager::")
+                                .unwrap_or(target);
+
+                            out.finish(format_args!(
+                                "{DIM}{BASE01}{now}{RESET} {BOLD}{level_color}{level_icon} {:<5}{RESET} {GREEN}{short_target}{RESET} {YELLOW}▸{RESET} {message}",
+                                record.level()
+                            ))
+                        })
                         .build(),
                 )?;
             }
@@ -78,7 +130,12 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::analysis::get_track_analysis,
+            commands::analysis::get_track_artwork,
+            commands::analysis::generate_track_fingerprint,
+            commands::analysis::generate_track_waveform,
+            commands::analysis::generate_track_spectrogram,
             commands::import::import_directory,
+            commands::import::import_playlist_command,
             commands::search::search_library,
             commands::search::get_library_storage_size,
             commands::search::get_library_tracks,
@@ -89,6 +146,7 @@ pub fn run() {
             commands::download::download_tracks,
             commands::download::retry_failed_downloads,
             commands::download::get_retry_queue_status,
+            commands::download::get_recent_downloads,
             commands::sources::spotify_auth_url,
             commands::sources::spotify_exchange_code,
             commands::sources::sync_spotify,
@@ -100,6 +158,8 @@ pub fn run() {
             commands::sources::disconnect_source,
             commands::sources::connect_spotify_with_server,
             commands::sources::connect_soundcloud_with_server,
+            commands::sources::dab_login,
+            commands::sources::check_dab_connected,
             commands::playlist::create_playlist_command,
             commands::playlist::get_playlists_command,
             commands::playlist::get_playlist_tracks_command,
@@ -114,6 +174,9 @@ pub fn run() {
             commands::sync::add_track_to_profile,
             commands::sync::add_playlist_to_profile,
             commands::sync::add_rule_to_profile,
+            commands::sync::remove_playlist_from_profile,
+            commands::sync::remove_track_from_profile,
+            commands::sync::get_profile_playlists,
             commands::sync::detect_rockbox_devices_cmd,
             commands::sync::preview_sync_cmd,
             commands::sync::execute_sync_cmd,
@@ -133,6 +196,8 @@ pub fn run() {
             commands::library_config::check_library_connection,
             commands::library_config::get_library_mount_state,
             commands::library_config::reveal_in_file_manager,
+            commands::library_config::get_app_setting,
+            commands::library_config::set_app_setting,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
