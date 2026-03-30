@@ -202,7 +202,7 @@ Plans:
 **Goal:** User can import M3U/M3U8 and Spotify JSON playlist files into the music library, with fuzzy track matching and a match preview before confirming playlist creation
 **Requirements**: IMP-01, IMP-02, IMP-03, IMP-04
 **Depends on:** Phase 11
-**Plans:** 3 plans
+**Plans:** 3/3 plans complete
 
 Plans:
 - [ ] 12-01-PLAN.md — Backend: playlist_importer module (M3U + JSON parsers, fuzzy matching, import command)
