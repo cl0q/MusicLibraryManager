@@ -1,19 +1,10 @@
-/**
- * PlaylistList component - displays playlists grouped by category.
- *
- * Features:
- * - Groups playlists by category (Liked, Smart, Regular)
- * - Shows playlist metadata (name, track count, cover)
- * - Create new playlist button with form
- * - Click to navigate to detail view
- */
-
 import { useState, useEffect } from 'react';
 import {
   getPlaylists,
   createPlaylist,
   type Playlist,
 } from '../../hooks/usePlaylists';
+import { ImportModal } from '../PlaylistImport/ImportModal';
 
 interface PlaylistListProps {
   onSelectPlaylist: (playlist: Playlist) => void;
@@ -26,6 +17,7 @@ export default function PlaylistList({ onSelectPlaylist }: PlaylistListProps) {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState('');
   const [newPlaylistDescription, setNewPlaylistDescription] = useState('');
+  const [showImportModal, setShowImportModal] = useState(false);
 
   useEffect(() => {
     loadPlaylists();
@@ -49,22 +41,16 @@ export default function PlaylistList({ onSelectPlaylist }: PlaylistListProps) {
     if (!newPlaylistName.trim()) return;
 
     try {
-      await createPlaylist(
-        newPlaylistName,
-        newPlaylistDescription || undefined
-      );
+      await createPlaylist(newPlaylistName, newPlaylistDescription || undefined);
       setNewPlaylistName('');
       setNewPlaylistDescription('');
       setShowCreateForm(false);
       await loadPlaylists();
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Failed to create playlist'
-      );
+      setError(err instanceof Error ? err.message : 'Failed to create playlist');
     }
   }
 
-  // Group playlists by category
   const likedPlaylists = playlists.filter((p) => p.category === 'liked');
   const smartPlaylists = playlists.filter((p) => p.category === 'smart');
   const regularPlaylists = playlists.filter((p) => p.category === 'regular');
@@ -72,7 +58,7 @@ export default function PlaylistList({ onSelectPlaylist }: PlaylistListProps) {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-gray-400">Loading playlists...</div>
+        <span className="text-sm text-ink-muted">Loading playlists...</span>
       </div>
     );
   }
@@ -80,36 +66,39 @@ export default function PlaylistList({ onSelectPlaylist }: PlaylistListProps) {
   if (error) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-red-400">Error: {error}</div>
+        <span className="text-sm text-rose-400">Error: {error}</span>
       </div>
     );
   }
 
   return (
-    <div className="p-6 space-y-8">
-      {/* Header */}
+    <div className="p-4 space-y-5">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-white">Playlists</h1>
-        <button
-          onClick={() => setShowCreateForm(!showCreateForm)}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
-        >
-          {showCreateForm ? 'Cancel' : '+ Create Playlist'}
-        </button>
+        <h1 className="text-xs font-semibold uppercase tracking-wide text-ink-secondary">Playlists</h1>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="px-3 py-1.5 text-xs font-medium text-ink-muted hover:text-ink border border-edge rounded transition-colors"
+          >
+            Import
+          </button>
+          <button
+            onClick={() => setShowCreateForm(!showCreateForm)}
+            className="px-3 py-1.5 text-xs font-medium bg-accent hover:bg-accent-bright text-base rounded transition-colors"
+          >
+            {showCreateForm ? 'Cancel' : '+ Create'}
+          </button>
+        </div>
       </div>
 
-      {/* Create Playlist Form */}
       {showCreateForm && (
-        <form
-          onSubmit={handleCreatePlaylist}
-          className="p-4 bg-gray-800 rounded-lg space-y-3"
-        >
+        <form onSubmit={handleCreatePlaylist} className="bg-surface border border-edge rounded-lg p-3 space-y-2">
           <input
             type="text"
             placeholder="Playlist name"
             value={newPlaylistName}
             onChange={(e) => setNewPlaylistName(e.target.value)}
-            className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:outline-none focus:border-blue-500"
+            className="w-full px-3 py-1.5 text-[13px] bg-raised border border-edge rounded text-ink placeholder-ink-muted focus:outline-none focus:border-accent/50"
             autoFocus
           />
           <input
@@ -117,125 +106,79 @@ export default function PlaylistList({ onSelectPlaylist }: PlaylistListProps) {
             placeholder="Description (optional)"
             value={newPlaylistDescription}
             onChange={(e) => setNewPlaylistDescription(e.target.value)}
-            className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:outline-none focus:border-blue-500"
+            className="w-full px-3 py-1.5 text-[13px] bg-raised border border-edge rounded text-ink placeholder-ink-muted focus:outline-none focus:border-accent/50"
           />
           <button
             type="submit"
-            className="w-full px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded transition"
+            className="w-full px-3 py-1.5 text-xs font-medium bg-accent hover:bg-accent-bright text-base rounded transition-colors"
           >
             Create
           </button>
         </form>
       )}
 
-      {/* Liked Playlists */}
       {likedPlaylists.length > 0 && (
-        <section>
-          <h2 className="text-xl font-semibold text-gray-300 mb-3">
-            Liked Playlists
-          </h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {likedPlaylists.map((playlist) => (
-              <PlaylistCard
-                key={playlist.id}
-                playlist={playlist}
-                onClick={() => onSelectPlaylist(playlist)}
-              />
-            ))}
-          </div>
-        </section>
+        <PlaylistSection title="Liked" playlists={likedPlaylists} onSelect={onSelectPlaylist} />
       )}
-
-      {/* Smart Playlists */}
       {smartPlaylists.length > 0 && (
-        <section>
-          <h2 className="text-xl font-semibold text-gray-300 mb-3">
-            Smart Playlists
-          </h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {smartPlaylists.map((playlist) => (
-              <PlaylistCard
-                key={playlist.id}
-                playlist={playlist}
-                onClick={() => onSelectPlaylist(playlist)}
-              />
-            ))}
-          </div>
-        </section>
+        <PlaylistSection title="Smart" playlists={smartPlaylists} onSelect={onSelectPlaylist} />
       )}
-
-      {/* Regular Playlists */}
       {regularPlaylists.length > 0 && (
-        <section>
-          <h2 className="text-xl font-semibold text-gray-300 mb-3">
-            My Playlists
-          </h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {regularPlaylists.map((playlist) => (
-              <PlaylistCard
-                key={playlist.id}
-                playlist={playlist}
-                onClick={() => onSelectPlaylist(playlist)}
-              />
-            ))}
-          </div>
-        </section>
+        <PlaylistSection title="Playlists" playlists={regularPlaylists} onSelect={onSelectPlaylist} />
       )}
 
       {playlists.length === 0 && (
-        <div className="text-center text-gray-400 py-12">
-          No playlists yet. Create your first playlist to get started!
+        <div className="flex items-center justify-center py-12">
+          <span className="text-sm text-ink-muted">No playlists yet</span>
         </div>
+      )}
+
+      {showImportModal && (
+        <ImportModal
+          onClose={() => setShowImportModal(false)}
+          onPlaylistCreated={() => {
+            setShowImportModal(false);
+            loadPlaylists();
+          }}
+        />
       )}
     </div>
   );
 }
 
-interface PlaylistCardProps {
-  playlist: Playlist;
-  onClick: () => void;
-}
-
-function PlaylistCard({ playlist, onClick }: PlaylistCardProps) {
+function PlaylistSection({ title, playlists, onSelect }: { title: string; playlists: Playlist[]; onSelect: (p: Playlist) => void }) {
   return (
-    <div
-      onClick={onClick}
-      className="group cursor-pointer bg-gray-800 hover:bg-gray-750 rounded-lg p-4 transition"
-    >
-      {/* Cover Image */}
-      <div className="aspect-square bg-gray-700 rounded-lg mb-3 flex items-center justify-center overflow-hidden">
-        {playlist.cover_image_url || playlist.cover_image_path ? (
-          <img
-            src={playlist.cover_image_url || playlist.cover_image_path || ''}
-            alt={playlist.name}
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <svg
-            className="w-12 h-12 text-gray-500"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
+    <section>
+      <h2 className="text-[11px] font-semibold uppercase tracking-wide text-ink-muted mb-2">{title}</h2>
+      <div className="space-y-1">
+        {playlists.map((playlist) => (
+          <button
+            key={playlist.id}
+            onClick={() => onSelect(playlist)}
+            className="w-full flex items-center gap-3 px-3 py-2 bg-surface border border-edge rounded-lg hover:bg-raised transition-colors text-left"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
-            />
-          </svg>
-        )}
+            <div className="w-10 h-10 bg-raised rounded flex items-center justify-center shrink-0">
+              {playlist.cover_image_url || playlist.cover_image_path ? (
+                <img
+                  src={playlist.cover_image_url || playlist.cover_image_path || ''}
+                  alt={playlist.name}
+                  className="w-full h-full object-cover rounded"
+                />
+              ) : (
+                <svg className="w-5 h-5 text-ink-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                </svg>
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="text-[13px] font-medium text-ink truncate block">{playlist.name}</span>
+              {playlist.description && (
+                <span className="text-xs text-ink-muted truncate block">{playlist.description}</span>
+              )}
+            </div>
+          </button>
+        ))}
       </div>
-
-      {/* Playlist Info */}
-      <h3 className="font-semibold text-white truncate group-hover:text-blue-400 transition">
-        {playlist.name}
-      </h3>
-      {playlist.description && (
-        <p className="text-sm text-gray-400 truncate mt-1">
-          {playlist.description}
-        </p>
-      )}
-    </div>
+    </section>
   );
 }

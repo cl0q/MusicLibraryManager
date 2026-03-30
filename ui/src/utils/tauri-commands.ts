@@ -50,7 +50,7 @@ export interface SyncPreview {
 
 // Playlist commands
 export async function get_playlists_command(): Promise<Playlist[]> {
-  return invoke<Playlist[]>("get_playlists");
+  return invoke<Playlist[]>("get_playlists_command");
 }
 
 export async function get_playlist_tracks_command(
@@ -114,10 +114,8 @@ export async function get_last_sync_time(): Promise<string | null> {
 }
 
 export interface SyncResult {
-  files_added: number;
-  files_updated: number;
-  files_removed: number;
-  playlists_created: number;
+  synced_count: number;
+  failed_count: number;
 }
 
 export async function execute_sync_cmd(profile_id: string): Promise<SyncResult> {
@@ -128,13 +126,52 @@ export async function detect_rockbox_devices_cmd(): Promise<RockboxDevice[]> {
   return invoke<RockboxDevice[]>("detect_rockbox_devices");
 }
 
-// Download commands
-export interface DownloadRequest {
-  track_ids: string[];
+export async function add_playlist_to_profile(profileId: number, playlistId: number): Promise<void> {
+  return invoke<void>("add_playlist_to_profile", { profileId, playlistId });
 }
 
-export async function download_tracks(request: DownloadRequest): Promise<void> {
-  return invoke<void>("download_tracks", { request });
+export async function remove_playlist_from_profile(profileId: number, playlistId: number): Promise<void> {
+  return invoke<void>("remove_playlist_from_profile", { profileId, playlistId });
+}
+
+export async function remove_track_from_profile(profileId: number, trackId: number): Promise<void> {
+  return invoke<void>("remove_track_from_profile", { profileId, trackId });
+}
+
+export interface ProfilePlaylist {
+  id: number;
+  name: string;
+  category: string;
+  track_count: number;
+}
+
+export async function get_profile_playlists(profileId: number): Promise<ProfilePlaylist[]> {
+  return invoke<ProfilePlaylist[]>("get_profile_playlists", { profileId });
+}
+
+// Download commands
+export interface DownloadRequest {
+  track_id?: string;
+  query: string;
+  artist: string;
+  title: string;
+  soundcloud_url?: string;
+  user_id?: string;
+}
+
+export interface BatchResult {
+  succeeded: number;
+  failed: number;
+  skipped: number;
+}
+
+export async function download_tracks(
+  requests: DownloadRequest[],
+  downloadDir: string,
+  transcodeDir: string,
+  rootDir: string,
+): Promise<BatchResult> {
+  return invoke<BatchResult>("download_tracks", { requests, downloadDir, transcodeDir, rootDir });
 }
 
 export interface RetryQueueStatus {
@@ -144,6 +181,20 @@ export interface RetryQueueStatus {
 
 export async function get_retry_queue_status(): Promise<RetryQueueStatus> {
   return invoke<RetryQueueStatus>("get_retry_queue_status");
+}
+
+export interface RecentDownload {
+  id: number;
+  artist: string;
+  title: string;
+  download_status: string;
+  organized_path: string | null;
+  format: string | null;
+  bitrate: number | null;
+}
+
+export async function get_recent_downloads(): Promise<RecentDownload[]> {
+  return invoke<RecentDownload[]>("get_recent_downloads");
 }
 
 // Enhancement commands
@@ -307,6 +358,20 @@ export async function get_library_mount_state(): Promise<string> {
 }
 
 // ============================================================================
+// App Settings Commands
+// ============================================================================
+
+/** Get an app setting by key */
+export async function getAppSetting(key: string): Promise<string | null> {
+  return invoke<string | null>("get_app_setting", { key });
+}
+
+/** Set an app setting */
+export async function setAppSetting(key: string, value: string): Promise<void> {
+  return invoke<void>("set_app_setting", { key, value });
+}
+
+// ============================================================================
 // Track Analysis Commands (Plan 10-03 backend)
 // ============================================================================
 
@@ -337,4 +402,48 @@ export interface TrackAnalysisData {
 /** Get track analysis data (ffprobe, fingerprint, waveform, spectrogram) */
 export async function getTrackAnalysis(trackId: number): Promise<TrackAnalysisData> {
   return invoke<TrackAnalysisData>("get_track_analysis", { trackId });
+}
+
+/** Get album artwork for a track as base64 data URI */
+export async function getTrackArtwork(trackId: number): Promise<string | null> {
+  return invoke<string | null>("get_track_artwork", { trackId });
+}
+
+/** Generate fingerprint for a single track */
+export async function generateTrackFingerprint(trackId: number): Promise<string> {
+  return invoke<string>("generate_track_fingerprint", { trackId });
+}
+
+/** Generate waveform visualization for a track (returns base64 PNG data URI) */
+export async function generateTrackWaveform(trackId: number): Promise<string> {
+  return invoke<string>("generate_track_waveform", { trackId });
+}
+
+/** Generate spectrogram for a track (returns base64 PNG data URI) */
+export async function generateTrackSpectrogram(trackId: number): Promise<string> {
+  return invoke<string>("generate_track_spectrogram", { trackId });
+}
+
+// Playlist import
+export interface ImportPlaylistResult {
+  playlist_id: number;
+  playlist_name: string;
+  total_tracks: number;
+  matched_tracks: number;
+  unmatched_tracks: number;
+  unmatched_details: string[];
+}
+
+/**
+ * Import a playlist from an M3U, M3U8, or Spotify JSON file.
+ * Fuzzy-matches tracks against library, creates playlist with matched tracks.
+ */
+export async function importPlaylistFromFile(
+  playlistName: string,
+  filePath: string
+): Promise<ImportPlaylistResult> {
+  return invoke<ImportPlaylistResult>("import_playlist_command", {
+    playlistName,
+    filePath,
+  });
 }
