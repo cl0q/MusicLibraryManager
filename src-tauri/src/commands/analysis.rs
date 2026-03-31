@@ -5,13 +5,47 @@
 //! - Fingerprint retrieval (future integration with Phase 7 data)
 //! - Spectrogram generation (future feature)
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use serde::Serialize;
 
+use crate::config::LibraryConfig;
 use crate::database::connection::get_connection;
 use crate::database::track_analysis::{TrackAnalysis, get_analysis, save_analysis};
 use crate::search::query::get_track_by_id;
+
+/// Resolve an organized_path (always relative) to an absolute file path by joining
+/// it with the configured library root.
+///
+/// # Errors
+/// - Returns `Err` if `path` is absolute — absolute organized_paths violate the
+///   Phase 8-01 portability invariant and must not be silently accepted.
+/// - Returns `Err` if the library root is not configured.
+fn resolve_track_path(conn: &rusqlite::Connection, path: &str) -> Result<String, String> {
+    if Path::new(path).is_absolute() {
+        return Err(format!(
+            "organized_path must be relative to library root, not absolute. \
+             Got: {}. Run the schema migration to fix existing data.",
+            path
+        ));
+    }
+    // Also reject Windows-style drive-letter paths (not caught by is_absolute() on Unix).
+    let is_windows_absolute = path.len() >= 2
+        && path.chars().next().map_or(false, |c| c.is_ascii_alphabetic())
+        && path.chars().nth(1) == Some(':');
+    if is_windows_absolute {
+        return Err(format!(
+            "organized_path must be relative to library root, not absolute. \
+             Got: {}. Run the schema migration to fix existing data.",
+            path
+        ));
+    }
+    let config = LibraryConfig::load(conn)
+        .map_err(|e| format!("Failed to load library config: {}", e))?;
+    let root = config.root_path
+        .ok_or_else(|| "Library not configured".to_string())?;
+    Ok(root.join(path).to_string_lossy().to_string())
+}
 
 /// Track analysis response sent to frontend.
 ///
@@ -60,9 +94,16 @@ pub async fn get_track_analysis(track_id: i64) -> Result<TrackAnalysisResponse, 
             .map_err(|e| format!("Database query failed: {}", e))?
             .ok_or_else(|| format!("Track {} not found", track_id))?;
 
-        // Check if track has a local file (remote tracks have organized_path = NULL)
-        let file_path = track.organized_path
-            .ok_or_else(|| "Track has no local file (remote/undownloaded track)".to_string())?;
+        // Track.organized_path is String (not Option). Remote tracks (organized_path IS NULL
+        // in the database) will fail at get_track_by_id with a rusqlite type error when trying
+        // to deserialize NULL → String. An empty organized_path also means no local file.
+        if track.organized_path.is_empty() {
+            return Err("Track has no local file (remote/undownloaded track)".to_string());
+        }
+
+        // Resolve relative organized_path against library root.
+        // Rejects absolute paths (stale data) with a descriptive error.
+        let file_path = resolve_track_path(&conn, &track.organized_path)?;
 
         // Run ffprobe to extract metadata as JSON
         let output = Command::new("ffprobe")
