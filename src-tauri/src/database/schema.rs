@@ -17,7 +17,11 @@ use crate::database::connection::Result;
 /// - Version 6: Phase 8 schema (app_config table for library configuration)
 /// - Version 7: Phase 9 schema (download_status column, idx_organized_path_null index)
 /// - Version 8: Phase 10 schema (track_analysis table for caching ffprobe/fingerprint/spectrogram data)
-pub const CURRENT_SCHEMA_VERSION: i32 = 8;
+/// - Version 9: Phase 11 fix (NULL out date_added for remote undownloaded tracks)
+/// - Version 10: Backfill date_added from track_sources.added_at for remote tracks
+/// - Version 11: Delete SoundCloud phantom tracks for clean re-sync with correct liked-at ordering
+/// - Version 12: Strip absolute library root prefix from organized_path (enforce relative-only invariant)
+pub const CURRENT_SCHEMA_VERSION: i32 = 12;
 
 /// SQL schema for the music library database (Phase 1 - base schema).
 ///
@@ -138,7 +142,7 @@ CREATE INDEX IF NOT EXISTS idx_tag ON playlist_tags(tag);
 
 -- Recently Added: tracks added in last 30 days, sorted newest first
 CREATE VIEW IF NOT EXISTS smart_playlist_recently_added AS
-SELECT id, artist, album, title, date_added
+SELECT id, artist, album, title, date_added, format, original_path
 FROM tracks
 WHERE date_added >= datetime('now', '-30 days')
 ORDER BY date_added DESC;
@@ -146,7 +150,7 @@ ORDER BY date_added DESC;
 -- Most Played: top 100 tracks by play count (populated in Phase 5 via Rockbox stats)
 -- Note: track_stats table will be added in Phase 5; using placeholder view for now
 CREATE VIEW IF NOT EXISTS smart_playlist_most_played AS
-SELECT id, artist, album, title, 0 AS play_count
+SELECT id, artist, album, title, date_added, format, original_path
 FROM tracks
 ORDER BY id DESC
 LIMIT 100;
@@ -407,6 +411,55 @@ fn migrate_to_v8(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Run Phase 11 fix migration: NULL out date_added for remote undownloaded tracks.
+///
+/// Remote tracks (synced from Spotify/SoundCloud but not downloaded) should show "-"
+/// for date_added. Only downloaded tracks should have a date_added value.
+fn migrate_to_v9(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "UPDATE tracks SET date_added = NULL WHERE organized_path IS NULL AND download_status IS NULL;"
+    )?;
+    Ok(())
+}
+
+/// Delete remote SoundCloud tracks so next sync re-creates them with correct liked-at ordering.
+///
+/// The v1 API only returns tracks in liked-at order without timestamps, so track_sources.added_at
+/// previously stored the upload date (wrong). Deleting forces a clean re-sync.
+fn migrate_to_v11(conn: &Connection) -> Result<()> {
+    // Delete track_sources for soundcloud tracks, then delete orphaned phantom tracks
+    conn.execute_batch(
+        "DELETE FROM track_sources WHERE source_id IN (SELECT id FROM sources WHERE name = 'soundcloud');
+         DELETE FROM tracks WHERE organized_path IS NULL AND download_status IS NULL
+           AND format = 'soundcloud'
+           AND id NOT IN (SELECT track_id FROM track_sources);"
+    )?;
+    Ok(())
+}
+
+/// Migration v12: Strip absolute library root prefix from organized_path values.
+///
+/// Affects tracks where organized_path starts with the library root path stored in app_config.
+/// Example: '/Volumes/Lexxar/Music/00_Artists/track.m4a' -> '00_Artists/track.m4a'
+///
+/// The LENGTH(...) + 2 formula: root_len + 1 to skip the trailing '/' + 1 because SUBSTR is
+/// 1-indexed. So for root '/Volumes/Lexxar/Music' (22 chars), SUBSTR starts at position 24,
+/// yielding the string after '/Volumes/Lexxar/Music/'.
+///
+/// No-op if app_config table doesn't exist or has no library_root key.
+fn migrate_to_v12(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "UPDATE tracks
+         SET organized_path = SUBSTR(
+             organized_path,
+             LENGTH((SELECT value FROM app_config WHERE key = 'library_root')) + 2
+         )
+         WHERE organized_path IS NOT NULL
+           AND organized_path LIKE (SELECT value || '/%' FROM app_config WHERE key = 'library_root');"
+    )?;
+    Ok(())
+}
+
 /// Initialize the database schema with versioned migrations.
 ///
 /// Creates all tables and indexes, applying migrations as needed.
@@ -469,6 +522,30 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
     if get_schema_version(conn)? < 8 {
         migrate_to_v8(conn)?;
         set_schema_version(conn, 8)?;
+    }
+
+    // Apply Phase 11 fix migrations if needed
+    if get_schema_version(conn)? < 9 {
+        migrate_to_v9(conn)?;
+        set_schema_version(conn, 9)?;
+    }
+
+    // Backfill date_added from track_sources.added_at for remote tracks (now superseded by v11)
+    if get_schema_version(conn)? < 10 {
+        // v10 is now a no-op; v11 does the proper cleanup
+        set_schema_version(conn, 10)?;
+    }
+
+    // Delete SoundCloud phantom tracks for clean re-sync with correct liked-at ordering
+    if get_schema_version(conn)? < 11 {
+        migrate_to_v11(conn)?;
+        set_schema_version(conn, 11)?;
+    }
+
+    // Strip absolute library root prefix from organized_path (enforce relative-only invariant)
+    if get_schema_version(conn)? < 12 {
+        migrate_to_v12(conn)?;
+        set_schema_version(conn, 12)?;
     }
 
     Ok(())
@@ -790,6 +867,63 @@ mod tests {
         // Verify review queue indexes exist
         assert!(index_exists(&conn, "idx_review_status"));
         assert!(index_exists(&conn, "idx_review_type"));
+    }
+
+    #[test]
+    fn test_schema_v12_strips_absolute_organized_paths() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&conn).unwrap();
+
+        // Set library root in app_config
+        conn.execute(
+            "INSERT OR REPLACE INTO app_config (key, value) VALUES ('library_root', '/Volumes/Lexxar/Music')",
+            [],
+        ).unwrap();
+
+        // Insert a track with an absolute organized_path (simulating the bug)
+        conn.execute(
+            "INSERT INTO tracks (artist, album_artist, album, title, format, original_path, organized_path)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            rusqlite::params![
+                "Artist", "Artist", "Album", "Track", "aac",
+                "/original/path.mp3",
+                "/Volumes/Lexxar/Music/00_Artists/Artist/Album/track.m4a"
+            ],
+        ).unwrap();
+
+        // Also insert a track that is already relative (should be untouched)
+        conn.execute(
+            "INSERT INTO tracks (artist, album_artist, album, title, format, original_path, organized_path)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            rusqlite::params![
+                "Artist2", "Artist2", "Album2", "Track2", "aac",
+                "/original/path2.mp3",
+                "00_Artists/Artist2/Album2/track2.m4a"
+            ],
+        ).unwrap();
+
+        // Run migration directly
+        migrate_to_v12(&conn).unwrap();
+
+        // Absolute path should now be relative
+        let org_path: String = conn
+            .query_row("SELECT organized_path FROM tracks WHERE title = 'Track'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(org_path, "00_Artists/Artist/Album/track.m4a");
+
+        // Already-relative path should be unchanged
+        let org_path2: String = conn
+            .query_row("SELECT organized_path FROM tracks WHERE title = 'Track2'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(org_path2, "00_Artists/Artist2/Album2/track2.m4a");
+    }
+
+    #[test]
+    fn test_schema_v12_is_applied_in_initialize() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&conn).unwrap();
+        assert_eq!(get_schema_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 12);
     }
 
     #[test]
