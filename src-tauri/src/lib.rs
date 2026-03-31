@@ -196,8 +196,6 @@ pub fn run() {
             commands::library_config::check_library_connection,
             commands::library_config::get_library_mount_state,
             commands::library_config::reveal_in_file_manager,
-            commands::library_config::get_app_setting,
-            commands::library_config::set_app_setting,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
