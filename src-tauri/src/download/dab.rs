@@ -189,6 +189,18 @@ impl DabClient {
         self.download_from_url(&stream_url, output_path).await
     }
 
+    /// Download a DAB track by its numeric track ID directly to a file.
+    ///
+    /// Two-step: get stream URL via /api/stream?trackId=N, then download.
+    /// Used by the orchestrator's retry path when track_id is already known.
+    pub async fn download_stream(&self, track_id: &str, output_path: &Path) -> Result<DownloadResult> {
+        let id: u64 = track_id.parse().map_err(|_| {
+            anyhow!("Invalid DAB track_id (expected integer): {}", track_id)
+        })?;
+        let stream_url = self.get_stream_url(id).await?;
+        self.download_from_url(&stream_url, output_path).await
+    }
+
     /// Download audio from a direct URL to the specified output path
     ///
     /// Streams to temporary file for atomic write:

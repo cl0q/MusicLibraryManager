@@ -14,7 +14,9 @@ use music_library_manager::database::get_memory_connection;
 use music_library_manager::database::tracks::update_download_status;
 use music_library_manager::search::query::{get_library_tracks_only, get_remote_tracks_only};
 
-/// A remote track (organized_path IS NULL) must have organized_path unset before download.
+/// A remote track (organized_path IS NULL) must have organized_path == "" before download.
+///
+/// get_remote_tracks_only uses COALESCE to map NULL → "" for Track.organized_path: String.
 #[test]
 fn remote_track_has_null_organized_path() {
     let (conn, track_id) = common::setup_test_db_with_remote_track("Remote Song", "Artist");
@@ -23,8 +25,8 @@ fn remote_track_has_null_organized_path() {
     assert_eq!(remote.len(), 1);
     assert_eq!(remote[0].id, Some(track_id));
     assert!(
-        remote[0].organized_path.is_none(),
-        "Remote track must have organized_path IS NULL before download"
+        remote[0].organized_path.is_empty(),
+        "Remote track must have organized_path IS NULL (empty string via COALESCE) before download"
     );
 }
 
@@ -40,17 +42,21 @@ fn download_status_update_moves_track_from_remote_to_library() {
     let library_before = get_library_tracks_only(&conn).expect("Library query");
     assert_eq!(library_before.len(), 0, "Track should NOT be in Library before download");
 
-    // Simulate download completion by updating organized_path
-    let final_path = "/library/A/Artist/Downloadable Song.m4a";
-    update_download_status(&conn, track_id, final_path).expect("DB update should succeed");
+    // Simulate download completion by updating organized_path.
+    // update_download_status takes (conn, track_id, relative_organized_path, absolute_path).
+    // Per Phase 8-01 invariant: organized_path must be relative to library root.
+    let relative_path = "library/A/Artist/Downloadable Song.m4a";
+    let absolute_path = "/library/A/Artist/Downloadable Song.m4a";
+    update_download_status(&conn, track_id, relative_path, absolute_path)
+        .expect("DB update should succeed");
 
     // After update: track must appear in Library, NOT in Remote
     let library_after = get_library_tracks_only(&conn).expect("Library query after download");
     assert_eq!(library_after.len(), 1, "Track should be in Library after download");
     assert_eq!(
-        library_after[0].organized_path.as_deref(),
-        Some(final_path),
-        "organized_path must match the downloaded file path"
+        library_after[0].organized_path,
+        relative_path,
+        "organized_path must match the relative path"
     );
 
     let remote_after = get_remote_tracks_only(&conn).expect("Remote query after download");
@@ -67,8 +73,10 @@ fn download_status_update_moves_track_from_remote_to_library() {
 fn download_status_update_sets_format_and_bitrate() {
     let (conn, track_id) = common::setup_test_db_with_remote_track("Format Test Song", "Artist");
 
-    // Download to an m4a path (should set format='aac')
-    update_download_status(&conn, track_id, "/library/test.m4a").expect("DB update should succeed");
+    // Download to an m4a path (should set format='aac').
+    // organized_path must be relative; absolute_path is the full path for bitrate detection.
+    update_download_status(&conn, track_id, "library/test.m4a", "/library/test.m4a")
+        .expect("DB update should succeed");
 
     let (format, bitrate): (String, Option<i64>) = conn
         .query_row(
@@ -91,7 +99,8 @@ fn download_status_update_sets_format_and_bitrate() {
 fn download_status_set_to_iso8601_timestamp() {
     let (conn, track_id) = common::setup_test_db_with_remote_track("Timestamp Test", "Artist");
 
-    update_download_status(&conn, track_id, "/library/test.m4a").expect("DB update");
+    update_download_status(&conn, track_id, "library/test.m4a", "/library/test.m4a")
+        .expect("DB update");
 
     let download_status: Option<String> = conn
         .query_row(
@@ -146,9 +155,11 @@ fn batch_download_moves_all_tracks_from_remote() {
     assert_eq!(get_remote_tracks_only(&conn).unwrap().len(), 3);
     assert_eq!(get_library_tracks_only(&conn).unwrap().len(), 0);
 
-    // Update all 3
+    // Update all 3 — organized_path must be relative, absolute_path separate
     for (i, &id) in track_ids.iter().enumerate() {
-        update_download_status(&conn, id, &format!("/library/track-{}.m4a", i)).unwrap();
+        let relative = format!("library/track-{}.m4a", i);
+        let absolute = format!("/library/track-{}.m4a", i);
+        update_download_status(&conn, id, &relative, &absolute).unwrap();
     }
 
     assert_eq!(get_remote_tracks_only(&conn).unwrap().len(), 0, "All 3 should leave Remote");

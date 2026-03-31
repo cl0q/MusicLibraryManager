@@ -7,6 +7,7 @@ use crate::download::youtube::{YoutubeClient, YoutubeDownloadResult};
 use crate::transcode::{transcode_audio, TranscodeResult};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Request to download a single track
@@ -37,6 +38,10 @@ pub struct BatchResult {
     pub skipped: u32,
     /// Track IDs that were successfully downloaded (for database status updates)
     pub downloaded_track_ids: Vec<i64>,
+    /// Map of track_id → absolute file path for database status updates.
+    /// Contains the final file path (transcoded AAC if available, FLAC otherwise).
+    #[serde(default)]
+    pub downloaded_paths: HashMap<i64, String>,
 }
 
 impl BatchResult {
@@ -46,6 +51,7 @@ impl BatchResult {
             failed: 0,
             skipped: 0,
             downloaded_track_ids: Vec::new(),
+            downloaded_paths: HashMap::new(),
         }
     }
 }
@@ -280,6 +286,7 @@ impl DownloadOrchestrator {
                         // Track successful download for database update
                         if let Some(track_id) = request.track_id.as_ref().and_then(|id| id.parse::<i64>().ok()) {
                             result.downloaded_track_ids.push(track_id);
+                            result.downloaded_paths.insert(track_id, aac_path.to_string_lossy().to_string());
                         }
                     }
                     Ok(TranscodeResult::Skipped(reason)) => {
@@ -289,6 +296,7 @@ impl DownloadOrchestrator {
                         // Track successful download for database update
                         if let Some(track_id) = request.track_id.as_ref().and_then(|id| id.parse::<i64>().ok()) {
                             result.downloaded_track_ids.push(track_id);
+                            result.downloaded_paths.insert(track_id, path.to_string_lossy().to_string());
                         }
                     }
                     Ok(TranscodeResult::Failed(error)) => {
@@ -545,7 +553,7 @@ mod tests {
             user_id: None,
         };
 
-        let result = orchestrator.download_batch(vec![request]).await.unwrap();
+        let result = orchestrator.download_batch(vec![request], None).await.unwrap();
 
         assert_eq!(result.skipped, 1);
         assert_eq!(result.succeeded, 0);

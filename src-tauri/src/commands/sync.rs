@@ -332,6 +332,24 @@ pub async fn get_last_sync_time() -> Result<Option<String>, String> {
     .map_err(|e| format!("Task join error: {}", e))?
 }
 
+/// Remove a playlist from a sync profile (stub — to be implemented).
+#[tauri::command]
+pub async fn remove_playlist_from_profile(_profile_id: i64, _playlist_id: i64) -> Result<(), String> {
+    Err("Not yet implemented".to_string())
+}
+
+/// Remove a track from a sync profile (stub — to be implemented).
+#[tauri::command]
+pub async fn remove_track_from_profile(_profile_id: i64, _track_id: i64) -> Result<(), String> {
+    Err("Not yet implemented".to_string())
+}
+
+/// Get playlists in a sync profile (stub — to be implemented).
+#[tauri::command]
+pub async fn get_profile_playlists(_profile_id: i64) -> Result<Vec<i64>, String> {
+    Ok(Vec::new())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

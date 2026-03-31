@@ -5,7 +5,7 @@
 //! - retry_failed_downloads: Retry all failed downloads from queue
 //! - get_retry_queue_status: Get current retry queue status
 
-use crate::download::orchestrator::{BatchResult, DownloadOrchestrator, DownloadRequest, TrackProgress};
+use crate::download::orchestrator::{BatchResult, DownloadOrchestrator, DownloadRequest};
 use crate::download::queue::RetryQueue;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -78,11 +78,9 @@ pub async fn download_tracks(
         .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
     let download_path = PathBuf::from(&download_dir);
-    let root_path = PathBuf::from(&root_dir);
     let mut orchestrator = DownloadOrchestrator::new(
         download_path.clone(),
-        PathBuf::from(transcode_dir),
-        Some(root_path),
+        PathBuf::from(&transcode_dir),
     )
     .map_err(|e| format!("Failed to create orchestrator: {}", e))?;
 
@@ -92,18 +90,24 @@ pub async fn download_tracks(
         *state.queue_path.lock().unwrap() = Some(queue_path);
     }
 
-    // Create progress callback closure that emits events
+    // Create progress callback closure that emits events.
+    // The orchestrator callback receives (current, total, track_display).
     let app_handle_clone = app_handle.clone();
-    let progress_callback: Option<Box<dyn Fn(TrackProgress) + Send + Sync>> = Some(Box::new(
-        move |tp: TrackProgress| {
+    let progress_callback: Option<Box<dyn Fn(usize, usize, &str) + Send + Sync>> = Some(Box::new(
+        move |current: usize, total: usize, track_display: &str| {
+            let progress_pct: u8 = if total > 0 {
+                ((current * 100) / total).min(100) as u8
+            } else {
+                0
+            };
             let event = DownloadProgressEvent {
-                track_id: tp.track_id,
-                track_name: tp.track_name,
-                status: tp.status.clone(),
-                progress: tp.progress,
-                error: tp.error,
-                source: tp.source,
-                current_step: Some(tp.status),
+                track_id: String::new(),
+                track_name: track_display.to_string(),
+                status: format!("{}/{}", current, total),
+                progress: progress_pct,
+                error: None,
+                source: None,
+                current_step: None,
                 speed: None,
                 eta: None,
                 file_size: None,
@@ -177,7 +181,6 @@ pub async fn retry_failed_downloads(
     let mut orchestrator = DownloadOrchestrator::new(
         PathBuf::from(download_dir),
         PathBuf::from(transcode_dir),
-        None,
     )
     .map_err(|e| format!("Failed to create orchestrator: {}", e))?;
 
@@ -332,7 +335,7 @@ mod tests {
             failed: 2,
             skipped: 1,
             downloaded_track_ids: vec![1, 2, 3],
-            downloaded_paths: vec![(1, "/path/to/file.m4a".to_string())],
+            downloaded_paths: std::collections::HashMap::from([(1i64, "/path/to/file.m4a".to_string())]),
         };
 
         // Verify serialization (required for Tauri IPC)

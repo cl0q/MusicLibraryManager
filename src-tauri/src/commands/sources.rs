@@ -362,6 +362,42 @@ pub async fn check_duplicates(
     Ok(matches)
 }
 
+/// Check if a source (spotify/soundcloud/dab) is connected (stub — to be implemented).
+#[tauri::command]
+pub async fn check_source_connected(_source: String) -> Result<bool, String> {
+    Ok(false)
+}
+
+/// Disconnect a source (stub — to be implemented).
+#[tauri::command]
+pub async fn disconnect_source(_source: String) -> Result<(), String> {
+    Ok(())
+}
+
+/// Connect Spotify using server-based OAuth (stub — to be implemented).
+#[tauri::command]
+pub async fn connect_spotify_with_server() -> Result<String, String> {
+    Err("Not yet implemented".to_string())
+}
+
+/// Connect SoundCloud using server-based OAuth (stub — to be implemented).
+#[tauri::command]
+pub async fn connect_soundcloud_with_server() -> Result<String, String> {
+    Err("Not yet implemented".to_string())
+}
+
+/// Log in to DAB Music API (stub — to be implemented).
+#[tauri::command]
+pub async fn dab_login(_email: String, _password: String) -> Result<(), String> {
+    Err("Not yet implemented".to_string())
+}
+
+/// Check if DAB Music API connection is active (stub — to be implemented).
+#[tauri::command]
+pub async fn check_dab_connected() -> Result<bool, String> {
+    Ok(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

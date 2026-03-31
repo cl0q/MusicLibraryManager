@@ -143,7 +143,7 @@ mod tests {
         Track {
             id: Some(id),
             metadata,
-            organized_path: Some(format!("{}/{}/{}.m4a", album_artist, album, title)),
+            organized_path: format!("{}/{}/{}.m4a", album_artist, album, title),
             is_duplicate: false,
             date_added: Some("2024-01-01T00:00:00Z".to_string()),
         }

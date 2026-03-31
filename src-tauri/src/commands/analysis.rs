@@ -51,7 +51,7 @@ fn resolve_track_path(conn: &rusqlite::Connection, path: &str) -> Result<String,
 ///
 /// Contains all available analysis data for a track, with optional fields
 /// to support incremental feature availability.
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct TrackAnalysisResponse {
     /// FFprobe JSON output (full metadata dump)
     pub ffprobe_output: Option<String>,
@@ -159,6 +159,30 @@ pub async fn get_track_analysis(track_id: i64) -> Result<TrackAnalysisResponse, 
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
+}
+
+/// Get artwork for a track (stub — to be implemented).
+#[tauri::command]
+pub async fn get_track_artwork(_track_id: i64) -> Result<Option<String>, String> {
+    Ok(None)
+}
+
+/// Generate acoustic fingerprint for a track (stub — to be implemented).
+#[tauri::command]
+pub async fn generate_track_fingerprint(_track_id: i64) -> Result<Option<String>, String> {
+    Ok(None)
+}
+
+/// Generate waveform data for a track (stub — to be implemented).
+#[tauri::command]
+pub async fn generate_track_waveform(_track_id: i64) -> Result<Option<String>, String> {
+    Ok(None)
+}
+
+/// Generate spectrogram for a track (stub — to be implemented).
+#[tauri::command]
+pub async fn generate_track_spectrogram(_track_id: i64) -> Result<Option<String>, String> {
+    Ok(None)
 }
 
 #[cfg(test)]

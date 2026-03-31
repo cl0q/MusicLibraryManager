@@ -212,7 +212,9 @@ pub fn get_library_tracks_only(conn: &Connection) -> DbResult<Vec<Track>> {
 /// * `Err(DatabaseError)` - If database query failed
 pub fn get_remote_tracks_only(conn: &Connection) -> DbResult<Vec<Track>> {
     let mut stmt = conn.prepare(
-        "SELECT DISTINCT t.id, t.artist, t.album_artist, t.album, t.title, t.genre, t.year, t.bitrate, t.duration, t.format, t.original_path, t.organized_path, t.is_duplicate, t.date_added
+        // Use COALESCE to map NULL organized_path → '' so rusqlite can deserialize it
+        // into Track.organized_path: String. Remote tracks will have organized_path == "".
+        "SELECT DISTINCT t.id, t.artist, t.album_artist, t.album, t.title, t.genre, t.year, t.bitrate, t.duration, t.format, t.original_path, COALESCE(t.organized_path, '') as organized_path, t.is_duplicate, t.date_added
          FROM tracks t
          INNER JOIN track_sources ts ON t.id = ts.track_id
          WHERE t.organized_path IS NULL
@@ -497,7 +499,7 @@ mod tests {
             "mp3".to_string(),
             format!("/path/to/{}.mp3", title),
         );
-        Track::with_id(id, metadata, Some(format!("{}/{}/{}.mp3", artist, album, title)))
+        Track::with_id(id, metadata, format!("{}/{}/{}.mp3", artist, album, title))
     }
 
     fn insert_test_track(conn: &Connection, track: &Track) {
