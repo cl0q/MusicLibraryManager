@@ -208,3 +208,14 @@ Plans:
 - [ ] 12-01-PLAN.md — Backend: playlist_importer module (M3U + JSON parsers, fuzzy matching, import command)
 - [ ] 12-02-PLAN.md — Frontend: ImportModal + MatchPreview components, Import button in PlaylistList
 - [ ] 12-03-PLAN.md — Human verification of end-to-end import flow
+
+### Phase 12.1: Consistent Path Resolution — organized_path always relative to root (INSERTED)
+
+**Goal:** Enforce the Phase 8-01 invariant: organized_path is always relative to library root, never absolute. Migrate 38 existing absolute paths, harden write paths with fail-fast validation, and clean up defensive read-side code.
+**Requirements**: PATH-01, PATH-02, PATH-03, PATH-04
+**Depends on:** Phase 12
+**Plans:** 2 plans
+
+Plans:
+- [ ] 12.1-01-PLAN.md — Write-path hardening: validate_organized_path guard, fail-fast strip_prefix, schema migration v9 (strip absolute paths from 38 existing DB rows)
+- [ ] 12.1-02-PLAN.md — Read-path cleanup: remove defensive absolute-path acceptance from reveal_in_file_manager and resolve_track_path; integration tests for path consistency
