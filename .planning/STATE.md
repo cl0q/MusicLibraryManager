@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Library Foundation & UX Polish
-status: executing
-stopped_at: Completed 12.1-01-PLAN.md
-last_updated: "2026-03-31T09:30:53.165Z"
+status: verifying
+stopped_at: Completed 12.1-02-PLAN.md
+last_updated: "2026-03-31T09:53:24.022Z"
 last_activity: 2026-03-31
 progress:
   total_phases: 7
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 22
-  completed_plans: 19
+  completed_plans: 20
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-02-05)
 
 Phase: 12.1 (consistent-path-resolution-organized-path-always-relative-to-root) — EXECUTING
 Plan: 2 of 2
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-03-31
 
 Progress: [█████████░░░░░░░░░░] 51/TBD total plans (v1.0: 39/39, v1.1: 12/TBD)
@@ -121,6 +121,8 @@ Recent decisions affecting current work:
 - [Phase 11.1]: No DabClient HTTP mocks in integration tests — network tests remain #[ignore] in dab.rs until trait abstraction added
 - [Phase 12.1-01]: Windows-style absolute paths explicitly detected since Path::is_absolute() returns false on Unix for drive-letter paths
 - [Phase 12.1-01]: validate_organized_path is the single write-boundary guard for organized_path — called at entry of update_download_status
+- [Phase 12.1]: reveal_in_file_manager now owns path resolution — takes relative organized_path, resolves via library root (not frontend responsibility)
+- [Phase 12.1]: COALESCE(organized_path,'') in get_remote_tracks_only avoids NULL→String type failure in rusqlite without changing Track.organized_path to Option<String>
 
 ### v1.1 Scope Decisions
 
@@ -156,8 +158,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-31T09:30:53.163Z
-Stopped at: Completed 12.1-01-PLAN.md
+Last session: 2026-03-31T09:53:24.020Z
+Stopped at: Completed 12.1-02-PLAN.md
 Resume file: None
 
 ---
