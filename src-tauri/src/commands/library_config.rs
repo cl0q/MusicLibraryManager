@@ -194,19 +194,48 @@ pub async fn get_library_mount_state(
 }
 
 /// Reveal a file in the native file manager (Finder on macOS).
+///
+/// `path` must be a relative `organized_path` (relative to library root).
+/// Absolute paths are rejected with an Err — they indicate stale data that
+/// predates the Phase 8-01 portability invariant.
 #[tauri::command]
 pub async fn reveal_in_file_manager(path: String) -> Result<(), String> {
-    let file_path = Path::new(&path);
-
-    if !file_path.exists() {
-        return Err(format!("File does not exist: {}", path));
+    // Reject absolute paths — organized_path must always be relative to library root.
+    // Windows drive-letter paths (e.g. C:\...) are also absolute but not caught by is_absolute()
+    // on Unix, so check for the drive-letter pattern explicitly.
+    let is_windows_absolute = path.len() >= 2
+        && path.chars().next().map_or(false, |c| c.is_ascii_alphabetic())
+        && path.chars().nth(1) == Some(':');
+    if Path::new(&path).is_absolute() || is_windows_absolute {
+        return Err(format!(
+            "organized_path must be relative to library root, not absolute. \
+             Got: {}. Run the schema migration to fix existing data.",
+            path
+        ));
     }
+
+    // Resolve the relative path against the configured library root.
+    let db_path = PathBuf::from("music_library.db");
+    let conn = get_connection(&db_path)
+        .map_err(|e| format!("Database connection failed: {}", e))?;
+    let config = LibraryConfig::load(&conn)
+        .map_err(|e| format!("Failed to load library config: {}", e))?;
+    let root = config.root_path
+        .ok_or_else(|| "Library root not configured — cannot resolve path".to_string())?;
+
+    let absolute_path = root.join(&path);
+
+    if !absolute_path.exists() {
+        return Err(format!("File does not exist: {}", absolute_path.display()));
+    }
+
+    let abs_str = absolute_path.to_string_lossy().to_string();
 
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
             .arg("-R")
-            .arg(&path)
+            .arg(&abs_str)
             .spawn()
             .map_err(|e| format!("Failed to open Finder: {}", e))?;
     }
@@ -214,7 +243,7 @@ pub async fn reveal_in_file_manager(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new("explorer")
-            .arg(format!("/select,{}", path))
+            .arg(format!("/select,{}", abs_str))
             .spawn()
             .map_err(|e| format!("Failed to open Explorer: {}", e))?;
     }
@@ -222,7 +251,7 @@ pub async fn reveal_in_file_manager(path: String) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
         std::process::Command::new("xdg-open")
-            .arg(file_path.parent().unwrap_or(file_path).to_string_lossy().to_string())
+            .arg(absolute_path.parent().unwrap_or(absolute_path.as_path()).to_string_lossy().to_string())
             .spawn()
             .map_err(|e| format!("Failed to open file manager: {}", e))?;
     }
