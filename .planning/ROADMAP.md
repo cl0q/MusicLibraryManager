@@ -214,8 +214,8 @@ Plans:
 **Goal:** Enforce the Phase 8-01 invariant: organized_path is always relative to library root, never absolute. Migrate 38 existing absolute paths, harden write paths with fail-fast validation, and clean up defensive read-side code.
 **Requirements**: PATH-01, PATH-02, PATH-03, PATH-04
 **Depends on:** Phase 12
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 
 Plans:
-- [ ] 12.1-01-PLAN.md — Write-path hardening: validate_organized_path guard, fail-fast strip_prefix, schema migration v9 (strip absolute paths from 38 existing DB rows)
+- [x] 12.1-01-PLAN.md — Write-path hardening: validate_organized_path guard, fail-fast strip_prefix, schema migration v9 (strip absolute paths from 38 existing DB rows)
 - [ ] 12.1-02-PLAN.md — Read-path cleanup: remove defensive absolute-path acceptance from reveal_in_file_manager and resolve_track_path; integration tests for path consistency

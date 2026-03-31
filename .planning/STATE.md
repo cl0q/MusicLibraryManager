@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Library Foundation & UX Polish
 status: executing
-stopped_at: Completed 11.1-02-PLAN.md
-last_updated: "2026-03-30T18:36:03.741Z"
-last_activity: 2026-03-30
+stopped_at: Completed 12.1-01-PLAN.md
+last_updated: "2026-03-31T09:30:53.165Z"
+last_activity: 2026-03-31
 progress:
-  total_phases: 6
+  total_phases: 7
   completed_phases: 4
-  total_plans: 20
-  completed_plans: 18
+  total_plans: 22
+  completed_plans: 19
 ---
 
 # Project State
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-05)
 
 **Core value:** Like a song anywhere and it reliably ends up in your owned library and on your devices in high quality
-**Current focus:** Phase 12 — import-external-playlists
+**Current focus:** Phase 12.1 — consistent-path-resolution-organized-path-always-relative-to-root
 
 ## Current Position
 
-Phase: 12
-Plan: Not started
-Status: Executing Phase 12
-Last activity: 2026-03-30
+Phase: 12.1 (consistent-path-resolution-organized-path-always-relative-to-root) — EXECUTING
+Plan: 2 of 2
+Status: Ready to execute
+Last activity: 2026-03-31
 
 Progress: [█████████░░░░░░░░░░] 51/TBD total plans (v1.0: 39/39, v1.1: 12/TBD)
 
@@ -119,6 +119,8 @@ Recent decisions affecting current work:
 - [Phase 11.1-03]: Mock @tauri-apps/api/event directly in tests — mockWindows does not implement transformCallback required by listen()
 - [Phase 11.1-03]: LibraryTable tests check column headers (not row data) — react-virtual needs real layout to render rows, happy-dom returns 0
 - [Phase 11.1]: No DabClient HTTP mocks in integration tests — network tests remain #[ignore] in dab.rs until trait abstraction added
+- [Phase 12.1-01]: Windows-style absolute paths explicitly detected since Path::is_absolute() returns false on Unix for drive-letter paths
+- [Phase 12.1-01]: validate_organized_path is the single write-boundary guard for organized_path — called at entry of update_download_status
 
 ### v1.1 Scope Decisions
 
@@ -133,6 +135,7 @@ Recent decisions affecting current work:
 
 - Phase 11.1 inserted after Phase 11: Functional & E2E Test Harness (URGENT)
 - Phase 12 added: Import External Playlists
+- Phase 12.1 inserted after Phase 12: Consistent Path Resolution — organized_path always relative to root (URGENT)
 
 ### Pending Todos
 
@@ -153,8 +156,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-22T13:58:01.272Z
-Stopped at: Completed 11.1-02-PLAN.md
+Last session: 2026-03-31T09:30:53.163Z
+Stopped at: Completed 12.1-01-PLAN.md
 Resume file: None
 
 ---
