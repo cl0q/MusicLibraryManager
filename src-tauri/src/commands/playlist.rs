@@ -286,6 +286,45 @@ pub async fn reorder_playlist_track_command(
     .map_err(|e| format!("Task join error: {}", e))?
 }
 
+/// Sync all tracks from a source into its liked playlist.
+///
+/// Finds (or creates) a "{Source} Likes" playlist, then adds any
+/// tracks from `track_sources` that aren't already in the playlist.
+///
+/// # Arguments
+/// * `source_name` - Source name (e.g. "soundcloud", "spotify")
+///
+/// # Returns
+/// * `Ok({playlist_id, added, total})` on success
+#[tauri::command]
+pub async fn sync_source_likes_playlist(
+    source_name: String,
+) -> Result<SyncLikesPlaylistResult, String> {
+    tokio::task::spawn_blocking(move || {
+        let db_path = PathBuf::from("music_library.db");
+        let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+
+        let (playlist_id, added, total) =
+            crate::database::playlist::sync_source_likes_playlist(&conn, &source_name)
+                .map_err(|e| format!("Failed to sync likes playlist: {}", e))?;
+
+        Ok(SyncLikesPlaylistResult {
+            playlist_id,
+            added,
+            total,
+        })
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+#[derive(serde::Serialize)]
+pub struct SyncLikesPlaylistResult {
+    pub playlist_id: i64,
+    pub added: usize,
+    pub total: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

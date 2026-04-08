@@ -719,6 +719,68 @@ pub fn add_liked_track(
     Ok(())
 }
 
+/// Sync all tracks from a source into its liked playlist.
+///
+/// Finds (or creates) the liked playlist for the given source,
+/// then adds any tracks present in `track_sources` but missing
+/// from the playlist. Existing tracks are left untouched.
+///
+/// # Arguments
+/// * `conn` - Database connection
+/// * `source_name` - Source name (e.g. "soundcloud", "spotify")
+///
+/// # Returns
+/// * `Ok((playlist_id, added_count, total_count))` on success
+/// * `Err` if source not found or database operation fails
+pub fn sync_source_likes_playlist(
+    conn: &Connection,
+    source_name: &str,
+) -> Result<(i64, usize, usize)> {
+    // Look up source
+    let source_id: i64 = conn.query_row(
+        "SELECT id FROM sources WHERE name = ?1 LIMIT 1",
+        [source_name],
+        |row| row.get(0),
+    )?;
+
+    // Get or create the liked playlist
+    let playlist_id = get_or_create_liked_playlist(conn, source_name, source_id)?;
+
+    // Get all track IDs from this source, newest first
+    let mut stmt = conn.prepare(
+        "SELECT track_id FROM track_sources WHERE source_id = ?1 ORDER BY added_at DESC",
+    )?;
+    let source_track_ids: Vec<i64> = stmt
+        .query_map([source_id], |row| row.get::<_, i64>(0))?
+        .collect::<std::result::Result<_, _>>()?;
+
+    let total = source_track_ids.len();
+
+    // Rebuild playlist: clear and re-insert in newest-first order
+    conn.execute_batch("BEGIN")?;
+
+    let old_count: usize = conn.query_row(
+        "SELECT COUNT(*) FROM playlist_tracks WHERE playlist_id = ?1",
+        [playlist_id],
+        |row| row.get(0),
+    )?;
+
+    conn.execute(
+        "DELETE FROM playlist_tracks WHERE playlist_id = ?1",
+        [playlist_id],
+    )?;
+
+    for track_id in &source_track_ids {
+        add_track_to_playlist(conn, playlist_id, *track_id)?;
+    }
+
+    conn.execute_batch("COMMIT")?;
+
+    let added = total.saturating_sub(old_count);
+
+    Ok((playlist_id, added, total))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

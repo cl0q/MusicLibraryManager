@@ -64,7 +64,7 @@ pub use library_config::{
 pub use playlist::{
     add_track_to_playlist_command, create_playlist_command, get_playlist_tracks_command,
     get_playlists_command, remove_track_from_playlist_command, reorder_playlist_track_command,
-    search_playlist_tracks_command,
+    search_playlist_tracks_command, sync_source_likes_playlist,
 };
 pub use search::{get_library_storage_size, get_library_tracks, get_library_tracks_only, get_remote_tracks_only, get_remote_track_count, search_library};
 pub use sources::{

@@ -43,7 +43,7 @@ export default function PlaylistDetailPage() {
   if (loading) {
     return (
       <div className="p-6">
-        <p className="text-gray-600 dark:text-gray-400">Loading playlist...</p>
+        <p className="text-ink-muted">Loading playlist...</p>
       </div>
     );
   }
@@ -51,7 +51,7 @@ export default function PlaylistDetailPage() {
   if (!playlist) {
     return (
       <div className="p-6">
-        <p className="text-gray-600 dark:text-gray-400">Playlist not found</p>
+        <p className="text-ink-muted">Playlist not found</p>
       </div>
     );
   }

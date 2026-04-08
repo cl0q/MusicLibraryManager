@@ -15,6 +15,7 @@ interface SourceCardProps {
   onSync?: () => void;
   connectLabel?: string;
   isConnecting?: boolean;
+  extraActions?: ReactNode;
 }
 
 function formatRelativeTime(isoTimestamp: string): string {
@@ -65,6 +66,7 @@ export default function SourceCard({
   onSync,
   connectLabel = `Connect ${name}`,
   isConnecting = false,
+  extraActions,
 }: SourceCardProps) {
   const isConnected = status === "connected" || status === "syncing" || status === "error";
 
@@ -120,6 +122,11 @@ export default function SourceCard({
           )}
         </div>
       </div>
+
+      {/* Extra actions */}
+      {isConnected && extraActions && (
+        <div className="px-3 pb-3 -mt-1">{extraActions}</div>
+      )}
 
       {/* Error message */}
       {status === "error" && errorMessage && (

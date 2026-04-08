@@ -12,6 +12,7 @@ import {
   disconnect_source,
   import_directory,
   get_library_config,
+  syncSourceLikesPlaylist,
 } from "../utils/tauri-commands";
 
 interface SourceState {
@@ -51,6 +52,7 @@ export default function Sources() {
   const [soundcloud, setSoundcloud] = useState<SourceState>({ status: "disconnected" });
   const [localLibrary, setLocalLibrary] = useState<SourceState>({ status: "disconnected" });
   const [isConnecting, setIsConnecting] = useState<string | null>(null);
+  const [likesSync, setLikesSync] = useState<string | null>(null);
 
   const checkConnections = useCallback(async () => {
     try {
@@ -159,6 +161,22 @@ export default function Sources() {
     }
   }, []);
 
+  const handleSyncLikesPlaylist = useCallback(async (source: string) => {
+    setLikesSync(source);
+    try {
+      const result = await syncSourceLikesPlaylist(source);
+      if (result.added === 0) {
+        toast.success(`${source === "soundcloud" ? "SoundCloud" : "Spotify"} Likes playlist is up to date (${result.total} tracks)`);
+      } else {
+        toast.success(`Added ${result.added} tracks to likes playlist (${result.total} total)`);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error(`Failed to sync likes playlist: ${message}`);
+    }
+    setLikesSync(null);
+  }, []);
+
   useEffect(() => {
     const unlisten = listen<{
       succeeded: number;
@@ -218,6 +236,15 @@ export default function Sources() {
           onDisconnect={handleDisconnectSpotify}
           onSync={handleSyncSpotify}
           isConnecting={isConnecting === "spotify"}
+          extraActions={
+            <button
+              onClick={() => handleSyncLikesPlaylist("spotify")}
+              disabled={likesSync !== null}
+              className="text-[11px] text-ink-muted hover:text-ink transition-colors disabled:opacity-40"
+            >
+              {likesSync === "spotify" ? "Syncing playlist..." : "Update Likes Playlist"}
+            </button>
+          }
         />
 
         <SourceCard
@@ -232,6 +259,15 @@ export default function Sources() {
           onDisconnect={handleDisconnectSoundCloud}
           onSync={handleSyncSoundCloud}
           isConnecting={isConnecting === "soundcloud"}
+          extraActions={
+            <button
+              onClick={() => handleSyncLikesPlaylist("soundcloud")}
+              disabled={likesSync !== null}
+              className="text-[11px] text-ink-muted hover:text-ink transition-colors disabled:opacity-40"
+            >
+              {likesSync === "soundcloud" ? "Syncing playlist..." : "Update Likes Playlist"}
+            </button>
+          }
         />
 
         <SourceCard

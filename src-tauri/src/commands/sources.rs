@@ -364,14 +364,19 @@ pub async fn check_duplicates(
 
 /// Check if a source (spotify/soundcloud/dab) is connected (stub — to be implemented).
 #[tauri::command]
-pub async fn check_source_connected(_source: String) -> Result<bool, String> {
-    Ok(false)
+pub async fn check_source_connected(source: String) -> Result<bool, String> {
+    match crate::auth::token_storage::get_refresh_token(&source, "default") {
+        Ok(_) => Ok(true),
+        Err(crate::auth::token_storage::TokenStorageError::TokenNotFound(_, _)) => Ok(false),
+        Err(e) => Err(format!("Failed to check token: {}", e)),
+    }
 }
 
 /// Disconnect a source (stub — to be implemented).
 #[tauri::command]
-pub async fn disconnect_source(_source: String) -> Result<(), String> {
-    Ok(())
+pub async fn disconnect_source(source: String) -> Result<(), String> {
+    crate::auth::token_storage::delete_token(&source, "default")
+        .map_err(|e| format!("Failed to delete token: {}", e))
 }
 
 /// Connect Spotify: generate auth URL, open browser, listen for callback, exchange code.

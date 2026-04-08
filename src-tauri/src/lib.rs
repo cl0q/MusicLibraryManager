@@ -167,6 +167,7 @@ pub fn run() {
             commands::playlist::add_track_to_playlist_command,
             commands::playlist::remove_track_from_playlist_command,
             commands::playlist::reorder_playlist_track_command,
+            commands::playlist::sync_source_likes_playlist,
             commands::sync::create_sync_profile,
             commands::sync::list_sync_profiles,
             commands::sync::get_sync_profile,

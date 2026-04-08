@@ -437,6 +437,17 @@ export async function generateTrackSpectrogram(trackId: number): Promise<string>
   return invoke<string>("generate_track_spectrogram", { trackId });
 }
 
+// Source likes playlist sync
+export interface SyncLikesPlaylistResult {
+  playlist_id: number;
+  added: number;
+  total: number;
+}
+
+export async function syncSourceLikesPlaylist(sourceName: string): Promise<SyncLikesPlaylistResult> {
+  return invoke<SyncLikesPlaylistResult>("sync_source_likes_playlist", { sourceName });
+}
+
 // Playlist import
 export interface ImportPlaylistResult {
   playlist_id: number;

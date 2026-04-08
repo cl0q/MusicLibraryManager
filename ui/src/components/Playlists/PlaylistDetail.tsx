@@ -1,14 +1,3 @@
-/**
- * PlaylistDetail component - shows playlist tracks with search and drag-drop reordering.
- *
- * Features:
- * - Search input with 300ms debounce
- * - Drag-and-drop track reordering using hello-pangea/dnd
- * - Optimistic local state updates
- * - Disable drag when search is active
- * - Track list with drag handles
- */
-
 import { useState, useEffect, useCallback } from 'react';
 import {
   DragDropContext,
@@ -47,10 +36,7 @@ export default function PlaylistDetail({
   }, [playlist.id]);
 
   useEffect(() => {
-    // Debounce search
-    if (searchDebounceTimer) {
-      clearTimeout(searchDebounceTimer);
-    }
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
 
     if (searchQuery.trim() === '') {
       setDisplayedTracks(tracks);
@@ -97,17 +83,14 @@ export default function PlaylistDetail({
 
       const sourceIndex = result.source.index;
       const destIndex = result.destination.index;
-
       if (sourceIndex === destIndex) return;
 
-      // Optimistic update
       const newTracks = Array.from(displayedTracks);
       const [movedTrack] = newTracks.splice(sourceIndex, 1);
       newTracks.splice(destIndex, 0, movedTrack);
       setDisplayedTracks(newTracks);
       setTracks(newTracks);
 
-      // Compute after_track_id and before_track_id
       const afterTrackId = destIndex > 0 ? newTracks[destIndex - 1].id : null;
       const beforeTrackId =
         destIndex < newTracks.length - 1 ? newTracks[destIndex + 1].id : null;
@@ -120,7 +103,6 @@ export default function PlaylistDetail({
           beforeTrackId || undefined
         );
       } catch (err) {
-        // Revert on error
         setError(
           err instanceof Error ? err.message : 'Failed to reorder track'
         );
@@ -135,94 +117,79 @@ export default function PlaylistDetail({
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-gray-400">Loading tracks...</div>
+        <span className="text-sm text-ink-muted">Loading tracks...</span>
       </div>
     );
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 space-y-4 max-w-3xl">
       {/* Header */}
-      <div className="flex items-start gap-4">
+      <div className="flex items-center gap-3">
         <button
           onClick={onBack}
-          className="mt-2 text-gray-400 hover:text-white transition"
+          className="text-ink-muted hover:text-ink transition-colors"
         >
-          <svg
-            className="w-6 h-6"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M15 19l-7-7 7-7"
-            />
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
         </button>
-
-        <div className="flex-1">
-          <h1 className="text-3xl font-bold text-white">{playlist.name}</h1>
-          {playlist.description && (
-            <p className="text-gray-400 mt-2">{playlist.description}</p>
-          )}
-          <p className="text-sm text-gray-500 mt-2">
+        <div>
+          <h1 className="text-sm font-semibold text-ink">{playlist.name}</h1>
+          <p className="text-[11px] text-ink-muted">
             {tracks.length} {tracks.length === 1 ? 'track' : 'tracks'}
           </p>
         </div>
       </div>
 
-      {/* Search Input */}
+      {/* Search */}
       <div className="relative">
+        <svg
+          className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-muted"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+        </svg>
         <input
           type="text"
           placeholder="Search tracks..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full px-4 py-3 pl-10 bg-gray-800 text-white rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500"
+          className="w-full pl-8 pr-3 py-1.5 text-xs bg-surface border border-edge rounded text-ink placeholder:text-ink-muted focus:outline-none focus:border-accent/50"
         />
-        <svg
-          className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-          />
-        </svg>
       </div>
 
-      {/* Error Display */}
+      {/* Error */}
       {error && (
-        <div className="p-3 bg-red-900/30 border border-red-700 rounded-lg text-red-400">
+        <div className="px-3 py-2 bg-rose-500/10 border border-rose-500/20 rounded text-xs text-rose-400">
           {error}
         </div>
       )}
 
-      {/* Track List with Drag-Drop */}
+      {/* Track List */}
       {displayedTracks.length === 0 ? (
-        <div className="text-center text-gray-400 py-12">
-          {isSearchActive
-            ? 'No tracks match your search.'
-            : 'This playlist is empty.'}
+        <div className="text-center text-ink-muted text-xs py-12">
+          {isSearchActive ? 'No tracks match your search.' : 'This playlist is empty.'}
         </div>
       ) : (
         <DragDropContext onDragEnd={handleDragEnd}>
           <Droppable droppableId="playlist-tracks" isDropDisabled={isSearchActive}>
-            {(provided, snapshot) => (
+            {(provided) => (
               <div
                 ref={provided.innerRef}
                 {...provided.droppableProps}
-                className={`space-y-1 ${
-                  snapshot.isDraggingOver ? 'bg-gray-800/50' : ''
-                }`}
               >
+                {/* Column header */}
+                <div className="flex items-center gap-3 px-2 py-1 text-[11px] text-ink-muted border-b border-edge-subtle mb-0.5">
+                  <span className="w-5" />
+                  <span className="w-6 text-right tabular-nums">#</span>
+                  <span className="flex-1">Title</span>
+                  <span className="w-12 text-right">Time</span>
+                </div>
+
                 {displayedTracks.map((track, index) => (
                   <Draggable
                     key={track.id}
@@ -234,50 +201,52 @@ export default function PlaylistDetail({
                       <div
                         ref={provided.innerRef}
                         {...provided.draggableProps}
-                        className={`flex items-center gap-3 p-3 rounded-lg transition ${
+                        className={`group flex items-center gap-3 px-2 py-1.5 rounded transition-colors ${
                           snapshot.isDragging
-                            ? 'bg-blue-600/20 shadow-lg'
-                            : 'bg-gray-800 hover:bg-gray-750'
-                        } ${isSearchActive ? 'cursor-default' : 'cursor-move'}`}
+                            ? 'bg-accent/10 shadow-lg'
+                            : 'hover:bg-raised/60'
+                        }`}
                       >
-                        {/* Drag Handle */}
+                        {/* Drag handle */}
                         <div
                           {...provided.dragHandleProps}
-                          className={`flex-shrink-0 text-gray-500 ${
-                            isSearchActive ? 'opacity-30' : 'hover:text-gray-300'
-                          }`}
+                          className={`w-5 shrink-0 flex items-center justify-center ${
+                            isSearchActive
+                              ? 'opacity-0'
+                              : 'opacity-0 group-hover:opacity-100 text-ink-muted'
+                          } transition-opacity`}
                         >
-                          <svg
-                            className="w-5 h-5"
-                            fill="currentColor"
-                            viewBox="0 0 16 16"
-                          >
-                            <circle cx="4" cy="3" r="1.5" />
-                            <circle cx="4" cy="8" r="1.5" />
-                            <circle cx="4" cy="13" r="1.5" />
-                            <circle cx="12" cy="3" r="1.5" />
-                            <circle cx="12" cy="8" r="1.5" />
-                            <circle cx="12" cy="13" r="1.5" />
+                          <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 16 16">
+                            <circle cx="5" cy="4" r="1.2" />
+                            <circle cx="5" cy="8" r="1.2" />
+                            <circle cx="5" cy="12" r="1.2" />
+                            <circle cx="11" cy="4" r="1.2" />
+                            <circle cx="11" cy="8" r="1.2" />
+                            <circle cx="11" cy="12" r="1.2" />
                           </svg>
                         </div>
 
-                        {/* Track Info */}
+                        {/* Index */}
+                        <span className="w-6 text-right text-[11px] text-ink-muted tabular-nums shrink-0">
+                          {index + 1}
+                        </span>
+
+                        {/* Track info */}
                         <div className="flex-1 min-w-0">
-                          <h3 className="text-white font-medium truncate">
+                          <p className="text-xs text-ink truncate">
                             {track.metadata.title}
-                          </h3>
-                          <p className="text-sm text-gray-400 truncate">
+                          </p>
+                          <p className="text-[11px] text-ink-muted truncate">
                             {track.metadata.artist}
-                            {track.metadata.album &&
-                              ` • ${track.metadata.album}`}
+                            {track.metadata.album && ` \u2022 ${track.metadata.album}`}
                           </p>
                         </div>
 
                         {/* Duration */}
                         {track.metadata.duration && (
-                          <div className="text-sm text-gray-500">
+                          <span className="w-12 text-right text-[11px] text-ink-muted tabular-nums shrink-0">
                             {formatDuration(track.metadata.duration)}
-                          </div>
+                          </span>
                         )}
                       </div>
                     )}
@@ -288,12 +257,6 @@ export default function PlaylistDetail({
             )}
           </Droppable>
         </DragDropContext>
-      )}
-
-      {isSearchActive && (
-        <div className="text-sm text-yellow-400 text-center">
-          Drag-and-drop disabled while searching
-        </div>
       )}
     </div>
   );
