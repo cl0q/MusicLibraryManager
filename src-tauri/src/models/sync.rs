@@ -18,6 +18,7 @@ pub struct SyncProfileDto {
     pub id: i64,
     pub name: String,
     pub output_folder: String,
+    pub playlist_path_prefix: String,
     pub track_count: usize,         // Total unique tracks (union of all sources)
     pub manual_track_count: usize,  // Manually added tracks
     pub playlist_count: usize,      // Number of playlists included
@@ -66,6 +67,7 @@ impl SyncProfileDto {
             id: profile.id,
             name: profile.name,
             output_folder: profile.output_folder.to_string_lossy().to_string(),
+            playlist_path_prefix: profile.playlist_path_prefix,
             track_count,
             manual_track_count,
             playlist_count,

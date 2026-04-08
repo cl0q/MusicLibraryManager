@@ -1,5 +1,7 @@
 // Shared test utilities for integration tests.
 // Import with: mod common; or use common::{setup_test_temp_dir, ...};
+pub mod audio;
+
 use music_library_manager::database::get_memory_connection;
 
 /// Creates an isolated temporary directory for test files.

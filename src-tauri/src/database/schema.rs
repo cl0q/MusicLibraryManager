@@ -21,7 +21,7 @@ use crate::database::connection::Result;
 /// - Version 10: Backfill date_added from track_sources.added_at for remote tracks
 /// - Version 11: Delete SoundCloud phantom tracks for clean re-sync with correct liked-at ordering
 /// - Version 12: Strip absolute library root prefix from organized_path (enforce relative-only invariant)
-pub const CURRENT_SCHEMA_VERSION: i32 = 12;
+pub const CURRENT_SCHEMA_VERSION: i32 = 13;
 
 /// SQL schema for the music library database (Phase 1 - base schema).
 ///
@@ -460,6 +460,16 @@ fn migrate_to_v12(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Migration v13: Add playlist_path_prefix to sync_profiles.
+///
+/// Allows per-profile path prefix for m3u8 playlist entries (e.g. "HDD0/" for Rockbox).
+fn migrate_to_v13(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "ALTER TABLE sync_profiles ADD COLUMN playlist_path_prefix TEXT NOT NULL DEFAULT '';"
+    )?;
+    Ok(())
+}
+
 /// Initialize the database schema with versioned migrations.
 ///
 /// Creates all tables and indexes, applying migrations as needed.
@@ -546,6 +556,12 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
     if get_schema_version(conn)? < 12 {
         migrate_to_v12(conn)?;
         set_schema_version(conn, 12)?;
+    }
+
+    // Add playlist_path_prefix to sync_profiles
+    if get_schema_version(conn)? < 13 {
+        migrate_to_v13(conn)?;
+        set_schema_version(conn, 13)?;
     }
 
     Ok(())
@@ -923,7 +939,7 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         initialize_schema(&conn).unwrap();
         assert_eq!(get_schema_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
-        assert_eq!(CURRENT_SCHEMA_VERSION, 12);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 13);
     }
 
     #[test]

@@ -10,8 +10,45 @@
 //! - get_review_queue_count_cmd: Get count of pending review items
 
 use crate::database::get_connection;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tauri::Emitter;
+
+/// Build a lookup map of track_id -> (artist, title) for progress reporting.
+fn build_track_info_map(
+    conn: &rusqlite::Connection,
+    tracks: &[(i64, String)],
+) -> Result<HashMap<i64, (String, String)>, String> {
+    let mut map = HashMap::new();
+    if tracks.is_empty() {
+        return Ok(map);
+    }
+    let placeholders: Vec<&str> = tracks.iter().map(|_| "?").collect();
+    let sql = format!(
+        "SELECT id, artist, title FROM tracks WHERE id IN ({})",
+        placeholders.join(",")
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| format!("Query error: {}", e))?;
+    let params: Vec<&dyn rusqlite::ToSql> = tracks
+        .iter()
+        .map(|(id, _)| id as &dyn rusqlite::ToSql)
+        .collect();
+    let rows = stmt
+        .query_map(params.as_slice(), |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|e| format!("Query error: {}", e))?;
+    for row in rows {
+        if let Ok((id, artist, title)) = row {
+            map.insert(id, (artist, title));
+        }
+    }
+    Ok(map)
+}
 
 /// Batch fingerprint all unfingerprinted tracks in the library.
 ///
@@ -45,6 +82,9 @@ pub async fn fingerprint_library_cmd(app: tauri::AppHandle) -> Result<serde_json
             let total = tracks.len();
             log::info!("Starting fingerprint scan: {} tracks", total);
 
+            // Build track info map for verbose progress reporting
+            let track_info = build_track_info_map(&conn, &tracks)?;
+
             // Emit started event
             let _ = app.emit("fingerprint:started", serde_json::json!({ "total": total }));
 
@@ -53,6 +93,10 @@ pub async fn fingerprint_library_cmd(app: tauri::AppHandle) -> Result<serde_json
             let mut failed_tracks = Vec::new();
 
             for (i, (track_id, path)) in tracks.iter().enumerate() {
+                let (artist, title) = track_info.get(track_id)
+                    .map(|(a, t)| (a.as_str(), t.as_str()))
+                    .unwrap_or(("", ""));
+
                 match crate::fingerprint::chromaprint::fingerprint_track(std::path::Path::new(path)) {
                     Ok((fingerprint, duration)) => {
                         match crate::fingerprint::chromaprint::save_fingerprint(&conn, *track_id, &fingerprint, duration) {
@@ -61,7 +105,11 @@ pub async fn fingerprint_library_cmd(app: tauri::AppHandle) -> Result<serde_json
                                 let _ = app.emit("fingerprint:progress", serde_json::json!({
                                     "current": i + 1,
                                     "total": total,
-                                    "track_id": track_id
+                                    "track_id": track_id,
+                                    "artist": artist,
+                                    "title": title,
+                                    "path": path,
+                                    "percent": ((i + 1) as f64 / total as f64 * 100.0) as u32
                                 }));
                             }
                             Err(e) => {
@@ -81,8 +129,6 @@ pub async fn fingerprint_library_cmd(app: tauri::AppHandle) -> Result<serde_json
                         }));
                     }
                 }
-
-                // No delay needed (CPU-bound operation, not rate-limited)
             }
 
             // Emit completed event
@@ -213,6 +259,9 @@ pub async fn analyze_replaygain_cmd(app: tauri::AppHandle) -> Result<serde_json:
             let total = tracks.len();
             log::info!("Starting ReplayGain analysis: {} tracks", total);
 
+            // Build track info map for verbose progress reporting
+            let track_info = build_track_info_map(&conn, &tracks)?;
+
             // Emit started event
             let _ = app.emit("replaygain:started", serde_json::json!({ "total": total }));
 
@@ -221,6 +270,10 @@ pub async fn analyze_replaygain_cmd(app: tauri::AppHandle) -> Result<serde_json:
             let mut failed_tracks = Vec::new();
 
             for (i, (track_id, path)) in tracks.iter().enumerate() {
+                let (artist, title) = track_info.get(track_id)
+                    .map(|(a, t)| (a.as_str(), t.as_str()))
+                    .unwrap_or(("", ""));
+
                 match crate::replaygain::analyzer::analyze_track(std::path::Path::new(path)) {
                     Ok(gain) => {
                         match crate::replaygain::analyzer::save_track_gain(&conn, *track_id, &gain) {
@@ -229,7 +282,11 @@ pub async fn analyze_replaygain_cmd(app: tauri::AppHandle) -> Result<serde_json:
                                 let _ = app.emit("replaygain:progress", serde_json::json!({
                                     "current": i + 1,
                                     "total": total,
-                                    "track_id": track_id
+                                    "track_id": track_id,
+                                    "artist": artist,
+                                    "title": title,
+                                    "path": path,
+                                    "percent": ((i + 1) as f64 / total as f64 * 100.0) as u32
                                 }));
                             }
                             Err(e) => {
@@ -249,8 +306,6 @@ pub async fn analyze_replaygain_cmd(app: tauri::AppHandle) -> Result<serde_json:
                         }));
                     }
                 }
-
-                // No delay needed (CPU-bound operation)
             }
 
             // Emit completed event

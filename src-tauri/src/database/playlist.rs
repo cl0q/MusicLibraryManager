@@ -325,7 +325,7 @@ pub fn get_playlist_tracks(conn: &Connection, playlist_id: i64) -> Result<Vec<Tr
     let mut stmt = conn.prepare(
         "SELECT t.id, t.artist, t.album_artist, t.album, t.title, t.genre, t.year,
                 t.bitrate, t.duration, t.format, t.original_path,
-                COALESCE(t.organized_path, '') as organized_path,
+                t.organized_path,
                 t.is_duplicate, t.date_added
          FROM tracks t
          JOIN playlist_tracks pt ON t.id = pt.track_id
@@ -384,7 +384,7 @@ pub fn search_playlist_tracks(
     let mut stmt = conn.prepare(
         "SELECT t.id, t.artist, t.album_artist, t.album, t.title, t.genre, t.year,
                 t.bitrate, t.duration, t.format, t.original_path,
-                COALESCE(t.organized_path, '') as organized_path,
+                t.organized_path,
                 t.is_duplicate, t.date_added
          FROM tracks t
          JOIN playlist_tracks pt ON t.id = pt.track_id
@@ -504,10 +504,10 @@ pub fn get_smart_playlist_tracks(
                     year: None,
                     bitrate: None,
                     duration: None,
-                    format: String::new(),
-                    original_path: String::new(),
+                    format: row.get(5)?,
+                    original_path: row.get(6)?,
                 },
-                organized_path: String::new(),
+                organized_path: None,
                 is_duplicate: false,
                 date_added: Some(row.get(4)?),
             })

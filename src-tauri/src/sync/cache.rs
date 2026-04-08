@@ -195,29 +195,46 @@ impl TranscodeCache {
 
     /// Build profile-specific path for a track.
     ///
-    /// Mirrors library structure: Profile/Artist/Album/Track.m4a
-    /// Uses sanitized filenames for FAT32 compatibility.
+    /// Preserves library folder hierarchy by stripping library_root from
+    /// original_path and swapping the extension to .m4a.
+    /// Falls back to Artist/Album/Track.m4a if original_path is not under library_root.
     ///
     /// # Arguments
     /// * `profile_folder` - Base path to profile folder
     /// * `track` - Track to generate path for
-    ///
-    /// # Returns
-    /// Full path in profile folder
-    ///
-    /// # Errors
-    /// Returns an error if parent directories cannot be created
-    pub fn build_profile_path(&self, profile_folder: &Path, track: &Track) -> Result<PathBuf> {
-        let artist = sanitize_filename(&track.metadata.album_artist);
-        let album = sanitize_filename(&track.metadata.album);
-        let title = sanitize_filename(&track.metadata.title);
+    /// * `library_root` - Library root path to strip from original_path
+    pub fn build_profile_path(&self, profile_folder: &Path, track: &Track, library_root: &Path) -> Result<PathBuf> {
+        let original = Path::new(&track.metadata.original_path);
 
-        let profile_path = profile_folder
-            .join(&artist)
-            .join(&album)
-            .join(format!("{}.m4a", title));
-
-        Ok(profile_path)
+        if let Ok(relative) = original.strip_prefix(library_root) {
+            // Preserve library structure, sanitize each component, swap extension
+            let mut profile_path = profile_folder.to_path_buf();
+            if let Some(parent) = relative.parent() {
+                for component in parent.components() {
+                    if let std::path::Component::Normal(part) = component {
+                        profile_path.push(sanitize_filename(
+                            part.to_str().unwrap_or("unknown"),
+                        ));
+                    }
+                }
+            }
+            let stem = relative
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown");
+            profile_path.push(format!("{}.m4a", sanitize_filename(stem)));
+            Ok(profile_path)
+        } else if track.metadata.original_path.contains("soundcloud.com") {
+            // SoundCloud tracks: 03_Club/SoundCloud/title.m4a
+            let title = sanitize_filename(&track.metadata.title);
+            Ok(profile_folder.join("03_Club").join("SoundCloud").join(format!("{}.m4a", title)))
+        } else {
+            // Fallback: track not under library root
+            let artist = sanitize_filename(&track.metadata.album_artist);
+            let album = sanitize_filename(&track.metadata.album);
+            let title = sanitize_filename(&track.metadata.title);
+            Ok(profile_folder.join(&artist).join(&album).join(format!("{}.m4a", title)))
+        }
     }
 }
 
@@ -276,6 +293,8 @@ mod tests {
     use crate::models::track::{Track, TrackMetadata};
     use tempfile::TempDir;
 
+    const TEST_LIBRARY_ROOT: &str = "/library";
+
     fn create_test_track(id: i64, artist: &str, album: &str, title: &str) -> Track {
         let metadata = TrackMetadata {
             artist: artist.to_string(),
@@ -287,7 +306,7 @@ mod tests {
             bitrate: None,
             duration: None,
             format: "flac".to_string(),
-            original_path: "/test/path.flac".to_string(),
+            original_path: format!("/library/00_Artist/{}/{}/{}.flac", artist, album, title),
         };
 
         Track {
@@ -423,16 +442,18 @@ mod tests {
     }
 
     #[test]
-    fn test_build_profile_path_basic() {
+    fn test_build_profile_path_preserves_library_structure() {
         let temp_dir = TempDir::new().unwrap();
         let cache = TranscodeCache::new(temp_dir.path().to_path_buf()).unwrap();
 
         let track = create_test_track(1, "Artist Name", "Album Name", "Track Title");
         let profile_folder = temp_dir.path().join("profile");
+        let library_root = Path::new(TEST_LIBRARY_ROOT);
 
-        let path = cache.build_profile_path(&profile_folder, &track).unwrap();
+        let path = cache.build_profile_path(&profile_folder, &track, library_root).unwrap();
 
-        // Should mirror library structure with .m4a extension
+        // Should preserve library hierarchy (00_Artist/Artist/Album/Track.m4a)
+        assert!(path.to_string_lossy().contains("00_Artist"));
         assert!(path.to_string_lossy().contains("Artist Name"));
         assert!(path.to_string_lossy().contains("Album Name"));
         assert!(path.to_string_lossy().contains("Track Title"));
@@ -444,11 +465,12 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let cache = TranscodeCache::new(temp_dir.path().to_path_buf()).unwrap();
 
-        // Track with characters that need sanitization
-        let track = create_test_track(2, "Artist: Name", "Album/Part 2", "Track?");
+        let mut track = create_test_track(2, "Artist: Name", "Album/Part 2", "Track?");
+        track.metadata.original_path = "/library/00_Artist/Artist: Name/Album/Part 2/Track?.flac".to_string();
         let profile_folder = temp_dir.path().join("profile");
+        let library_root = Path::new(TEST_LIBRARY_ROOT);
 
-        let path = cache.build_profile_path(&profile_folder, &track).unwrap();
+        let path = cache.build_profile_path(&profile_folder, &track, library_root).unwrap();
         let path_str = path.to_string_lossy();
 
         // Should not contain invalid FAT32 characters

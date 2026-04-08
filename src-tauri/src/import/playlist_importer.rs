@@ -235,7 +235,7 @@ pub fn import_playlist_from_file(
 
     tx.execute(
         "INSERT INTO playlists (name, description, category, is_liked, is_smart, is_pinned)
-         VALUES (?1, ?2, 'Regular', 0, 0, 0)",
+         VALUES (?1, ?2, 'regular', 0, 0, 0)",
         rusqlite::params![playlist_name, description],
     ).map_err(|e| format!("Failed to create playlist: {}", e))?;
 

@@ -44,7 +44,26 @@ fn resolve_track_path(conn: &rusqlite::Connection, path: &str) -> Result<String,
         .map_err(|e| format!("Failed to load library config: {}", e))?;
     let root = config.root_path
         .ok_or_else(|| "Library not configured".to_string())?;
-    Ok(root.join(path).to_string_lossy().to_string())
+
+    // Try direct join first (downloaded tracks include prefix like "00_Artists/...")
+    let direct = root.join(path);
+    if direct.exists() {
+        return Ok(direct.to_string_lossy().to_string());
+    }
+    // Search scan folders (imported tracks omit the scan folder prefix)
+    for folder in &config.scan_folders {
+        let candidate = root.join(folder).join(path);
+        if candidate.exists() {
+            return Ok(candidate.to_string_lossy().to_string());
+        }
+    }
+    // Try download_destination
+    let candidate = root.join(&config.download_destination).join(path);
+    if candidate.exists() {
+        return Ok(candidate.to_string_lossy().to_string());
+    }
+    // Fall back to direct path (will fail at caller if file doesn't exist)
+    Ok(direct.to_string_lossy().to_string())
 }
 
 /// Track analysis response sent to frontend.
@@ -94,16 +113,14 @@ pub async fn get_track_analysis(track_id: i64) -> Result<TrackAnalysisResponse, 
             .map_err(|e| format!("Database query failed: {}", e))?
             .ok_or_else(|| format!("Track {} not found", track_id))?;
 
-        // Track.organized_path is String (not Option). Remote tracks (organized_path IS NULL
-        // in the database) will fail at get_track_by_id with a rusqlite type error when trying
-        // to deserialize NULL → String. An empty organized_path also means no local file.
-        if track.organized_path.is_empty() {
-            return Err("Track has no local file (remote/undownloaded track)".to_string());
-        }
+        let organized_path = track.organized_path
+            .as_deref()
+            .filter(|p| !p.is_empty())
+            .ok_or_else(|| "Track has no local file (remote/undownloaded track)".to_string())?;
 
         // Resolve relative organized_path against library root.
         // Rejects absolute paths (stale data) with a descriptive error.
-        let file_path = resolve_track_path(&conn, &track.organized_path)?;
+        let file_path = resolve_track_path(&conn, organized_path)?;
 
         // Run ffprobe to extract metadata as JSON
         let output = Command::new("ffprobe")
@@ -161,28 +178,153 @@ pub async fn get_track_analysis(track_id: i64) -> Result<TrackAnalysisResponse, 
     .map_err(|e| format!("Task join error: {}", e))?
 }
 
-/// Get artwork for a track (stub — to be implemented).
+/// Extract embedded artwork from a track and return as base64 data URI.
 #[tauri::command]
-pub async fn get_track_artwork(_track_id: i64) -> Result<Option<String>, String> {
-    Ok(None)
+pub async fn get_track_artwork(track_id: i64) -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let db_path = PathBuf::from("music_library.db");
+        let conn = get_connection(&db_path)
+            .map_err(|e| format!("Database error: {}", e))?;
+
+        let track = get_track_by_id(&conn, track_id)
+            .map_err(|e| format!("Database query failed: {}", e))?
+            .ok_or_else(|| format!("Track {} not found", track_id))?;
+
+        let organized_path = track.organized_path
+            .as_deref()
+            .filter(|p| !p.is_empty())
+            .ok_or_else(|| "No local file".to_string())?;
+
+        let file_path = resolve_track_path(&conn, organized_path)?;
+
+        // Extract cover art to stdout as PNG via ffmpeg
+        let output = Command::new("ffmpeg")
+            .args(&["-i", &file_path, "-an", "-vcodec", "png", "-f", "image2pipe", "-"])
+            .output();
+
+        match output {
+            Ok(o) if o.status.success() && !o.stdout.is_empty() => {
+                use base64::Engine;
+                let b64 = base64::engine::general_purpose::STANDARD.encode(&o.stdout);
+                Ok(Some(format!("data:image/png;base64,{}", b64)))
+            }
+            _ => Ok(None),
+        }
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
-/// Generate acoustic fingerprint for a track (stub — to be implemented).
+/// Generate acoustic fingerprint for a track using fpcalc (Chromaprint).
+/// Returns a text summary string, not an image.
 #[tauri::command]
-pub async fn generate_track_fingerprint(_track_id: i64) -> Result<Option<String>, String> {
-    Ok(None)
+pub async fn generate_track_fingerprint(track_id: i64) -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let db_path = PathBuf::from("music_library.db");
+        let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+        let track = get_track_by_id(&conn, track_id)
+            .map_err(|e| format!("DB error: {}", e))?
+            .ok_or_else(|| format!("Track {} not found", track_id))?;
+        let organized_path = track.organized_path.as_deref().filter(|p| !p.is_empty())
+            .ok_or_else(|| "No local file".to_string())?;
+        let file_path = resolve_track_path(&conn, organized_path)?;
+
+        let output = Command::new("fpcalc")
+            .args(&["-json", &file_path])
+            .output();
+
+        match output {
+            Ok(o) if o.status.success() => {
+                let stdout = String::from_utf8_lossy(&o.stdout).to_string();
+                Ok(Some(stdout))
+            }
+            Ok(o) => Err(format!("fpcalc failed: {}", String::from_utf8_lossy(&o.stderr))),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                Err("fpcalc not found. Install Chromaprint via: brew install chromaprint".to_string())
+            }
+            Err(e) => Err(format!("Failed to run fpcalc: {}", e)),
+        }
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
-/// Generate waveform data for a track (stub — to be implemented).
+/// Generate waveform visualization for a track as base64 PNG data URI.
+/// Uses ffmpeg's showwavespic filter.
 #[tauri::command]
-pub async fn generate_track_waveform(_track_id: i64) -> Result<Option<String>, String> {
-    Ok(None)
+pub async fn generate_track_waveform(track_id: i64) -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let db_path = PathBuf::from("music_library.db");
+        let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+        let track = get_track_by_id(&conn, track_id)
+            .map_err(|e| format!("DB error: {}", e))?
+            .ok_or_else(|| format!("Track {} not found", track_id))?;
+        let organized_path = track.organized_path.as_deref().filter(|p| !p.is_empty())
+            .ok_or_else(|| "No local file".to_string())?;
+        let file_path = resolve_track_path(&conn, organized_path)?;
+
+        let output = Command::new("ffmpeg")
+            .args(&[
+                "-i", &file_path,
+                "-filter_complex", "showwavespic=s=600x120:colors=#d4940c",
+                "-frames:v", "1",
+                "-f", "image2pipe",
+                "-vcodec", "png",
+                "-",
+            ])
+            .output();
+
+        match output {
+            Ok(o) if o.status.success() && !o.stdout.is_empty() => {
+                use base64::Engine;
+                let b64 = base64::engine::general_purpose::STANDARD.encode(&o.stdout);
+                Ok(Some(format!("data:image/png;base64,{}", b64)))
+            }
+            Ok(o) => Err(format!("ffmpeg waveform failed: {}", String::from_utf8_lossy(&o.stderr))),
+            Err(e) => Err(format!("Failed to run ffmpeg: {}", e)),
+        }
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
-/// Generate spectrogram for a track (stub — to be implemented).
+/// Generate spectrogram for a track as base64 PNG data URI.
+/// Uses ffmpeg's showspectrumpic filter.
 #[tauri::command]
-pub async fn generate_track_spectrogram(_track_id: i64) -> Result<Option<String>, String> {
-    Ok(None)
+pub async fn generate_track_spectrogram(track_id: i64) -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let db_path = PathBuf::from("music_library.db");
+        let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+        let track = get_track_by_id(&conn, track_id)
+            .map_err(|e| format!("DB error: {}", e))?
+            .ok_or_else(|| format!("Track {} not found", track_id))?;
+        let organized_path = track.organized_path.as_deref().filter(|p| !p.is_empty())
+            .ok_or_else(|| "No local file".to_string())?;
+        let file_path = resolve_track_path(&conn, organized_path)?;
+
+        let output = Command::new("ffmpeg")
+            .args(&[
+                "-i", &file_path,
+                "-filter_complex", "showspectrumpic=s=600x200:legend=0",
+                "-frames:v", "1",
+                "-f", "image2pipe",
+                "-vcodec", "png",
+                "-",
+            ])
+            .output();
+
+        match output {
+            Ok(o) if o.status.success() && !o.stdout.is_empty() => {
+                use base64::Engine;
+                let b64 = base64::engine::general_purpose::STANDARD.encode(&o.stdout);
+                Ok(Some(format!("data:image/png;base64,{}", b64)))
+            }
+            Ok(o) => Err(format!("ffmpeg spectrogram failed: {}", String::from_utf8_lossy(&o.stderr))),
+            Err(e) => Err(format!("Failed to run ffmpeg: {}", e)),
+        }
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[cfg(test)]

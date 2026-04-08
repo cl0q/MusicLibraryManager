@@ -26,11 +26,11 @@ export function LibraryMountProvider({ children }: LibraryMountProviderProps) {
   // Helper to map backend state strings to frontend state
   const mapBackendState = (backendState: string): MountState => {
     switch (backendState) {
-      case "Connected":
+      case "connected":
         return "connected";
-      case "Disconnected":
+      case "disconnected":
         return "disconnected";
-      case "NotConfigured":
+      case "notconfigured":
         return "not_configured";
       default:
         console.warn("Unknown backend state:", backendState);

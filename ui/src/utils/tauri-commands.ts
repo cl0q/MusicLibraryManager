@@ -122,6 +122,14 @@ export async function execute_sync_cmd(profile_id: string): Promise<SyncResult> 
   return invoke<SyncResult>("execute_sync_cmd", { profileId: Number(profile_id) });
 }
 
+export async function clean_sync_cmd(profile_id: string): Promise<SyncResult> {
+  return invoke<SyncResult>("clean_sync_cmd", { profileId: Number(profile_id) });
+}
+
+export async function update_sync_profile_settings(profileId: number, playlistPathPrefix: string): Promise<void> {
+  return invoke<void>("update_sync_profile_settings", { profileId, playlistPathPrefix });
+}
+
 export async function detect_rockbox_devices_cmd(): Promise<RockboxDevice[]> {
   return invoke<RockboxDevice[]>("detect_rockbox_devices");
 }
@@ -401,7 +409,12 @@ export interface TrackAnalysisData {
 
 /** Get track analysis data (ffprobe, fingerprint, waveform, spectrogram) */
 export async function getTrackAnalysis(trackId: number): Promise<TrackAnalysisData> {
-  return invoke<TrackAnalysisData>("get_track_analysis", { trackId });
+  const raw = await invoke<{ ffprobe_output?: string; fingerprint?: string; spectrogram_path?: string }>("get_track_analysis", { trackId });
+  return {
+    ffprobe: raw.ffprobe_output ? JSON.parse(raw.ffprobe_output) : undefined,
+    fingerprint: raw.fingerprint ?? undefined,
+    spectrogram_path: raw.spectrogram_path ?? undefined,
+  };
 }
 
 /** Get album artwork for a track as base64 data URI */

@@ -1,0 +1,28 @@
+# Secrets
+.env
+src-tauri/.tokens/
+
+# Databases
+*.db
+
+# Caches
+src-tauri/artwork_cache/
+src-tauri/transcode_cache/
+
+# Local data
+src-tauri/00_Artists/
+src-tauri/00_Artists_staging/
+
+# OS / editor junk
+.DS_Store
+__pycache__/
+
+# GSD internal
+.planning/agent-history.json
+
+# Test artifacts
+ui/e2e/results/
+ui/e2e/screenshots/
+
+# Unrelated
+streaming2ipod/

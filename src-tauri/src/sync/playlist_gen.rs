@@ -30,6 +30,8 @@ pub fn generate_m3u8(
     _playlist_name: &str,
     tracks: &[Track],
     _profile_folder: &Path,
+    library_root: &Path,
+    path_prefix: &str,
 ) -> Result<String> {
     let mut lines = Vec::new();
 
@@ -47,15 +49,46 @@ pub fn generate_m3u8(
         );
         lines.push(extinf);
 
-        // Relative path from profile root to track file
-        // Profile structure: Artist/Album/Track.m4a
-        let relative_path = format!(
-            "{}/{}/{}.m4a",
-            sanitize_filename(&track.metadata.album_artist),
-            sanitize_filename(&track.metadata.album),
-            sanitize_filename(&track.metadata.title)
-        );
-        lines.push(relative_path);
+        // Relative path from profile root — mirrors library folder structure
+        let original = Path::new(&track.metadata.original_path);
+        let relative_path = if let Ok(rel) = original.strip_prefix(library_root) {
+            let parent = rel.parent().unwrap_or(Path::new(""));
+            let mut parts: Vec<String> = parent
+                .components()
+                .filter_map(|c| {
+                    if let std::path::Component::Normal(p) = c {
+                        Some(sanitize_filename(p.to_str().unwrap_or("unknown")))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            let stem = rel
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown");
+            parts.push(format!("{}.m4a", sanitize_filename(stem)));
+            parts.join("/")
+        } else if track.metadata.original_path.contains("soundcloud.com") {
+            // SoundCloud tracks: 03_Club/SoundCloud/title.m4a
+            format!(
+                "03_Club/SoundCloud/{}.m4a",
+                sanitize_filename(&track.metadata.title)
+            )
+        } else {
+            // Fallback for tracks not under library root
+            format!(
+                "{}/{}/{}.m4a",
+                sanitize_filename(&track.metadata.album_artist),
+                sanitize_filename(&track.metadata.album),
+                sanitize_filename(&track.metadata.title)
+            )
+        };
+        if path_prefix.is_empty() {
+            lines.push(relative_path);
+        } else {
+            lines.push(format!("{}{}", path_prefix, relative_path));
+        }
     }
 
     Ok(lines.join("\n"))
@@ -86,27 +119,22 @@ pub fn write_playlist_file(
     Ok(())
 }
 
-/// Generate and write playlist to profile's Playlists directory.
-///
-/// Convenience function that:
-/// 1. Creates profile_folder/Playlists/ directory if needed
-/// 2. Generates M3U8 content from tracks
-/// 3. Writes to profile_folder/Playlists/{playlist_name}.m3u8
+/// Generate and write playlist to profile root directory.
 ///
 /// # Arguments
 /// * `profile_folder` - Root directory of the sync profile
 /// * `playlist_name` - Name for the playlist file (without .m3u8 extension)
 /// * `tracks` - Tracks to include in the playlist
+/// * `library_root` - Library root path for resolving relative track paths
 pub fn write_profile_playlist(
     profile_folder: &Path,
     playlist_name: &str,
     tracks: &[Track],
+    library_root: &Path,
+    path_prefix: &str,
 ) -> Result<()> {
-    let playlists_dir = profile_folder.join("Playlists");
-    std::fs::create_dir_all(&playlists_dir)?;
-
-    let content = generate_m3u8(playlist_name, tracks, profile_folder)?;
-    let playlist_path = playlists_dir.join(format!("{}.m3u8", playlist_name));
+    let content = generate_m3u8(playlist_name, tracks, profile_folder, library_root, path_prefix)?;
+    let playlist_path = profile_folder.join(format!("{}.m3u8", sanitize_filename(playlist_name)));
 
     write_playlist_file(&playlist_path, &content)
 }
@@ -118,6 +146,8 @@ mod tests {
     use tempfile::TempDir;
     use std::fs;
     use std::path::PathBuf;
+
+    const TEST_LIBRARY_ROOT: &str = "/library";
 
     fn create_test_track(
         id: i64,
@@ -137,7 +167,7 @@ mod tests {
             bitrate: Some(248),
             duration,
             format: "m4a".to_string(),
-            original_path: "/original/path".to_string(),
+            original_path: format!("/library/00_Artist/{}/{}/{}.m4a", album_artist, album, title),
         };
 
         Track {
@@ -156,9 +186,9 @@ mod tests {
         ];
 
         let profile_folder = PathBuf::from("/tmp/profile");
-        let content = generate_m3u8("Test Playlist", &tracks, &profile_folder).unwrap();
+        let library_root = Path::new(TEST_LIBRARY_ROOT);
+        let content = generate_m3u8("Test Playlist", &tracks, &profile_folder, library_root, "").unwrap();
 
-        // Should start with #EXTM3U header
         assert!(content.starts_with("#EXTM3U\n"));
     }
 
@@ -169,22 +199,23 @@ mod tests {
         ];
 
         let profile_folder = PathBuf::from("/tmp/profile");
-        let content = generate_m3u8("Test Playlist", &tracks, &profile_folder).unwrap();
+        let library_root = Path::new(TEST_LIBRARY_ROOT);
+        let content = generate_m3u8("Test Playlist", &tracks, &profile_folder, library_root, "").unwrap();
 
-        // Should contain #EXTINF line with duration, artist, and title
         assert!(content.contains("#EXTINF:180,Artist A - Track 1"));
     }
 
     #[test]
-    fn test_generate_m3u8_relative_paths() {
+    fn test_generate_m3u8_preserves_library_structure() {
         let tracks = vec![
             create_test_track(1, "Artist A", "Artist A", "Album 1", "Track 1", Some(180)),
         ];
 
         let profile_folder = PathBuf::from("/tmp/profile");
-        let content = generate_m3u8("Test Playlist", &tracks, &profile_folder).unwrap();
+        let library_root = Path::new(TEST_LIBRARY_ROOT);
+        let content = generate_m3u8("Test Playlist", &tracks, &profile_folder, library_root, "").unwrap();
 
-        // Paths should be relative (no leading /)
+        // Should preserve library folder structure (00_Artist/...)
         let lines: Vec<&str> = content.lines().collect();
         for line in &lines {
             if !line.starts_with('#') && !line.is_empty() {
@@ -192,8 +223,7 @@ mod tests {
             }
         }
 
-        // Should contain relative path
-        assert!(content.contains("Artist A/Album 1/Track 1.m4a"));
+        assert!(content.contains("00_Artist/Artist A/Album 1/Track 1.m4a"));
     }
 
     #[test]
@@ -205,57 +235,46 @@ mod tests {
         ];
 
         let profile_folder = PathBuf::from("/tmp/profile");
-        let content = generate_m3u8("Multi Track", &tracks, &profile_folder).unwrap();
+        let library_root = Path::new(TEST_LIBRARY_ROOT);
+        let content = generate_m3u8("Multi Track", &tracks, &profile_folder, library_root, "").unwrap();
 
-        // Should contain all three tracks
         assert!(content.contains("Artist A - Track 1"));
         assert!(content.contains("Artist B - Track 2"));
         assert!(content.contains("Artist C - Track 3"));
 
-        // Should contain all three paths
-        assert!(content.contains("Artist A/Album 1/Track 1.m4a"));
-        assert!(content.contains("Artist B/Album 2/Track 2.m4a"));
-        assert!(content.contains("Artist C/Album 3/Track 3.m4a"));
+        assert!(content.contains("00_Artist/Artist A/Album 1/Track 1.m4a"));
+        assert!(content.contains("00_Artist/Artist B/Album 2/Track 2.m4a"));
+        assert!(content.contains("00_Artist/Artist C/Album 3/Track 3.m4a"));
     }
 
     #[test]
     fn test_sanitize_filenames_in_paths() {
-        let tracks = vec![
-            create_test_track(
-                1,
-                "Artist: Name",
-                "Artist: Name",
-                "Album / Part 2",
-                "Song?",
-                Some(180),
-            ),
-        ];
+        let mut track = create_test_track(1, "Artist: Name", "Artist: Name", "Album / Part 2", "Song?", Some(180));
+        track.metadata.original_path = "/library/00_Artist/Artist: Name/Album / Part 2/Song?.m4a".to_string();
 
         let profile_folder = PathBuf::from("/tmp/profile");
-        let content = generate_m3u8("Sanitized", &tracks, &profile_folder).unwrap();
+        let library_root = Path::new(TEST_LIBRARY_ROOT);
+        let content = generate_m3u8("Sanitized", &[track], &profile_folder, library_root, "").unwrap();
 
-        // Paths should not contain invalid FAT32 characters
         let lines: Vec<&str> = content.lines().collect();
         for line in &lines {
             if !line.starts_with('#') && !line.is_empty() {
                 assert!(!line.contains(':'), "Path should not contain colon: {}", line);
                 assert!(!line.contains('?'), "Path should not contain question mark: {}", line);
-                // Note: forward slash is the path separator, so we can't check for that
             }
         }
     }
 
     #[test]
     fn test_generate_m3u8_zero_duration() {
-        // Test handling of tracks with no duration
         let tracks = vec![
             create_test_track(1, "Artist A", "Artist A", "Album 1", "Track 1", None),
         ];
 
         let profile_folder = PathBuf::from("/tmp/profile");
-        let content = generate_m3u8("No Duration", &tracks, &profile_folder).unwrap();
+        let library_root = Path::new(TEST_LIBRARY_ROOT);
+        let content = generate_m3u8("No Duration", &tracks, &profile_folder, library_root, "").unwrap();
 
-        // Should default to 0 for missing duration
         assert!(content.contains("#EXTINF:0,Artist A - Track 1"));
     }
 
@@ -297,15 +316,11 @@ mod tests {
             create_test_track(2, "Artist B", "Artist B", "Album 2", "Track 2", Some(240)),
         ];
 
-        write_profile_playlist(profile_folder, "Test Playlist", &tracks).unwrap();
+        let library_root = Path::new(TEST_LIBRARY_ROOT);
+        write_profile_playlist(profile_folder, "Test Playlist", &tracks, library_root, "").unwrap();
 
-        // Playlists directory should be created
-        let playlists_dir = profile_folder.join("Playlists");
-        assert!(playlists_dir.exists());
-        assert!(playlists_dir.is_dir());
-
-        // Playlist file should exist
-        let playlist_path = playlists_dir.join("Test Playlist.m3u8");
+        // Playlist file should exist at profile root
+        let playlist_path = profile_folder.join("Test Playlist.m3u8");
         assert!(playlist_path.exists());
 
         // Content should be valid M3U8
@@ -320,15 +335,14 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let profile_folder = temp_dir.path();
 
-        let tracks = vec![
-            create_test_track(1, "CON", "CON", "PRN", "AUX", Some(180)),
-        ];
+        let mut track = create_test_track(1, "CON", "CON", "PRN", "AUX", Some(180));
+        track.metadata.original_path = "/library/00_Artist/CON/PRN/AUX.m4a".to_string();
 
-        write_profile_playlist(profile_folder, "Reserved", &tracks).unwrap();
+        let library_root = Path::new(TEST_LIBRARY_ROOT);
+        write_profile_playlist(profile_folder, "Reserved", &[track], library_root, "").unwrap();
 
-        // Should handle Windows reserved names with underscore prefix
         let content = fs::read_to_string(
-            profile_folder.join("Playlists").join("Reserved.m3u8")
+            profile_folder.join("Reserved.m3u8")
         ).unwrap();
 
         // Paths should be prefixed with underscore for reserved names

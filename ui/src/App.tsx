@@ -1,13 +1,11 @@
 import { useEffect, useState } from "react";
-import { createBrowserRouter, RouterProvider } from "react-router";
-import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
+import { createBrowserRouter, RouterProvider, Navigate } from "react-router";
 import { toast } from "sonner";
 import ToastProvider from "./components/Notifications/ToastProvider";
+import { ThemeProvider } from "./contexts/ThemeContext";
 import MainLayout from "./layouts/MainLayout";
-import Dashboard from "./pages/Dashboard";
 import LibraryBrowser from "./pages/LibraryBrowser";
 import TrackDetail from "./pages/TrackDetail";
-import Downloads from "./pages/Downloads";
 import Playlists from "./pages/Playlists";
 import PlaylistDetailPage from "./pages/PlaylistDetailPage";
 import Sync from "./pages/Sync";
@@ -26,50 +24,18 @@ const router = createBrowserRouter([
     path: "/",
     element: <MainLayout />,
     children: [
-      {
-        index: true,
-        element: <Dashboard />,
-      },
-      {
-        path: "sources",
-        element: <Sources />,
-      },
-      {
-        path: "callback",
-        element: <OAuthCallback />,
-      },
-      {
-        path: "library",
-        element: <LibraryBrowser view="library" />,
-      },
-      {
-        path: "library/:trackId",
-        element: <TrackDetail />,
-      },
-      {
-        path: "remote",
-        element: <LibraryBrowser view="remote" />,
-      },
-      {
-        path: "playlists",
-        element: <Playlists />,
-      },
-      {
-        path: "playlists/:id",
-        element: <PlaylistDetailPage />,
-      },
-      {
-        path: "sync",
-        element: <Sync />,
-      },
-      {
-        path: "downloads",
-        element: <Downloads />,
-      },
-      {
-        path: "settings",
-        element: <Settings />,
-      },
+      { index: true, element: <LibraryBrowser view="library" /> },
+      { path: "remote", element: <LibraryBrowser view="remote" /> },
+      { path: "library/:trackId", element: <TrackDetail /> },
+      { path: "playlists", element: <Playlists /> },
+      { path: "playlists/:id", element: <PlaylistDetailPage /> },
+      { path: "sync", element: <Sync /> },
+      { path: "sources", element: <Sources /> },
+      { path: "settings", element: <Settings /> },
+      { path: "callback", element: <OAuthCallback /> },
+      // Redirects for removed routes
+      { path: "downloads", element: <Navigate to="/" replace /> },
+      { path: "library", element: <Navigate to="/" replace /> },
     ],
   },
 ]);
@@ -94,9 +60,12 @@ function App() {
 
   // Handle OAuth deep links (musiclibrary://callback?code=...&state=...)
   useEffect(() => {
-    console.log("[DeepLink] Setting up deep link handler");
+    let cleanup: (() => void) | null = null;
 
-    const unsubscribe = onOpenUrl(async (urls) => {
+    const setup = async () => {
+      try {
+        const { onOpenUrl } = await import("@tauri-apps/plugin-deep-link");
+        const unsubscribe = await onOpenUrl(async (urls: string[]) => {
       console.log("[DeepLink] Received URLs:", urls);
 
       for (const urlString of urls) {
@@ -104,7 +73,6 @@ function App() {
           console.log("[DeepLink] Processing URL:", urlString);
           const url = new URL(urlString);
 
-          // Only handle callback URLs
           if (url.host !== "callback") {
             console.log("[DeepLink] Skipping non-callback URL, host:", url.host);
             continue;
@@ -119,7 +87,6 @@ function App() {
             continue;
           }
 
-          // Determine source from state prefix
           let source: string | null = null;
           if (state?.startsWith("spotify:")) {
             source = "spotify";
@@ -135,7 +102,6 @@ function App() {
           console.log("[DeepLink] Exchanging code for source:", source);
           const userId = "default";
 
-          // Exchange the code for tokens
           if (source === "spotify") {
             await spotify_exchange_code(code, userId);
             toast.success("Spotify connected successfully!");
@@ -145,7 +111,6 @@ function App() {
           }
 
           console.log("[DeepLink] Exchange successful!");
-          // Emit event so Sources page can refresh connection status
           window.dispatchEvent(new CustomEvent("oauth-complete", { detail: { source } }));
         } catch (err) {
           console.error("[DeepLink] Error:", err);
@@ -153,15 +118,22 @@ function App() {
           toast.error(`Connection failed: ${message}`);
         }
       }
-    });
+        });
+        cleanup = unsubscribe;
+      } catch (err) {
+        console.warn("[DeepLink] Plugin not available (expected outside Tauri):", err);
+      }
+    };
+
+    setup();
 
     return () => {
-      unsubscribe.then((fn) => fn());
+      cleanup?.();
     };
   }, []);
 
   return (
-    <>
+    <ThemeProvider>
       <ToastProvider />
       <RouterProvider router={router} />
       {showWizard && (
@@ -170,7 +142,7 @@ function App() {
           onSkip={() => setShowWizard(false)}
         />
       )}
-    </>
+    </ThemeProvider>
   );
 }
 

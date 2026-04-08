@@ -24,7 +24,7 @@ export default function Dashboard() {
       const result = await execute_sync_cmd(profile.id);
 
       toast.success(
-        `Sync complete! Added: ${result.files_added}, Updated: ${result.files_updated}, Removed: ${result.files_removed}`
+        `Sync complete! ${result.synced_count} synced, ${result.failed_count} failed`
       );
     } catch (error) {
       console.error("Sync failed:", error);

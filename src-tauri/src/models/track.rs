@@ -40,7 +40,7 @@ pub struct TrackMetadata {
 /// Complete track record for database storage.
 ///
 /// Combines extracted metadata with library-specific fields:
-/// - organized_path: sanitized Artist/Album/Track.ext path
+/// - organized_path: sanitized Artist/Album/Track.ext path (None for streaming tracks)
 /// - is_duplicate: whether a better quality version exists
 /// - date_added: when track was imported to library
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -50,7 +50,8 @@ pub struct Track {
     /// Extracted audio metadata
     pub metadata: TrackMetadata,
     /// Sanitized path for organized library: Artist/Album/Track.ext
-    pub organized_path: String,
+    /// None for streaming tracks (Spotify, SoundCloud) that don't have local files
+    pub organized_path: Option<String>,
     /// True if a higher quality duplicate exists
     pub is_duplicate: bool,
     /// ISO 8601 timestamp when added to library
@@ -93,14 +94,25 @@ impl Track {
         Self {
             id: None,
             metadata,
-            organized_path,
+            organized_path: Some(organized_path),
+            is_duplicate: false,
+            date_added: None,
+        }
+    }
+
+    /// Create a Track for streaming sources (no local file).
+    pub fn new_streaming(metadata: TrackMetadata) -> Self {
+        Self {
+            id: None,
+            metadata,
+            organized_path: None,
             is_duplicate: false,
             date_added: None,
         }
     }
 
     /// Create a Track with database ID (for loaded records).
-    pub fn with_id(id: i64, metadata: TrackMetadata, organized_path: String) -> Self {
+    pub fn with_id(id: i64, metadata: TrackMetadata, organized_path: Option<String>) -> Self {
         Self {
             id: Some(id),
             metadata,
@@ -154,7 +166,7 @@ mod tests {
 
         assert!(track.id.is_none());
         assert!(!track.is_duplicate);
-        assert_eq!(track.organized_path, "artist/album/title.flac");
+        assert_eq!(track.organized_path, Some("artist/album/title.flac".to_string()));
     }
 
     #[test]
@@ -172,7 +184,7 @@ mod tests {
             "/music/file.mp3".to_string(),
         );
 
-        let track = Track::with_id(42, metadata, "artist/album/title.mp3".to_string());
+        let track = Track::with_id(42, metadata, Some("artist/album/title.mp3".to_string()));
 
         assert_eq!(track.id, Some(42));
     }

@@ -32,11 +32,12 @@
 //! });
 //! ```
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::database::get_connection;
 use crate::models::sync::{FilterRuleDto, SyncProfileDto};
 use crate::sync::{detect_rockbox_devices, RockboxDevice, SyncPreview, SyncResult};
+use tauri::Emitter;
 
 /// Create a new sync profile.
 ///
@@ -140,6 +141,23 @@ pub async fn delete_sync_profile(profile_id: i64) -> Result<(), String> {
     .map_err(|e| format!("Task join error: {}", e))?
 }
 
+/// Update sync profile settings (playlist path prefix).
+#[tauri::command]
+pub async fn update_sync_profile_settings(
+    profile_id: i64,
+    playlist_path_prefix: String,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let db_path = PathBuf::from("music_library.db");
+        let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+
+        crate::sync::profile::update_sync_profile_settings(&conn, profile_id, &playlist_path_prefix)
+            .map_err(|e| format!("Failed to update profile settings: {}", e))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
 /// Add a track to a sync profile (manual track selection).
 ///
 /// # Arguments
@@ -212,6 +230,65 @@ pub async fn add_rule_to_profile(profile_id: i64, rule: FilterRuleDto) -> Result
     .map_err(|e| format!("Task join error: {}", e))?
 }
 
+/// Remove a playlist from a sync profile.
+#[tauri::command]
+pub async fn remove_playlist_from_profile(profile_id: i64, playlist_id: i64) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let db_path = PathBuf::from("music_library.db");
+        let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+
+        crate::sync::profile::remove_playlist(&conn, profile_id, playlist_id)
+            .map_err(|e| format!("Failed to remove playlist from profile: {}", e))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+/// Remove a manual track from a sync profile.
+#[tauri::command]
+pub async fn remove_track_from_profile(profile_id: i64, track_id: i64) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let db_path = PathBuf::from("music_library.db");
+        let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+
+        crate::sync::profile::remove_manual_track(&conn, profile_id, track_id)
+            .map_err(|e| format!("Failed to remove track from profile: {}", e))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+/// Get playlist IDs and names attached to a sync profile.
+#[tauri::command]
+pub async fn get_profile_playlists(profile_id: i64) -> Result<Vec<serde_json::Value>, String> {
+    tokio::task::spawn_blocking(move || {
+        let db_path = PathBuf::from("music_library.db");
+        let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+
+        let mut stmt = conn.prepare(
+            "SELECT p.id, p.name, p.category,
+                    (SELECT COUNT(*) FROM playlist_tracks pt WHERE pt.playlist_id = p.id) as track_count
+             FROM sync_profile_playlists spp
+             JOIN playlists p ON spp.playlist_id = p.id
+             WHERE spp.profile_id = ?1"
+        ).map_err(|e| format!("Query error: {}", e))?;
+
+        let rows = stmt.query_map([profile_id], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "category": row.get::<_, String>(2)?,
+                "track_count": row.get::<_, i64>(3)?
+            }))
+        }).map_err(|e| format!("Query error: {}", e))?;
+
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Row error: {}", e))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
 /// Detect Rockbox-enabled devices connected to the system.
 ///
 /// Scans platform-specific mount points for .rockbox directory marker.
@@ -276,14 +353,196 @@ pub async fn preview_sync_cmd(
 #[tauri::command]
 pub async fn execute_sync_cmd(profile_id: i64, app: tauri::AppHandle) -> Result<SyncResult, String> {
     tokio::task::spawn_blocking(move || {
+        let handle = tokio::runtime::Handle::current();
+        handle.block_on(async {
+            let db_path = PathBuf::from("music_library.db");
+            let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+            let cache_dir = PathBuf::from("transcode_cache");
+
+            // Step 1: Transcode missing cache files
+            let profile = crate::sync::profile::get_sync_profile(&conn, profile_id)
+                .map_err(|e| format!("Profile error: {}", e))?;
+            let all_track_ids = profile.get_all_track_ids(&conn)
+                .map_err(|e| format!("Track ID error: {}", e))?;
+            let cache = crate::sync::TranscodeCache::new(cache_dir.clone())
+                .map_err(|e| format!("Cache error: {}", e))?;
+
+            // Load library config for path resolution
+            let lib_config = crate::config::LibraryConfig::load(&conn)
+                .map_err(|e| format!("Config error: {}", e))?;
+            let library_root = lib_config.root_path
+                .ok_or_else(|| "Library root not configured".to_string())?;
+
+            // Find tracks needing transcode
+            let mut to_transcode: Vec<(i64, PathBuf)> = Vec::new();
+            for track_id in &all_track_ids {
+                let (original_path, organized_path): (String, Option<String>) = conn.query_row(
+                    "SELECT original_path, organized_path FROM tracks WHERE id = ?",
+                    [track_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                ).map_err(|e| format!("DB error: {}", e))?;
+
+                // Resolve source file: try organized_path against library root first
+                // (works for downloaded tracks), then fall back to original_path
+                // (works for scanned tracks with absolute paths on disk).
+                let src = organized_path
+                    .as_deref()
+                    .filter(|p| !p.is_empty())
+                    .and_then(|op| {
+                        // Try direct join
+                        let direct = library_root.join(op);
+                        if direct.exists() { return Some(direct); }
+                        // Try scan folders
+                        for folder in &lib_config.scan_folders {
+                            let c = library_root.join(folder).join(op);
+                            if c.exists() { return Some(c); }
+                        }
+                        None
+                    })
+                    .or_else(|| {
+                        // Fall back to original_path if it's a real file path (not a URL)
+                        if !original_path.starts_with("http") {
+                            let p = PathBuf::from(&original_path);
+                            if p.exists() { return Some(p); }
+                        }
+                        None
+                    });
+
+                let src = match src {
+                    Some(p) => p,
+                    None => {
+                        log::warn!("Track {}: source file not found (organized={:?}, original={})",
+                            track_id, organized_path, original_path);
+                        continue;
+                    }
+                };
+
+                let cache_path = cache.get_cache_path(*track_id, &src);
+                if !cache_path.exists() {
+                    to_transcode.push((*track_id, src));
+                }
+            }
+
+            if !to_transcode.is_empty() {
+                log::info!("Transcoding {} tracks to cache before sync", to_transcode.len());
+                let _ = app.emit("sync:transcode_started", serde_json::json!({
+                    "profile_id": profile_id,
+                    "total": to_transcode.len()
+                }));
+
+                let total = to_transcode.len();
+                for (i, (track_id, abs_source)) in to_transcode.iter().enumerate() {
+                    let src = abs_source.as_path();
+                    let cache_path = cache.get_cache_path(*track_id, src);
+
+                    // Get track info for logging
+                    let (artist, title) = conn.query_row(
+                        "SELECT artist, title FROM tracks WHERE id = ?",
+                        [track_id],
+                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                    ).unwrap_or_else(|_| ("".to_string(), "".to_string()));
+
+                    log::info!(
+                        "[{}/{}] Transcoding {} - {} ({})",
+                        i + 1, total, artist, title, src.display()
+                    );
+
+                    let _ = app.emit("sync:transcode_progress", serde_json::json!({
+                        "current": i + 1,
+                        "total": total,
+                        "artist": artist,
+                        "title": title
+                    }));
+
+                    match crate::transcode::transcode_audio(src, &cache_dir).await {
+                        Ok(crate::transcode::TranscodeResult::Transcoded(out)) => {
+                            // transcode_audio writes to {cache_dir}/{stem}.m4a
+                            // but cache expects {cache_dir}/{track_id}.m4a
+                            if out != cache_path {
+                                if let Err(e) = std::fs::rename(&out, &cache_path) {
+                                    log::warn!("Failed to rename {} -> {}: {}", out.display(), cache_path.display(), e);
+                                    // Try copy + delete as fallback
+                                    let _ = std::fs::copy(&out, &cache_path);
+                                    let _ = std::fs::remove_file(&out);
+                                }
+                            }
+                            log::info!("  Cached as {}", cache_path.display());
+                        }
+                        Ok(crate::transcode::TranscodeResult::Skipped(reason)) => {
+                            // Copy original to cache for sync
+                            log::info!("  Transcode skipped ({}), copying original", reason);
+                            if let Err(e) = std::fs::copy(src, &cache_path) {
+                                log::warn!("  Failed to copy to cache: {}", e);
+                            }
+                        }
+                        Ok(crate::transcode::TranscodeResult::Failed(e)) => {
+                            log::warn!("  Transcode failed: {}", e);
+                        }
+                        Err(e) => {
+                            log::warn!("  Transcode error: {}", e);
+                        }
+                    }
+                }
+
+                let _ = app.emit("sync:transcode_completed", serde_json::json!({
+                    "profile_id": profile_id,
+                    "transcoded": total
+                }));
+            }
+
+            // Step 2: Run sync
+            crate::sync::sync_profile_to_folder(&conn, profile_id, cache_dir, Some(&app))
+                .map_err(|e| format!("Failed to execute sync: {}", e))
+        })
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+/// Clean sync: clear sync state for a profile, then execute a full resync.
+///
+/// Deletes all `sync_state` entries for the given profile so the next sync
+/// treats every track as new. Then delegates to `execute_sync_cmd`.
+#[tauri::command]
+pub async fn clean_sync_cmd(profile_id: i64, app: tauri::AppHandle) -> Result<SyncResult, String> {
+    // Clear sync state first
+    tokio::task::spawn_blocking(move || {
         let db_path = PathBuf::from("music_library.db");
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+        conn.execute("DELETE FROM sync_state WHERE profile_id = ?", [profile_id])
+            .map_err(|e| format!("Failed to clear sync state: {}", e))?;
+        log::info!("Cleared sync state for profile {}", profile_id);
+        Ok::<_, String>(())
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))??;
 
-        // Use default cache directory (could be made configurable in Phase 6)
+    // Now run normal sync
+    execute_sync_cmd(profile_id, app).await
+}
+
+/// Get set of track IDs that have a transcode cache file.
+#[tauri::command]
+pub async fn get_cached_track_ids() -> Result<Vec<i64>, String> {
+    tokio::task::spawn_blocking(move || {
         let cache_dir = PathBuf::from("transcode_cache");
-
-        crate::sync::sync_profile_to_folder(&conn, profile_id, cache_dir, Some(&app))
-            .map_err(|e| format!("Failed to execute sync: {}", e))
+        if !cache_dir.exists() {
+            return Ok(vec![]);
+        }
+        let mut ids = Vec::new();
+        let entries = std::fs::read_dir(&cache_dir)
+            .map_err(|e| format!("Failed to read cache dir: {}", e))?;
+        for entry in entries.flatten() {
+            if let Some(stem) = entry.path().file_stem().and_then(|s| s.to_str()) {
+                if let Ok(id) = stem.parse::<i64>() {
+                    // Only include non-empty files
+                    if entry.metadata().map(|m| m.len() > 0).unwrap_or(false) {
+                        ids.push(id);
+                    }
+                }
+            }
+        }
+        Ok(ids)
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
@@ -330,24 +589,6 @@ pub async fn get_last_sync_time() -> Result<Option<String>, String> {
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
-}
-
-/// Remove a playlist from a sync profile (stub — to be implemented).
-#[tauri::command]
-pub async fn remove_playlist_from_profile(_profile_id: i64, _playlist_id: i64) -> Result<(), String> {
-    Err("Not yet implemented".to_string())
-}
-
-/// Remove a track from a sync profile (stub — to be implemented).
-#[tauri::command]
-pub async fn remove_track_from_profile(_profile_id: i64, _track_id: i64) -> Result<(), String> {
-    Err("Not yet implemented".to_string())
-}
-
-/// Get playlists in a sync profile (stub — to be implemented).
-#[tauri::command]
-pub async fn get_profile_playlists(_profile_id: i64) -> Result<Vec<i64>, String> {
-    Ok(Vec::new())
 }
 
 #[cfg(test)]

@@ -1,50 +1,56 @@
 import { useState, useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
-
-interface ProgressUpdate {
-  current: number;
-  total: number;
-  track_title: string;
-}
+import type { DownloadProgressEvent } from "../../types/events";
 
 interface DownloadProgressProps {
   isDownloading: boolean;
 }
 
 export function DownloadProgress({ isDownloading }: DownloadProgressProps) {
-  const [progress, setProgress] = useState<ProgressUpdate | null>(null);
+  const [progress, setProgress] = useState<DownloadProgressEvent | null>(null);
 
   useEffect(() => {
     if (!isDownloading) return;
 
-    const unlisten = listen<ProgressUpdate>("download-progress", (event) => {
+    let cancelled = false;
+    let unlistenFn: (() => void) | undefined;
+
+    listen<DownloadProgressEvent>("download:progress", (event) => {
+      if (cancelled) return;
       setProgress(event.payload);
+    }).then((fn) => {
+      if (cancelled) {
+        fn();
+      } else {
+        unlistenFn = fn;
+      }
     });
 
     return () => {
-      unlisten.then(fn => fn());
+      cancelled = true;
+      unlistenFn?.();
     };
   }, [isDownloading]);
 
   if (!isDownloading || !progress) return null;
 
-  const percent = Math.round((progress.current / progress.total) * 100);
-
   return (
-    <div className="fixed bottom-4 right-4 bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 w-80">
-      <div className="text-sm font-medium mb-2">
-        Downloading ({progress.current}/{progress.total})
+    <div className="fixed bottom-12 right-4 bg-surface border border-edge rounded-lg shadow-2xl p-3 w-72 z-30">
+      <div className="text-xs font-medium text-ink mb-1">
+        {progress.status === "completed" ? "Download Complete" : "Downloading"}
       </div>
-      <div className="text-xs text-gray-600 dark:text-gray-400 mb-2 truncate">
-        {progress.track_title}
+      <div className="text-[11px] text-ink-secondary mb-2 truncate">
+        {progress.track_name}
       </div>
-      <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+      <div className="h-1 bg-edge rounded-full overflow-hidden">
         <div
-          className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-          style={{ width: `${percent}%` }}
+          className="h-full bg-sky-500 rounded-full transition-all duration-300"
+          style={{ width: `${progress.progress}%` }}
         />
       </div>
-      <div className="text-xs text-gray-500 mt-1 text-right">{percent}%</div>
+      <div className="text-[10px] text-ink-muted mt-1 text-right tabular-nums">
+        {progress.progress}%
+      </div>
     </div>
   );
 }

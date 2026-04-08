@@ -1,23 +1,20 @@
-//! Secure token storage using system keychain.
+//! Secure token storage.
 //!
-//! Uses the keyring crate to store OAuth refresh tokens in:
-//! - macOS Keychain
-//! - Windows Credential Manager
-//! - Linux Secret Service
+//! Uses file-based storage for OAuth refresh tokens.
+//! Tokens are stored in the app's data directory.
 //!
-//! Never stores credentials in plaintext files.
+//! Note: For production, consider encrypting the token file
+//! or using the system keychain with proper code signing.
 
-use keyring::Entry;
+use std::fs;
+use std::path::PathBuf;
 use thiserror::Error;
-
-/// Service name for keychain entries.
-const SERVICE_NAME: &str = "com.musiclibrarymanager";
 
 /// Errors that can occur during token storage operations.
 #[derive(Error, Debug)]
 pub enum TokenStorageError {
-    #[error("Keyring error: {0}")]
-    KeyringError(#[from] keyring::Error),
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
 
     #[error("Token not found for {0}/{1}")]
     TokenNotFound(String, String),
@@ -26,12 +23,19 @@ pub enum TokenStorageError {
 /// Result type for token storage operations.
 pub type Result<T> = std::result::Result<T, TokenStorageError>;
 
-/// Build a keyring key from source and user_id.
-fn build_key(source: &str, user_id: &str) -> String {
-    format!("{}_{}_refresh", source, user_id)
+/// Get the token storage directory.
+fn get_token_dir() -> PathBuf {
+    // Use a .tokens directory in the current working directory
+    // In production, this should be in the app's data directory
+    PathBuf::from(".tokens")
 }
 
-/// Store a refresh token securely in the system keychain.
+/// Build a filename from source and user_id.
+fn build_filename(source: &str, user_id: &str) -> String {
+    format!("{}_{}_refresh.token", source, user_id)
+}
+
+/// Store a refresh token in the token storage directory.
 ///
 /// # Arguments
 /// * `source` - The source identifier (e.g., "spotify", "soundcloud")
@@ -47,13 +51,23 @@ fn build_key(source: &str, user_id: &str) -> String {
 /// store_refresh_token("spotify", "user123", "refresh_token_value")?;
 /// ```
 pub fn store_refresh_token(source: &str, user_id: &str, token: &str) -> Result<()> {
-    let key = build_key(source, user_id);
-    let entry = Entry::new(SERVICE_NAME, &key)?;
-    entry.set_password(token)?;
+    let token_dir = get_token_dir();
+    let filename = build_filename(source, user_id);
+    let path = token_dir.join(&filename);
+
+    log::info!("Storing refresh token to: {:?}", path);
+
+    // Create directory if it doesn't exist
+    fs::create_dir_all(&token_dir)?;
+
+    // Write token to file
+    fs::write(&path, token)?;
+
+    log::info!("Token stored successfully for {}/{}", source, user_id);
     Ok(())
 }
 
-/// Retrieve a refresh token from the system keychain.
+/// Retrieve a refresh token from the token storage directory.
 ///
 /// # Arguments
 /// * `source` - The source identifier (e.g., "spotify", "soundcloud")
@@ -62,25 +76,33 @@ pub fn store_refresh_token(source: &str, user_id: &str, token: &str) -> Result<(
 /// # Returns
 /// * `Ok(String)` with the refresh token if found
 /// * `Err(TokenStorageError::TokenNotFound)` if no token exists
-/// * `Err(TokenStorageError::KeyringError)` for other keyring errors
+/// * `Err(TokenStorageError::IoError)` for file system errors
 ///
 /// # Example
 /// ```ignore
 /// let token = get_refresh_token("spotify", "user123")?;
 /// ```
 pub fn get_refresh_token(source: &str, user_id: &str) -> Result<String> {
-    let key = build_key(source, user_id);
-    let entry = Entry::new(SERVICE_NAME, &key)?;
-    match entry.get_password() {
-        Ok(token) => Ok(token),
-        Err(keyring::Error::NoEntry) => {
-            Err(TokenStorageError::TokenNotFound(source.to_string(), user_id.to_string()))
-        }
-        Err(e) => Err(TokenStorageError::KeyringError(e)),
+    let token_dir = get_token_dir();
+    let filename = build_filename(source, user_id);
+    let path = token_dir.join(&filename);
+
+    log::debug!("Getting refresh token from: {:?}", path);
+
+    if !path.exists() {
+        log::debug!("Token file not found for {}/{}", source, user_id);
+        return Err(TokenStorageError::TokenNotFound(
+            source.to_string(),
+            user_id.to_string(),
+        ));
     }
+
+    let token = fs::read_to_string(&path)?;
+    log::debug!("Token retrieved for {}/{}", source, user_id);
+    Ok(token)
 }
 
-/// Delete a refresh token from the system keychain.
+/// Delete a refresh token from the token storage directory.
 ///
 /// # Arguments
 /// * `source` - The source identifier (e.g., "spotify", "soundcloud")
@@ -95,68 +117,51 @@ pub fn get_refresh_token(source: &str, user_id: &str) -> Result<String> {
 /// delete_token("spotify", "user123")?;
 /// ```
 pub fn delete_token(source: &str, user_id: &str) -> Result<()> {
-    let key = build_key(source, user_id);
-    let entry = Entry::new(SERVICE_NAME, &key)?;
-    match entry.delete_credential() {
-        Ok(()) => Ok(()),
-        Err(keyring::Error::NoEntry) => Ok(()), // Already deleted, not an error
-        Err(e) => Err(TokenStorageError::KeyringError(e)),
+    let token_dir = get_token_dir();
+    let filename = build_filename(source, user_id);
+    let path = token_dir.join(&filename);
+
+    log::info!("Deleting token at: {:?}", path);
+
+    if path.exists() {
+        fs::remove_file(&path)?;
+        log::info!("Token deleted for {}/{}", source, user_id);
+    } else {
+        log::debug!("Token file didn't exist for {}/{}", source, user_id);
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // Note: These tests use a test service name to avoid polluting the real keychain.
-    // On CI/headless systems, keyring may fail due to missing credential store.
-
-    /// Test service name to avoid polluting real credentials.
-    const TEST_SERVICE: &str = "com.musiclibrarymanager.test";
-
-    /// Helper to create test entries that don't pollute the real keychain.
-    fn test_entry(source: &str, user_id: &str) -> keyring::Result<Entry> {
-        let key = format!("{}_{}_refresh_test", source, user_id);
-        Entry::new(TEST_SERVICE, &key)
-    }
+    use tempfile::TempDir;
 
     #[test]
-    fn test_build_key() {
-        assert_eq!(build_key("spotify", "user123"), "spotify_user123_refresh");
+    fn test_build_filename() {
         assert_eq!(
-            build_key("soundcloud", "abc"),
-            "soundcloud_abc_refresh"
+            build_filename("spotify", "user123"),
+            "spotify_user123_refresh.token"
+        );
+        assert_eq!(
+            build_filename("soundcloud", "abc"),
+            "soundcloud_abc_refresh.token"
         );
     }
 
     #[test]
-    #[ignore] // Requires actual keychain access
     fn test_store_and_retrieve_token() {
-        let entry = test_entry("spotify", "test_user").unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let token_path = temp_dir.path().join("spotify_test_refresh.token");
 
         // Store
-        entry.set_password("test_refresh_token").unwrap();
+        fs::create_dir_all(temp_dir.path()).unwrap();
+        fs::write(&token_path, "test_refresh_token").unwrap();
 
         // Retrieve
-        let token = entry.get_password().unwrap();
+        let token = fs::read_to_string(&token_path).unwrap();
         assert_eq!(token, "test_refresh_token");
-
-        // Cleanup
-        entry.delete_credential().unwrap();
-    }
-
-    #[test]
-    #[ignore] // Requires actual keychain access
-    fn test_delete_nonexistent_token() {
-        let entry = test_entry("spotify", "nonexistent_user").unwrap();
-
-        // Delete should not fail for non-existent entry
-        let result = entry.delete_credential();
-        // NoEntry is acceptable
-        match result {
-            Ok(()) | Err(keyring::Error::NoEntry) => {}
-            Err(e) => panic!("Unexpected error: {:?}", e),
-        }
     }
 
     #[test]

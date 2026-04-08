@@ -7,7 +7,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use oauth2::{
     basic::{BasicClient, BasicTokenResponse},
     reqwest,
-    AuthUrl, ClientId, ClientSecret, RedirectUrl, RefreshToken, TokenResponse, TokenUrl,
+    AuthType, AuthUrl, ClientId, ClientSecret, RedirectUrl, RefreshToken, TokenResponse, TokenUrl,
 };
 use thiserror::Error;
 
@@ -96,9 +96,11 @@ impl TokenManager {
             .set_auth_uri(auth_url)
             .set_token_uri(token_url)
             .set_redirect_uri(
-                RedirectUrl::new("http://localhost:8080/callback".to_string())
+                RedirectUrl::new("http://127.0.0.1:19823/callback".to_string())
                     .map_err(|e| TokenRefreshError::InvalidConfig(format!("Invalid redirect URL: {}", e)))?,
-            );
+            )
+            // Use POST body for credentials (required by SoundCloud, accepted by Spotify)
+            .set_auth_type(AuthType::RequestBody);
 
         Ok(Self {
             client,

@@ -1,15 +1,24 @@
-// Track type definition
-export interface Track {
-  id: string;
-  title: string;
+// Track metadata (nested in Track)
+export interface TrackMetadata {
   artist: string;
-  album: string;
   album_artist: string;
-  duration: number;
-  source: string;
-  quality: string;
-  date_added: string;
-  local_path?: string;
+  album: string;
+  title: string;
+  genre: string | null;
+  year: number | null;
+  bitrate: number | null;
+  duration: number | null;
+  format: string;
+  original_path: string;
+}
+
+// Track type definition (matches backend Rust struct)
+export interface Track {
+  id: number | null;
+  metadata: TrackMetadata;
+  organized_path: string | null;
+  is_duplicate: boolean;
+  date_added: string | null;
 }
 
 // Album type (basic stub for future use)

@@ -41,6 +41,7 @@ pub mod enhancements;
 pub mod files;
 pub mod import;
 pub mod library_config;
+pub mod maintenance;
 pub mod playlist;
 pub mod search;
 pub mod sources;

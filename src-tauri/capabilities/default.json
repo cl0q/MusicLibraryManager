@@ -6,6 +6,11 @@
     "main"
   ],
   "permissions": [
-    "core:default"
+    "core:default",
+    "core:event:default",
+    "shell:allow-open",
+    "dialog:allow-open",
+    "deep-link:default",
+    "log:default"
   ]
 }

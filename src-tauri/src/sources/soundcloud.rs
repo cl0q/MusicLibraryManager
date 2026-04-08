@@ -16,7 +16,7 @@
 
 use chrono::{DateTime, TimeDelta, Utc};
 use oauth2::{
-    basic::BasicClient, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken,
+    basic::BasicClient, AuthType, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken,
     PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenResponse, TokenUrl,
 };
 use reqwest::Client;
@@ -28,9 +28,9 @@ use crate::auth::{token_refresh::TokenManager, token_storage};
 
 /// SoundCloud OAuth endpoints.
 const AUTH_URL: &str = "https://soundcloud.com/connect";
-const TOKEN_URL: &str = "https://api.soundcloud.com/oauth2/token";
+const TOKEN_URL: &str = "https://secure.soundcloud.com/oauth/token";
 
-/// SoundCloud API base URL.
+/// SoundCloud API base URL (v1).
 const API_BASE: &str = "https://api.soundcloud.com";
 
 /// Errors that can occur during SoundCloud operations.
@@ -244,7 +244,7 @@ impl SoundCloudClient {
                     .map_err(|e| SoundCloudError::ConfigError(format!("Invalid token URL: {}", e)))?,
             )
             .set_redirect_uri(
-                RedirectUrl::new("http://localhost:8080/callback".to_string())
+                RedirectUrl::new("http://127.0.0.1:19823/callback".to_string())
                     .map_err(|e| SoundCloudError::ConfigError(format!("Invalid redirect URL: {}", e)))?,
             );
 
@@ -299,9 +299,11 @@ impl SoundCloudClient {
                     .map_err(|e| SoundCloudError::ConfigError(format!("Invalid token URL: {}", e)))?,
             )
             .set_redirect_uri(
-                RedirectUrl::new("http://localhost:8080/callback".to_string())
+                RedirectUrl::new("http://127.0.0.1:19823/callback".to_string())
                     .map_err(|e| SoundCloudError::ConfigError(format!("Invalid redirect URL: {}", e)))?,
-            );
+            )
+            // SoundCloud requires client credentials in POST body, not HTTP Basic Auth
+            .set_auth_type(AuthType::RequestBody);
 
         // Create async HTTP client
         let http_client = oauth2::reqwest::Client::builder()
@@ -416,42 +418,54 @@ impl SoundCloudClient {
     pub async fn sync_likes(&mut self, user_id: &str, conn: &Connection) -> Result<usize> {
         self.ensure_token(user_id).await?;
 
-        // Get last sync timestamp from database
-        let last_sync = get_last_sync_timestamp(conn, user_id, "soundcloud")?
-            .unwrap_or_else(|| (Utc::now() - TimeDelta::days(365)).to_rfc3339());
-
         let mut added_count = 0;
-        let mut next_url = Some(format!("{}/me/favorites?limit=50", API_BASE));
+        // v1 /me/favorites returns flat tracks in liked-at order (most recently liked first).
+        // SC API doesn't expose the liked-at timestamp, so we derive synthetic timestamps
+        // from position to preserve correct ordering.
+        let base_time = Utc::now();
+        let mut global_index: i64 = 0;
+
+        let mut next_url = Some(format!(
+            "{}/me/favorites?limit=200&linked_partitioning=1",
+            API_BASE
+        ));
 
         while let Some(ref url) = next_url {
-            let response: SoundCloudCollection<SoundCloudLike> = self.api_get(url).await?;
+            log::info!("Fetching SoundCloud likes from: {}", url);
 
-            for like in response.collection {
-                // Parse the liked_at timestamp
-                let liked_at = DateTime::parse_from_rfc3339(&like.created_at)
-                    .map_err(|e| SoundCloudError::DateParseError(format!("{}: {}", e, like.created_at)))?;
+            let (tracks, pagination_next): (Vec<SoundCloudTrack>, Option<String>) =
+                match self.api_get::<SoundCloudCollection<SoundCloudTrack>>(url).await {
+                    Ok(collection) => {
+                        log::info!("Got collection with {} tracks", collection.collection.len());
+                        (collection.collection, collection.next_href)
+                    }
+                    Err(_) => {
+                        let tracks: Vec<SoundCloudTrack> = self.api_get(url).await?;
+                        log::info!("Got raw array with {} tracks", tracks.len());
+                        (tracks, None)
+                    }
+                };
 
-                // Only process tracks liked since last sync
-                if liked_at.to_rfc3339() > last_sync {
-                    // Insert track and source relationship into database
-                    insert_track_from_soundcloud(conn, &like.track, &like.created_at)?;
+            for track in tracks {
+                // Synthetic liked-at: most recently liked = base_time, older = earlier timestamps.
+                // 1-minute spacing preserves sort order.
+                let liked_at = base_time - TimeDelta::minutes(global_index);
+                let liked_at_str = liked_at.to_rfc3339();
+                global_index += 1;
+
+                if insert_track_from_soundcloud(conn, &track, &liked_at_str)? {
                     added_count += 1;
-                } else {
-                    // Since likes are ordered by date (newest first), stop when we hit old ones
-                    next_url = None;
-                    break;
                 }
             }
 
-            // Continue to next page if we haven't stopped
-            if next_url.is_some() {
-                next_url = response.next_href;
-            }
+            next_url = pagination_next;
+            log::info!("Next page: {:?}", next_url);
         }
 
-        // Update last sync timestamp
+        // Update last sync timestamp (for logging purposes, not filtering)
         set_last_sync_timestamp(conn, user_id, "soundcloud", &Utc::now().to_rfc3339())?;
 
+        log::info!("SoundCloud sync complete: {} new tracks added", added_count);
         Ok(added_count)
     }
 
@@ -524,6 +538,26 @@ impl SoundCloudClient {
     }
 }
 
+/// Parse SoundCloud's non-standard date format.
+///
+/// SoundCloud uses format: "2026/01/03 09:39:42 +0000"
+/// This is not RFC3339, so we need custom parsing.
+fn parse_soundcloud_date(date_str: &str) -> Result<DateTime<Utc>> {
+    // Try RFC3339 first (in case some responses use it)
+    if let Ok(dt) = DateTime::parse_from_rfc3339(date_str) {
+        return Ok(dt.with_timezone(&Utc));
+    }
+
+    // Parse SoundCloud format: "2026/01/03 09:39:42 +0000"
+    let parsed = chrono::NaiveDateTime::parse_from_str(
+        date_str.trim_end_matches(" +0000"),
+        "%Y/%m/%d %H:%M:%S",
+    )
+    .map_err(|e| SoundCloudError::DateParseError(format!("{}: {}", e, date_str)))?;
+
+    Ok(parsed.and_utc())
+}
+
 /// Get the last sync timestamp for a source.
 fn get_last_sync_timestamp(
     conn: &Connection,
@@ -559,6 +593,50 @@ fn set_last_sync_timestamp(
     Ok(())
 }
 
+/// Find an existing track by fuzzy title+artist similarity.
+///
+/// Uses a LIKE pre-filter to narrow candidates, then applies Jaro-Winkler
+/// similarity scoring (≥0.85 threshold). Returns the best match if found.
+fn find_similar_track(
+    conn: &Connection,
+    title: &str,
+    artist: &str,
+) -> Result<Option<i64>> {
+    use crate::dedup::calculate_similarity;
+
+    let title_prefix = &title[..title.len().min(10)];
+    let artist_prefix = &artist[..artist.len().min(10)];
+
+    let mut stmt = conn.prepare(
+        "SELECT id, title, artist FROM tracks
+         WHERE title LIKE ? OR artist LIKE ?
+         LIMIT 50",
+    )?;
+
+    let candidates = stmt.query_map(
+        rusqlite::params![
+            format!("%{title_prefix}%"),
+            format!("%{artist_prefix}%"),
+        ],
+        |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        },
+    )?;
+
+    let mut best: Option<(i64, f64)> = None;
+    for candidate in candidates {
+        let (id, db_title, db_artist) = candidate?;
+        let score = calculate_similarity(title, artist, &db_title, &db_artist);
+        if score >= 0.85 {
+            if best.is_none() || score > best.unwrap().1 {
+                best = Some((id, score));
+            }
+        }
+    }
+
+    Ok(best.map(|(id, _)| id))
+}
+
 /// Insert a track from SoundCloud into the database.
 ///
 /// Creates a track record and track_sources relationship.
@@ -582,8 +660,61 @@ fn insert_track_from_soundcloud(
         )
         .optional()?;
 
-    if existing.is_some() {
-        // Track already exists, skip
+    if let Some(track_id) = existing {
+        // Update date_added to keep ordering consistent across syncs
+        conn.execute(
+            "UPDATE tracks SET date_added = ? WHERE id = ?",
+            rusqlite::params![added_at, track_id],
+        )?;
+        return Ok(false);
+    }
+
+    // Also check by original_path (permalink_url) — track may exist from a download
+    // but its track_sources entry was cleaned up by migration
+    let existing_by_path: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM tracks WHERE original_path = ?",
+            [&track.permalink_url],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    if let Some(track_id) = existing_by_path {
+        // Re-create the track_sources link and update date_added
+        conn.execute(
+            "UPDATE tracks SET date_added = ? WHERE id = ?",
+            rusqlite::params![added_at, track_id],
+        )?;
+        let source_id: i64 = conn.query_row(
+            "SELECT id FROM sources WHERE name = 'soundcloud' LIMIT 1",
+            [],
+            |row| row.get(0),
+        )?;
+        conn.execute(
+            "INSERT OR IGNORE INTO track_sources (track_id, source_id, external_id, added_at)
+             VALUES (?, ?, ?, ?)",
+            rusqlite::params![track_id, source_id, external_id, added_at],
+        )?;
+        return Ok(false);
+    }
+
+    // Check by similarity — catches local tracks imported from disk whose
+    // original_path is a filesystem path (not a SoundCloud permalink)
+    if let Some(track_id) = find_similar_track(conn, &track.title, &track.user.username)? {
+        conn.execute(
+            "INSERT OR IGNORE INTO sources (name, user_id, enabled) VALUES ('soundcloud', 'default', 1)",
+            [],
+        )?;
+        let source_id: i64 = conn.query_row(
+            "SELECT id FROM sources WHERE name = 'soundcloud' LIMIT 1",
+            [],
+            |row| row.get(0),
+        )?;
+        conn.execute(
+            "INSERT OR IGNORE INTO track_sources (track_id, source_id, external_id, added_at)
+             VALUES (?, ?, ?, ?)",
+            rusqlite::params![track_id, source_id, external_id, added_at],
+        )?;
         return Ok(false);
     }
 
@@ -592,8 +723,8 @@ fn insert_track_from_soundcloud(
     let duration_secs = track.duration / 1000; // Convert from ms to seconds
 
     conn.execute(
-        "INSERT INTO tracks (artist, album_artist, album, title, genre, duration, format, original_path)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tracks (artist, album_artist, album, title, genre, duration, format, original_path, date_added)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         rusqlite::params![
             track.user.username,
             track.user.username,
@@ -603,6 +734,7 @@ fn insert_track_from_soundcloud(
             duration_secs as i64,
             "soundcloud", // Format indicates streaming source
             track.permalink_url,
+            added_at, // Use SoundCloud "liked at" timestamp
         ],
     )?;
 
@@ -668,34 +800,7 @@ fn find_or_create_soundcloud_track(
     }
 
     // Check for duplicate by similarity
-    use crate::dedup::calculate_similarity;
-
-    let similar: Option<i64> = conn
-        .query_row(
-            "SELECT id, title, artist FROM tracks
-             WHERE title LIKE ? OR artist LIKE ?
-             LIMIT 50",
-            rusqlite::params![
-                format!("%{}%", &track.title[..track.title.len().min(10)]),
-                format!("%{}%", &track.user.username[..track.user.username.len().min(10)])
-            ],
-            |row| {
-                let id: i64 = row.get(0)?;
-                let title: String = row.get(1)?;
-                let artist: String = row.get(2)?;
-
-                let similarity = calculate_similarity(&track.title, &track.user.username, &title, &artist);
-                if similarity >= 0.85 {
-                    Ok(Some(id))
-                } else {
-                    Ok(None)
-                }
-            },
-        )
-        .optional()?
-        .flatten();
-
-    if let Some(track_id) = similar {
+    if let Some(track_id) = find_similar_track(conn, &track.title, &track.user.username)? {
         // Found similar track, create track_sources relationship
         conn.execute(
             "INSERT OR IGNORE INTO track_sources (track_id, source_id, external_id, added_at)
@@ -709,8 +814,8 @@ fn find_or_create_soundcloud_track(
     let duration_secs = track.duration / 1000;
 
     conn.execute(
-        "INSERT INTO tracks (artist, album_artist, album, title, genre, duration, format, original_path)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tracks (artist, album_artist, album, title, genre, duration, format, original_path, date_added)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         rusqlite::params![
             track.user.username,
             track.user.username,
@@ -720,6 +825,7 @@ fn find_or_create_soundcloud_track(
             duration_secs as i64,
             "soundcloud",
             track.permalink_url,
+            added_at, // Use SoundCloud "liked at" timestamp
         ],
     )?;
 
@@ -840,34 +946,31 @@ pub async fn import_soundcloud_liked_songs(
         .unwrap_or_else(|| (chrono::Utc::now() - chrono::TimeDelta::days(365)).to_rfc3339());
 
     let mut added_count = 0;
-    let mut next_url = Some(format!("{}/me/favorites?limit=50", API_BASE));
+    let base_time = Utc::now();
+    let mut global_index: i64 = 0;
+    let mut next_url = Some(format!("{}/me/favorites?limit=50&linked_partitioning=1", API_BASE));
 
     while let Some(ref url) = next_url {
-        let response: SoundCloudCollection<SoundCloudLike> = client.api_get(url).await?;
+        let response: SoundCloudCollection<SoundCloudTrack> = client.api_get(url).await?;
 
-        for like in response.collection {
-            let liked_at = chrono::DateTime::parse_from_rfc3339(&like.created_at)
-                .map_err(|e| SoundCloudError::DateParseError(format!("{}: {}", e, like.created_at)))?;
+        for track in response.collection {
+            let liked_at = base_time - TimeDelta::minutes(global_index);
+            let liked_at_str = liked_at.to_rfc3339();
+            global_index += 1;
 
-            // Only process tracks liked since last sync
-            if liked_at.to_rfc3339() > last_sync {
-                let track_id = find_or_create_soundcloud_track(conn, &like.track, source_id, &like.created_at)?;
+            // Skip tracks older than last sync (use index-based cutoff)
+            // Since we can't get real liked-at timestamps, just process all tracks
+            // and rely on find_or_create deduplication
+            let track_id = find_or_create_soundcloud_track(conn, &track, source_id, &liked_at_str)?;
 
-                // Add to liked playlist
-                use crate::database::playlist::add_liked_track;
-                add_liked_track(conn, playlist_id, track_id, &like.created_at)?;
-                added_count += 1;
-            } else {
-                // Stop when we hit old tracks
-                next_url = None;
-                break;
-            }
+            // Add to liked playlist
+            use crate::database::playlist::add_liked_track;
+            add_liked_track(conn, playlist_id, track_id, &liked_at_str)?;
+            added_count += 1;
         }
 
-        // Continue to next page if we haven't stopped
-        if next_url.is_some() {
-            next_url = response.next_href;
-        }
+        // Continue to next page
+        next_url = response.next_href;
     }
 
     // Update last sync timestamp
@@ -949,7 +1052,7 @@ mod tests {
             .set_client_secret(ClientSecret::new("test_client_secret".to_string()))
             .set_auth_uri(AuthUrl::new(AUTH_URL.to_string()).unwrap())
             .set_token_uri(TokenUrl::new(TOKEN_URL.to_string()).unwrap())
-            .set_redirect_uri(RedirectUrl::new("http://localhost:8080/callback".to_string()).unwrap());
+            .set_redirect_uri(RedirectUrl::new("http://127.0.0.1:19823/callback".to_string()).unwrap());
 
         let (pkce_challenge, _pkce_verifier) = PkceCodeChallenge::new_random_sha256();
 
@@ -1058,12 +1161,12 @@ mod tests {
                     }
                 }
             ],
-            "next_href": "https://api.soundcloud.com/me/favorites?limit=50&offset=50"
+            "next_href": "https://api-v2.soundcloud.com/me/track_likes?limit=50&offset=50"
         }"#;
 
         let response: SoundCloudCollection<SoundCloudLike> = serde_json::from_str(json).unwrap();
         assert_eq!(response.collection.len(), 1);
-        assert_eq!(response.next_href, Some("https://api.soundcloud.com/me/favorites?limit=50&offset=50".to_string()));
+        assert_eq!(response.next_href, Some("https://api-v2.soundcloud.com/me/track_likes?limit=50&offset=50".to_string()));
     }
 
     #[test]
@@ -1174,6 +1277,68 @@ mod tests {
 
         let count = client.sync_likes("test_user", &conn).await.unwrap();
         println!("Synced {} liked tracks", count);
+    }
+
+    #[tokio::test]
+    #[ignore] // Requires real DB + SoundCloud credentials + app NOT running (shared refresh token)
+    async fn test_sync_likes_ordering_e2e() {
+        // Uses real DB and token to verify sync produces correct liked-at ordering.
+        // Run with: cargo test test_sync_likes_ordering_e2e -- --ignored --nocapture
+        // NOTE: App must be closed first — SC rotates refresh tokens on use.
+        dotenvy::dotenv().ok();
+
+        let db_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("music_library.db");
+        if !db_path.exists() {
+            panic!("No music_library.db found at {:?}", db_path);
+        }
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        crate::database::schema::initialize_schema(&conn).unwrap();
+
+        let mut client = SoundCloudClient::new().unwrap();
+        client.ensure_token("default").await.unwrap();
+
+        let count = client.sync_likes("default", &conn).await.unwrap();
+        println!("Synced {} new liked tracks", count);
+
+        // Verify ordering: date_added should be DESC (most recently liked first)
+        let mut stmt = conn
+            .prepare(
+                "SELECT t.title, t.date_added FROM tracks t
+                 JOIN track_sources ts ON ts.track_id = t.id
+                 JOIN sources s ON ts.source_id = s.id
+                 WHERE s.name = 'soundcloud' AND t.date_added IS NOT NULL
+                 ORDER BY t.date_added DESC
+                 LIMIT 10",
+            )
+            .unwrap();
+        let rows: Vec<(String, String)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        println!("\nTop 10 liked tracks (should match SoundCloud likes page order):");
+        for (i, (title, date)) in rows.iter().enumerate() {
+            println!("  {}. {} ({})", i + 1, title, date);
+        }
+
+        // Verify descending order
+        for window in rows.windows(2) {
+            assert!(
+                window[0].1 >= window[1].1,
+                "date_added not in DESC order: {} >= {} failed",
+                window[0].1,
+                window[1].1
+            );
+        }
+
+        // First track should match SoundCloud likes page
+        assert!(
+            !rows.is_empty(),
+            "No SoundCloud tracks found after sync"
+        );
+        println!("\nFirst liked track: {}", rows[0].0);
+        println!("Expected (from SC page): Stereo Players vs Cieśla & Winamp & DJ PitorS - Salam Aleikum v2 (Bagrol Mashup)");
     }
 
     #[test]

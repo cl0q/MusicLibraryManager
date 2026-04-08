@@ -11,7 +11,10 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    host: '0.0.0.0',  // Allow external access for OAuth callbacks
   },
+  // Single-page application mode - serves index.html for all routes
+  appType: 'spa',
   // Tauri production build
   build: {
     target: ['es2021', 'chrome100', 'safari13'],

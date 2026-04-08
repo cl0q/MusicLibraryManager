@@ -177,10 +177,13 @@ pub fn run() {
             commands::sync::remove_playlist_from_profile,
             commands::sync::remove_track_from_profile,
             commands::sync::get_profile_playlists,
+            commands::sync::update_sync_profile_settings,
             commands::sync::detect_rockbox_devices_cmd,
             commands::sync::preview_sync_cmd,
             commands::sync::execute_sync_cmd,
+            commands::sync::clean_sync_cmd,
             commands::sync::get_last_sync_time,
+            commands::sync::get_cached_track_ids,
             commands::enhancements::fingerprint_library_cmd,
             commands::enhancements::fetch_artwork_cmd,
             commands::enhancements::analyze_replaygain_cmd,
@@ -196,6 +199,12 @@ pub fn run() {
             commands::library_config::check_library_connection,
             commands::library_config::get_library_mount_state,
             commands::library_config::reveal_in_file_manager,
+            commands::library_config::get_app_setting,
+            commands::library_config::set_app_setting,
+            commands::maintenance::reindex_search,
+            commands::maintenance::rescan_metadata,
+            commands::maintenance::find_orphaned_tracks,
+            commands::maintenance::purge_orphaned_tracks,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

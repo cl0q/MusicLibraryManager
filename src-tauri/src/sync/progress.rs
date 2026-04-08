@@ -70,6 +70,7 @@ pub fn compute_sync_preview(
     profile: &SyncProfile,
     cache: &TranscodeCache,
     device_space: Option<u64>,
+    library_root: &Path,
 ) -> Result<SyncPreview> {
     // 1. Get all track IDs in profile via profile.get_all_track_ids()
     let profile_track_ids = profile.get_all_track_ids(conn)?;
@@ -89,7 +90,7 @@ pub fn compute_sync_preview(
 
             if cache_path.exists() {
                 let size = std::fs::metadata(&cache_path)?.len();
-                let dest_path = cache.build_profile_path(&profile.output_folder, &track)?;
+                let dest_path = cache.build_profile_path(&profile.output_folder, &track, library_root)?;
 
                 files_to_add.push(FilePreview {
                     track_id: *track_id,
@@ -112,12 +113,11 @@ pub fn compute_sync_preview(
 
     for track_id in to_remove {
         if let Ok(track) = get_track(conn, *track_id) {
-            let relative_path = format!(
-                "{}/{}/{}.m4a",
-                track.metadata.album_artist,
-                track.metadata.album,
-                track.metadata.title
-            );
+            let dest_path = cache.build_profile_path(&profile.output_folder, &track, library_root)?;
+            let relative_path = dest_path.strip_prefix(&profile.output_folder)
+                .unwrap_or(&dest_path)
+                .display()
+                .to_string();
             files_to_remove.push(relative_path);
 
             // Estimate size from sync_state if available
@@ -169,6 +169,7 @@ pub fn execute_sync(
     profile: &SyncProfile,
     cache: &TranscodeCache,
     preview: &SyncPreview,
+    library_root: &Path,
 ) -> Result<SyncResult> {
     // Block if insufficient space
     if !preview.has_sufficient_space {
@@ -205,7 +206,7 @@ pub fn execute_sync(
             continue;
         }
 
-        let dest_path = match cache.build_profile_path(&profile.output_folder, &track) {
+        let dest_path = match cache.build_profile_path(&profile.output_folder, &track, library_root) {
             Ok(p) => p,
             Err(e) => {
                 failed.push((file.track_id, format!("Failed to build path: {}", e)));
@@ -427,7 +428,7 @@ fn get_synced_file_size(conn: &Connection, profile_id: i64, track_id: i64) -> Re
 fn get_track(conn: &Connection, track_id: i64) -> Result<Track> {
     let mut stmt = conn.prepare(
         "SELECT id, artist, album_artist, album, title, genre, year, bitrate, duration, format,
-                original_path, COALESCE(organized_path, '') as organized_path, is_duplicate, date_added
+                original_path, organized_path, is_duplicate, date_added
          FROM tracks WHERE id = ?",
     )?;
 
@@ -509,6 +510,8 @@ mod tests {
     use std::path::PathBuf;
     use tempfile::TempDir;
 
+    const TEST_LIBRARY_ROOT: &str = "/test_library";
+
     fn create_test_track(conn: &Connection, title: &str) -> i64 {
         let path = format!("/test/{}.flac", title.replace(" ", "_"));
         conn.execute(
@@ -548,7 +551,7 @@ mod tests {
         let profile = crate::sync::profile::get_sync_profile(&conn, profile_id).unwrap();
 
         // Compute preview
-        let preview = compute_sync_preview(&conn, &profile, &cache, Some(100_000_000)).unwrap();
+        let preview = compute_sync_preview(&conn, &profile, &cache, Some(100_000_000), Path::new(TEST_LIBRARY_ROOT)).unwrap();
 
         // Empty sync_state = all tracks need sync
         assert_eq!(preview.files_to_add.len(), 1);
@@ -599,7 +602,7 @@ mod tests {
         let profile = crate::sync::profile::get_sync_profile(&conn, profile_id).unwrap();
 
         // Compute preview
-        let preview = compute_sync_preview(&conn, &profile, &cache, Some(100_000_000)).unwrap();
+        let preview = compute_sync_preview(&conn, &profile, &cache, Some(100_000_000), Path::new(TEST_LIBRARY_ROOT)).unwrap();
 
         // Only track2 should need sync (track1 already synced)
         assert_eq!(preview.files_to_add.len(), 1);
@@ -635,7 +638,7 @@ mod tests {
         let profile = crate::sync::profile::get_sync_profile(&conn, profile_id).unwrap();
 
         // Compute preview with insufficient space (less than file size + 50MB buffer)
-        let preview = compute_sync_preview(&conn, &profile, &cache, Some(1_000_000)).unwrap();
+        let preview = compute_sync_preview(&conn, &profile, &cache, Some(1_000_000), Path::new(TEST_LIBRARY_ROOT)).unwrap();
 
         // Should have insufficient space
         assert!(!preview.has_sufficient_space);
@@ -667,7 +670,7 @@ mod tests {
         let cache = TranscodeCache::new(temp_dir.path().join("cache")).unwrap();
 
         // Should fail with insufficient space
-        let result = execute_sync(&conn, &profile, &cache, &preview);
+        let result = execute_sync(&conn, &profile, &cache, &preview, Path::new(TEST_LIBRARY_ROOT));
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Insufficient"));
     }
@@ -700,10 +703,10 @@ mod tests {
         let profile = crate::sync::profile::get_sync_profile(&conn, profile_id).unwrap();
 
         // Compute preview
-        let preview = compute_sync_preview(&conn, &profile, &cache, Some(100_000_000)).unwrap();
+        let preview = compute_sync_preview(&conn, &profile, &cache, Some(100_000_000), Path::new(TEST_LIBRARY_ROOT)).unwrap();
 
         // Execute sync
-        let result = execute_sync(&conn, &profile, &cache, &preview).unwrap();
+        let result = execute_sync(&conn, &profile, &cache, &preview, Path::new(TEST_LIBRARY_ROOT)).unwrap();
 
         // Should have synced 1 file
         assert_eq!(result.synced_count, 1);
@@ -711,7 +714,7 @@ mod tests {
 
         // Verify file was linked to profile folder
         let track = get_track(&conn, track_id).unwrap();
-        let dest_path = cache.build_profile_path(&profile.output_folder, &track).unwrap();
+        let dest_path = cache.build_profile_path(&profile.output_folder, &track, Path::new(TEST_LIBRARY_ROOT)).unwrap();
         assert!(dest_path.exists());
     }
 
@@ -743,8 +746,8 @@ mod tests {
         let profile = crate::sync::profile::get_sync_profile(&conn, profile_id).unwrap();
 
         // Compute and execute sync
-        let preview = compute_sync_preview(&conn, &profile, &cache, Some(100_000_000)).unwrap();
-        execute_sync(&conn, &profile, &cache, &preview).unwrap();
+        let preview = compute_sync_preview(&conn, &profile, &cache, Some(100_000_000), Path::new(TEST_LIBRARY_ROOT)).unwrap();
+        execute_sync(&conn, &profile, &cache, &preview, Path::new(TEST_LIBRARY_ROOT)).unwrap();
 
         // Verify sync_state was updated
         let synced = get_synced_tracks(&conn, profile_id).unwrap();

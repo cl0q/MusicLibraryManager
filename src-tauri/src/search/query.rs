@@ -165,7 +165,7 @@ pub fn get_library_tracks_only(conn: &Connection) -> DbResult<Vec<Track>> {
     let mut stmt = conn.prepare(
         "SELECT id, artist, album_artist, album, title, genre, year, bitrate, duration, format, original_path, organized_path, is_duplicate, date_added
          FROM tracks
-         WHERE organized_path IS NOT NULL
+         WHERE organized_path IS NOT NULL AND organized_path != ''
          ORDER BY date_added DESC",
     )?;
 
@@ -212,12 +212,10 @@ pub fn get_library_tracks_only(conn: &Connection) -> DbResult<Vec<Track>> {
 /// * `Err(DatabaseError)` - If database query failed
 pub fn get_remote_tracks_only(conn: &Connection) -> DbResult<Vec<Track>> {
     let mut stmt = conn.prepare(
-        // Use COALESCE to map NULL organized_path → '' so rusqlite can deserialize it
-        // into Track.organized_path: String. Remote tracks will have organized_path == "".
-        "SELECT DISTINCT t.id, t.artist, t.album_artist, t.album, t.title, t.genre, t.year, t.bitrate, t.duration, t.format, t.original_path, COALESCE(t.organized_path, '') as organized_path, t.is_duplicate, t.date_added
+        "SELECT DISTINCT t.id, t.artist, t.album_artist, t.album, t.title, t.genre, t.year, t.bitrate, t.duration, t.format, t.original_path, t.organized_path, t.is_duplicate, t.date_added
          FROM tracks t
          INNER JOIN track_sources ts ON t.id = ts.track_id
-         WHERE t.organized_path IS NULL
+         WHERE (t.organized_path IS NULL OR t.organized_path = '')
          ORDER BY t.date_added DESC",
     )?;
 

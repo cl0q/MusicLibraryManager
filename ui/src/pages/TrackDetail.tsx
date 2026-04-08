@@ -16,25 +16,24 @@ export default function TrackDetail() {
     const loadTrack = async () => {
       if (!trackId) {
         toast.error("No track ID provided");
-        navigate("/library");
+        navigate("/");
         return;
       }
 
       try {
-        // Search for track by ID using search_library
         const tracks = await search_library(trackId);
-        const foundTrack = tracks.find((t) => t.id === trackId);
+        const foundTrack = tracks.find((t) => t.id === Number(trackId));
 
         if (!foundTrack) {
           toast.error("Track not found");
-          navigate("/library");
+          navigate("/");
           return;
         }
 
         setTrack(foundTrack);
       } catch (error) {
         toast.error(`Failed to load track: ${error}`);
-        navigate("/library");
+        navigate("/");
       } finally {
         setLoading(false);
       }
@@ -45,47 +44,47 @@ export default function TrackDetail() {
 
   if (loading) {
     return (
-      <div className="p-6">
-        <p className="text-gray-600 dark:text-gray-400">Loading track...</p>
+      <div className="flex items-center justify-center h-full">
+        <span className="text-sm text-ink-muted">Loading...</span>
       </div>
     );
   }
 
   if (!track) {
     return (
-      <div className="p-6">
-        <p className="text-gray-600 dark:text-gray-400">Track not found</p>
+      <div className="flex items-center justify-center h-full">
+        <span className="text-sm text-ink-muted">Track not found</span>
       </div>
     );
   }
 
   return (
-    <div className="p-6">
-      <div className="mb-6">
-        <button
-          onClick={() => navigate("/library")}
-          className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
-        >
-          ← Back to Library
-        </button>
+    <div className="p-4 space-y-4">
+      <button
+        onClick={() => navigate("/")}
+        className="text-xs text-accent hover:text-accent-bright font-medium transition-colors"
+      >
+        ← Back to Library
+      </button>
+
+      <div>
+        <h1 className="text-lg font-semibold text-ink">{track.metadata.title}</h1>
+        <p className="text-sm text-ink-secondary">{track.metadata.artist}</p>
       </div>
 
-      <h1 className="text-3xl font-bold mb-6 text-gray-900 dark:text-white">
-        {track.title}
-      </h1>
+      <MetadataPanel track={track} />
 
-      <div className="space-y-6">
-        <MetadataPanel track={track} />
-        {track.local_path && <WaveformView audioUrl={track.local_path} />}
-        {!track.local_path && (
-          <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
-            <p className="text-yellow-800 dark:text-yellow-200">
-              This track has not been downloaded yet. Waveform visualization is
-              only available for downloaded tracks.
-            </p>
-          </div>
-        )}
-      </div>
+      {track.metadata.original_path && (
+        <WaveformView audioUrl={track.metadata.original_path} />
+      )}
+
+      {!track.metadata.original_path && (
+        <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+          <p className="text-xs text-amber-400">
+            Track not downloaded. Waveform is only available for local files.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

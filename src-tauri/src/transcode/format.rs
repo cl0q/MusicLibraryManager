@@ -77,13 +77,26 @@ pub fn detect_format(file_path: &Path) -> Result<AudioFormat> {
     let codec = codec_params.codec;
     let sample_rate = codec_params.sample_rate;
 
-    // Calculate bitrate from bits_per_coded_sample * sample_rate * channels (if available)
+    // Calculate bitrate: prefer bits_per_coded_sample for lossless,
+    // fall back to file-size estimation for lossy (MP3 etc. don't report bits_per_coded_sample)
     let bitrate = if let (Some(bits), Some(rate), Some(channels)) = (
         codec_params.bits_per_coded_sample,
         codec_params.sample_rate,
         codec_params.channels,
     ) {
         Some((bits as u64) * (rate as u64) * (channels.count() as u64))
+    } else if let (Ok(file_meta), Some(n_frames), Some(rate)) = (
+        std::fs::metadata(file_path),
+        codec_params.n_frames,
+        codec_params.sample_rate,
+    ) {
+        // Estimate bitrate from file size and duration
+        let duration_secs = n_frames as f64 / rate as f64;
+        if duration_secs > 0.0 {
+            Some((file_meta.len() as f64 * 8.0 / duration_secs) as u64)
+        } else {
+            None
+        }
     } else {
         None
     };

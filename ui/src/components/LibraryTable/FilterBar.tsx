@@ -12,23 +12,22 @@ export default function FilterBar({
   loading = false,
 }: FilterBarProps) {
   return (
-    <div className="flex items-center gap-4 mb-4">
+    <div className="flex items-center gap-3">
       <div className="flex-1 relative">
         <input
           type="text"
-          placeholder="Search library..."
+          placeholder="Search tracks..."
           value={value}
           onChange={(e) => onChange(e.target.value)}
           disabled={loading}
-          className="w-full px-4 py-2 pl-10 border border-gray-300 dark:border-gray-600 rounded-lg
-                     bg-white dark:bg-gray-800
-                     text-gray-900 dark:text-white
-                     placeholder-gray-500 dark:placeholder-gray-400
-                     focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400
-                     disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full h-8 px-3 pl-8 text-[13px] bg-raised border border-edge rounded
+                     text-ink placeholder-ink-muted
+                     focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20
+                     disabled:opacity-50 disabled:cursor-not-allowed
+                     transition-colors"
         />
         <svg
-          className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400"
+          className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-muted"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -41,15 +40,9 @@ export default function FilterBar({
           />
         </svg>
       </div>
-      <div className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
-        {loading ? (
-          "Loading..."
-        ) : (
-          <>
-            {trackCount} {trackCount === 1 ? "track" : "tracks"}
-          </>
-        )}
-      </div>
+      <span className="text-xs text-ink-muted tabular-nums whitespace-nowrap">
+        {loading ? "..." : `${trackCount.toLocaleString()} tracks`}
+      </span>
     </div>
   );
 }

@@ -1,8 +1,11 @@
+use crate::auth::token_storage;
 use crate::download::client::HttpClient;
 use anyhow::{anyhow, Context, Result};
 use futures_util::StreamExt;
+use reqwest::header::{HeaderMap, HeaderValue, COOKIE};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 
@@ -52,34 +55,165 @@ pub enum DownloadResult {
     NotFound,
 }
 
-/// Client for DAB Music API (dab.yeet.su)
+/// DAB login request body
+#[derive(Serialize)]
+struct DabLoginRequest {
+    email: String,
+    password: String,
+}
+
+const DAB_TOKEN_SOURCE: &str = "dab";
+const DAB_TOKEN_USER: &str = "default";
+
+/// Client for DAB Music API (dabmusic.xyz / dab.yeet.su)
 ///
-/// Two-step download flow:
-/// 1. Search by artist+title to get DAB track ID
-/// 2. Get stream URL via /api/stream?trackId=... then download the FLAC
+/// Authentication: cookie-based JWT session.
+/// Login via POST /api/auth/login → session cookie → pass on all requests.
+///
+/// Download flow:
+/// 1. Authenticate (login or use stored session)
+/// 2. Search by artist+title to get DAB track ID
+/// 3. Get stream URL via /api/stream?trackId=...
+/// 4. Download FLAC from CDN
 pub struct DabClient {
     client: HttpClient,
     base_url: String,
+    /// Cached session token (avoids re-reading from disk on every request)
+    session_token: Mutex<Option<String>>,
 }
 
 impl DabClient {
-    /// Create a new DAB API client
+    /// Create a new DAB API client, loading any stored session token
     pub fn new() -> Result<Self> {
+        let token = token_storage::get_refresh_token(DAB_TOKEN_SOURCE, DAB_TOKEN_USER).ok();
+        if token.is_some() {
+            log::info!("DAB: loaded stored session token");
+        }
+
         Ok(Self {
             client: HttpClient::new()?,
             base_url: "https://dab.yeet.su/api".to_string(),
+            session_token: Mutex::new(token),
         })
     }
 
-    /// Search for tracks by query string
+    /// Login to DAB with email/password and store the session token.
     ///
-    /// Returns a list of matching tracks with metadata
+    /// Called from Tauri command or automatically on 401.
+    pub async fn login(&self, email: &str, password: &str) -> Result<()> {
+        let url = format!("{}/auth/login", self.base_url);
+        let body = DabLoginRequest {
+            email: email.to_string(),
+            password: password.to_string(),
+        };
+
+        let response = self.client.post_json(&url, &body).await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body_text = response.text().await.unwrap_or_default();
+            anyhow::bail!("DAB login failed ({}): {}", status, body_text);
+        }
+
+        // Extract session cookie from Set-Cookie header
+        let session = response
+            .cookies()
+            .find(|c| c.name() == "session")
+            .map(|c| c.value().to_string())
+            .ok_or_else(|| anyhow!("DAB login succeeded but no session cookie returned"))?;
+
+        // Store token persistently
+        token_storage::store_refresh_token(DAB_TOKEN_SOURCE, DAB_TOKEN_USER, &session)?;
+
+        // Cache in memory
+        *self.session_token.lock().unwrap() = Some(session);
+
+        log::info!("DAB: logged in successfully");
+        Ok(())
+    }
+
+    /// Try to login using env vars DAB_EMAIL and DAB_PASSWORD.
+    /// Returns Ok(false) if env vars not set (not an error — user may login via UI).
+    pub async fn try_login_from_env(&self) -> Result<bool> {
+        let email = std::env::var("DAB_EMAIL").ok();
+        let password = std::env::var("DAB_PASSWORD").ok();
+
+        match (email, password) {
+            (Some(e), Some(p)) if !e.is_empty() && !p.is_empty() => {
+                self.login(&e, &p).await?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    /// Check if we have a stored session token
+    pub fn is_authenticated(&self) -> bool {
+        self.session_token.lock().unwrap().is_some()
+    }
+
+    /// Clear stored session (logout)
+    pub fn logout(&self) -> Result<()> {
+        *self.session_token.lock().unwrap() = None;
+        let _ = token_storage::delete_token(DAB_TOKEN_SOURCE, DAB_TOKEN_USER);
+        log::info!("DAB: logged out");
+        Ok(())
+    }
+
+    /// Build auth headers with the session cookie
+    fn auth_headers(&self) -> Option<HeaderMap> {
+        let token = self.session_token.lock().unwrap();
+        token.as_ref().map(|t| {
+            let mut headers = HeaderMap::new();
+            let cookie_val = format!("session={}", t);
+            if let Ok(val) = HeaderValue::from_str(&cookie_val) {
+                headers.insert(COOKIE, val);
+            }
+            headers
+        })
+    }
+
+    /// Make an authenticated GET request. On 401, try re-login from env then retry once.
+    async fn authed_get(&self, url: &str) -> Result<reqwest::Response> {
+        // If not authenticated at all, try env login first
+        if !self.is_authenticated() {
+            let _ = self.try_login_from_env().await;
+        }
+
+        let headers = self.auth_headers();
+        let response = self
+            .client
+            .get_with_retry_and_headers(url, headers.as_ref())
+            .await;
+
+        match response {
+            Ok(r) => Ok(r),
+            Err(e) => {
+                // Check if any error in the chain mentions 401
+                let err_str = format!("{:#}", e);
+                if err_str.contains("401") || err_str.contains("Unauthorized") {
+                    log::warn!("DAB: 401 — session expired, attempting re-login");
+                    if self.try_login_from_env().await.unwrap_or(false) {
+                        let headers = self.auth_headers();
+                        self.client
+                            .get_with_retry_and_headers(url, headers.as_ref())
+                            .await
+                    } else {
+                        Err(anyhow!("DAB: authentication required — login via Settings or set DAB_EMAIL/DAB_PASSWORD"))
+                    }
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    /// Search for tracks by query string
     pub async fn search_track(&self, query: &str) -> Result<Vec<DabTrack>> {
         let url = format!("{}/search?q={}", self.base_url, urlencoding::encode(query));
 
         let response = self
-            .client
-            .get_with_retry(&url)
+            .authed_get(&url)
             .await
             .context("Failed to search DAB API")?;
 
@@ -96,14 +230,11 @@ impl DabClient {
     }
 
     /// Get the stream URL for a DAB track ID
-    ///
-    /// Returns the direct FLAC download URL from Qobuz CDN
     async fn get_stream_url(&self, dab_track_id: u64) -> Result<String> {
         let url = format!("{}/stream?trackId={}", self.base_url, dab_track_id);
 
         let response = self
-            .client
-            .get_with_retry(&url)
+            .authed_get(&url)
             .await
             .context("Failed to get DAB stream URL")?;
 
@@ -334,6 +465,12 @@ impl Default for DabClient {
     fn default() -> Self {
         Self::new().expect("Failed to create default DAB client")
     }
+}
+
+/// Check if DAB credentials are configured (either stored token or env vars)
+pub fn is_dab_configured() -> bool {
+    token_storage::get_refresh_token(DAB_TOKEN_SOURCE, DAB_TOKEN_USER).is_ok()
+        || (std::env::var("DAB_EMAIL").is_ok() && std::env::var("DAB_PASSWORD").is_ok())
 }
 
 #[cfg(test)]

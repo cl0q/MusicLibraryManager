@@ -1,13 +1,107 @@
 @import "tailwindcss";
 
+@theme {
+  /* Backgrounds */
+  --color-base: #0c0c12;
+  --color-surface: #14141c;
+  --color-raised: #1c1c26;
+  --color-overlay: #24242e;
+
+  /* Borders */
+  --color-edge: #2a2a36;
+  --color-edge-subtle: #1e1e28;
+
+  /* Text */
+  --color-ink: #e8e8f0;
+  --color-ink-secondary: #8888a0;
+  --color-ink-muted: #55556a;
+
+  /* Accent */
+  --color-accent: #d4940c;
+  --color-accent-bright: #f0a818;
+
+  /* Mono font */
+  --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+}
+
+/* ── Solarized Dark ─────────────────────────────── */
+[data-theme="solarized-dark"] {
+  --color-base: #002b36;
+  --color-surface: #073642;
+  --color-raised: #0a4050;
+  --color-overlay: #0d4a5a;
+  --color-edge: #1a5a6a;
+  --color-edge-subtle: #0f4858;
+  --color-ink: #93a1a1;
+  --color-ink-secondary: #839496;
+  --color-ink-muted: #586e75;
+  --color-accent: #b58900;
+  --color-accent-bright: #d4a017;
+}
+
+/* ── Solarized Light ────────────────────────────── */
+[data-theme="solarized-light"] {
+  --color-base: #fdf6e3;
+  --color-surface: #eee8d5;
+  --color-raised: #e6dfcc;
+  --color-overlay: #ddd6c3;
+  --color-edge: #d0c8b0;
+  --color-edge-subtle: #e0d9c6;
+  --color-ink: #586e75;
+  --color-ink-secondary: #657b83;
+  --color-ink-muted: #93a1a1;
+  --color-accent: #b58900;
+  --color-accent-bright: #d4a017;
+}
+
 :root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
   line-height: 1.5;
-  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  background: var(--color-base);
+  color: var(--color-ink);
+}
+
+/* Thin scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-edge) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-edge);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-muted);
+}
+
+/* Override react-contexify to follow theme */
+.react-contexify {
+  --contexify-menu-bgColor: var(--color-surface) !important;
+  --contexify-separator-color: var(--color-edge-subtle) !important;
+  --contexify-item-color: var(--color-ink) !important;
+  --contexify-activeItem-bgColor: color-mix(in srgb, var(--color-accent) 15%, transparent) !important;
+  --contexify-activeItem-color: var(--color-accent-bright) !important;
+  --contexify-menu-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important;
+  border: 1px solid var(--color-edge) !important;
+  border-radius: 6px !important;
+  font-size: 13px !important;
 }

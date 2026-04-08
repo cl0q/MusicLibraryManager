@@ -39,21 +39,26 @@ pub async fn transcode_audio(input: &Path, output_dir: &Path) -> Result<Transcod
     );
 
     // Decision logic
+    // Determine target bitrate
+    let mut config = FfmpegConfig::default();
+
     if format.is_lossless {
-        // Lossless -> transcode to AAC
-        log::info!("Lossless format detected, transcoding to AAC");
+        // Lossless -> transcode to 248kbps AAC
+        log::info!("Lossless format detected, transcoding to 248kbps AAC");
     } else {
         // Lossy format - check bitrate
         let bitrate = format.bitrate.unwrap_or(999_000); // Assume high bitrate if unknown
 
         if bitrate < 248_000 {
-            // Already lossy and below target - skip to avoid quality loss
-            let reason = format!(
-                "Already lossy <248kbps ({}kbps), preserving original",
+            // Already lossy and below target - skip to preserve quality
+            log::info!(
+                "Lossy format at {}kbps (<248kbps), skipping to preserve quality",
                 bitrate / 1000
             );
-            log::info!("{}", reason);
-            return Ok(TranscodeResult::Skipped(reason));
+            return Ok(TranscodeResult::Skipped(format!(
+                "Lossy format at {}kbps is below 248kbps threshold, skipping to avoid re-encoding",
+                bitrate / 1000
+            )));
         } else {
             // Lossy but high bitrate - transcode to reduce size
             log::info!(
@@ -71,7 +76,7 @@ pub async fn transcode_audio(input: &Path, output_dir: &Path) -> Result<Transcod
     let output_path = output_dir.join(format!("{}.m4a", input_stem));
 
     // Perform transcode
-    match transcode_to_aac(input, &output_path, &FfmpegConfig::default()).await {
+    match transcode_to_aac(input, &output_path, &config).await {
         Ok(()) => {
             log::info!("Successfully transcoded to: {}", output_path.display());
             Ok(TranscodeResult::Transcoded(output_path))

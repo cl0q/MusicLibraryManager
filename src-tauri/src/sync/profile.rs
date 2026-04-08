@@ -30,6 +30,7 @@ pub struct SyncProfile {
     pub id: i64,
     pub name: String,
     pub output_folder: PathBuf,
+    pub playlist_path_prefix: String,
     pub date_created: String,
     pub date_modified: String,
 }
@@ -239,7 +240,7 @@ pub fn create_sync_profile(
 /// * `Err` if profile not found or database operation fails
 pub fn get_sync_profile(conn: &Connection, profile_id: i64) -> Result<SyncProfile> {
     let profile = conn.query_row(
-        "SELECT id, name, output_folder, date_created, date_modified
+        "SELECT id, name, output_folder, playlist_path_prefix, date_created, date_modified
          FROM sync_profiles WHERE id = ?1",
         [profile_id],
         |row| {
@@ -247,8 +248,9 @@ pub fn get_sync_profile(conn: &Connection, profile_id: i64) -> Result<SyncProfil
                 id: row.get(0)?,
                 name: row.get(1)?,
                 output_folder: PathBuf::from(row.get::<_, String>(2)?),
-                date_created: row.get(3)?,
-                date_modified: row.get(4)?,
+                playlist_path_prefix: row.get(3)?,
+                date_created: row.get(4)?,
+                date_modified: row.get(5)?,
             })
         },
     )?;
@@ -266,7 +268,7 @@ pub fn get_sync_profile(conn: &Connection, profile_id: i64) -> Result<SyncProfil
 /// * `Err` if database operation fails
 pub fn list_sync_profiles(conn: &Connection) -> Result<Vec<SyncProfile>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, output_folder, date_created, date_modified
+        "SELECT id, name, output_folder, playlist_path_prefix, date_created, date_modified
          FROM sync_profiles ORDER BY name",
     )?;
 
@@ -276,8 +278,9 @@ pub fn list_sync_profiles(conn: &Connection) -> Result<Vec<SyncProfile>> {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 output_folder: PathBuf::from(row.get::<_, String>(2)?),
-                date_created: row.get(3)?,
-                date_modified: row.get(4)?,
+                playlist_path_prefix: row.get(3)?,
+                date_created: row.get(4)?,
+                date_modified: row.get(5)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<SyncProfile>>>()?;
@@ -431,6 +434,19 @@ pub fn get_profile_rules(conn: &Connection, profile_id: i64) -> Result<Vec<Filte
         .collect::<rusqlite::Result<Vec<FilterRule>>>()?;
 
     Ok(rules)
+}
+
+/// Update sync profile settings (path prefix).
+pub fn update_sync_profile_settings(
+    conn: &Connection,
+    profile_id: i64,
+    playlist_path_prefix: &str,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE sync_profiles SET playlist_path_prefix = ?1, date_modified = CURRENT_TIMESTAMP WHERE id = ?2",
+        rusqlite::params![playlist_path_prefix, profile_id],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

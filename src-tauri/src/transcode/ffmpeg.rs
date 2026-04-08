@@ -78,17 +78,6 @@ pub async fn transcode_to_aac(
     // Build ffmpeg command
     // Example: ffmpeg -i input.flac -c:a libfdk_aac -b:a 248k output.m4a
     let bitrate_str = format!("{}k", config.target_bitrate / 1000);
-    let mut cmd = Command::new("ffmpeg");
-    cmd.arg("-i")
-        .arg(input)
-        .arg("-c:a")
-        .arg(encoder)
-        .arg("-b:a")
-        .arg(&bitrate_str)
-        .arg("-y") // Overwrite temp file if exists
-        .arg(&temp_output)
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
 
     log::info!(
         "Transcoding {} to AAC ({}kbps, encoder: {})",
@@ -97,38 +86,58 @@ pub async fn transcode_to_aac(
         encoder
     );
 
-    // Spawn process and capture stderr for progress
-    let mut child = cmd
-        .spawn()
-        .context("Failed to spawn ffmpeg process")?;
-
-    // Stream stderr for progress logging
-    if let Some(stderr) = child.stderr.take() {
-        let reader = BufReader::new(stderr);
-        let mut lines = reader.lines();
-
-        tokio::spawn(async move {
-            while let Ok(Some(line)) = lines.next_line().await {
-                if line.contains("time=") {
-                    log::debug!("FFmpeg progress: {}", line);
-                }
-            }
-        });
-    }
-
-    // Wait for completion
-    let status = child
-        .wait()
-        .await
-        .context("Failed to wait for ffmpeg process")?;
+    // First attempt: try to preserve cover art with -c:v copy
+    let (status, stderr_output) = run_ffmpeg(
+        input,
+        &temp_output,
+        encoder,
+        &bitrate_str,
+        &["-c:v", "copy", "-disposition:v", "attached_pic"],
+    )
+    .await?;
 
     if !status.success() {
-        // Clean up temp file on failure
+        // Clean up temp file from failed attempt
         let _ = fs::remove_file(&temp_output).await;
-        anyhow::bail!(
-            "FFmpeg transcode failed with exit code: {:?}",
-            status.code()
-        );
+
+        // Check if the failure is cover-art/video-stream related
+        let is_cover_art_issue = stderr_output.contains("Video")
+            || stderr_output.contains("attached_pic")
+            || stderr_output.contains("video stream")
+            || stderr_output.contains("Could not find tag for codec")
+            || status.code() == Some(234);
+
+        if is_cover_art_issue {
+            log::warn!(
+                "FFmpeg failed with cover art flags, retrying without video stream: {}",
+                input.display()
+            );
+
+            // Retry without cover art: use -vn to strip video/image streams
+            let (retry_status, retry_stderr) = run_ffmpeg(
+                input,
+                &temp_output,
+                encoder,
+                &bitrate_str,
+                &["-vn"],
+            )
+            .await?;
+
+            if !retry_status.success() {
+                let _ = fs::remove_file(&temp_output).await;
+                anyhow::bail!(
+                    "FFmpeg transcode failed on retry (no cover art) with exit code: {:?}\nstderr: {}",
+                    retry_status.code(),
+                    retry_stderr
+                );
+            }
+        } else {
+            anyhow::bail!(
+                "FFmpeg transcode failed with exit code: {:?}\nstderr: {}",
+                status.code(),
+                stderr_output
+            );
+        }
     }
 
     // Atomic rename: temp -> final output
@@ -144,6 +153,59 @@ pub async fn transcode_to_aac(
 
     log::info!("Transcode complete: {}", output.display());
     Ok(())
+}
+
+/// Run FFmpeg with the given audio args and extra flags (e.g. video handling).
+/// Returns the exit status and collected stderr output.
+async fn run_ffmpeg(
+    input: &Path,
+    output: &Path,
+    encoder: &str,
+    bitrate: &str,
+    extra_args: &[&str],
+) -> Result<(std::process::ExitStatus, String)> {
+    let mut cmd = Command::new("ffmpeg");
+    cmd.arg("-i")
+        .arg(input)
+        .arg("-c:a")
+        .arg(encoder)
+        .arg("-b:a")
+        .arg(bitrate);
+
+    for arg in extra_args {
+        cmd.arg(arg);
+    }
+
+    cmd.arg("-y")
+        .arg(output)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+
+    let mut child = cmd
+        .spawn()
+        .context("Failed to spawn ffmpeg process")?;
+
+    // Collect stderr for both logging and error diagnosis
+    let mut stderr_output = String::new();
+    if let Some(stderr) = child.stderr.take() {
+        let reader = BufReader::new(stderr);
+        let mut lines = reader.lines();
+
+        while let Ok(Some(line)) = lines.next_line().await {
+            if line.contains("time=") {
+                log::debug!("FFmpeg progress: {}", line);
+            }
+            stderr_output.push_str(&line);
+            stderr_output.push('\n');
+        }
+    }
+
+    let status = child
+        .wait()
+        .await
+        .context("Failed to wait for ffmpeg process")?;
+
+    Ok((status, stderr_output))
 }
 
 #[cfg(test)]

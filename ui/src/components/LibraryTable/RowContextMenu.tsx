@@ -82,8 +82,6 @@ export default function RowContextMenu({ track, onConfirm, onOpenMoreInfo }: Row
     loadData();
   }, []);
 
-  if (!track) return null;
-
   // Determine which tracks to operate on (selected or single)
   const getTargetTracks = (): Track[] => {
     if (selectedTracks.length > 0) {
@@ -144,6 +142,7 @@ export default function RowContextMenu({ track, onConfirm, onOpenMoreInfo }: Row
     try {
       await invoke("reveal_in_file_manager", {
         path: localPath,
+        fallbackPath: track.original_path,
       });
     } catch (error) {
       toast.error(`Failed to open file manager: ${error}`);
@@ -190,8 +189,8 @@ export default function RowContextMenu({ track, onConfirm, onOpenMoreInfo }: Row
       return;
     }
 
-    if (!config.download_destination) {
-      toast.error("Download destination not configured");
+    if (!config.download_destination || !config.root_path) {
+      toast.error("Download destination or library root not configured");
       return;
     }
 
@@ -213,9 +212,10 @@ export default function RowContextMenu({ track, onConfirm, onOpenMoreInfo }: Row
       // Start download progress UI
       setIsDownloading(true);
 
-      // Invoke download command with FLAC and AAC directories
-      const flacDir = config.download_destination;
-      const aacDir = config.download_destination + "_staging"; // Staging for AAC transcodes
+      // Build staging paths under hidden .mlm_staging/ directory
+      const downloadDir = `${config.root_path}/.mlm_staging/downloads`;
+      const transcodeDir = `${config.root_path}/.mlm_staging/transcoded`;
+      const rootDir = config.root_path;
 
       const result = await invoke<{
         succeeded: number;
@@ -223,8 +223,9 @@ export default function RowContextMenu({ track, onConfirm, onOpenMoreInfo }: Row
         skipped: number;
       }>("download_tracks", {
         requests,
-        flacDir,
-        aacDir,
+        downloadDir,
+        transcodeDir,
+        rootDir,
       });
 
       // Stop download progress UI
@@ -245,8 +246,8 @@ export default function RowContextMenu({ track, onConfirm, onOpenMoreInfo }: Row
   };
 
   // Track is local if it has organized_path
-  const isLocalTrack = track.organized_path !== null;
-  const isRemoteTrack = track.organized_path === null;
+  const isLocalTrack = track ? track.organized_path !== null : false;
+  const isRemoteTrack = track ? track.organized_path === null : false;
 
   return (
     <>

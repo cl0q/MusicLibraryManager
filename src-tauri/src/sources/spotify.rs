@@ -47,7 +47,8 @@ const AUTH_URL: &str = "https://accounts.spotify.com/authorize";
 const TOKEN_URL: &str = "https://accounts.spotify.com/api/token";
 
 /// Default redirect URI for local OAuth callback.
-const REDIRECT_URI: &str = "http://localhost:8080/callback";
+/// Uses port 19823 for the local callback server (avoids conflicts with Vite dev server).
+const REDIRECT_URI: &str = "http://127.0.0.1:19823/callback";
 
 /// Maximum items per API request (Spotify limit).
 const PAGE_SIZE: u32 = 50;
@@ -941,8 +942,8 @@ fn insert_synced_tracks(
         // Note: This creates a "phantom" track entry that will be matched
         // with local files via the duplicate detection system
         conn.execute(
-            "INSERT INTO tracks (artist, album_artist, album, title, format, original_path, duration)
-             VALUES (?, ?, ?, ?, 'spotify', ?, ?)",
+            "INSERT INTO tracks (artist, album_artist, album, title, format, original_path, duration, date_added)
+             VALUES (?, ?, ?, ?, 'spotify', ?, ?, ?)",
             rusqlite::params![
                 &track.artist,
                 &track.artist, // album_artist = artist for now
@@ -950,6 +951,7 @@ fn insert_synced_tracks(
                 &track.title,
                 &track.spotify_uri, // Use URI as "path" for Spotify tracks
                 track.duration_secs as i64,
+                &track.added_at, // Use Spotify "liked at" timestamp
             ],
         )?;
 
@@ -1037,8 +1039,8 @@ fn find_or_create_track(
 
     // No existing track found, create new phantom track
     conn.execute(
-        "INSERT INTO tracks (artist, album_artist, album, title, format, original_path, duration)
-         VALUES (?, ?, ?, ?, 'spotify', ?, ?)",
+        "INSERT INTO tracks (artist, album_artist, album, title, format, original_path, duration, date_added)
+         VALUES (?, ?, ?, ?, 'spotify', ?, ?, ?)",
         rusqlite::params![
             &track.artist,
             &track.artist, // album_artist = artist for now
@@ -1046,6 +1048,7 @@ fn find_or_create_track(
             &track.title,
             &track.spotify_uri, // Use URI as "path" for Spotify tracks
             track.duration_secs as i64,
+            &track.added_at, // Use Spotify "liked at" timestamp
         ],
     )?;
 

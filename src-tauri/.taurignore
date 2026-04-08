@@ -11,3 +11,5 @@ music_library.db
 **/00_Artists/**
 **/00_Artists_staging/**
 **/artwork_cache/**
+transcode_cache
+**/transcode_cache/**

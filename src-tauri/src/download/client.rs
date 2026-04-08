@@ -35,6 +35,7 @@ impl HttpClient {
     pub fn with_config(config: RetryConfig) -> Result<Self> {
         let client = Client::builder()
             .timeout(Duration::from_secs(30))
+            .cookie_store(true)
             .build()
             .context("Failed to build HTTP client")?;
 
@@ -49,6 +50,15 @@ impl HttpClient {
     /// - 5xx Server Errors → transient error (retry with backoff)
     /// - Network errors → transient error (retry with backoff)
     pub async fn get_with_retry(&self, url: &str) -> Result<Response> {
+        self.get_with_retry_and_headers(url, None).await
+    }
+
+    /// Perform GET request with custom headers and exponential backoff retry
+    pub async fn get_with_retry_and_headers(
+        &self,
+        url: &str,
+        headers: Option<&reqwest::header::HeaderMap>,
+    ) -> Result<Response> {
         let backoff_config = ExponentialBackoff {
             initial_interval: self.config.initial_interval,
             max_elapsed_time: Some(Duration::from_secs(30)),
@@ -56,46 +66,38 @@ impl HttpClient {
         };
 
         let operation = || async {
-            let response = self
-                .client
-                .get(url)
+            let mut request = self.client.get(url);
+            if let Some(h) = headers {
+                request = request.headers(h.clone());
+            }
+
+            let response = request
                 .send()
                 .await
                 .map_err(|e| {
-                    // Network errors are transient - retry
                     BackoffError::transient(anyhow::Error::from(e))
                 })?;
 
             let status = response.status();
 
-            // Classify status codes
             match status {
-                // Success - return immediately
                 status if status.is_success() => Ok(response),
-
-                // 404 Not Found - permanent error, don't retry
                 StatusCode::NOT_FOUND => {
                     Err(BackoffError::permanent(anyhow::anyhow!(
                         "Resource not found (404)"
                     )))
                 }
-
-                // 429 Rate Limited - transient, retry with backoff
                 StatusCode::TOO_MANY_REQUESTS => {
                     Err(BackoffError::transient(anyhow::anyhow!(
                         "Rate limited (429), will retry"
                     )))
                 }
-
-                // 5xx Server Errors - transient, retry
                 status if status.is_server_error() => {
                     Err(BackoffError::transient(anyhow::anyhow!(
                         "Server error ({}), will retry",
                         status
                     )))
                 }
-
-                // Other client errors (400, 401, 403, etc.) - permanent
                 _ => {
                     Err(BackoffError::permanent(anyhow::anyhow!(
                         "HTTP error: {}",
@@ -108,6 +110,25 @@ impl HttpClient {
         retry(backoff_config, operation)
             .await
             .context("Request failed after retries")
+    }
+
+    /// Perform POST request with JSON body (no retry — used for login)
+    pub async fn post_json<T: serde::Serialize>(
+        &self,
+        url: &str,
+        body: &T,
+    ) -> Result<Response> {
+        self.client
+            .post(url)
+            .json(body)
+            .send()
+            .await
+            .context("POST request failed")
+    }
+
+    /// Get a reference to the inner reqwest client
+    pub fn inner(&self) -> &Client {
+        &self.client
     }
 }
 

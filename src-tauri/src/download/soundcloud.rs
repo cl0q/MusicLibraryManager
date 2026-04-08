@@ -6,9 +6,15 @@
 //!
 //! ## Requirements
 //!
-//! - `scdl` CLI installed (`pip install scdl`)
+//! - `scdl` >= 3.0.4 installed (`pip install scdl` or `pipx install scdl`)
 //! - SoundCloud Go+ subscription for 248kbps AAC quality
-//! - OAuth access token stored in system keychain via token_storage
+//! - OAuth access token stored in scdl config (~/.config/scdl/scdl.cfg)
+//!
+//! ## Architecture (scdl v3)
+//!
+//! As of v3, scdl is a wrapper around yt-dlp with SoundCloud-specific
+//! postprocessors. Client ID is auto-generated and cached by yt-dlp's
+//! SoundCloud extractor -- no manual client_id needed.
 //!
 //! ## Download Priority
 //!
@@ -17,7 +23,6 @@
 //! 2. DAB (FLAC) - if track available
 //! 3. YouTube (fallback)
 
-use crate::auth::token_storage;
 use anyhow::{anyhow, Context, Result};
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
@@ -75,9 +80,9 @@ impl SoundCloudDownloader {
 
     /// Download a track from SoundCloud using scdl CLI.
     ///
-    /// Retrieves the OAuth access token from the system keychain, then invokes
-    /// scdl with --auth-token to download the track. SoundCloud Go+ accounts
-    /// get 248kbps AAC quality.
+    /// scdl v3 (yt-dlp wrapper) handles client_id generation and caching
+    /// automatically. Auth token is read from ~/.config/scdl/scdl.cfg.
+    /// SoundCloud Go+ accounts get 248kbps AAC quality.
     ///
     /// # Arguments
     /// * `request` - Download request with track URL, user ID, and output directory
@@ -90,39 +95,34 @@ impl SoundCloudDownloader {
         &self,
         request: &SoundCloudDownloadRequest,
     ) -> Result<SoundCloudDownloadResult> {
-        // Retrieve SoundCloud access token from keychain
-        let access_token = token_storage::get_refresh_token("soundcloud", &request.user_id)
-            .map_err(|e| {
-                anyhow!(
-                    "SoundCloud auth token not found: {}. Run OAuth flow first.",
-                    e
-                )
-            })?;
-
-        // Ensure output directory exists
-        tokio::fs::create_dir_all(&request.output_dir)
+        // Use a unique temp subdirectory per download to avoid file collisions
+        // when multiple scdl processes run concurrently.
+        let temp_dir = request.output_dir.join(format!(".tmp_{}", request.track_id.replace('/', "_")));
+        tokio::fs::create_dir_all(&temp_dir)
             .await
-            .context("Failed to create output directory")?;
+            .context("Failed to create temp download directory")?;
 
         // Build scdl command:
-        // scdl -l <track_url> --auth-token <token> --path <output_dir> --onlymp3 --name-format {title}
-        let output = Command::new("scdl")
-            .arg("-l")
+        // scdl v3.0.4+ auto-generates client_id via yt-dlp's SoundCloud extractor.
+        // Auth token is read from ~/.config/scdl/scdl.cfg automatically.
+        let mut cmd = Command::new("scdl");
+        cmd.arg("-l")
             .arg(&request.track_url)
-            .arg("--auth-token")
-            .arg(&access_token)
             .arg("--path")
-            .arg(&request.output_dir)
-            .arg("--onlymp3")
+            .arg(&temp_dir)
             .arg("--original-art")
             .arg("--name-format")
-            .arg("{title}")
+            .arg("{title}");
+
+        let output = cmd
             .output()
             .await
             .context("Failed to execute scdl. Is scdl installed? (pip install scdl)")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
+            // Clean up temp dir on failure
+            let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 
             // Check for "not found" or "not available" errors
             if stderr.contains("not found")
@@ -140,10 +140,31 @@ impl SoundCloudDownloader {
             ));
         }
 
-        // scdl downloads to output_dir; find the most recently created audio file
-        let downloaded_file = find_most_recent_audio_file(&request.output_dir).await?;
+        // Find the downloaded file in the isolated temp directory
+        let downloaded_file = find_most_recent_audio_file(&temp_dir).await?;
 
-        Ok(SoundCloudDownloadResult::Success(downloaded_file))
+        // Move from temp dir to the actual output directory
+        let final_name = downloaded_file.file_name()
+            .ok_or_else(|| anyhow!("Downloaded file has no filename"))?;
+        let final_path = request.output_dir.join(final_name);
+        tokio::fs::rename(&downloaded_file, &final_path)
+            .await
+            .or_else(|_| {
+                // rename fails across filesystems; try copy+delete
+                let src = downloaded_file.clone();
+                let dst = final_path.clone();
+                tokio::runtime::Handle::current().block_on(async {
+                    tokio::fs::copy(&src, &dst).await?;
+                    tokio::fs::remove_file(&src).await?;
+                    Ok::<(), std::io::Error>(())
+                })
+            })
+            .context("Failed to move downloaded file from temp dir")?;
+
+        // Clean up temp dir
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+
+        Ok(SoundCloudDownloadResult::Success(final_path))
     }
 }
 
@@ -167,7 +188,7 @@ async fn find_most_recent_audio_file(dir: &Path) -> Result<PathBuf> {
         let path = entry.path();
         if let Some(ext) = path.extension() {
             let ext_lower = ext.to_string_lossy().to_lowercase();
-            if ext_lower == "mp3" || ext_lower == "m4a" || ext_lower == "aac" {
+            if ext_lower == "mp3" || ext_lower == "m4a" || ext_lower == "aac" || ext_lower == "flac" || ext_lower == "opus" || ext_lower == "wav" {
                 if let Ok(metadata) = entry.metadata().await {
                     if let Ok(modified) = metadata.modified() {
                         candidates.push((path, modified));

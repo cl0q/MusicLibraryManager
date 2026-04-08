@@ -374,16 +374,97 @@ pub async fn disconnect_source(_source: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Connect Spotify using server-based OAuth (stub — to be implemented).
+/// Connect Spotify: generate auth URL, open browser, listen for callback, exchange code.
 #[tauri::command]
-pub async fn connect_spotify_with_server() -> Result<String, String> {
-    Err("Not yet implemented".to_string())
+pub async fn connect_spotify_with_server(
+    oauth_state: State<'_, OAuthState>,
+) -> Result<String, String> {
+    // Generate auth URL (stores PKCE verifier in state)
+    let url = spotify_auth_url(State::clone(&oauth_state))?;
+    open::that(&url).map_err(|e| format!("Failed to open browser: {}", e))?;
+
+    // Wait for OAuth callback on local server
+    let code = wait_for_oauth_callback().await?;
+
+    // Exchange code for tokens (consumes PKCE verifier from state)
+    spotify_exchange_code(code, "default".to_string(), oauth_state).await?;
+
+    Ok("Connected".to_string())
 }
 
-/// Connect SoundCloud using server-based OAuth (stub — to be implemented).
+/// Connect SoundCloud: generate auth URL, open browser, listen for callback, exchange code.
 #[tauri::command]
-pub async fn connect_soundcloud_with_server() -> Result<String, String> {
-    Err("Not yet implemented".to_string())
+pub async fn connect_soundcloud_with_server(
+    oauth_state: State<'_, OAuthState>,
+) -> Result<String, String> {
+    // Generate auth URL (stores PKCE verifier in state)
+    let url = soundcloud_auth_url(State::clone(&oauth_state))?;
+    open::that(&url).map_err(|e| format!("Failed to open browser: {}", e))?;
+
+    // Wait for OAuth callback on local server
+    let code = wait_for_oauth_callback().await?;
+
+    // Exchange code for tokens (consumes PKCE verifier from state)
+    soundcloud_exchange_code(code, "default".to_string(), oauth_state).await?;
+
+    Ok("Connected".to_string())
+}
+
+/// Start a temporary HTTP server on port 19823, wait for the OAuth callback,
+/// extract the `code` parameter, send a success page, and return the code.
+async fn wait_for_oauth_callback() -> Result<String, String> {
+    use tokio::net::TcpListener;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = TcpListener::bind("127.0.0.1:19823").await
+        .map_err(|e| format!("Failed to bind callback server: {}", e))?;
+
+    log::info!("OAuth callback server listening on 127.0.0.1:19823");
+
+    // Wait for a single connection (with 2 minute timeout)
+    let (mut stream, _) = tokio::time::timeout(
+        std::time::Duration::from_secs(120),
+        listener.accept(),
+    )
+    .await
+    .map_err(|_| "OAuth timed out — no callback received within 2 minutes".to_string())?
+    .map_err(|e| format!("Failed to accept connection: {}", e))?;
+
+    // Read the HTTP request
+    let mut buf = vec![0u8; 4096];
+    let n = stream.read(&mut buf).await
+        .map_err(|e| format!("Failed to read callback: {}", e))?;
+    let request = String::from_utf8_lossy(&buf[..n]);
+
+    // Extract code from GET /callback?code=...&state=...
+    let code = request
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1)) // "/callback?code=...&state=..."
+        .and_then(|path| path.split('?').nth(1))
+        .and_then(|query| {
+            query.split('&')
+                .find_map(|param| {
+                    let mut kv = param.splitn(2, '=');
+                    match (kv.next(), kv.next()) {
+                        (Some("code"), Some(v)) => Some(v.to_string()),
+                        _ => None,
+                    }
+                })
+        })
+        .ok_or_else(|| "No authorization code in callback".to_string())?;
+
+    // Send success response
+    let html = "<html><body style='font-family:system-ui;text-align:center;padding:60px;background:#0c0c12;color:#e8e8f0'><h2>Authorization successful</h2><p>You can close this tab.</p></body></html>";
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        html.len(),
+        html
+    );
+    let _ = stream.write_all(response.as_bytes()).await;
+
+    log::info!("OAuth callback received, code extracted");
+    Ok(code)
 }
 
 /// Log in to DAB Music API (stub — to be implemented).

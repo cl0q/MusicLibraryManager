@@ -12,7 +12,7 @@
 
 use anyhow::Result;
 use rusqlite::Connection;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::Emitter;
 
 pub mod cache;
@@ -49,8 +49,12 @@ pub fn preview_sync(
 ) -> Result<SyncPreview> {
     let profile = profile::get_sync_profile(conn, profile_id)?;
     let cache = TranscodeCache::new(cache_dir)?;
+    let library_root = crate::config::LibraryConfig::load(conn)
+        .map_err(|e| anyhow::anyhow!("{}", e))?
+        .root_path
+        .unwrap_or_default();
 
-    progress::compute_sync_preview(conn, &profile, &cache, device_space)
+    progress::compute_sync_preview(conn, &profile, &cache, device_space, &library_root)
 }
 
 /// Execute full sync: files + playlists.
@@ -76,7 +80,23 @@ pub fn sync_profile_to_folder(
     app: Option<&tauri::AppHandle>,
 ) -> Result<SyncResult> {
     let profile = profile::get_sync_profile(conn, profile_id)?;
-    let cache = TranscodeCache::new(cache_dir)?;
+    log::info!("Sync profile '{}' (id={}) -> {}", profile.name, profile.id, profile.output_folder.display());
+
+    let cache = TranscodeCache::new(cache_dir.clone())?;
+    log::info!("Transcode cache dir: {}", cache_dir.display());
+
+    let library_root = crate::config::LibraryConfig::load(conn)
+        .map_err(|e| anyhow::anyhow!("{}", e))?
+        .root_path
+        .unwrap_or_default();
+
+    // Resolve all track IDs in the profile
+    let all_track_ids = profile.get_all_track_ids(conn)?;
+    log::info!("Profile contains {} tracks", all_track_ids.len());
+
+    if all_track_ids.is_empty() {
+        log::warn!("Profile has no tracks — add tracks, playlists, or rules first");
+    }
 
     // Emit sync started event
     if let Some(app) = app {
@@ -84,31 +104,86 @@ pub fn sync_profile_to_folder(
     }
 
     // 1. Compute preview
-    let preview = progress::compute_sync_preview(conn, &profile, &cache, None)?;
+    let preview = progress::compute_sync_preview(conn, &profile, &cache, None, &library_root)?;
+    log::info!(
+        "Sync preview: {} to add, {} to remove, {} bytes new",
+        preview.files_to_add.len(),
+        preview.files_to_remove.len(),
+        preview.total_new_size
+    );
+
+    if preview.files_to_add.is_empty() && all_track_ids.len() > 0 {
+        // Explain why nothing to sync
+        let mut missing_cache = 0;
+        let mut already_synced = 0;
+        for track_id in &all_track_ids {
+            let track_result = conn.query_row(
+                "SELECT original_path FROM tracks WHERE id = ?",
+                [track_id],
+                |row| row.get::<_, String>(0),
+            );
+            if let Ok(original_path) = track_result {
+                let cache_path = cache.get_cache_path(*track_id, std::path::Path::new(&original_path));
+                if !cache_path.exists() {
+                    missing_cache += 1;
+                    if missing_cache <= 3 {
+                        log::info!("  No cache file for track {} ({})", track_id, cache_path.display());
+                    }
+                } else {
+                    already_synced += 1;
+                }
+            }
+        }
+        if missing_cache > 3 {
+            log::info!("  ... and {} more tracks without cache files", missing_cache - 3);
+        }
+        if missing_cache > 0 {
+            log::warn!(
+                "{} of {} tracks have no transcode cache — download/transcode them first",
+                missing_cache, all_track_ids.len()
+            );
+        }
+        if already_synced > 0 {
+            log::info!("{} tracks already synced (unchanged)", already_synced);
+        }
+    }
+
+    for file in &preview.files_to_add {
+        log::info!("  + {} - {} -> {}", file.artist, file.title, file.destination_path);
+    }
+    for path in &preview.files_to_remove {
+        log::info!("  - {}", path);
+    }
 
     // 2. Execute file sync
-    let result = progress::execute_sync(conn, &profile, &cache, &preview)?;
+    let result = progress::execute_sync(conn, &profile, &cache, &preview, &library_root)?;
+    log::info!("Sync result: {} synced, {} failed", result.synced_count, result.failed_count);
+    for (track_id, error) in &result.failed_tracks {
+        log::error!("  Failed track {}: {}", track_id, error);
+    }
 
     // Emit sync progress event (after file sync completes)
     if let Some(app) = app {
         let _ = app.emit("sync:progress", serde_json::json!({
             "profile_id": profile_id,
             "files_synced": result.synced_count,
-            "total_files": result.synced_count
+            "total_files": preview.files_to_add.len()
         }));
     }
 
     // 3. Generate M3U8 playlists for profile
-    sync_playlists(conn, &profile)?;
+    let playlist_count = sync_playlists(conn, &profile, &library_root)?;
+    if playlist_count > 0 {
+        log::info!("Generated {} M3U8 playlists", playlist_count);
+    }
 
     // Emit sync completed event
     if let Some(app) = app {
         let _ = app.emit("sync:completed", serde_json::json!({
             "profile_id": profile_id,
             "result": {
-                "files_added": result.synced_count,
-                "files_updated": 0,
-                "files_removed": 0
+                "synced_count": result.synced_count,
+                "failed_count": result.failed_count
             }
         }));
     }
@@ -128,7 +203,7 @@ pub fn sync_profile_to_folder(
 /// # Returns
 /// * `Ok(())` if all playlists generated successfully
 /// * `Err` if database query or file write fails
-fn sync_playlists(conn: &Connection, profile: &SyncProfile) -> Result<()> {
+fn sync_playlists(conn: &Connection, profile: &SyncProfile, library_root: &Path) -> Result<usize> {
     // Query sync_profile_playlists to get playlist IDs
     let mut stmt = conn.prepare(
         "SELECT playlist_id FROM sync_profile_playlists WHERE profile_id = ?",
@@ -137,6 +212,8 @@ fn sync_playlists(conn: &Connection, profile: &SyncProfile) -> Result<()> {
     let playlist_ids: Vec<i64> = stmt
         .query_map([profile.id], |row| row.get(0))?
         .collect::<rusqlite::Result<Vec<i64>>>()?;
+
+    let count = playlist_ids.len();
 
     for playlist_id in playlist_ids {
         // Get playlist details
@@ -153,10 +230,12 @@ fn sync_playlists(conn: &Connection, profile: &SyncProfile) -> Result<()> {
             &profile.output_folder,
             &playlist_name,
             &tracks,
+            library_root,
+            &profile.playlist_path_prefix,
         )?;
     }
 
-    Ok(())
+    Ok(count)
 }
 
 #[cfg(test)]
@@ -271,11 +350,8 @@ mod tests {
         assert_eq!(result.synced_count, 2);
         assert_eq!(result.failed_count, 0);
 
-        // Verify M3U8 playlist created
-        let playlists_dir = temp_dir.path().join("profile").join("Playlists");
-        assert!(playlists_dir.exists());
-
-        let playlist_file = playlists_dir.join("Test Playlist.m3u8");
+        // Verify M3U8 playlist created at profile root
+        let playlist_file = temp_dir.path().join("profile").join("Test Playlist.m3u8");
         assert!(playlist_file.exists());
 
         // Verify M3U8 content

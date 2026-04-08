@@ -34,9 +34,9 @@ impl fmt::Display for PlaylistCategory {
 }
 
 impl PlaylistCategory {
-    /// Parse category from database string.
+    /// Parse category from database string (case-insensitive).
     pub fn from_str(s: &str) -> Option<Self> {
-        match s {
+        match s.to_lowercase().as_str() {
             "liked" => Some(PlaylistCategory::Liked),
             "smart" => Some(PlaylistCategory::Smart),
             "regular" => Some(PlaylistCategory::Regular),

@@ -13,6 +13,36 @@ use crate::config::{LibraryConfig, create_marker_file, verify_marker_file};
 use crate::database::connection::get_connection;
 use crate::mount::MountDetector;
 
+/// Try to resolve a relative organized_path to an absolute path by searching:
+/// 1. root/path directly (downloaded tracks include folder prefix)
+/// 2. root/scan_folder/path for each scan folder
+/// 3. root/download_destination/path
+fn resolve_to_absolute(
+    root: &Path,
+    path: &str,
+    scan_folders: &[String],
+    download_destination: &str,
+) -> Option<PathBuf> {
+    // Direct join
+    let direct = root.join(path);
+    if direct.exists() {
+        return Some(direct);
+    }
+    // Search scan folders
+    for folder in scan_folders {
+        let candidate = root.join(folder).join(path);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    // Try download_destination
+    let candidate = root.join(download_destination).join(path);
+    if candidate.exists() {
+        return Some(candidate);
+    }
+    None
+}
+
 /// Open native OS folder picker for library selection.
 ///
 /// Returns selected path as String, or None if user cancelled.
@@ -199,22 +229,8 @@ pub async fn get_library_mount_state(
 /// Absolute paths are rejected with an Err — they indicate stale data that
 /// predates the Phase 8-01 portability invariant.
 #[tauri::command]
-pub async fn reveal_in_file_manager(path: String) -> Result<(), String> {
-    // Reject absolute paths — organized_path must always be relative to library root.
-    // Windows drive-letter paths (e.g. C:\...) are also absolute but not caught by is_absolute()
-    // on Unix, so check for the drive-letter pattern explicitly.
-    let is_windows_absolute = path.len() >= 2
-        && path.chars().next().map_or(false, |c| c.is_ascii_alphabetic())
-        && path.chars().nth(1) == Some(':');
-    if Path::new(&path).is_absolute() || is_windows_absolute {
-        return Err(format!(
-            "organized_path must be relative to library root, not absolute. \
-             Got: {}. Run the schema migration to fix existing data.",
-            path
-        ));
-    }
-
-    // Resolve the relative path against the configured library root.
+pub async fn reveal_in_file_manager(path: String, fallback_path: Option<String>) -> Result<(), String> {
+    // Resolve the relative organized_path against the configured library root.
     let db_path = PathBuf::from("music_library.db");
     let conn = get_connection(&db_path)
         .map_err(|e| format!("Database connection failed: {}", e))?;
@@ -223,21 +239,55 @@ pub async fn reveal_in_file_manager(path: String) -> Result<(), String> {
     let root = config.root_path
         .ok_or_else(|| "Library root not configured — cannot resolve path".to_string())?;
 
-    let absolute_path = root.join(&path);
-
-    if !absolute_path.exists() {
-        return Err(format!("File does not exist: {}", absolute_path.display()));
-    }
+    let absolute_path = resolve_to_absolute(&root, &path, &config.scan_folders, &config.download_destination)
+        .or_else(|| {
+            // If organized_path resolution fails, try original_path as fallback
+            // (scanned tracks have the actual absolute path in original_path)
+            fallback_path.as_deref()
+                .filter(|p| !p.starts_with("http"))
+                .map(|p| PathBuf::from(p))
+                .filter(|p| p.exists())
+        })
+        .ok_or_else(|| format!(
+            "File not found. organized_path='{}', scan_folders={:?}",
+            path, config.scan_folders
+        ))?;
 
     let abs_str = absolute_path.to_string_lossy().to_string();
+    let containing_folder = absolute_path.parent().unwrap_or(&absolute_path).to_string_lossy().to_string();
+
+    // Read configured file manager preference
+    let file_manager: String = conn
+        .query_row("SELECT value FROM app_config WHERE key = 'file_manager'", [], |row| row.get(0))
+        .unwrap_or_else(|_| "system".to_string());
 
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open")
-            .arg("-R")
-            .arg(&abs_str)
-            .spawn()
-            .map_err(|e| format!("Failed to open Finder: {}", e))?;
+        match file_manager.as_str() {
+            "system" => {
+                std::process::Command::new("open")
+                    .arg("-R")
+                    .arg(&abs_str)
+                    .spawn()
+                    .map_err(|e| format!("Failed to open Finder: {}", e))?;
+            }
+            "forklift" => {
+                std::process::Command::new("open")
+                    .arg("-a")
+                    .arg("ForkLift")
+                    .arg(&containing_folder)
+                    .spawn()
+                    .map_err(|e| format!("Failed to open ForkLift: {}", e))?;
+            }
+            custom_app => {
+                std::process::Command::new("open")
+                    .arg("-a")
+                    .arg(custom_app)
+                    .arg(&containing_folder)
+                    .spawn()
+                    .map_err(|e| format!("Failed to open {}: {}", custom_app, e))?;
+            }
+        }
     }
 
     #[cfg(target_os = "windows")]
@@ -251,12 +301,52 @@ pub async fn reveal_in_file_manager(path: String) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
         std::process::Command::new("xdg-open")
-            .arg(absolute_path.parent().unwrap_or(absolute_path.as_path()).to_string_lossy().to_string())
+            .arg(&containing_folder)
             .spawn()
             .map_err(|e| format!("Failed to open file manager: {}", e))?;
     }
 
     Ok(())
+}
+
+/// Get an app setting from the app_config table.
+#[tauri::command]
+pub async fn get_app_setting(key: String) -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let db_path = PathBuf::from("music_library.db");
+        let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+
+        let result: Option<String> = conn
+            .query_row(
+                "SELECT value FROM app_config WHERE key = ?1",
+                [&key],
+                |row| row.get(0),
+            )
+            .ok();
+
+        Ok(result)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+/// Set an app setting in the app_config table.
+#[tauri::command]
+pub async fn set_app_setting(key: String, value: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let db_path = PathBuf::from("music_library.db");
+        let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+
+        conn.execute(
+            "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)",
+            rusqlite::params![key, value],
+        )
+        .map_err(|e| format!("Failed to save setting: {}", e))?;
+
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[cfg(test)]

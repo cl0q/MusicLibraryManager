@@ -99,14 +99,16 @@ fn detect_file_format_bitrate(file_path: &str) -> (String, Option<u64>) {
         None => "unknown".to_string(),
     };
 
-    // Detect bitrate using transcode::format module
-    let bitrate = match crate::transcode::detect_format(path) {
-        Ok(audio_format) => audio_format.bitrate,
-        Err(e) => {
-            log::warn!("Failed to detect bitrate for {}: {}", file_path, e);
-            None
-        }
-    };
+    // Prefer lofty audio stream bitrate (kbps), fall back to symphonia container estimate
+    let bitrate = crate::metadata::extractor::extract_metadata(path)
+        .ok()
+        .and_then(|m| m.bitrate.map(|b| b as u64))
+        .or_else(|| {
+            crate::transcode::detect_format(path)
+                .ok()
+                .and_then(|f| f.bitrate)
+                .map(|bps| bps / 1000)
+        });
 
     (format, bitrate)
 }

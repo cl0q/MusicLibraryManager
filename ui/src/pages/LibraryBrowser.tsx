@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, NavLink } from "react-router";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { toast } from "sonner";
 import { useLibraryTracks } from "../hooks/useLibraryTracks";
 import { useEnhancementProgress } from "../hooks/useEnhancements";
 import { useLibraryMount } from "../contexts/LibraryMountContext";
@@ -18,10 +20,10 @@ import {
 } from "../utils/tauri-commands";
 
 interface LibraryBrowserProps {
-  view?: 'library' | 'remote';
+  view?: "library" | "remote";
 }
 
-export default function LibraryBrowser({ view = 'library' }: LibraryBrowserProps) {
+export default function LibraryBrowser({ view = "library" }: LibraryBrowserProps) {
   const navigate = useNavigate();
   const { mountState, isLibraryAvailable } = useLibraryMount();
   const [showReviewQueue, setShowReviewQueue] = useState(false);
@@ -31,13 +33,19 @@ export default function LibraryBrowser({ view = 'library' }: LibraryBrowserProps
   const [moreInfoOpen, setMoreInfoOpen] = useState(false);
 
   const { tracks, loading, filterQuery, setFilterQuery } = useLibraryTracks(view, refreshKey);
+  const [cachedTrackIds, setCachedTrackIds] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    invoke<number[]>("get_cached_track_ids")
+      .then((ids) => setCachedTrackIds(new Set(ids)))
+      .catch(() => {});
+  }, [refreshKey]);
 
   const fingerprintProgress = useEnhancementProgress("fingerprint");
   const artworkProgress = useEnhancementProgress("artwork");
   const replaygainProgress = useEnhancementProgress("replaygain");
   const deepscanProgress = useEnhancementProgress("deepscan");
 
-  // Load review queue count on mount
   useEffect(() => {
     const loadCount = async () => {
       try {
@@ -50,66 +58,34 @@ export default function LibraryBrowser({ view = 'library' }: LibraryBrowserProps
     loadCount();
   }, []);
 
-  // Listen for library reconnection events to auto-refresh
   useEffect(() => {
-    const handleReconnect = () => {
-      // Increment refresh key to trigger re-fetch in useLibraryTracks
-      setRefreshKey((prev) => prev + 1);
-    };
+    const handleReconnect = () => setRefreshKey((prev) => prev + 1);
     window.addEventListener("library-reconnected", handleReconnect);
     return () => window.removeEventListener("library-reconnected", handleReconnect);
   }, []);
 
-  // Listen for download-complete events to auto-refresh Remote view
   useEffect(() => {
-    const unlisten = listen("download-complete", (event) => {
-      console.log("Download complete:", event.payload);
-      // Trigger Remote view refresh
+    const unlisten = listen("download-complete", () => {
       setRefreshKey((prev) => prev + 1);
     });
-
-    return () => {
-      unlisten.then((fn) => fn());
-    };
+    return () => { unlisten.then((fn) => fn()); };
   }, []);
 
   const handleFingerprintLibrary = async () => {
-    try {
-      const result = await fingerprintLibrary();
-      console.log("Fingerprint result:", result);
-    } catch (err) {
-      console.error("Failed to fingerprint library:", err);
-    }
+    try { await fingerprintLibrary(); } catch (err) { console.error("Fingerprint failed:", err); }
   };
-
   const handleFetchArtwork = async () => {
-    try {
-      const result = await fetchArtwork();
-      console.log("Artwork result:", result);
-    } catch (err) {
-      console.error("Failed to fetch artwork:", err);
-    }
+    try { await fetchArtwork(); } catch (err) { console.error("Artwork failed:", err); }
   };
-
   const handleAnalyzeReplayGain = async () => {
-    try {
-      const result = await analyzeReplayGain();
-      console.log("ReplayGain result:", result);
-    } catch (err) {
-      console.error("Failed to analyze ReplayGain:", err);
-    }
+    try { await analyzeReplayGain(); } catch (err) { console.error("ReplayGain failed:", err); }
   };
-
   const handleDeepScan = async () => {
     try {
-      const result = await deepScan();
-      console.log("Deep scan result:", result);
-      // Refresh review queue count after deep scan
+      await deepScan();
       const count = await getReviewQueueCount();
       setReviewQueueCount(count);
-    } catch (err) {
-      console.error("Failed to run deep scan:", err);
-    }
+    } catch (err) { console.error("Deep scan failed:", err); }
   };
 
   const handleOpenMoreInfo = (track: Track) => {
@@ -117,42 +93,24 @@ export default function LibraryBrowser({ view = 'library' }: LibraryBrowserProps
     setMoreInfoOpen(true);
   };
 
-  const handleCloseMoreInfo = () => {
-    setMoreInfoOpen(false);
-  };
-
-  // Show disconnected state if library is not available (only for library view, not remote)
-  if (view === 'library' && !isLibraryAvailable) {
+  // Disconnected state
+  if (view === "library" && !isLibraryAvailable) {
     return (
-      <div className="flex flex-col items-center justify-center h-full p-6 text-center">
-        <div className="max-w-md space-y-4">
-          {/* Hard drive icon */}
-          <svg
-            className="w-16 h-16 mx-auto text-gray-400"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
-            />
-          </svg>
-          <h2 className="text-xl font-semibold text-gray-700 dark:text-gray-300">
+      <div className="flex flex-col items-center justify-center h-full">
+        <div className="max-w-xs text-center space-y-3">
+          <div className="w-10 h-10 mx-auto rounded-lg bg-raised flex items-center justify-center">
+            <svg className="w-5 h-5 text-ink-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 17.25v-.228a4.5 4.5 0 00-.12-1.03l-2.268-9.64a3.375 3.375 0 00-3.285-2.602H7.923a3.375 3.375 0 00-3.285 2.602l-2.268 9.64a4.5 4.5 0 00-.12 1.03v.228m19.5 0a3 3 0 01-3 3H5.25a3 3 0 01-3-3m19.5 0a3 3 0 00-3-3H5.25a3 3 0 00-3 3" />
+            </svg>
+          </div>
+          <p className="text-sm text-ink-secondary">
             {mountState === "not_configured"
-              ? "Library Not Configured"
-              : "Library Drive Not Connected"}
-          </h2>
-          <p className="text-gray-500 dark:text-gray-400">
-            {mountState === "not_configured"
-              ? "Set up your music library location to browse your collection."
-              : "Connect your external drive to access your music library."}
+              ? "Library not configured yet."
+              : "External drive not connected."}
           </p>
           <button
             onClick={() => navigate("/settings")}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            className="text-xs text-accent hover:text-accent-bright font-medium transition-colors"
           >
             Open Settings
           </button>
@@ -162,148 +120,154 @@ export default function LibraryBrowser({ view = 'library' }: LibraryBrowserProps
   }
 
   return (
-    <div className="flex flex-col h-full p-6 space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-        {view === 'remote' ? 'Remote' : 'Library'}
-      </h1>
-
-      {view === 'library' && (<>
-      {/* Enhancement Actions (library view only) */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-        <h2 className="text-lg font-semibold mb-3 text-gray-900 dark:text-gray-100">
-          Enhancement Tools
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-          <button
-            onClick={handleFingerprintLibrary}
-            disabled={fingerprintProgress.isRunning}
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+    <div className="flex flex-col h-full">
+      {/* Header bar: tabs + tools */}
+      <div className="flex items-center justify-between px-4 h-11 border-b border-edge-subtle shrink-0">
+        {/* View tabs */}
+        <div className="flex items-center gap-0.5">
+          <NavLink
+            to="/"
+            end
+            className={({ isActive }) =>
+              `px-3 py-1 text-[13px] rounded transition-colors ${
+                isActive
+                  ? "bg-raised text-ink font-medium"
+                  : "text-ink-secondary hover:text-ink"
+              }`
+            }
           >
-            {fingerprintProgress.isRunning ? (
-              <span className="flex items-center justify-center gap-2">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                Fingerprinting... {fingerprintProgress.progress?.current}/{fingerprintProgress.progress?.total}
-              </span>
-            ) : (
-              "Fingerprint Library"
-            )}
-          </button>
-
-          <button
-            onClick={handleFetchArtwork}
-            disabled={artworkProgress.isRunning}
-            className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            Local
+          </NavLink>
+          <NavLink
+            to="/remote"
+            className={({ isActive }) =>
+              `px-3 py-1 text-[13px] rounded transition-colors ${
+                isActive
+                  ? "bg-raised text-ink font-medium"
+                  : "text-ink-secondary hover:text-ink"
+              }`
+            }
           >
-            {artworkProgress.isRunning ? (
-              <span className="flex items-center justify-center gap-2">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                Fetching Artwork...
-              </span>
-            ) : (
-              "Fetch Artwork"
-            )}
-          </button>
-
-          <button
-            onClick={handleAnalyzeReplayGain}
-            disabled={replaygainProgress.isRunning}
-            className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {replaygainProgress.isRunning ? (
-              <span className="flex items-center justify-center gap-2">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                Analyzing... {replaygainProgress.progress?.current}/{replaygainProgress.progress?.total}
-              </span>
-            ) : (
-              "Analyze ReplayGain"
-            )}
-          </button>
-
-          <button
-            onClick={handleDeepScan}
-            disabled={deepscanProgress.isRunning}
-            className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {deepscanProgress.isRunning ? (
-              <span className="flex items-center justify-center gap-2">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                Scanning...
-              </span>
-            ) : (
-              "Deep Scan"
-            )}
-          </button>
+            Remote
+          </NavLink>
         </div>
-      </div>
 
-      {/* Review Queue Section */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-        <button
-          onClick={() => setShowReviewQueue(!showReviewQueue)}
-          className="w-full flex items-center justify-between text-lg font-semibold text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-        >
-          <span className="flex items-center gap-2">
-            Review Queue
-            {reviewQueueCount > 0 && (
-              <span className="px-2 py-0.5 bg-red-500 text-white text-xs rounded-full">
-                {reviewQueueCount}
-              </span>
-            )}
-          </span>
-          <svg
-            className={`w-5 h-5 transform transition-transform ${
-              showReviewQueue ? "rotate-180" : ""
-            }`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M19 9l-7 7-7-7"
+        {/* Enhancement tools — compact toolbar */}
+        {view === "library" && (
+          <div className="flex items-center gap-0.5">
+            <ToolButton
+              label="Fingerprint"
+              onClick={handleFingerprintLibrary}
+              running={fingerprintProgress.isRunning}
+              progress={fingerprintProgress.progress}
             />
-          </svg>
-        </button>
-        {showReviewQueue && (
-          <div className="mt-4">
-            <ReviewQueue />
+            <ToolButton
+              label="Artwork"
+              onClick={handleFetchArtwork}
+              running={artworkProgress.isRunning}
+            />
+            <ToolButton
+              label="ReplayGain"
+              onClick={handleAnalyzeReplayGain}
+              running={replaygainProgress.isRunning}
+              progress={replaygainProgress.progress}
+            />
+            <ToolButton
+              label="Scan"
+              onClick={handleDeepScan}
+              running={deepscanProgress.isRunning}
+            />
           </div>
         )}
       </div>
-      </>)}
 
-      {/* Library Table */}
-      <FilterBar
-        value={filterQuery}
-        onChange={setFilterQuery}
-        trackCount={tracks.length}
-        loading={loading}
-      />
+      {/* Review Queue — only shows when there are items */}
+      {view === "library" && reviewQueueCount > 0 && (
+        <div className="px-4 pt-2">
+          <button
+            onClick={() => setShowReviewQueue(!showReviewQueue)}
+            className="flex items-center gap-2 text-xs text-ink-secondary hover:text-ink transition-colors"
+          >
+            <span>Review Queue</span>
+            <span className="bg-rose-500/15 text-rose-400 px-1.5 py-0.5 rounded text-[10px] font-medium tabular-nums">
+              {reviewQueueCount}
+            </span>
+            <svg
+              className={`w-3 h-3 transition-transform ${showReviewQueue ? "rotate-180" : ""}`}
+              fill="none" stroke="currentColor" viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {showReviewQueue && (
+            <div className="mt-2">
+              <ReviewQueue />
+            </div>
+          )}
+        </div>
+      )}
 
-      <div className="flex-1 min-h-0">
+      {/* Search + track count */}
+      <div className="px-4 py-2.5 shrink-0">
+        <FilterBar
+          value={filterQuery}
+          onChange={setFilterQuery}
+          trackCount={tracks.length}
+          loading={loading}
+        />
+      </div>
+
+      {/* Track table */}
+      <div className="flex-1 min-h-0 px-4 pb-2">
         {loading ? (
           <div className="flex items-center justify-center h-full">
-            <div className="text-gray-600 dark:text-gray-400">
-              Loading library...
-            </div>
+            <span className="text-sm text-ink-muted">Loading...</span>
           </div>
         ) : tracks.length === 0 ? (
           <div className="flex items-center justify-center h-full">
-            <div className="text-gray-600 dark:text-gray-400">
-              {filterQuery
-                ? "No tracks match your search"
-                : "No tracks in library"}
-            </div>
+            <span className="text-sm text-ink-muted">
+              {filterQuery ? "No tracks match your search" : "No tracks yet"}
+            </span>
           </div>
         ) : (
-          <LibraryTable tracks={tracks} onOpenMoreInfo={handleOpenMoreInfo} />
+          <LibraryTable tracks={tracks} view={view} onOpenMoreInfo={handleOpenMoreInfo} cachedTrackIds={cachedTrackIds} />
         )}
       </div>
 
-      {/* More Info Panel */}
-      <MoreInfoPanel track={moreInfoTrack} isOpen={moreInfoOpen} onClose={handleCloseMoreInfo} />
+      <MoreInfoPanel track={moreInfoTrack} isOpen={moreInfoOpen} onClose={() => setMoreInfoOpen(false)} />
     </div>
+  );
+}
+
+/** Compact toolbar button for enhancement tools */
+function ToolButton({
+  label,
+  onClick,
+  running,
+  progress,
+}: {
+  label: string;
+  onClick: () => void;
+  running: boolean;
+  progress?: { current: number; total: number } | null;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={running}
+      className="px-2 py-1 text-[11px] text-ink-muted hover:text-ink hover:bg-raised rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      title={label}
+    >
+      {running ? (
+        <span className="flex items-center gap-1">
+          <span className="w-2.5 h-2.5 border border-ink-muted border-t-sky-400 rounded-full animate-spin" />
+          <span className="tabular-nums">
+            {progress ? `${progress.current}/${progress.total}` : "..."}
+          </span>
+        </span>
+      ) : (
+        label
+      )}
+    </button>
   );
 }

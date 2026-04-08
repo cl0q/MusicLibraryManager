@@ -14,7 +14,7 @@ export default function MetadataPanel({ track }: MetadataPanelProps) {
     { label: "Album Artist", value: m.album_artist },
     { label: "Duration", value: formatDuration(m.duration ?? 0) },
     { label: "Format", value: m.format?.toUpperCase() || "Unknown" },
-    { label: "Bitrate", value: m.bitrate ? `${m.bitrate} kbps` : "-" },
+    { label: "Bitrate", value: m.bitrate ? `${Math.round(m.bitrate / 1000)} kbps` : "-" },
     { label: "Year", value: m.year?.toString() || "-" },
     { label: "Genre", value: m.genre || "-" },
     { label: "Date Added", value: track.date_added ? formatDate(new Date(track.date_added).getTime() / 1000) : "-" },
