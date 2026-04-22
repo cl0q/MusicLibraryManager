@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   useReactTable,
   createColumnHelper,
@@ -7,6 +7,7 @@ import {
   getSortedRowModel,
   type SortingState,
   type ColumnSizingState,
+  type VisibilityState,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { Track } from "../../types/library";
@@ -19,6 +20,67 @@ interface LibraryTableProps {
   view?: "library" | "remote";
   onOpenMoreInfo?: (track: Track) => void;
   cachedTrackIds?: Set<number>;
+  /** Column visibility override — used by MoreInfo/Settings to toggle the `energy` column on. */
+  columnVisibility?: VisibilityState;
+  onColumnVisibilityChange?: (v: VisibilityState) => void;
+}
+
+/**
+ * SourceBadge — tiny pill indicating where a track originates (Spotify,
+ * SoundCloud, etc.). Rendered inline in the Title cell when the track has
+ * a streaming origin.
+ */
+function SourceBadge({ source }: { source: string | null | undefined }) {
+  if (!source) return null;
+  const map: Record<string, { color: string; label: string }> = {
+    spotify: { color: "var(--color-emerald, #10b981)", label: "Spotify" },
+    soundcloud: { color: "#ff7a00", label: "SoundCloud" },
+    bandcamp: { color: "#1da0c3", label: "Bandcamp" },
+    beatport: { color: "var(--color-sky, #38bdf8)", label: "Beatport" },
+  };
+  const key = source.toLowerCase();
+  const entry = map[key];
+  if (!entry) return null;
+  return (
+    <span
+      className="shrink-0 inline-flex items-center px-1 py-px rounded text-[10px] leading-none uppercase tracking-wide"
+      style={{
+        color: entry.color,
+        background: `color-mix(in oklab, ${entry.color} 14%, transparent)`,
+      }}
+    >
+      {entry.label}
+    </span>
+  );
+}
+
+/**
+ * EnergyBars — scaled-down version of the mock's EnergyBars atom. Renders
+ * a 1-5 bucket as five stepped rectangles. Value is read from a placeholder
+ * `energy_bucket` field on the track row — populated by Phase 18's loudness
+ * analysis.
+ */
+function EnergyBars({ value }: { value: number | null | undefined }) {
+  if (value == null) return <span className="text-ink-muted text-[11px]">—</span>;
+  const clamped = Math.max(1, Math.min(5, value));
+  return (
+    <span className="inline-flex items-end gap-[2px] h-[14px]">
+      {[1, 2, 3, 4, 5].map((i) => {
+        const on = i <= clamped;
+        const h = 3 + (i - 1) * 2;
+        return (
+          <span
+            key={i}
+            className="w-[2px] rounded-[0.5px]"
+            style={{
+              height: `${h}px`,
+              background: on ? "var(--color-accent)" : "var(--color-edge)",
+            }}
+          />
+        );
+      })}
+    </span>
+  );
 }
 
 const columnHelper = createColumnHelper<Track>();
@@ -28,18 +90,35 @@ const columns = [
     id: "title",
     header: "Title",
     size: 260,
-    minSize: 100,
+    minSize: 120,
     maxSize: 500,
     cell: (info) => {
-      const cached = (info.table.options.meta as { cachedTrackIds?: Set<number> })?.cachedTrackIds;
-      const trackId = info.row.original.id;
+      const meta = info.table.options.meta as {
+        cachedTrackIds?: Set<number>;
+        view?: "library" | "remote";
+      };
+      const cached = meta?.cachedTrackIds;
+      const view = meta?.view;
+      const track = info.row.original;
+      const trackId = track.id;
       const isCached = cached && trackId ? cached.has(trackId) : false;
+      const isRemoteView = view === "remote";
+
       return (
-        <div className="text-[13px] font-medium text-ink truncate flex items-center gap-1.5" title={info.getValue() || "Unknown"}>
-          {isCached && (
-            <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-emerald-500" title="Transcoded & cached" />
-          )}
-          {info.getValue() || "Unknown"}
+        <div className="text-[13px] text-ink truncate flex items-center gap-1.5" title={info.getValue() || "Unknown"}>
+          {isCached ? (
+            <span
+              className="shrink-0 w-[5px] h-[5px] rounded-full bg-emerald-500"
+              title="Cached locally"
+            />
+          ) : isRemoteView ? (
+            <span
+              className="shrink-0 w-[5px] h-[5px] rounded-full bg-ink-muted"
+              title="Remote — not downloaded"
+            />
+          ) : null}
+          <span className="truncate font-medium">{info.getValue() || "Unknown"}</span>
+          <SourceBadge source={track.metadata.format} />
         </div>
       );
     },
@@ -75,7 +154,10 @@ const columns = [
     minSize: 50,
     maxSize: 100,
     cell: (info) => (
-      <div className="text-[13px] text-ink-muted text-right tabular-nums font-mono">
+      <div
+        className="text-[12px] text-ink-muted text-right tabular-nums"
+        style={{ fontFamily: "var(--font-mono)" }}
+      >
         {formatDuration(info.getValue() ?? 0)}
       </div>
     ),
@@ -93,7 +175,10 @@ const columns = [
           ? "Stream"
           : (format || "—").toUpperCase();
       return (
-        <div className="text-[11px] text-ink-muted uppercase tracking-wide">
+        <div
+          className="text-[10px] text-ink-muted uppercase tracking-[0.06em]"
+          style={{ fontFamily: "var(--font-mono)" }}
+        >
           {display}
         </div>
       );
@@ -109,7 +194,10 @@ const columns = [
       const bitrate = info.getValue();
       const display = bitrate ? (bitrate > 10000 ? Math.round(bitrate / 1000) : bitrate) : null;
       return (
-        <div className="text-[13px] text-ink-muted text-right tabular-nums font-mono">
+        <div
+          className="text-[12px] text-ink-muted text-right tabular-nums"
+          style={{ fontFamily: "var(--font-mono)" }}
+        >
           {display ?? "—"}
         </div>
       );
@@ -122,27 +210,83 @@ const columns = [
     maxSize: 150,
     cell: (info) => {
       const dateStr = info.getValue();
-      if (!dateStr) return <div className="text-[13px] text-ink-muted">—</div>;
+      if (!dateStr) return <div className="text-[12px] text-ink-muted">—</div>;
       const timestamp = new Date(dateStr).getTime() / 1000;
       return (
-        <div className="text-[13px] text-ink-muted tabular-nums">
+        <div
+          className="text-[12px] text-ink-muted tabular-nums"
+          style={{ fontFamily: "var(--font-mono)" }}
+        >
           {formatDate(timestamp)}
         </div>
       );
     },
   }),
+  // Hidden by default; Phase 18 surfaces this via column-menu toggle.
+  columnHelper.accessor(
+    // Stored on the track row as energy_bucket (nullable INTEGER). The Track
+    // type doesn't declare it yet — Phase 18 adds the backend column and
+    // loosens the type. For now, read through a defensive `any` so the
+    // column renders "—" when the field is absent.
+    (row) => {
+      const v = (row as unknown as { energy_bucket?: number | null }).energy_bucket;
+      return v ?? null;
+    },
+    {
+      id: "energy",
+      header: "Energy",
+      size: 70,
+      minSize: 50,
+      maxSize: 120,
+      cell: (info) => <EnergyBars value={info.getValue() as number | null} />,
+    }
+  ),
 ];
 
-function LibraryTableInner({ tracks, view, onOpenMoreInfo, cachedTrackIds }: LibraryTableProps) {
+function LibraryTableInner({
+  tracks,
+  view,
+  onOpenMoreInfo,
+  cachedTrackIds,
+  columnVisibility,
+  onColumnVisibilityChange,
+}: LibraryTableProps) {
   const [sorting, setSorting] = useState<SortingState>(
     view === "remote" ? [{ id: "date_added", desc: true }] : []
   );
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
+  // Internal visibility fallback when parent doesn't manage it. `energy` is
+  // hidden by default — Phase 18 surfaces the toggle in the column menu.
+  const [internalVisibility, setInternalVisibility] = useState<VisibilityState>({ energy: false });
+  const resolvedVisibility = columnVisibility ?? internalVisibility;
+  const handleVisibilityChange: React.Dispatch<React.SetStateAction<VisibilityState>> = (updater) => {
+    if (onColumnVisibilityChange) {
+      const next =
+        typeof updater === "function"
+          ? (updater as (old: VisibilityState) => VisibilityState)(resolvedVisibility)
+          : updater;
+      onColumnVisibilityChange(next);
+    } else {
+      setInternalVisibility(updater);
+    }
+  };
+
   const [contextMenuTrack, setContextMenuTrack] = useState<Track | null>(null);
   const [confirmedTracks, setConfirmedTracks] = useState<Set<number>>(new Set());
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const { displayMenu } = useRowContextMenu();
-  const { selectedTracks, setSelectedTracks, isSelected } = useTrackSelection();
+  const { selectedTracks, setSelectedTracks, isSelected, clearSelection } = useTrackSelection();
+
+  // Esc clears selection (needed by batch bar in Phase 19 too)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && selectedTracks.length > 0) {
+        clearSelection();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedTracks.length, clearSelection]);
 
   const showInlineConfirmation = (trackIds: number[]) => {
     setConfirmedTracks((prev) => {
@@ -188,14 +332,15 @@ function LibraryTableInner({ tracks, view, onOpenMoreInfo, cachedTrackIds }: Lib
   const table = useReactTable({
     data: tracks,
     columns,
-    state: { sorting, columnSizing },
+    state: { sorting, columnSizing, columnVisibility: resolvedVisibility },
     onSortingChange: setSorting,
     onColumnSizingChange: setColumnSizing,
+    onColumnVisibilityChange: handleVisibilityChange,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     columnResizeMode: "onChange",
     enableColumnResizing: true,
-    meta: { cachedTrackIds },
+    meta: { cachedTrackIds, view },
   });
 
   const { rows } = table.getRowModel();
@@ -218,7 +363,8 @@ function LibraryTableInner({ tracks, view, onOpenMoreInfo, cachedTrackIds }: Lib
     <>
       <div
         ref={tableContainerRef}
-        className="overflow-auto h-full border border-edge rounded-lg bg-surface select-none"
+        className="overflow-auto h-full border border-edge rounded-md bg-surface select-none"
+        style={{ fontFamily: "var(--font-ui)" }}
       >
         <table className="w-full border-collapse table-fixed">
           <thead className="bg-surface sticky top-0 z-10">
@@ -228,7 +374,7 @@ function LibraryTableInner({ tracks, view, onOpenMoreInfo, cachedTrackIds }: Lib
                   <th
                     key={header.id}
                     style={{ width: header.getSize() }}
-                    className="relative px-3 py-2 text-left text-[10px] font-semibold text-ink-muted uppercase tracking-wider select-none"
+                    className="relative px-3 py-2 text-left text-[10px] font-semibold text-ink-muted uppercase tracking-[0.08em] select-none"
                   >
                     <div
                       className="flex items-center gap-1.5 cursor-pointer hover:text-ink-secondary transition-colors"
@@ -270,13 +416,14 @@ function LibraryTableInner({ tracks, view, onOpenMoreInfo, cachedTrackIds }: Lib
               return (
                 <tr
                   key={row.id}
-                  className={`border-t border-edge-subtle cursor-pointer transition-colors duration-150 ${
+                  className={`border-t border-edge-subtle cursor-pointer transition-colors duration-100 ${
                     confirmed
                       ? "bg-emerald-500/10"
                       : selected
                         ? "bg-accent/10"
                         : "hover:bg-raised/60"
                   }`}
+                  style={{ height: "var(--row-h, 36px)" }}
                   onClick={(e) => handleRowClick(track, e)}
                   onContextMenu={(e) => {
                     e.preventDefault();
@@ -285,7 +432,11 @@ function LibraryTableInner({ tracks, view, onOpenMoreInfo, cachedTrackIds }: Lib
                   }}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-3 py-1.5 overflow-hidden">
+                    <td
+                      key={cell.id}
+                      className="overflow-hidden align-middle px-3"
+                      style={{ paddingTop: "var(--row-py, 6px)", paddingBottom: "var(--row-py, 6px)" }}
+                    >
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </td>
                   ))}
@@ -303,10 +454,10 @@ function LibraryTableInner({ tracks, view, onOpenMoreInfo, cachedTrackIds }: Lib
   );
 }
 
-export default function LibraryTable({ tracks, view, onOpenMoreInfo, cachedTrackIds }: LibraryTableProps) {
+export default function LibraryTable(props: LibraryTableProps) {
   return (
     <TrackSelectionProvider>
-      <LibraryTableInner tracks={tracks} view={view} onOpenMoreInfo={onOpenMoreInfo} cachedTrackIds={cachedTrackIds} />
+      <LibraryTableInner {...props} />
     </TrackSelectionProvider>
   );
 }
