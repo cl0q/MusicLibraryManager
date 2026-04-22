@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
-export type ThemeName = "midnight" | "solarized-dark" | "solarized-light";
+export type ThemeName = "solar" | "midnight" | "solarized-dark" | "solarized-light";
 
 interface ThemeContextValue {
   theme: ThemeName;
@@ -9,19 +9,25 @@ interface ThemeContextValue {
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
-  theme: "midnight",
+  theme: "solar",
   setTheme: () => {},
-  isDark: true,
+  isDark: false,
 });
 
 const STORAGE_KEY = "mlm-theme";
+const LIGHT_THEMES: ThemeName[] = ["solar", "solarized-light"];
 
 function getInitialTheme(): ThemeName {
   const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored === "midnight" || stored === "solarized-dark" || stored === "solarized-light") {
+  if (
+    stored === "solar" ||
+    stored === "midnight" ||
+    stored === "solarized-dark" ||
+    stored === "solarized-light"
+  ) {
     return stored;
   }
-  return "midnight";
+  return "solar";
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -36,7 +42,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
 
-  const isDark = theme !== "solarized-light";
+  const isDark = !LIGHT_THEMES.includes(theme);
 
   return (
     <ThemeContext.Provider value={{ theme, setTheme, isDark }}>

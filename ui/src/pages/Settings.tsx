@@ -11,6 +11,11 @@ const themes: {
   colors: { bg: string; surface: string; text: string; accent: string };
 }[] = [
   {
+    value: "solar",
+    label: "Solar",
+    colors: { bg: "#f0ebe1", surface: "#e8e2d4", text: "#1a1612", accent: "#b8541e" },
+  },
+  {
     value: "midnight",
     label: "Midnight",
     colors: { bg: "#0c0c12", surface: "#14141c", text: "#e8e8f0", accent: "#d4940c" },

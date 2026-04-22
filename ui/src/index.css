@@ -20,8 +20,33 @@
   --color-accent: #d4940c;
   --color-accent-bright: #f0a818;
 
-  /* Mono font */
+  /* Typography (Solar + defaults) */
+  --font-ui: Inter, system-ui, -apple-system, sans-serif;
   --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+  --font-display: Inter, system-ui, -apple-system, sans-serif;
+
+  /* Density tokens — consumed by tables and lists */
+  --row-h: 36px;
+  --row-py: 6px;
+}
+
+/* ── Solar — Pro Audio Light (default for new installs) ─── */
+/* See .planning/research/solar-design/project/mlm/theme.jsx */
+[data-theme="solar"] {
+  --color-base: #f0ebe1;
+  --color-surface: #e8e2d4;
+  --color-raised: #ddd4c2;
+  --color-overlay: #d2c8b4;
+  --color-edge: #c4b89e;
+  --color-edge-subtle: #d8cfbb;
+  --color-ink: #1a1612;
+  --color-ink-secondary: #5a5248;
+  --color-ink-muted: #8a8172;
+  --color-accent: #b8541e;
+  --color-accent-bright: #d46a2d;
+  --font-ui: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --font-display: 'IBM Plex Serif', Georgia, serif;
 }
 
 /* ── Solarized Dark ─────────────────────────────── */
@@ -55,7 +80,7 @@
 }
 
 :root {
-  font-family: Inter, system-ui, -apple-system, sans-serif;
+  font-family: var(--font-ui);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
