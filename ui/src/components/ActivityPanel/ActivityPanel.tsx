@@ -57,7 +57,7 @@ const MAX_LOG_ENTRIES = 500;
 export default function ActivityPanel() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState<"ops" | "logs">("ops");
-  const { downloads, queueStatus, handleRetryFailed, clearDownloads } = useDownloadQueue();
+  const { downloads, handleRetryFailed, clearDownloads } = useDownloadQueue();
   const syncs = useSyncProgress();
 
   // Library stats

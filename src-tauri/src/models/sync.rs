@@ -3,9 +3,25 @@
 //! Contains DTOs for device sync profiles:
 //! - `SyncProfileDto` - Complete profile with computed statistics
 //! - `FilterRuleDto` - Filter rule for query-based track selection
+//! - `SyncCounts` - Counts from a source sync operation
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+
+/// Counts returned from a source sync operation.
+///
+/// Tracks how many items were found from the remote source,
+/// how many were newly inserted, and how many were skipped
+/// because they already existed in the library.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SyncCounts {
+    /// Total tracks found/checked from the remote source.
+    pub found: usize,
+    /// Newly inserted tracks.
+    pub added: usize,
+    /// Tracks that already existed in the library (skipped).
+    pub skipped: usize,
+}
 
 use crate::sync::profile::{FilterRule, SyncProfile};
 

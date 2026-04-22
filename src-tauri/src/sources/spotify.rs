@@ -446,9 +446,9 @@ impl SpotifyClient {
     /// * `conn` - Database connection
     ///
     /// # Returns
-    /// * `Ok(count)` - Number of new tracks synced
+    /// * `Ok(SyncCounts)` - Counts of found, added, and skipped tracks
     /// * `Err(SpotifyError)` - If API call or database operation fails
-    pub async fn sync_liked_songs(&mut self, conn: &Connection) -> Result<usize> {
+    pub async fn sync_liked_songs(&mut self, conn: &Connection) -> Result<crate::models::SyncCounts> {
         // Get last sync timestamp from database
         let last_sync = get_last_sync_timestamp(conn, &self.user_id, "spotify")?
             .unwrap_or_else(|| {
@@ -459,7 +459,7 @@ impl SpotifyClient {
         let last_sync_dt =
             DateTime::parse_from_rfc3339(&last_sync).unwrap_or_else(|_| Utc::now().into());
 
-        let mut added_count = 0;
+        let mut counts = crate::models::SyncCounts::default();
         let mut next_url = Some(format!("{}/me/tracks?limit={}", API_BASE, PAGE_SIZE));
         let mut tracks_to_insert: Vec<SyncedTrack> = Vec::new();
 
@@ -470,6 +470,8 @@ impl SpotifyClient {
 
             let mut found_old_track = false;
             for item in data.items {
+                counts.found += 1;
+
                 // Parse added_at timestamp
                 let added_at = DateTime::parse_from_rfc3339(&item.added_at)
                     .unwrap_or_else(|_| Utc::now().into());
@@ -477,10 +479,11 @@ impl SpotifyClient {
                 // Only process tracks added since last sync
                 if added_at > last_sync_dt {
                     tracks_to_insert.push(SyncedTrack::from(&item));
-                    added_count += 1;
+                    counts.added += 1;
                 } else {
                     // Spotify returns tracks in reverse chronological order,
                     // so once we hit old tracks, we can stop
+                    counts.skipped += 1;
                     found_old_track = true;
                     break;
                 }
@@ -501,7 +504,7 @@ impl SpotifyClient {
         // Update last sync timestamp
         set_last_sync_timestamp(conn, &self.user_id, "spotify", &Utc::now().to_rfc3339())?;
 
-        Ok(added_count)
+        Ok(counts)
     }
 
     /// Get all user playlists.

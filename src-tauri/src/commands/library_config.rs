@@ -154,7 +154,7 @@ pub async fn configure_library(
         configured: true,
     };
 
-    let db_path = PathBuf::from("music_library.db");
+    let db_path = crate::database::db_path();
     let conn = get_connection(&db_path)
         .map_err(|e| format!("Database connection failed: {}", e))?;
 
@@ -170,7 +170,7 @@ pub async fn configure_library(
 /// Returns LibraryConfig struct with current settings.
 #[tauri::command]
 pub async fn get_library_config() -> Result<LibraryConfig, String> {
-    let db_path = PathBuf::from("music_library.db");
+    let db_path = crate::database::db_path();
     let conn = get_connection(&db_path)
         .map_err(|e| format!("Database connection failed: {}", e))?;
 
@@ -183,7 +183,7 @@ pub async fn get_library_config() -> Result<LibraryConfig, String> {
 /// Returns true if library is configured and root path exists, false otherwise.
 #[tauri::command]
 pub async fn check_library_connection() -> Result<bool, String> {
-    let db_path = PathBuf::from("music_library.db");
+    let db_path = crate::database::db_path();
     let conn = get_connection(&db_path)
         .map_err(|e| format!("Database connection failed: {}", e))?;
 
@@ -231,7 +231,7 @@ pub async fn get_library_mount_state(
 #[tauri::command]
 pub async fn reveal_in_file_manager(path: String, fallback_path: Option<String>) -> Result<(), String> {
     // Resolve the relative organized_path against the configured library root.
-    let db_path = PathBuf::from("music_library.db");
+    let db_path = crate::database::db_path();
     let conn = get_connection(&db_path)
         .map_err(|e| format!("Database connection failed: {}", e))?;
     let config = LibraryConfig::load(&conn)
@@ -313,7 +313,7 @@ pub async fn reveal_in_file_manager(path: String, fallback_path: Option<String>)
 #[tauri::command]
 pub async fn get_app_setting(key: String) -> Result<Option<String>, String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         let result: Option<String> = conn
@@ -330,11 +330,135 @@ pub async fn get_app_setting(key: String) -> Result<Option<String>, String> {
     .map_err(|e| format!("Task join error: {}", e))?
 }
 
+/// Library size status returned by check_library_size_limit.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct LibrarySizeStatus {
+    pub used_bytes: u64,
+    pub limit_bytes: Option<u64>,
+    pub remaining_bytes: Option<u64>,
+    pub warning: bool,
+}
+
+/// Set a maximum size limit for the library (in GB). Pass `null` to clear the limit.
+#[tauri::command]
+pub async fn set_library_size_limit(limit_gb: Option<f64>) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let db_path = crate::database::db_path();
+        let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+
+        match limit_gb {
+            Some(gb) => {
+                conn.execute(
+                    "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES ('library_size_limit_gb', ?1, CURRENT_TIMESTAMP)",
+                    rusqlite::params![gb.to_string()],
+                )
+                .map_err(|e| format!("Failed to save size limit: {}", e))?;
+                log::info!("Library size limit set to {} GB", gb);
+            }
+            None => {
+                conn.execute(
+                    "DELETE FROM app_config WHERE key = 'library_size_limit_gb'",
+                    [],
+                )
+                .map_err(|e| format!("Failed to clear size limit: {}", e))?;
+                log::info!("Library size limit cleared");
+            }
+        }
+
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+/// Get the current library size limit in GB, or null if not set.
+#[tauri::command]
+pub async fn get_library_size_limit() -> Result<Option<f64>, String> {
+    tokio::task::spawn_blocking(move || {
+        let db_path = crate::database::db_path();
+        let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+
+        let result: Option<String> = conn
+            .query_row(
+                "SELECT value FROM app_config WHERE key = 'library_size_limit_gb'",
+                [],
+                |row| row.get(0),
+            )
+            .ok();
+
+        Ok(result.and_then(|v| v.parse::<f64>().ok()))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+/// Check the library's current size against the configured limit.
+///
+/// Returns used size, limit, remaining space, and whether a warning should be shown.
+/// Warning is true when remaining is less than 10% of the limit or less than 1 GB.
+#[tauri::command]
+pub async fn check_library_size_limit() -> Result<LibrarySizeStatus, String> {
+    tokio::task::spawn_blocking(move || {
+        let db_path = crate::database::db_path();
+        let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+
+        // Get current library size
+        let mut stmt = conn
+            .prepare("SELECT original_path FROM tracks")
+            .map_err(|e| format!("Failed to prepare query: {}", e))?;
+
+        let paths: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .map_err(|e| format!("Failed to query tracks: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let mut used_bytes: u64 = 0;
+        for path in paths {
+            if let Ok(metadata) = std::fs::metadata(&path) {
+                used_bytes += metadata.len();
+            }
+        }
+
+        // Get limit
+        let limit_gb: Option<f64> = conn
+            .query_row(
+                "SELECT value FROM app_config WHERE key = 'library_size_limit_gb'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok());
+
+        let limit_bytes = limit_gb.map(|gb| (gb * 1_073_741_824.0) as u64);
+
+        let remaining_bytes = limit_bytes.map(|limit| limit.saturating_sub(used_bytes));
+
+        let warning = match (limit_bytes, remaining_bytes) {
+            (Some(limit), Some(remaining)) => {
+                let ten_percent = limit / 10;
+                let one_gb: u64 = 1_073_741_824;
+                remaining < ten_percent || remaining < one_gb
+            }
+            _ => false,
+        };
+
+        Ok(LibrarySizeStatus {
+            used_bytes,
+            limit_bytes,
+            remaining_bytes,
+            warning,
+        })
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
 /// Set an app setting in the app_config table.
 #[tauri::command]
 pub async fn set_app_setting(key: String, value: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         conn.execute(

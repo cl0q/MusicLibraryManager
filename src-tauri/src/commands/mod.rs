@@ -60,6 +60,8 @@ pub use import::{import_directory, import_playlist_command};
 pub use library_config::{
     check_library_connection, configure_library, get_library_config,
     get_library_mount_state, get_subfolders, select_library_folder,
+    set_library_size_limit, get_library_size_limit, check_library_size_limit,
+    LibrarySizeStatus,
 };
 pub use playlist::{
     add_track_to_playlist_command, create_playlist_command, get_playlist_tracks_command,
@@ -68,8 +70,10 @@ pub use playlist::{
 };
 pub use search::{get_library_storage_size, get_library_tracks, get_library_tracks_only, get_remote_tracks_only, get_remote_track_count, search_library};
 pub use sources::{
-    check_duplicates, soundcloud_auth_url, soundcloud_exchange_code, spotify_auth_url,
-    spotify_exchange_code, sync_soundcloud, sync_spotify, OAuthState,
+    apple_music_check_connected, apple_music_get_dev_token, apple_music_store_user_token,
+    check_duplicates, disconnect_apple_music, soundcloud_auth_url, soundcloud_exchange_code,
+    spotify_auth_url, spotify_exchange_code, sync_apple_music, sync_soundcloud, sync_spotify,
+    OAuthState,
 };
 pub use sync::{
     add_playlist_to_profile, add_rule_to_profile, add_track_to_profile, create_sync_profile,

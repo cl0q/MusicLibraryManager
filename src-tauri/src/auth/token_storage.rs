@@ -8,7 +8,16 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use thiserror::Error;
+
+static TOKEN_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// Initialize the token storage directory. Called once during Tauri setup.
+pub fn init_token_dir(app_data_dir: PathBuf) {
+    let dir = app_data_dir.join("tokens");
+    TOKEN_DIR.set(dir).expect("TOKEN_DIR already initialized");
+}
 
 /// Errors that can occur during token storage operations.
 #[derive(Error, Debug)]
@@ -25,9 +34,10 @@ pub type Result<T> = std::result::Result<T, TokenStorageError>;
 
 /// Get the token storage directory.
 fn get_token_dir() -> PathBuf {
-    // Use a .tokens directory in the current working directory
-    // In production, this should be in the app's data directory
-    PathBuf::from(".tokens")
+    TOKEN_DIR
+        .get()
+        .cloned()
+        .unwrap_or_else(|| PathBuf::from(".tokens"))
 }
 
 /// Build a filename from source and user_id.

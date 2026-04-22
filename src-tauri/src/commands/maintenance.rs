@@ -18,7 +18,7 @@ use tauri::Emitter;
 #[tauri::command]
 pub async fn reindex_search(app: tauri::AppHandle) -> Result<u64, String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         // Clear analysis cache
@@ -31,6 +31,8 @@ pub async fn reindex_search(app: tauri::AppHandle) -> Result<u64, String> {
         let _ = app.emit("maintenance:reindex_complete", serde_json::json!({
             "cleared": cleared
         }));
+        // Emit generic library:updated so UI stats refresh immediately
+        let _ = app.emit("library:updated", serde_json::json!({ "source": "reindex" }));
 
         Ok(cleared)
     })
@@ -49,7 +51,7 @@ pub async fn reindex_search(app: tauri::AppHandle) -> Result<u64, String> {
 pub async fn rescan_metadata(app: tauri::AppHandle) -> Result<RescanResult, String> {
     log::info!("rescan_metadata command invoked");
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         let config = LibraryConfig::load(&conn)
@@ -152,6 +154,8 @@ pub async fn rescan_metadata(app: tauri::AppHandle) -> Result<RescanResult, Stri
             "updated": updated,
             "errors": errors,
         }));
+        // Emit generic library:updated so UI stats refresh immediately
+        let _ = app.emit("library:updated", serde_json::json!({ "source": "rescan" }));
 
         Ok(RescanResult { scanned, updated, errors })
     })
@@ -192,7 +196,7 @@ fn resolve_local_path(
 #[tauri::command]
 pub async fn find_orphaned_tracks() -> Result<OrphanResult, String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         let config = LibraryConfig::load(&conn)
@@ -253,7 +257,7 @@ pub async fn purge_orphaned_tracks() -> Result<u64, String> {
     }
 
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         let mut deleted = 0u64;

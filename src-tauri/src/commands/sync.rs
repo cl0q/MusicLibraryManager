@@ -32,7 +32,7 @@
 //! });
 //! ```
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::database::get_connection;
 use crate::models::sync::{FilterRuleDto, SyncProfileDto};
@@ -54,7 +54,7 @@ use tauri::Emitter;
 #[tauri::command]
 pub async fn create_sync_profile(name: String, output_folder: String) -> Result<i64, String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         let output_path = PathBuf::from(output_folder);
@@ -75,7 +75,7 @@ pub async fn create_sync_profile(name: String, output_folder: String) -> Result<
 #[tauri::command]
 pub async fn list_sync_profiles() -> Result<Vec<SyncProfileDto>, String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         let profiles = crate::sync::profile::list_sync_profiles(&conn)
@@ -105,7 +105,7 @@ pub async fn list_sync_profiles() -> Result<Vec<SyncProfileDto>, String> {
 #[tauri::command]
 pub async fn get_sync_profile(profile_id: i64) -> Result<SyncProfileDto, String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         let profile = crate::sync::profile::get_sync_profile(&conn, profile_id)
@@ -131,7 +131,7 @@ pub async fn get_sync_profile(profile_id: i64) -> Result<SyncProfileDto, String>
 #[tauri::command]
 pub async fn delete_sync_profile(profile_id: i64) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         crate::sync::profile::delete_sync_profile(&conn, profile_id)
@@ -148,7 +148,7 @@ pub async fn update_sync_profile_settings(
     playlist_path_prefix: String,
 ) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         crate::sync::profile::update_sync_profile_settings(&conn, profile_id, &playlist_path_prefix)
@@ -170,7 +170,7 @@ pub async fn update_sync_profile_settings(
 #[tauri::command]
 pub async fn add_track_to_profile(profile_id: i64, track_id: i64) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         crate::sync::profile::add_manual_track(&conn, profile_id, track_id)
@@ -194,7 +194,7 @@ pub async fn add_track_to_profile(profile_id: i64, track_id: i64) -> Result<(), 
 #[tauri::command]
 pub async fn add_playlist_to_profile(profile_id: i64, playlist_id: i64) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         crate::sync::profile::add_playlist(&conn, profile_id, playlist_id)
@@ -218,7 +218,7 @@ pub async fn add_playlist_to_profile(profile_id: i64, playlist_id: i64) -> Resul
 #[tauri::command]
 pub async fn add_rule_to_profile(profile_id: i64, rule: FilterRuleDto) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         let filter_rule = rule.into();
@@ -234,7 +234,7 @@ pub async fn add_rule_to_profile(profile_id: i64, rule: FilterRuleDto) -> Result
 #[tauri::command]
 pub async fn remove_playlist_from_profile(profile_id: i64, playlist_id: i64) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         crate::sync::profile::remove_playlist(&conn, profile_id, playlist_id)
@@ -248,7 +248,7 @@ pub async fn remove_playlist_from_profile(profile_id: i64, playlist_id: i64) -> 
 #[tauri::command]
 pub async fn remove_track_from_profile(profile_id: i64, track_id: i64) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         crate::sync::profile::remove_manual_track(&conn, profile_id, track_id)
@@ -262,7 +262,7 @@ pub async fn remove_track_from_profile(profile_id: i64, track_id: i64) -> Result
 #[tauri::command]
 pub async fn get_profile_playlists(profile_id: i64) -> Result<Vec<serde_json::Value>, String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         let mut stmt = conn.prepare(
@@ -323,7 +323,7 @@ pub async fn preview_sync_cmd(
     device_space: Option<u64>,
 ) -> Result<SyncPreview, String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         // Use default cache directory (could be made configurable in Phase 6)
@@ -355,7 +355,7 @@ pub async fn execute_sync_cmd(profile_id: i64, app: tauri::AppHandle) -> Result<
     tokio::task::spawn_blocking(move || {
         let handle = tokio::runtime::Handle::current();
         handle.block_on(async {
-            let db_path = PathBuf::from("music_library.db");
+            let db_path = crate::database::db_path();
             let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
             let cache_dir = PathBuf::from("transcode_cache");
 
@@ -507,7 +507,7 @@ pub async fn execute_sync_cmd(profile_id: i64, app: tauri::AppHandle) -> Result<
 pub async fn clean_sync_cmd(profile_id: i64, app: tauri::AppHandle) -> Result<SyncResult, String> {
     // Clear sync state first
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
         conn.execute("DELETE FROM sync_state WHERE profile_id = ?", [profile_id])
             .map_err(|e| format!("Failed to clear sync state: {}", e))?;
@@ -569,7 +569,7 @@ pub async fn get_cached_track_ids() -> Result<Vec<i64>, String> {
 #[tauri::command]
 pub async fn get_last_sync_time() -> Result<Option<String>, String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         let result: Result<String, rusqlite::Error> = conn.query_row(

@@ -5,7 +5,7 @@
 //! - Fingerprint retrieval (future integration with Phase 7 data)
 //! - Spectrogram generation (future feature)
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 use serde::Serialize;
 
@@ -94,7 +94,7 @@ pub struct TrackAnalysisResponse {
 #[tauri::command]
 pub async fn get_track_analysis(track_id: i64) -> Result<TrackAnalysisResponse, String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path)
             .map_err(|e| format!("Database error: {}", e))?;
 
@@ -182,7 +182,7 @@ pub async fn get_track_analysis(track_id: i64) -> Result<TrackAnalysisResponse, 
 #[tauri::command]
 pub async fn get_track_artwork(track_id: i64) -> Result<Option<String>, String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path)
             .map_err(|e| format!("Database error: {}", e))?;
 
@@ -220,7 +220,7 @@ pub async fn get_track_artwork(track_id: i64) -> Result<Option<String>, String> 
 #[tauri::command]
 pub async fn generate_track_fingerprint(track_id: i64) -> Result<Option<String>, String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
         let track = get_track_by_id(&conn, track_id)
             .map_err(|e| format!("DB error: {}", e))?
@@ -254,7 +254,7 @@ pub async fn generate_track_fingerprint(track_id: i64) -> Result<Option<String>,
 #[tauri::command]
 pub async fn generate_track_waveform(track_id: i64) -> Result<Option<String>, String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
         let track = get_track_by_id(&conn, track_id)
             .map_err(|e| format!("DB error: {}", e))?
@@ -293,7 +293,7 @@ pub async fn generate_track_waveform(track_id: i64) -> Result<Option<String>, St
 #[tauri::command]
 pub async fn generate_track_spectrogram(track_id: i64) -> Result<Option<String>, String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
         let track = get_track_by_id(&conn, track_id)
             .map_err(|e| format!("DB error: {}", e))?

@@ -14,7 +14,6 @@
 //! - If present, creates SoundCloudClient and runs incremental sync
 //! - All errors are caught and logged, never propagated
 
-use std::path::PathBuf;
 
 use crate::config::LibraryConfig;
 use crate::database::{get_connection, initialize_schema};
@@ -45,7 +44,7 @@ const DEFAULT_USER_ID: &str = "default";
 pub fn initialize_on_startup() {
     log::info!("Initializing database and playlists...");
 
-    let db_path = PathBuf::from("music_library.db");
+    let db_path = crate::database::db_path();
     let conn = match get_connection(&db_path) {
         Ok(c) => c,
         Err(e) => {
@@ -98,11 +97,11 @@ pub async fn run_startup_tasks() {
         && std::env::var("SPOTIFY_CLIENT_SECRET").is_ok()
     {
         match sync_spotify_on_startup().await {
-            Ok(count) => {
-                if count > 0 {
-                    log::info!("Startup sync: added {} new Spotify tracks", count);
+            Ok(counts) => {
+                if counts.added > 0 {
+                    log::info!("Startup sync: added {} new Spotify tracks ({} found, {} skipped)", counts.added, counts.found, counts.skipped);
                 } else {
-                    log::info!("Startup sync: Spotify library up to date");
+                    log::info!("Startup sync: Spotify library up to date ({} tracks checked)", counts.found);
                 }
             }
             Err(e) => {
@@ -121,11 +120,11 @@ pub async fn run_startup_tasks() {
         && std::env::var("SOUNDCLOUD_CLIENT_SECRET").is_ok()
     {
         match sync_soundcloud_on_startup().await {
-            Ok(count) => {
-                if count > 0 {
-                    log::info!("Startup sync: added {} new SoundCloud tracks", count);
+            Ok(counts) => {
+                if counts.added > 0 {
+                    log::info!("Startup sync: added {} new SoundCloud tracks ({} found, {} skipped)", counts.added, counts.found, counts.skipped);
                 } else {
-                    log::info!("Startup sync: SoundCloud library up to date");
+                    log::info!("Startup sync: SoundCloud library up to date ({} tracks checked)", counts.found);
                 }
             }
             Err(e) => {
@@ -139,6 +138,26 @@ pub async fn run_startup_tasks() {
         log::info!("Startup sync: SoundCloud credentials not configured, skipping");
     }
 
+    // Attempt Apple Music sync
+    // No env var check needed — AppleMusicClient::new() will fail gracefully
+    // if no stored user token exists.
+    match sync_apple_music_on_startup().await {
+        Ok(counts) => {
+            if counts.added > 0 {
+                log::info!("Startup sync: added {} new Apple Music tracks ({} found, {} skipped)", counts.added, counts.found, counts.skipped);
+            } else {
+                log::info!("Startup sync: Apple Music library up to date ({} tracks checked)", counts.found);
+            }
+        }
+        Err(e) => {
+            // This is expected when user hasn't connected Apple Music
+            log::info!(
+                "Startup Apple Music sync skipped (user may not be authenticated): {}",
+                e
+            );
+        }
+    }
+
     log::info!("Startup tasks complete");
 }
 
@@ -146,12 +165,12 @@ pub async fn run_startup_tasks() {
 ///
 /// Creates a SpotifyClient (which handles token refresh) and runs
 /// incremental sync. Returns the number of new tracks added.
-async fn sync_spotify_on_startup() -> Result<usize, String> {
+async fn sync_spotify_on_startup() -> Result<crate::models::SyncCounts, String> {
     let mut client = SpotifyClient::new(DEFAULT_USER_ID)
         .await
         .map_err(|e| format!("Failed to create Spotify client: {}", e))?;
 
-    let db_path = PathBuf::from("music_library.db");
+    let db_path = crate::database::db_path();
     let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
     client
@@ -164,15 +183,36 @@ async fn sync_spotify_on_startup() -> Result<usize, String> {
 ///
 /// Creates a SoundCloudClient and runs incremental sync.
 /// Returns the number of new tracks added.
-async fn sync_soundcloud_on_startup() -> Result<usize, String> {
+async fn sync_soundcloud_on_startup() -> Result<crate::models::SyncCounts, String> {
     let mut client =
         SoundCloudClient::new().map_err(|e| format!("Failed to create SoundCloud client: {}", e))?;
 
-    let db_path = PathBuf::from("music_library.db");
+    let db_path = crate::database::db_path();
     let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
     client
         .sync_likes(DEFAULT_USER_ID, &conn)
+        .await
+        .map_err(|e| format!("Sync failed: {}", e))
+}
+
+/// Sync Apple Music library songs on startup.
+///
+/// Creates an AppleMusicClient (which scrapes a fresh dev token and loads
+/// the stored user token) and runs incremental sync.
+/// Returns the number of new tracks added.
+async fn sync_apple_music_on_startup() -> Result<crate::models::SyncCounts, String> {
+    use crate::sources::AppleMusicClient;
+
+    let mut client = AppleMusicClient::new(DEFAULT_USER_ID)
+        .await
+        .map_err(|e| format!("Failed to create Apple Music client: {}", e))?;
+
+    let db_path = crate::database::db_path();
+    let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+
+    client
+        .sync_library_songs(&conn)
         .await
         .map_err(|e| format!("Sync failed: {}", e))
 }
@@ -190,7 +230,7 @@ async fn sync_soundcloud_on_startup() -> Result<usize, String> {
 pub fn setup_mount_detection(app_handle: tauri::AppHandle) -> Result<(), String> {
     log::info!("Setting up mount detection...");
 
-    let db_path = PathBuf::from("music_library.db");
+    let db_path = crate::database::db_path();
     let conn = get_connection(&db_path)
         .map_err(|e| format!("Failed to get database connection: {}", e))?;
 

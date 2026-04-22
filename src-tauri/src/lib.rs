@@ -48,6 +48,41 @@ pub fn run() {
             queue_path: std::sync::Mutex::new(None),
         })
         .setup(|app| {
+            // Initialize database path using Tauri's app data directory
+            let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
+            database::init_db_path(app_data_dir.clone());
+
+            // Initialize token storage path
+            auth::token_storage::init_token_dir(app_data_dir.clone());
+
+            // Migrate: if db doesn't exist in app data dir but exists in CWD, copy it
+            let db_dest = app_data_dir.join("music_library.db");
+            if !db_dest.exists() {
+                let cwd_db = std::path::PathBuf::from("music_library.db");
+                if cwd_db.exists() {
+                    log::info!("Migrating database from {:?} to {:?}", cwd_db, db_dest);
+                    if let Err(e) = std::fs::copy(&cwd_db, &db_dest) {
+                        log::error!("Failed to migrate database: {}", e);
+                    }
+                }
+            }
+
+            // Migrate: if tokens exist in old CWD .tokens/ but not in app data dir, copy them
+            let token_dest = app_data_dir.join("tokens");
+            let old_tokens = std::path::PathBuf::from(".tokens");
+            if old_tokens.exists() && (!token_dest.exists() || token_dest.read_dir().map_or(true, |mut d| d.next().is_none())) {
+                log::info!("Migrating tokens from {:?} to {:?}", old_tokens, token_dest);
+                std::fs::create_dir_all(&token_dest).ok();
+                if let Ok(entries) = std::fs::read_dir(&old_tokens) {
+                    for entry in entries.flatten() {
+                        let dest_file = token_dest.join(entry.file_name());
+                        if let Err(e) = std::fs::copy(entry.path(), &dest_file) {
+                            log::error!("Failed to migrate token {:?}: {}", entry.file_name(), e);
+                        }
+                    }
+                }
+            }
+
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -158,6 +193,11 @@ pub fn run() {
             commands::sources::disconnect_source,
             commands::sources::connect_spotify_with_server,
             commands::sources::connect_soundcloud_with_server,
+            commands::sources::apple_music_get_dev_token,
+            commands::sources::apple_music_store_user_token,
+            commands::sources::apple_music_check_connected,
+            commands::sources::sync_apple_music,
+            commands::sources::disconnect_apple_music,
             commands::sources::dab_login,
             commands::sources::check_dab_connected,
             commands::playlist::create_playlist_command,
@@ -202,6 +242,9 @@ pub fn run() {
             commands::library_config::reveal_in_file_manager,
             commands::library_config::get_app_setting,
             commands::library_config::set_app_setting,
+            commands::library_config::set_library_size_limit,
+            commands::library_config::get_library_size_limit,
+            commands::library_config::check_library_size_limit,
             commands::maintenance::reindex_search,
             commands::maintenance::rescan_metadata,
             commands::maintenance::find_orphaned_tracks,

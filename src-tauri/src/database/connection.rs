@@ -3,10 +3,35 @@
 //! Provides connection creation and transaction wrappers that ensure
 //! PRAGMA foreign_keys = ON is always enabled.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use rusqlite::{Connection, Transaction};
 use thiserror::Error;
+
+/// Global database path, initialized once during Tauri setup.
+static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+/// Initialize the global database path. Called once during Tauri setup.
+///
+/// Uses the Tauri app data directory so the database lives in a stable
+/// location regardless of CWD (which differs between dev and release).
+pub fn init_db_path(app_data_dir: PathBuf) {
+    std::fs::create_dir_all(&app_data_dir).ok();
+    let path = app_data_dir.join("music_library.db");
+    DB_PATH.set(path).expect("DB_PATH already initialized");
+}
+
+/// Get the resolved database path.
+///
+/// Falls back to a relative path if `init_db_path` was never called
+/// (e.g. in tests or standalone Rust usage).
+pub fn db_path() -> PathBuf {
+    DB_PATH
+        .get()
+        .cloned()
+        .unwrap_or_else(|| PathBuf::from("music_library.db"))
+}
 
 /// Database error types.
 #[derive(Debug, Error)]

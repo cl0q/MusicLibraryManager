@@ -40,7 +40,7 @@ pub async fn transcode_audio(input: &Path, output_dir: &Path) -> Result<Transcod
 
     // Decision logic
     // Determine target bitrate
-    let mut config = FfmpegConfig::default();
+    let config = FfmpegConfig::default();
 
     if format.is_lossless {
         // Lossless -> transcode to 248kbps AAC

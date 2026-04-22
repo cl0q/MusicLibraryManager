@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { listen } from "@tauri-apps/api/event";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import SourceCard, { type SourceStatus } from "../components/Sources/SourceCard";
 import {
   connect_spotify_with_server,
@@ -13,6 +14,11 @@ import {
   import_directory,
   get_library_config,
   syncSourceLikesPlaylist,
+  apple_music_get_dev_token,
+  apple_music_store_user_token,
+  apple_music_check_connected,
+  sync_apple_music,
+  disconnect_apple_music,
 } from "../utils/tauri-commands";
 
 interface SourceState {
@@ -46,23 +52,40 @@ function FolderIcon() {
   );
 }
 
+function AppleMusicIcon() {
+  return (
+    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="url(#apple-music-gradient)">
+      <defs>
+        <linearGradient id="apple-music-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#fc3c44" />
+          <stop offset="100%" stopColor="#d42e8d" />
+        </linearGradient>
+      </defs>
+      <path d="M23.994 6.124a9.23 9.23 0 00-.24-2.19c-.317-1.31-1.062-2.31-2.18-3.043a5.022 5.022 0 00-1.877-.726 10.496 10.496 0 00-1.564-.15c-.04-.003-.083-.01-.124-.013H5.986c-.152.01-.303.017-.455.026-.747.043-1.49.123-2.193.4-1.336.53-2.3 1.452-2.865 2.78-.192.448-.292.925-.363 1.408-.056.392-.088.785-.1 1.18 0 .032-.007.062-.01.093v12.223c.01.14.017.283.027.424.05.815.154 1.624.497 2.373.65 1.42 1.738 2.353 3.234 2.802.42.127.856.187 1.297.228.468.045.937.07 1.407.074 3.834.004 7.67.004 11.504 0 .5-.006.998-.03 1.494-.08.517-.05 1.022-.152 1.5-.374 1.19-.553 2.032-1.46 2.543-2.657.207-.484.328-.99.393-1.512.06-.478.088-.96.095-1.442.01-.837.003-1.673.003-2.51V6.124zM17.725 18.09c-.03.322-.094.637-.234.93-.375.783-1.03 1.16-1.857 1.27-.534.072-1.06.04-1.58-.076-.628-.14-1.228-.387-1.78-.722-.17-.103-.326-.224-.51-.353 0 .204.003.382 0 .56a3.578 3.578 0 01-.067.638 1.446 1.446 0 01-.333.67c-.27.3-.626.415-1.016.434-.36.018-.71-.028-1.048-.13-.786-.236-1.37-.733-1.705-1.49a2.598 2.598 0 01-.197-.835c-.05-.495.03-.972.21-1.43.286-.733.78-1.268 1.482-1.592.5-.23 1.028-.342 1.577-.367.22-.01.44 0 .663.012V9.203c0-.184.032-.362.11-.527.13-.274.354-.42.652-.42.07 0 .14.01.21.024l4.277.91c.263.057.468.195.578.447.053.12.076.252.076.387v6.36c.012.568.003 1.138-.108 1.706z" />
+    </svg>
+  );
+}
+
 export default function Sources() {
   const navigate = useNavigate();
   const [spotify, setSpotify] = useState<SourceState>({ status: "disconnected" });
   const [soundcloud, setSoundcloud] = useState<SourceState>({ status: "disconnected" });
+  const [appleMusic, setAppleMusic] = useState<SourceState>({ status: "disconnected" });
   const [localLibrary, setLocalLibrary] = useState<SourceState>({ status: "disconnected" });
   const [isConnecting, setIsConnecting] = useState<string | null>(null);
   const [likesSync, setLikesSync] = useState<string | null>(null);
 
   const checkConnections = useCallback(async () => {
     try {
-      const [spotifyConnected, soundcloudConnected, libraryConfig] = await Promise.all([
+      const [spotifyConnected, soundcloudConnected, appleMusicConnected, libraryConfig] = await Promise.all([
         check_source_connected("spotify"),
         check_source_connected("soundcloud"),
+        apple_music_check_connected("default"),
         get_library_config(),
       ]);
       setSpotify((prev) => ({ ...prev, status: spotifyConnected ? "connected" : "disconnected" }));
       setSoundcloud((prev) => ({ ...prev, status: soundcloudConnected ? "connected" : "disconnected" }));
+      setAppleMusic((prev) => ({ ...prev, status: appleMusicConnected ? "connected" : "disconnected" }));
       setLocalLibrary({ status: libraryConfig.configured ? "connected" : "disconnected" });
     } catch (err) {
       console.error("Failed to check connections:", err);
@@ -158,6 +181,77 @@ export default function Sources() {
       const message = err instanceof Error ? err.message : String(err);
       setSoundcloud((prev) => ({ ...prev, status: "error", errorMessage: message }));
       toast.error(`SoundCloud sync failed: ${message}`);
+    }
+  }, []);
+
+  // Apple Music handlers
+  const handleConnectAppleMusic = useCallback(async () => {
+    setIsConnecting("apple_music");
+    try {
+      toast.info("Getting Apple Music developer token...");
+      const devToken = await apple_music_get_dev_token();
+
+      // Open webview window for MusicKit JS auth
+      const authWindow = new WebviewWindow("apple-music-auth", {
+        url: `/apple-music-auth.html?devToken=${encodeURIComponent(devToken)}`,
+        title: "Apple Music Authorization",
+        width: 500,
+        height: 600,
+        resizable: false,
+        center: true,
+      });
+
+      // Listen for the auth complete event from the webview
+      const unlisten = await listen<{ userToken: string }>("apple-music-auth-complete", async (event) => {
+        try {
+          await apple_music_store_user_token(event.payload.userToken, "default");
+          setAppleMusic((prev) => ({ ...prev, status: "connected" }));
+          toast.success("Apple Music connected!");
+        } catch (storeErr) {
+          const msg = storeErr instanceof Error ? storeErr.message : String(storeErr);
+          toast.error(`Failed to store Apple Music token: ${msg}`);
+        }
+        unlisten();
+      });
+
+      // Clean up listener if window is closed without completing auth
+      authWindow.onCloseRequested(async () => {
+        unlisten();
+        setIsConnecting(null);
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error(`Apple Music connection failed: ${message}`);
+    } finally {
+      setIsConnecting(null);
+    }
+  }, []);
+
+  const handleDisconnectAppleMusic = useCallback(async () => {
+    try {
+      await disconnect_apple_music("default");
+      setAppleMusic({ status: "disconnected" });
+      toast.success("Apple Music disconnected");
+    } catch (err) {
+      toast.error(`Failed to disconnect: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, []);
+
+  const handleSyncAppleMusic = useCallback(async () => {
+    setAppleMusic((prev) => ({ ...prev, status: "syncing" }));
+    try {
+      const result = await sync_apple_music("default");
+      setAppleMusic((prev) => ({
+        ...prev,
+        status: "connected",
+        trackCount: (prev.trackCount || 0) + result.added,
+        lastSyncTime: new Date().toISOString(),
+      }));
+      toast.success(`Apple Music: ${result.added} new tracks`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setAppleMusic((prev) => ({ ...prev, status: "error", errorMessage: message }));
+      toast.error(`Apple Music sync failed: ${message}`);
     }
   }, []);
 
@@ -268,6 +362,20 @@ export default function Sources() {
               {likesSync === "soundcloud" ? "Syncing playlist..." : "Update Likes Playlist"}
             </button>
           }
+        />
+
+        <SourceCard
+          name="Apple Music"
+          icon={<AppleMusicIcon />}
+          status={appleMusic.status}
+          description="Sync library songs and playlists from Apple Music."
+          trackCount={appleMusic.trackCount}
+          lastSyncTime={appleMusic.lastSyncTime}
+          errorMessage={appleMusic.errorMessage}
+          onConnect={handleConnectAppleMusic}
+          onDisconnect={handleDisconnectAppleMusic}
+          onSync={handleSyncAppleMusic}
+          isConnecting={isConnecting === "apple_music"}
         />
 
         <SourceCard

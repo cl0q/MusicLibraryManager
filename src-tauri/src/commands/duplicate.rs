@@ -3,7 +3,6 @@
 //! Provides the `detect_duplicates` command that can be invoked from the UI
 //! to scan the library and mark duplicate tracks.
 
-use std::path::PathBuf;
 
 use crate::database::get_connection;
 use crate::duplicate::detector::mark_duplicates;
@@ -32,7 +31,7 @@ pub struct DuplicateResponse {
 #[tauri::command]
 pub async fn detect_duplicates() -> Result<DuplicateResponse, String> {
     // TODO: Make database path configurable (Phase 6)
-    let db_path = PathBuf::from("music_library.db");
+    let db_path = crate::database::db_path();
 
     let mut conn =
         get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;

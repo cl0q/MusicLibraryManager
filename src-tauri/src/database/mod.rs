@@ -27,5 +27,5 @@ pub mod track_analysis;
 pub mod tracks;
 
 // Re-export commonly used items
-pub use connection::{get_connection, get_memory_connection, with_transaction, DatabaseError, Result};
+pub use connection::{db_path, get_connection, get_memory_connection, init_db_path, with_transaction, DatabaseError, Result};
 pub use schema::initialize_schema;

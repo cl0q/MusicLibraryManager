@@ -42,7 +42,6 @@
 //! });
 //! ```
 
-use std::path::PathBuf;
 
 use crate::database::get_connection;
 use crate::models::playlist::{Playlist, PlaylistCategory};
@@ -68,7 +67,7 @@ pub async fn create_playlist_command(
     tags: Vec<String>,
 ) -> Result<i64, String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         crate::database::playlist::create_playlist(
@@ -97,7 +96,7 @@ pub async fn create_playlist_command(
 #[tauri::command]
 pub async fn get_playlists_command() -> Result<Vec<Playlist>, String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         let mut stmt = conn
@@ -154,7 +153,7 @@ pub async fn get_playlists_command() -> Result<Vec<Playlist>, String> {
 #[tauri::command]
 pub async fn get_playlist_tracks_command(playlist_id: i64) -> Result<Vec<Track>, String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         crate::database::playlist::get_playlist_tracks(&conn, playlist_id)
@@ -182,7 +181,7 @@ pub async fn search_playlist_tracks_command(
     query: String,
 ) -> Result<Vec<Track>, String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         crate::database::playlist::search_playlist_tracks(&conn, playlist_id, &query)
@@ -210,7 +209,7 @@ pub async fn add_track_to_playlist_command(
     track_id: i64,
 ) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         crate::database::playlist::add_track_to_playlist(&conn, playlist_id, track_id)
@@ -238,7 +237,7 @@ pub async fn remove_track_from_playlist_command(
     track_id: i64,
 ) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         crate::database::playlist::remove_track_from_playlist(&conn, playlist_id, track_id)
@@ -270,7 +269,7 @@ pub async fn reorder_playlist_track_command(
     before_track_id: Option<i64>,
 ) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         crate::database::playlist::reorder_playlist_track(
@@ -301,7 +300,7 @@ pub async fn sync_source_likes_playlist(
     source_name: String,
 ) -> Result<SyncLikesPlaylistResult, String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         let (playlist_id, added, total) =

@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { useNavigate, NavLink } from "react-router";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { toast } from "sonner";
 import { useLibraryTracks } from "../hooks/useLibraryTracks";
 import { useEnhancementProgress } from "../hooks/useEnhancements";
 import { useLibraryMount } from "../contexts/LibraryMountContext";

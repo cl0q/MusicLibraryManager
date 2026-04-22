@@ -18,7 +18,19 @@ src-tauri/00_Artists_staging/
 __pycache__/
 
 # GSD internal
-.planning/agent-history.json
+.planning/
+
+# Archived / scratch
+_archive/
+code_map.md
+
+# Rust build output
+src-tauri/target/
+src-tauri/gen/
+
+# Node/build output
+ui/node_modules/
+ui/dist/
 
 # Test artifacts
 ui/e2e/results/

@@ -186,6 +186,8 @@ pub fn sync_profile_to_folder(
                 "failed_count": result.failed_count
             }
         }));
+        // Emit generic library:updated so UI stats refresh immediately
+        let _ = app.emit("library:updated", serde_json::json!({ "source": "sync" }));
     }
 
     Ok(result)

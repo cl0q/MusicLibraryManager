@@ -21,7 +21,6 @@
 //! const count = await invoke<number>("sync_spotify", { userId: "user1" });
 //! ```
 
-use std::path::PathBuf;
 use std::sync::Mutex;
 
 use oauth2::{CsrfToken, PkceCodeVerifier};
@@ -57,6 +56,10 @@ impl Default for OAuthState {
 pub struct SyncResponse {
     /// Number of new tracks added during sync.
     pub added: usize,
+    /// Total tracks found/checked from the source.
+    pub found: usize,
+    /// Tracks that already existed in the library (skipped).
+    pub skipped: usize,
     /// Source that was synced.
     pub source: String,
 }
@@ -161,13 +164,13 @@ pub async fn sync_spotify(user_id: String) -> Result<SyncResponse, String> {
     // Run sync in a blocking thread because rusqlite::Connection is !Send
     // and sync_liked_songs holds it across .await points
     let handle = tokio::runtime::Handle::current();
-    let added = tokio::task::spawn_blocking(move || {
+    let counts = tokio::task::spawn_blocking(move || {
         handle.block_on(async {
             let mut client = SpotifyClient::new(&user_id)
                 .await
                 .map_err(|e| format!("Failed to create Spotify client: {}", e))?;
 
-            let db_path = PathBuf::from("music_library.db");
+            let db_path = crate::database::db_path();
             let conn =
                 get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
@@ -180,10 +183,12 @@ pub async fn sync_spotify(user_id: String) -> Result<SyncResponse, String> {
     .await
     .map_err(|e| format!("Task join error: {}", e))??;
 
-    log::info!("Spotify sync complete: {} new tracks added", added);
+    log::info!("Spotify sync complete: {} new, {} found, {} skipped", counts.added, counts.found, counts.skipped);
 
     Ok(SyncResponse {
-        added,
+        added: counts.added,
+        found: counts.found,
+        skipped: counts.skipped,
         source: "spotify".to_string(),
     })
 }
@@ -272,12 +277,12 @@ pub async fn sync_soundcloud(user_id: String) -> Result<SyncResponse, String> {
     // Run sync in a blocking thread because rusqlite::Connection is !Send
     // and sync_likes holds it across .await points
     let handle = tokio::runtime::Handle::current();
-    let added = tokio::task::spawn_blocking(move || {
+    let counts = tokio::task::spawn_blocking(move || {
         handle.block_on(async {
             let mut client = SoundCloudClient::new()
                 .map_err(|e| format!("Failed to create SoundCloud client: {}", e))?;
 
-            let db_path = PathBuf::from("music_library.db");
+            let db_path = crate::database::db_path();
             let conn =
                 get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
@@ -290,10 +295,12 @@ pub async fn sync_soundcloud(user_id: String) -> Result<SyncResponse, String> {
     .await
     .map_err(|e| format!("Task join error: {}", e))??;
 
-    log::info!("SoundCloud sync complete: {} new tracks added", added);
+    log::info!("SoundCloud sync complete: {} new, {} found, {} skipped", counts.added, counts.found, counts.skipped);
 
     Ok(SyncResponse {
-        added,
+        added: counts.added,
+        found: counts.found,
+        skipped: counts.skipped,
         source: "soundcloud".to_string(),
     })
 }
@@ -324,7 +331,7 @@ pub async fn check_duplicates(
 ) -> Result<Vec<DuplicateMatch>, String> {
     let threshold = threshold.unwrap_or(0.85);
 
-    let db_path = PathBuf::from("music_library.db");
+    let db_path = crate::database::db_path();
     let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
     // Query all tracks from database for comparison
@@ -472,6 +479,127 @@ async fn wait_for_oauth_callback() -> Result<String, String> {
     Ok(code)
 }
 
+// ============================================================================
+// Apple Music Commands
+// ============================================================================
+
+/// Scrape Apple Music developer token from the web player.
+///
+/// Fetches the music.apple.com HTML and extracts the JWT developer token
+/// from the embedded configuration meta tag.
+///
+/// # Returns
+/// * `Ok(String)` - Developer JWT token for MusicKit JS configuration
+/// * `Err(String)` - If scraping fails (Apple may have changed their web player)
+#[tauri::command]
+pub async fn apple_music_get_dev_token() -> Result<String, String> {
+    crate::sources::scrape_developer_token()
+        .await
+        .map_err(|e| format!("Failed to get Apple Music developer token: {}", e))
+}
+
+/// Store Apple Music user token after MusicKit JS authorization.
+///
+/// Stores the Music User Token obtained from MusicKit JS authorize() call.
+/// This token lasts ~180 days and cannot be refreshed — user must re-auth when it expires.
+///
+/// # Arguments
+/// * `user_token` - Music User Token from MusicKit JS
+/// * `user_id` - User identifier for token storage
+#[tauri::command]
+pub async fn apple_music_store_user_token(
+    user_token: String,
+    user_id: String,
+) -> Result<(), String> {
+    crate::auth::store_refresh_token("apple_music", &user_id, &user_token)
+        .map_err(|e| format!("Failed to store Apple Music user token: {}", e))
+}
+
+/// Check if Apple Music is connected and the token is still valid.
+///
+/// Checks if a user token file exists AND makes a lightweight API call
+/// to verify the token still works.
+///
+/// # Arguments
+/// * `user_id` - User identifier
+///
+/// # Returns
+/// * `Ok(true)` - Token exists and is valid
+/// * `Ok(false)` - Token doesn't exist or is expired
+#[tauri::command]
+pub async fn apple_music_check_connected(user_id: String) -> Result<bool, String> {
+    // First check if token exists
+    match crate::auth::token_storage::get_refresh_token("apple_music", &user_id) {
+        Ok(_) => {
+            // Token exists, try to validate it with a lightweight API call
+            match crate::sources::AppleMusicClient::new(&user_id).await {
+                Ok(client) => Ok(client.check_token_valid().await),
+                Err(_) => Ok(false),
+            }
+        }
+        Err(crate::auth::token_storage::TokenStorageError::TokenNotFound(_, _)) => Ok(false),
+        Err(e) => Err(format!("Failed to check Apple Music token: {}", e)),
+    }
+}
+
+/// Trigger incremental Apple Music sync of library songs.
+///
+/// Creates an AppleMusicClient (scrapes fresh dev token, loads stored user token)
+/// and syncs library songs added since the last sync.
+///
+/// Uses `spawn_blocking` with `block_on` to handle rusqlite's `!Send` Connection
+/// being held across async boundaries in the sync methods.
+///
+/// # Arguments
+/// * `user_id` - User identifier (must have completed MusicKit auth)
+///
+/// # Returns
+/// * `Ok(SyncResponse)` - Number of new tracks added
+/// * `Err(String)` - If sync fails
+#[tauri::command]
+pub async fn sync_apple_music(user_id: String) -> Result<SyncResponse, String> {
+    log::info!("Starting Apple Music sync for user {}", user_id);
+
+    let handle = tokio::runtime::Handle::current();
+    let counts = tokio::task::spawn_blocking(move || {
+        handle.block_on(async {
+            let mut client = crate::sources::AppleMusicClient::new(&user_id)
+                .await
+                .map_err(|e| format!("Failed to create Apple Music client: {}", e))?;
+
+            let db_path = crate::database::db_path();
+            let conn =
+                get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+
+            client
+                .sync_library_songs(&conn)
+                .await
+                .map_err(|e| format!("Apple Music sync failed: {}", e))
+        })
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))??;
+
+    log::info!("Apple Music sync complete: {} new, {} found, {} skipped", counts.added, counts.found, counts.skipped);
+
+    Ok(SyncResponse {
+        added: counts.added,
+        found: counts.found,
+        skipped: counts.skipped,
+        source: "apple_music".to_string(),
+    })
+}
+
+/// Disconnect Apple Music by removing the stored user token.
+///
+/// # Arguments
+/// * `user_id` - User identifier
+#[tauri::command]
+pub async fn disconnect_apple_music(user_id: String) -> Result<(), String> {
+    crate::auth::token_storage::delete_token("apple_music", &user_id)
+        .map_err(|e| format!("Failed to disconnect Apple Music: {}", e))
+}
+
 /// Log in to DAB Music API (stub — to be implemented).
 #[tauri::command]
 pub async fn dab_login(_email: String, _password: String) -> Result<(), String> {
@@ -499,11 +627,15 @@ mod tests {
     fn test_sync_response_serialize() {
         let response = SyncResponse {
             added: 42,
+            found: 100,
+            skipped: 58,
             source: "spotify".to_string(),
         };
 
         let json = serde_json::to_string(&response).unwrap();
         assert!(json.contains("\"added\":42"));
+        assert!(json.contains("\"found\":100"));
+        assert!(json.contains("\"skipped\":58"));
         assert!(json.contains("\"source\":\"spotify\""));
     }
 

@@ -19,7 +19,6 @@
 //! results.forEach(r => console.log(`${r.track.metadata.title} (${r.score})`));
 //! ```
 
-use std::path::PathBuf;
 
 use crate::database::get_connection;
 use crate::models::track::Track;
@@ -53,7 +52,7 @@ use crate::search::query::{get_all_tracks, search_tracks, SearchResult};
 pub async fn search_library(query: String) -> Result<Vec<SearchResult>, String> {
     // TODO: Phase 6 will make database path configurable
     // For now, use default path in current working directory
-    let db_path = PathBuf::from("music_library.db");
+    let db_path = crate::database::db_path();
 
     let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
@@ -80,7 +79,7 @@ pub async fn search_library(query: String) -> Result<Vec<SearchResult>, String> 
 /// ```
 #[tauri::command]
 pub async fn get_library_tracks() -> Result<Vec<Track>, String> {
-    let db_path = PathBuf::from("music_library.db");
+    let db_path = crate::database::db_path();
 
     let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
@@ -107,7 +106,7 @@ pub async fn get_library_tracks() -> Result<Vec<Track>, String> {
 /// ```
 #[tauri::command]
 pub async fn get_library_tracks_only() -> Result<Vec<Track>, String> {
-    let db_path = PathBuf::from("music_library.db");
+    let db_path = crate::database::db_path();
 
     let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
@@ -134,7 +133,7 @@ pub async fn get_library_tracks_only() -> Result<Vec<Track>, String> {
 /// ```
 #[tauri::command]
 pub async fn get_remote_tracks_only() -> Result<Vec<Track>, String> {
-    let db_path = PathBuf::from("music_library.db");
+    let db_path = crate::database::db_path();
 
     let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
@@ -161,7 +160,7 @@ pub async fn get_remote_tracks_only() -> Result<Vec<Track>, String> {
 /// ```
 #[tauri::command]
 pub async fn get_remote_track_count() -> Result<i64, String> {
-    let db_path = PathBuf::from("music_library.db");
+    let db_path = crate::database::db_path();
 
     let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
@@ -190,7 +189,7 @@ pub async fn get_remote_track_count() -> Result<i64, String> {
 #[tauri::command]
 pub async fn get_library_storage_size() -> Result<u64, String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         let mut stmt = conn

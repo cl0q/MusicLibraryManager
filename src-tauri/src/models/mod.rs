@@ -11,5 +11,5 @@ pub mod sync;
 pub mod track;
 
 pub use playlist::{Playlist, PlaylistCategory, PlaylistTag, PlaylistTrack};
-pub use sync::{FilterRuleDto, SyncProfileDto};
+pub use sync::{FilterRuleDto, SyncCounts, SyncProfileDto};
 pub use track::{Track, TrackMetadata};

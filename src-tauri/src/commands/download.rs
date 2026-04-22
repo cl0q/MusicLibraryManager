@@ -73,7 +73,7 @@ pub async fn download_tracks(
     use crate::database::get_connection;
 
     // Get database connection (same pattern as other commands)
-    let db_path = PathBuf::from("music_library.db");
+    let db_path = crate::database::db_path();
     let db_conn = get_connection(&db_path)
         .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
@@ -151,6 +151,9 @@ pub async fn download_tracks(
     app_handle
         .emit("download-complete", &result)
         .map_err(|e| format!("Failed to emit download-complete event: {}", e))?;
+
+    // Emit generic library:updated so UI stats refresh immediately
+    let _ = app_handle.emit("library:updated", serde_json::json!({ "source": "download" }));
 
     Ok(result)
 }
@@ -252,7 +255,7 @@ pub async fn get_recent_downloads() -> Result<Vec<RecentDownload>, String> {
 
     use crate::database::get_connection;
 
-    let db_path = PathBuf::from("music_library.db");
+    let db_path = crate::database::db_path();
     let db_conn = get_connection(&db_path)
         .map_err(|e| format!("Failed to get database connection: {}", e))?;
 

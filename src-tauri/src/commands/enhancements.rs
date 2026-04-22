@@ -72,7 +72,7 @@ pub async fn fingerprint_library_cmd(app: tauri::AppHandle) -> Result<serde_json
     tokio::task::spawn_blocking(move || {
         let handle = tokio::runtime::Handle::current();
         handle.block_on(async {
-            let db_path = PathBuf::from("music_library.db");
+            let db_path = crate::database::db_path();
             let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
             // Get unfingerprinted tracks
@@ -172,7 +172,7 @@ pub async fn fetch_artwork_cmd(app: tauri::AppHandle) -> Result<serde_json::Valu
     tokio::task::spawn_blocking(move || {
         let handle = tokio::runtime::Handle::current();
         handle.block_on(async {
-            let db_path = PathBuf::from("music_library.db");
+            let db_path = crate::database::db_path();
             let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
             // Get tracks without artwork
@@ -249,7 +249,7 @@ pub async fn analyze_replaygain_cmd(app: tauri::AppHandle) -> Result<serde_json:
     tokio::task::spawn_blocking(move || {
         let handle = tokio::runtime::Handle::current();
         handle.block_on(async {
-            let db_path = PathBuf::from("music_library.db");
+            let db_path = crate::database::db_path();
             let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
             // Get unanalyzed tracks
@@ -347,7 +347,7 @@ pub async fn deep_scan_cmd(app: tauri::AppHandle) -> Result<serde_json::Value, S
     tokio::task::spawn_blocking(move || {
         let handle = tokio::runtime::Handle::current();
         handle.block_on(async {
-            let db_path = PathBuf::from("music_library.db");
+            let db_path = crate::database::db_path();
             let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
             log::info!("Starting deep scan for fingerprint duplicates");
@@ -391,7 +391,7 @@ pub async fn deep_scan_cmd(app: tauri::AppHandle) -> Result<serde_json::Value, S
 #[tauri::command]
 pub async fn get_review_queue_cmd(status: Option<String>) -> Result<serde_json::Value, String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         let items = crate::dedup::fingerprint::get_review_queue(&conn, status.as_deref())
@@ -438,7 +438,7 @@ pub async fn resolve_review_item_cmd(review_id: i64, action: String) -> Result<(
     }
 
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         crate::dedup::fingerprint::resolve_review_item(&conn, review_id, &action)
@@ -458,7 +458,7 @@ pub async fn resolve_review_item_cmd(review_id: i64, action: String) -> Result<(
 #[tauri::command]
 pub async fn get_review_queue_count_cmd() -> Result<i64, String> {
     tokio::task::spawn_blocking(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
         let count: i64 = conn

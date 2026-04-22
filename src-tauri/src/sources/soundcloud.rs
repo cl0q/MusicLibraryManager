@@ -413,12 +413,12 @@ impl SoundCloudClient {
     /// * `conn` - Database connection
     ///
     /// # Returns
-    /// * `Ok(usize)` - Number of new tracks added
+    /// * `Ok(SyncCounts)` - Counts of found, added, and skipped tracks
     /// * `Err(SoundCloudError)` - If sync failed
-    pub async fn sync_likes(&mut self, user_id: &str, conn: &Connection) -> Result<usize> {
+    pub async fn sync_likes(&mut self, user_id: &str, conn: &Connection) -> Result<crate::models::SyncCounts> {
         self.ensure_token(user_id).await?;
 
-        let mut added_count = 0;
+        let mut counts = crate::models::SyncCounts::default();
         // v1 /me/favorites returns flat tracks in liked-at order (most recently liked first).
         // SC API doesn't expose the liked-at timestamp, so we derive synthetic timestamps
         // from position to preserve correct ordering.
@@ -452,9 +452,12 @@ impl SoundCloudClient {
                 let liked_at = base_time - TimeDelta::minutes(global_index);
                 let liked_at_str = liked_at.to_rfc3339();
                 global_index += 1;
+                counts.found += 1;
 
                 if insert_track_from_soundcloud(conn, &track, &liked_at_str)? {
-                    added_count += 1;
+                    counts.added += 1;
+                } else {
+                    counts.skipped += 1;
                 }
             }
 
@@ -465,8 +468,8 @@ impl SoundCloudClient {
         // Update last sync timestamp (for logging purposes, not filtering)
         set_last_sync_timestamp(conn, user_id, "soundcloud", &Utc::now().to_rfc3339())?;
 
-        log::info!("SoundCloud sync complete: {} new tracks added", added_count);
-        Ok(added_count)
+        log::info!("SoundCloud sync complete: {} found, {} new, {} skipped", counts.found, counts.added, counts.skipped);
+        Ok(counts)
     }
 
     /// Sync user's playlists.
@@ -851,16 +854,18 @@ fn find_or_create_soundcloud_track(
 /// * `conn` - Database connection
 ///
 /// # Returns
-/// * `Ok(usize)` - Total number of new tracks added
+/// * `Ok(SyncCounts)` - Combined counts from likes and playlists sync
 /// * `Err(SoundCloudError)` - If sync failed
 pub async fn sync_soundcloud_library(
     client: &mut SoundCloudClient,
     user_id: &str,
     conn: &Connection,
-) -> Result<usize> {
-    let likes_count = client.sync_likes(user_id, conn).await?;
+) -> Result<crate::models::SyncCounts> {
+    let mut counts = client.sync_likes(user_id, conn).await?;
     let playlists_count = client.sync_playlists(user_id, conn).await?;
-    Ok(likes_count + playlists_count)
+    counts.found += playlists_count;
+    counts.added += playlists_count;
+    Ok(counts)
 }
 
 /// Import a specific SoundCloud playlist into the library.
@@ -941,8 +946,8 @@ pub async fn import_soundcloud_liked_songs(
     use crate::database::playlist::get_or_create_liked_playlist;
     let playlist_id = get_or_create_liked_playlist(conn, "soundcloud", source_id)?;
 
-    // Get last sync timestamp
-    let last_sync = get_last_sync_timestamp(conn, user_id, "soundcloud")?
+    // Get last sync timestamp (for logging; we process all tracks and rely on dedup)
+    let _last_sync = get_last_sync_timestamp(conn, user_id, "soundcloud")?
         .unwrap_or_else(|| (chrono::Utc::now() - chrono::TimeDelta::days(365)).to_rfc3339());
 
     let mut added_count = 0;

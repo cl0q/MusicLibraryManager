@@ -35,12 +35,12 @@ export function useDownloadQueue() {
                 track_name: `${dl.artist} - ${dl.title}`,
                 status: "completed",
                 progress: 100,
-                error: null,
-                source: null,
-                current_step: null,
-                speed: null,
-                eta: null,
-                file_size: null,
+                error: undefined,
+                source: undefined,
+                current_step: undefined,
+                speed: undefined,
+                eta: undefined,
+                file_size: undefined,
               });
             }
           }

@@ -70,7 +70,7 @@ pub async fn import_directory(
 
     // Spawn background thread for the heavy import work
     std::thread::spawn(move || {
-        let db_path = PathBuf::from("music_library.db");
+        let db_path = crate::database::db_path();
         let mut conn = match get_connection(&db_path) {
             Ok(c) => c,
             Err(e) => {
@@ -114,6 +114,8 @@ pub async fn import_directory(
                         failure_summary,
                     },
                 );
+                // Emit generic library:updated so UI stats refresh immediately
+                let _ = app_handle.emit("library:updated", serde_json::json!({ "source": "import" }));
             }
             Err(e) => {
                 log::error!("Import failed: {}", e);
@@ -143,7 +145,7 @@ pub async fn import_playlist_command(
     playlist_name: String,
     file_path: String,
 ) -> Result<crate::import::ImportPlaylistResult, String> {
-    let db_path = std::path::PathBuf::from("music_library.db");
+    let db_path = crate::database::db_path();
     let mut conn = crate::database::get_connection(&db_path)
         .map_err(|e| format!("Database error: {}", e))?;
 

@@ -320,6 +320,35 @@ export async function connect_soundcloud_with_server(): Promise<void> {
 }
 
 // ============================================================================
+// Apple Music Commands
+// ============================================================================
+
+/** Scrape Apple Music developer token from web player */
+export async function apple_music_get_dev_token(): Promise<string> {
+  return invoke<string>("apple_music_get_dev_token");
+}
+
+/** Store Apple Music user token after MusicKit JS authorization */
+export async function apple_music_store_user_token(userToken: string, userId: string): Promise<void> {
+  return invoke<void>("apple_music_store_user_token", { userToken, userId });
+}
+
+/** Check if Apple Music is connected and token is valid */
+export async function apple_music_check_connected(userId: string): Promise<boolean> {
+  return invoke<boolean>("apple_music_check_connected", { userId });
+}
+
+/** Sync library songs from Apple Music */
+export async function sync_apple_music(userId: string): Promise<SyncResponse> {
+  return invoke<SyncResponse>("sync_apple_music", { userId });
+}
+
+/** Disconnect Apple Music by removing stored user token */
+export async function disconnect_apple_music(userId: string): Promise<void> {
+  return invoke<void>("disconnect_apple_music", { userId });
+}
+
+// ============================================================================
 // Library Configuration Commands
 // ============================================================================
 

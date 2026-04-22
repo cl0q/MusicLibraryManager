@@ -91,7 +91,8 @@ pub fn generate_m3u8(
         }
     }
 
-    Ok(lines.join("\n"))
+    // Trailing newline required by M3U8 spec
+    Ok(lines.join("\n") + "\n")
 }
 
 /// Write playlist content to a file.
@@ -173,7 +174,7 @@ mod tests {
         Track {
             id: Some(id),
             metadata,
-            organized_path: format!("{}/{}/{}.m4a", album_artist, album, title),
+            organized_path: Some(format!("{}/{}/{}.m4a", album_artist, album, title)),
             is_duplicate: false,
             date_added: Some("2024-01-01T00:00:00Z".to_string()),
         }
@@ -190,6 +191,7 @@ mod tests {
         let content = generate_m3u8("Test Playlist", &tracks, &profile_folder, library_root, "").unwrap();
 
         assert!(content.starts_with("#EXTM3U\n"));
+        assert!(content.ends_with('\n'), "M3U8 must end with a trailing newline");
     }
 
     #[test]
@@ -279,11 +281,63 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_m3u8_with_path_prefix() {
+        let tracks = vec![
+            create_test_track(1, "Artist A", "Artist A", "Album 1", "Track 1", Some(180)),
+        ];
+
+        let profile_folder = PathBuf::from("/tmp/profile");
+        let library_root = Path::new(TEST_LIBRARY_ROOT);
+        let content = generate_m3u8("Prefixed", &tracks, &profile_folder, library_root, "/Music/").unwrap();
+
+        let lines: Vec<&str> = content.lines().collect();
+        // Path line should start with the prefix
+        let path_line = lines.iter().find(|l| !l.starts_with('#')).unwrap();
+        assert!(path_line.starts_with("/Music/"), "Path should start with prefix: {}", path_line);
+        assert!(path_line.contains("Track 1.m4a"));
+    }
+
+    #[test]
+    fn test_generate_m3u8_without_path_prefix() {
+        let tracks = vec![
+            create_test_track(1, "Artist A", "Artist A", "Album 1", "Track 1", Some(180)),
+        ];
+
+        let profile_folder = PathBuf::from("/tmp/profile");
+        let library_root = Path::new(TEST_LIBRARY_ROOT);
+        let content = generate_m3u8("No Prefix", &tracks, &profile_folder, library_root, "").unwrap();
+
+        let lines: Vec<&str> = content.lines().collect();
+        let path_line = lines.iter().find(|l| !l.starts_with('#')).unwrap();
+        // With empty prefix, path should be a plain relative path (no leading slash)
+        assert!(!path_line.starts_with('/'), "Path should be relative with no prefix: {}", path_line);
+        assert!(path_line.contains("Track 1.m4a"));
+    }
+
+    #[test]
+    fn test_generate_m3u8_extinf_on_separate_line_from_path() {
+        let tracks = vec![
+            create_test_track(1, "Artist A", "Artist A", "Album 1", "Track 1", Some(180)),
+        ];
+
+        let profile_folder = PathBuf::from("/tmp/profile");
+        let library_root = Path::new(TEST_LIBRARY_ROOT);
+        let content = generate_m3u8("Format Check", &tracks, &profile_folder, library_root, "").unwrap();
+
+        let lines: Vec<&str> = content.lines().collect();
+        // Line 0: #EXTM3U, Line 1: #EXTINF:..., Line 2: path
+        assert_eq!(lines.len(), 3, "Expected exactly 3 lines: header, extinf, path");
+        assert!(lines[1].starts_with("#EXTINF:180,"), "EXTINF line format wrong: {}", lines[1]);
+        assert!(!lines[2].starts_with('#'), "Path line should not start with #: {}", lines[2]);
+        assert!(lines[2].ends_with(".m4a"), "Path line should end with .m4a: {}", lines[2]);
+    }
+
+    #[test]
     fn test_write_playlist_file_creates_file() {
         let temp_dir = TempDir::new().unwrap();
         let playlist_path = temp_dir.path().join("test.m3u8");
 
-        let content = "#EXTM3U\n#EXTINF:180,Artist - Title\nArtist/Album/Title.m4a";
+        let content = "#EXTM3U\n#EXTINF:180,Artist - Title\nArtist/Album/Title.m4a\n";
         write_playlist_file(&playlist_path, content).unwrap();
 
         // File should exist

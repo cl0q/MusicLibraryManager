@@ -87,6 +87,7 @@ export default function RowContextMenu({ track, onConfirm, onOpenMoreInfo }: Row
     if (selectedTracks.length > 0) {
       return selectedTracks;
     }
+    if (!track) return [];
     return [track];
   };
 
@@ -133,6 +134,7 @@ export default function RowContextMenu({ track, onConfirm, onOpenMoreInfo }: Row
   };
 
   const handleRevealInFileManager = async () => {
+    if (!track) return;
     const localPath = track.organized_path;
     if (!localPath) {
       toast.error("Track has no local file");
@@ -142,7 +144,7 @@ export default function RowContextMenu({ track, onConfirm, onOpenMoreInfo }: Row
     try {
       await invoke("reveal_in_file_manager", {
         path: localPath,
-        fallbackPath: track.original_path,
+        fallbackPath: track.metadata.original_path,
       });
     } catch (error) {
       toast.error(`Failed to open file manager: ${error}`);
@@ -150,6 +152,7 @@ export default function RowContextMenu({ track, onConfirm, onOpenMoreInfo }: Row
   };
 
   const handleCopyFilePath = async () => {
+    if (!track) return;
     const localPath = track.organized_path;
     if (!localPath) {
       toast.error("Track has no local file");
@@ -165,7 +168,7 @@ export default function RowContextMenu({ track, onConfirm, onOpenMoreInfo }: Row
   };
 
   const handleMoreInfo = () => {
-    if (onOpenMoreInfo) {
+    if (onOpenMoreInfo && track) {
       onOpenMoreInfo(track);
     }
   };
