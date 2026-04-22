@@ -3,6 +3,14 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { importPlaylistFromFile, type ImportPlaylistResult } from '../../utils/tauri-commands';
 import { MatchPreview } from './MatchPreview';
 
+/**
+ * Import-playlist modal — Solar mock (screens.jsx::ImportModalScreen).
+ *
+ * Styling: centered 560px panel, base/surface layered background, heavy
+ * shadow, dimmed backdrop. Uses uppercase section labels with letter
+ * spacing, monospace rows for file/track summaries.
+ */
+
 interface ImportModalProps {
   onClose: () => void;
   onPlaylistCreated: () => void;
@@ -22,9 +30,7 @@ export function ImportModal({ onClose, onPlaylistCreated }: ImportModalProps) {
     try {
       const selected = await open({
         multiple: false,
-        filters: [
-          { name: 'Playlist files', extensions: ['m3u', 'm3u8', 'json'] },
-        ],
+        filters: [{ name: 'Playlist files', extensions: ['m3u', 'm3u8', 'json'] }],
       });
       if (typeof selected === 'string') {
         setFilePath(selected);
@@ -64,103 +70,139 @@ export function ImportModal({ onClose, onPlaylistCreated }: ImportModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{
+        background: 'color-mix(in oklab, var(--color-base) 80%, transparent)',
+        backdropFilter: 'blur(2px)',
+        fontFamily: 'var(--font-ui)',
+      }}
       onClick={handleBackdropClick}
     >
-      <div className="bg-surface border border-edge rounded-lg shadow-xl w-full max-w-md mx-4 flex flex-col gap-4 p-6">
+      <div
+        className="bg-surface border border-edge rounded-lg w-[560px] max-w-full mx-4 overflow-hidden"
+        style={{ boxShadow: '0 20px 80px rgba(0,0,0,0.45), 0 0 0 1px rgba(0,0,0,0.25)' }}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Import Playlist</h2>
+        <div className="flex items-center gap-2.5 px-5 pt-4 pb-3.5 border-b border-edge-subtle">
+          <svg className="w-4 h-4 text-ink-secondary" fill="none" stroke="currentColor" strokeWidth={1.7} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v8m0 0l-3-3m3 3l3-3M4 14v4a2 2 0 002 2h12a2 2 0 002-2v-4" />
+          </svg>
+          <span className="text-[14px] font-semibold text-ink">Import playlist</span>
+          <div className="flex-1" />
           <button
             onClick={onClose}
-            className="text-ink-muted hover:text-ink transition-colors text-xl leading-none"
+            className="text-ink-muted hover:text-ink transition-colors"
             aria-label="Close"
           >
-            &times;
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.7} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M18 6L6 18" />
+            </svg>
           </button>
         </div>
 
-        {step === 'select' && (
-          <>
-            {/* File picker */}
-            <div className="flex flex-col gap-2">
-              <label className="text-[13px] font-medium">Playlist file</label>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 px-3 py-1.5 bg-raised border border-edge rounded text-[13px] text-ink-muted truncate">
-                  {filePath
-                    ? (filePath.split('/').pop() ?? filePath.split('\\').pop() ?? filePath)
-                    : 'No file selected'}
+        {/* Body */}
+        <div className="p-5">
+          {step === 'select' && (
+            <div className="flex flex-col gap-4">
+              <div>
+                <Label>Source</Label>
+                <div className="flex items-center gap-2.5 p-2.5 bg-raised border border-edge rounded-[5px]">
+                  <div
+                    className="w-8 h-8 rounded shrink-0"
+                    style={{ background: 'linear-gradient(135deg, var(--color-accent), var(--color-accent-bright))' }}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13px] text-ink truncate font-medium">
+                      {filePath
+                        ? (filePath.split('/').pop() ?? filePath.split('\\').pop() ?? filePath)
+                        : 'No file selected'}
+                    </div>
+                    <div className="text-[11px] text-ink-muted truncate">
+                      Supported: .m3u, .m3u8, Spotify .json export
+                    </div>
+                  </div>
+                  <button
+                    onClick={handlePickFile}
+                    className="h-7 px-3 rounded-[5px] bg-raised border border-edge text-[11px] font-medium text-ink-secondary hover:text-ink hover:bg-overlay transition-colors whitespace-nowrap"
+                  >
+                    Browse
+                  </button>
                 </div>
-                <button
-                  onClick={handlePickFile}
-                  className="px-3 py-1.5 text-xs font-medium bg-raised border border-edge rounded hover:bg-surface-hover transition-colors whitespace-nowrap"
-                >
-                  Browse
-                </button>
               </div>
-              <p className="text-xs text-ink-muted">Supported: .m3u, .m3u8, Spotify .json export</p>
+
+              <div>
+                <Label>Playlist name</Label>
+                <input
+                  type="text"
+                  value={playlistName}
+                  onChange={(e) => setPlaylistName(e.target.value)}
+                  placeholder="Enter playlist name"
+                  className="w-full h-[32px] px-3 text-[13px] bg-raised border border-edge rounded-[5px] text-ink placeholder-ink-muted focus:outline-none focus:border-accent/50"
+                />
+              </div>
+
+              {error && <p className="text-[12px] text-rose-400">{error}</p>}
             </div>
+          )}
 
-            {/* Playlist name */}
-            <div className="flex flex-col gap-2">
-              <label className="text-[13px] font-medium">Playlist name</label>
-              <input
-                type="text"
-                value={playlistName}
-                onChange={e => setPlaylistName(e.target.value)}
-                placeholder="Enter playlist name"
-                className="px-3 py-1.5 text-[13px] bg-raised border border-edge rounded text-ink placeholder-ink-muted focus:outline-none focus:border-accent/50"
-              />
+          {step === 'preview' && result && (
+            <div className="flex flex-col gap-3">
+              <Label>Match preview</Label>
+              <MatchPreview result={result} />
+              {error && <p className="text-[12px] text-rose-400">{error}</p>}
             </div>
+          )}
+        </div>
 
-            {error && <p className="text-rose-400 text-sm">{error}</p>}
-
-            {/* Actions */}
-            <div className="flex justify-end gap-2 pt-2">
+        {/* Footer */}
+        <div className="flex items-center gap-2 justify-end px-5 py-3 border-t border-edge-subtle">
+          {step === 'select' ? (
+            <>
               <button
                 onClick={onClose}
-                className="px-3 py-1.5 text-xs text-ink-muted hover:text-ink transition-colors"
+                className="h-[30px] px-3.5 rounded-[5px] bg-transparent border border-edge text-[12px] text-ink-secondary hover:text-ink transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleImport}
                 disabled={!filePath || !playlistName.trim() || loading}
-                className="px-3 py-1.5 text-xs font-medium bg-accent hover:bg-accent-bright text-base rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="h-[30px] px-4 rounded-[5px] bg-accent text-[12px] font-semibold hover:bg-accent-bright disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                style={{ color: 'var(--color-base)' }}
               >
-                {loading ? 'Matching...' : 'Preview Matches'}
+                {loading ? 'Matching…' : 'Preview matches'}
               </button>
-            </div>
-          </>
-        )}
-
-        {step === 'preview' && result && (
-          <>
-            <MatchPreview result={result} />
-
-            {error && <p className="text-rose-400 text-sm">{error}</p>}
-
-            {/* Actions */}
-            <div className="flex justify-end gap-2 pt-2">
+            </>
+          ) : (
+            <>
               <button
                 onClick={() => { setStep('select'); setResult(null); }}
-                className="px-3 py-1.5 text-xs text-ink-muted hover:text-ink transition-colors"
+                className="h-[30px] px-3.5 rounded-[5px] bg-transparent border border-edge text-[12px] text-ink-secondary hover:text-ink transition-colors"
               >
                 Back
               </button>
               <button
                 onClick={handleConfirmCreate}
-                disabled={result.matched_tracks === 0}
-                className="px-3 py-1.5 text-xs font-medium bg-accent hover:bg-accent-bright text-base rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                disabled={!result || result.matched_tracks === 0}
+                className="h-[30px] px-4 rounded-[5px] bg-accent text-[12px] font-semibold hover:bg-accent-bright disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                style={{ color: 'var(--color-base)' }}
               >
-                {result.matched_tracks === 0
+                {result && result.matched_tracks === 0
                   ? 'No tracks matched'
-                  : `Create Playlist (${result.matched_tracks} tracks)`}
+                  : `Import ${result?.matched_tracks ?? 0} tracks`}
               </button>
-            </div>
-          </>
-        )}
+            </>
+          )}
+        </div>
       </div>
+    </div>
+  );
+}
+
+function Label({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="text-[11px] text-ink-muted uppercase tracking-[0.08em] font-semibold mb-1.5">
+      {children}
     </div>
   );
 }

@@ -313,13 +313,27 @@ export default function Sources() {
     }
   }, [navigate]);
 
-  return (
-    <div className="p-4 space-y-4 max-w-2xl">
-      <h1 className="text-xs font-semibold uppercase tracking-wide text-ink-secondary">Sources</h1>
+  const connectedCount = [spotify, soundcloud, appleMusic, localLibrary].filter(
+    (s) => s.status === "connected" || s.status === "syncing" || s.status === "error",
+  ).length;
 
-      <div className="space-y-3">
+  return (
+    <div className="flex flex-col h-full overflow-hidden" style={{ fontFamily: "var(--font-ui)" }}>
+      {/* Header — matches SourcesScreen mock */}
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-edge-subtle shrink-0">
+        <span className="text-[13px] font-semibold text-ink">Sources</span>
+        <span className="text-[11px] text-ink-muted">
+          {connectedCount} connected
+        </span>
+      </div>
+
+      <div
+        className="flex-1 overflow-auto p-4 grid gap-3.5 content-start"
+        style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}
+      >
         <SourceCard
           name="Spotify"
+          brandColor="var(--color-emerald, #34d399)"
           icon={<SpotifyIcon />}
           status={spotify.status}
           description="Sync liked songs and playlists from Spotify."
@@ -343,6 +357,7 @@ export default function Sources() {
 
         <SourceCard
           name="SoundCloud"
+          brandColor="#ff7a00"
           icon={<SoundCloudIcon />}
           status={soundcloud.status}
           description="Sync liked tracks from SoundCloud."
@@ -366,6 +381,7 @@ export default function Sources() {
 
         <SourceCard
           name="Apple Music"
+          brandColor="#fc3c44"
           icon={<AppleMusicIcon />}
           status={appleMusic.status}
           description="Sync library songs and playlists from Apple Music."
@@ -380,6 +396,7 @@ export default function Sources() {
 
         <SourceCard
           name="Local Library"
+          brandColor="var(--color-sky, #38bdf8)"
           icon={<FolderIcon />}
           status={localLibrary.status}
           description="Import music from your configured library folder."
