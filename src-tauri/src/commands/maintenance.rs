@@ -276,3 +276,182 @@ pub async fn purge_orphaned_tracks() -> Result<u64, String> {
     .await
     .map_err(|e| format!("Task join error: {}", e))?
 }
+
+/// Phase 19: Remove multiple tracks from the library (DB only).
+///
+/// Deletes rows from `tracks`. Files on disk are untouched. Foreign-key
+/// cascades handle `replaygain`, `fingerprints`, `artwork`,
+/// `track_analysis`, `playlist_tracks`, `sync_profile_tracks`, etc.
+///
+/// Returns the number of rows actually deleted (may be less than input
+/// if some ids no longer existed).
+#[tauri::command]
+pub async fn remove_tracks_from_library(track_ids: Vec<i64>) -> Result<u64, String> {
+    if track_ids.is_empty() {
+        return Ok(0);
+    }
+    tokio::task::spawn_blocking(move || {
+        let db_path = crate::database::db_path();
+        let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+        // Cascades require foreign_keys=ON (cheap, idempotent).
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .map_err(|e| format!("Failed to enable foreign keys: {}", e))?;
+
+        let mut deleted = 0u64;
+        for chunk in track_ids.chunks(500) {
+            let placeholders: Vec<String> = chunk.iter().map(|_| "?".to_string()).collect();
+            let sql = format!("DELETE FROM tracks WHERE id IN ({})", placeholders.join(","));
+            let params: Vec<rusqlite::types::Value> = chunk
+                .iter()
+                .map(|id| rusqlite::types::Value::Integer(*id))
+                .collect();
+            let n = conn
+                .execute(&sql, rusqlite::params_from_iter(params))
+                .map_err(|e| format!("Delete error: {}", e))?;
+            deleted += n as u64;
+        }
+        log::info!("Removed {} tracks from library (DB only)", deleted);
+        Ok(deleted)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+/// Phase 19 destructive action: Delete file(s) from disk AND the matching
+/// DB row(s). For each track id:
+///   1. Resolve the on-disk path (organized_path joined under library_root,
+///      falling back to original_path when the track has no organized entry
+///      or the file isn't found under the library root).
+///   2. Remove the file if present. Missing files are logged as warnings
+///      but do not block the DB cleanup.
+///   3. Delete the tracks row (cascading rows follow).
+///
+/// Returns a structured summary so the UI can differentiate.
+#[derive(Debug, serde::Serialize)]
+pub struct DeleteFromDiskResult {
+    pub files_deleted: u64,
+    pub files_missing: u64,
+    pub rows_deleted: u64,
+    pub errors: Vec<String>,
+}
+
+#[tauri::command]
+pub async fn delete_tracks_from_disk(
+    track_ids: Vec<i64>,
+) -> Result<DeleteFromDiskResult, String> {
+    if track_ids.is_empty() {
+        return Ok(DeleteFromDiskResult {
+            files_deleted: 0,
+            files_missing: 0,
+            rows_deleted: 0,
+            errors: vec![],
+        });
+    }
+    tokio::task::spawn_blocking(move || {
+        let db_path = crate::database::db_path();
+        let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .map_err(|e| format!("Failed to enable foreign keys: {}", e))?;
+
+        let lib_config = LibraryConfig::load(&conn)
+            .map_err(|e| format!("Config error: {}", e))?;
+        let library_root = lib_config.root_path.clone();
+
+        let mut files_deleted = 0u64;
+        let mut files_missing = 0u64;
+        let mut errors = Vec::new();
+        let mut ids_to_delete = Vec::with_capacity(track_ids.len());
+
+        for track_id in &track_ids {
+            // Look up the track's on-disk location.
+            let row: Option<(String, Option<String>)> = conn
+                .query_row(
+                    "SELECT original_path, organized_path FROM tracks WHERE id = ?",
+                    [track_id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .ok();
+            let Some((original_path, organized_path)) = row else {
+                errors.push(format!("track {} not found", track_id));
+                continue;
+            };
+
+            let resolved = resolve_path_for_delete(
+                &original_path,
+                organized_path.as_deref().unwrap_or(""),
+                library_root.as_deref(),
+                &lib_config.scan_folders,
+            );
+            match std::fs::remove_file(&resolved) {
+                Ok(_) => files_deleted += 1,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    files_missing += 1;
+                    log::warn!("File missing for track {}: {}", track_id, resolved.display());
+                }
+                Err(e) => {
+                    errors.push(format!(
+                        "failed to delete {}: {}",
+                        resolved.display(),
+                        e
+                    ));
+                    continue;
+                }
+            }
+            ids_to_delete.push(*track_id);
+        }
+
+        // Delete DB rows for tracks whose files were handled (or were
+        // already missing — the DB row should still go away).
+        let mut rows_deleted = 0u64;
+        for chunk in ids_to_delete.chunks(500) {
+            let placeholders: Vec<String> = chunk.iter().map(|_| "?".to_string()).collect();
+            let sql = format!("DELETE FROM tracks WHERE id IN ({})", placeholders.join(","));
+            let params: Vec<rusqlite::types::Value> = chunk
+                .iter()
+                .map(|id| rusqlite::types::Value::Integer(*id))
+                .collect();
+            let n = conn
+                .execute(&sql, rusqlite::params_from_iter(params))
+                .map_err(|e| format!("Delete error: {}", e))?;
+            rows_deleted += n as u64;
+        }
+        log::info!(
+            "delete_tracks_from_disk: {} files deleted, {} missing, {} rows gone, {} errors",
+            files_deleted,
+            files_missing,
+            rows_deleted,
+            errors.len()
+        );
+        Ok(DeleteFromDiskResult {
+            files_deleted,
+            files_missing,
+            rows_deleted,
+            errors,
+        })
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+fn resolve_path_for_delete(
+    original_path: &str,
+    organized_path: &str,
+    library_root: Option<&Path>,
+    scan_folders: &[String],
+) -> PathBuf {
+    if !organized_path.is_empty() {
+        if let Some(root) = library_root {
+            let direct = root.join(organized_path);
+            if direct.exists() {
+                return direct;
+            }
+            for folder in scan_folders {
+                let candidate = root.join(folder).join(organized_path);
+                if candidate.exists() {
+                    return candidate;
+                }
+            }
+        }
+    }
+    PathBuf::from(original_path)
+}

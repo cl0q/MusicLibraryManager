@@ -250,6 +250,8 @@ pub fn run() {
             commands::maintenance::rescan_metadata,
             commands::maintenance::find_orphaned_tracks,
             commands::maintenance::purge_orphaned_tracks,
+            commands::maintenance::remove_tracks_from_library,
+            commands::maintenance::delete_tracks_from_disk,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

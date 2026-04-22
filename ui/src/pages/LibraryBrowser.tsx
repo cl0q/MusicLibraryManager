@@ -305,6 +305,7 @@ export default function LibraryBrowser({ view = "library" }: LibraryBrowserProps
             cachedTrackIds={cachedTrackIds}
             columnVisibility={columnVisibility}
             onColumnVisibilityChange={setColumnVisibility}
+            onTracksMutated={() => setRefreshKey((k) => k + 1)}
           />
         )}
       </div>

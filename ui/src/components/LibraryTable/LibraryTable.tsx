@@ -15,6 +15,7 @@ import { formatDuration, formatDate } from "../../utils/formatter";
 import RowContextMenu, { useRowContextMenu } from "./RowContextMenu";
 import { TrackSelectionProvider, useTrackSelection } from "../../contexts/TrackSelectionContext";
 import EnergyBars from "./EnergyBars";
+import BatchBar from "./BatchBar";
 
 interface LibraryTableProps {
   tracks: Track[];
@@ -24,6 +25,11 @@ interface LibraryTableProps {
   /** Column visibility override — used by MoreInfo/Settings to toggle the `energy` column on. */
   columnVisibility?: VisibilityState;
   onColumnVisibilityChange?: (v: VisibilityState) => void;
+  /**
+   * Called after destructive batch-bar operations (remove from library,
+   * delete from disk) so the parent can refresh the track list.
+   */
+  onTracksMutated?: (kind: "removed" | "deleted") => void;
 }
 
 /**
@@ -213,6 +219,7 @@ function LibraryTableInner({
   cachedTrackIds,
   columnVisibility,
   onColumnVisibilityChange,
+  onTracksMutated,
 }: LibraryTableProps) {
   const [sorting, setSorting] = useState<SortingState>(
     view === "remote" ? [{ id: "date_added", desc: true }] : []
@@ -240,7 +247,7 @@ function LibraryTableInner({
   const { displayMenu } = useRowContextMenu();
   const { selectedTracks, setSelectedTracks, isSelected, clearSelection } = useTrackSelection();
 
-  // Esc clears selection (needed by batch bar in Phase 19 too)
+  // Esc clears selection (needed by batch bar in Phase 19 too).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && selectedTracks.length > 0) {
@@ -249,6 +256,24 @@ function LibraryTableInner({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, [selectedTracks.length, clearSelection]);
+
+  // Phase 19: click-outside the table container clears the selection.
+  // We look for pointerdown targets that are not inside the table
+  // container AND not inside the batch-bar wrapper (which lives next
+  // to the table at the same relative root).
+  useEffect(() => {
+    if (selectedTracks.length === 0) return;
+    const onDown = (e: MouseEvent) => {
+      const root = tableContainerRef.current?.parentElement;
+      if (!root) return;
+      const target = e.target as Node | null;
+      if (target && !root.contains(target)) {
+        clearSelection();
+      }
+    };
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
   }, [selectedTracks.length, clearSelection]);
 
   const showInlineConfirmation = (trackIds: number[]) => {
@@ -323,7 +348,7 @@ function LibraryTableInner({
     : 0;
 
   return (
-    <>
+    <div className="relative h-full">
       <div
         ref={tableContainerRef}
         className="overflow-auto h-full border border-edge rounded-md bg-surface select-none"
@@ -413,7 +438,12 @@ function LibraryTableInner({
         </table>
       </div>
       <RowContextMenu track={contextMenuTrack} onConfirm={showInlineConfirmation} onOpenMoreInfo={onOpenMoreInfo} />
-    </>
+      <BatchBar
+        selected={selectedTracks}
+        onClear={clearSelection}
+        onMutated={onTracksMutated}
+      />
+    </div>
   );
 }
 
