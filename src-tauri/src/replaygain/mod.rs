@@ -21,6 +21,7 @@
 //! ```
 
 pub mod analyzer;
+pub mod loudness;
 pub mod tagger;
 
 // Re-export public API

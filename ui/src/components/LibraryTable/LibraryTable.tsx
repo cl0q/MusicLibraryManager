@@ -14,6 +14,7 @@ import type { Track } from "../../types/library";
 import { formatDuration, formatDate } from "../../utils/formatter";
 import RowContextMenu, { useRowContextMenu } from "./RowContextMenu";
 import { TrackSelectionProvider, useTrackSelection } from "../../contexts/TrackSelectionContext";
+import EnergyBars from "./EnergyBars";
 
 interface LibraryTableProps {
   tracks: Track[];
@@ -50,35 +51,6 @@ function SourceBadge({ source }: { source: string | null | undefined }) {
       }}
     >
       {entry.label}
-    </span>
-  );
-}
-
-/**
- * EnergyBars — scaled-down version of the mock's EnergyBars atom. Renders
- * a 1-5 bucket as five stepped rectangles. Value is read from a placeholder
- * `energy_bucket` field on the track row — populated by Phase 18's loudness
- * analysis.
- */
-function EnergyBars({ value }: { value: number | null | undefined }) {
-  if (value == null) return <span className="text-ink-muted text-[11px]">—</span>;
-  const clamped = Math.max(1, Math.min(5, value));
-  return (
-    <span className="inline-flex items-end gap-[2px] h-[14px]">
-      {[1, 2, 3, 4, 5].map((i) => {
-        const on = i <= clamped;
-        const h = 3 + (i - 1) * 2;
-        return (
-          <span
-            key={i}
-            className="w-[2px] rounded-[0.5px]"
-            style={{
-              height: `${h}px`,
-              background: on ? "var(--color-accent)" : "var(--color-edge)",
-            }}
-          />
-        );
-      })}
     </span>
   );
 }
@@ -222,25 +194,16 @@ const columns = [
       );
     },
   }),
-  // Hidden by default; Phase 18 surfaces this via column-menu toggle.
-  columnHelper.accessor(
-    // Stored on the track row as energy_bucket (nullable INTEGER). The Track
-    // type doesn't declare it yet — Phase 18 adds the backend column and
-    // loosens the type. For now, read through a defensive `any` so the
-    // column renders "—" when the field is absent.
-    (row) => {
-      const v = (row as unknown as { energy_bucket?: number | null }).energy_bucket;
-      return v ?? null;
-    },
-    {
-      id: "energy",
-      header: "Energy",
-      size: 70,
-      minSize: 50,
-      maxSize: 120,
-      cell: (info) => <EnergyBars value={info.getValue() as number | null} />,
-    }
-  ),
+  // Hidden by default — users opt in via the column-menu toggle.
+  // Populated by the Phase 18 loudness analysis pipeline (nullable INTEGER).
+  columnHelper.accessor((row) => row.energy_bucket ?? null, {
+    id: "energy",
+    header: "Energy",
+    size: 70,
+    minSize: 50,
+    maxSize: 120,
+    cell: (info) => <EnergyBars value={info.getValue() as number | null} />,
+  }),
 ];
 
 function LibraryTableInner({

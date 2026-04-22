@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// - album_artist: album_artist -> artist -> "various artists"
 /// - album: album or "unknown album"
 /// - title: title or filename stem
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct TrackMetadata {
     /// Track artist (may differ from album artist)
     pub artist: String,
@@ -43,7 +43,7 @@ pub struct TrackMetadata {
 /// - organized_path: sanitized Artist/Album/Track.ext path (None for streaming tracks)
 /// - is_duplicate: whether a better quality version exists
 /// - date_added: when track was imported to library
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Track {
     /// Database ID (None until inserted)
     pub id: Option<i64>,
@@ -56,6 +56,18 @@ pub struct Track {
     pub is_duplicate: bool,
     /// ISO 8601 timestamp when added to library
     pub date_added: Option<String>,
+    /// Phase 18: EBU R128 integrated loudness (LUFS). NULL until analyzed.
+    #[serde(default)]
+    pub lufs_i: Option<f64>,
+    /// Phase 18: Loudness range (LU).
+    #[serde(default)]
+    pub lufs_range: Option<f64>,
+    /// Phase 18: True peak in dBFS.
+    #[serde(default)]
+    pub true_peak: Option<f64>,
+    /// Phase 18: Energy bucket 1..=5 derived from LUFS-I + spectral centroid.
+    #[serde(default)]
+    pub energy_bucket: Option<i64>,
 }
 
 impl TrackMetadata {
@@ -97,6 +109,10 @@ impl Track {
             organized_path: Some(organized_path),
             is_duplicate: false,
             date_added: None,
+            lufs_i: None,
+            lufs_range: None,
+            true_peak: None,
+            energy_bucket: None,
         }
     }
 
@@ -108,6 +124,10 @@ impl Track {
             organized_path: None,
             is_duplicate: false,
             date_added: None,
+            lufs_i: None,
+            lufs_range: None,
+            true_peak: None,
+            energy_bucket: None,
         }
     }
 
@@ -119,6 +139,10 @@ impl Track {
             organized_path,
             is_duplicate: false,
             date_added: None,
+            lufs_i: None,
+            lufs_range: None,
+            true_peak: None,
+            energy_bucket: None,
         }
     }
 }

@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import LibrarySetup from "../components/Settings/LibrarySetup";
-import { getAppSetting, setAppSetting } from "../utils/tauri-commands";
+import { getAppSetting, setAppSetting, analyzeLoudnessAll } from "../utils/tauri-commands";
 import { useTheme, type ThemeName } from "../contexts/ThemeContext";
 
 const themes: {
@@ -189,6 +189,25 @@ export default function Settings() {
 
       {/* ── Maintenance ────────────────────────── */}
       <Section label="Maintenance" last>
+        <MaintenanceRow
+          label="Analyze Loudness"
+          hint="LUFS-I, LRA, peak, energy for all tracks"
+          running={maintenanceRunning === "loudness"}
+          disabled={maintenanceRunning !== null}
+          actions={[
+            {
+              label: "Analyze",
+              loadingLabel: "Queuing…",
+              onClick: () =>
+                runMaintenance("loudness", async () => {
+                  const r = await analyzeLoudnessAll();
+                  toast.success(
+                    `Loudness analysis — ${r.analyzed} analyzed, ${r.failed} failed`,
+                  );
+                }),
+            },
+          ]}
+        />
         <MaintenanceRow
           label="Clear Analysis Cache"
           hint="Cached ffprobe data"

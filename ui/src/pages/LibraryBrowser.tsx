@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import { useNavigate, NavLink } from "react-router";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { toast } from "sonner";
+import type { VisibilityState } from "@tanstack/react-table";
 import { useLibraryTracks } from "../hooks/useLibraryTracks";
 import { useEnhancementProgress } from "../hooks/useEnhancements";
 import { useLibraryMount } from "../contexts/LibraryMountContext";
@@ -13,7 +15,7 @@ import type { Track } from "../types/library";
 import {
   fingerprintLibrary,
   fetchArtwork,
-  analyzeReplayGain,
+  analyzeLoudnessAll,
   deepScan,
   getReviewQueueCount,
   getRemoteTrackCount,
@@ -44,6 +46,9 @@ export default function LibraryBrowser({ view = "library" }: LibraryBrowserProps
   const [cachedTrackIds, setCachedTrackIds] = useState<Set<number>>(new Set());
   const [remoteCount, setRemoteCount] = useState<number | null>(null);
   const [localCount, setLocalCount] = useState<number | null>(null);
+  // Phase 18: energy column is hidden by default; toggle from header.
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({ energy: false });
+  const energyOn = columnVisibility.energy !== false;
 
   useEffect(() => {
     invoke<number[]>("get_cached_track_ids")
@@ -121,8 +126,19 @@ export default function LibraryBrowser({ view = "library" }: LibraryBrowserProps
   const handleFetchArtwork = async () => {
     try { await fetchArtwork(); } catch (err) { console.error("Artwork failed:", err); }
   };
-  const handleAnalyzeReplayGain = async () => {
-    try { await analyzeReplayGain(); } catch (err) { console.error("ReplayGain failed:", err); }
+  // Library-header "Analyze": Phase 18 wires this to `analyze_loudness_all`,
+  // which queues every local track where `lufs_i IS NULL`. The underlying
+  // ReplayGain pipeline also benefits because the replaygain pass now
+  // saves LUFS columns too — this button is the deliberate backfill path
+  // that avoids re-analyzing already-done tracks.
+  const handleAnalyzeLoudness = async () => {
+    try {
+      const r = await analyzeLoudnessAll();
+      toast.success(`Loudness — ${r.analyzed} analyzed, ${r.failed} failed`);
+    } catch (err) {
+      console.error("Loudness analysis failed:", err);
+      toast.error(`Loudness failed: ${err}`);
+    }
   };
   const handleDeepScan = async () => {
     try {
@@ -192,7 +208,7 @@ export default function LibraryBrowser({ view = "library" }: LibraryBrowserProps
                   <IconBtn
                     icon="bolt"
                     label={analyzing ? "Analyzing…" : "Analyze"}
-                    onClick={handleAnalyzeReplayGain}
+                    onClick={handleAnalyzeLoudness}
                     running={replaygainProgress.isRunning}
                     progress={replaygainProgress.progress}
                     disabled={analyzing}
@@ -219,6 +235,23 @@ export default function LibraryBrowser({ view = "library" }: LibraryBrowserProps
                     running={artworkProgress.isRunning}
                     disabled={analyzing}
                   />
+                  {/* Energy column toggle — unhides the hidden-by-default
+                      energy column so users can see the 1-5 bucket inline. */}
+                  <button
+                    onClick={() =>
+                      setColumnVisibility((v) => ({ ...v, energy: !energyOn }))
+                    }
+                    title={energyOn ? "Hide energy column" : "Show energy column"}
+                    className={`flex items-center gap-1.5 h-[30px] px-2.5 rounded-[5px] border text-[12px] transition-colors ${
+                      energyOn
+                        ? "bg-accent/15 border-accent/40 text-accent"
+                        : "bg-raised border-edge text-ink-secondary hover:text-ink hover:bg-overlay"
+                    }`}
+                    style={{ fontFamily: "var(--font-ui)" }}
+                  >
+                    <EnergyGlyph on={energyOn} />
+                    <span>Energy</span>
+                  </button>
                 </div>
               ) : null
             }
@@ -265,7 +298,14 @@ export default function LibraryBrowser({ view = "library" }: LibraryBrowserProps
             </span>
           </div>
         ) : (
-          <LibraryTable tracks={tracks} view={view} onOpenMoreInfo={handleOpenMoreInfo} cachedTrackIds={cachedTrackIds} />
+          <LibraryTable
+            tracks={tracks}
+            view={view}
+            onOpenMoreInfo={handleOpenMoreInfo}
+            cachedTrackIds={cachedTrackIds}
+            columnVisibility={columnVisibility}
+            onColumnVisibilityChange={setColumnVisibility}
+          />
         )}
       </div>
 
@@ -297,6 +337,29 @@ function SegTab({ to, label, count, active }: { to: string; label: string; count
         {count === null ? "—" : count.toLocaleString()}
       </span>
     </NavLink>
+  );
+}
+
+/** Tiny 5-bar stepped glyph used on the Energy column toggle. */
+function EnergyGlyph({ on }: { on: boolean }) {
+  const bars = on ? 5 : 2;
+  return (
+    <span className="inline-flex items-end gap-[2px]" style={{ height: 12 }}>
+      {[1, 2, 3, 4, 5].map((i) => {
+        const lit = i <= bars;
+        const h = 2 + (i - 1) * 1.6;
+        return (
+          <span
+            key={i}
+            className="w-[1.5px] rounded-[0.5px]"
+            style={{
+              height: `${h}px`,
+              background: lit ? "currentColor" : "var(--color-edge)",
+            }}
+          />
+        );
+      })}
+    </span>
   );
 }
 

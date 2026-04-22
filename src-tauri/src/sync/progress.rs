@@ -452,6 +452,7 @@ fn get_track(conn: &Connection, track_id: i64) -> Result<Track> {
             organized_path: row.get(11)?,
             is_duplicate: row.get(12)?,
             date_added: row.get(13)?,
+            ..Default::default()
         })
     })
     .context("Track not found")

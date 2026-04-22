@@ -72,7 +72,7 @@ const MAX_CANDIDATES: usize = 100;
 /// * `Err(DatabaseError)` - If database query failed
 pub fn get_track_by_id(conn: &Connection, track_id: i64) -> DbResult<Option<Track>> {
     let mut stmt = conn.prepare(
-        "SELECT id, artist, album_artist, album, title, genre, year, bitrate, duration, format, original_path, organized_path, is_duplicate, date_added
+        "SELECT id, artist, album_artist, album, title, genre, year, bitrate, duration, format, original_path, organized_path, is_duplicate, date_added, lufs_i, lufs_range, true_peak, energy_bucket
          FROM tracks
          WHERE id = ?",
     )?;
@@ -95,6 +95,10 @@ pub fn get_track_by_id(conn: &Connection, track_id: i64) -> DbResult<Option<Trac
             organized_path: row.get(11)?,
             is_duplicate: row.get::<_, i32>(12)? != 0,
             date_added: row.get(13)?,
+            lufs_i: row.get(14)?,
+            lufs_range: row.get(15)?,
+            true_peak: row.get(16)?,
+            energy_bucket: row.get(17)?,
         })
     });
 
@@ -118,7 +122,7 @@ pub fn get_track_by_id(conn: &Connection, track_id: i64) -> DbResult<Option<Trac
 /// * `Err(DatabaseError)` - If database query failed
 pub fn get_all_tracks(conn: &Connection) -> DbResult<Vec<Track>> {
     let mut stmt = conn.prepare(
-        "SELECT id, artist, album_artist, album, title, genre, year, bitrate, duration, format, original_path, organized_path, is_duplicate, date_added
+        "SELECT id, artist, album_artist, album, title, genre, year, bitrate, duration, format, original_path, organized_path, is_duplicate, date_added, lufs_i, lufs_range, true_peak, energy_bucket
          FROM tracks
          ORDER BY date_added DESC",
     )?;
@@ -142,6 +146,10 @@ pub fn get_all_tracks(conn: &Connection) -> DbResult<Vec<Track>> {
                 organized_path: row.get(11)?,
                 is_duplicate: row.get::<_, i32>(12)? != 0,
                 date_added: row.get(13)?,
+                lufs_i: row.get(14)?,
+                lufs_range: row.get(15)?,
+                true_peak: row.get(16)?,
+                energy_bucket: row.get(17)?,
             })
         })?
         .filter_map(|r| r.ok())
@@ -163,7 +171,7 @@ pub fn get_all_tracks(conn: &Connection) -> DbResult<Vec<Track>> {
 /// * `Err(DatabaseError)` - If database query failed
 pub fn get_library_tracks_only(conn: &Connection) -> DbResult<Vec<Track>> {
     let mut stmt = conn.prepare(
-        "SELECT id, artist, album_artist, album, title, genre, year, bitrate, duration, format, original_path, organized_path, is_duplicate, date_added
+        "SELECT id, artist, album_artist, album, title, genre, year, bitrate, duration, format, original_path, organized_path, is_duplicate, date_added, lufs_i, lufs_range, true_peak, energy_bucket
          FROM tracks
          WHERE organized_path IS NOT NULL AND organized_path != ''
          ORDER BY date_added DESC",
@@ -188,6 +196,10 @@ pub fn get_library_tracks_only(conn: &Connection) -> DbResult<Vec<Track>> {
                 organized_path: row.get(11)?,
                 is_duplicate: row.get::<_, i32>(12)? != 0,
                 date_added: row.get(13)?,
+                lufs_i: row.get(14)?,
+                lufs_range: row.get(15)?,
+                true_peak: row.get(16)?,
+                energy_bucket: row.get(17)?,
             })
         })?
         .filter_map(|r| r.ok())
@@ -212,7 +224,7 @@ pub fn get_library_tracks_only(conn: &Connection) -> DbResult<Vec<Track>> {
 /// * `Err(DatabaseError)` - If database query failed
 pub fn get_remote_tracks_only(conn: &Connection) -> DbResult<Vec<Track>> {
     let mut stmt = conn.prepare(
-        "SELECT DISTINCT t.id, t.artist, t.album_artist, t.album, t.title, t.genre, t.year, t.bitrate, t.duration, t.format, t.original_path, t.organized_path, t.is_duplicate, t.date_added
+        "SELECT DISTINCT t.id, t.artist, t.album_artist, t.album, t.title, t.genre, t.year, t.bitrate, t.duration, t.format, t.original_path, t.organized_path, t.is_duplicate, t.date_added, t.lufs_i, t.lufs_range, t.true_peak, t.energy_bucket
          FROM tracks t
          INNER JOIN track_sources ts ON t.id = ts.track_id
          WHERE (t.organized_path IS NULL OR t.organized_path = '')
@@ -238,6 +250,10 @@ pub fn get_remote_tracks_only(conn: &Connection) -> DbResult<Vec<Track>> {
                 organized_path: row.get(11)?,
                 is_duplicate: row.get::<_, i32>(12)? != 0,
                 date_added: row.get(13)?,
+                lufs_i: row.get(14)?,
+                lufs_range: row.get(15)?,
+                true_peak: row.get(16)?,
+                energy_bucket: row.get(17)?,
             })
         })?
         .filter_map(|r| r.ok())
@@ -303,7 +319,7 @@ pub fn search_tracks(conn: &Connection, query: &str) -> DbResult<Vec<SearchResul
     // First pass: get candidates from database
     // Using LIKE for initial filtering (fast with indexes)
     let mut stmt = conn.prepare(
-        "SELECT id, artist, album_artist, album, title, genre, year, bitrate, duration, format, original_path, organized_path, is_duplicate, date_added
+        "SELECT id, artist, album_artist, album, title, genre, year, bitrate, duration, format, original_path, organized_path, is_duplicate, date_added, lufs_i, lufs_range, true_peak, energy_bucket
          FROM tracks
          WHERE artist LIKE ?1 OR album LIKE ?1 OR title LIKE ?1
          LIMIT ?2",
@@ -331,6 +347,10 @@ pub fn search_tracks(conn: &Connection, query: &str) -> DbResult<Vec<SearchResul
                     organized_path: row.get(11)?,
                     is_duplicate: row.get::<_, i32>(12)? != 0,
                     date_added: row.get(13)?,
+                    lufs_i: row.get(14)?,
+                    lufs_range: row.get(15)?,
+                    true_peak: row.get(16)?,
+                    energy_bucket: row.get(17)?,
                 })
             },
         )?

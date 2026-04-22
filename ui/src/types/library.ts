@@ -19,6 +19,12 @@ export interface Track {
   organized_path: string | null;
   is_duplicate: boolean;
   date_added: string | null;
+  // Phase 18: loudness columns on tracks (nullable). Populated by the
+  // replaygain / loudness analysis passes; NULL means "not analyzed yet".
+  lufs_i?: number | null;
+  lufs_range?: number | null;
+  true_peak?: number | null;
+  energy_bucket?: number | null;
 }
 
 // Album type (basic stub for future use)

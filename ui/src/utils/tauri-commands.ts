@@ -238,6 +238,18 @@ export async function analyzeReplayGain(): Promise<ReplayGainResult> {
   return invoke<ReplayGainResult>("analyze_replaygain_cmd");
 }
 
+// Phase 18 — full loudness analysis (LUFS-I, LRA, true peak, energy bucket)
+// over every local track where `lufs_i IS NULL`.
+export interface LoudnessAnalysisResult {
+  analyzed: number;
+  failed: number;
+  failures?: Array<{ track_id: number; error: string }>;
+}
+
+export async function analyzeLoudnessAll(): Promise<LoudnessAnalysisResult> {
+  return invoke<LoudnessAnalysisResult>("analyze_loudness_all");
+}
+
 export interface DeepScanResult {
   pairs_compared: number;
   duplicates_found: number;

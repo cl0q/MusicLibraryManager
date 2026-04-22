@@ -52,8 +52,9 @@ pub use analysis::get_track_analysis;
 pub use download::{download_tracks, get_retry_queue_status, retry_failed_downloads};
 pub use duplicate::detect_duplicates;
 pub use enhancements::{
-    analyze_replaygain_cmd, deep_scan_cmd, fetch_artwork_cmd, fingerprint_library_cmd,
-    get_review_queue_cmd, get_review_queue_count_cmd, resolve_review_item_cmd,
+    analyze_loudness_all, analyze_replaygain_cmd, deep_scan_cmd, fetch_artwork_cmd,
+    fingerprint_library_cmd, get_review_queue_cmd, get_review_queue_count_cmd,
+    resolve_review_item_cmd,
 };
 pub use files::copy_to_clipboard;
 pub use import::{import_directory, import_playlist_command};

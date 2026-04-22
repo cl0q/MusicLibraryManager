@@ -28,6 +28,21 @@ pub struct GainResult {
     pub track_peak: f64,
 }
 
+/// Full EBU R128 result — ReplayGain values plus loudness descriptors
+/// needed by the Phase 18 More Info panel.
+///
+/// `lufs_i`: integrated loudness (LUFS, negative for typical music).
+/// `lufs_range`: loudness range in LU (positive).
+/// `true_peak_dbfs`: max true peak across channels expressed in dBFS.
+#[derive(Debug, Clone)]
+pub struct FullLoudnessResult {
+    pub track_gain: f64,
+    pub track_peak: f64,
+    pub lufs_i: f64,
+    pub lufs_range: f64,
+    pub true_peak_dbfs: f64,
+}
+
 /// ReplayGain album gain and per-track results.
 #[derive(Debug, Clone)]
 pub struct AlbumGainResult {
@@ -186,6 +201,72 @@ pub fn analyze_album(tracks: &[(i64, &Path)]) -> Result<AlbumGainResult, Analyze
         album_peak,
         tracks: track_results,
     })
+}
+
+/// Analyze loudness descriptors used by Phase 18 More Info: integrated
+/// loudness (LUFS-I), loudness range (LRA), true peak in dBFS, and the
+/// ReplayGain values.
+///
+/// Shares decoding work with [`analyze_track`] but enables the `LRA` mode
+/// in EBU R128 so loudness_range() is callable.
+pub fn analyze_track_full(path: &Path) -> Result<FullLoudnessResult, AnalyzerError> {
+    let (samples, sample_rate, channels) = decode_to_pcm(path)?;
+
+    let mut ebu = EbuR128::new(
+        channels as u32,
+        sample_rate,
+        Mode::I | Mode::LRA | Mode::TRUE_PEAK,
+    )
+    .map_err(|e| AnalyzerError::EbuR128(e.to_string()))?;
+
+    ebu.add_frames_i16(&samples)
+        .map_err(|e| AnalyzerError::EbuR128(e.to_string()))?;
+
+    // Integrated loudness
+    let loudness = ebu
+        .loudness_global()
+        .map_err(|e| AnalyzerError::EbuR128(e.to_string()))?;
+
+    // Silence / near-silence handling: match analyze_track's clamp behaviour.
+    let silent = loudness.is_infinite() || loudness < -70.0;
+
+    let (track_gain, lufs_i) = if silent {
+        (20.0, -70.0)
+    } else {
+        (-18.0 - loudness, loudness)
+    };
+
+    // Loudness range — may error if no gated blocks; fall back to 0.0.
+    let lufs_range = ebu.loudness_range().unwrap_or(0.0);
+
+    // Max true peak across channels (linear). Convert to dBFS; -∞ for silence.
+    let mut max_peak = 0.0_f64;
+    for channel in 0..channels {
+        let peak = ebu
+            .true_peak(channel as u32)
+            .map_err(|e| AnalyzerError::EbuR128(e.to_string()))?;
+        if peak > max_peak {
+            max_peak = peak;
+        }
+    }
+    let true_peak_dbfs = linear_to_dbfs(max_peak);
+
+    Ok(FullLoudnessResult {
+        track_gain,
+        track_peak: max_peak,
+        lufs_i,
+        lufs_range,
+        true_peak_dbfs,
+    })
+}
+
+/// Convert a linear peak value (0..1+) to dBFS. Silence / zero peak maps
+/// to -120.0 (arbitrary floor) rather than -∞ so it serialises cleanly.
+pub fn linear_to_dbfs(linear: f64) -> f64 {
+    if linear <= 0.0 {
+        return -120.0;
+    }
+    20.0 * linear.log10()
 }
 
 /// Save track gain values to database.

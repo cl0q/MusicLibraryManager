@@ -228,6 +228,7 @@ pub fn run() {
             commands::enhancements::fingerprint_library_cmd,
             commands::enhancements::fetch_artwork_cmd,
             commands::enhancements::analyze_replaygain_cmd,
+            commands::enhancements::analyze_loudness_all,
             commands::enhancements::deep_scan_cmd,
             commands::enhancements::get_review_queue_cmd,
             commands::enhancements::resolve_review_item_cmd,

@@ -21,7 +21,9 @@ use crate::database::connection::Result;
 /// - Version 10: Backfill date_added from track_sources.added_at for remote tracks
 /// - Version 11: Delete SoundCloud phantom tracks for clean re-sync with correct liked-at ordering
 /// - Version 12: Strip absolute library root prefix from organized_path (enforce relative-only invariant)
-pub const CURRENT_SCHEMA_VERSION: i32 = 13;
+/// - Version 13: Add playlist_path_prefix to sync_profiles
+/// - Version 14: Phase 18 loudness columns (lufs_i, lufs_range, true_peak, energy_bucket) on tracks
+pub const CURRENT_SCHEMA_VERSION: i32 = 14;
 
 /// SQL schema for the music library database (Phase 1 - base schema).
 ///
@@ -470,6 +472,31 @@ fn migrate_to_v13(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Migration v14 (Phase 18): Add loudness + energy columns to tracks.
+///
+/// - `lufs_i` REAL: EBU R128 integrated loudness (negative dBFS, e.g. -14.2).
+/// - `lufs_range` REAL: Loudness range (LU).
+/// - `true_peak` REAL: True peak in dBFS (e.g. -0.3).
+/// - `energy_bucket` INTEGER: Derived 1..5 bucket (LUFS-I + spectral centroid).
+///
+/// All nullable — NULL means "not yet analyzed". Backfill via
+/// `analyze_loudness_all` Tauri command.
+fn migrate_to_v14(conn: &Connection) -> Result<()> {
+    if !column_exists(conn, "tracks", "lufs_i")? {
+        conn.execute_batch("ALTER TABLE tracks ADD COLUMN lufs_i REAL;")?;
+    }
+    if !column_exists(conn, "tracks", "lufs_range")? {
+        conn.execute_batch("ALTER TABLE tracks ADD COLUMN lufs_range REAL;")?;
+    }
+    if !column_exists(conn, "tracks", "true_peak")? {
+        conn.execute_batch("ALTER TABLE tracks ADD COLUMN true_peak REAL;")?;
+    }
+    if !column_exists(conn, "tracks", "energy_bucket")? {
+        conn.execute_batch("ALTER TABLE tracks ADD COLUMN energy_bucket INTEGER;")?;
+    }
+    Ok(())
+}
+
 /// Initialize the database schema with versioned migrations.
 ///
 /// Creates all tables and indexes, applying migrations as needed.
@@ -562,6 +589,12 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
     if get_schema_version(conn)? < 13 {
         migrate_to_v13(conn)?;
         set_schema_version(conn, 13)?;
+    }
+
+    // Phase 18: loudness + energy columns on tracks
+    if get_schema_version(conn)? < 14 {
+        migrate_to_v14(conn)?;
+        set_schema_version(conn, 14)?;
     }
 
     Ok(())
@@ -939,7 +972,35 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         initialize_schema(&conn).unwrap();
         assert_eq!(get_schema_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
-        assert_eq!(CURRENT_SCHEMA_VERSION, 13);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 14);
+    }
+
+    #[test]
+    fn test_phase18_loudness_columns_exist() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&conn).unwrap();
+
+        assert!(column_exists(&conn, "tracks", "lufs_i").unwrap());
+        assert!(column_exists(&conn, "tracks", "lufs_range").unwrap());
+        assert!(column_exists(&conn, "tracks", "true_peak").unwrap());
+        assert!(column_exists(&conn, "tracks", "energy_bucket").unwrap());
+
+        // All nullable — insert a track without any loudness values and verify
+        // the columns round-trip as NULL.
+        conn.execute(
+            "INSERT INTO tracks (artist, album_artist, album, title, format, original_path)
+             VALUES (?, ?, ?, ?, ?, ?)",
+            ["Artist", "Artist", "Album", "T", "flac", "/p.flac"],
+        ).unwrap();
+
+        let (lufs, lra, peak, energy): (Option<f64>, Option<f64>, Option<f64>, Option<i64>) = conn
+            .query_row(
+                "SELECT lufs_i, lufs_range, true_peak, energy_bucket FROM tracks LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert!(lufs.is_none() && lra.is_none() && peak.is_none() && energy.is_none());
     }
 
     #[test]

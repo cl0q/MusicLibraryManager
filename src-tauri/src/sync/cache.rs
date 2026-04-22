@@ -312,9 +312,10 @@ mod tests {
         Track {
             id: Some(id),
             metadata,
-            organized_path: format!("{}/{}/{}.flac", artist, album, title),
+            organized_path: Some(format!("{}/{}/{}.flac", artist, album, title)),
             is_duplicate: false,
             date_added: None,
+            ..Default::default()
         }
     }
 

@@ -354,6 +354,7 @@ pub fn get_playlist_tracks(conn: &Connection, playlist_id: i64) -> Result<Vec<Tr
                 organized_path: row.get(11)?,
                 is_duplicate: row.get::<_, i32>(12)? != 0,
                 date_added: row.get(13)?,
+                ..Default::default()
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -416,6 +417,7 @@ pub fn search_playlist_tracks(
                     organized_path: row.get(11)?,
                     is_duplicate: row.get::<_, i32>(12)? != 0,
                     date_added: row.get(13)?,
+                    ..Default::default()
                 })
             },
         )?
@@ -510,6 +512,7 @@ pub fn get_smart_playlist_tracks(
                 organized_path: None,
                 is_duplicate: false,
                 date_added: Some(row.get(4)?),
+                ..Default::default()
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;

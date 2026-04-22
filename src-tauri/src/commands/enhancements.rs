@@ -274,10 +274,23 @@ pub async fn analyze_replaygain_cmd(app: tauri::AppHandle) -> Result<serde_json:
                     .map(|(a, t)| (a.as_str(), t.as_str()))
                     .unwrap_or(("", ""));
 
-                match crate::replaygain::analyzer::analyze_track(std::path::Path::new(path)) {
-                    Ok(gain) => {
-                        match crate::replaygain::analyzer::save_track_gain(&conn, *track_id, &gain) {
-                            Ok(_) => {
+                // Phase 18: run the fuller analysis (adds LRA, true peak in
+                // dBFS, spectral centroid, energy bucket) from the same
+                // decoded audio we'd have used for the original gain pass.
+                // The replaygain gain + peak are still saved to the
+                // existing `replaygain` table; the loudness descriptors go
+                // to the new tracks columns.
+                match crate::replaygain::loudness::analyze_track_loudness(std::path::Path::new(path)) {
+                    Ok(analysis) => {
+                        let gain = crate::replaygain::analyzer::GainResult {
+                            track_gain: analysis.loudness.track_gain,
+                            track_peak: analysis.loudness.track_peak,
+                        };
+                        let save_rg = crate::replaygain::analyzer::save_track_gain(&conn, *track_id, &gain);
+                        let save_loud = crate::replaygain::loudness::save_loudness(&conn, *track_id, &analysis);
+
+                        match (save_rg, save_loud) {
+                            (Ok(_), Ok(_)) => {
                                 analyzed += 1;
                                 let _ = app.emit("replaygain:progress", serde_json::json!({
                                     "current": i + 1,
@@ -286,14 +299,25 @@ pub async fn analyze_replaygain_cmd(app: tauri::AppHandle) -> Result<serde_json:
                                     "artist": artist,
                                     "title": title,
                                     "path": path,
-                                    "percent": ((i + 1) as f64 / total as f64 * 100.0) as u32
+                                    "percent": ((i + 1) as f64 / total as f64 * 100.0) as u32,
+                                    "lufs_i": analysis.loudness.lufs_i,
+                                    "lufs_range": analysis.loudness.lufs_range,
+                                    "true_peak": analysis.loudness.true_peak_dbfs,
+                                    "energy_bucket": analysis.energy_bucket,
                                 }));
                             }
-                            Err(e) => {
+                            (Err(e), _) => {
                                 log::error!("Failed to save ReplayGain for track {}: {}", track_id, e);
                                 failed_tracks.push(serde_json::json!({
                                     "track_id": track_id,
-                                    "error": format!("Database error: {}", e)
+                                    "error": format!("Database error (rg): {}", e)
+                                }));
+                            }
+                            (_, Err(e)) => {
+                                log::error!("Failed to save loudness for track {}: {}", track_id, e);
+                                failed_tracks.push(serde_json::json!({
+                                    "track_id": track_id,
+                                    "error": format!("Database error (loudness): {}", e)
                                 }));
                             }
                         }
@@ -473,6 +497,169 @@ pub async fn get_review_queue_count_cmd() -> Result<i64, String> {
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
+}
+
+/// Phase 18: Batch analyze full loudness (LUFS-I, LRA, true peak, energy
+/// bucket) for all local tracks where `lufs_i IS NULL`.
+///
+/// Runs through the same async-blocking queue pattern as the other
+/// enhancement ops. Emits the `loudness:*` event family so the Activity
+/// panel picks up progress identically to `replaygain:*`.
+///
+/// # Events
+/// - "loudness:started" { total }
+/// - "loudness:progress" { current, total, track_id, artist, title, path, percent }
+/// - "loudness:completed" { analyzed, failed }
+#[tauri::command]
+pub async fn analyze_loudness_all(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(move || {
+        let handle = tokio::runtime::Handle::current();
+        handle.block_on(async {
+            let db_path = crate::database::db_path();
+            let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+
+            // Resolve tracks with NULL lufs_i that have files on disk.
+            let tracks = crate::replaygain::loudness::get_unanalyzed_loudness_tracks(&conn)
+                .map_err(|e| format!("Failed to list unanalyzed tracks: {}", e))?;
+
+            let total = tracks.len();
+            log::info!("Starting loudness analysis: {} tracks", total);
+
+            // Load library root once so we can resolve relative organized paths.
+            let lib_config = crate::config::LibraryConfig::load(&conn)
+                .map_err(|e| format!("Config error: {}", e))?;
+            let library_root = lib_config.root_path.clone();
+
+            // Build track info map for verbose progress (reuse the 2-tuple helper).
+            let tuple_tracks: Vec<(i64, String)> = tracks
+                .iter()
+                .map(|(id, orig, _org)| (*id, orig.clone()))
+                .collect();
+            let track_info = build_track_info_map(&conn, &tuple_tracks)?;
+
+            let _ = app.emit("loudness:started", serde_json::json!({ "total": total }));
+
+            let mut analyzed = 0usize;
+            let mut failed_tracks = Vec::new();
+
+            for (i, (track_id, original_path, organized_path)) in tracks.iter().enumerate() {
+                let (artist, title) = track_info
+                    .get(track_id)
+                    .map(|(a, t)| (a.as_str(), t.as_str()))
+                    .unwrap_or(("", ""));
+
+                // Path resolution: prefer an existing organized path joined
+                // with the library root; else fall back to original_path
+                // (which may be absolute for scan-imported tracks).
+                let resolved: std::path::PathBuf = resolve_source_path(
+                    original_path,
+                    organized_path,
+                    library_root.as_deref(),
+                    &lib_config.scan_folders,
+                );
+
+                if !resolved.exists() {
+                    failed_tracks.push(serde_json::json!({
+                        "track_id": track_id,
+                        "error": format!("File not found: {}", resolved.display()),
+                    }));
+                    continue;
+                }
+
+                match crate::replaygain::loudness::analyze_track_loudness(&resolved) {
+                    Ok(analysis) => {
+                        match crate::replaygain::loudness::save_loudness(&conn, *track_id, &analysis) {
+                            Ok(_) => {
+                                analyzed += 1;
+                                let _ = app.emit(
+                                    "loudness:progress",
+                                    serde_json::json!({
+                                        "current": i + 1,
+                                        "total": total,
+                                        "track_id": track_id,
+                                        "artist": artist,
+                                        "title": title,
+                                        "path": resolved.display().to_string(),
+                                        "percent": ((i + 1) as f64 / total.max(1) as f64 * 100.0) as u32,
+                                        "lufs_i": analysis.loudness.lufs_i,
+                                        "lufs_range": analysis.loudness.lufs_range,
+                                        "true_peak": analysis.loudness.true_peak_dbfs,
+                                        "energy_bucket": analysis.energy_bucket,
+                                    }),
+                                );
+                            }
+                            Err(e) => {
+                                log::error!("save_loudness failed for track {}: {}", track_id, e);
+                                failed_tracks.push(serde_json::json!({
+                                    "track_id": track_id,
+                                    "error": format!("Database error: {}", e),
+                                }));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "Loudness analysis failed for track {} at {}: {}",
+                            track_id,
+                            resolved.display(),
+                            e
+                        );
+                        failed_tracks.push(serde_json::json!({
+                            "track_id": track_id,
+                            "error": format!("Analysis error: {}", e),
+                        }));
+                    }
+                }
+            }
+
+            let _ = app.emit(
+                "loudness:completed",
+                serde_json::json!({ "analyzed": analyzed, "failed": failed_tracks.len() }),
+            );
+
+            log::info!(
+                "Loudness analysis complete: {} analyzed, {} failed",
+                analyzed,
+                failed_tracks.len()
+            );
+
+            Ok(serde_json::json!({
+                "analyzed": analyzed,
+                "failed": failed_tracks.len(),
+                "failures": failed_tracks,
+            }))
+        })
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+/// Resolve the on-disk path for a track given its original + organized paths.
+/// Mirrors the resolution logic used by `execute_sync_cmd`:
+/// 1. If organized_path is non-empty, try `library_root/<organized>`.
+/// 2. Also try `library_root/<scan_folder>/<organized>` for each scan folder.
+/// 3. Fall back to `original_path` (works for scan-imported absolute paths).
+fn resolve_source_path(
+    original_path: &str,
+    organized_path: &str,
+    library_root: Option<&std::path::Path>,
+    scan_folders: &[String],
+) -> std::path::PathBuf {
+    if !organized_path.is_empty() {
+        if let Some(root) = library_root {
+            let direct = root.join(organized_path);
+            if direct.exists() {
+                return direct;
+            }
+            for folder in scan_folders {
+                let candidate = root.join(folder).join(organized_path);
+                if candidate.exists() {
+                    return candidate;
+                }
+            }
+        }
+    }
+    std::path::PathBuf::from(original_path)
 }
 
 #[cfg(test)]
