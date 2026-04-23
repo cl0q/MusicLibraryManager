@@ -1281,7 +1281,7 @@ mod tests {
         // client.set_access_token("...", Utc::now() + TimeDelta::hours(1));
 
         let count = client.sync_likes("test_user", &conn).await.unwrap();
-        println!("Synced {} liked tracks", count);
+        println!("Synced {:?} liked tracks", count);
     }
 
     #[tokio::test]
@@ -1303,7 +1303,7 @@ mod tests {
         client.ensure_token("default").await.unwrap();
 
         let count = client.sync_likes("default", &conn).await.unwrap();
-        println!("Synced {} new liked tracks", count);
+        println!("Synced {:?} new liked tracks", count);
 
         // Verify ordering: date_added should be DESC (most recently liked first)
         let mut stmt = conn

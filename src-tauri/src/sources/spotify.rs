@@ -1341,7 +1341,7 @@ mod tests {
         let conn = get_memory_connection().unwrap();
         let mut client = SpotifyClient::new("test_user").await.unwrap();
         let count = client.sync_liked_songs(&conn).await.unwrap();
-        println!("Synced {} tracks", count);
+        println!("Synced {:?} tracks", count);
     }
 
     #[tokio::test]

@@ -23,7 +23,8 @@ use crate::database::connection::Result;
 /// - Version 12: Strip absolute library root prefix from organized_path (enforce relative-only invariant)
 /// - Version 13: Add playlist_path_prefix to sync_profiles
 /// - Version 14: Phase 18 loudness columns (lufs_i, lufs_range, true_peak, energy_bucket) on tracks
-pub const CURRENT_SCHEMA_VERSION: i32 = 14;
+/// - Version 15: Phase 20 track_tags table (track_id, tag_key, tag_value) for Yeat taxonomy backfill
+pub const CURRENT_SCHEMA_VERSION: i32 = 15;
 
 /// SQL schema for the music library database (Phase 1 - base schema).
 ///
@@ -321,6 +322,26 @@ CREATE TABLE IF NOT EXISTS track_analysis (
 );
 ";
 
+/// SQL schema for Phase 20 track tags table.
+///
+/// Contains:
+/// - `track_tags` table: structured (track_id, tag_key, tag_value) with composite PK.
+///   Used to backfill the on-disk Yeat folder taxonomy (era, variant, artist).
+/// - Index on (tag_key, tag_value) for "all tracks with era=X" queries.
+/// - Index on (tag_key) for "what tag keys exist" queries.
+pub const PHASE20_SCHEMA_SQL: &str = "
+CREATE TABLE IF NOT EXISTS track_tags (
+    track_id INTEGER NOT NULL,
+    tag_key TEXT NOT NULL,
+    tag_value TEXT NOT NULL,
+    PRIMARY KEY (track_id, tag_key, tag_value),
+    FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_track_tags_key_value ON track_tags(tag_key, tag_value);
+CREATE INDEX IF NOT EXISTS idx_track_tags_key ON track_tags(tag_key);
+";
+
 /// Get the current schema version from the database.
 pub fn get_schema_version(conn: &Connection) -> Result<i32> {
     let version: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -497,6 +518,17 @@ fn migrate_to_v14(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Migration v15 (Phase 20): Create track_tags table for Yeat taxonomy backfill.
+///
+/// Additive only — no existing table is touched. The composite primary key
+/// `(track_id, tag_key, tag_value)` is the idempotency key for the backfill
+/// walker: INSERT OR REPLACE on this key is a no-op when the same triple
+/// is rewritten.
+fn migrate_to_v15(conn: &Connection) -> Result<()> {
+    conn.execute_batch(PHASE20_SCHEMA_SQL)?;
+    Ok(())
+}
+
 /// Initialize the database schema with versioned migrations.
 ///
 /// Creates all tables and indexes, applying migrations as needed.
@@ -595,6 +627,12 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
     if get_schema_version(conn)? < 14 {
         migrate_to_v14(conn)?;
         set_schema_version(conn, 14)?;
+    }
+
+    // Phase 20: track_tags table for Yeat taxonomy backfill
+    if get_schema_version(conn)? < 15 {
+        migrate_to_v15(conn)?;
+        set_schema_version(conn, 15)?;
     }
 
     Ok(())
@@ -972,7 +1010,7 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         initialize_schema(&conn).unwrap();
         assert_eq!(get_schema_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
-        assert_eq!(CURRENT_SCHEMA_VERSION, 14);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 15);
     }
 
     #[test]
@@ -1031,6 +1069,172 @@ mod tests {
 
         // Verify existing data is preserved during migration (simulate v6 -> v7)
         // The test above implicitly verifies this since initialize_schema applies all migrations
+    }
+
+    #[test]
+    fn test_phase20_track_tags_table_exists() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&conn).unwrap();
+
+        assert!(table_exists(&conn, "track_tags"));
+        assert_eq!(get_schema_version(&conn).unwrap(), 15);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 15);
+    }
+
+    #[test]
+    fn test_phase20_track_tags_indexes_exist() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&conn).unwrap();
+
+        assert!(index_exists(&conn, "idx_track_tags_key_value"));
+        assert!(index_exists(&conn, "idx_track_tags_key"));
+    }
+
+    #[test]
+    fn test_phase20_track_tags_composite_pk() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&conn).unwrap();
+
+        // Insert a track for FK reference
+        conn.execute(
+            "INSERT INTO tracks (artist, album_artist, album, title, format, original_path)
+             VALUES (?, ?, ?, ?, ?, ?)",
+            ["Yeat", "Yeat", "AftërLyfe", "Flawless", "flac", "/path/flawless.flac"],
+        ).unwrap();
+
+        // First insert of (track_id=1, era, aftrelyfe) should succeed
+        conn.execute(
+            "INSERT INTO track_tags (track_id, tag_key, tag_value) VALUES (?, ?, ?)",
+            rusqlite::params![1i64, "era", "aftrelyfe"],
+        ).unwrap();
+
+        // Same exact triple must violate the composite PK
+        let dup = conn.execute(
+            "INSERT INTO track_tags (track_id, tag_key, tag_value) VALUES (?, ?, ?)",
+            rusqlite::params![1i64, "era", "aftrelyfe"],
+        );
+        assert!(dup.is_err(), "duplicate (track_id, tag_key, tag_value) should fail PK");
+
+        // Same (track_id, tag_key) but different tag_value should succeed — a track
+        // can legitimately have era=aftrelyfe AND era=lyfestyle during drift detection.
+        conn.execute(
+            "INSERT INTO track_tags (track_id, tag_key, tag_value) VALUES (?, ?, ?)",
+            rusqlite::params![1i64, "era", "lyfestyle"],
+        ).unwrap();
+
+        let count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM track_tags WHERE track_id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn test_phase20_track_tags_cascade_delete() {
+        let conn = Connection::open_in_memory().unwrap();
+        // Enable foreign keys so the FK cascade actually fires
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        initialize_schema(&conn).unwrap();
+
+        // Insert a track and two tag rows
+        conn.execute(
+            "INSERT INTO tracks (artist, album_artist, album, title, format, original_path)
+             VALUES (?, ?, ?, ?, ?, ?)",
+            ["Yeat", "Yeat", "AftërLyfe", "Flawless", "flac", "/path/flawless.flac"],
+        ).unwrap();
+
+        conn.execute(
+            "INSERT INTO track_tags (track_id, tag_key, tag_value) VALUES (?, ?, ?)",
+            rusqlite::params![1i64, "era", "aftrelyfe"],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO track_tags (track_id, tag_key, tag_value) VALUES (?, ?, ?)",
+            rusqlite::params![1i64, "artist", "yeat"],
+        ).unwrap();
+
+        // Sanity check — rows exist before delete
+        let before: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM track_tags WHERE track_id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(before, 2);
+
+        // Delete the track — FK cascade should wipe the tag rows
+        conn.execute("DELETE FROM tracks WHERE id = 1", []).unwrap();
+
+        let after: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM track_tags WHERE track_id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(after, 0, "ON DELETE CASCADE should remove track_tags rows");
+    }
+
+    #[test]
+    fn test_phase20_migration_from_v14_to_v15() {
+        let conn = Connection::open_in_memory().unwrap();
+
+        // Simulate a v14 database by applying every prior schema in order.
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        conn.execute_batch(PHASE3_SCHEMA_SQL).unwrap();
+        conn.execute_batch(PHASE4_SCHEMA_SQL).unwrap();
+        conn.execute_batch(PHASE5_SCHEMA_SQL).unwrap();
+        conn.execute_batch(PHASE7_SCHEMA_SQL).unwrap();
+        conn.execute_batch(PHASE8_SCHEMA_SQL).unwrap();
+        conn.execute_batch(PHASE9_SCHEMA_SQL).unwrap();
+        conn.execute_batch(PHASE10_SCHEMA_SQL).unwrap();
+        // Apply v14-shape columns directly (match migrate_to_v14 output)
+        conn.execute_batch("ALTER TABLE tracks ADD COLUMN download_status TEXT;").unwrap();
+        conn.execute_batch("ALTER TABLE tracks ADD COLUMN lufs_i REAL;").unwrap();
+        conn.execute_batch("ALTER TABLE tracks ADD COLUMN lufs_range REAL;").unwrap();
+        conn.execute_batch("ALTER TABLE tracks ADD COLUMN true_peak REAL;").unwrap();
+        conn.execute_batch("ALTER TABLE tracks ADD COLUMN energy_bucket INTEGER;").unwrap();
+        conn.execute_batch(
+            "ALTER TABLE sync_profiles ADD COLUMN playlist_path_prefix TEXT NOT NULL DEFAULT '';"
+        ).unwrap();
+        conn.execute_batch("PRAGMA user_version = 14;").unwrap();
+
+        // Pre-insert data we expect to survive the migration
+        conn.execute(
+            "INSERT INTO tracks (artist, album_artist, album, title, format, original_path)
+             VALUES (?, ?, ?, ?, ?, ?)",
+            ["Yeat", "Yeat", "Lyfe", "Flawless", "flac", "/disk/flawless.flac"],
+        ).unwrap();
+
+        // Confirm starting state
+        assert_eq!(get_schema_version(&conn).unwrap(), 14);
+        assert!(!table_exists(&conn, "track_tags"));
+
+        // Apply the migration chain
+        initialize_schema(&conn).unwrap();
+
+        // Final version must be v15 and track_tags must now exist
+        assert_eq!(get_schema_version(&conn).unwrap(), 15);
+        assert!(table_exists(&conn, "track_tags"));
+        assert!(index_exists(&conn, "idx_track_tags_key_value"));
+        assert!(index_exists(&conn, "idx_track_tags_key"));
+
+        // Existing track row must be preserved — migration is additive
+        let title: String = conn
+            .query_row(
+                "SELECT title FROM tracks WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(title, "Flawless");
+
+        // Second initialize_schema call must be a no-op
+        initialize_schema(&conn).unwrap();
+        assert_eq!(get_schema_version(&conn).unwrap(), 15);
     }
 }
 

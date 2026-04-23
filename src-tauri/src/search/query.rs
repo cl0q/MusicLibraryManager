@@ -517,7 +517,7 @@ mod tests {
             "mp3".to_string(),
             format!("/path/to/{}.mp3", title),
         );
-        Track::with_id(id, metadata, format!("{}/{}/{}.mp3", artist, album, title))
+        Track::with_id(id, metadata, Some(format!("{}/{}/{}.mp3", artist, album, title)))
     }
 
     fn insert_test_track(conn: &Connection, track: &Track) {
