@@ -101,6 +101,10 @@ open = "5.3.3"
 notify = { version = "6", features = ["macos_fsevent"] }
 rayon = "1.10.0"
 
+# Phase 20 - Yeat tag inference (disk walker + era normalization)
+walkdir = "2"
+deunicode = "1"
+
 [dev-dependencies]
 tempfile = "3.24.0"
 serde_json = "1"

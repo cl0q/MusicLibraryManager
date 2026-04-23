@@ -18,6 +18,7 @@ pub mod sources;
 pub mod startup;
 pub mod sync;
 pub mod transcode;
+pub mod yeat;
 
 use tauri::Manager;
 
