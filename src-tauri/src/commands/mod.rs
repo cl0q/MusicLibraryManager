@@ -31,6 +31,7 @@
 //! - get_review_queue_cmd: Retrieve review queue entries
 //! - resolve_review_item_cmd: Approve/reject/dismiss review items
 //! - get_review_queue_count_cmd: Get pending review count for sidebar badge
+//! - backfill_yeat_tags_cmd: Backfill `track_tags` from on-disk Yeat taxonomy
 //!
 //! Commands are registered in lib.rs via tauri::generate_handler![]
 
@@ -46,6 +47,7 @@ pub mod playlist;
 pub mod search;
 pub mod sources;
 pub mod sync;
+pub mod yeat;
 
 // Re-export commands for registration
 pub use analysis::get_track_analysis;
@@ -81,3 +83,4 @@ pub use sync::{
     delete_sync_profile, detect_rockbox_devices_cmd, execute_sync_cmd, get_last_sync_time,
     get_sync_profile, list_sync_profiles, preview_sync_cmd,
 };
+pub use yeat::{backfill_yeat_tags_cmd, BackfillReport, DriftEntry};

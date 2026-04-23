@@ -253,6 +253,7 @@ pub fn run() {
             commands::maintenance::purge_orphaned_tracks,
             commands::maintenance::remove_tracks_from_library,
             commands::maintenance::delete_tracks_from_disk,
+            commands::yeat::backfill_yeat_tags_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
