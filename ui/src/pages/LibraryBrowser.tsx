@@ -19,6 +19,7 @@ import {
   deepScan,
   getReviewQueueCount,
   getRemoteTrackCount,
+  stopAnalysis,
 } from "../utils/tauri-commands";
 
 interface LibraryBrowserProps {
@@ -92,7 +93,7 @@ export default function LibraryBrowser({ view = "library" }: LibraryBrowserProps
 
   const fingerprintProgress = useEnhancementProgress("fingerprint");
   const artworkProgress = useEnhancementProgress("artwork");
-  const replaygainProgress = useEnhancementProgress("replaygain");
+  const loudnessProgress = useEnhancementProgress("loudness");
   const deepscanProgress = useEnhancementProgress("deepscan");
 
   useEffect(() => {
@@ -120,33 +121,62 @@ export default function LibraryBrowser({ view = "library" }: LibraryBrowserProps
     return () => { unlisten.then((fn) => fn()); };
   }, []);
 
-  const handleFingerprintLibrary = async () => {
-    try { await fingerprintLibrary(); } catch (err) { console.error("Fingerprint failed:", err); }
-  };
-  const handleFetchArtwork = async () => {
-    try { await fetchArtwork(); } catch (err) { console.error("Artwork failed:", err); }
-  };
-  // Library-header "Analyze": Phase 18 wires this to `analyze_loudness_all`,
-  // which queues every local track where `lufs_i IS NULL`. The underlying
-  // ReplayGain pipeline also benefits because the replaygain pass now
-  // saves LUFS columns too — this button is the deliberate backfill path
-  // that avoids re-analyzing already-done tracks.
-  const handleAnalyzeLoudness = async () => {
+  // Phase 20: each enhancement button is a toggle. First click starts
+  // the op; a click while it's running signals the backend to stop
+  // between tracks (within one track of latency). The button flips
+  // back to its idle label once the backend emits `{prefix}:stopped`.
+  const toggleOp = async (
+    prefix: string,
+    prog: ReturnType<typeof useEnhancementProgress>,
+    start: () => Promise<unknown>,
+    onDone?: () => void,
+  ) => {
+    if (prog.isRunning) {
+      prog.setIsStopping(true);
+      try {
+        await stopAnalysis(prefix);
+      } catch (err) {
+        console.error(`Stop ${prefix} failed:`, err);
+        prog.setIsStopping(false);
+      }
+      return;
+    }
     try {
-      const r = await analyzeLoudnessAll();
-      toast.success(`Loudness — ${r.analyzed} analyzed, ${r.failed} failed`);
+      await start();
+      onDone?.();
     } catch (err) {
-      console.error("Loudness analysis failed:", err);
-      toast.error(`Loudness failed: ${err}`);
+      console.error(`${prefix} failed:`, err);
     }
   };
-  const handleDeepScan = async () => {
-    try {
-      await deepScan();
+
+  const handleFingerprintLibrary = () =>
+    toggleOp("fingerprint", fingerprintProgress, fingerprintLibrary);
+
+  const handleFetchArtwork = () =>
+    toggleOp("artwork", artworkProgress, fetchArtwork);
+
+  // Library-header "Analyze": Phase 18 wires this to `analyze_loudness_all`,
+  // which queues every local track where `lufs_i IS NULL`. Phase 20 turns
+  // it into a start/stop toggle so the user can bail mid-backfill.
+  const handleAnalyzeLoudness = () =>
+    toggleOp(
+      "loudness",
+      loudnessProgress,
+      async () => {
+        const r = await analyzeLoudnessAll();
+        if (r.cancelled) {
+          toast.info(`Loudness stopped — ${r.analyzed} analyzed, ${r.failed} failed`);
+        } else {
+          toast.success(`Loudness — ${r.analyzed} analyzed, ${r.failed} failed`);
+        }
+      },
+    );
+
+  const handleDeepScan = () =>
+    toggleOp("deepscan", deepscanProgress, deepScan, async () => {
       const count = await getReviewQueueCount();
       setReviewQueueCount(count);
-    } catch (err) { console.error("Deep scan failed:", err); }
-  };
+    });
 
   const handleOpenMoreInfo = (track: Track) => {
     setMoreInfoTrack(track);
@@ -179,11 +209,14 @@ export default function LibraryBrowser({ view = "library" }: LibraryBrowserProps
     );
   }
 
-  // The running status of any enhancement op doubles as the Analyze button state.
-  const analyzing =
+  // Phase 20: track whether *any* op is running so sibling buttons can
+  // grey themselves out. The running button itself stays clickable so
+  // the user can stop it — that's handled inline via `running` on each
+  // IconBtn.
+  const anyRunning =
     fingerprintProgress.isRunning ||
     artworkProgress.isRunning ||
-    replaygainProgress.isRunning ||
+    loudnessProgress.isRunning ||
     deepscanProgress.isRunning;
 
   return (
@@ -207,33 +240,38 @@ export default function LibraryBrowser({ view = "library" }: LibraryBrowserProps
                 <div className="flex items-center gap-1.5">
                   <IconBtn
                     icon="bolt"
-                    label={analyzing ? "Analyzing…" : "Analyze"}
+                    label="Analyze"
                     onClick={handleAnalyzeLoudness}
-                    running={replaygainProgress.isRunning}
-                    progress={replaygainProgress.progress}
-                    disabled={analyzing}
+                    running={loudnessProgress.isRunning}
+                    stopping={loudnessProgress.isStopping}
+                    progress={loudnessProgress.progress}
+                    disabled={anyRunning && !loudnessProgress.isRunning}
                   />
                   <IconBtn
                     icon="refresh"
                     label="Match"
                     onClick={handleFingerprintLibrary}
                     running={fingerprintProgress.isRunning}
+                    stopping={fingerprintProgress.isStopping}
                     progress={fingerprintProgress.progress}
-                    disabled={analyzing}
+                    disabled={anyRunning && !fingerprintProgress.isRunning}
                   />
                   <IconBtn
                     icon="filter"
                     label="Scan"
                     onClick={handleDeepScan}
                     running={deepscanProgress.isRunning}
-                    disabled={analyzing}
+                    stopping={deepscanProgress.isStopping}
+                    disabled={anyRunning && !deepscanProgress.isRunning}
                   />
                   <IconBtn
                     icon="image"
                     label="Artwork"
                     onClick={handleFetchArtwork}
                     running={artworkProgress.isRunning}
-                    disabled={analyzing}
+                    stopping={artworkProgress.isStopping}
+                    progress={artworkProgress.progress}
+                    disabled={anyRunning && !artworkProgress.isRunning}
                   />
                   {/* Energy column toggle — unhides the hidden-by-default
                       energy column so users can see the 1-5 bucket inline. */}
@@ -371,11 +409,19 @@ const ICON_PATHS: Record<string, string> = {
   image: "M3 5a2 2 0 012-2h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5zm4 5a2 2 0 100-4 2 2 0 000 4zm12 6l-5-5-4 4-2-2-3 3v2a2 2 0 002 2h10a2 2 0 002-2v-2z",
 };
 
+/**
+ * Enhancement action button. Doubles as a start/stop toggle: clicking
+ * while `running` sends the cancel signal. The toggled state uses a
+ * y2k-style inset shadow + crimson glow so the button visually reads as
+ * "pressed in and hot". `stopping` keeps the pressed look after the
+ * click and swaps the label to "Stopping…" while workers drain.
+ */
 function IconBtn({
   icon,
   label,
   onClick,
   running,
+  stopping,
   progress,
   disabled,
 }: {
@@ -383,19 +429,69 @@ function IconBtn({
   label: string;
   onClick: () => void;
   running?: boolean;
+  stopping?: boolean;
   progress?: { current: number; total: number } | null;
   disabled?: boolean;
 }) {
+  const toggled = !!running;
+  const displayLabel = stopping
+    ? "Stopping…"
+    : running
+    ? "Stop"
+    : label;
+  const title =
+    (running
+      ? stopping
+        ? "Stopping — waiting for in-flight workers…"
+        : `Stop ${label.toLowerCase()}`
+      : label) + (running && progress ? ` — ${progress.current}/${progress.total}` : "");
+
   return (
     <button
       onClick={onClick}
       disabled={disabled}
-      title={label + (running && progress ? ` — ${progress.current}/${progress.total}` : "")}
-      className="flex items-center gap-1.5 h-[30px] px-2.5 rounded-[5px] bg-raised border border-edge text-ink-secondary text-[12px] hover:text-ink hover:bg-overlay transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-      style={{ fontFamily: "var(--font-ui)" }}
+      title={title}
+      className={
+        "relative flex items-center gap-1.5 h-[30px] px-2.5 rounded-[5px] border text-[12px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed " +
+        (toggled
+          ? "bg-rose-500/15 border-rose-400/50 text-rose-200 hover:bg-rose-500/20"
+          : "bg-raised border-edge text-ink-secondary hover:text-ink hover:bg-overlay")
+      }
+      style={{
+        fontFamily: "var(--font-ui)",
+        // Y2K toggled shadow: inner gradient for the "pressed-in glass"
+        // look, plus an outer rose glow that subtly pulses.
+        boxShadow: toggled
+          ? [
+              "inset 0 1px 0 rgba(0,0,0,0.45)",
+              "inset 0 -1px 0 rgba(255,255,255,0.08)",
+              "inset 0 2px 6px rgba(244,63,94,0.35)",
+              "0 0 0 1px rgba(244,63,94,0.25)",
+              "0 0 14px rgba(244,63,94,0.45)",
+            ].join(", ")
+          : undefined,
+        animation: toggled && !stopping ? "y2kPulse 1.6s ease-in-out infinite" : undefined,
+      }}
     >
       {running ? (
-        <span className="w-3 h-3 border border-ink-muted border-t-sky-400 rounded-full animate-spin" />
+        stopping ? (
+          <span className="w-3 h-3 border border-rose-200/60 border-t-rose-200 rounded-full animate-spin" />
+        ) : (
+          // Stop glyph — square inside a faintly glowing ring.
+          <span className="relative inline-flex items-center justify-center w-[13px] h-[13px]">
+            <span
+              className="absolute inset-0 rounded-full"
+              style={{ boxShadow: "inset 0 0 0 1px rgba(244,63,94,0.55)" }}
+            />
+            <span
+              className="w-[6px] h-[6px] rounded-[1px]"
+              style={{
+                background: "linear-gradient(180deg, #fda4af 0%, #e11d48 100%)",
+                boxShadow: "0 0 4px rgba(244,63,94,0.7)",
+              }}
+            />
+          </span>
+        )
       ) : (
         <svg className="w-[13px] h-[13px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.7}>
           <path strokeLinecap="round" strokeLinejoin="round" d={ICON_PATHS[icon]} />
@@ -404,10 +500,10 @@ function IconBtn({
       <span>
         {running && progress ? (
           <span className="tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
-            {progress.current}/{progress.total}
+            {stopping ? displayLabel : `${progress.current}/${progress.total}`}
           </span>
         ) : (
-          label
+          displayLabel
         )}
       </span>
     </button>

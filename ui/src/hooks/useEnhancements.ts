@@ -18,44 +18,55 @@ export function useEnhancementProgress(eventPrefix: string) {
   const [isRunning, setIsRunning] = useState(false);
   const [progress, setProgress] = useState<EnhancementProgress | null>(null);
   const [result, setResult] = useState<any>(null);
+  // True from the moment the user clicks Stop until the backend emits
+  // `:stopped`. Lets the button render a distinct "stopping…" state so
+  // users get immediate feedback while in-flight workers drain.
+  const [isStopping, setIsStopping] = useState(false);
 
   useEffect(() => {
     let startedUnlisten: (() => void) | null = null;
     let progressUnlisten: (() => void) | null = null;
     let completedUnlisten: (() => void) | null = null;
+    let stoppedUnlisten: (() => void) | null = null;
 
-    // Set up event listeners
     const setupListeners = async () => {
-      // Started event
       startedUnlisten = await listen(`${eventPrefix}:started`, (event) => {
         setIsRunning(true);
+        setIsStopping(false);
         setProgress(event.payload as EnhancementProgress);
         setResult(null);
       });
 
-      // Progress event
       progressUnlisten = await listen(`${eventPrefix}:progress`, (event) => {
         setProgress(event.payload as EnhancementProgress);
       });
 
-      // Completed event
       completedUnlisten = await listen(`${eventPrefix}:completed`, (event) => {
         setIsRunning(false);
+        setIsStopping(false);
+        setResult(event.payload);
+      });
+
+      // Phase 20: cancellation ack from backend. Same shape as completed
+      // but the button flips straight back to its idle state.
+      stoppedUnlisten = await listen(`${eventPrefix}:stopped`, (event) => {
+        setIsRunning(false);
+        setIsStopping(false);
         setResult(event.payload);
       });
     };
 
     setupListeners();
 
-    // Cleanup listeners on unmount
     return () => {
       if (startedUnlisten) startedUnlisten();
       if (progressUnlisten) progressUnlisten();
       if (completedUnlisten) completedUnlisten();
+      if (stoppedUnlisten) stoppedUnlisten();
     };
   }, [eventPrefix]);
 
-  return { isRunning, progress, result };
+  return { isRunning, isStopping, progress, result, setIsStopping };
 }
 
 /**

@@ -243,6 +243,7 @@ export async function analyzeReplayGain(): Promise<ReplayGainResult> {
 export interface LoudnessAnalysisResult {
   analyzed: number;
   failed: number;
+  cancelled?: boolean;
   failures?: Array<{ track_id: number; error: string }>;
 }
 
@@ -258,6 +259,16 @@ export interface DeepScanResult {
 
 export async function deepScan(): Promise<DeepScanResult> {
   return invoke<DeepScanResult>("deep_scan_cmd");
+}
+
+/**
+ * Phase 20 — Stop an in-flight enhancement op.
+ * `prefix` matches the Tauri event namespace: "fingerprint", "artwork",
+ * "replaygain", "loudness", or "deepscan". The running op polls this
+ * flag between tracks and bails early, emitting `{prefix}:stopped`.
+ */
+export async function stopAnalysis(prefix: string): Promise<boolean> {
+  return invoke<boolean>("stop_analysis_cmd", { prefix });
 }
 
 export async function getReviewQueue(status?: string): Promise<ReviewQueueItem[]> {

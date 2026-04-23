@@ -46,12 +46,18 @@ pub struct BatchArtworkResult {
 ///
 /// # Returns
 /// Statistics about the batch operation
-pub async fn batch_fetch_artwork(
+pub async fn batch_fetch_artwork<C, P>(
     conn: &Connection,
     cache: &ArtworkCache,
     client: &reqwest::Client,
     track_ids: &[(i64, String, String)],
-) -> Result<BatchArtworkResult> {
+    cancelled: C,
+    mut on_progress: P,
+) -> Result<BatchArtworkResult>
+where
+    C: Fn() -> bool,
+    P: FnMut(usize, i64),
+{
     use std::path::Path;
 
     let mut result = BatchArtworkResult {
@@ -61,7 +67,11 @@ pub async fn batch_fetch_artwork(
         failed: Vec::new(),
     };
 
-    for (track_id, artist, album) in track_ids {
+    for (idx, (track_id, artist, album)) in track_ids.iter().enumerate() {
+        if cancelled() {
+            break;
+        }
+        on_progress(idx + 1, *track_id);
         // Check if already cached
         if cache.is_cached(*track_id, "500") && cache.is_cached(*track_id, "1200") {
             result.already_cached += 1;

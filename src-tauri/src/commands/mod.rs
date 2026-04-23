@@ -36,6 +36,7 @@
 //! Commands are registered in lib.rs via tauri::generate_handler![]
 
 pub mod analysis;
+pub mod batch_control;
 pub mod download;
 pub mod duplicate;
 pub mod enhancements;
@@ -51,6 +52,7 @@ pub mod yeat;
 
 // Re-export commands for registration
 pub use analysis::get_track_analysis;
+pub use batch_control::stop_analysis_cmd;
 pub use download::{download_tracks, get_retry_queue_status, retry_failed_downloads};
 pub use duplicate::detect_duplicates;
 pub use enhancements::{

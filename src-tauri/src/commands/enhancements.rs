@@ -8,10 +8,22 @@
 //! - get_review_queue_cmd: Retrieve review queue entries
 //! - resolve_review_item_cmd: Approve/reject/dismiss review items
 //! - get_review_queue_count_cmd: Get count of pending review items
+//!
+//! The CPU-heavy loops (fingerprint, replaygain, loudness) run in
+//! batches of `batch_control::BATCH_SIZE` tracks with up to
+//! `batch_control::worker_count()` blocking workers in flight. Every
+//! iteration checks `batch_control::is_cancelled(prefix)` so the stop
+//! button from the UI interrupts within one track rather than after all
+//! 11k are done.
 
+use crate::commands::batch_control::{
+    cancel_flag, is_cancelled, reset_cancel, worker_count, BATCH_SIZE,
+};
 use crate::database::get_connection;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use tauri::Emitter;
 
 /// Build a lookup map of track_id -> (artist, title) for progress reporting.
@@ -50,177 +62,303 @@ fn build_track_info_map(
     Ok(map)
 }
 
+/// Run `tasks` through a worker pool, respecting the cancel flag for
+/// `prefix`. Each task is spawned via `spawn_blocking` so synchronous
+/// ffmpeg / fpcalc / rusqlite work doesn't block the tokio runtime.
+///
+/// Yields control at batch boundaries (every `BATCH_SIZE` items) and
+/// between spawns so a stop signal is observed within one track worth
+/// of latency rather than after the whole library.
+async fn run_parallel_batches<T, F>(prefix: &str, tasks: Vec<T>, work: F)
+where
+    T: Send + 'static,
+    F: Fn(T) + Send + Sync + Clone + 'static,
+{
+    use futures_util::stream::{FuturesUnordered, StreamExt};
+
+    let parallelism = worker_count();
+    let mut iter = tasks.into_iter();
+    let mut in_flight: FuturesUnordered<tokio::task::JoinHandle<()>> = FuturesUnordered::new();
+    let mut dispatched: usize = 0;
+
+    // Prime the pool.
+    for _ in 0..parallelism {
+        match iter.next() {
+            Some(item) if !is_cancelled(prefix) => {
+                let w = work.clone();
+                in_flight.push(tokio::task::spawn_blocking(move || w(item)));
+                dispatched += 1;
+            }
+            _ => break,
+        }
+    }
+
+    while let Some(_) = in_flight.next().await {
+        if is_cancelled(prefix) {
+            // Drain whatever's still running so we don't double-spend on
+            // cancelled work, but don't dispatch anything new.
+            while let Some(_) = in_flight.next().await {}
+            return;
+        }
+        if let Some(item) = iter.next() {
+            let w = work.clone();
+            in_flight.push(tokio::task::spawn_blocking(move || w(item)));
+            dispatched += 1;
+
+            // Give tokio a tick to process events every batch so the
+            // cancel flag gets a chance to be flipped from the UI side.
+            if dispatched % BATCH_SIZE == 0 {
+                tokio::task::yield_now().await;
+            }
+        }
+    }
+}
+
 /// Batch fingerprint all unfingerprinted tracks in the library.
 ///
-/// Generates Chromaprint fingerprints for tracks without existing fingerprints.
-/// Emits progress events for real-time UI updates.
-///
-/// # Arguments
-/// * `app` - Tauri AppHandle for event emission
-///
-/// # Returns
-/// * `Ok(serde_json::Value)` - JSON with { processed, failed }
-/// * `Err(String)` - If database or fingerprinting fails
+/// Processes tracks in parallel batches. Cancellable via
+/// `stop_analysis_cmd("fingerprint")`.
 ///
 /// # Events
 /// - "fingerprint:started" with { total }
-/// - "fingerprint:progress" with { current, total, track_id }
+/// - "fingerprint:progress" with { current, total, track_id, ... }
 /// - "fingerprint:completed" with { processed, failed }
+/// - "fingerprint:stopped" with { processed, failed } when cancelled
 #[tauri::command]
 pub async fn fingerprint_library_cmd(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
-    // Use spawn_blocking + block_on pattern for rusqlite (!Send)
-    tokio::task::spawn_blocking(move || {
-        let handle = tokio::runtime::Handle::current();
-        handle.block_on(async {
-            let db_path = crate::database::db_path();
-            let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+    const PREFIX: &str = "fingerprint";
+    reset_cancel(PREFIX);
 
-            // Get unfingerprinted tracks
-            let tracks = crate::fingerprint::chromaprint::get_unfingerprinted_tracks(&conn)
-                .map_err(|e| format!("Failed to get unfingerprinted tracks: {}", e))?;
+    // Pull the task list (blocking work on rusqlite) up front so the
+    // parallel loop below doesn't need a shared Connection.
+    let (tracks, track_info) = tokio::task::spawn_blocking(|| -> Result<_, String> {
+        let db_path = crate::database::db_path();
+        let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+        let tracks = crate::fingerprint::chromaprint::get_unfingerprinted_tracks(&conn)
+            .map_err(|e| format!("Failed to get unfingerprinted tracks: {}", e))?;
+        let track_info = build_track_info_map(&conn, &tracks)?;
+        Ok((tracks, track_info))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))??;
 
-            let total = tracks.len();
-            log::info!("Starting fingerprint scan: {} tracks", total);
+    let total = tracks.len();
+    log::info!("Starting fingerprint scan: {} tracks", total);
+    let _ = app.emit("fingerprint:started", serde_json::json!({ "total": total }));
 
-            // Build track info map for verbose progress reporting
-            let track_info = build_track_info_map(&conn, &tracks)?;
+    let processed = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::new(AtomicUsize::new(0));
+    let failed = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+    let track_info = Arc::new(track_info);
 
-            // Emit started event
-            let _ = app.emit("fingerprint:started", serde_json::json!({ "total": total }));
+    {
+        let processed = processed.clone();
+        let counter = counter.clone();
+        let failed = failed.clone();
+        let track_info = track_info.clone();
+        let app = app.clone();
 
-            // Process each track
-            let mut processed = 0;
-            let mut failed_tracks = Vec::new();
+        run_parallel_batches(PREFIX, tracks, move |(track_id, path): (i64, String)| {
+            if is_cancelled(PREFIX) {
+                return;
+            }
+            let (artist, title) = track_info
+                .get(&track_id)
+                .map(|(a, t)| (a.clone(), t.clone()))
+                .unwrap_or_default();
 
-            for (i, (track_id, path)) in tracks.iter().enumerate() {
-                let (artist, title) = track_info.get(track_id)
-                    .map(|(a, t)| (a.as_str(), t.as_str()))
-                    .unwrap_or(("", ""));
-
-                match crate::fingerprint::chromaprint::fingerprint_track(std::path::Path::new(path)) {
-                    Ok((fingerprint, duration)) => {
-                        match crate::fingerprint::chromaprint::save_fingerprint(&conn, *track_id, &fingerprint, duration) {
-                            Ok(_) => {
-                                processed += 1;
-                                let _ = app.emit("fingerprint:progress", serde_json::json!({
-                                    "current": i + 1,
+            match crate::fingerprint::chromaprint::fingerprint_track(std::path::Path::new(&path)) {
+                Ok((fingerprint, duration)) => {
+                    let db_path = crate::database::db_path();
+                    let conn = match get_connection(&db_path) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            failed.lock().unwrap().push(serde_json::json!({
+                                "track_id": track_id,
+                                "error": format!("Database error: {}", e),
+                            }));
+                            counter.fetch_add(1, Ordering::Relaxed);
+                            return;
+                        }
+                    };
+                    match crate::fingerprint::chromaprint::save_fingerprint(
+                        &conn, track_id, &fingerprint, duration,
+                    ) {
+                        Ok(_) => {
+                            processed.fetch_add(1, Ordering::Relaxed);
+                            let cur = counter.fetch_add(1, Ordering::Relaxed) + 1;
+                            let _ = app.emit(
+                                "fingerprint:progress",
+                                serde_json::json!({
+                                    "current": cur,
                                     "total": total,
                                     "track_id": track_id,
                                     "artist": artist,
                                     "title": title,
                                     "path": path,
-                                    "percent": ((i + 1) as f64 / total as f64 * 100.0) as u32
-                                }));
-                            }
-                            Err(e) => {
-                                log::error!("Failed to save fingerprint for track {}: {}", track_id, e);
-                                failed_tracks.push(serde_json::json!({
-                                    "track_id": track_id,
-                                    "error": format!("Database error: {}", e)
-                                }));
-                            }
+                                    "percent": (cur as f64 / total.max(1) as f64 * 100.0) as u32,
+                                }),
+                            );
+                        }
+                        Err(e) => {
+                            log::error!(
+                                "Failed to save fingerprint for track {}: {}",
+                                track_id,
+                                e
+                            );
+                            failed.lock().unwrap().push(serde_json::json!({
+                                "track_id": track_id,
+                                "error": format!("Database error: {}", e),
+                            }));
+                            counter.fetch_add(1, Ordering::Relaxed);
                         }
                     }
-                    Err(e) => {
-                        log::warn!("Failed to fingerprint track {} at {}: {}", track_id, path, e);
-                        failed_tracks.push(serde_json::json!({
-                            "track_id": track_id,
-                            "error": format!("Fingerprint error: {}", e)
-                        }));
-                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to fingerprint track {} at {}: {}", track_id, path, e);
+                    failed.lock().unwrap().push(serde_json::json!({
+                        "track_id": track_id,
+                        "error": format!("Fingerprint error: {}", e),
+                    }));
+                    counter.fetch_add(1, Ordering::Relaxed);
                 }
             }
-
-            // Emit completed event
-            let _ = app.emit("fingerprint:completed", serde_json::json!({
-                "processed": processed,
-                "failed": failed_tracks.len()
-            }));
-
-            log::info!("Fingerprint scan complete: {} processed, {} failed", processed, failed_tracks.len());
-
-            Ok(serde_json::json!({
-                "processed": processed,
-                "failed": failed_tracks.len(),
-                "failures": failed_tracks
-            }))
         })
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
+        .await;
+    }
+
+    let processed_n = processed.load(Ordering::Relaxed);
+    let failures = Arc::try_unwrap(failed)
+        .unwrap_or_else(|arc| Mutex::new(arc.lock().unwrap().clone()))
+        .into_inner()
+        .unwrap_or_default();
+    let failed_n = failures.len();
+    let cancelled = is_cancelled(PREFIX);
+
+    let event = if cancelled {
+        "fingerprint:stopped"
+    } else {
+        "fingerprint:completed"
+    };
+    let _ = app.emit(
+        event,
+        serde_json::json!({
+            "processed": processed_n,
+            "failed": failed_n,
+            "cancelled": cancelled,
+        }),
+    );
+    log::info!(
+        "Fingerprint scan {}: {} processed, {} failed",
+        if cancelled { "stopped" } else { "complete" },
+        processed_n,
+        failed_n
+    );
+
+    Ok(serde_json::json!({
+        "processed": processed_n,
+        "failed": failed_n,
+        "cancelled": cancelled,
+        "failures": failures,
+    }))
 }
 
 /// Batch fetch artwork for tracks without artwork.
 ///
-/// Fetches album artwork from MusicBrainz/Cover Art Archive for tracks
-/// without cached artwork. Respects 1 req/sec MusicBrainz rate limit.
-/// Emits progress events for real-time UI updates.
-///
-/// # Arguments
-/// * `app` - Tauri AppHandle for event emission
-///
-/// # Returns
-/// * `Ok(serde_json::Value)` - JSON with { fetched, already_cached, not_found, failed }
-/// * `Err(String)` - If database or artwork fetching fails
+/// Not parallelised — MusicBrainz rate-limits us to ~1 req/sec so extra
+/// workers don't help. Cancellation is still wired up so the UI stop
+/// button works.
 ///
 /// # Events
 /// - "artwork:started" with { total }
-/// - "artwork:progress" with { current, total, track_id }
-/// - "artwork:completed" with { fetched, not_found, failed }
+/// - "artwork:progress" with { current, total, track_id, ... }
+/// - "artwork:completed" with { fetched, already_cached, not_found, failed }
+/// - "artwork:stopped" with the same shape when cancelled
 #[tauri::command]
 pub async fn fetch_artwork_cmd(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    const PREFIX: &str = "artwork";
+    reset_cancel(PREFIX);
+
     tokio::task::spawn_blocking(move || {
         let handle = tokio::runtime::Handle::current();
         handle.block_on(async {
             let db_path = crate::database::db_path();
             let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
-            // Get tracks without artwork
             let tracks = crate::artwork::cache::get_tracks_without_artwork(&conn)
                 .map_err(|e| format!("Failed to get tracks without artwork: {}", e))?;
 
             let total = tracks.len();
             log::info!("Starting artwork fetch: {} tracks", total);
-
-            // Emit started event
             let _ = app.emit("artwork:started", serde_json::json!({ "total": total }));
 
-            // Create artwork cache
             let cache_dir = PathBuf::from("artwork_cache");
             let cache = crate::artwork::ArtworkCache::new(cache_dir)
                 .map_err(|e| format!("Failed to create artwork cache: {}", e))?;
 
-            // Create HTTP client
             let client = reqwest::Client::builder()
                 .user_agent("MusicLibraryManager/1.0")
                 .build()
                 .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-            // Batch fetch artwork
-            let result = crate::artwork::batch_fetch_artwork(&conn, &cache, &client, &tracks)
-                .await
-                .map_err(|e| format!("Batch fetch failed: {}", e))?;
+            // batch_fetch_artwork handles its own per-track loop + rate
+            // limit; it polls `is_cancelled(PREFIX)` between tracks.
+            let result = crate::artwork::batch_fetch_artwork(
+                &conn,
+                &cache,
+                &client,
+                &tracks,
+                || is_cancelled(PREFIX),
+                |current, track_id| {
+                    let _ = app.emit(
+                        "artwork:progress",
+                        serde_json::json!({
+                            "current": current,
+                            "total": total,
+                            "track_id": track_id,
+                            "percent": (current as f64 / total.max(1) as f64 * 100.0) as u32,
+                        }),
+                    );
+                },
+            )
+            .await
+            .map_err(|e| format!("Batch fetch failed: {}", e))?;
 
-            // Emit progress after each track (batch_fetch_artwork doesn't emit per-track)
-            // We'll emit completed immediately since batch_fetch_artwork is synchronous
-            let _ = app.emit("artwork:completed", serde_json::json!({
-                "fetched": result.fetched,
-                "already_cached": result.already_cached,
-                "not_found": result.not_found,
-                "failed": result.failed.len()
-            }));
+            let cancelled = is_cancelled(PREFIX);
+            let event = if cancelled {
+                "artwork:stopped"
+            } else {
+                "artwork:completed"
+            };
+            let _ = app.emit(
+                event,
+                serde_json::json!({
+                    "fetched": result.fetched,
+                    "already_cached": result.already_cached,
+                    "not_found": result.not_found,
+                    "failed": result.failed.len(),
+                    "cancelled": cancelled,
+                }),
+            );
 
-            log::info!("Artwork fetch complete: {} fetched, {} cached, {} not found, {} failed",
-                result.fetched, result.already_cached, result.not_found, result.failed.len());
+            log::info!(
+                "Artwork fetch {}: {} fetched, {} cached, {} not found, {} failed",
+                if cancelled { "stopped" } else { "complete" },
+                result.fetched,
+                result.already_cached,
+                result.not_found,
+                result.failed.len()
+            );
 
             Ok(serde_json::json!({
                 "fetched": result.fetched,
                 "already_cached": result.already_cached,
                 "not_found": result.not_found,
                 "failed": result.failed.len(),
+                "cancelled": cancelled,
                 "failures": result.failed.iter().map(|(id, err)| {
                     serde_json::json!({ "track_id": id, "error": err })
-                }).collect::<Vec<_>>()
+                }).collect::<Vec<_>>(),
             }))
         })
     })
@@ -228,146 +366,176 @@ pub async fn fetch_artwork_cmd(app: tauri::AppHandle) -> Result<serde_json::Valu
     .map_err(|e| format!("Task join error: {}", e))?
 }
 
-/// Batch analyze ReplayGain for unanalyzed tracks.
+/// Batch analyze ReplayGain + full loudness for unanalyzed tracks.
 ///
-/// Analyzes EBU R128 loudness for tracks without ReplayGain values.
-/// Emits progress events for real-time UI updates.
-///
-/// # Arguments
-/// * `app` - Tauri AppHandle for event emission
-///
-/// # Returns
-/// * `Ok(serde_json::Value)` - JSON with { analyzed, failed }
-/// * `Err(String)` - If database or analysis fails
-///
-/// # Events
-/// - "replaygain:started" with { total }
-/// - "replaygain:progress" with { current, total, track_id }
-/// - "replaygain:completed" with { analyzed, failed }
+/// Parallel; cancellable via `stop_analysis_cmd("replaygain")`.
 #[tauri::command]
 pub async fn analyze_replaygain_cmd(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
-    tokio::task::spawn_blocking(move || {
-        let handle = tokio::runtime::Handle::current();
-        handle.block_on(async {
-            let db_path = crate::database::db_path();
-            let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+    const PREFIX: &str = "replaygain";
+    reset_cancel(PREFIX);
 
-            // Get unanalyzed tracks
-            let tracks = crate::replaygain::analyzer::get_unanalyzed_tracks(&conn)
-                .map_err(|e| format!("Failed to get unanalyzed tracks: {}", e))?;
+    let (tracks, track_info) = tokio::task::spawn_blocking(|| -> Result<_, String> {
+        let db_path = crate::database::db_path();
+        let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
+        let tracks = crate::replaygain::analyzer::get_unanalyzed_tracks(&conn)
+            .map_err(|e| format!("Failed to get unanalyzed tracks: {}", e))?;
+        let track_info = build_track_info_map(&conn, &tracks)?;
+        Ok((tracks, track_info))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))??;
 
-            let total = tracks.len();
-            log::info!("Starting ReplayGain analysis: {} tracks", total);
+    let total = tracks.len();
+    log::info!("Starting ReplayGain analysis: {} tracks", total);
+    let _ = app.emit("replaygain:started", serde_json::json!({ "total": total }));
 
-            // Build track info map for verbose progress reporting
-            let track_info = build_track_info_map(&conn, &tracks)?;
+    let analyzed = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::new(AtomicUsize::new(0));
+    let failed = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+    let track_info = Arc::new(track_info);
 
-            // Emit started event
-            let _ = app.emit("replaygain:started", serde_json::json!({ "total": total }));
+    {
+        let analyzed = analyzed.clone();
+        let counter = counter.clone();
+        let failed = failed.clone();
+        let track_info = track_info.clone();
+        let app = app.clone();
 
-            // Process each track
-            let mut analyzed = 0;
-            let mut failed_tracks = Vec::new();
+        run_parallel_batches(PREFIX, tracks, move |(track_id, path): (i64, String)| {
+            if is_cancelled(PREFIX) {
+                return;
+            }
+            let (artist, title) = track_info
+                .get(&track_id)
+                .map(|(a, t)| (a.clone(), t.clone()))
+                .unwrap_or_default();
 
-            for (i, (track_id, path)) in tracks.iter().enumerate() {
-                let (artist, title) = track_info.get(track_id)
-                    .map(|(a, t)| (a.as_str(), t.as_str()))
-                    .unwrap_or(("", ""));
+            match crate::replaygain::loudness::analyze_track_loudness(std::path::Path::new(&path)) {
+                Ok(analysis) => {
+                    let db_path = crate::database::db_path();
+                    let conn = match get_connection(&db_path) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            failed.lock().unwrap().push(serde_json::json!({
+                                "track_id": track_id,
+                                "error": format!("Database error: {}", e),
+                            }));
+                            counter.fetch_add(1, Ordering::Relaxed);
+                            return;
+                        }
+                    };
+                    let gain = crate::replaygain::analyzer::GainResult {
+                        track_gain: analysis.loudness.track_gain,
+                        track_peak: analysis.loudness.track_peak,
+                    };
+                    let save_rg =
+                        crate::replaygain::analyzer::save_track_gain(&conn, track_id, &gain);
+                    let save_loud =
+                        crate::replaygain::loudness::save_loudness(&conn, track_id, &analysis);
 
-                // Phase 18: run the fuller analysis (adds LRA, true peak in
-                // dBFS, spectral centroid, energy bucket) from the same
-                // decoded audio we'd have used for the original gain pass.
-                // The replaygain gain + peak are still saved to the
-                // existing `replaygain` table; the loudness descriptors go
-                // to the new tracks columns.
-                match crate::replaygain::loudness::analyze_track_loudness(std::path::Path::new(path)) {
-                    Ok(analysis) => {
-                        let gain = crate::replaygain::analyzer::GainResult {
-                            track_gain: analysis.loudness.track_gain,
-                            track_peak: analysis.loudness.track_peak,
-                        };
-                        let save_rg = crate::replaygain::analyzer::save_track_gain(&conn, *track_id, &gain);
-                        let save_loud = crate::replaygain::loudness::save_loudness(&conn, *track_id, &analysis);
-
-                        match (save_rg, save_loud) {
-                            (Ok(_), Ok(_)) => {
-                                analyzed += 1;
-                                let _ = app.emit("replaygain:progress", serde_json::json!({
-                                    "current": i + 1,
+                    match (save_rg, save_loud) {
+                        (Ok(_), Ok(_)) => {
+                            analyzed.fetch_add(1, Ordering::Relaxed);
+                            let cur = counter.fetch_add(1, Ordering::Relaxed) + 1;
+                            let _ = app.emit(
+                                "replaygain:progress",
+                                serde_json::json!({
+                                    "current": cur,
                                     "total": total,
                                     "track_id": track_id,
                                     "artist": artist,
                                     "title": title,
                                     "path": path,
-                                    "percent": ((i + 1) as f64 / total as f64 * 100.0) as u32,
+                                    "percent": (cur as f64 / total.max(1) as f64 * 100.0) as u32,
                                     "lufs_i": analysis.loudness.lufs_i,
                                     "lufs_range": analysis.loudness.lufs_range,
                                     "true_peak": analysis.loudness.true_peak_dbfs,
                                     "energy_bucket": analysis.energy_bucket,
-                                }));
-                            }
-                            (Err(e), _) => {
-                                log::error!("Failed to save ReplayGain for track {}: {}", track_id, e);
-                                failed_tracks.push(serde_json::json!({
-                                    "track_id": track_id,
-                                    "error": format!("Database error (rg): {}", e)
-                                }));
-                            }
-                            (_, Err(e)) => {
-                                log::error!("Failed to save loudness for track {}: {}", track_id, e);
-                                failed_tracks.push(serde_json::json!({
-                                    "track_id": track_id,
-                                    "error": format!("Database error (loudness): {}", e)
-                                }));
-                            }
+                                }),
+                            );
+                        }
+                        (Err(e), _) => {
+                            log::error!(
+                                "Failed to save ReplayGain for track {}: {}",
+                                track_id,
+                                e
+                            );
+                            failed.lock().unwrap().push(serde_json::json!({
+                                "track_id": track_id,
+                                "error": format!("Database error (rg): {}", e),
+                            }));
+                            counter.fetch_add(1, Ordering::Relaxed);
+                        }
+                        (_, Err(e)) => {
+                            log::error!("Failed to save loudness for track {}: {}", track_id, e);
+                            failed.lock().unwrap().push(serde_json::json!({
+                                "track_id": track_id,
+                                "error": format!("Database error (loudness): {}", e),
+                            }));
+                            counter.fetch_add(1, Ordering::Relaxed);
                         }
                     }
-                    Err(e) => {
-                        log::warn!("Failed to analyze track {} at {}: {}", track_id, path, e);
-                        failed_tracks.push(serde_json::json!({
-                            "track_id": track_id,
-                            "error": format!("Analysis error: {}", e)
-                        }));
-                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to analyze track {} at {}: {}", track_id, path, e);
+                    failed.lock().unwrap().push(serde_json::json!({
+                        "track_id": track_id,
+                        "error": format!("Analysis error: {}", e),
+                    }));
+                    counter.fetch_add(1, Ordering::Relaxed);
                 }
             }
-
-            // Emit completed event
-            let _ = app.emit("replaygain:completed", serde_json::json!({
-                "analyzed": analyzed,
-                "failed": failed_tracks.len()
-            }));
-
-            log::info!("ReplayGain analysis complete: {} analyzed, {} failed", analyzed, failed_tracks.len());
-
-            Ok(serde_json::json!({
-                "analyzed": analyzed,
-                "failed": failed_tracks.len(),
-                "failures": failed_tracks
-            }))
         })
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
+        .await;
+    }
+
+    let analyzed_n = analyzed.load(Ordering::Relaxed);
+    let failures = Arc::try_unwrap(failed)
+        .unwrap_or_else(|arc| Mutex::new(arc.lock().unwrap().clone()))
+        .into_inner()
+        .unwrap_or_default();
+    let failed_n = failures.len();
+    let cancelled = is_cancelled(PREFIX);
+
+    let event = if cancelled {
+        "replaygain:stopped"
+    } else {
+        "replaygain:completed"
+    };
+    let _ = app.emit(
+        event,
+        serde_json::json!({
+            "analyzed": analyzed_n,
+            "failed": failed_n,
+            "cancelled": cancelled,
+        }),
+    );
+    log::info!(
+        "ReplayGain {}: {} analyzed, {} failed",
+        if cancelled { "stopped" } else { "complete" },
+        analyzed_n,
+        failed_n
+    );
+
+    Ok(serde_json::json!({
+        "analyzed": analyzed_n,
+        "failed": failed_n,
+        "cancelled": cancelled,
+        "failures": failures,
+    }))
 }
 
 /// Execute deep scan for fingerprint-based duplicates.
 ///
-/// Compares all fingerprinted tracks to find duplicates based on audio similarity.
-/// Emits progress events for real-time UI updates.
-///
-/// # Arguments
-/// * `app` - Tauri AppHandle for event emission
-///
-/// # Returns
-/// * `Ok(serde_json::Value)` - JSON with { pairs_compared, duplicates_found, conflicts_flagged }
-/// * `Err(String)` - If database or scan fails
-///
-/// # Events
-/// - "deepscan:started" with { }
-/// - "deepscan:completed" with { pairs_compared, duplicates_found, conflicts_flagged }
+/// Cancellation is best-effort — the underlying pairwise comparison is
+/// already fast once fingerprints exist, so we only check the flag
+/// before the scan starts. Still, we emit a stopped event if the user
+/// clicks stop before we get going.
 #[tauri::command]
 pub async fn deep_scan_cmd(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    const PREFIX: &str = "deepscan";
+    reset_cancel(PREFIX);
+
     tokio::task::spawn_blocking(move || {
         let handle = tokio::runtime::Handle::current();
         handle.block_on(async {
@@ -375,28 +543,58 @@ pub async fn deep_scan_cmd(app: tauri::AppHandle) -> Result<serde_json::Value, S
             let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
             log::info!("Starting deep scan for fingerprint duplicates");
-
-            // Emit started event
             let _ = app.emit("deepscan:started", serde_json::json!({}));
 
-            // Run deep scan
+            if is_cancelled(PREFIX) {
+                let _ = app.emit(
+                    "deepscan:stopped",
+                    serde_json::json!({
+                        "pairs_compared": 0,
+                        "duplicates_found": 0,
+                        "conflicts_flagged": 0,
+                        "cancelled": true,
+                    }),
+                );
+                return Ok(serde_json::json!({
+                    "pairs_compared": 0,
+                    "duplicates_found": 0,
+                    "conflicts_flagged": 0,
+                    "cancelled": true,
+                }));
+            }
+
             let result = crate::dedup::fingerprint::deep_scan_library(&conn)
                 .map_err(|e| format!("Deep scan failed: {}", e))?;
 
-            // Emit completed event
-            let _ = app.emit("deepscan:completed", serde_json::json!({
-                "pairs_compared": result.pairs_compared,
-                "duplicates_found": result.duplicates_found,
-                "conflicts_flagged": result.conflicts_flagged
-            }));
+            let cancelled = is_cancelled(PREFIX);
+            let event = if cancelled {
+                "deepscan:stopped"
+            } else {
+                "deepscan:completed"
+            };
+            let _ = app.emit(
+                event,
+                serde_json::json!({
+                    "pairs_compared": result.pairs_compared,
+                    "duplicates_found": result.duplicates_found,
+                    "conflicts_flagged": result.conflicts_flagged,
+                    "cancelled": cancelled,
+                }),
+            );
 
-            log::info!("Deep scan complete: {} pairs compared, {} duplicates, {} conflicts",
-                result.pairs_compared, result.duplicates_found, result.conflicts_flagged);
+            log::info!(
+                "Deep scan {}: {} pairs, {} duplicates, {} conflicts",
+                if cancelled { "stopped" } else { "complete" },
+                result.pairs_compared,
+                result.duplicates_found,
+                result.conflicts_flagged
+            );
 
             Ok(serde_json::json!({
                 "pairs_compared": result.pairs_compared,
                 "duplicates_found": result.duplicates_found,
-                "conflicts_flagged": result.conflicts_flagged
+                "conflicts_flagged": result.conflicts_flagged,
+                "cancelled": cancelled,
             }))
         })
     })
@@ -405,13 +603,6 @@ pub async fn deep_scan_cmd(app: tauri::AppHandle) -> Result<serde_json::Value, S
 }
 
 /// Get review queue entries with optional status filter.
-///
-/// # Arguments
-/// * `status` - Optional status filter ("pending" | "approved" | "rejected" | "dismissed")
-///
-/// # Returns
-/// * `Ok(serde_json::Value)` - JSON array of review queue items
-/// * `Err(String)` - If database query fails
 #[tauri::command]
 pub async fn get_review_queue_cmd(status: Option<String>) -> Result<serde_json::Value, String> {
     tokio::task::spawn_blocking(move || {
@@ -421,7 +612,6 @@ pub async fn get_review_queue_cmd(status: Option<String>) -> Result<serde_json::
         let items = crate::dedup::fingerprint::get_review_queue(&conn, status.as_deref())
             .map_err(|e| format!("Failed to get review queue: {}", e))?;
 
-        // Convert to JSON
         let json_items: Vec<serde_json::Value> = items
             .iter()
             .map(|item| {
@@ -446,19 +636,13 @@ pub async fn get_review_queue_cmd(status: Option<String>) -> Result<serde_json::
 }
 
 /// Resolve a review queue item with approve/reject/dismiss action.
-///
-/// # Arguments
-/// * `review_id` - Review queue entry ID
-/// * `action` - Action to take ("approved" | "rejected" | "dismissed")
-///
-/// # Returns
-/// * `Ok(())` - If resolution succeeded
-/// * `Err(String)` - If action is invalid or database update fails
 #[tauri::command]
 pub async fn resolve_review_item_cmd(review_id: i64, action: String) -> Result<(), String> {
-    // Validate action
     if !["approved", "rejected", "dismissed"].contains(&action.as_str()) {
-        return Err(format!("Invalid action '{}'. Must be 'approved', 'rejected', or 'dismissed'", action));
+        return Err(format!(
+            "Invalid action '{}'. Must be 'approved', 'rejected', or 'dismissed'",
+            action
+        ));
     }
 
     tokio::task::spawn_blocking(move || {
@@ -473,12 +657,6 @@ pub async fn resolve_review_item_cmd(review_id: i64, action: String) -> Result<(
 }
 
 /// Get count of pending review queue items.
-///
-/// Used by sidebar badge to show number of items requiring attention.
-///
-/// # Returns
-/// * `Ok(i64)` - Count of pending items
-/// * `Err(String)` - If database query fails
 #[tauri::command]
 pub async fn get_review_queue_count_cmd() -> Result<i64, String> {
     tokio::task::spawn_blocking(move || {
@@ -502,85 +680,128 @@ pub async fn get_review_queue_count_cmd() -> Result<i64, String> {
 /// Phase 18: Batch analyze full loudness (LUFS-I, LRA, true peak, energy
 /// bucket) for all local tracks where `lufs_i IS NULL`.
 ///
-/// Runs through the same async-blocking queue pattern as the other
-/// enhancement ops. Emits the `loudness:*` event family so the Activity
-/// panel picks up progress identically to `replaygain:*`.
-///
-/// # Events
-/// - "loudness:started" { total }
-/// - "loudness:progress" { current, total, track_id, artist, title, path, percent }
-/// - "loudness:completed" { analyzed, failed }
+/// Parallel; cancellable via `stop_analysis_cmd("loudness")`.
 #[tauri::command]
 pub async fn analyze_loudness_all(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
-    tokio::task::spawn_blocking(move || {
-        let handle = tokio::runtime::Handle::current();
-        handle.block_on(async {
+    const PREFIX: &str = "loudness";
+    reset_cancel(PREFIX);
+
+    // Prep: pull task list + library config off the tokio async runtime.
+    let (tracks, track_info, library_root, scan_folders) =
+        tokio::task::spawn_blocking(|| -> Result<_, String> {
             let db_path = crate::database::db_path();
             let conn = get_connection(&db_path).map_err(|e| format!("Database error: {}", e))?;
 
-            // Resolve tracks with NULL lufs_i that have files on disk.
             let tracks = crate::replaygain::loudness::get_unanalyzed_loudness_tracks(&conn)
                 .map_err(|e| format!("Failed to list unanalyzed tracks: {}", e))?;
 
-            let total = tracks.len();
-            log::info!("Starting loudness analysis: {} tracks", total);
-
-            // Load library root once so we can resolve relative organized paths.
             let lib_config = crate::config::LibraryConfig::load(&conn)
                 .map_err(|e| format!("Config error: {}", e))?;
-            let library_root = lib_config.root_path.clone();
 
-            // Build track info map for verbose progress (reuse the 2-tuple helper).
             let tuple_tracks: Vec<(i64, String)> = tracks
                 .iter()
                 .map(|(id, orig, _org)| (*id, orig.clone()))
                 .collect();
             let track_info = build_track_info_map(&conn, &tuple_tracks)?;
 
-            let _ = app.emit("loudness:started", serde_json::json!({ "total": total }));
+            Ok((
+                tracks,
+                track_info,
+                lib_config.root_path,
+                lib_config.scan_folders,
+            ))
+        })
+        .await
+        .map_err(|e| format!("Task join error: {}", e))??;
 
-            let mut analyzed = 0usize;
-            let mut failed_tracks = Vec::new();
+    let total = tracks.len();
+    log::info!("Starting loudness analysis: {} tracks", total);
+    let _ = app.emit("loudness:started", serde_json::json!({ "total": total }));
 
-            for (i, (track_id, original_path, organized_path)) in tracks.iter().enumerate() {
+    let analyzed = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::new(AtomicUsize::new(0));
+    let failed = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+    let track_info = Arc::new(track_info);
+    let library_root = Arc::new(library_root);
+    let scan_folders = Arc::new(scan_folders);
+
+    {
+        let analyzed = analyzed.clone();
+        let counter = counter.clone();
+        let failed = failed.clone();
+        let track_info = track_info.clone();
+        let library_root = library_root.clone();
+        let scan_folders = scan_folders.clone();
+        let app = app.clone();
+
+        run_parallel_batches(
+            PREFIX,
+            tracks,
+            move |(track_id, original_path, organized_path): (i64, String, String)| {
+                if is_cancelled(PREFIX) {
+                    return;
+                }
                 let (artist, title) = track_info
-                    .get(track_id)
-                    .map(|(a, t)| (a.as_str(), t.as_str()))
-                    .unwrap_or(("", ""));
+                    .get(&track_id)
+                    .map(|(a, t)| (a.clone(), t.clone()))
+                    .unwrap_or_default();
 
-                // Path resolution: prefer an existing organized path joined
-                // with the library root; else fall back to original_path
-                // (which may be absolute for scan-imported tracks).
                 let resolved: std::path::PathBuf = resolve_source_path(
-                    original_path,
-                    organized_path,
-                    library_root.as_deref(),
-                    &lib_config.scan_folders,
+                    &original_path,
+                    &organized_path,
+                    library_root.as_ref().as_deref(),
+                    scan_folders.as_slice(),
                 );
 
                 if !resolved.exists() {
-                    failed_tracks.push(serde_json::json!({
+                    failed.lock().unwrap().push(serde_json::json!({
                         "track_id": track_id,
                         "error": format!("File not found: {}", resolved.display()),
                     }));
-                    continue;
+                    counter.fetch_add(1, Ordering::Relaxed);
+                    return;
                 }
 
                 match crate::replaygain::loudness::analyze_track_loudness(&resolved) {
                     Ok(analysis) => {
-                        match crate::replaygain::loudness::save_loudness(&conn, *track_id, &analysis) {
+                        let db_path = crate::database::db_path();
+                        let conn = match get_connection(&db_path) {
+                            Ok(c) => c,
+                            Err(e) => {
+                                failed.lock().unwrap().push(serde_json::json!({
+                                    "track_id": track_id,
+                                    "error": format!("Database error: {}", e),
+                                }));
+                                counter.fetch_add(1, Ordering::Relaxed);
+                                return;
+                            }
+                        };
+                        match crate::replaygain::loudness::save_loudness(&conn, track_id, &analysis)
+                        {
                             Ok(_) => {
-                                analyzed += 1;
+                                analyzed.fetch_add(1, Ordering::Relaxed);
+                                let cur = counter.fetch_add(1, Ordering::Relaxed) + 1;
+                                log::info!(
+                                    "Loudness [{}/{}] {} — {} → LUFS-I {:.1}, LRA {:.1}, peak {:.1} dB, energy {}",
+                                    cur,
+                                    total,
+                                    artist,
+                                    title,
+                                    analysis.loudness.lufs_i,
+                                    analysis.loudness.lufs_range,
+                                    analysis.loudness.true_peak_dbfs,
+                                    analysis.energy_bucket,
+                                );
                                 let _ = app.emit(
                                     "loudness:progress",
                                     serde_json::json!({
-                                        "current": i + 1,
+                                        "current": cur,
                                         "total": total,
                                         "track_id": track_id,
                                         "artist": artist,
                                         "title": title,
                                         "path": resolved.display().to_string(),
-                                        "percent": ((i + 1) as f64 / total.max(1) as f64 * 100.0) as u32,
+                                        "percent": (cur as f64 / total.max(1) as f64 * 100.0) as u32,
                                         "lufs_i": analysis.loudness.lufs_i,
                                         "lufs_range": analysis.loudness.lufs_range,
                                         "true_peak": analysis.loudness.true_peak_dbfs,
@@ -590,10 +811,11 @@ pub async fn analyze_loudness_all(app: tauri::AppHandle) -> Result<serde_json::V
                             }
                             Err(e) => {
                                 log::error!("save_loudness failed for track {}: {}", track_id, e);
-                                failed_tracks.push(serde_json::json!({
+                                failed.lock().unwrap().push(serde_json::json!({
                                     "track_id": track_id,
                                     "error": format!("Database error: {}", e),
                                 }));
+                                counter.fetch_add(1, Ordering::Relaxed);
                             }
                         }
                     }
@@ -604,34 +826,54 @@ pub async fn analyze_loudness_all(app: tauri::AppHandle) -> Result<serde_json::V
                             resolved.display(),
                             e
                         );
-                        failed_tracks.push(serde_json::json!({
+                        failed.lock().unwrap().push(serde_json::json!({
                             "track_id": track_id,
                             "error": format!("Analysis error: {}", e),
                         }));
+                        counter.fetch_add(1, Ordering::Relaxed);
                     }
                 }
-            }
+            },
+        )
+        .await;
+    }
 
-            let _ = app.emit(
-                "loudness:completed",
-                serde_json::json!({ "analyzed": analyzed, "failed": failed_tracks.len() }),
-            );
+    let analyzed_n = analyzed.load(Ordering::Relaxed);
+    let failures = Arc::try_unwrap(failed)
+        .unwrap_or_else(|arc| Mutex::new(arc.lock().unwrap().clone()))
+        .into_inner()
+        .unwrap_or_default();
+    let failed_n = failures.len();
+    let cancelled = is_cancelled(PREFIX);
 
-            log::info!(
-                "Loudness analysis complete: {} analyzed, {} failed",
-                analyzed,
-                failed_tracks.len()
-            );
+    let event = if cancelled {
+        "loudness:stopped"
+    } else {
+        "loudness:completed"
+    };
+    let _ = app.emit(
+        event,
+        serde_json::json!({
+            "analyzed": analyzed_n,
+            "failed": failed_n,
+            "cancelled": cancelled,
+        }),
+    );
+    log::info!(
+        "Loudness {}: {} analyzed, {} failed",
+        if cancelled { "stopped" } else { "complete" },
+        analyzed_n,
+        failed_n
+    );
 
-            Ok(serde_json::json!({
-                "analyzed": analyzed,
-                "failed": failed_tracks.len(),
-                "failures": failed_tracks,
-            }))
-        })
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
+    let _ = cancel_flag(PREFIX); // keep the registry entry live for next run
+
+    Ok(serde_json::json!({
+        "analyzed": analyzed_n,
+        "failed": failed_n,
+        "cancelled": cancelled,
+        "failures": failures,
+    }))
 }
 
 /// Resolve the on-disk path for a track given its original + organized paths.
@@ -664,16 +906,11 @@ fn resolve_source_path(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_validate_action() {
-        // Valid actions
         assert!(["approved", "rejected", "dismissed"].contains(&"approved"));
         assert!(["approved", "rejected", "dismissed"].contains(&"rejected"));
         assert!(["approved", "rejected", "dismissed"].contains(&"dismissed"));
-
-        // Invalid actions
         assert!(!["approved", "rejected", "dismissed"].contains(&"invalid"));
         assert!(!["approved", "rejected", "dismissed"].contains(&""));
     }

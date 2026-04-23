@@ -231,6 +231,7 @@ pub fn run() {
             commands::enhancements::analyze_replaygain_cmd,
             commands::enhancements::analyze_loudness_all,
             commands::enhancements::deep_scan_cmd,
+            commands::batch_control::stop_analysis_cmd,
             commands::enhancements::get_review_queue_cmd,
             commands::enhancements::resolve_review_item_cmd,
             commands::enhancements::get_review_queue_count_cmd,

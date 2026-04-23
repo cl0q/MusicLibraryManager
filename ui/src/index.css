@@ -94,6 +94,28 @@ body {
   color: var(--color-ink);
 }
 
+/* Y2K-style pulsing glow for toggled-on action buttons (e.g. enhancement
+   stop buttons). Alternates the outer rose halo intensity so the
+   "pressed and hot" state visibly breathes. */
+@keyframes y2kPulse {
+  0%, 100% {
+    box-shadow:
+      inset 0 1px 0 rgba(0, 0, 0, 0.45),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.08),
+      inset 0 2px 6px rgba(244, 63, 94, 0.35),
+      0 0 0 1px rgba(244, 63, 94, 0.25),
+      0 0 14px rgba(244, 63, 94, 0.45);
+  }
+  50% {
+    box-shadow:
+      inset 0 1px 0 rgba(0, 0, 0, 0.45),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.08),
+      inset 0 2px 8px rgba(244, 63, 94, 0.55),
+      0 0 0 1px rgba(244, 63, 94, 0.35),
+      0 0 22px rgba(244, 63, 94, 0.65);
+  }
+}
+
 /* Thin scrollbars */
 * {
   scrollbar-width: thin;

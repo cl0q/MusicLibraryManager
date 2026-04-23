@@ -127,7 +127,7 @@ export default function ActivityPanel() {
 
   // Listen for enhancement operation events
   useEffect(() => {
-    const eventTypes = ["fingerprint", "artwork", "replaygain", "deepscan"];
+    const eventTypes = ["fingerprint", "artwork", "replaygain", "loudness", "deepscan"];
     const unlisteners: Promise<() => void>[] = [];
 
     for (const type of eventTypes) {
@@ -415,6 +415,7 @@ export default function ActivityPanel() {
                 const label = op.type === "fingerprint" ? "Fingerprinting"
                   : op.type === "artwork" ? "Fetching Artwork"
                   : op.type === "replaygain" ? "ReplayGain Analysis"
+                  : op.type === "loudness" ? "Loudness Analysis"
                   : "Deep Scan";
                 const trackName = op.artist && op.title
                   ? `${op.artist} - ${op.title}`
