@@ -256,6 +256,8 @@ pub fn run() {
             commands::maintenance::delete_tracks_from_disk,
             commands::yeat::backfill_yeat_tags_cmd,
             commands::albums::detect_album_siblings_cmd,
+            commands::albums::get_album_detail_cmd,
+            commands::albums::set_variant_preference_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

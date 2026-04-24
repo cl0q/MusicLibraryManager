@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Track, ReviewQueueItem } from "../types/library";
+import type { Track, ReviewQueueItem, AlbumDetail, VariantPreference } from "../types/library";
 
 // Playlist types
 export interface Playlist {
@@ -523,3 +523,46 @@ export async function importPlaylistFromFile(
     filePath,
   });
 }
+
+// ============================================================================
+// Phase 21 — Album Detail + UFO Toggle Commands
+// ============================================================================
+
+/**
+ * Fetch the full detail payload for an album identified by its slug.
+ *
+ * Slug format: produced by `ui/src/utils/slug.ts::computeSlug(albumArtist, title)`.
+ * Backend (`database/albums.rs::compute_album_slug`) MUST produce the same slug
+ * for the same inputs — any mismatch means the lookup silently misses. The
+ * Rust reference implementation uses `deunicode` + lowercase + collapse
+ * non-alphanumeric runs to `-` + trim edges.
+ *
+ * If the slug resolves to a variant album, the response auto-redirects to the
+ * base — `result.album.id` is ALWAYS the base album id, and `result.siblings`
+ * contains the variants.
+ *
+ * Throws if the album is not found (backend returns a string error).
+ */
+export async function getAlbumDetail(albumSlug: string): Promise<AlbumDetail> {
+  return invoke<AlbumDetail>("get_album_detail_cmd", { albumSlug });
+}
+
+/**
+ * Persist the user's UFO toggle selection for a given base album.
+ *
+ * Backend validates that `selectedAlbumId` is either equal to `baseAlbumId`
+ * OR a row with `variant_of = baseAlbumId`. Any other value rejects with a
+ * string error.
+ *
+ * Mirrors the `VariantPreference` TS interface for documentation purposes —
+ * the call itself accepts the two ids as positional args (Tauri convention).
+ */
+export async function setVariantPreference(
+  baseAlbumId: number,
+  selectedAlbumId: number,
+): Promise<void> {
+  return invoke<void>("set_variant_preference_cmd", { baseAlbumId, selectedAlbumId });
+}
+
+// Re-export the shape for callers that want a typed argument bag.
+export type { VariantPreference };
