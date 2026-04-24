@@ -8,9 +8,11 @@
 //! Plan 21-03 extends this module with query functions (`get_album_by_slug`,
 //! `get_album_detail`) consumed by the Tauri command layer.
 
-use rusqlite::{params, Transaction};
+use chrono::Utc;
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 use crate::database::connection::Result;
+use crate::models::track::{Track, TrackMetadata};
 use crate::yeat::tags::{detect_variant, normalize_era};
 
 /// Album row — mirrors v16 `albums` table.
@@ -124,6 +126,375 @@ pub fn backfill_albums_from_tracks(tx: &Transaction) -> Result<usize> {
     Ok(inserted)
 }
 
+// ============================================================================
+// Plan 21-03 — AlbumDetail payload + slug lookup + sibling/track queries +
+// variant-preference UPSERT. Consumed by the Tauri command layer
+// (commands/albums.rs::get_album_detail_cmd + set_variant_preference_cmd).
+// ============================================================================
+
+/// Pair: a sibling album + its own track list. Matches the TS shape
+/// `{ album: Album; tracks: Track[] }` in `ui/src/types/library.ts`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SiblingWithTracks {
+    pub album: Album,
+    pub tracks: Vec<Track>,
+}
+
+/// The full payload returned by `get_album_detail_cmd`. Mirrors the
+/// `AlbumDetail` TS interface. `album` is ALWAYS the base album (the row
+/// whose `variant_of IS NULL`); `siblings` are the variants pointing at it.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AlbumDetail {
+    pub album: Album,
+    pub tracks: Vec<Track>,
+    pub siblings: Vec<SiblingWithTracks>,
+    pub selected_album_id: i64,
+    pub is_yeat: bool,
+}
+
+/// Compute a URL slug for an album from (album_artist, title).
+///
+/// Rules (locked in 21-CONTEXT.md §Album Page Surfacing):
+/// 1. Join with a space: `"{album_artist} {title}"`.
+/// 2. Deunicode-transliterate diacritics (ë -> e) — same crate as
+///    `normalize_era` in `yeat::tags` for consistency.
+/// 3. Lowercase.
+/// 4. Fold any run of non-alphanumeric characters to a single `-`.
+/// 5. Trim leading/trailing `-`.
+///
+/// Frontend MUST produce the same slug for the same inputs (see
+/// `ui/src/utils/slug.ts::computeSlug` created in Plan 21-04) — any
+/// mismatch means the lookup silently misses.
+///
+/// Examples:
+/// - `("Yeat", "AftërLyfe")` -> `"yeat-afterlyfe"`
+/// - `("Yeat", "AftërLyfe [U]")` -> `"yeat-afterlyfe-u"`
+/// - `("Playboi Carti", "I AM MUSIC")` -> `"playboi-carti-i-am-music"`
+pub fn compute_album_slug(album_artist: &str, title: &str) -> String {
+    let combined = format!("{} {}", album_artist, title);
+    let deunicoded = deunicode::deunicode(&combined);
+    let lowered = deunicoded.to_lowercase();
+
+    let mut out = String::with_capacity(lowered.len());
+    let mut last_was_dash = false;
+    for c in lowered.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+            last_was_dash = false;
+        } else if !last_was_dash {
+            out.push('-');
+            last_was_dash = true;
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
+/// Look up an album row by its computed slug.
+///
+/// Computes the slug for every album on the fly and returns the first match.
+/// For Phase 21 library sizes (≤ thousands of albums), the linear scan is
+/// acceptable. If performance becomes an issue later, add a `slug TEXT`
+/// column + index — do NOT prematurely optimize here.
+///
+/// Returns `Ok(None)` if no album matches.
+///
+/// Security (T-21.03-03): the slug is NEVER concatenated into SQL — only
+/// compared via in-memory string equality against per-row computed slugs.
+/// No path traversal vector because no filesystem access happens here.
+pub fn get_album_by_slug(conn: &Connection, slug: &str) -> Result<Option<Album>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, artist, album_artist, title, title_normalized, year, cover_path, variant_of, variant_kind
+         FROM albums",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok(Album {
+            id: r.get(0)?,
+            artist: r.get(1)?,
+            album_artist: r.get(2)?,
+            title: r.get(3)?,
+            title_normalized: r.get(4)?,
+            year: r.get(5)?,
+            cover_path: r.get(6)?,
+            variant_of: r.get(7)?,
+            variant_kind: r.get(8)?,
+        })
+    })?;
+
+    for row in rows {
+        let album = row?;
+        if compute_album_slug(&album.album_artist, &album.title) == slug {
+            return Ok(Some(album));
+        }
+    }
+    Ok(None)
+}
+
+/// Fetch the track list for a given album id. Tracks are ordered by title
+/// ASC (case-insensitive) for determinism — no `track_number` column exists
+/// in the tracks table today. If a later phase adds one, update this
+/// ORDER BY.
+///
+/// Hydrates the full `Track` struct including Phase 18 loudness columns so
+/// the AlbumDetail payload matches the library table's Track shape.
+pub fn get_album_tracks(conn: &Connection, album_id: i64) -> Result<Vec<Track>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, artist, album_artist, album, title, genre, year, bitrate, duration,
+                format, original_path, organized_path, is_duplicate, date_added,
+                lufs_i, lufs_range, true_peak, energy_bucket
+         FROM tracks
+         WHERE album_id = ?1
+         ORDER BY title COLLATE NOCASE ASC, id ASC",
+    )?;
+
+    let rows = stmt.query_map(rusqlite::params![album_id], |r| {
+        let metadata = TrackMetadata {
+            artist: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+            album_artist: r.get::<_, Option<String>>(2)?.unwrap_or_default(),
+            album: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+            title: r.get::<_, Option<String>>(4)?.unwrap_or_default(),
+            genre: r.get(5)?,
+            year: r.get::<_, Option<i64>>(6)?.map(|y| y as u32),
+            bitrate: r.get::<_, Option<i64>>(7)?.map(|b| b as u32),
+            duration: r.get::<_, Option<i64>>(8)?.map(|d| d as u32),
+            format: r.get::<_, Option<String>>(9)?.unwrap_or_default(),
+            original_path: r.get::<_, Option<String>>(10)?.unwrap_or_default(),
+        };
+        Ok(Track {
+            id: Some(r.get::<_, i64>(0)?),
+            metadata,
+            organized_path: r.get::<_, Option<String>>(11)?,
+            is_duplicate: r.get::<_, i64>(12).unwrap_or(0) != 0,
+            date_added: r.get::<_, Option<String>>(13)?,
+            lufs_i: r.get(14)?,
+            lufs_range: r.get(15)?,
+            true_peak: r.get(16)?,
+            energy_bucket: r.get(17)?,
+        })
+    })?;
+
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+/// Build the full [`AlbumDetail`] payload for an album, resolving to the BASE
+/// row if `album_id` points at a variant.
+///
+/// Steps:
+/// 1. Load the album by id.
+/// 2. If `album.variant_of IS NOT NULL`, re-load by that id — we always
+///    return the base as `detail.album`.
+/// 3. Load tracks for the base.
+/// 4. Load every album row where `variant_of = base.id`; for each, load
+///    its tracks.
+/// 5. Compute `is_yeat` = OR over (base tracks ∪ sibling tracks) of "has a
+///    `track_tags` row with tag_key='artist' AND tag_value='yeat'".
+/// 6. Look up `user_album_variant_pref` for (user_id, base.id);
+///    `selected_album_id` = row's selected_album_id if present, else base.id.
+pub fn get_album_with_siblings(
+    conn: &Connection,
+    album_id: i64,
+    user_id: &str,
+) -> Result<Option<AlbumDetail>> {
+    // Step 1: load the album by id.
+    let starting = conn
+        .query_row(
+            "SELECT id, artist, album_artist, title, title_normalized, year, cover_path, variant_of, variant_kind
+             FROM albums WHERE id = ?1",
+            rusqlite::params![album_id],
+            |r| {
+                Ok(Album {
+                    id: r.get(0)?,
+                    artist: r.get(1)?,
+                    album_artist: r.get(2)?,
+                    title: r.get(3)?,
+                    title_normalized: r.get(4)?,
+                    year: r.get(5)?,
+                    cover_path: r.get(6)?,
+                    variant_of: r.get(7)?,
+                    variant_kind: r.get(8)?,
+                })
+            },
+        )
+        .optional()?;
+
+    let starting = match starting {
+        Some(a) => a,
+        None => return Ok(None),
+    };
+
+    // Step 2: resolve to base if this is a variant.
+    let base = if let Some(base_id) = starting.variant_of {
+        conn.query_row(
+            "SELECT id, artist, album_artist, title, title_normalized, year, cover_path, variant_of, variant_kind
+             FROM albums WHERE id = ?1",
+            rusqlite::params![base_id],
+            |r| {
+                Ok(Album {
+                    id: r.get(0)?,
+                    artist: r.get(1)?,
+                    album_artist: r.get(2)?,
+                    title: r.get(3)?,
+                    title_normalized: r.get(4)?,
+                    year: r.get(5)?,
+                    cover_path: r.get(6)?,
+                    variant_of: r.get(7)?,
+                    variant_kind: r.get(8)?,
+                })
+            },
+        )
+        .optional()?
+        .unwrap_or(starting) // If base was deleted, fall back to the variant itself.
+    } else {
+        starting
+    };
+
+    // Step 3: base tracks.
+    let base_tracks = get_album_tracks(conn, base.id)?;
+
+    // Step 4: siblings (variant_of = base.id) + their tracks.
+    let sibling_albums: Vec<Album> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, artist, album_artist, title, title_normalized, year, cover_path, variant_of, variant_kind
+             FROM albums WHERE variant_of = ?1
+             ORDER BY variant_kind ASC, id ASC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![base.id], |r| {
+            Ok(Album {
+                id: r.get(0)?,
+                artist: r.get(1)?,
+                album_artist: r.get(2)?,
+                title: r.get(3)?,
+                title_normalized: r.get(4)?,
+                year: r.get(5)?,
+                cover_path: r.get(6)?,
+                variant_of: r.get(7)?,
+                variant_kind: r.get(8)?,
+            })
+        })?;
+        rows.filter_map(|r| r.ok()).collect()
+    };
+
+    let mut siblings: Vec<SiblingWithTracks> = Vec::with_capacity(sibling_albums.len());
+    for sa in sibling_albums {
+        let t = get_album_tracks(conn, sa.id)?;
+        siblings.push(SiblingWithTracks { album: sa, tracks: t });
+    }
+
+    // Step 5: is_yeat — any track on base OR a sibling with (artist=yeat).
+    let all_album_ids: Vec<i64> = std::iter::once(base.id)
+        .chain(siblings.iter().map(|s| s.album.id))
+        .collect();
+    let is_yeat = album_set_has_yeat_tag(conn, &all_album_ids)?;
+
+    // Step 6: selected_album_id from user_album_variant_pref, default = base.id.
+    let selected_album_id = get_variant_preference(conn, user_id, base.id)?
+        .unwrap_or(base.id);
+
+    Ok(Some(AlbumDetail {
+        album: base,
+        tracks: base_tracks,
+        siblings,
+        selected_album_id,
+        is_yeat,
+    }))
+}
+
+/// Returns true iff ANY track in ANY of the given albums carries a
+/// `track_tags (tag_key='artist', tag_value='yeat')` row.
+///
+/// Security (T-21.03-01): the `format!` only builds the placeholder list
+/// (`?, ?, ?, …`) — album id values are always bound via
+/// `rusqlite::params_from_iter`. Zero injection surface.
+fn album_set_has_yeat_tag(conn: &Connection, album_ids: &[i64]) -> Result<bool> {
+    if album_ids.is_empty() {
+        return Ok(false);
+    }
+    let placeholders: String = (0..album_ids.len()).map(|_| "?").collect::<Vec<_>>().join(",");
+    let sql = format!(
+        "SELECT 1 FROM track_tags tt
+         JOIN tracks t ON t.id = tt.track_id
+         WHERE t.album_id IN ({})
+           AND tt.tag_key = 'artist'
+           AND tt.tag_value = 'yeat'
+         LIMIT 1",
+        placeholders
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let params_vec: Vec<&dyn rusqlite::ToSql> = album_ids
+        .iter()
+        .map(|id| id as &dyn rusqlite::ToSql)
+        .collect();
+    let found = stmt
+        .query_row(rusqlite::params_from_iter(params_vec), |r| r.get::<_, i64>(0))
+        .optional()?;
+    Ok(found.is_some())
+}
+
+/// UPSERT the user's variant selection for a given base album.
+///
+/// Validates that `selected_album_id` is either equal to `base_album_id` OR
+/// a row where `variant_of = base_album_id`. Returns an error if the caller
+/// passes an unrelated album.
+///
+/// Error variant: uses `rusqlite::Error::InvalidQuery.into()` for domain
+/// validation failures — mirrors `database/playlist.rs:484` since
+/// `DatabaseError` only carries `Sqlite(rusqlite::Error)` and
+/// `Connection(String)` variants (LOCKED per 21-03 plan §STEP 2).
+pub fn upsert_variant_preference(
+    conn: &Connection,
+    user_id: &str,
+    base_album_id: i64,
+    selected_album_id: i64,
+) -> Result<()> {
+    // Validate selected_album_id.
+    let is_valid: bool = if selected_album_id == base_album_id {
+        true
+    } else {
+        conn.query_row(
+            "SELECT 1 FROM albums WHERE id = ?1 AND variant_of = ?2",
+            rusqlite::params![selected_album_id, base_album_id],
+            |r| r.get::<_, i64>(0),
+        )
+        .optional()?
+        .is_some()
+    };
+    if !is_valid {
+        log::warn!(
+            "set_variant_preference: selected_album_id {} is neither the base {} nor a variant of it",
+            selected_album_id,
+            base_album_id
+        );
+        return Err(rusqlite::Error::InvalidQuery.into());
+    }
+
+    let updated_at = Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO user_album_variant_pref (user_id, base_album_id, selected_album_id, updated_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(user_id, base_album_id) DO UPDATE SET
+             selected_album_id = excluded.selected_album_id,
+             updated_at = excluded.updated_at",
+        rusqlite::params![user_id, base_album_id, selected_album_id, updated_at],
+    )?;
+    Ok(())
+}
+
+/// Read the user's variant selection for a given base album. Returns
+/// `Ok(None)` when no preference row exists (caller defaults to base).
+pub fn get_variant_preference(
+    conn: &Connection,
+    user_id: &str,
+    base_album_id: i64,
+) -> Result<Option<i64>> {
+    conn.query_row(
+        "SELECT selected_album_id FROM user_album_variant_pref
+         WHERE user_id = ?1 AND base_album_id = ?2",
+        rusqlite::params![user_id, base_album_id],
+        |r| r.get::<_, i64>(0),
+    )
+    .optional()
+    .map_err(|e| e.into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,5 +547,240 @@ mod tests {
     #[test]
     fn test_variant_kind_half() {
         assert_eq!(variant_kind_for_title("4L 0.5"), Some("0.5".to_string()));
+    }
+
+    // ========================================================================
+    // Plan 21-03 tests — slug computation, slug lookup, sibling/track queries,
+    // is_yeat gate, variant-preference UPSERT/GET.
+    // ========================================================================
+
+    use crate::database::initialize_schema;
+    use rusqlite::Connection;
+
+    /// In-memory DB with v16 schema applied + foreign keys enabled.
+    fn prepared_conn() -> Connection {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        initialize_schema(&mut conn).unwrap();
+        conn
+    }
+
+    /// Insert an album row, return its id.
+    fn insert_album(
+        conn: &Connection,
+        album_artist: &str,
+        title: &str,
+        variant_of: Option<i64>,
+        variant_kind: Option<&str>,
+    ) -> i64 {
+        let title_norm = normalize_title_stem(title);
+        conn.execute(
+            "INSERT INTO albums (artist, album_artist, title, title_normalized, variant_of, variant_kind)
+             VALUES (?, ?, ?, ?, ?, ?)",
+            rusqlite::params![album_artist, album_artist, title, title_norm, variant_of, variant_kind],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
+    /// Insert a track row linked to `album_id`. Returns its id.
+    fn insert_track(conn: &Connection, album_id: i64, title: &str, relpath: &str) -> i64 {
+        conn.execute(
+            "INSERT INTO tracks (artist, album_artist, album, title, format, original_path, organized_path, album_id)
+             VALUES ('Yeat', 'Yeat', 'X', ?, 'flac', ?, ?, ?)",
+            rusqlite::params![title, relpath, relpath, album_id],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
+    // ---------- compute_album_slug (pure) ----------
+
+    #[test]
+    fn test_compute_album_slug_basic() {
+        assert_eq!(compute_album_slug("Yeat", "AftërLyfe"), "yeat-afterlyfe");
+    }
+
+    #[test]
+    fn test_compute_album_slug_variant() {
+        assert_eq!(compute_album_slug("Yeat", "AftërLyfe [U]"), "yeat-afterlyfe-u");
+    }
+
+    #[test]
+    fn test_compute_album_slug_spaces_and_punct() {
+        assert_eq!(
+            compute_album_slug("Playboi Carti", "I AM MUSIC"),
+            "playboi-carti-i-am-music"
+        );
+    }
+
+    // ---------- get_album_by_slug ----------
+
+    #[test]
+    fn test_get_album_by_slug_returns_variant_row_not_base() {
+        let conn = prepared_conn();
+        let base = insert_album(&conn, "Yeat", "AftërLyfe", None, None);
+        let var = insert_album(&conn, "Yeat", "AftërLyfe [U]", Some(base), Some("u"));
+        let hit = get_album_by_slug(&conn, "yeat-afterlyfe-u")
+            .unwrap()
+            .expect("variant slug hit");
+        assert_eq!(hit.id, var);
+        assert_eq!(hit.variant_of, Some(base));
+    }
+
+    #[test]
+    fn test_get_album_by_slug_no_match_returns_none() {
+        let conn = prepared_conn();
+        let hit = get_album_by_slug(&conn, "nonexistent-album").unwrap();
+        assert!(hit.is_none());
+    }
+
+    // ---------- get_album_with_siblings ----------
+
+    #[test]
+    fn test_get_album_with_siblings_resolves_variant_to_base() {
+        let conn = prepared_conn();
+        let base = insert_album(&conn, "Yeat", "AftërLyfe", None, None);
+        let var = insert_album(&conn, "Yeat", "AftërLyfe [U]", Some(base), Some("u"));
+        insert_track(&conn, base, "Base Track", "a/b.flac");
+        insert_track(&conn, var, "Variant Track", "a/c.flac");
+
+        // Query by variant id — should return base + [variant].
+        let detail = get_album_with_siblings(&conn, var, "default")
+            .unwrap()
+            .expect("detail");
+        assert_eq!(detail.album.id, base, "album field must be base, not variant");
+        assert_eq!(detail.tracks.len(), 1);
+        assert_eq!(detail.tracks[0].metadata.title, "Base Track");
+        assert_eq!(detail.siblings.len(), 1);
+        assert_eq!(detail.siblings[0].album.id, var);
+        assert_eq!(detail.siblings[0].tracks.len(), 1);
+        assert_eq!(detail.selected_album_id, base, "default selection = base");
+    }
+
+    #[test]
+    fn test_get_album_with_siblings_no_siblings() {
+        let conn = prepared_conn();
+        let solo = insert_album(&conn, "Yeat", "Lyfestyle", None, None);
+        insert_track(&conn, solo, "Track 1", "yeat/lyfe/1.flac");
+        let detail = get_album_with_siblings(&conn, solo, "default")
+            .unwrap()
+            .expect("detail");
+        assert_eq!(detail.siblings.len(), 0);
+        assert_eq!(detail.tracks.len(), 1);
+    }
+
+    #[test]
+    fn test_get_album_tracks_ordered_by_title() {
+        let conn = prepared_conn();
+        let a = insert_album(&conn, "Yeat", "TestOrder", None, None);
+        insert_track(&conn, a, "Charlie", "t/c.flac");
+        insert_track(&conn, a, "alpha", "t/a.flac");
+        insert_track(&conn, a, "Bravo", "t/b.flac");
+        let tracks = get_album_tracks(&conn, a).unwrap();
+        assert_eq!(tracks.len(), 3);
+        let titles: Vec<&str> = tracks.iter().map(|t| t.metadata.title.as_str()).collect();
+        // Case-insensitive ASC.
+        assert_eq!(titles, vec!["alpha", "Bravo", "Charlie"]);
+    }
+
+    // ---------- is_yeat gate ----------
+
+    #[test]
+    fn test_is_yeat_true_when_any_sibling_has_yeat_tag() {
+        let conn = prepared_conn();
+        let base = insert_album(&conn, "Yeat", "AftërLyfe", None, None);
+        let var = insert_album(&conn, "Yeat", "AftërLyfe [U]", Some(base), Some("u"));
+        let base_tid = insert_track(&conn, base, "t1", "a/1.flac");
+        // Only the variant's track has the yeat tag.
+        let var_tid = insert_track(&conn, var, "t2", "a/2.flac");
+        conn.execute(
+            "INSERT INTO track_tags (track_id, tag_key, tag_value) VALUES (?, 'artist', 'yeat')",
+            rusqlite::params![var_tid],
+        )
+        .unwrap();
+        let _ = base_tid;
+
+        let detail = get_album_with_siblings(&conn, base, "default")
+            .unwrap()
+            .expect("detail");
+        assert!(
+            detail.is_yeat,
+            "is_yeat must be true when any sibling track has artist=yeat"
+        );
+    }
+
+    #[test]
+    fn test_is_yeat_false_when_no_yeat_tags() {
+        let conn = prepared_conn();
+        let solo = insert_album(&conn, "Drake", "Scorpion", None, None);
+        insert_track(&conn, solo, "God's Plan", "drake/g.flac");
+        let detail = get_album_with_siblings(&conn, solo, "default")
+            .unwrap()
+            .expect("detail");
+        assert!(!detail.is_yeat);
+    }
+
+    // ---------- upsert_variant_preference + get_variant_preference ----------
+
+    #[test]
+    fn test_upsert_variant_preference_insert_then_update() {
+        let conn = prepared_conn();
+        let base = insert_album(&conn, "Yeat", "AftërLyfe", None, None);
+        let var = insert_album(&conn, "Yeat", "AftërLyfe [U]", Some(base), Some("u"));
+
+        upsert_variant_preference(&conn, "default", base, var).unwrap();
+        let got = get_variant_preference(&conn, "default", base).unwrap();
+        assert_eq!(got, Some(var));
+
+        // Update: switch back to base.
+        upsert_variant_preference(&conn, "default", base, base).unwrap();
+        let got = get_variant_preference(&conn, "default", base).unwrap();
+        assert_eq!(got, Some(base));
+
+        // Assert only one row exists per (user_id, base_album_id).
+        let row_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM user_album_variant_pref WHERE user_id = 'default' AND base_album_id = ?",
+                rusqlite::params![base],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(row_count, 1);
+    }
+
+    #[test]
+    fn test_upsert_variant_preference_rejects_unrelated_album() {
+        let conn = prepared_conn();
+        let base = insert_album(&conn, "Yeat", "AftërLyfe", None, None);
+        let unrelated = insert_album(&conn, "Drake", "Scorpion", None, None);
+
+        let result = upsert_variant_preference(&conn, "default", base, unrelated);
+        assert!(result.is_err(), "unrelated album must be rejected");
+    }
+
+    #[test]
+    fn test_get_variant_preference_no_row_returns_none() {
+        let conn = prepared_conn();
+        let base = insert_album(&conn, "Yeat", "AftërLyfe", None, None);
+        let got = get_variant_preference(&conn, "default", base).unwrap();
+        assert_eq!(got, None);
+    }
+
+    // ---------- AlbumDetail JSON shape ----------
+
+    #[test]
+    fn test_album_detail_json_shape() {
+        let conn = prepared_conn();
+        let base = insert_album(&conn, "Yeat", "Test", None, None);
+        let detail = get_album_with_siblings(&conn, base, "default")
+            .unwrap()
+            .expect("detail");
+        let json = serde_json::to_value(&detail).unwrap();
+        assert!(json.get("album").is_some());
+        assert!(json.get("tracks").is_some());
+        assert!(json.get("siblings").is_some());
+        assert!(json.get("selected_album_id").is_some());
+        assert!(json.get("is_yeat").is_some());
     }
 }
