@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router";
 import {
   useReactTable,
   createColumnHelper,
@@ -12,6 +13,7 @@ import {
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { Track } from "../../types/library";
 import { formatDuration, formatDate } from "../../utils/formatter";
+import { computeSlug } from "../../utils/slug";
 import RowContextMenu, { useRowContextMenu } from "./RowContextMenu";
 import { TrackSelectionProvider, useTrackSelection } from "../../contexts/TrackSelectionContext";
 import EnergyBars from "./EnergyBars";
@@ -63,154 +65,191 @@ function SourceBadge({ source }: { source: string | null | undefined }) {
 
 const columnHelper = createColumnHelper<Track>();
 
-const columns = [
-  columnHelper.accessor((row) => row.metadata.title, {
-    id: "title",
-    header: "Title",
-    size: 260,
-    minSize: 120,
-    maxSize: 500,
-    cell: (info) => {
-      const meta = info.table.options.meta as {
-        cachedTrackIds?: Set<number>;
-        view?: "library" | "remote";
-      };
-      const cached = meta?.cachedTrackIds;
-      const view = meta?.view;
-      const track = info.row.original;
-      const trackId = track.id;
-      const isCached = cached && trackId ? cached.has(trackId) : false;
-      const isRemoteView = view === "remote";
+/**
+ * Build the column definitions for the library table.
+ *
+ * The column list used to be a module-level constant, but the Phase 21
+ * dev-entry on the Album cell needs `useNavigate()` to push `/albums/:slug`
+ * into the router. Hoisting columns into a hook-scoped `useMemo` lets the
+ * Album cell close over `navigate` without rebuilding every render.
+ *
+ * `navigate` is the only dependency — all other column data is row-driven.
+ */
+function buildColumns(navigate: ReturnType<typeof useNavigate>) {
+  return [
+    columnHelper.accessor((row) => row.metadata.title, {
+      id: "title",
+      header: "Title",
+      size: 260,
+      minSize: 120,
+      maxSize: 500,
+      cell: (info) => {
+        const meta = info.table.options.meta as {
+          cachedTrackIds?: Set<number>;
+          view?: "library" | "remote";
+        };
+        const cached = meta?.cachedTrackIds;
+        const view = meta?.view;
+        const track = info.row.original;
+        const trackId = track.id;
+        const isCached = cached && trackId ? cached.has(trackId) : false;
+        const isRemoteView = view === "remote";
 
-      return (
-        <div className="text-[13px] text-ink truncate flex items-center gap-1.5" title={info.getValue() || "Unknown"}>
-          {isCached ? (
-            <span
-              className="shrink-0 w-[5px] h-[5px] rounded-full bg-emerald-500"
-              title="Cached locally"
-            />
-          ) : isRemoteView ? (
-            <span
-              className="shrink-0 w-[5px] h-[5px] rounded-full bg-ink-muted"
-              title="Remote — not downloaded"
-            />
-          ) : null}
-          <span className="truncate font-medium">{info.getValue() || "Unknown"}</span>
-          <SourceBadge source={track.metadata.format} />
+        return (
+          <div className="text-[13px] text-ink truncate flex items-center gap-1.5" title={info.getValue() || "Unknown"}>
+            {isCached ? (
+              <span
+                className="shrink-0 w-[5px] h-[5px] rounded-full bg-emerald-500"
+                title="Cached locally"
+              />
+            ) : isRemoteView ? (
+              <span
+                className="shrink-0 w-[5px] h-[5px] rounded-full bg-ink-muted"
+                title="Remote — not downloaded"
+              />
+            ) : null}
+            <span className="truncate font-medium">{info.getValue() || "Unknown"}</span>
+            <SourceBadge source={track.metadata.format} />
+          </div>
+        );
+      },
+    }),
+    columnHelper.accessor((row) => row.metadata.artist, {
+      id: "artist",
+      header: "Artist",
+      size: 180,
+      minSize: 80,
+      maxSize: 400,
+      cell: (info) => (
+        <div className="text-[13px] text-ink-secondary truncate" title={info.getValue() || "Unknown"}>
+          {info.getValue() || "Unknown"}
         </div>
-      );
-    },
-  }),
-  columnHelper.accessor((row) => row.metadata.artist, {
-    id: "artist",
-    header: "Artist",
-    size: 180,
-    minSize: 80,
-    maxSize: 400,
-    cell: (info) => (
-      <div className="text-[13px] text-ink-secondary truncate" title={info.getValue() || "Unknown"}>
-        {info.getValue() || "Unknown"}
-      </div>
-    ),
-  }),
-  columnHelper.accessor((row) => row.metadata.album, {
-    id: "album",
-    header: "Album",
-    size: 180,
-    minSize: 80,
-    maxSize: 400,
-    cell: (info) => (
-      <div className="text-[13px] text-ink-secondary truncate" title={info.getValue() || "Unknown"}>
-        {info.getValue() || "Unknown"}
-      </div>
-    ),
-  }),
-  columnHelper.accessor((row) => row.metadata.duration, {
-    id: "duration",
-    header: "Time",
-    size: 65,
-    minSize: 50,
-    maxSize: 100,
-    cell: (info) => (
-      <div
-        className="text-[12px] text-ink-muted text-right tabular-nums"
-        style={{ fontFamily: "var(--font-mono)" }}
-      >
-        {formatDuration(info.getValue() ?? 0)}
-      </div>
-    ),
-  }),
-  columnHelper.accessor((row) => row.metadata.format, {
-    id: "format",
-    header: "Fmt",
-    size: 60,
-    minSize: 45,
-    maxSize: 100,
-    cell: (info) => {
-      const format = info.getValue();
-      const display =
-        format === "spotify" || format === "soundcloud"
-          ? "Stream"
-          : (format || "—").toUpperCase();
-      return (
-        <div
-          className="text-[10px] text-ink-muted uppercase tracking-[0.06em]"
-          style={{ fontFamily: "var(--font-mono)" }}
-        >
-          {display}
-        </div>
-      );
-    },
-  }),
-  columnHelper.accessor((row) => row.metadata.bitrate, {
-    id: "bitrate",
-    header: "Kbps",
-    size: 65,
-    minSize: 50,
-    maxSize: 100,
-    cell: (info) => {
-      const bitrate = info.getValue();
-      const display = bitrate ? (bitrate > 10000 ? Math.round(bitrate / 1000) : bitrate) : null;
-      return (
+      ),
+    }),
+    columnHelper.accessor((row) => row.metadata.album, {
+      id: "album",
+      header: "Album",
+      size: 180,
+      minSize: 80,
+      maxSize: 400,
+      cell: (info) => {
+        const value = info.getValue() || "Unknown";
+        const albumArtist = info.row.original.metadata.album_artist || "";
+        // Only enable the dev-entry link when we have both a real album
+        // title AND an album_artist to build a URL-safe slug from. Empty
+        // / "Unknown" rows fall back to plain text (disabled button).
+        const isNavigable =
+          Boolean(albumArtist) && value !== "Unknown" && value.trim() !== "";
+        // [Phase 21 dev-entry] Temporary — remove in Phase 23.
+        // Keeps /albums/:slug reachable from the library during Phase 21
+        // development. Phase 23 introduces the Yeat artist sidebar which
+        // supersedes this click-through and this button + comment block
+        // must be removed when that ships.
+        const onClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+          e.stopPropagation();
+          if (!isNavigable) return;
+          navigate(`/albums/${computeSlug(albumArtist, value)}`);
+        };
+        return (
+          <button
+            type="button"
+            disabled={!isNavigable}
+            title={isNavigable ? "Open album" : undefined}
+            onClick={onClick}
+            className="text-[13px] text-ink-secondary truncate text-left hover:text-ink hover:underline decoration-dotted underline-offset-2 transition-colors disabled:cursor-default disabled:hover:no-underline disabled:hover:text-ink-secondary bg-transparent border-0 p-0 w-full"
+          >
+            {value}
+          </button>
+        );
+      },
+    }),
+    columnHelper.accessor((row) => row.metadata.duration, {
+      id: "duration",
+      header: "Time",
+      size: 65,
+      minSize: 50,
+      maxSize: 100,
+      cell: (info) => (
         <div
           className="text-[12px] text-ink-muted text-right tabular-nums"
           style={{ fontFamily: "var(--font-mono)" }}
         >
-          {display ?? "—"}
+          {formatDuration(info.getValue() ?? 0)}
         </div>
-      );
-    },
-  }),
-  columnHelper.accessor("date_added", {
-    header: "Added",
-    size: 90,
-    minSize: 70,
-    maxSize: 150,
-    cell: (info) => {
-      const dateStr = info.getValue();
-      if (!dateStr) return <div className="text-[12px] text-ink-muted">—</div>;
-      const timestamp = new Date(dateStr).getTime() / 1000;
-      return (
-        <div
-          className="text-[12px] text-ink-muted tabular-nums"
-          style={{ fontFamily: "var(--font-mono)" }}
-        >
-          {formatDate(timestamp)}
-        </div>
-      );
-    },
-  }),
-  // Hidden by default — users opt in via the column-menu toggle.
-  // Populated by the Phase 18 loudness analysis pipeline (nullable INTEGER).
-  columnHelper.accessor((row) => row.energy_bucket ?? null, {
-    id: "energy",
-    header: "Energy",
-    size: 70,
-    minSize: 50,
-    maxSize: 120,
-    cell: (info) => <EnergyBars value={info.getValue() as number | null} />,
-  }),
-];
+      ),
+    }),
+    columnHelper.accessor((row) => row.metadata.format, {
+      id: "format",
+      header: "Fmt",
+      size: 60,
+      minSize: 45,
+      maxSize: 100,
+      cell: (info) => {
+        const format = info.getValue();
+        const display =
+          format === "spotify" || format === "soundcloud"
+            ? "Stream"
+            : (format || "—").toUpperCase();
+        return (
+          <div
+            className="text-[10px] text-ink-muted uppercase tracking-[0.06em]"
+            style={{ fontFamily: "var(--font-mono)" }}
+          >
+            {display}
+          </div>
+        );
+      },
+    }),
+    columnHelper.accessor((row) => row.metadata.bitrate, {
+      id: "bitrate",
+      header: "Kbps",
+      size: 65,
+      minSize: 50,
+      maxSize: 100,
+      cell: (info) => {
+        const bitrate = info.getValue();
+        const display = bitrate ? (bitrate > 10000 ? Math.round(bitrate / 1000) : bitrate) : null;
+        return (
+          <div
+            className="text-[12px] text-ink-muted text-right tabular-nums"
+            style={{ fontFamily: "var(--font-mono)" }}
+          >
+            {display ?? "—"}
+          </div>
+        );
+      },
+    }),
+    columnHelper.accessor("date_added", {
+      header: "Added",
+      size: 90,
+      minSize: 70,
+      maxSize: 150,
+      cell: (info) => {
+        const dateStr = info.getValue();
+        if (!dateStr) return <div className="text-[12px] text-ink-muted">—</div>;
+        const timestamp = new Date(dateStr).getTime() / 1000;
+        return (
+          <div
+            className="text-[12px] text-ink-muted tabular-nums"
+            style={{ fontFamily: "var(--font-mono)" }}
+          >
+            {formatDate(timestamp)}
+          </div>
+        );
+      },
+    }),
+    // Hidden by default — users opt in via the column-menu toggle.
+    // Populated by the Phase 18 loudness analysis pipeline (nullable INTEGER).
+    columnHelper.accessor((row) => row.energy_bucket ?? null, {
+      id: "energy",
+      header: "Energy",
+      size: 70,
+      minSize: 50,
+      maxSize: 120,
+      cell: (info) => <EnergyBars value={info.getValue() as number | null} />,
+    }),
+  ];
+}
 
 function LibraryTableInner({
   tracks,
@@ -246,6 +285,10 @@ function LibraryTableInner({
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const { displayMenu } = useRowContextMenu();
   const { selectedTracks, setSelectedTracks, isSelected, clearSelection } = useTrackSelection();
+  const navigate = useNavigate();
+  // Columns capture `navigate` so the Phase 21 dev-entry can route
+  // `/albums/:slug`. Memoized on `navigate` identity — stable across renders.
+  const columns = useMemo(() => buildColumns(navigate), [navigate]);
 
   // Esc clears selection (needed by batch bar in Phase 19 too).
   useEffect(() => {
