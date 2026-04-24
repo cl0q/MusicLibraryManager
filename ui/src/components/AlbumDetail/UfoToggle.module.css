@@ -1,0 +1,5 @@
+/* UfoToggle styles live in ui/src/index.css (alongside @keyframes y2kPulse).
+ * This module file is intentionally empty — kept for file-organization parity
+ * if the project later migrates to CSS modules. See index.css for the full
+ * `.ufo-*` class block and the `@keyframes ufoOpenLeft/Right/Beam` definitions.
+ */

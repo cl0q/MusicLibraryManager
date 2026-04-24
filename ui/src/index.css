@@ -152,3 +152,274 @@ body {
   border-radius: 6px !important;
   font-size: 13px !important;
 }
+
+/* ============================================================================
+ * Phase 21 — UFO Toggle
+ *
+ * Geometry, colors, and animation timings are locked in 21-UI-SPEC.md:
+ *   - Outer pill: 180×44 px, 22px radius, 1px #8a97b5 border
+ *   - Two 89px hemispheres separated by a 1px center seam at 50% (#2c3650 @ 0.8)
+ *   - Beam pseudo-element at center, 0→30px width during the 500ms animation
+ *   - Cool blue-white accent ramp, scoped to .ufo-* selectors ONLY
+ *
+ * 500ms animation timeline (keyframe % vs. elapsed ms):
+ *   0%   = 0ms     rest
+ *   50%  = 250ms   peak separation (hemispheres at ±15px, beam at 30px/opacity 1)
+ *   60%  = 300ms   end of dwell (still at peak)
+ *   90%  = 450ms   hemispheres closed, beam faded
+ *   100% = 500ms   settled
+ *
+ * Per-segment easing is encoded with `animation-timing-function` inside the
+ * keyframes: ease-out-quart on the opening half, ease-in-out on the close.
+ *
+ * @media (prefers-reduced-motion: reduce) suppresses animation + transition
+ * but the React state + aria-pressed still flip at t=0, so screen readers
+ * and reduced-motion users get an instant, accessible swap.
+ * ========================================================================= */
+
+/* Pill chassis — glass gradient, 180×44, 22px radius. */
+.ufo-pill {
+  position: relative;
+  display: inline-flex;
+  width: 180px;
+  height: 44px;
+  border-radius: 22px;
+  border: 1px solid #8a97b5;
+  background: linear-gradient(
+    180deg,
+    #f4f6fb 0%,
+    #e4e8f2 35%,
+    #c9d2e4 55%,
+    #9fa9c0 85%,
+    #8a97b5 100%
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.15),
+    0 1px 2px rgba(30, 40, 70, 0.2),
+    0 4px 12px rgba(30, 40, 70, 0.08);
+  overflow: hidden;
+  isolation: isolate; /* contain the beam pseudo-element */
+  transition: box-shadow 180ms ease-out;
+}
+
+/* Center seam — 1px vertical divider at x=90 (50%). */
+.ufo-pill::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(44, 54, 80, 0.8);
+  transform: translateX(-0.5px);
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* Beam — pseudo-element grows at animation peak, fades on close. */
+.ufo-pill::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  height: 44px;
+  width: 0;
+  transform: translateX(-50%);
+  background: radial-gradient(
+    ellipse at center,
+    rgba(255, 255, 255, 0.95) 0%,
+    rgba(184, 212, 255, 0.6) 30%,
+    rgba(76, 127, 232, 0.3) 60%,
+    transparent 100%
+  );
+  filter: blur(1px);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Hover lift on the chassis (cursor over either hemisphere). */
+.ufo-pill:hover {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.15),
+    0 1px 2px rgba(30, 40, 70, 0.2),
+    0 4px 16px rgba(30, 40, 70, 0.12);
+}
+
+/* Each hemisphere is a <button>. */
+.ufo-side {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 89px;
+  height: 44px;
+  padding: 0 16px;
+  border: none;
+  background: transparent;
+  color: #5a657e;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    color 120ms ease-out,
+    box-shadow 180ms ease-out;
+  z-index: 2;
+}
+
+.ufo-side--left {
+  border-radius: 22px 0 0 22px;
+}
+.ufo-side--right {
+  border-radius: 0 22px 22px 0;
+}
+
+/* Active hemisphere — forward-sit, cool blue-white glow (UI-SPEC §Active). */
+.ufo-side[data-active="true"] {
+  color: #1a2140;
+  transform: translateZ(0);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    inset 0 -1px 1px rgba(30, 40, 70, 0.15),
+    0 0 20px rgba(140, 184, 255, 0.5),
+    0 0 40px rgba(76, 127, 232, 0.25);
+}
+
+/* Hover on the inactive side — label dim lifts 70%→85%. */
+.ufo-side[data-active="false"]:hover {
+  color: rgba(90, 101, 126, 0.85);
+}
+
+/* Pressed inner shadow on mouse-down (tactile feedback). */
+.ufo-side:active {
+  box-shadow: inset 0 2px 4px rgba(30, 40, 70, 0.25);
+}
+
+/* Keyboard focus-visible only — 2px solid #4c7fe8 ring, 2px offset. */
+.ufo-side:focus-visible {
+  outline: 2px solid #4c7fe8;
+  outline-offset: 2px;
+}
+.ufo-side:focus {
+  outline: none;
+}
+
+/* Animation trigger — applied to .ufo-pill via data-animating="true" while
+ * the 500ms keyframe runs. Clicks are swallowed during the animation to
+ * prevent mid-flight state flips (UI-SPEC §Rapid Toggle Handling). */
+.ufo-pill[data-animating="true"] .ufo-side {
+  pointer-events: none;
+}
+.ufo-pill[data-animating="true"] .ufo-side--left {
+  animation: ufoOpenLeft 500ms forwards;
+}
+.ufo-pill[data-animating="true"] .ufo-side--right {
+  animation: ufoOpenRight 500ms forwards;
+}
+.ufo-pill[data-animating="true"]::before {
+  animation: ufoBeam 500ms forwards;
+}
+
+/* Hemispheres slide apart (ease-out-quart), dwell, snap shut (ease-in-out).
+ * Per-segment animation-timing-function declarations inside the keyframes
+ * enable the two-phase easing contract from UI-SPEC §UFO Opening Animation. */
+@keyframes ufoOpenLeft {
+  0% {
+    transform: translateX(0);
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  50% {
+    transform: translateX(-15px);
+  }
+  60% {
+    transform: translateX(-15px);
+    animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+@keyframes ufoOpenRight {
+  0% {
+    transform: translateX(0);
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  50% {
+    transform: translateX(15px);
+  }
+  60% {
+    transform: translateX(15px);
+    animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+/* Beam: fade in 0→50% (0→250ms), hold to 60% (300ms), fade out to 90% (450ms). */
+@keyframes ufoBeam {
+  0% {
+    opacity: 0;
+    width: 0;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  50% {
+    opacity: 1;
+    width: 30px;
+  }
+  60% {
+    opacity: 1;
+    width: 30px;
+    animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
+  }
+  90% {
+    opacity: 0;
+    width: 0;
+  }
+  100% {
+    opacity: 0;
+    width: 0;
+  }
+}
+
+/* Tracklist crossfade — driven by React key-remount on the tracklist
+ * container. The consumer applies .ufo-crossfade while animating; the
+ * fade-out / fade-in straddles the 250ms state commit. */
+.ufo-crossfade {
+  animation: ufoTracklistFade 500ms forwards;
+}
+@keyframes ufoTracklistFade {
+  0% {
+    opacity: 1;
+  }
+  30% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* Reduced motion — instant swap, no animation. aria-pressed still updates
+ * at t=0 because that's a React state change, not a CSS animation. */
+@media (prefers-reduced-motion: reduce) {
+  .ufo-pill,
+  .ufo-pill *,
+  .ufo-pill::before,
+  .ufo-pill::after,
+  .ufo-crossfade {
+    animation: none !important;
+    transition: none !important;
+  }
+}
