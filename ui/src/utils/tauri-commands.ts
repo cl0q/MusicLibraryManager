@@ -566,3 +566,29 @@ export async function setVariantPreference(
 
 // Re-export the shape for callers that want a typed argument bag.
 export type { VariantPreference };
+
+// ============================================================================
+// Phase 21.1 — Rescan Albums
+// ============================================================================
+
+/** Result payload returned by `rescanAlbums`. */
+export interface RescanAlbumsResult {
+  /** Count of new albums rows created by the backfill (usually 0 on rescan). */
+  backfilled_albums: number;
+  /** Count of 1-base + 1-variant linkages detected (includes already-correct rows). */
+  sibling_pairs_detected: number;
+  /** Count of orphan variants + multi-base candidates; >0 means user may want to review. */
+  ambiguous_count: number;
+}
+
+/**
+ * Phase 21.1 — Re-run the album backfill + sibling detection on the live
+ * library. Idempotent; non-destructive to existing user variant preferences.
+ *
+ * Use this after importing new tracks or noticing drift (missing UFO toggle,
+ * incomplete album tracklist). The v17 migration auto-runs this once on app
+ * startup; this command is the manual-refresh counterpart exposed in Settings.
+ */
+export async function rescanAlbums(): Promise<RescanAlbumsResult> {
+  return invoke<RescanAlbumsResult>("rescan_albums_cmd");
+}

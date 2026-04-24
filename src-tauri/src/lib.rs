@@ -258,6 +258,7 @@ pub fn run() {
             commands::albums::detect_album_siblings_cmd,
             commands::albums::get_album_detail_cmd,
             commands::albums::set_variant_preference_cmd,
+            commands::albums::rescan_albums_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

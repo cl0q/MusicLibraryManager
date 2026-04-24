@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import LibrarySetup from "../components/Settings/LibrarySetup";
-import { getAppSetting, setAppSetting, analyzeLoudnessAll } from "../utils/tauri-commands";
+import { getAppSetting, setAppSetting, analyzeLoudnessAll, rescanAlbums } from "../utils/tauri-commands";
 import { useTheme, type ThemeName } from "../contexts/ThemeContext";
 
 const themes: {
@@ -239,6 +239,26 @@ export default function Settings() {
                   toast.info("Rescanning metadata...");
                   const r = await invoke<{ scanned: number; updated: number; errors: number }>("rescan_metadata");
                   toast.success(`${r.scanned} scanned, ${r.updated} updated, ${r.errors} errors`);
+                }),
+            },
+          ]}
+        />
+        <MaintenanceRow
+          label="Rescan Albums"
+          hint="Re-index albums, detect variants, refresh siblings"
+          running={maintenanceRunning === "rescan-albums"}
+          disabled={maintenanceRunning !== null}
+          actions={[
+            {
+              label: "Rescan",
+              loadingLabel: "Rescanning…",
+              onClick: () =>
+                runMaintenance("rescan-albums", async () => {
+                  const r = await rescanAlbums();
+                  const suffix = r.ambiguous_count > 0 ? ` (${r.ambiguous_count} ambiguous)` : "";
+                  toast.success(
+                    `${r.sibling_pairs_detected} sibling pairs detected, ${r.backfilled_albums} albums backfilled${suffix}`,
+                  );
                 }),
             },
           ]}

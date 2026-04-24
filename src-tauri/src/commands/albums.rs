@@ -8,8 +8,10 @@
 //! the frontend-facing pair that powers `AlbumDetailPage` and the UFO toggle.
 
 use crate::database::albums::{
-    get_album_by_slug, get_album_with_siblings, upsert_variant_preference, AlbumDetail,
+    backfill_albums_from_tracks, get_album_by_slug, get_album_with_siblings,
+    upsert_variant_preference, AlbumDetail,
 };
+use crate::database::connection::with_transaction;
 use crate::database::{db_path, get_connection};
 use crate::yeat::{detect_album_siblings, write_sibling_report, SiblingReport};
 
@@ -122,11 +124,78 @@ pub async fn set_variant_preference_cmd(
     .map_err(|e| format!("join: {}", e))?
 }
 
+/// Phase 21.1 — result payload for `rescan_albums_cmd`.
+///
+/// Reports back to the frontend:
+/// - `backfilled_albums`: count of albums rows inserted by
+///   `backfill_albums_from_tracks` (usually 0 on subsequent rescans since the
+///   backfill uses `INSERT OR IGNORE`).
+/// - `sibling_pairs_detected`: count of 1-base + 1-variant linkages seen by
+///   `detect_album_siblings` (includes both newly-linked and already-correct
+///   rows — same as the Tauri `detect_album_siblings_cmd`).
+/// - `ambiguous_count`: count of orphan variants + multi-base candidates
+///   surfaced during detection. >0 indicates data the user may want to
+///   review via the sync report JSON.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RescanAlbumsResult {
+    pub backfilled_albums: usize,
+    pub sibling_pairs_detected: usize,
+    pub ambiguous_count: usize,
+}
+
+/// Phase 21.1 — Re-run the album backfill + sibling detection on the live
+/// library. Exposed to the UI so the user can manually refresh album data
+/// after importing new tracks or noticing drift (e.g. missing UFO toggle).
+///
+/// Idempotent; non-destructive to `user_album_variant_pref`. Runs the
+/// backfill inside its own transaction (so if it fails, no partial writes);
+/// sibling detection runs afterwards (the fn takes `&mut Connection` and
+/// opens its own transaction).
+///
+/// # Security (T-21.1-04)
+/// Zero-argument Tauri command. Not an injection surface. Authorization: any
+/// user of the app can invoke — same level as other maintenance commands.
+#[tauri::command]
+pub async fn rescan_albums_cmd() -> Result<RescanAlbumsResult, String> {
+    tokio::task::spawn_blocking(move || {
+        let db = db_path();
+        let mut conn = get_connection(&db).map_err(|e| format!("open db: {}", e))?;
+
+        // Step 1: idempotent backfill inside its own transaction.
+        let backfilled = with_transaction(&mut conn, |tx| backfill_albums_from_tracks(tx))
+            .map_err(|e| format!("backfill: {}", e))?;
+
+        // Step 2: sibling detection (opens its own tx internally).
+        let report = detect_album_siblings(&mut conn)
+            .map_err(|e| format!("detect siblings: {}", e))?;
+
+        // Step 3: best-effort report persistence. Failure here doesn't fail
+        // the command — the DB mutations are already committed.
+        match write_sibling_report(&report) {
+            Ok(path) => log::info!("rescan_albums: wrote report to {}", path.display()),
+            Err(e) => log::warn!("rescan_albums: report write failed (mutations already committed): {}", e),
+        }
+
+        let ambiguous_count = report.ambiguous_siblings.orphan_variants.len()
+            + report.ambiguous_siblings.multi_base_candidates.len();
+
+        Ok(RescanAlbumsResult {
+            backfilled_albums: backfilled,
+            sibling_pairs_detected: report.pairs_detected,
+            ambiguous_count,
+        })
+    })
+    .await
+    .map_err(|e| format!("join: {}", e))?
+}
+
 #[cfg(test)]
 mod tests {
     // The core detect_album_siblings logic is tested in
     // src/yeat/siblings.rs::tests. The core get_album_with_siblings +
     // upsert_variant_preference are tested in src/database/albums.rs::tests.
+    // rescan_albums_cmd is a thin wrapper over backfill_albums_from_tracks +
+    // detect_album_siblings, both exercised by their own test modules.
     // This module is a thin Tauri wrapper layer — no additional unit tests
     // needed.
 }

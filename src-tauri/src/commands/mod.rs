@@ -35,6 +35,7 @@
 //! - detect_album_siblings_cmd: Detect and link album variant siblings (Phase 21)
 //! - get_album_detail_cmd: Fetch an album + its tracks + siblings + variant preference (Phase 21)
 //! - set_variant_preference_cmd: Persist the user's UFO toggle selection (Phase 21)
+//! - rescan_albums_cmd: Re-run albums backfill + sibling detection (Phase 21.1)
 //!
 //! Commands are registered in lib.rs via tauri::generate_handler![]
 
@@ -55,7 +56,10 @@ pub mod sync;
 pub mod yeat;
 
 // Re-export commands for registration
-pub use albums::{detect_album_siblings_cmd, get_album_detail_cmd, set_variant_preference_cmd};
+pub use albums::{
+    detect_album_siblings_cmd, get_album_detail_cmd, rescan_albums_cmd, set_variant_preference_cmd,
+    RescanAlbumsResult,
+};
 pub use analysis::get_track_analysis;
 pub use batch_control::stop_analysis_cmd;
 pub use download::{download_tracks, get_retry_queue_status, retry_failed_downloads};
