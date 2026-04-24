@@ -25,7 +25,9 @@ use crate::database::connection::Result;
 /// - Version 14: Phase 18 loudness columns (lufs_i, lufs_range, true_peak, energy_bucket) on tracks
 /// - Version 15: Phase 20 track_tags table (track_id, tag_key, tag_value) for Yeat taxonomy backfill
 /// - Version 16: Phase 21 albums + variant_of + user_album_variant_pref (VAR-01)
-pub const CURRENT_SCHEMA_VERSION: i32 = 16;
+/// - Version 17: Phase 21.1 albums remediation (renormalize titles, merge
+///   case-duplicate rows, case-insensitive unique index)
+pub const CURRENT_SCHEMA_VERSION: i32 = 17;
 
 /// SQL schema for the music library database (Phase 1 - base schema).
 ///
@@ -626,10 +628,14 @@ fn migrate_to_v16(conn: &mut Connection) -> Result<()> {
         //    Only updates tracks where album_id is still NULL — so repeat
         //    migrations are no-ops for already-linked rows.
         tx.execute_batch(
+            // Case-insensitive on album_artist — must match the case-insensitive
+            // GROUP BY in `backfill_albums_from_tracks` so tracks with different
+            // casings (e.g. 'Yeat' vs 'yeat') all link to the single
+            // representative albums row. (Phase 21.1 fix.)
             "UPDATE tracks
              SET album_id = (
                  SELECT a.id FROM albums a
-                 WHERE a.album_artist = tracks.album_artist
+                 WHERE LOWER(a.album_artist) = LOWER(tracks.album_artist)
                    AND a.title = tracks.album
                  LIMIT 1
              )
@@ -638,6 +644,84 @@ fn migrate_to_v16(conn: &mut Connection) -> Result<()> {
 
         Ok(())
     })
+}
+
+/// Migration v17 (Phase 21.1): Remediate stale album data written by v16.
+///
+/// The v16 backfill ran with a pre-fix `normalize_title_stem` that stripped
+/// non-ASCII characters before applying deunicode, producing stems like
+/// `aft_rlyfe` instead of `afterlyfe`. It also aggregated on exact-case
+/// `album_artist`, creating duplicate album rows for `Yeat` vs `yeat`.
+///
+/// Work (executed inside a single `with_transaction` block):
+/// 1. Recompute `title_normalized` + `variant_kind` on every albums row
+///    using the current (correct) normalizer.
+/// 2. Merge duplicate album rows by case-insensitive key, re-linking
+///    `tracks.album_id` and `albums.variant_of` references to the kept
+///    MIN(id) row.
+/// 3. Add a case-insensitive UNIQUE index on
+///    `(LOWER(album_artist), title_normalized, IFNULL(variant_kind, ''))`
+///    so future imports can't re-introduce case-split duplicates.
+///
+/// AFTER the tx commits, we run `detect_album_siblings` outside the tx
+/// because its signature (`&mut Connection`) opens its own transaction,
+/// which SQLite can't nest. Running it after remediation is still correct:
+/// sibling detection is idempotent and writes its own tx. If detection
+/// fails, the schema version stays at 17 (set before the call) so the
+/// migration isn't re-run; users can manually invoke `rescan_albums_cmd`.
+///
+/// Security (T-21.1-01): all writes use `rusqlite::params!` bound parameters.
+/// Security (T-21.1-02): atomicity of remediation guaranteed by
+/// `with_transaction`; any failure in steps 1-3 rolls back leaving v16 state.
+fn migrate_to_v17(conn: &mut Connection) -> Result<()> {
+    use crate::database::albums::remediate_albums_data;
+    use crate::database::connection::with_transaction;
+
+    with_transaction(conn, |tx| {
+        // Step 1 + 2: remediate (renormalize + dedupe + re-point references).
+        remediate_albums_data(tx)?;
+
+        // Step 3: add the case-insensitive UNIQUE index. The original v16
+        // UNIQUE index `idx_albums_unique_stem` is case-sensitive on
+        // `album_artist`; it stays in place but is effectively a superset of
+        // this tighter constraint — any row satisfying the CI constraint also
+        // satisfies the CS one, so the CS index never rejects valid rows.
+        // Keeping both avoids a full table rebuild.
+        tx.execute_batch(
+            "CREATE UNIQUE INDEX IF NOT EXISTS albums_artist_stem_kind_ci
+                 ON albums (LOWER(album_artist), title_normalized, IFNULL(variant_kind, ''));",
+        )?;
+
+        Ok(())
+    })
+}
+
+/// Post-commit step for migration v17: re-run sibling detection so
+/// `variant_of` is populated on the remediated data and the UFO toggle
+/// renders without the user needing to click Rescan in Settings.
+///
+/// Called from `initialize_schema` AFTER `set_schema_version(conn, 17)`.
+/// Errors are logged but NOT propagated — the schema migration is already
+/// committed; a failure here only affects the convenience of auto-populated
+/// `variant_of`. Users can still manually invoke `rescan_albums_cmd`.
+fn v17_rerun_sibling_detection(conn: &mut Connection) {
+    match crate::yeat::detect_album_siblings(conn) {
+        Ok(report) => {
+            log::info!(
+                "albums.v17 sibling detection: pairs_detected={}, groups_detected={}, orphan_variants={}, multi_base={}",
+                report.pairs_detected,
+                report.groups_detected,
+                report.ambiguous_siblings.orphan_variants.len(),
+                report.ambiguous_siblings.multi_base_candidates.len()
+            );
+        }
+        Err(e) => {
+            log::error!(
+                "albums.v17 sibling detection failed (migration still committed): {}",
+                e
+            );
+        }
+    }
 }
 
 /// Initialize the database schema with versioned migrations.
@@ -751,6 +835,18 @@ pub fn initialize_schema(conn: &mut Connection) -> Result<()> {
     if get_schema_version(conn)? < 16 {
         migrate_to_v16(conn)?;
         set_schema_version(conn, 16)?;
+    }
+
+    // Phase 21.1: remediate stale album data from v16 backfill (renormalize
+    // titles, merge case-duplicates, add CI UNIQUE index, re-run sibling
+    // detection).
+    if get_schema_version(conn)? < 17 {
+        migrate_to_v17(conn)?;
+        set_schema_version(conn, 17)?;
+        // Run sibling detection AFTER schema version bump so a failure here
+        // doesn't cause re-running the migration on next startup. See the fn
+        // doc for why this runs outside the migration transaction.
+        v17_rerun_sibling_detection(conn);
     }
 
     Ok(())
@@ -1128,7 +1224,7 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         initialize_schema(&mut conn).unwrap();
         assert_eq!(get_schema_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
-        assert_eq!(CURRENT_SCHEMA_VERSION, 16);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 17);
     }
 
     #[test]
@@ -1196,9 +1292,9 @@ mod tests {
 
         assert!(table_exists(&conn, "track_tags"));
         // After initialize_schema runs the full chain, we're at CURRENT_SCHEMA_VERSION.
-        // Phase 21 bumped this to 16; Phase 20's track_tags table still exists at v16.
-        assert_eq!(get_schema_version(&conn).unwrap(), 16);
-        assert_eq!(CURRENT_SCHEMA_VERSION, 16);
+        // Phase 21.1 bumped this to 17; Phase 20's track_tags table still exists.
+        assert_eq!(get_schema_version(&conn).unwrap(), 17);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 17);
     }
 
     #[test]
@@ -1363,8 +1459,9 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_phase21_schema_version_is_16() {
-        assert_eq!(CURRENT_SCHEMA_VERSION, 16);
+    fn test_phase21_schema_version_is_17() {
+        // Phase 21.1 bumped CURRENT_SCHEMA_VERSION to 17 (from 16 in Phase 21).
+        assert_eq!(CURRENT_SCHEMA_VERSION, 17);
     }
 
     #[test]
@@ -1380,7 +1477,7 @@ mod tests {
         assert!(index_exists(&conn, "idx_albums_album_artist"));
         assert!(index_exists(&conn, "idx_tracks_album_id"));
         assert!(index_exists(&conn, "idx_user_album_variant_pref_user"));
-        assert_eq!(get_schema_version(&conn).unwrap(), 16);
+        assert_eq!(get_schema_version(&conn).unwrap(), 17);
     }
 
     #[test]
@@ -1565,8 +1662,9 @@ mod tests {
         let v_first = get_schema_version(&conn).unwrap();
         initialize_schema(&mut conn).unwrap();
         let v_second = get_schema_version(&conn).unwrap();
-        assert_eq!(v_first, 16);
-        assert_eq!(v_second, 16);
+        // Phase 21.1 bumped CURRENT_SCHEMA_VERSION to 17.
+        assert_eq!(v_first, 17);
+        assert_eq!(v_second, 17);
     }
 
     #[test]
@@ -1601,7 +1699,9 @@ mod tests {
         initialize_schema(&mut conn).unwrap();
         conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
 
-        assert_eq!(get_schema_version(&conn).unwrap(), 16);
+        // Phase 21.1: initialize_schema now advances all the way to v17
+        // (includes remediation + CI UNIQUE index + sibling re-detect).
+        assert_eq!(get_schema_version(&conn).unwrap(), 17);
         assert!(table_exists(&conn, "albums"));
         assert!(table_exists(&conn, "user_album_variant_pref"));
 
@@ -1636,6 +1736,266 @@ mod tests {
             |r| r.get(0),
         ).unwrap();
         assert_eq!(albums_count, 0, "empty tracks should produce zero albums");
+    }
+
+    // ========================================================================
+    // Phase 21.1: album backfill remediation (v17)
+    // ========================================================================
+
+    #[test]
+    fn test_phase21_1_schema_version_is_17() {
+        assert_eq!(CURRENT_SCHEMA_VERSION, 17);
+    }
+
+    /// Helper: re-run initialize_schema after rolling back to v16 and dropping
+    /// the v17-specific CI index. Used by the remediation tests that want to
+    /// seed stale/duplicate rows and then re-trigger migrate_to_v17.
+    fn reset_to_v16_for_remediation_test(conn: &mut Connection) {
+        conn.execute_batch("DROP INDEX IF EXISTS albums_artist_stem_kind_ci")
+            .unwrap();
+        conn.execute_batch("PRAGMA user_version = 16").unwrap();
+    }
+
+    /// Migration v17 recomputes `title_normalized` + `variant_kind` for every
+    /// row using the current `normalize_title_stem`. Seed a row with a stale
+    /// stem (`aft_rlyfe` — the pre-fix buggy output), reset user_version to 16,
+    /// re-run `initialize_schema`, and verify the stem is remediated.
+    #[test]
+    fn test_phase21_1_renormalizes_stale_stems() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        initialize_schema(&mut conn).unwrap();
+
+        // Simulate a pre-v17 DB: drop the CI index so we can seed a stale row.
+        reset_to_v16_for_remediation_test(&mut conn);
+
+        // Seed a stale albums row: bogus `title_normalized` + stale
+        // `variant_kind` that current code wouldn't produce.
+        conn.execute(
+            "INSERT INTO albums (id, artist, album_artist, title, title_normalized, variant_kind)
+             VALUES (9001, 'Yeat', 'Yeat', 'AftërLyfe', 'aft_rlyfe', NULL)",
+            [],
+        )
+        .unwrap();
+
+        initialize_schema(&mut conn).unwrap();
+
+        assert_eq!(get_schema_version(&conn).unwrap(), 17);
+
+        let stem: String = conn
+            .query_row(
+                "SELECT title_normalized FROM albums WHERE id = 9001",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            stem, "afterlyfe",
+            "v17 must renormalize AftërLyfe to afterlyfe (not aft_rlyfe)"
+        );
+    }
+
+    /// Migration v17 merges duplicate album rows keyed by
+    /// (LOWER(album_artist), title_normalized, IFNULL(variant_kind, '')).
+    /// Any `tracks.album_id` pointing at a dropped row must be re-pointed to
+    /// the kept MIN(id) row.
+    #[test]
+    fn test_phase21_1_merges_case_duplicate_albums() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        initialize_schema(&mut conn).unwrap();
+
+        // Simulate pre-v17 state: drop CI index so we can seed case-duplicates.
+        reset_to_v16_for_remediation_test(&mut conn);
+
+        // Two album rows differing only by album_artist case.
+        conn.execute(
+            "INSERT INTO albums (id, artist, album_artist, title, title_normalized, variant_kind)
+             VALUES (9001, 'Yeat', 'Yeat', '4L', '4l', NULL),
+                    (9002, 'Yeat', 'yeat', '4L', '4l', NULL)",
+            [],
+        )
+        .unwrap();
+
+        // A track pointing at the lower-case duplicate (id 9002).
+        conn.execute(
+            "INSERT INTO tracks (id, artist, album_artist, album, title, format, original_path, album_id)
+             VALUES (7001, 'Yeat', 'yeat', '4L', 'Flex Up', 'flac', '/fake/path.flac', 9002)",
+            [],
+        )
+        .unwrap();
+
+        // Re-run to fire v17 remediation.
+        initialize_schema(&mut conn).unwrap();
+
+        // Exactly one albums row should remain for (yeat/Yeat, 4l, NULL).
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM albums
+                 WHERE title_normalized = '4l' AND variant_kind IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "case-duplicates must merge into one row");
+
+        // Track 7001 should now point at id 9001 (MIN id of the merged group).
+        let linked: i64 = conn
+            .query_row(
+                "SELECT album_id FROM tracks WHERE id = 7001",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            linked, 9001,
+            "tracks.album_id must re-point to the kept MIN(id)"
+        );
+
+        // And the dropped row is gone.
+        let dropped_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM albums WHERE id = 9002",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(dropped_exists, 0, "duplicate row 9002 should be deleted");
+    }
+
+    /// The case-insensitive UNIQUE index `albums_artist_stem_kind_ci` rejects
+    /// future inserts that differ only by album_artist casing — prevents
+    /// backfill drift from re-introducing Yeat/yeat splits.
+    #[test]
+    fn test_phase21_1_ci_index_rejects_case_duplicate_insert() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        initialize_schema(&mut conn).unwrap();
+
+        // Clean slate — backfill may have seeded rows; we only care about the
+        // behavior of the index after v17 applied.
+        conn.execute_batch("DELETE FROM albums").unwrap();
+
+        conn.execute(
+            "INSERT INTO albums (artist, album_artist, title, title_normalized, variant_kind)
+             VALUES ('Yeat', 'Yeat', 'Test', 'test', NULL)",
+            [],
+        )
+        .unwrap();
+
+        // Second insert differs only by album_artist case — CI index must reject.
+        let result = conn.execute(
+            "INSERT INTO albums (artist, album_artist, title, title_normalized, variant_kind)
+             VALUES ('Yeat', 'yeat', 'Test', 'test', NULL)",
+            [],
+        );
+        assert!(
+            result.is_err(),
+            "case-insensitive UNIQUE index should reject Yeat vs yeat duplicate"
+        );
+    }
+
+    /// The hardened `backfill_albums_from_tracks` aggregation (case-insensitive
+    /// on album_artist) collapses `Yeat` and `yeat` tracks into a single
+    /// albums row during the Phase 21 migration on a pre-v16 DB.
+    #[test]
+    fn test_phase21_1_backfill_case_insensitive_aggregation() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        initialize_schema(&mut conn).unwrap();
+
+        // Tear down v16 artifacts so we can re-run the migration chain on a
+        // fresh albums table with case-mixed tracks pre-inserted.
+        conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+        conn.execute_batch("DROP TABLE IF EXISTS user_album_variant_pref").unwrap();
+        conn.execute_batch("DROP TABLE IF EXISTS albums").unwrap();
+        conn.execute_batch("PRAGMA user_version = 15").unwrap();
+
+        // Seed tracks with mixed casing on album_artist.
+        conn.execute(
+            "INSERT INTO tracks (artist, album_artist, album, title, format, original_path)
+             VALUES ('Yeat', 'Yeat', '4L', 'Rollin', 'flac', '/t1.flac'),
+                    ('Yeat', 'yeat', '4L', 'Flex Up', 'flac', '/t2.flac'),
+                    ('Yeat', 'YEAT', '4L', 'Money So Big', 'flac', '/t3.flac')",
+            [],
+        )
+        .unwrap();
+
+        initialize_schema(&mut conn).unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+
+        // All three casings should collapse into a single album row.
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM albums WHERE title = '4L'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "case-insensitive GROUP BY must collapse Yeat/yeat/YEAT into one row"
+        );
+
+        // All three tracks should link to that single album row.
+        let linked_track_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tracks
+                 WHERE album_id IS NOT NULL
+                   AND album_id = (SELECT id FROM albums WHERE title = '4L')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            linked_track_count, 3,
+            "all three mixed-case tracks should link to the single albums row"
+        );
+    }
+
+    /// After v17 migration, `albums.variant_of` pointers to merged-away rows
+    /// must be re-pointed to the kept MIN(id). Otherwise sibling linkages break.
+    #[test]
+    fn test_phase21_1_variant_of_repointed_on_merge() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        initialize_schema(&mut conn).unwrap();
+
+        // Simulate pre-v17 state: drop CI index so we can seed case-duplicates.
+        reset_to_v16_for_remediation_test(&mut conn);
+
+        // Seed: 2 base rows (case-duplicate), plus a variant pointing at the
+        // soon-to-be-dropped base.
+        conn.execute(
+            "INSERT INTO albums (id, artist, album_artist, title, title_normalized, variant_kind)
+             VALUES (9001, 'Yeat', 'Yeat', '4L', '4l', NULL),
+                    (9002, 'Yeat', 'yeat', '4L', '4l', NULL),
+                    (9003, 'Yeat', 'yeat', '4L [U]', '4l', 'u')",
+            [],
+        )
+        .unwrap();
+        // variant points at id 9002 (the dup that will be dropped).
+        conn.execute(
+            "UPDATE albums SET variant_of = 9002 WHERE id = 9003",
+            [],
+        )
+        .unwrap();
+
+        initialize_schema(&mut conn).unwrap();
+
+        // variant row 9003 should now point at the kept id 9001.
+        let repointed: Option<i64> = conn
+            .query_row(
+                "SELECT variant_of FROM albums WHERE id = 9003",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            repointed,
+            Some(9001),
+            "variant_of must re-point from dropped dup (9002) to kept MIN (9001)"
+        );
     }
 }
 

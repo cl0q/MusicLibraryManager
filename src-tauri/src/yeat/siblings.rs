@@ -534,9 +534,13 @@ mod tests {
     #[test]
     fn test_multi_base_candidates_logged() {
         // Force-create two base rows with the same (album_artist, title_normalized, NULL)
-        // by temporarily disabling the unique index — simulates a corrupted DB.
+        // by temporarily disabling the unique indexes — simulates a corrupted DB.
+        // Phase 21.1 added a second case-insensitive UNIQUE index that must
+        // also be dropped for this simulated-corruption scenario.
         let mut conn = new_db();
         conn.execute_batch("DROP INDEX IF EXISTS idx_albums_unique_stem;")
+            .unwrap();
+        conn.execute_batch("DROP INDEX IF EXISTS albums_artist_stem_kind_ci;")
             .unwrap();
 
         conn.execute(

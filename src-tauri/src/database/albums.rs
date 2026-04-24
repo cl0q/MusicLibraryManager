@@ -89,12 +89,17 @@ pub fn variant_kind_for_title(title: &str) -> Option<String> {
 /// Security (T-21-01): All INSERTs use rusqlite params — NEVER string
 /// interpolation. Album titles and album_artist are user-controlled.
 pub fn backfill_albums_from_tracks(tx: &Transaction) -> Result<usize> {
+    // Phase 21.1: case-insensitive on album_artist so `Yeat` and `yeat` collapse
+    // into a single albums row. `MIN(album_artist)` picks a deterministic
+    // representative display value across casing variants. The `albums`
+    // case-insensitive UNIQUE index (v17) is the second line of defense if
+    // future drift somehow produces a casing-split pair here.
     let mut stmt = tx.prepare(
-        "SELECT album_artist, album, MIN(artist) AS artist, MIN(year) AS year
+        "SELECT MIN(album_artist) AS album_artist, album, MIN(artist) AS artist, MIN(year) AS year
          FROM tracks
          WHERE album_artist IS NOT NULL AND album IS NOT NULL
            AND album_artist != '' AND album != ''
-         GROUP BY album_artist, album",
+         GROUP BY LOWER(album_artist), album",
     )?;
 
     let rows: Vec<(String, String, String, Option<i64>)> = stmt
@@ -124,6 +129,125 @@ pub fn backfill_albums_from_tracks(tx: &Transaction) -> Result<usize> {
     }
 
     Ok(inserted)
+}
+
+// ============================================================================
+// Phase 21.1 — One-shot data remediation for v16 backfill drift.
+// ============================================================================
+
+/// One-time remediation for Phase 21.1. Called from `migrate_to_v17`.
+///
+/// Fixes two classes of stale data written by the v16 backfill running on a
+/// pre-fix version of `normalize_title_stem`:
+///
+/// 1. `title_normalized` values that reflect pre-deunicode stripping (e.g.
+///    `AftërLyfe` stored as `aft_rlyfe` instead of `afterlyfe`). We recompute
+///    every row using the current `normalize_title_stem` + `variant_kind_for_title`.
+/// 2. Duplicate album rows caused by case-variant `album_artist` (`Yeat` vs `yeat`).
+///    We merge duplicate groups keyed by `(LOWER(album_artist), title_normalized,
+///    IFNULL(variant_kind, ''))`, keeping the row with MIN(id). Any references
+///    on `tracks.album_id` or `albums.variant_of` pointing at a non-kept row
+///    are re-pointed to the kept id, and the duplicates are deleted.
+///
+/// Safe to call inside the `migrate_to_v17` transaction. Returns
+/// `(renormalized, merged_groups, rows_deleted)` for logging.
+///
+/// Security (T-21.1-01): all UPDATEs + DELETEs use `rusqlite::params!` bound
+/// parameters. No `format!`-built SQL with user-controlled values.
+pub fn remediate_albums_data(tx: &Transaction) -> Result<(usize, usize, usize)> {
+    // Step A: recompute title_normalized and variant_kind for every row.
+    // Read all rows first (borrow-safe), then UPDATE each by id.
+    let rows: Vec<(i64, String)> = {
+        let mut stmt = tx.prepare("SELECT id, title FROM albums")?;
+        let mapped: Vec<(i64, String)> = stmt
+            .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
+            .filter_map(|r| r.ok())
+            .collect();
+        mapped
+    };
+    let mut renormalized = 0usize;
+    for (id, title) in &rows {
+        let new_norm = normalize_title_stem(title);
+        let new_kind = variant_kind_for_title(title);
+        let n = tx.execute(
+            "UPDATE albums SET title_normalized = ?, variant_kind = ? WHERE id = ?",
+            params![new_norm, new_kind, id],
+        )?;
+        renormalized += n;
+    }
+
+    // Step B: identify duplicate groups keyed by case-insensitive album_artist +
+    // title_normalized + variant_kind (NULL treated as ''). Keep MIN(id), drop
+    // the rest.
+    let dupes: Vec<(i64, Vec<i64>)> = {
+        let mut stmt = tx.prepare(
+            "SELECT MIN(id) AS keep_id, GROUP_CONCAT(id) AS all_ids
+             FROM albums
+             GROUP BY LOWER(album_artist), title_normalized, IFNULL(variant_kind, '')
+             HAVING COUNT(*) > 1",
+        )?;
+        let mapped: Vec<(i64, Vec<i64>)> = stmt
+            .query_map([], |r| {
+                let keep: i64 = r.get(0)?;
+                let all: String = r.get(1)?;
+                let all_ids: Vec<i64> = all
+                    .split(',')
+                    .filter_map(|s| s.trim().parse::<i64>().ok())
+                    .collect();
+                let drop_ids: Vec<i64> = all_ids.into_iter().filter(|id| *id != keep).collect();
+                Ok((keep, drop_ids))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        mapped
+    };
+
+    let mut merged_groups = 0usize;
+    let mut rows_deleted = 0usize;
+    for (keep_id, drop_ids) in &dupes {
+        if drop_ids.is_empty() {
+            continue;
+        }
+        merged_groups += 1;
+
+        // Re-point tracks.album_id from dropped rows -> keep_id.
+        for drop_id in drop_ids {
+            tx.execute(
+                "UPDATE tracks SET album_id = ? WHERE album_id = ?",
+                params![keep_id, drop_id],
+            )?;
+        }
+
+        // Re-point albums.variant_of from dropped rows -> keep_id. MUST run
+        // before the DELETE so FK constraints don't null the pointer.
+        for drop_id in drop_ids {
+            tx.execute(
+                "UPDATE albums SET variant_of = ? WHERE variant_of = ?",
+                params![keep_id, drop_id],
+            )?;
+        }
+
+        // Delete the duplicate rows one at a time (keeps borrow checker happy
+        // and avoids dynamic-params juggling). user_album_variant_pref
+        // cascades via FK (acceptable per 21.1-CONTEXT: pre-remediation
+        // preferences were unusable since no UFO toggle rendered).
+        for drop_id in drop_ids {
+            let n = tx.execute(
+                "DELETE FROM albums WHERE id = ?",
+                params![drop_id],
+            )?;
+            rows_deleted += n;
+        }
+    }
+
+    log::info!(
+        "albums.v17 remediation: renormalized={}, merged_groups={}, rows_deleted={}",
+        renormalized,
+        merged_groups,
+        rows_deleted
+    );
+
+    Ok((renormalized, merged_groups, rows_deleted))
 }
 
 // ============================================================================
