@@ -100,8 +100,8 @@ mod tests {
 
     #[test]
     fn test_get_analysis_not_found() {
-        let conn = get_memory_connection().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = get_memory_connection().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         let result = get_analysis(&conn, 999).unwrap();
         assert!(result.is_none());
@@ -109,8 +109,8 @@ mod tests {
 
     #[test]
     fn test_save_and_get_analysis() {
-        let conn = get_memory_connection().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = get_memory_connection().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         // Insert a test track first
         conn.execute(
@@ -146,8 +146,8 @@ mod tests {
 
     #[test]
     fn test_update_existing_analysis() {
-        let conn = get_memory_connection().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = get_memory_connection().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         // Insert a test track
         conn.execute(
@@ -197,10 +197,10 @@ mod tests {
 
     #[test]
     fn test_cascade_delete() {
-        let conn = get_memory_connection().unwrap();
+        let mut conn = get_memory_connection().unwrap();
         // Enable foreign keys for this test
         conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
-        initialize_schema(&conn).unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         // Insert track and analysis
         conn.execute(

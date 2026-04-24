@@ -526,8 +526,8 @@ mod tests {
 
     #[test]
     fn test_compute_sync_preview_new_profile() {
-        let conn = get_memory_connection().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = get_memory_connection().unwrap();
+        initialize_schema(&mut conn).unwrap();
         let temp_dir = TempDir::new().unwrap();
 
         // Create profile
@@ -562,8 +562,8 @@ mod tests {
 
     #[test]
     fn test_compute_sync_preview_incremental() {
-        let conn = get_memory_connection().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = get_memory_connection().unwrap();
+        initialize_schema(&mut conn).unwrap();
         let temp_dir = TempDir::new().unwrap();
 
         // Create profile
@@ -613,8 +613,8 @@ mod tests {
 
     #[test]
     fn test_space_validation_blocks_insufficient() {
-        let conn = get_memory_connection().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = get_memory_connection().unwrap();
+        initialize_schema(&mut conn).unwrap();
         let temp_dir = TempDir::new().unwrap();
 
         // Create profile
@@ -656,8 +656,8 @@ mod tests {
             has_sufficient_space: false,
         };
 
-        let conn = get_memory_connection().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = get_memory_connection().unwrap();
+        initialize_schema(&mut conn).unwrap();
         let temp_dir = TempDir::new().unwrap();
 
         let profile_id = create_sync_profile(
@@ -678,8 +678,8 @@ mod tests {
 
     #[test]
     fn test_execute_sync_links_files() {
-        let conn = get_memory_connection().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = get_memory_connection().unwrap();
+        initialize_schema(&mut conn).unwrap();
         let temp_dir = TempDir::new().unwrap();
 
         // Create profile
@@ -721,8 +721,8 @@ mod tests {
 
     #[test]
     fn test_execute_sync_updates_state() {
-        let conn = get_memory_connection().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = get_memory_connection().unwrap();
+        initialize_schema(&mut conn).unwrap();
         let temp_dir = TempDir::new().unwrap();
 
         // Create profile
@@ -768,8 +768,8 @@ mod tests {
 
     #[test]
     fn test_clean_removed_tracks() {
-        let conn = get_memory_connection().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = get_memory_connection().unwrap();
+        initialize_schema(&mut conn).unwrap();
         let temp_dir = TempDir::new().unwrap();
 
         // Create profile

@@ -506,8 +506,8 @@ mod tests {
     fn test_save_and_load_track_gain() {
         use rusqlite::Connection;
 
-        let conn = Connection::open_in_memory().unwrap();
-        crate::database::schema::initialize_schema(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::database::schema::initialize_schema(&mut conn).unwrap();
 
         // Insert a test track
         conn.execute(
@@ -538,8 +538,8 @@ mod tests {
     fn test_get_unanalyzed_tracks() {
         use rusqlite::Connection;
 
-        let conn = Connection::open_in_memory().unwrap();
-        crate::database::schema::initialize_schema(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::database::schema::initialize_schema(&mut conn).unwrap();
 
         // Insert two tracks
         conn.execute(

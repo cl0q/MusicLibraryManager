@@ -456,8 +456,8 @@ mod tests {
 
     #[test]
     fn test_create_sync_profile() {
-        let conn = get_memory_connection().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = get_memory_connection().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         let profile_id =
             create_sync_profile(&conn, "iPod Classic".to_string(), PathBuf::from("/mnt/ipod"))
@@ -473,8 +473,8 @@ mod tests {
 
     #[test]
     fn test_list_sync_profiles() {
-        let conn = get_memory_connection().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = get_memory_connection().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         create_sync_profile(&conn, "iPod".to_string(), PathBuf::from("/mnt/ipod")).unwrap();
         create_sync_profile(&conn, "iPhone".to_string(), PathBuf::from("/mnt/iphone")).unwrap();
@@ -488,8 +488,8 @@ mod tests {
 
     #[test]
     fn test_delete_sync_profile() {
-        let conn = get_memory_connection().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = get_memory_connection().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         let profile_id =
             create_sync_profile(&conn, "Test".to_string(), PathBuf::from("/tmp/test")).unwrap();
@@ -502,8 +502,8 @@ mod tests {
 
     #[test]
     fn test_add_manual_track() {
-        let conn = get_memory_connection().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = get_memory_connection().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         // Create profile
         let profile_id =
@@ -529,8 +529,8 @@ mod tests {
 
     #[test]
     fn test_add_playlist_to_profile() {
-        let conn = get_memory_connection().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = get_memory_connection().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         // Create profile
         let profile_id =
@@ -571,8 +571,8 @@ mod tests {
 
     #[test]
     fn test_add_rule() {
-        let conn = get_memory_connection().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = get_memory_connection().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         // Create profile
         let profile_id =
@@ -598,8 +598,8 @@ mod tests {
 
     #[test]
     fn test_get_all_track_ids_union() {
-        let conn = get_memory_connection().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = get_memory_connection().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         // Create profile
         let profile_id =

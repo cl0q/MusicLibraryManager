@@ -1176,8 +1176,8 @@ mod tests {
 
     #[test]
     fn test_database_sync_timestamp() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        crate::database::schema::initialize_schema(&conn).unwrap();
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::database::schema::initialize_schema(&mut conn).unwrap();
 
         // Initially no timestamp
         let ts = get_last_sync_timestamp(&conn, "user1", "soundcloud").unwrap();
@@ -1198,9 +1198,9 @@ mod tests {
 
     #[test]
     fn test_insert_track_from_soundcloud() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
         conn.execute("PRAGMA foreign_keys = ON", []).unwrap();
-        crate::database::schema::initialize_schema(&conn).unwrap();
+        crate::database::schema::initialize_schema(&mut conn).unwrap();
 
         let track = SoundCloudTrack {
             id: 123456,
@@ -1274,8 +1274,8 @@ mod tests {
         // - Valid refresh token stored in keychain for user
 
         let mut client = SoundCloudClient::new().unwrap();
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        crate::database::schema::initialize_schema(&conn).unwrap();
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::database::schema::initialize_schema(&mut conn).unwrap();
 
         // Would need to set access token manually for this test
         // client.set_access_token("...", Utc::now() + TimeDelta::hours(1));
@@ -1296,8 +1296,8 @@ mod tests {
         if !db_path.exists() {
             panic!("No music_library.db found at {:?}", db_path);
         }
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
-        crate::database::schema::initialize_schema(&conn).unwrap();
+        let mut conn = rusqlite::Connection::open(&db_path).unwrap();
+        crate::database::schema::initialize_schema(&mut conn).unwrap();
 
         let mut client = SoundCloudClient::new().unwrap();
         client.ensure_token("default").await.unwrap();
@@ -1348,8 +1348,8 @@ mod tests {
 
     #[test]
     fn test_find_or_create_soundcloud_track_new() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        crate::database::schema::initialize_schema(&conn).unwrap();
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::database::schema::initialize_schema(&mut conn).unwrap();
 
         // Create source
         conn.execute(
@@ -1398,8 +1398,8 @@ mod tests {
 
     #[test]
     fn test_find_or_create_soundcloud_track_existing() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        crate::database::schema::initialize_schema(&conn).unwrap();
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::database::schema::initialize_schema(&mut conn).unwrap();
 
         conn.execute(
             "INSERT INTO sources (name, user_id, enabled) VALUES ('soundcloud', 'test_user', 1)",
@@ -1444,8 +1444,8 @@ mod tests {
     #[tokio::test]
     #[ignore] // Requires SoundCloud credentials
     async fn test_import_soundcloud_playlist_integration() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        crate::database::schema::initialize_schema(&conn).unwrap();
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::database::schema::initialize_schema(&mut conn).unwrap();
 
         let client = SoundCloudClient::new().unwrap();
 
@@ -1464,8 +1464,8 @@ mod tests {
     #[tokio::test]
     #[ignore] // Requires SoundCloud credentials
     async fn test_import_soundcloud_liked_songs_integration() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        crate::database::schema::initialize_schema(&conn).unwrap();
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::database::schema::initialize_schema(&mut conn).unwrap();
 
         let mut client = SoundCloudClient::new().unwrap();
 
@@ -1485,8 +1485,8 @@ mod tests {
     #[tokio::test]
     #[ignore] // Requires SoundCloud credentials
     async fn test_refresh_soundcloud_playlist_integration() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        crate::database::schema::initialize_schema(&conn).unwrap();
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::database::schema::initialize_schema(&mut conn).unwrap();
 
         let client = SoundCloudClient::new().unwrap();
 

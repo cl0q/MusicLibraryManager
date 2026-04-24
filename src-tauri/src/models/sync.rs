@@ -136,8 +136,8 @@ mod tests {
 
     #[test]
     fn test_sync_profile_dto_from_profile() {
-        let conn = get_memory_connection().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = get_memory_connection().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         // Create a profile
         let profile_id = create_sync_profile(

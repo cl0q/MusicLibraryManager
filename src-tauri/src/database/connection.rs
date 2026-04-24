@@ -69,13 +69,13 @@ pub type Result<T> = std::result::Result<T, DatabaseError>;
 /// // Foreign keys are now enforced
 /// ```
 pub fn get_connection(db_path: &Path) -> Result<Connection> {
-    let conn = Connection::open(db_path)?;
+    let mut conn = Connection::open(db_path)?;
 
     // CRITICAL: Enable foreign keys (default is OFF in SQLite)
     conn.execute("PRAGMA foreign_keys = ON", [])?;
 
     // Initialize schema (idempotent - safe to call every time)
-    crate::database::schema::initialize_schema(&conn)?;
+    crate::database::schema::initialize_schema(&mut conn)?;
 
     Ok(conn)
 }
@@ -89,13 +89,13 @@ pub fn get_connection(db_path: &Path) -> Result<Connection> {
 /// * `Ok(Connection)` with foreign keys enabled and schema initialized
 /// * `Err(DatabaseError)` if initialization failed
 pub fn get_memory_connection() -> Result<Connection> {
-    let conn = Connection::open_in_memory()?;
+    let mut conn = Connection::open_in_memory()?;
 
     // Enable foreign keys
     conn.execute("PRAGMA foreign_keys = ON", [])?;
 
     // Initialize schema
-    crate::database::schema::initialize_schema(&conn)?;
+    crate::database::schema::initialize_schema(&mut conn)?;
 
     Ok(conn)
 }

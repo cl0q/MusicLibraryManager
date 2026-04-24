@@ -261,8 +261,8 @@ mod tests {
 
     #[test]
     fn test_preview_sync_returns_accurate_counts() {
-        let conn = get_memory_connection().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = get_memory_connection().unwrap();
+        initialize_schema(&mut conn).unwrap();
         let temp_dir = TempDir::new().unwrap();
 
         // Create profile
@@ -298,8 +298,8 @@ mod tests {
 
     #[test]
     fn test_sync_profile_to_folder_complete_workflow() {
-        let conn = get_memory_connection().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = get_memory_connection().unwrap();
+        initialize_schema(&mut conn).unwrap();
         let temp_dir = TempDir::new().unwrap();
 
         // Create profile

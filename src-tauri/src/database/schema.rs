@@ -24,7 +24,8 @@ use crate::database::connection::Result;
 /// - Version 13: Add playlist_path_prefix to sync_profiles
 /// - Version 14: Phase 18 loudness columns (lufs_i, lufs_range, true_peak, energy_bucket) on tracks
 /// - Version 15: Phase 20 track_tags table (track_id, tag_key, tag_value) for Yeat taxonomy backfill
-pub const CURRENT_SCHEMA_VERSION: i32 = 15;
+/// - Version 16: Phase 21 albums + variant_of + user_album_variant_pref (VAR-01)
+pub const CURRENT_SCHEMA_VERSION: i32 = 16;
 
 /// SQL schema for the music library database (Phase 1 - base schema).
 ///
@@ -342,6 +343,54 @@ CREATE INDEX IF NOT EXISTS idx_track_tags_key_value ON track_tags(tag_key, tag_v
 CREATE INDEX IF NOT EXISTS idx_track_tags_key ON track_tags(tag_key);
 ";
 
+/// SQL schema for Phase 21 album pairs + UFO toggle (v16).
+///
+/// Creates:
+/// - `albums` table with self-referential `variant_of` FK (base ↔ variant pair).
+/// - `user_album_variant_pref` table for per-user toggle state.
+/// - Additive `tracks.album_id` column (added via ALTER in migrate_to_v16).
+///
+/// Per 21-CONTEXT.md §variant_of Schema Shape:
+/// - Unique index on (album_artist, title_normalized, variant_kind) — NULL
+///   variant_kind is the base row; one base + one of each variant kind per
+///   stem.
+/// - `variant_of` direction: variant row points at base row (base has NULL).
+/// - ON DELETE SET NULL on `variant_of` — deleting base does NOT cascade
+///   to children; it unlinks them.
+/// - `user_album_variant_pref` cascades on album deletion.
+pub const PHASE21_SCHEMA_SQL: &str = "
+CREATE TABLE IF NOT EXISTS albums (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    artist TEXT NOT NULL,
+    album_artist TEXT NOT NULL,
+    title TEXT NOT NULL,
+    title_normalized TEXT NOT NULL,
+    year INTEGER,
+    cover_path TEXT,
+    variant_of INTEGER REFERENCES albums(id) ON DELETE SET NULL,
+    variant_kind TEXT
+);
+
+-- Uniqueness: one base row + one of each variant kind per (album_artist, stem).
+-- COALESCE ensures NULL variant_kind (base) is treated as a distinct value.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_albums_unique_stem
+    ON albums(album_artist, title_normalized, COALESCE(variant_kind, ''));
+
+CREATE INDEX IF NOT EXISTS idx_albums_variant_of ON albums(variant_of);
+CREATE INDEX IF NOT EXISTS idx_albums_album_artist ON albums(album_artist);
+
+CREATE TABLE IF NOT EXISTS user_album_variant_pref (
+    user_id TEXT NOT NULL,
+    base_album_id INTEGER NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+    selected_album_id INTEGER NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, base_album_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_album_variant_pref_user
+    ON user_album_variant_pref(user_id);
+";
+
 /// Get the current schema version from the database.
 pub fn get_schema_version(conn: &Connection) -> Result<i32> {
     let version: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -529,18 +578,81 @@ fn migrate_to_v15(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Migration v16 (Phase 21): albums table + variant_of + user_album_variant_pref + tracks.album_id.
+///
+/// Transactional: all of (CREATE tables, ALTER tracks add column, backfill
+/// albums from tracks, backfill tracks.album_id via UPDATE join) happen in a
+/// single transaction so a failure leaves v15 intact. Idempotent via
+/// CREATE TABLE IF NOT EXISTS + column-detection guard + INSERT OR IGNORE
+/// backfill.
+///
+/// Security (T-21-01): backfill uses parameterized INSERTs — user-controlled
+/// values (album titles, artists) never reach SQL via string interpolation.
+/// Mitigation (T-21-04): atomicity guaranteed by `with_transaction` — any
+/// failure rolls the whole migration back, leaving v15 state intact.
+fn migrate_to_v16(conn: &mut Connection) -> Result<()> {
+    use crate::database::albums::backfill_albums_from_tracks;
+    use crate::database::connection::with_transaction;
+
+    with_transaction(conn, |tx| {
+        // 1. Create tables + indexes.
+        tx.execute_batch(PHASE21_SCHEMA_SQL)?;
+
+        // 2. Add tracks.album_id column if missing. SQLite supports
+        //    ADD COLUMN inside a transaction.
+        let has_album_id: bool = {
+            let mut stmt = tx.prepare("PRAGMA table_info(tracks)")?;
+            let cols: Vec<String> = stmt
+                .query_map([], |r| r.get::<_, String>(1))?
+                .filter_map(|r| r.ok())
+                .collect();
+            cols.contains(&"album_id".to_string())
+        };
+        if !has_album_id {
+            tx.execute_batch(
+                "ALTER TABLE tracks ADD COLUMN album_id INTEGER REFERENCES albums(id) ON DELETE SET NULL;"
+            )?;
+        }
+        // Index creation is idempotent via IF NOT EXISTS — safe to run even
+        // when column already exists.
+        tx.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_tracks_album_id ON tracks(album_id);"
+        )?;
+
+        // 3. Backfill albums rows from DISTINCT (album_artist, album) in tracks.
+        backfill_albums_from_tracks(tx)?;
+
+        // 4. Populate tracks.album_id via UPDATE-JOIN on (album_artist, album).
+        //    Only updates tracks where album_id is still NULL — so repeat
+        //    migrations are no-ops for already-linked rows.
+        tx.execute_batch(
+            "UPDATE tracks
+             SET album_id = (
+                 SELECT a.id FROM albums a
+                 WHERE a.album_artist = tracks.album_artist
+                   AND a.title = tracks.album
+                 LIMIT 1
+             )
+             WHERE album_id IS NULL;"
+        )?;
+
+        Ok(())
+    })
+}
+
 /// Initialize the database schema with versioned migrations.
 ///
 /// Creates all tables and indexes, applying migrations as needed.
 /// Safe to call multiple times (idempotent via version tracking).
 ///
 /// # Arguments
-/// * `conn` - An open database connection
+/// * `conn` - A mutable open database connection (mut required as of v16 —
+///   `migrate_to_v16` uses `with_transaction` which takes `&mut Connection`).
 ///
 /// # Returns
 /// * `Ok(())` if schema was created/migrated successfully
 /// * `Err(DatabaseError)` if schema creation failed
-pub fn initialize_schema(conn: &Connection) -> Result<()> {
+pub fn initialize_schema(conn: &mut Connection) -> Result<()> {
     let current_version = get_schema_version(conn)?;
 
     // Apply base schema (Phase 1)
@@ -635,6 +747,12 @@ pub fn initialize_schema(conn: &Connection) -> Result<()> {
         set_schema_version(conn, 15)?;
     }
 
+    // Phase 21: albums + variant_of + user_album_variant_pref + tracks.album_id
+    if get_schema_version(conn)? < 16 {
+        migrate_to_v16(conn)?;
+        set_schema_version(conn, 16)?;
+    }
+
     Ok(())
 }
 
@@ -667,16 +785,16 @@ mod tests {
 
     #[test]
     fn test_schema_creates_tracks_table() {
-        let conn = Connection::open_in_memory().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         assert!(table_exists(&conn, "tracks"));
     }
 
     #[test]
     fn test_schema_creates_indexes() {
-        let conn = Connection::open_in_memory().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         // Verify Phase 1 indexes exist
         assert!(index_exists(&conn, "idx_artist"));
@@ -691,11 +809,11 @@ mod tests {
 
     #[test]
     fn test_schema_idempotent() {
-        let conn = Connection::open_in_memory().unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
 
         // Should be safe to call multiple times
-        initialize_schema(&conn).unwrap();
-        initialize_schema(&conn).unwrap();
+        initialize_schema(&mut conn).unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         assert!(table_exists(&conn, "tracks"));
         assert_eq!(get_schema_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
@@ -703,12 +821,12 @@ mod tests {
 
     #[test]
     fn test_schema_version_tracking() {
-        let conn = Connection::open_in_memory().unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
 
         // Fresh database starts at version 0
         assert_eq!(get_schema_version(&conn).unwrap(), 0);
 
-        initialize_schema(&conn).unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         // After initialization, should be at current version
         assert_eq!(get_schema_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
@@ -716,8 +834,8 @@ mod tests {
 
     #[test]
     fn test_phase3_sources_table() {
-        let conn = Connection::open_in_memory().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         assert!(table_exists(&conn, "sources"));
 
@@ -738,8 +856,8 @@ mod tests {
 
     #[test]
     fn test_phase3_track_sources_table() {
-        let conn = Connection::open_in_memory().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         assert!(table_exists(&conn, "track_sources"));
 
@@ -772,8 +890,8 @@ mod tests {
 
     #[test]
     fn test_phase3_last_sync_timestamps_table() {
-        let conn = Connection::open_in_memory().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         assert!(table_exists(&conn, "last_sync_timestamps"));
 
@@ -801,8 +919,8 @@ mod tests {
 
     #[test]
     fn test_phase3_variant_of_column() {
-        let conn = Connection::open_in_memory().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         // Verify variant_of column exists
         assert!(column_exists(&conn, "tracks", "variant_of").unwrap());
@@ -832,10 +950,10 @@ mod tests {
 
     #[test]
     fn test_track_sources_cascade_delete() {
-        let conn = Connection::open_in_memory().unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
         // Enable foreign keys for this test
         conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
-        initialize_schema(&conn).unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         // Insert track, source, and relationship
         conn.execute(
@@ -871,7 +989,7 @@ mod tests {
 
     #[test]
     fn test_migration_from_v1_to_v2() {
-        let conn = Connection::open_in_memory().unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
 
         // Simulate a v1 database (only base schema)
         conn.execute_batch(SCHEMA_SQL).unwrap();
@@ -884,7 +1002,7 @@ mod tests {
         ).unwrap();
 
         // Now run full initialization (should migrate)
-        initialize_schema(&conn).unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         // Verify migration happened
         assert_eq!(get_schema_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
@@ -906,8 +1024,8 @@ mod tests {
 
     #[test]
     fn test_phase7_tables_exist() {
-        let conn = Connection::open_in_memory().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         // Verify Phase 7 tables exist
         assert!(table_exists(&conn, "fingerprints"));
@@ -918,7 +1036,7 @@ mod tests {
 
     #[test]
     fn test_migration_from_v4_to_v5() {
-        let conn = Connection::open_in_memory().unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
 
         // Simulate a v4 database (Phase 1-5 schemas)
         conn.execute_batch(SCHEMA_SQL).unwrap();
@@ -931,7 +1049,7 @@ mod tests {
         assert_eq!(get_schema_version(&conn).unwrap(), 4);
 
         // Now run full initialization (should migrate to current version)
-        initialize_schema(&conn).unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         // Verify migration happened to current version
         assert_eq!(get_schema_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
@@ -948,8 +1066,8 @@ mod tests {
 
     #[test]
     fn test_review_queue_indexes() {
-        let conn = Connection::open_in_memory().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         // Verify review queue indexes exist
         assert!(index_exists(&conn, "idx_review_status"));
@@ -958,8 +1076,8 @@ mod tests {
 
     #[test]
     fn test_schema_v12_strips_absolute_organized_paths() {
-        let conn = Connection::open_in_memory().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         // Set library root in app_config
         conn.execute(
@@ -1007,16 +1125,16 @@ mod tests {
 
     #[test]
     fn test_schema_v12_is_applied_in_initialize() {
-        let conn = Connection::open_in_memory().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&mut conn).unwrap();
         assert_eq!(get_schema_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
-        assert_eq!(CURRENT_SCHEMA_VERSION, 15);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 16);
     }
 
     #[test]
     fn test_phase18_loudness_columns_exist() {
-        let conn = Connection::open_in_memory().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         assert!(column_exists(&conn, "tracks", "lufs_i").unwrap());
         assert!(column_exists(&conn, "tracks", "lufs_range").unwrap());
@@ -1043,8 +1161,8 @@ mod tests {
 
     #[test]
     fn test_phase9_download_status_column() {
-        let conn = Connection::open_in_memory().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         // Verify download_status column exists
         assert!(column_exists(&conn, "tracks", "download_status").unwrap());
@@ -1073,18 +1191,20 @@ mod tests {
 
     #[test]
     fn test_phase20_track_tags_table_exists() {
-        let conn = Connection::open_in_memory().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         assert!(table_exists(&conn, "track_tags"));
-        assert_eq!(get_schema_version(&conn).unwrap(), 15);
-        assert_eq!(CURRENT_SCHEMA_VERSION, 15);
+        // After initialize_schema runs the full chain, we're at CURRENT_SCHEMA_VERSION.
+        // Phase 21 bumped this to 16; Phase 20's track_tags table still exists at v16.
+        assert_eq!(get_schema_version(&conn).unwrap(), 16);
+        assert_eq!(CURRENT_SCHEMA_VERSION, 16);
     }
 
     #[test]
     fn test_phase20_track_tags_indexes_exist() {
-        let conn = Connection::open_in_memory().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         assert!(index_exists(&conn, "idx_track_tags_key_value"));
         assert!(index_exists(&conn, "idx_track_tags_key"));
@@ -1092,8 +1212,8 @@ mod tests {
 
     #[test]
     fn test_phase20_track_tags_composite_pk() {
-        let conn = Connection::open_in_memory().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         // Insert a track for FK reference
         conn.execute(
@@ -1134,10 +1254,10 @@ mod tests {
 
     #[test]
     fn test_phase20_track_tags_cascade_delete() {
-        let conn = Connection::open_in_memory().unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
         // Enable foreign keys so the FK cascade actually fires
         conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
-        initialize_schema(&conn).unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         // Insert a track and two tag rows
         conn.execute(
@@ -1180,7 +1300,7 @@ mod tests {
 
     #[test]
     fn test_phase20_migration_from_v14_to_v15() {
-        let conn = Connection::open_in_memory().unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
 
         // Simulate a v14 database by applying every prior schema in order.
         conn.execute_batch(SCHEMA_SQL).unwrap();
@@ -1213,11 +1333,12 @@ mod tests {
         assert_eq!(get_schema_version(&conn).unwrap(), 14);
         assert!(!table_exists(&conn, "track_tags"));
 
-        // Apply the migration chain
-        initialize_schema(&conn).unwrap();
+        // Apply the migration chain — runs v14 → v15 → v16 in sequence.
+        initialize_schema(&mut conn).unwrap();
 
-        // Final version must be v15 and track_tags must now exist
-        assert_eq!(get_schema_version(&conn).unwrap(), 15);
+        // Final version is CURRENT_SCHEMA_VERSION (v16 after Phase 21).
+        // Phase 20's track_tags table still exists at v16.
+        assert_eq!(get_schema_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
         assert!(table_exists(&conn, "track_tags"));
         assert!(index_exists(&conn, "idx_track_tags_key_value"));
         assert!(index_exists(&conn, "idx_track_tags_key"));
@@ -1233,8 +1354,288 @@ mod tests {
         assert_eq!(title, "Flawless");
 
         // Second initialize_schema call must be a no-op
-        initialize_schema(&conn).unwrap();
+        initialize_schema(&mut conn).unwrap();
+        assert_eq!(get_schema_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
+    }
+
+    // ========================================================================
+    // Phase 21: albums + variant_of + user_album_variant_pref (v16)
+    // ========================================================================
+
+    #[test]
+    fn test_phase21_schema_version_is_16() {
+        assert_eq!(CURRENT_SCHEMA_VERSION, 16);
+    }
+
+    #[test]
+    fn test_phase21_albums_table_exists() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&mut conn).unwrap();
+
+        assert!(table_exists(&conn, "albums"));
+        assert!(table_exists(&conn, "user_album_variant_pref"));
+        assert!(column_exists(&conn, "tracks", "album_id").unwrap());
+        assert!(index_exists(&conn, "idx_albums_unique_stem"));
+        assert!(index_exists(&conn, "idx_albums_variant_of"));
+        assert!(index_exists(&conn, "idx_albums_album_artist"));
+        assert!(index_exists(&conn, "idx_tracks_album_id"));
+        assert!(index_exists(&conn, "idx_user_album_variant_pref_user"));
+        assert_eq!(get_schema_version(&conn).unwrap(), 16);
+    }
+
+    #[test]
+    fn test_phase21_backfill_populates_albums() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        initialize_schema(&mut conn).unwrap();
+
+        // Insert 3 tracks across 3 distinct (album_artist, album) pairs.
+        conn.execute(
+            "INSERT INTO tracks (artist, album_artist, album, title, format, original_path)
+             VALUES ('Yeat', 'Yeat', 'AftërLyfe', 'Flawless', 'flac', '/a.flac')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO tracks (artist, album_artist, album, title, format, original_path)
+             VALUES ('Yeat', 'Yeat', 'AftërLyfe [U]', 'Flawless', 'flac', '/b.flac')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO tracks (artist, album_artist, album, title, format, original_path)
+             VALUES ('Yeat', 'Yeat', 'Lyfestyle V1', 'Track', 'flac', '/c.flac')",
+            [],
+        ).unwrap();
+
+        // Call backfill directly in a transaction — the migration already ran
+        // once (at initialize_schema), but that was on an empty tracks table.
+        // This exercises the same path plans downstream will use.
+        use crate::database::albums::backfill_albums_from_tracks;
+        use crate::database::connection::with_transaction;
+        with_transaction(&mut conn, |tx| {
+            backfill_albums_from_tracks(tx)?;
+            tx.execute_batch(
+                "UPDATE tracks SET album_id = (
+                     SELECT a.id FROM albums a
+                     WHERE a.album_artist = tracks.album_artist AND a.title = tracks.album
+                     LIMIT 1
+                 ) WHERE album_id IS NULL;"
+            )?;
+            Ok(())
+        }).unwrap();
+
+        let album_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM albums",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(album_count, 3);
+
+        // Verify variant_kind values.
+        let u_kind: Option<String> = conn.query_row(
+            "SELECT variant_kind FROM albums WHERE title = 'AftërLyfe [U]'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(u_kind, Some("u".to_string()));
+
+        let base_kind: Option<String> = conn.query_row(
+            "SELECT variant_kind FROM albums WHERE title = 'AftërLyfe'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(base_kind, None);
+
+        let v1_kind: Option<String> = conn.query_row(
+            "SELECT variant_kind FROM albums WHERE title = 'Lyfestyle V1'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(v1_kind, Some("v1".to_string()));
+
+        // Verify stems collapse: AftërLyfe and AftërLyfe [U] share title_normalized='afterlyfe'.
+        let stem_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM albums WHERE title_normalized = 'afterlyfe'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(stem_count, 2, "base and [U] must share the 'afterlyfe' stem");
+
+        // Verify tracks.album_id was populated.
+        let ar_album_id: Option<i64> = conn.query_row(
+            "SELECT album_id FROM tracks WHERE album = 'AftërLyfe' LIMIT 1",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert!(ar_album_id.is_some(), "tracks.album_id should be populated");
+    }
+
+    #[test]
+    fn test_phase21_unique_stem_constraint() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&mut conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO albums (artist, album_artist, title, title_normalized, variant_kind)
+             VALUES ('Yeat', 'Yeat', 'AftërLyfe', 'afterlyfe', NULL)",
+            [],
+        ).unwrap();
+
+        // Second insert with same (album_artist, title_normalized, NULL variant_kind) must fail.
+        let dup = conn.execute(
+            "INSERT INTO albums (artist, album_artist, title, title_normalized, variant_kind)
+             VALUES ('Yeat', 'Yeat', 'AftërLyfe', 'afterlyfe', NULL)",
+            [],
+        );
+        assert!(dup.is_err(), "duplicate (album_artist, stem, NULL variant_kind) must violate unique index");
+
+        // But (album_artist, same stem, variant_kind='u') must succeed.
+        conn.execute(
+            "INSERT INTO albums (artist, album_artist, title, title_normalized, variant_kind)
+             VALUES ('Yeat', 'Yeat', 'AftërLyfe [U]', 'afterlyfe', 'u')",
+            [],
+        ).unwrap();
+    }
+
+    #[test]
+    fn test_phase21_variant_of_set_null_on_base_delete() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        initialize_schema(&mut conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO albums (id, artist, album_artist, title, title_normalized, variant_kind)
+             VALUES (1, 'Yeat', 'Yeat', 'AftërLyfe', 'afterlyfe', NULL)",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO albums (id, artist, album_artist, title, title_normalized, variant_of, variant_kind)
+             VALUES (2, 'Yeat', 'Yeat', 'AftërLyfe [U]', 'afterlyfe', 1, 'u')",
+            [],
+        ).unwrap();
+
+        // Delete the base row — variant row's variant_of should become NULL, NOT cascade delete.
+        conn.execute("DELETE FROM albums WHERE id = 1", []).unwrap();
+
+        let still_exists: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM albums WHERE id = 2",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(still_exists, 1, "variant row must survive base deletion");
+
+        let variant_of: Option<i64> = conn.query_row(
+            "SELECT variant_of FROM albums WHERE id = 2",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(variant_of, None, "variant_of must be NULL after base delete");
+    }
+
+    #[test]
+    fn test_phase21_user_pref_cascade_on_album_delete() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        initialize_schema(&mut conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO albums (id, artist, album_artist, title, title_normalized)
+             VALUES (1, 'Yeat', 'Yeat', 'AftërLyfe', 'afterlyfe')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO user_album_variant_pref (user_id, base_album_id, selected_album_id, updated_at)
+             VALUES ('default', 1, 1, '2026-04-23T00:00:00Z')",
+            [],
+        ).unwrap();
+
+        conn.execute("DELETE FROM albums WHERE id = 1", []).unwrap();
+
+        let pref_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM user_album_variant_pref WHERE base_album_id = 1",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(pref_count, 0, "preference row must cascade delete when album deleted");
+    }
+
+    #[test]
+    fn test_phase21_migration_idempotent() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&mut conn).unwrap();
+        let v_first = get_schema_version(&conn).unwrap();
+        initialize_schema(&mut conn).unwrap();
+        let v_second = get_schema_version(&conn).unwrap();
+        assert_eq!(v_first, 16);
+        assert_eq!(v_second, 16);
+    }
+
+    #[test]
+    fn test_phase21_migration_from_v15_to_v16() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        // Simulate a v15 DB — apply the existing chain up to v16 and roll back
+        // to v15 by dropping v16 artifacts and resetting user_version.
+        // album_id column stays (can't drop columns in SQLite < 3.35 without
+        // rebuild); the column-exists guard in migrate_to_v16 handles the
+        // already-present case on re-migration.
+        initialize_schema(&mut conn).unwrap();
+
+        // Disable FK enforcement while we tear down v16 artifacts — the
+        // lingering `tracks.album_id` column still carries an FK to the
+        // (about-to-be-dropped) `albums` table. Re-enable after the migration
+        // restores a consistent schema.
+        conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+        conn.execute_batch("DROP TABLE IF EXISTS user_album_variant_pref").unwrap();
+        conn.execute_batch("DROP TABLE IF EXISTS albums").unwrap();
+        conn.execute_batch("PRAGMA user_version = 15").unwrap();
+
         assert_eq!(get_schema_version(&conn).unwrap(), 15);
+        assert!(!table_exists(&conn, "albums"));
+
+        // Insert a track before migration.
+        conn.execute(
+            "INSERT INTO tracks (artist, album_artist, album, title, format, original_path)
+             VALUES ('Yeat', 'Yeat', 'AftërLyfe', 'Flawless', 'flac', '/f.flac')",
+            [],
+        ).unwrap();
+
+        initialize_schema(&mut conn).unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+
+        assert_eq!(get_schema_version(&conn).unwrap(), 16);
+        assert!(table_exists(&conn, "albums"));
+        assert!(table_exists(&conn, "user_album_variant_pref"));
+
+        // Existing track preserved.
+        let title: String = conn.query_row(
+            "SELECT title FROM tracks WHERE id = 1",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(title, "Flawless");
+
+        // Backfill ran — albums row exists for AftërLyfe.
+        let albums_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM albums WHERE title = 'AftërLyfe'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(albums_count, 1);
+    }
+
+    #[test]
+    fn test_phase21_backfill_empty_tracks_no_op() {
+        // Test 8 from the plan: empty tracks table at migration time produces
+        // zero albums rows (no-op backfill, no errors).
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&mut conn).unwrap();
+
+        // tracks is empty after schema init — albums should also be empty.
+        let albums_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM albums",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(albums_count, 0, "empty tracks should produce zero albums");
     }
 }
 

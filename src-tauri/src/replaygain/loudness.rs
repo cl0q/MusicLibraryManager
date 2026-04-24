@@ -306,8 +306,8 @@ mod tests {
     fn save_loudness_round_trips() {
         use crate::database::schema::initialize_schema;
 
-        let conn = Connection::open_in_memory().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         conn.execute(
             "INSERT INTO tracks (artist, album_artist, album, title, format, original_path)
@@ -347,8 +347,8 @@ mod tests {
     fn get_unanalyzed_skips_remote_tracks() {
         use crate::database::schema::initialize_schema;
 
-        let conn = Connection::open_in_memory().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&mut conn).unwrap();
 
         // Remote track — no organized_path, should be skipped.
         conn.execute(

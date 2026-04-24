@@ -20,6 +20,7 @@
 //! })?;
 //! ```
 
+pub mod albums;
 pub mod connection;
 pub mod playlist;
 pub mod schema;

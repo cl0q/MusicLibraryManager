@@ -45,7 +45,7 @@ pub fn initialize_on_startup() {
     log::info!("Initializing database and playlists...");
 
     let db_path = crate::database::db_path();
-    let conn = match get_connection(&db_path) {
+    let mut conn = match get_connection(&db_path) {
         Ok(c) => c,
         Err(e) => {
             log::error!("Failed to connect to database: {}", e);
@@ -54,7 +54,7 @@ pub fn initialize_on_startup() {
     };
 
     // Initialize schema (idempotent)
-    if let Err(e) = initialize_schema(&conn) {
+    if let Err(e) = initialize_schema(&mut conn) {
         log::error!("Failed to initialize schema: {}", e);
         return;
     }

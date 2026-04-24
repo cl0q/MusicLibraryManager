@@ -323,9 +323,9 @@ mod tests {
 
     /// Build an in-memory DB with schema v15 applied + foreign keys enabled.
     fn setup_db() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
-        initialize_schema(&conn).unwrap();
+        initialize_schema(&mut conn).unwrap();
         conn
     }
 

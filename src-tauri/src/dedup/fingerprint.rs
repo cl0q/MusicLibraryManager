@@ -450,8 +450,8 @@ mod tests {
     use crate::fingerprint::chromaprint::save_fingerprint;
 
     fn create_test_db() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        initialize_schema(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&mut conn).unwrap();
         conn
     }
 

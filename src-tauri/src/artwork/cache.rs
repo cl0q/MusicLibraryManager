@@ -184,8 +184,8 @@ mod tests {
 
     #[test]
     fn test_get_tracks_without_artwork() {
-        let conn = Connection::open_in_memory().unwrap();
-        crate::database::schema::initialize_schema(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::database::schema::initialize_schema(&mut conn).unwrap();
 
         // Insert test tracks
         conn.execute(
@@ -217,8 +217,8 @@ mod tests {
 
     #[test]
     fn test_save_artwork_state_roundtrip() {
-        let conn = Connection::open_in_memory().unwrap();
-        crate::database::schema::initialize_schema(&conn).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::database::schema::initialize_schema(&mut conn).unwrap();
 
         // Insert test track
         conn.execute(
