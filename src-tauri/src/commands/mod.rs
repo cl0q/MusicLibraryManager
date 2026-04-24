@@ -32,9 +32,11 @@
 //! - resolve_review_item_cmd: Approve/reject/dismiss review items
 //! - get_review_queue_count_cmd: Get pending review count for sidebar badge
 //! - backfill_yeat_tags_cmd: Backfill `track_tags` from on-disk Yeat taxonomy
+//! - detect_album_siblings_cmd: Detect and link album variant siblings (Phase 21)
 //!
 //! Commands are registered in lib.rs via tauri::generate_handler![]
 
+pub mod albums;
 pub mod analysis;
 pub mod batch_control;
 pub mod download;
@@ -51,6 +53,7 @@ pub mod sync;
 pub mod yeat;
 
 // Re-export commands for registration
+pub use albums::detect_album_siblings_cmd;
 pub use analysis::get_track_analysis;
 pub use batch_control::stop_analysis_cmd;
 pub use download::{download_tracks, get_retry_queue_status, retry_failed_downloads};
