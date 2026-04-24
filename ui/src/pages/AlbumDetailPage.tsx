@@ -32,6 +32,9 @@ export default function AlbumDetailPage() {
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedAlbumId, setSelectedAlbumId] = useState<number | null>(null);
+  // `.ufo-crossfade` only wants to play while the UFO pill is animating (500ms).
+  // Gate on isAnimating so the initial mount stays static.
+  const [isAnimating, setIsAnimating] = useState(false);
 
   const load = useCallback(async () => {
     if (!slug) return;
@@ -141,16 +144,21 @@ export default function AlbumDetailPage() {
             selectedAlbumId={selectedAlbumId ?? detail.album.id}
             onSelect={(newSelectedId) => {
               setSelectedAlbumId(newSelectedId);
+              setIsAnimating(true);
+              window.setTimeout(() => setIsAnimating(false), 500);
             }}
           />
         </div>
       )}
 
       <div className="px-5 pb-6 pt-8">
-        {/* Key-remount drives the crossfade when the UFO toggle swaps selection. */}
+        {/* Key-remount swaps the data instantly at the 50% keyframe; the
+         * .ufo-crossfade class on the outer wrapper drives the visual
+         * 500ms fade-dip around that commit. */}
         <AlbumTracklist
           key={selectedAlbumId ?? detail.album.id}
           tracks={selected.tracks}
+          animating={isAnimating}
         />
       </div>
     </div>

@@ -2,6 +2,10 @@ import type { Track } from "../../types/library";
 
 interface AlbumTracklistProps {
   tracks: Track[];
+  /** When true, apply the `.ufo-crossfade` class so the container fades through
+   *  the 500ms UFO-opening animation window. Defaults to false so initial
+   *  page mounts stay static. */
+  animating?: boolean;
 }
 
 /**
@@ -24,14 +28,18 @@ function formatDuration(sec: number | null | undefined): string {
  * Empty-tracks copy is verbatim per UI-SPEC §Copywriting Contract —
  * "This album has no tracks."
  *
- * The parent forces remount via a `key={selectedAlbumId}` prop so the UFO
- * animation's crossfade (driven by `.ufo-crossfade` on the container in a
- * future enhancement, or by CSS transitions already on rows) reads cleanly.
+ * The parent forces remount via a `key={selectedAlbumId}` prop so the new
+ * variant's track data is instantly swapped in at the 50% keyframe of the
+ * UFO animation. The `animating` prop toggles `.ufo-crossfade` on the
+ * container for the 500ms animation window so the swap reads as a fade-dip
+ * rather than an instant replace.
  */
-export function AlbumTracklist({ tracks }: AlbumTracklistProps) {
+export function AlbumTracklist({ tracks, animating = false }: AlbumTracklistProps) {
+  const crossfadeClass = animating ? " ufo-crossfade" : "";
+
   if (tracks.length === 0) {
     return (
-      <div className="border border-edge rounded-md bg-surface p-6">
+      <div className={`border border-edge rounded-md bg-surface p-6${crossfadeClass}`}>
         <p className="text-ink-muted text-[13px]">
           This album has no tracks.
         </p>
@@ -40,7 +48,7 @@ export function AlbumTracklist({ tracks }: AlbumTracklistProps) {
   }
 
   return (
-    <div className="border border-edge rounded-md bg-surface overflow-hidden">
+    <div className={`border border-edge rounded-md bg-surface overflow-hidden${crossfadeClass}`}>
       <div
         className="grid items-center gap-3 px-3 py-2 text-[10px] text-ink-muted uppercase border-b border-edge"
         style={{
