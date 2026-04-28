@@ -94,4 +94,7 @@ pub use sync::{
     delete_sync_profile, detect_rockbox_devices_cmd, execute_sync_cmd, get_last_sync_time,
     get_sync_profile, list_sync_profiles, preview_sync_cmd,
 };
-pub use yeat::{backfill_yeat_tags_cmd, BackfillReport, DriftEntry};
+pub use yeat::{
+    backfill_yeat_tags_cmd, backfill_yeat_tags_from_db_cmd, BackfillReport, DbBackfillReport,
+    DriftEntry,
+};

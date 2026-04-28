@@ -309,6 +309,144 @@ pub async fn backfill_yeat_tags_cmd(library_root: String) -> Result<BackfillRepo
 }
 
 // ============================================================================
+// Phase 21.1 — DB-derived backfill (no disk walking)
+// ============================================================================
+
+/// Result payload for [`backfill_yeat_tags_from_db_cmd`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbBackfillReport {
+    /// Distinct yeat tracks (LOWER(album_artist)='yeat') the command processed.
+    pub tracks_processed: usize,
+    /// Count of (artist=yeat) tags written.
+    pub artist_tags_written: usize,
+    /// Count of (era=<album.title_normalized>) tags written. Only tracks
+    /// linked to an album row contribute.
+    pub era_tags_written: usize,
+    /// Count of (variant=<album.variant_kind>) tags written. Only albums
+    /// with a non-null variant_kind contribute.
+    pub variant_tags_written: usize,
+    /// Count of stale managed-key rows removed before re-inserting fresh ones.
+    pub stale_tags_removed: usize,
+}
+
+/// Tag every track where `LOWER(album_artist) = 'yeat'` with the three
+/// managed keys derived from the live DB:
+///
+/// - `(artist, 'yeat')` — unconditional.
+/// - `(era, albums.title_normalized)` — joined via `tracks.album_id`. Skipped
+///   for tracks with no album link.
+/// - `(variant, albums.variant_kind)` — only when the album has a non-null
+///   variant_kind (e.g. `'0.5'`, `'v1'`, `'u'`).
+///
+/// Idempotent: deletes existing managed-key rows for yeat tracks first, then
+/// re-inserts the fresh set. Non-yeat tracks and unmanaged tag keys are never
+/// touched. Runs inside a single transaction; a failure mid-way rolls back.
+///
+/// This replaces the disk-walking variant for v1.3 because the on-disk
+/// `00_Artist/Yeat/` layout doesn't match the walker's hard-coded
+/// `<root>/00_Artist/Yeat/<era>/<file>` shape (the user's Yeat folder has
+/// content directories, scripts, and a doubled `Yeat/Yeat/` nesting). The
+/// DB-derived approach uses the post-v17 `albums` table as authoritative
+/// instead of the disk taxonomy.
+fn run_db_backfill(conn: &mut Connection) -> Result<DbBackfillReport, String> {
+    let tx = conn.transaction().map_err(|e| format!("begin tx: {}", e))?;
+
+    // Count yeat tracks for the report.
+    let tracks_processed: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) FROM tracks WHERE LOWER(album_artist) = 'yeat'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("count yeat tracks: {}", e))?;
+
+    // Step 1: clear managed-key rows for every yeat track. Keeps re-runs
+    // clean (e.g. a stale era from a previous backfill). Unmanaged keys
+    // are untouched — this command only owns artist/era/variant.
+    let stale_tags_removed = tx
+        .execute(
+            "DELETE FROM track_tags
+             WHERE tag_key IN ('artist', 'era', 'variant')
+               AND track_id IN (
+                   SELECT id FROM tracks WHERE LOWER(album_artist) = 'yeat'
+               )",
+            [],
+        )
+        .map_err(|e| format!("delete stale managed tags: {}", e))?;
+
+    // Step 2: write (artist, yeat) for every yeat track.
+    let artist_tags_written = tx
+        .execute(
+            "INSERT INTO track_tags (track_id, tag_key, tag_value)
+             SELECT id, 'artist', 'yeat'
+             FROM tracks WHERE LOWER(album_artist) = 'yeat'",
+            [],
+        )
+        .map_err(|e| format!("insert artist tags: {}", e))?;
+
+    // Step 3: write (era, albums.title_normalized) for every yeat track
+    // that is linked to an album.
+    let era_tags_written = tx
+        .execute(
+            "INSERT INTO track_tags (track_id, tag_key, tag_value)
+             SELECT t.id, 'era', a.title_normalized
+             FROM tracks t
+             JOIN albums a ON a.id = t.album_id
+             WHERE LOWER(t.album_artist) = 'yeat'
+               AND a.title_normalized IS NOT NULL
+               AND a.title_normalized <> ''",
+            [],
+        )
+        .map_err(|e| format!("insert era tags: {}", e))?;
+
+    // Step 4: write (variant, albums.variant_kind) where the album row
+    // carries a variant_kind. Base albums (variant_kind IS NULL) skip this.
+    let variant_tags_written = tx
+        .execute(
+            "INSERT INTO track_tags (track_id, tag_key, tag_value)
+             SELECT t.id, 'variant', a.variant_kind
+             FROM tracks t
+             JOIN albums a ON a.id = t.album_id
+             WHERE LOWER(t.album_artist) = 'yeat'
+               AND a.variant_kind IS NOT NULL",
+            [],
+        )
+        .map_err(|e| format!("insert variant tags: {}", e))?;
+
+    tx.commit().map_err(|e| format!("commit tx: {}", e))?;
+
+    log::info!(
+        "yeat tags db-backfill: tracks={}, artist={}, era={}, variant={}, removed={}",
+        tracks_processed,
+        artist_tags_written,
+        era_tags_written,
+        variant_tags_written,
+        stale_tags_removed
+    );
+
+    Ok(DbBackfillReport {
+        tracks_processed: tracks_processed as usize,
+        artist_tags_written,
+        era_tags_written,
+        variant_tags_written,
+        stale_tags_removed,
+    })
+}
+
+/// Tauri-registered entry point for the DB-derived Yeat tag backfill. See
+/// [`run_db_backfill`] for semantics. Wired to the "Backfill Yeat Tags"
+/// button in Settings.
+#[tauri::command]
+pub async fn backfill_yeat_tags_from_db_cmd() -> Result<DbBackfillReport, String> {
+    tokio::task::spawn_blocking(move || {
+        let mut conn = get_connection(&db_path()).map_err(|e| format!("db connection: {}", e))?;
+        run_db_backfill(&mut conn)
+    })
+    .await
+    .map_err(|e| format!("join: {}", e))?
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -715,5 +853,135 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::env::set_current_dir(&self.prev);
         }
+    }
+
+    // ---------- run_db_backfill (Phase 21.1 DB-derived backfill) ----------
+
+    /// Insert a track with explicit `album_artist` casing; bypasses
+    /// `insert_track` (which hard-codes "Yeat"). Returns the new rowid.
+    fn insert_track_for_db_backfill(
+        conn: &Connection,
+        album_artist: &str,
+        album: &str,
+        original_path: &str,
+        album_id: Option<i64>,
+    ) -> i64 {
+        conn.execute(
+            "INSERT INTO tracks (artist, album_artist, album, title, format, original_path, organized_path, album_id)
+             VALUES (?1, ?2, ?3, 'T', 'm4a', ?4, NULL, ?5)",
+            rusqlite::params![album_artist, album_artist, album, original_path, album_id],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
+    fn insert_album_for_db_backfill(
+        conn: &Connection,
+        album_artist: &str,
+        title: &str,
+        title_normalized: &str,
+        variant_kind: Option<&str>,
+    ) -> i64 {
+        conn.execute(
+            "INSERT INTO albums (artist, album_artist, title, title_normalized, variant_kind)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![album_artist, album_artist, title, title_normalized, variant_kind],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
+    #[test]
+    fn test_db_backfill_writes_artist_era_variant_tags() {
+        let mut conn = setup_db();
+        let base_album = insert_album_for_db_backfill(&conn, "Yeat", "4L", "4l", None);
+        let variant_album = insert_album_for_db_backfill(&conn, "yeat", "4L 0.5", "4l", Some("0.5"));
+        let base_track = insert_track_for_db_backfill(&conn, "Yeat", "4L", "/disk/a.m4a", Some(base_album));
+        let variant_track =
+            insert_track_for_db_backfill(&conn, "yeat", "4L 0.5", "/disk/b.m4a", Some(variant_album));
+        // A non-Yeat track that must NOT be tagged.
+        let non_yeat = insert_track_for_db_backfill(&conn, "Drake", "Scorpion", "/disk/c.m4a", None);
+
+        let report = run_db_backfill(&mut conn).expect("backfill ok");
+
+        assert_eq!(report.tracks_processed, 2);
+        assert_eq!(report.artist_tags_written, 2);
+        assert_eq!(report.era_tags_written, 2);
+        assert_eq!(report.variant_tags_written, 1);
+        assert_eq!(report.stale_tags_removed, 0);
+
+        // Both Yeat tracks have artist=yeat + era=4l; variant track also has variant=0.5.
+        assert_eq!(count_tags(&conn, base_track), 2, "base: artist + era");
+        assert_eq!(count_tags(&conn, variant_track), 3, "variant: artist + era + variant");
+        assert_eq!(count_tags(&conn, non_yeat), 0, "non-yeat untouched");
+
+        // Specifically verify the era value is 4l (album.title_normalized).
+        let era: String = conn
+            .query_row(
+                "SELECT tag_value FROM track_tags WHERE track_id = ?1 AND tag_key = 'era'",
+                rusqlite::params![base_track],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(era, "4l");
+    }
+
+    #[test]
+    fn test_db_backfill_idempotent_and_clears_stale() {
+        let mut conn = setup_db();
+        let album = insert_album_for_db_backfill(&conn, "Yeat", "4L", "4l", None);
+        let track = insert_track_for_db_backfill(&conn, "Yeat", "4L", "/disk/a.m4a", Some(album));
+
+        // Seed a stale era tag from a prior buggy run (e.g. era="Yeat" from
+        // doubled-folder walker output). The DB backfill must clear it.
+        conn.execute(
+            "INSERT INTO track_tags (track_id, tag_key, tag_value) VALUES (?1, 'era', 'Yeat')",
+            rusqlite::params![track],
+        )
+        .unwrap();
+        // And an unmanaged tag the backfill MUST NOT touch.
+        conn.execute(
+            "INSERT INTO track_tags (track_id, tag_key, tag_value) VALUES (?1, 'mood', 'hyped')",
+            rusqlite::params![track],
+        )
+        .unwrap();
+
+        let r1 = run_db_backfill(&mut conn).expect("first run");
+        assert_eq!(r1.stale_tags_removed, 1, "stale era=Yeat must be removed");
+        // Track now has: artist=yeat, era=4l, mood=hyped (unmanaged preserved).
+        assert_eq!(count_tags(&conn, track), 3);
+
+        let r2 = run_db_backfill(&mut conn).expect("second run");
+        // Re-runs delete the freshly-written managed rows then re-write them —
+        // count is steady, no growth.
+        assert_eq!(r2.stale_tags_removed, 2, "removes the artist+era it just wrote");
+        assert_eq!(r2.artist_tags_written, 1);
+        assert_eq!(r2.era_tags_written, 1);
+        assert_eq!(count_tags(&conn, track), 3, "tag count is stable across re-runs");
+
+        // The unmanaged 'mood' row survives.
+        let mood_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM track_tags WHERE track_id = ?1 AND tag_key = 'mood'",
+                rusqlite::params![track],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(mood_count, 1);
+    }
+
+    #[test]
+    fn test_db_backfill_skips_tracks_without_album_link() {
+        let mut conn = setup_db();
+        // Yeat track with NO album_id — should still get artist tag, no era/variant.
+        let track = insert_track_for_db_backfill(&conn, "Yeat", "Loose", "/disk/loose.m4a", None);
+
+        let report = run_db_backfill(&mut conn).expect("backfill ok");
+
+        assert_eq!(report.tracks_processed, 1);
+        assert_eq!(report.artist_tags_written, 1);
+        assert_eq!(report.era_tags_written, 0);
+        assert_eq!(report.variant_tags_written, 0);
+        assert_eq!(count_tags(&conn, track), 1, "only artist=yeat");
     }
 }

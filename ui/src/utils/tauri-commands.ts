@@ -594,43 +594,33 @@ export async function rescanAlbums(): Promise<RescanAlbumsResult> {
 }
 
 // ============================================================================
-// Phase 20 — Backfill Yeat Tags
+// Phase 21.1 — DB-derived Yeat Tag Backfill
 // ============================================================================
 
-/** Per-(track, tag_key) diff entry produced by `backfillYeatTags`. */
-export interface YeatTagDriftEntry {
-  track_id: number;
-  relative_path: string;
-  tag_key: string;
-  old_value: string;
-  new_value: string;
-}
-
 /**
- * Result payload returned by `backfillYeatTags`. Matches Rust `BackfillReport`
- * in `src-tauri/src/commands/yeat.rs`.
+ * Result payload for `backfillYeatTagsFromDb`. Matches Rust
+ * `DbBackfillReport` in `src-tauri/src/commands/yeat.rs`.
  */
-export interface YeatBackfillReport {
-  walked_at: string;
-  library_root: string;
-  tracks_scanned: number;
-  tracks_matched: number;
-  tags_written: number;
-  tags_removed: number;
-  drift: YeatTagDriftEntry[];
-  orphan_disk_files: string[];
-  report_path: string;
+export interface YeatDbBackfillReport {
+  tracks_processed: number;
+  artist_tags_written: number;
+  era_tags_written: number;
+  variant_tags_written: number;
+  stale_tags_removed: number;
 }
 
 /**
- * Phase 20 — Walk `<libraryRoot>/00_Artist/Yeat/` on disk and reconcile
- * `track_tags` rows for every matching track (artist=yeat, era=<folder>,
- * variant=<detected> if applicable). Idempotent. Required before sibling
- * detection / UFO toggle can identify Yeat albums — without these tags the
- * `is_yeat` gate excludes every Yeat album.
+ * Phase 21.1 — Tag every track where `LOWER(album_artist) = 'yeat'` with
+ * managed-key triples derived from the live DB (not the disk taxonomy):
  *
- * Writes a JSON drift report to `.planning/sync-reports/yeat-tags-<ts>.json`.
+ * - `(artist, 'yeat')` for every yeat track.
+ * - `(era, albums.title_normalized)` joined via `tracks.album_id`.
+ * - `(variant, albums.variant_kind)` for albums with non-null variant_kind.
+ *
+ * Idempotent: per-track DELETE+INSERT on managed keys. Unmanaged tags
+ * (e.g. mood, source) are never touched. Required so sibling detection's
+ * `is_yeat` gate accepts Yeat albums and the UFO toggle can render.
  */
-export async function backfillYeatTags(libraryRoot: string): Promise<YeatBackfillReport> {
-  return invoke<YeatBackfillReport>("backfill_yeat_tags_cmd", { libraryRoot });
+export async function backfillYeatTagsFromDb(): Promise<YeatDbBackfillReport> {
+  return invoke<YeatDbBackfillReport>("backfill_yeat_tags_from_db_cmd");
 }

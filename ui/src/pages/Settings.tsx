@@ -7,8 +7,7 @@ import {
   setAppSetting,
   analyzeLoudnessAll,
   rescanAlbums,
-  backfillYeatTags,
-  get_library_config,
+  backfillYeatTagsFromDb,
 } from "../utils/tauri-commands";
 import { useTheme, type ThemeName } from "../contexts/ThemeContext";
 
@@ -272,26 +271,21 @@ export default function Settings() {
         />
         <MaintenanceRow
           label="Backfill Yeat Tags"
-          hint="Walk 00_Artist/Yeat/ and tag tracks with artist + era + variant"
+          hint="Tag Yeat tracks with artist + era + variant from the albums table"
           running={maintenanceRunning === "backfill-yeat-tags"}
           disabled={maintenanceRunning !== null}
           actions={[
             {
               label: "Backfill",
-              loadingLabel: "Walking…",
+              loadingLabel: "Tagging…",
               onClick: () =>
                 runMaintenance("backfill-yeat-tags", async () => {
-                  const cfg = await get_library_config();
-                  if (!cfg.root_path) {
-                    toast.error("Configure a library root first");
-                    return;
-                  }
-                  const r = await backfillYeatTags(cfg.root_path);
-                  const driftSuffix = r.drift.length > 0 ? `, ${r.drift.length} drift` : "";
-                  const orphanSuffix =
-                    r.orphan_disk_files.length > 0 ? `, ${r.orphan_disk_files.length} orphan files` : "";
+                  const r = await backfillYeatTagsFromDb();
+                  const total = r.artist_tags_written + r.era_tags_written + r.variant_tags_written;
+                  const removedSuffix =
+                    r.stale_tags_removed > 0 ? `, ${r.stale_tags_removed} stale removed` : "";
                   toast.success(
-                    `${r.tracks_matched}/${r.tracks_scanned} tracks tagged, ${r.tags_written} tags written${driftSuffix}${orphanSuffix}`,
+                    `${r.tracks_processed} tracks tagged, ${total} tags written${removedSuffix}`,
                   );
                 }),
             },
