@@ -191,9 +191,17 @@ pub fn detect_album_siblings(conn: &mut Connection) -> Result<SiblingReport, Str
     let albums_scanned = albums.len();
 
     // Partition albums into (yeat_base_map, yeat_variants).
-    // base_map key: (album_artist, title_normalized, era) -> Vec<base_id>.
+    // base_map key: (LOWER(album_artist), title_normalized, era) -> Vec<base_id>.
     //   Stored as Vec even though the unique index normally permits only 1 —
     //   we surface multi-base as an ambiguous case rather than silently picking one.
+    //
+    // album_artist is lower-cased when keying because the upstream backfill +
+    // remediation merge case-duplicates by `LOWER(album_artist)`, but
+    // representative casing is preserved on each remaining row (one row may
+    // be `Yeat`, another may stay `yeat` because the merge picked MIN(id) per
+    // group). Sibling detection must therefore be case-insensitive too —
+    // otherwise a base row `Yeat | 4L` never pairs with a variant row
+    // `yeat | 4l 0.5` and the UFO toggle never renders.
     let mut base_map: HashMap<(String, String, Option<String>), Vec<i64>> = HashMap::new();
     let mut variants: Vec<AlbumRow> = Vec::new();
 
@@ -204,7 +212,7 @@ pub fn detect_album_siblings(conn: &mut Connection) -> Result<SiblingReport, Str
         match &a.variant_kind {
             None => {
                 let key = (
-                    a.album_artist.clone(),
+                    a.album_artist.to_lowercase(),
                     a.title_normalized.clone(),
                     a.era.clone(),
                 );
@@ -222,7 +230,7 @@ pub fn detect_album_siblings(conn: &mut Connection) -> Result<SiblingReport, Str
 
     for variant in &variants {
         let key = (
-            variant.album_artist.clone(),
+            variant.album_artist.to_lowercase(),
             variant.title_normalized.clone(),
             variant.era.clone(),
         );
@@ -396,6 +404,39 @@ mod tests {
             )
             .unwrap();
         assert_eq!(base_of, None);
+    }
+
+    /// Regression: live DB has surviving rows with mixed `album_artist` case
+    /// (e.g. base row `Yeat | 4L`, variant row `yeat | 4l 0.5`) because the
+    /// v17 merge keeps only the MIN(id) per case-insensitive group — the
+    /// kept row's casing is whatever happened to win that group, so two
+    /// different groups can land on different casings. Sibling detection
+    /// must match across casings or no UFO toggle ever renders.
+    #[test]
+    fn test_detect_pair_across_album_artist_casing() {
+        let mut conn = new_db();
+        let base = seed_album(&mut conn, "Yeat", "4L", "yeat/4l/01.flac");
+        let variant = seed_album(&mut conn, "yeat", "4L 0.5", "yeat/4l_05/01.flac");
+        tag_track(&conn, base, "artist", "yeat");
+        tag_track(&conn, base, "era", "4l");
+        tag_track(&conn, variant, "artist", "yeat");
+        tag_track(&conn, variant, "era", "4l");
+
+        let report = detect_album_siblings(&mut conn).expect("detect");
+        assert_eq!(
+            report.pairs_detected, 1,
+            "mixed-case album_artist must still pair base+variant"
+        );
+        assert_eq!(report.ambiguous_siblings.orphan_variants.len(), 0);
+
+        let variant_of: Option<i64> = conn
+            .query_row(
+                "SELECT variant_of FROM albums WHERE id = ?",
+                rusqlite::params![variant],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(variant_of, Some(base));
     }
 
     #[test]
