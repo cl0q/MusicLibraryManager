@@ -2,7 +2,14 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import LibrarySetup from "../components/Settings/LibrarySetup";
-import { getAppSetting, setAppSetting, analyzeLoudnessAll, rescanAlbums } from "../utils/tauri-commands";
+import {
+  getAppSetting,
+  setAppSetting,
+  analyzeLoudnessAll,
+  rescanAlbums,
+  backfillYeatTags,
+  get_library_config,
+} from "../utils/tauri-commands";
 import { useTheme, type ThemeName } from "../contexts/ThemeContext";
 
 const themes: {
@@ -258,6 +265,33 @@ export default function Settings() {
                   const suffix = r.ambiguous_count > 0 ? ` (${r.ambiguous_count} ambiguous)` : "";
                   toast.success(
                     `${r.sibling_pairs_detected} sibling pairs detected, ${r.backfilled_albums} albums backfilled${suffix}`,
+                  );
+                }),
+            },
+          ]}
+        />
+        <MaintenanceRow
+          label="Backfill Yeat Tags"
+          hint="Walk 00_Artist/Yeat/ and tag tracks with artist + era + variant"
+          running={maintenanceRunning === "backfill-yeat-tags"}
+          disabled={maintenanceRunning !== null}
+          actions={[
+            {
+              label: "Backfill",
+              loadingLabel: "Walking…",
+              onClick: () =>
+                runMaintenance("backfill-yeat-tags", async () => {
+                  const cfg = await get_library_config();
+                  if (!cfg.root_path) {
+                    toast.error("Configure a library root first");
+                    return;
+                  }
+                  const r = await backfillYeatTags(cfg.root_path);
+                  const driftSuffix = r.drift.length > 0 ? `, ${r.drift.length} drift` : "";
+                  const orphanSuffix =
+                    r.orphan_disk_files.length > 0 ? `, ${r.orphan_disk_files.length} orphan files` : "";
+                  toast.success(
+                    `${r.tracks_matched}/${r.tracks_scanned} tracks tagged, ${r.tags_written} tags written${driftSuffix}${orphanSuffix}`,
                   );
                 }),
             },
