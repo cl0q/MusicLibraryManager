@@ -682,11 +682,12 @@ fn migrate_to_v17(conn: &mut Connection) -> Result<()> {
         remediate_albums_data(tx)?;
 
         // Step 3: add the case-insensitive UNIQUE index. The original v16
-        // UNIQUE index `idx_albums_unique_stem` is case-sensitive on
-        // `album_artist`; it stays in place but is effectively a superset of
-        // this tighter constraint — any row satisfying the CI constraint also
-        // satisfies the CS one, so the CS index never rejects valid rows.
-        // Keeping both avoids a full table rebuild.
+        // CS UNIQUE index `idx_albums_unique_stem` was dropped inside
+        // `remediate_albums_data` (Step 0) because it would otherwise
+        // reject the renormalize UPDATE loop. The CI index below is
+        // strictly stronger — every post-remediation row pair that would
+        // have been a CS-duplicate is also a CI-duplicate, so dropping
+        // the CS index loses no protection.
         tx.execute_batch(
             "CREATE UNIQUE INDEX IF NOT EXISTS albums_artist_stem_kind_ci
                  ON albums (LOWER(album_artist), title_normalized, IFNULL(variant_kind, ''));",
@@ -1472,7 +1473,10 @@ mod tests {
         assert!(table_exists(&conn, "albums"));
         assert!(table_exists(&conn, "user_album_variant_pref"));
         assert!(column_exists(&conn, "tracks", "album_id").unwrap());
-        assert!(index_exists(&conn, "idx_albums_unique_stem"));
+        // v17 dropped the v16 CS UNIQUE index and replaced it with a CI one
+        // (see `remediate_albums_data` Step 0).
+        assert!(!index_exists(&conn, "idx_albums_unique_stem"));
+        assert!(index_exists(&conn, "albums_artist_stem_kind_ci"));
         assert!(index_exists(&conn, "idx_albums_variant_of"));
         assert!(index_exists(&conn, "idx_albums_album_artist"));
         assert!(index_exists(&conn, "idx_tracks_album_id"));
@@ -1747,12 +1751,20 @@ mod tests {
         assert_eq!(CURRENT_SCHEMA_VERSION, 17);
     }
 
-    /// Helper: re-run initialize_schema after rolling back to v16 and dropping
-    /// the v17-specific CI index. Used by the remediation tests that want to
-    /// seed stale/duplicate rows and then re-trigger migrate_to_v17.
+    /// Helper: re-run initialize_schema after rolling back to v16. Drops the
+    /// v17-specific CI index AND re-creates the v16 CS UNIQUE index that
+    /// `remediate_albums_data` is supposed to drop in Step 0. Without
+    /// re-creating the CS index, remediation tests would pass even when
+    /// remediation fails to drop it (which is the bug Phase 21.1 hotfix
+    /// fixes — the CS index blocks the renormalize UPDATE loop).
     fn reset_to_v16_for_remediation_test(conn: &mut Connection) {
         conn.execute_batch("DROP INDEX IF EXISTS albums_artist_stem_kind_ci")
             .unwrap();
+        conn.execute_batch(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_albums_unique_stem
+             ON albums(album_artist, title_normalized, COALESCE(variant_kind, ''));",
+        )
+        .unwrap();
         conn.execute_batch("PRAGMA user_version = 16").unwrap();
     }
 
@@ -1996,6 +2008,65 @@ mod tests {
             Some(9001),
             "variant_of must re-point from dropped dup (9002) to kept MIN (9001)"
         );
+    }
+
+    /// Regression for the production crash on first v17 launch:
+    /// `UNIQUE constraint failed: index 'idx_albums_unique_stem'`.
+    /// The CS UNIQUE index from v16 must be dropped *before* Step A's
+    /// renormalize loop, otherwise an UPDATE that moves a row's
+    /// `title_normalized` onto a value already held by another row sharing
+    /// the same `(album_artist, variant_kind)` aborts the whole transaction.
+    #[test]
+    fn test_phase21_1_renormalize_does_not_collide_with_cs_index() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        initialize_schema(&mut conn).unwrap();
+
+        reset_to_v16_for_remediation_test(&mut conn);
+
+        // Two rows under the same album_artist that, after renormalization,
+        // collide on the v16 CS UNIQUE index. Row 9001 has the pre-fix
+        // buggy stem; row 9002 already has the correct stem (e.g. from a
+        // later import). The CS index tolerates them as-is, but
+        // renormalizing 9001 -> 'afterlyfe' would collide with 9002 unless
+        // the index is dropped first.
+        conn.execute(
+            "INSERT INTO albums (id, artist, album_artist, title, title_normalized, variant_kind)
+             VALUES (9001, 'Yeat', 'Yeat', 'AftërLyfe', 'aft_rlyfe', NULL),
+                    (9002, 'Yeat', 'Yeat', 'Afterlyfe',  'afterlyfe', NULL)",
+            [],
+        )
+        .unwrap();
+
+        // This must NOT fail with a UNIQUE-constraint error.
+        initialize_schema(&mut conn).unwrap();
+
+        assert_eq!(get_schema_version(&conn).unwrap(), 17);
+
+        // After renormalize-then-merge, exactly one row remains for the
+        // (Yeat, afterlyfe, NULL) group — the kept MIN(id) is 9001.
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM albums
+                 WHERE LOWER(album_artist) = 'yeat'
+                   AND title_normalized = 'afterlyfe'
+                   AND variant_kind IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "renormalize+merge must leave exactly one row");
+
+        let kept_exists: i64 = conn
+            .query_row("SELECT COUNT(*) FROM albums WHERE id = 9001", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(kept_exists, 1, "MIN(id) row 9001 must be kept");
+
+        // And the v16 CS index is gone, replaced by the CI one.
+        assert!(!index_exists(&conn, "idx_albums_unique_stem"));
+        assert!(index_exists(&conn, "albums_artist_stem_kind_ci"));
     }
 }
 

@@ -155,6 +155,16 @@ pub fn backfill_albums_from_tracks(tx: &Transaction) -> Result<usize> {
 /// Security (T-21.1-01): all UPDATEs + DELETEs use `rusqlite::params!` bound
 /// parameters. No `format!`-built SQL with user-controlled values.
 pub fn remediate_albums_data(tx: &Transaction) -> Result<(usize, usize, usize)> {
+    // Step 0: drop the v16 case-sensitive UNIQUE index. It would otherwise
+    // reject mid-loop UPDATEs in Step A — e.g. row `Yeat | AftërLyfe |
+    // aft_rlyfe` renormalized to `afterlyfe` collides with a sibling row
+    // already at `Yeat | * | afterlyfe`. The new CI index created at the
+    // end of `migrate_to_v17` is strictly stronger (every CS-duplicate is
+    // also a CI-duplicate after normalization), so the CS index is
+    // redundant once remediation completes. DDL inside this transaction
+    // rolls back with the rest if any later step fails.
+    tx.execute_batch("DROP INDEX IF EXISTS idx_albums_unique_stem;")?;
+
     // Step A: recompute title_normalized and variant_kind for every row.
     // Read all rows first (borrow-safe), then UPDATE each by id.
     let rows: Vec<(i64, String)> = {
