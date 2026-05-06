@@ -22,7 +22,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, render } from "@testing-library/react";
 import { mockIPC } from "@tauri-apps/api/mocks";
+import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
+
+// Tiny helper: run effect exactly once (guards StrictMode double-invoke).
+function useEffectOnce(fn: () => void | (() => void)) {
+  const ranRef = useRef(false);
+  useEffect(() => {
+    if (ranRef.current) return;
+    ranRef.current = true;
+    return fn();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+}
 
 import { PlaybackProvider, usePlayback } from "../../src/contexts/PlaybackContext";
 import { LibraryMountProvider } from "../../src/contexts/LibraryMountContext";
@@ -512,11 +524,13 @@ describe("focus-track rule (D-12)", () => {
   });
 
   it("idle + 1 selected + space → play(selectedTracks[0])", async () => {
-    let lastInvoked: string | null = null;
-    let lastArgs: unknown = null;
+    let resolveCalled = false;
+    let resolveArgs: unknown = null;
     mockIPC((cmd, args) => {
-      lastInvoked = cmd;
-      lastArgs = args;
+      if (cmd === "resolve_track_audio_path") {
+        resolveCalled = true;
+        resolveArgs = args;
+      }
       if (cmd === "get_library_config")
         return {
           root_path: "/library",
@@ -533,10 +547,10 @@ describe("focus-track rule (D-12)", () => {
 
     function Probe() {
       const sel = useTrackSelection();
-      // seed selection on first render
-      if (sel.selectedTracks.length === 0) {
+      // seed selection AFTER render to avoid setState-in-render warning
+      useEffectOnce(() => {
         sel.setSelectedTracks([makeTrack({ id: 42 })]);
-      }
+      });
       return null;
     }
 
@@ -555,8 +569,8 @@ describe("focus-track rule (D-12)", () => {
       await Promise.resolve();
     });
 
-    expect(lastInvoked).toBe("resolve_track_audio_path");
-    const a = lastArgs as { trackId?: number; track_id?: number } | null;
+    expect(resolveCalled).toBe(true);
+    const a = resolveArgs as { trackId?: number; track_id?: number } | null;
     expect(a?.trackId ?? a?.track_id).toBe(42);
   });
 
@@ -581,13 +595,13 @@ describe("focus-track rule (D-12)", () => {
 
     function Probe() {
       const sel = useTrackSelection();
-      if (sel.selectedTracks.length === 0) {
+      useEffectOnce(() => {
         sel.setSelectedTracks([
           makeTrack({ id: 7 }),
           makeTrack({ id: 8 }),
           makeTrack({ id: 9 }),
         ]);
-      }
+      });
       return null;
     }
 
