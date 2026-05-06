@@ -473,6 +473,94 @@ pub async fn set_app_setting(key: String, value: String) -> Result<(), String> {
     .map_err(|e| format!("Task join error: {}", e))?
 }
 
+/// Response payload for resolve_track_audio_path.
+/// Carries everything PlaybackContext needs to start HTML5 audio playback
+/// in a single round-trip (D-06).
+#[derive(Debug, serde::Serialize)]
+pub struct TrackPlaybackInfo {
+    /// Absolute filesystem path — frontend wraps via convertFileSrc() (Phase 28 asset protocol)
+    pub absolute_path: String,
+    /// LUFS-I value for normalization gain calc (D-19); NULL when LOUD-04 not yet run (D-20)
+    pub lufs_i: Option<f64>,
+    /// Audio format string (e.g. "mp3", "m4a", "flac", "wav") — used for D-03 toast copy
+    pub format: String,
+    /// Duration in seconds from DB metadata; frontend falls back to <audio>.duration if None
+    pub duration: Option<f64>,
+}
+
+/// Resolve a library track's absolute audio path for HTML5 preview playback.
+///
+/// Security boundary (T-29-01): rejects Remote tracks (organized_path IS NULL) with Err.
+/// Reuses resolve_to_absolute() — the Phase 12.1 path-resolution authority (D-06).
+/// Reads ONLY: id, organized_path, lufs_i, format, duration from tracks table (D-27).
+/// Writes NOTHING to any table.
+#[tauri::command]
+pub async fn resolve_track_audio_path(track_id: i64) -> Result<TrackPlaybackInfo, String> {
+    tokio::task::spawn_blocking(move || {
+        let db_path = crate::database::db_path();
+        let conn = get_connection(&db_path)
+            .map_err(|e| format!("Database connection failed: {}", e))?;
+
+        // Load library config for root_path + scan_folders + download_destination
+        let config = LibraryConfig::load(&conn)
+            .map_err(|e| format!("Failed to load library config: {}", e))?;
+        let root = config.root_path
+            .ok_or_else(|| "Library root not configured — cannot resolve audio path".to_string())?;
+
+        // Query ONLY the columns Phase 29 needs (D-27: no track_tags, albums, variant_of reads)
+        let mut stmt = conn
+            .prepare(
+                "SELECT organized_path, lufs_i, format, duration \
+                 FROM tracks WHERE id = ?1",
+            )
+            .map_err(|e| format!("Query prepare failed: {}", e))?;
+
+        let (organized_path, lufs_i, format, duration): (
+            Option<String>,
+            Option<f64>,
+            String,
+            Option<f64>,
+        ) = stmt
+            .query_row(rusqlite::params![track_id], |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<f64>>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<f64>>(3)?,
+                ))
+            })
+            .map_err(|e| format!("Track not found (id={}): {}", track_id, e))?;
+
+        // T-29-01: Reject Remote tracks — organized_path IS NULL means not downloaded
+        let rel_path = organized_path
+            .ok_or_else(|| "Remote tracks cannot be previewed — download first".to_string())?;
+
+        // Resolve to absolute path via Phase 12.1 authority (no new path logic)
+        let absolute_path = resolve_to_absolute(
+            &root,
+            &rel_path,
+            &config.scan_folders,
+            &config.download_destination,
+        )
+        .ok_or_else(|| {
+            format!(
+                "Audio file not found on disk: organized_path='{}', root='{}'",
+                rel_path,
+                root.display()
+            )
+        })?;
+
+        Ok(TrackPlaybackInfo {
+            absolute_path: absolute_path.to_string_lossy().to_string(),
+            lufs_i,
+            format,
+            duration,
+        })
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
