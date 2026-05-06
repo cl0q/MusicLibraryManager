@@ -248,6 +248,7 @@ pub fn run() {
             commands::library_config::set_library_size_limit,
             commands::library_config::get_library_size_limit,
             commands::library_config::check_library_size_limit,
+            commands::library_config::resolve_track_audio_path,
             commands::maintenance::reindex_search,
             commands::maintenance::rescan_metadata,
             commands::maintenance::find_orphaned_tracks,
