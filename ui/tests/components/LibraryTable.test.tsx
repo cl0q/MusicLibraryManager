@@ -1,8 +1,21 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { render } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
 import { mockIPC } from '@tauri-apps/api/mocks';
 import LibraryTable from '../../src/components/LibraryTable/LibraryTable';
+// Phase 29-03: TrackSelectionProvider was lifted from LibraryTable up to
+// MainLayout (so PlaybackContext can consume it). Tests that render
+// LibraryTable directly must now provide the wrapper themselves.
+import { TrackSelectionProvider } from '../../src/contexts/TrackSelectionContext';
 import type { Track } from '../../src/types/library';
+
+function Wrap({ children }: { children: React.ReactNode }) {
+  return (
+    <MemoryRouter>
+      <TrackSelectionProvider>{children}</TrackSelectionProvider>
+    </MemoryRouter>
+  );
+}
 
 // Mock track factory
 function makeTrack(overrides: Partial<Track> = {}): Track {
@@ -50,9 +63,11 @@ describe('LibraryTable', () => {
     // We test that the component renders the table structure without crashing, and
     // verify the underlying data model is correct by inspecting the rendered output.
     const { container } = render(
-      <div style={{ height: '500px', width: '800px' }}>
-        <LibraryTable tracks={[makeTrack()]} />
-      </div>
+      <Wrap>
+        <div style={{ height: '500px', width: '800px' }}>
+          <LibraryTable tracks={[makeTrack()]} />
+        </div>
+      </Wrap>
     );
     // Component renders without throwing — table element is present
     expect(container.querySelector('table')).toBeTruthy();
@@ -60,9 +75,11 @@ describe('LibraryTable', () => {
 
   it('renders track artist in the table', () => {
     const { container } = render(
-      <div style={{ height: '500px', width: '800px' }}>
-        <LibraryTable tracks={[makeTrack()]} />
-      </div>
+      <Wrap>
+        <div style={{ height: '500px', width: '800px' }}>
+          <LibraryTable tracks={[makeTrack()]} />
+        </div>
+      </Wrap>
     );
     // Table header is always rendered (not virtualized)
     expect(container.querySelector('thead')).toBeTruthy();
@@ -72,9 +89,11 @@ describe('LibraryTable', () => {
 
   it('renders column headers for title and artist', () => {
     const { container } = render(
-      <div style={{ height: '500px', width: '800px' }}>
-        <LibraryTable tracks={[makeTrack()]} />
-      </div>
+      <Wrap>
+        <div style={{ height: '500px', width: '800px' }}>
+          <LibraryTable tracks={[makeTrack()]} />
+        </div>
+      </Wrap>
     );
     // Table headers are always rendered regardless of virtualization
     expect(container.innerHTML.includes('Title')).toBe(true);
@@ -83,7 +102,11 @@ describe('LibraryTable', () => {
   });
 
   it('renders empty table without crashing', () => {
-    const { container } = render(<LibraryTable tracks={[]} />);
+    const { container } = render(
+      <Wrap>
+        <LibraryTable tracks={[]} />
+      </Wrap>
+    );
     expect(container).toBeTruthy();
     expect(container.querySelector('table')).toBeTruthy();
   });

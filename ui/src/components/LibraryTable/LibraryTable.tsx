@@ -15,7 +15,11 @@ import type { Track } from "../../types/library";
 import { formatDuration, formatDate } from "../../utils/formatter";
 import { computeSlug } from "../../utils/slug";
 import RowContextMenu, { useRowContextMenu } from "./RowContextMenu";
-import { TrackSelectionProvider, useTrackSelection } from "../../contexts/TrackSelectionContext";
+// Phase 29-03: TrackSelectionProvider is now mounted in MainLayout.tsx so
+// PlaybackContext (D-12 focus-track rule) can consume useTrackSelection().
+// LibraryTable used to wrap itself in TrackSelectionProvider; that wrap was
+// lifted up the tree. We still consume the context here.
+import { useTrackSelection } from "../../contexts/TrackSelectionContext";
 import EnergyBars from "./EnergyBars";
 import BatchBar from "./BatchBar";
 
@@ -490,10 +494,9 @@ function LibraryTableInner({
   );
 }
 
+// Phase 29-03: TrackSelectionProvider was lifted to MainLayout.tsx so the
+// new PlaybackContext (D-04/D-12) can read selectedTracks at provider scope.
+// LibraryTable now passes through directly — the provider is upstream.
 export default function LibraryTable(props: LibraryTableProps) {
-  return (
-    <TrackSelectionProvider>
-      <LibraryTableInner {...props} />
-    </TrackSelectionProvider>
-  );
+  return <LibraryTableInner {...props} />;
 }
