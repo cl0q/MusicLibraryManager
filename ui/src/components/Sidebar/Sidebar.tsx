@@ -47,9 +47,20 @@ export default function Sidebar() {
       ),
     },
     {
+      path: "/folders",
+      label: "Folders",
+      kbd: "3",
+      matchPrefix: "/folders",
+      icon: (
+        <svg className="w-[15px] h-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+        </svg>
+      ),
+    },
+    {
       path: "/sync",
       label: "Sync",
-      kbd: "3",
+      kbd: "4",
       matchPrefix: "/sync",
       icon: (
         <svg className="w-[15px] h-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
@@ -60,7 +71,7 @@ export default function Sidebar() {
     {
       path: "/sources",
       label: "Sources",
-      kbd: "4",
+      kbd: "5",
       matchPrefix: "/sources",
       icon: (
         <svg className="w-[15px] h-[15px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>

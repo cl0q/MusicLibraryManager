@@ -9,6 +9,7 @@ import TrackDetail from "./pages/TrackDetail";
 import Playlists from "./pages/Playlists";
 import PlaylistDetailPage from "./pages/PlaylistDetailPage";
 import AlbumDetailPage from "./pages/AlbumDetailPage";
+import Folders from "./pages/Folders";
 import Sync from "./pages/Sync";
 import Sources from "./pages/Sources";
 import Settings from "./pages/Settings";
@@ -31,6 +32,7 @@ const router = createBrowserRouter([
       { path: "playlists", element: <Playlists /> },
       { path: "playlists/:id", element: <PlaylistDetailPage /> },
       { path: "albums/:slug", element: <AlbumDetailPage /> },
+      { path: "folders", element: <Folders /> },
       { path: "sync", element: <Sync /> },
       { path: "sources", element: <Sources /> },
       { path: "settings", element: <Settings /> },

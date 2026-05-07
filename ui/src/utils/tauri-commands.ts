@@ -624,3 +624,30 @@ export interface YeatDbBackfillReport {
 export async function backfillYeatTagsFromDb(): Promise<YeatDbBackfillReport> {
   return invoke<YeatDbBackfillReport>("backfill_yeat_tags_from_db_cmd");
 }
+
+// ============================================================================
+// Folder Explorer Commands (Phase 30)
+// ============================================================================
+
+export interface FolderNode {
+  name: string;
+  full_path: string;
+  track_count: number;
+  has_children: boolean;
+}
+
+/** List folder children for the tree view. prefix=undefined for top-level. */
+export async function listFolderChildren(
+  prefix?: string,
+  hideDotPrefixed?: boolean,
+): Promise<FolderNode[]> {
+  return invoke<FolderNode[]>("list_folder_children", {
+    prefix: prefix ?? null,
+    hideDotPrefixed: hideDotPrefixed ?? true,
+  });
+}
+
+/** Get tracks under a folder prefix for the right-pane track list. */
+export async function getFolderTracks(prefix: string): Promise<Track[]> {
+  return invoke<Track[]>("get_folder_tracks", { prefix });
+}
