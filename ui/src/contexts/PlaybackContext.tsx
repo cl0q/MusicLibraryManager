@@ -68,6 +68,9 @@ interface TrackPlaybackInfo {
   duration: number | null;
 }
 
+// D-02 whitelist. Lower-cased here; format strings come from the DB lower-case.
+const PLAYABLE_FORMATS = new Set(["mp3", "m4a", "flac", "wav"]);
+
 const PlaybackContext = createContext<PlaybackContextValue | null>(null);
 
 // ---------- provider ----------
@@ -165,16 +168,29 @@ export function PlaybackProvider({ children }: PlaybackProviderProps) {
     };
     const handleError = () => {
       const err = audio.error;
-      if (err && err.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
-        // D-03: hardcoded copy. Do NOT use err.message — WKWebView may not
-        // populate it consistently (Pitfall 2 in plan). Pull format from
-        // the track ref to avoid stale closure on currentTrack state.
-        const fmt = currentTrackRef.current?.metadata?.format ?? "unknown";
-        toast.error(
-          `Preview not supported: ${fmt}. The track is in your library and syncs to your iPod.`,
-        );
-        setStatus("error");
-        setError(`Preview not supported: ${fmt}`);
+      // MEDIA_ERR_SRC_NOT_SUPPORTED (4) fires both for genuinely unsupported
+      // formats (D-02 non-whitelist) AND for IO/scope failures on whitelist
+      // formats (e.g. asset-protocol scope rejection, file missing on disk).
+      // Branch on the format so the user gets honest copy in both cases.
+      if (err && err.code === 4 /* MEDIA_ERR_SRC_NOT_SUPPORTED */) {
+        const fmt = (
+          currentTrackRef.current?.metadata?.format ?? "unknown"
+        ).toLowerCase();
+        if (PLAYABLE_FORMATS.has(fmt)) {
+          // Whitelist format that still failed to load → IO/scope/decode.
+          // Don't claim the format is unsupported — it isn't.
+          toast.error("Couldn't load preview. The file may be unavailable or in a path the player can't access.");
+          setStatus("error");
+          setError("Couldn't load preview");
+        } else {
+          // D-03: hardcoded copy for genuinely unsupported formats. Do NOT use
+          // err.message — WKWebView may not populate it consistently.
+          toast.error(
+            `Preview not supported: ${fmt}. The track is in your library and syncs to your iPod.`,
+          );
+          setStatus("error");
+          setError(`Preview not supported: ${fmt}`);
+        }
       } else {
         // D-23: inline mini-bar error, no toast spam.
         setStatus("error");
