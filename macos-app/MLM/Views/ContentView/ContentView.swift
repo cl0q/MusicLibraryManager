@@ -130,7 +130,9 @@ struct ContentView: View {
                 handleTrackDoubleClick(track)
             })
         case .playlists:
-            PlaceholderView(title: "Playlists", icon: "list.bullet", description: "Your curated playlists")
+            PlaylistsView(onTrackDoubleClick: { track in
+                handleTrackDoubleClick(track)
+            })
         case .folders:
             PlaceholderView(title: "Folders", icon: "folder", description: "Browse by disk folder structure")
         case .sync:

@@ -3,8 +3,8 @@ import SwiftUI
 /// Context menu for right-clicking track rows in the library table.
 ///
 /// Actions are grouped into categories matching the Tauri app:
-/// - Playback (Phase 5 — placeholder)
-/// - Playlists (Phase 6 — placeholder)
+/// - Playback (Phase 5)
+/// - Playlists (Phase 6 — "Add to Playlist" submenu)
 /// - Sync (Phase 12 — placeholder)
 /// - File operations (local tracks only)
 /// - Destructive actions (remove/delete)
@@ -53,11 +53,11 @@ struct TrackContextMenu: View {
 
         // MARK: - Playlists (Phase 6)
         Section {
-            Button {
-                // Placeholder — Phase 6
-            } label: {
-                Label("Add to Playlist…", systemImage: "text.badge.plus")
-            }
+            PlaylistSubmenu(
+                selectedTrackIDs: selectedTrackIDs,
+                countSuffix: countSuffix,
+                container: container
+            )
         }
 
         // MARK: - Sync (Phase 12)
@@ -150,5 +150,66 @@ struct TrackContextMenu: View {
               let path = track.organizedPath else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(path, forType: .string)
+    }
+}
+
+// MARK: - Playlist Submenu
+
+/// Submenu that loads playlists on appear and lets the user add tracks to one.
+struct PlaylistSubmenu: View {
+    let selectedTrackIDs: Set<Int64>
+    let countSuffix: String
+    let container: DependencyContainer
+
+    @State private var playlists: [Playlist] = []
+    @State private var isLoaded = false
+
+    var body: some View {
+        Menu {
+            if !isLoaded {
+                Text("Loading…")
+            } else if playlists.isEmpty {
+                Text("No playlists")
+            } else {
+                ForEach(playlists) { playlist in
+                    Button {
+                        addToPlaylist(playlist)
+                    } label: {
+                        HStack {
+                            if playlist.isPinned == 1 {
+                                Image(systemName: "pin.fill")
+                            }
+                            Text(playlist.name)
+                        }
+                    }
+                }
+            }
+        } label: {
+            Label("Add to Playlist\(countSuffix)", systemImage: "text.badge.plus")
+        }
+        .task {
+            guard !isLoaded else { return }
+            if let repo = container.playlistRepository {
+                playlists = (try? await repo.fetchAll()) ?? []
+            }
+            isLoaded = true
+        }
+    }
+
+    private func addToPlaylist(_ playlist: Playlist) {
+        guard let playlistId = playlist.id,
+              let playlistRepo = container.playlistRepository else { return }
+
+        let trackIds = Array(selectedTrackIDs)
+        let position = String(format: "%06d", 999000) // Append to end
+
+        Task {
+            try? await playlistRepo.addTracks(
+                playlistId: playlistId,
+                trackIds: trackIds,
+                startPosition: position
+            )
+            NotificationCenter.default.post(name: .playlistDidChange, object: nil)
+        }
     }
 }

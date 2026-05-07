@@ -38,6 +38,14 @@ extension Notification.Name {
     /// Posted when playback state changes (play/pause/stop).
     static let playbackStateDidChange = Notification.Name("MLMPlaybackStateDidChange")
 
+    // MARK: Playlists
+
+    /// Posted when a playlist is created, deleted, renamed, pinned, or its tracks change.
+    ///
+    /// Observers should reload playlist data. Used to keep PlaylistsView,
+    /// TrackContextMenu submenu, and SidebarView in sync.
+    static let playlistDidChange = Notification.Name("MLMPlaylistDidChange")
+
     // MARK: Sync (reserved for Phase 12)
 
     /// Posted when a sync operation completes.
