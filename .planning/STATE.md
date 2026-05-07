@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: macOS Native
 status: in_progress
-stopped_at: Phase 1 starting — Project scaffold + data layer
-last_updated: "2026-05-07T20:00:00.000Z"
+stopped_at: Phase 2 complete — Shell & Navigation
+last_updated: "2026-05-07T22:00:00.000Z"
 last_activity: 2026-05-07
 progress:
   total_phases: 20
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  completed_phases: 2
+  total_plans: 1
+  completed_plans: 1
+  percent: 10
 ---
 
 # Project State
@@ -21,17 +21,34 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-07)
 
 **Core value:** Like a song anywhere and it reliably ends up in your owned library and on your devices in high quality — native macOS experience
-**Current focus:** Phase 1 — Project Scaffold + Core Data Layer
+**Current focus:** Phase 3 — Library Browser (next)
 **Source of truth:** `macos-app/PLAN.md` + `.planning/ROADMAP.md` v2.0 section
 **v1.4 source of truth (paused):** `.planning/REQUIREMENTS.md` v1.4 section + `.planning/ROADMAP.md` v1.4 section
 **v1.3 source of truth (paused):** `.planning/REQUIREMENTS.md` v1.3 section + `.planning/ROADMAP.md` v1.3 section
 
 ## Current Position
 
-Phase: 1 (Project Scaffold + Core Data Layer) — IN PROGRESS
-Plan: 0 of TBD
-Status: Setting up Xcode project and core data layer
+Phase: 2 (Shell & Navigation) — COMPLETE
+Next: Phase 3 (Library Browser)
+Status: Shell layout shipped — NavigationSplitView + MiniPlayer + ActivityPanel + ⌘1-5 shortcuts
 Last activity: 2026-05-07
+
+## Phase 1 Summary (v2.0)
+
+- **01-01** — Xcode/SPM project scaffold + GRDB database manager with 19 migrations + all core models (Track, Playlist, SyncProfile, Album, Source) + 7 repositories (Track, Playlist, Sync, Album, Source, Analysis, Config) + Solar theme tokens (Colors, Typography, Spacing) + entitlements + utilities (ProcessRunner, FileHelpers, Debouncer) + 326-line database test suite (10 tests covering schema, CRUD, FK cascades, migrations)
+
+## Phase 2 Summary (v2.0)
+
+- ContentView restructured: VStack layout integrating NavigationSplitView + MiniPlayerView (36px) + ActivityPanel (36px collapsed / 320px expanded)
+- MiniPlayerView: empty-state shell — play icon + "No track playing" + progress bar placeholder + duration placeholder. Wired to Solar theme. Phase 5 connects PlaybackViewModel
+- ActivityPanel: collapsible bottom panel with Operations/Logs tabs (segmented picker). Both tabs show empty-state placeholders. Phase 16 wires real data
+- SidebarView Settings button wired to open Settings window (NSApp selector)
+- ⌘1-5 keyboard shortcuts wired via FocusedSceneValue + CommandMenu in MLMApp
+- Settings scene upgraded from bare Text to SettingsPlaceholderView with Solar styling
+- FocusedValueKey pattern for cross-scene navigation state (SelectedSectionKey)
+
+**Files created:** MiniPlayerView.swift, ActivityPanel.swift, OperationsTab.swift, LogsTab.swift
+**Files modified:** ContentView.swift (major rework), SidebarView.swift, MLMApp.swift
 
 ## Phase 28 Summary (v1.4)
 

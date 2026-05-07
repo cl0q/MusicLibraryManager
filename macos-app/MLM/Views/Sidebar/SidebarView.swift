@@ -3,7 +3,7 @@ import SwiftUI
 /// Sidebar navigation matching the Tauri app's 5-section layout.
 ///
 /// Provides navigation items with ⌘1–⌘5 keyboard shortcuts
-/// and a Settings footer at the bottom.
+/// (wired via CommandMenu in MLMApp) and a Settings footer.
 struct SidebarView: View {
     @Binding var selectedSection: SidebarSection
 
@@ -27,9 +27,12 @@ struct SidebarView: View {
         .background(Color.mlmSurface)
     }
 
+    // MARK: - Settings footer
+
     private var settingsFooter: some View {
         Button {
-            // TODO: Open settings window
+            // Open the Settings window (macOS 13+)
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         } label: {
             Label("Settings", systemImage: "gearshape")
                 .font(MLMFont.body)
@@ -41,5 +44,6 @@ struct SidebarView: View {
         .buttonStyle(.plain)
         .padding(.horizontal, 8)
         .padding(.bottom, 8)
+        .keyboardShortcut(",")
     }
 }

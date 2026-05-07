@@ -1,8 +1,34 @@
 import SwiftUI
 
-/// Root content view with NavigationSplitView layout.
+// MARK: - FocusedValues for ⌘1–5 navigation shortcuts
+
+/// Allows CommandMenu in MLMApp to write the sidebar selection.
+struct SelectedSectionKey: FocusedValueKey {
+    typealias Value = Binding<SidebarSection>
+}
+
+extension FocusedValues {
+    var selectedSection: Binding<SidebarSection>? {
+        get { self[SelectedSectionKey.self] }
+        set { self[SelectedSectionKey.self] = newValue }
+    }
+}
+
+// MARK: - Root content view
+
+/// Root content view with full window layout.
 ///
-/// Provides the 3-column layout: Sidebar + Content + optional Detail.
+/// Layout (top → bottom):
+/// ```
+/// ┌────────┬──────────────────────┐
+/// │Sidebar │  Detail content      │  NavigationSplitView
+/// │        │                      │
+/// ├────────┴──────────────────────┤
+/// │ ▶ No track playing     —:—   │  MiniPlayerView (36px)
+/// ├───────────────────────────────┤
+/// │ ▼ Activity                    │  ActivityPanel (36px collapsed)
+/// └───────────────────────────────┘
+/// ```
 struct ContentView: View {
     @Environment(\.container) private var container
 
@@ -10,40 +36,50 @@ struct ContentView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        if container.isInitialized {
+        Group {
+            if container.isInitialized {
+                initializedView
+            } else if let error = container.initializationError {
+                errorView(error)
+            } else {
+                loadingView
+            }
+        }
+        .focusedSceneValue(\.selectedSection, $selectedSection)
+    }
+
+    // MARK: - Initialized layout
+
+    private var initializedView: some View {
+        VStack(spacing: 0) {
+            // Main content — NavigationSplitView fills available space
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 SidebarView(selectedSection: $selectedSection)
                     .frame(minWidth: MLMSpacing.sidebarWidth)
             } detail: {
                 detailView
             }
-            .background(Color.mlmBase)
-        } else if let error = container.initializationError {
-            VStack(spacing: 16) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 48))
-                    .foregroundColor(.mlmError)
-                Text("Failed to Initialize")
-                    .font(MLMFont.pageTitle)
-                    .foregroundColor(.mlmInk)
-                Text(error.localizedDescription)
-                    .font(MLMFont.body)
-                    .foregroundColor(.mlmInkSecondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.mlmBase)
-        } else {
-            VStack(spacing: 12) {
-                ProgressView()
-                    .controlSize(.large)
-                Text("Loading Library...")
-                    .font(MLMFont.body)
-                    .foregroundColor(.mlmInkSecondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.mlmBase)
+
+            // Separator
+            Rectangle()
+                .fill(Color.mlmEdge)
+                .frame(height: 1)
+
+            // Persistent mini player bar
+            MiniPlayerView()
+
+            // Separator
+            Rectangle()
+                .fill(Color.mlmEdge)
+                .frame(height: 1)
+
+            // Collapsible activity panel
+            ActivityPanel()
         }
+        .background(Color.mlmBase)
     }
+
+    // MARK: - Detail view router
 
     @ViewBuilder
     private var detailView: some View {
@@ -60,10 +96,46 @@ struct ContentView: View {
             PlaceholderView(title: "Sources", icon: "globe", description: "Connected streaming services")
         }
     }
+
+    // MARK: - Error state
+
+    private func errorView(_ error: Error) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 48))
+                .foregroundColor(.mlmError)
+            Text("Failed to Initialize")
+                .font(MLMFont.pageTitle)
+                .foregroundColor(.mlmInk)
+            Text(error.localizedDescription)
+                .font(MLMFont.body)
+                .foregroundColor(.mlmInkSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.mlmBase)
+    }
+
+    // MARK: - Loading state
+
+    private var loadingView: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .controlSize(.large)
+            Text("Loading Library...")
+                .font(MLMFont.body)
+                .foregroundColor(.mlmInkSecondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.mlmBase)
+    }
 }
 
-/// Navigation sections matching the Tauri app sidebar
-enum SidebarSection: String, CaseIterable, Identifiable {
+// MARK: - Navigation sections
+
+/// Navigation sections matching the Tauri app sidebar.
+enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
     case library
     case playlists
     case folders
@@ -103,7 +175,9 @@ enum SidebarSection: String, CaseIterable, Identifiable {
     }
 }
 
-/// Placeholder view for sections not yet implemented
+// MARK: - Placeholder view
+
+/// Placeholder view for sections not yet implemented.
 struct PlaceholderView: View {
     let title: String
     let icon: String

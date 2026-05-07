@@ -11,6 +11,9 @@ struct MLMApp: App {
 
     @State private var container = DependencyContainer.shared
 
+    /// Reads the sidebar selection from the focused window via FocusedValues.
+    @FocusedBinding(\.selectedSection) private var selectedSection
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -20,12 +23,44 @@ struct MLMApp: App {
         .windowStyle(.titleBar)
         .defaultSize(width: 1200, height: 800)
         .commands {
+            // Remove default New Document item
             CommandGroup(replacing: .newItem) {}
+
+            // ⌘1–5 navigation shortcuts
+            CommandMenu("Navigate") {
+                ForEach(SidebarSection.allCases) { section in
+                    Button(section.label) {
+                        selectedSection = section
+                    }
+                    .keyboardShortcut(section.keyboardShortcut)
+                }
+            }
         }
 
         Settings {
-            Text("Settings")
-                .frame(width: 400, height: 300)
+            SettingsPlaceholderView()
         }
+    }
+}
+
+// MARK: - Settings placeholder
+
+/// Placeholder settings view until Phase 17.
+private struct SettingsPlaceholderView: View {
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "gearshape")
+                .font(.system(size: 32))
+                .foregroundColor(.mlmInkMuted)
+            Text("Settings")
+                .font(MLMFont.pageTitle)
+                .foregroundColor(.mlmInk)
+            Text("Library configuration, themes, and maintenance\nwill be available in a future phase.")
+                .font(MLMFont.body)
+                .foregroundColor(.mlmInkSecondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(width: 400, height: 300)
+        .background(Color.mlmBase)
     }
 }
