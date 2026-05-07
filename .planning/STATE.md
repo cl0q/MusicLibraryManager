@@ -1,35 +1,36 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.4
-milestone_name: Daily Driver
+milestone: v2.0
+milestone_name: macOS Native
 status: in_progress
-stopped_at: Phase 30 complete — 4/4 plans executed
-last_updated: "2026-05-07T19:00:00.000Z"
+stopped_at: Phase 1 starting — Project scaffold + data layer
+last_updated: "2026-05-07T20:00:00.000Z"
 last_activity: 2026-05-07
 progress:
-  total_phases: 7
-  completed_phases: 3
-  total_plans: 13
-  completed_plans: 9
-  percent: 69
+  total_phases: 20
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-04)
+See: .planning/PROJECT.md (updated 2026-05-07)
 
-**Core value:** Like a song anywhere and it reliably ends up in your owned library and on your devices in high quality — and now: actually open the app daily to live with that library
-**Current focus:** Phase 30 — Disk-Folder Explorer (COMPLETE)
-**Source of truth:** `.planning/REQUIREMENTS.md` v1.4 section + `.planning/ROADMAP.md` v1.4 section + `.planning/research/v1.4-daily-driver/SUMMARY.md` for synthesis-level context
-**v1.3 source of truth (paused):** `.planning/REQUIREMENTS.md` v1.3 section + `.planning/ROADMAP.md` v1.3 section + `project_yeat_feature.md` — retained verbatim for resumption
+**Core value:** Like a song anywhere and it reliably ends up in your owned library and on your devices in high quality — native macOS experience
+**Current focus:** Phase 1 — Project Scaffold + Core Data Layer
+**Source of truth:** `macos-app/PLAN.md` + `.planning/ROADMAP.md` v2.0 section
+**v1.4 source of truth (paused):** `.planning/REQUIREMENTS.md` v1.4 section + `.planning/ROADMAP.md` v1.4 section
+**v1.3 source of truth (paused):** `.planning/REQUIREMENTS.md` v1.3 section + `.planning/ROADMAP.md` v1.3 section
 
 ## Current Position
 
-Phase: 30 (Disk-Folder Explorer) — COMPLETE
-Plan: 4 of 4 complete
-Status: All plans executed successfully
+Phase: 1 (Project Scaffold + Core Data Layer) — IN PROGRESS
+Plan: 0 of TBD
+Status: Setting up Xcode project and core data layer
 Last activity: 2026-05-07
 
 ## Phase 28 Summary (v1.4)

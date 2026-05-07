@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Allow outgoing network connections (Spotify/SoundCloud/DAB API, AcoustID, MusicBrainz) -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- Read/write access to user-selected files (library root, sync target) -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+
+    <!-- Read access to /Volumes for external drives (Lexxar, iPod) -->
+    <key>com.apple.security.files.bookmarks.app-scope</key>
+    <true/>
+
+    <!-- Keychain access for OAuth token storage -->
+    <key>com.apple.security.keychain</key>
+    <true/>
+
+    <!-- Allow spawning child processes (ffmpeg, yt-dlp, scdl, fpcalc) -->
+    <key>com.apple.security.inherit</key>
+    <true/>
+</dict>
+</plist>
