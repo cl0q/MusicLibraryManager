@@ -1,5 +1,6 @@
 import type { ReactElement } from "react";
 import { NavLink, useLocation } from "react-router";
+import { useLibraryMount } from "../../contexts/LibraryMountContext";
 
 /**
  * Left navigation shell — 192px wide, matches shell.jsx mock.
@@ -22,6 +23,7 @@ interface NavItem {
 
 export default function Sidebar() {
   const location = useLocation();
+  const { isLibraryAvailable } = useLibraryMount();
 
   const navItems: NavItem[] = [
     {
@@ -117,6 +119,12 @@ export default function Sidebar() {
             >
               <span className="flex items-center justify-center w-4 h-4 shrink-0">{item.icon}</span>
               <span className="flex-1">{item.label}</span>
+              {item.label === "Folders" && !isLibraryAvailable && (
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-accent shrink-0"
+                  title="Library drive disconnected"
+                />
+              )}
               <Kbd active={Boolean(active)}>⌘{item.kbd}</Kbd>
             </NavLink>
           );

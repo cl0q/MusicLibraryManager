@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
 import FolderTree from "../components/FolderTree/FolderTree";
+import FolderTreeBanner from "../components/FolderTree/FolderTreeBanner";
 import FolderTreeContextMenu from "../components/FolderTree/FolderTreeContextMenu";
 import LibraryTable from "../components/LibraryTable/LibraryTable";
 import { useLibraryMount } from "../contexts/LibraryMountContext";
@@ -134,6 +135,9 @@ export default function Folders() {
             <span className="text-[10px] text-ink-muted">Staging</span>
           </label>
         </div>
+
+        {/* Disconnect banner (D-14) */}
+        <FolderTreeBanner mounted={isLibraryAvailable} />
 
         {/* Tree body */}
         <div className="flex-1 overflow-hidden">
