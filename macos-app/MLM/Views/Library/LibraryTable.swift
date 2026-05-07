@@ -9,6 +9,7 @@ import SwiftUI
 /// via `viewModel.toggleSort(column:)`.
 struct LibraryTable: View {
     @Bindable var viewModel: LibraryViewModel
+    @Environment(\.container) private var container
 
     /// Callback when a track is double-clicked (primary action).
     var onDoubleClick: ((Track) -> Void)?
@@ -33,13 +34,21 @@ struct LibraryTable: View {
             // Title
             TableColumn("Title") { track in
                 HStack(spacing: 6) {
-                    // Local/Remote status dot
-                    Circle()
-                        .fill(track.isLocal ? Color.mlmSuccess : Color.mlmActive)
-                        .frame(width: 6, height: 6)
+                    // Now-playing / Local / Remote indicator
+                    if isNowPlaying(track) {
+                        Image(systemName: "speaker.wave.2.fill")
+                            .font(.system(size: 8))
+                            .foregroundColor(.mlmAccent)
+                            .frame(width: 6)
+                            .symbolEffect(.variableColor, isActive: true)
+                    } else {
+                        Circle()
+                            .fill(track.isLocal ? Color.mlmSuccess : Color.mlmActive)
+                            .frame(width: 6, height: 6)
+                    }
                     Text(track.title)
                         .font(MLMFont.tableCell)
-                        .foregroundColor(.mlmInk)
+                        .foregroundColor(isNowPlaying(track) ? .mlmAccent : .mlmInk)
                         .lineLimit(1)
                 }
             }
@@ -192,6 +201,17 @@ struct LibraryTable: View {
     }
 
     // MARK: - Helpers
+
+    /// Whether a track is the currently playing track.
+    private func isNowPlaying(_ track: Track) -> Bool {
+        guard let playbackVM = container.playbackViewModel,
+              let currentTrack = playbackVM.currentTrack,
+              let currentID = currentTrack.id,
+              let trackID = track.id else {
+            return false
+        }
+        return currentID == trackID && playbackVM.isPlaying
+    }
 
     /// Format date_added for display (e.g., "2026-05-07" → "May 7").
     private func formatDateAdded(_ dateString: String?) -> String {

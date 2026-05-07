@@ -136,6 +136,10 @@ final class PlaybackViewModel {
             try audioPlayer.play()
             playbackState = .playing
 
+            // Notify observers
+            postTrackDidChange()
+            postStateDidChange()
+
             // Start position polling
             startPositionTimer()
 
@@ -144,6 +148,7 @@ final class PlaybackViewModel {
         } catch {
             errorMessage = error.localizedDescription
             playbackState = .stopped
+            postStateDidChange()
         }
     }
 
@@ -162,6 +167,8 @@ final class PlaybackViewModel {
                 stopPositionTimer()
                 updatePosition()
             }
+
+            postStateDidChange()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -174,6 +181,7 @@ final class PlaybackViewModel {
             try audioPlayer.play()
             playbackState = .playing
             startPositionTimer()
+            postStateDidChange()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -186,6 +194,7 @@ final class PlaybackViewModel {
         playbackState = .paused
         stopPositionTimer()
         updatePosition()
+        postStateDidChange()
     }
 
     /// Stop playback and unload track.
@@ -194,7 +203,11 @@ final class PlaybackViewModel {
         audioPlayer.stop()
         playbackState = .stopped
         currentPosition = 0
+        currentTrack = nil
+        waveformData = []
         stopPositionTimer()
+        postTrackDidChange()
+        postStateDidChange()
     }
 
     /// Seek to a position in seconds.
@@ -244,6 +257,7 @@ final class PlaybackViewModel {
             playbackState = .stopped
             currentPosition = 0
             stopPositionTimer()
+            postStateDidChange()
         }
     }
 
@@ -274,5 +288,27 @@ final class PlaybackViewModel {
         let m = totalSeconds / 60
         let s = totalSeconds % 60
         return String(format: "%d:%02d", m, s)
+    }
+
+    // MARK: - Notifications
+
+    /// Post notification when the current track changes.
+    private func postTrackDidChange() {
+        NotificationCenter.default.post(
+            name: .playbackTrackDidChange,
+            object: nil,
+            userInfo: currentTrack.flatMap { track in
+                track.id.map { ["trackId": $0] }
+            }
+        )
+    }
+
+    /// Post notification when playback state changes.
+    private func postStateDidChange() {
+        NotificationCenter.default.post(
+            name: .playbackStateDidChange,
+            object: nil,
+            userInfo: ["state": playbackState]
+        )
     }
 }

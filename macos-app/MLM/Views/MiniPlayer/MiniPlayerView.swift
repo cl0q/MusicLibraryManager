@@ -22,8 +22,12 @@ struct MiniPlayerView: View {
             // Play/pause button
             playPauseButton
 
-            // Track info
-            trackInfo
+            // Track info or error
+            if let error = playbackVM?.errorMessage {
+                errorInfo(error)
+            } else {
+                trackInfo
+            }
 
             Spacer()
 
@@ -83,6 +87,20 @@ struct MiniPlayerView: View {
                     .foregroundColor(.mlmInkMuted)
                     .lineLimit(1)
             }
+        }
+    }
+
+    // MARK: - Error Info
+
+    private func errorInfo(_ message: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 10))
+                .foregroundColor(.mlmError)
+            Text(message)
+                .font(MLMFont.miniPlayerArtist)
+                .foregroundColor(.mlmError)
+                .lineLimit(1)
         }
     }
 

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: macOS Native
 status: in_progress
-stopped_at: Phase 4 complete — Import & Metadata
-last_updated: "2026-05-08T00:40:00.000Z"
+stopped_at: Phase 5 complete — Track Detail & Playback
+last_updated: "2026-05-08T01:30:00.000Z"
 last_activity: 2026-05-08
 progress:
   total_phases: 20
-  completed_phases: 4
-  total_plans: 3
-  completed_plans: 3
-  percent: 20
+  completed_phases: 5
+  total_plans: 4
+  completed_plans: 4
+  percent: 25
 ---
 
 # Project State
@@ -21,17 +21,32 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-07)
 
 **Core value:** Like a song anywhere and it reliably ends up in your owned library and on your devices in high quality — native macOS experience
-**Current focus:** Phase 4 — Import & Metadata (complete)
+**Current focus:** Phase 5 — Track Detail & Playback (complete)
 **Source of truth:** `macos-app/PLAN.md` + `.planning/ROADMAP.md` v2.0 section
 **v1.4 source of truth (paused):** `.planning/REQUIREMENTS.md` v1.4 section + `.planning/ROADMAP.md` v1.4 section
 **v1.3 source of truth (paused):** `.planning/REQUIREMENTS.md` v1.3 section + `.planning/ROADMAP.md` v1.3 section
 
 ## Current Position
 
-Phase: 4 (Import & Metadata) — COMPLETE
-Next: Phase 5 (Track Detail & Playback)
-Status: Import pipeline complete — scan / extract / batch-insert / first-run wizard / Settings re-scan / cross-view refresh notification
+Phase: 5 (Track Detail & Playback) — COMPLETE
+Next: Phase 6 (Playlists)
+Status: Full playback pipeline operational — double-click/spacebar/context-menu play, AVAudioEngine audio graph, LUFS gain compensation, waveform visualization, now-playing indicator, mini player integration, notification posting
 Last activity: 2026-05-08
+
+## Phase 5 Summary (v2.0)
+
+- Full playback pipeline: double-click track → inspector opens with TrackDetailView → waveform renders from AVAudioFile samples (Canvas, 200 bins, mirrored bars) → play/pause works → MiniPlayer updates live
+- AudioPlayer: AVAudioEngine graph (playerNode → gainNode → mainMixer → output), loadFile/play/pause/stop/seek, LUFS compensation (target -14 LUFS, max +6 dB boost), waveform peak extraction
+- PlaybackViewModel: @Observable singleton, position timer (50ms poll), play/pause/stop/seek, auto-detects natural track completion, posts .playbackTrackDidChange + .playbackStateDidChange notifications
+- TrackDetailView: header (icon + title + artist + format badge + play button) + WaveformView (Canvas with progress overlay, click/drag-to-seek) + MetadataPanel (Tags/File/Analysis/Library sections)
+- MiniPlayerView: wired to PlaybackViewModel — play/pause button, track title + artist, seekable progress bar (drag gesture), time display, inline error display (rose color) when playback fails
+- LibraryTable: now-playing indicator — playing track shows animated speaker.wave.2.fill icon + accent-colored title text; replaces green/blue local/remote dot while playing
+- TrackContextMenu: "Play" action wired to PlaybackViewModel (plays first selected local track, disabled for remote-only selections)
+- Spacebar play/pause: global shortcut via CommandMenu in MLMApp (FocusedValue-based PlaybackViewModel access)
+- LUFS gain compensation: AudioPlayer.applyLUFSCompensation uses track.lufsI to adjust AVAudioUnitEQ.globalGain (clamped to safe range)
+- Notification posting: PlaybackViewModel posts .playbackTrackDidChange (userInfo: trackId) and .playbackStateDidChange (userInfo: state) on every state transition
+
+**Files modified:** PlaybackViewModel.swift (notifications, stop cleanup), LibraryTable.swift (now-playing indicator), MiniPlayerView.swift (error display), TrackContextMenu.swift (Play action wired)
 
 ## Phase 4 Summary (v2.0)
 

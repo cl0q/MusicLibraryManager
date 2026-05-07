@@ -13,6 +13,7 @@ import SwiftUI
 struct TrackContextMenu: View {
     let selectedTrackIDs: Set<Int64>
     let tracks: [Track]
+    @Environment(\.container) private var container
 
     /// Resolved selected tracks.
     private var selectedTracks: [Track] {
@@ -41,10 +42,11 @@ struct TrackContextMenu: View {
         // MARK: - Playback (Phase 5)
         Section {
             Button {
-                // Placeholder — Phase 5
+                playSelectedTrack()
             } label: {
                 Label("Play", systemImage: "play.fill")
             }
+            .disabled(selectedTracks.isEmpty || selectedTracks.first?.isRemote == true)
         }
 
         Divider()
@@ -123,6 +125,15 @@ struct TrackContextMenu: View {
     }
 
     // MARK: - Actions
+
+    /// Play the first selected local track.
+    private func playSelectedTrack() {
+        guard let track = selectedTracks.first(where: { $0.isLocal }),
+              let playbackVM = container.playbackViewModel else { return }
+        Task {
+            await playbackVM.playTrack(track)
+        }
+    }
 
     /// Reveal the first selected local track in Finder.
     private func revealInFinder() {
