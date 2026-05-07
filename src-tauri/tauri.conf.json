@@ -25,7 +25,12 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["/Volumes/Lexxar/Music/**", "$HOME/Music/**"]
+        "scope": [
+          "/Volumes/Lexxar/Music/**",
+          "/Volumes/Lexxar/Music/.mlm_staging/**",
+          "$HOME/Music/**",
+          "$HOME/Music/.mlm_staging/**"
+        ]
       }
     }
   },
