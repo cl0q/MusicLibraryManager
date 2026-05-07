@@ -25,10 +25,15 @@ final class DependencyContainer {
     private(set) var analysisRepository: AnalysisRepository?
     private(set) var configRepository: ConfigRepository?
 
+    // MARK: - Services
+
+    private(set) var importService: ImportService?
+
     // MARK: - State
 
     private(set) var isInitialized = false
     private(set) var initializationError: Error?
+    var hasLibraryRoot = false
 
     // MARK: - Initialization
 
@@ -52,6 +57,17 @@ final class DependencyContainer {
         self.sourceRepository = SourceRepository(database: dbPool)
         self.analysisRepository = AnalysisRepository(database: dbPool)
         self.configRepository = ConfigRepository(database: dbPool)
+
+        // Services
+        self.importService = ImportService(
+            database: dbPool,
+            trackRepository: self.trackRepository!
+        )
+
+        // Check if library root is configured
+        if let root = try await configRepository?.getLibraryRoot(), !root.isEmpty {
+            hasLibraryRoot = true
+        }
 
         isInitialized = true
     }

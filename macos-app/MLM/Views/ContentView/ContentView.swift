@@ -34,11 +34,32 @@ struct ContentView: View {
 
     @State private var selectedSection: SidebarSection = .library
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var showFirstRunWizard = false
 
     var body: some View {
         Group {
             if container.isInitialized {
-                initializedView
+                ZStack {
+                    initializedView
+
+                    // First-run wizard overlay when no library root configured
+                    if showFirstRunWizard {
+                        Color.black.opacity(0.6)
+                            .ignoresSafeArea()
+                            .transition(.opacity)
+
+                        FirstRunWizard {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                showFirstRunWizard = false
+                                container.hasLibraryRoot = true
+                            }
+                        }
+                        .transition(.scale(scale: 0.9).combined(with: .opacity))
+                    }
+                }
+                .onAppear {
+                    showFirstRunWizard = !container.hasLibraryRoot
+                }
             } else if let error = container.initializationError {
                 errorView(error)
             } else {
