@@ -261,6 +261,8 @@ pub fn run() {
             commands::albums::get_album_detail_cmd,
             commands::albums::set_variant_preference_cmd,
             commands::albums::rescan_albums_cmd,
+            commands::folders::list_folder_children,
+            commands::folders::get_folder_tracks,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

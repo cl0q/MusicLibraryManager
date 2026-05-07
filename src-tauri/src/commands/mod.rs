@@ -46,6 +46,7 @@ pub mod download;
 pub mod duplicate;
 pub mod enhancements;
 pub mod files;
+pub mod folders;
 pub mod import;
 pub mod library_config;
 pub mod maintenance;
@@ -70,6 +71,7 @@ pub use enhancements::{
     resolve_review_item_cmd,
 };
 pub use files::copy_to_clipboard;
+pub use folders::{list_folder_children, get_folder_tracks};
 pub use import::{import_directory, import_playlist_command};
 pub use library_config::{
     check_library_connection, configure_library, get_library_config,

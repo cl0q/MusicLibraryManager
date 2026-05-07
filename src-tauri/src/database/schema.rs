@@ -850,6 +850,14 @@ pub fn initialize_schema(conn: &mut Connection) -> Result<()> {
         v17_rerun_sibling_detection(conn);
     }
 
+    // Phase 30: Add covering index on organized_path for folder prefix LIKE queries.
+    // Idempotent (IF NOT EXISTS), no schema version bump — stays at v17.
+    // The existing idx_organized_path_null is a partial index (WHERE organized_path IS NULL)
+    // and does NOT cover prefix queries like WHERE organized_path LIKE 'artist/%'.
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_organized_path ON tracks(organized_path);"
+    )?;
+
     Ok(())
 }
 
