@@ -32,6 +32,18 @@ struct LibraryView: View {
             initializeViewModel()
             await viewModel?.loadTracks()
         }
+        // Refresh library data when an import completes (FirstRunWizard, Settings re-scan, etc.)
+        .onReceive(NotificationCenter.default.publisher(for: .libraryDidImport)) { _ in
+            Task { await viewModel?.refresh() }
+        }
+        // Refresh after track deletions
+        .onReceive(NotificationCenter.default.publisher(for: .libraryDidDeleteTracks)) { _ in
+            Task { await viewModel?.refresh() }
+        }
+        // Refresh when a download moves a track from Remote → Local
+        .onReceive(NotificationCenter.default.publisher(for: .downloadDidComplete)) { _ in
+            Task { await viewModel?.refresh() }
+        }
     }
 
     // MARK: - Content

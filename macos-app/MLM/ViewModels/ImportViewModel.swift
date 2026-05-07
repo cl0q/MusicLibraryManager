@@ -71,6 +71,7 @@ final class ImportViewModel {
     ///
     /// Scans recursively, extracts metadata, and saves to database.
     /// Progress is reported via the `progress` property.
+    /// Posts `.libraryDidImport` notification on success.
     @MainActor
     func importLibrary() async {
         guard let root = libraryRoot else {
@@ -103,6 +104,16 @@ final class ImportViewModel {
             if result.failed > 0 {
                 errorMessage = "\(result.failed) file(s) failed to import"
             }
+
+            // Notify other views that library data has changed
+            NotificationCenter.default.post(
+                name: .libraryDidImport,
+                object: nil,
+                userInfo: [
+                    "succeeded": result.succeeded,
+                    "skipped": result.skipped
+                ]
+            )
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -113,6 +124,7 @@ final class ImportViewModel {
     /// Import from a specific directory (for manual folder selection).
     ///
     /// - Parameter directory: Directory to scan and import from
+    /// Posts `.libraryDidImport` notification on success.
     @MainActor
     func importFromDirectory(_ directory: URL) async {
         isImporting = true
@@ -133,6 +145,16 @@ final class ImportViewModel {
             if result.failed > 0 {
                 errorMessage = "\(result.failed) file(s) failed to import"
             }
+
+            // Notify other views that library data has changed
+            NotificationCenter.default.post(
+                name: .libraryDidImport,
+                object: nil,
+                userInfo: [
+                    "succeeded": result.succeeded,
+                    "skipped": result.skipped
+                ]
+            )
         } catch {
             errorMessage = error.localizedDescription
         }

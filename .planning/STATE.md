@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: macOS Native
 status: in_progress
-stopped_at: Phase 3 in-progress — Library Browser
-last_updated: "2026-05-07T23:30:00.000Z"
-last_activity: 2026-05-07
+stopped_at: Phase 4 complete — Import & Metadata
+last_updated: "2026-05-08T00:40:00.000Z"
+last_activity: 2026-05-08
 progress:
   total_phases: 20
-  completed_phases: 3
-  total_plans: 2
-  completed_plans: 2
-  percent: 15
+  completed_phases: 4
+  total_plans: 3
+  completed_plans: 3
+  percent: 20
 ---
 
 # Project State
@@ -21,17 +21,30 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-07)
 
 **Core value:** Like a song anywhere and it reliably ends up in your owned library and on your devices in high quality — native macOS experience
-**Current focus:** Phase 3 — Library Browser (complete)
+**Current focus:** Phase 4 — Import & Metadata (complete)
 **Source of truth:** `macos-app/PLAN.md` + `.planning/ROADMAP.md` v2.0 section
 **v1.4 source of truth (paused):** `.planning/REQUIREMENTS.md` v1.4 section + `.planning/ROADMAP.md` v1.4 section
 **v1.3 source of truth (paused):** `.planning/REQUIREMENTS.md` v1.3 section + `.planning/ROADMAP.md` v1.3 section
 
 ## Current Position
 
-Phase: 3 (Library Browser) — COMPLETE
-Next: Phase 4 (Import & Metadata)
-Status: Library table shipped — SwiftUI Table w/ 10 columns, FilterBar, Local/Remote tabs, EnergyBars, TrackContextMenu, multi-select
-Last activity: 2026-05-07
+Phase: 4 (Import & Metadata) — COMPLETE
+Next: Phase 5 (Track Detail & Playback)
+Status: Import pipeline complete — scan / extract / batch-insert / first-run wizard / Settings re-scan / cross-view refresh notification
+Last activity: 2026-05-08
+
+## Phase 4 Summary (v2.0)
+
+- Import pipeline fully operational: ImportService scans directories recursively, MetadataExtractor reads tags via AVFoundation (MP3/FLAC/M4A/WAV/AIFF/OGG), PathSanitizer generates FAT32-safe `artist/album/title.ext` paths, batch-insert with skip-on-duplicate
+- ImportViewModel: @Observable, tracks import progress, library root management, posts `.libraryDidImport` notification after successful import
+- FirstRunWizard: 4-step wizard (welcome → select folder → scanning progress → done summary), wired in ContentView overlay
+- LibrarySetupView: Settings panel with library root display/change, track count stats, Reveal in Finder, re-scan, import folder, supported formats grid
+- SettingsView: TabView container wrapping LibrarySetupView (Library tab), extensible for Phase 17 (Appearance + Maintenance tabs)
+- Cross-view refresh: NotificationCenter-based `.libraryDidImport` / `.libraryDidDeleteTracks` / `.downloadDidComplete` notifications; LibraryView observes all three and auto-refreshes
+- Notifications.swift: Centralized Notification.Name extensions for library, playback, sync, download events (playback/sync/download reserved for future phases)
+
+**Files created:** Notifications.swift, SettingsView.swift
+**Files modified:** ImportViewModel.swift (notification posts), LibraryView.swift (notification observers), MLMApp.swift (Settings scene → SettingsView)
 
 ## Phase 3 Summary (v2.0)
 

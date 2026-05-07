@@ -38,9 +38,8 @@ struct MLMApp: App {
         }
 
         Settings {
-            LibrarySetupView()
+            SettingsView()
                 .environment(container)
-                .frame(minWidth: 500, minHeight: 400)
         }
     }
 }
