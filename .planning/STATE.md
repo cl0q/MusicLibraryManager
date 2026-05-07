@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: macOS Native
 status: in_progress
-stopped_at: Phase 2 complete — Shell & Navigation
-last_updated: "2026-05-07T22:00:00.000Z"
+stopped_at: Phase 3 in-progress — Library Browser
+last_updated: "2026-05-07T23:30:00.000Z"
 last_activity: 2026-05-07
 progress:
   total_phases: 20
-  completed_phases: 2
-  total_plans: 1
-  completed_plans: 1
-  percent: 10
+  completed_phases: 3
+  total_plans: 2
+  completed_plans: 2
+  percent: 15
 ---
 
 # Project State
@@ -21,17 +21,30 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-07)
 
 **Core value:** Like a song anywhere and it reliably ends up in your owned library and on your devices in high quality — native macOS experience
-**Current focus:** Phase 3 — Library Browser (next)
+**Current focus:** Phase 3 — Library Browser (complete)
 **Source of truth:** `macos-app/PLAN.md` + `.planning/ROADMAP.md` v2.0 section
 **v1.4 source of truth (paused):** `.planning/REQUIREMENTS.md` v1.4 section + `.planning/ROADMAP.md` v1.4 section
 **v1.3 source of truth (paused):** `.planning/REQUIREMENTS.md` v1.3 section + `.planning/ROADMAP.md` v1.3 section
 
 ## Current Position
 
-Phase: 2 (Shell & Navigation) — COMPLETE
-Next: Phase 3 (Library Browser)
-Status: Shell layout shipped — NavigationSplitView + MiniPlayer + ActivityPanel + ⌘1-5 shortcuts
+Phase: 3 (Library Browser) — COMPLETE
+Next: Phase 4 (Import & Metadata)
+Status: Library table shipped — SwiftUI Table w/ 10 columns, FilterBar, Local/Remote tabs, EnergyBars, TrackContextMenu, multi-select
 Last activity: 2026-05-07
+
+## Phase 3 Summary (v2.0)
+
+- LibraryViewModel: @Observable ViewModel with search (debounced 200ms), column sorting (10 columns), Local/Remote tab switching, multi-select via Set<Int64>, async GRDB loading via TrackRepository
+- LibraryTable: SwiftUI Table with title (status dot), artist, album, time, fmt, kbps, genre, year, energy (EnergyBars), date_added columns. contextMenu(forSelectionType:) for multi-select-aware right-click
+- FilterBar: Local/Remote segmented tab switcher with counts, search field with ⌘F focus shortcut, clear button, placeholder action buttons (Analyze/Match/Filters)
+- EnergyBars: 5-bar symmetric mountain visualization (8/12/16/12/8px) with level-keyed colors from Solar energy palette (cyan→emerald→amber→orange→rose)
+- TrackContextMenu: Play, Add to Playlist, Add to Sync Profile, Reveal in Finder, Copy Path (local only), Download (remote only), More Info, Remove from Library — all placeholder-wired for future phases
+- LibraryView: Container VStack composing FilterBar + LibraryTable, lazy ViewModel init from DependencyContainer, toolbar track count
+- ContentView detail router updated: .library case now renders LibraryView instead of PlaceholderView
+
+**Files created:** LibraryViewModel.swift, LibraryView.swift, LibraryTable.swift, FilterBar.swift, EnergyBars.swift, TrackContextMenu.swift
+**Files modified:** ContentView.swift (detail router)
 
 ## Phase 1 Summary (v2.0)
 

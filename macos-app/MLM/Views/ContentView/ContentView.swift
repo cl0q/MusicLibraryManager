@@ -85,7 +85,7 @@ struct ContentView: View {
     private var detailView: some View {
         switch selectedSection {
         case .library:
-            PlaceholderView(title: "Library", icon: "music.note.list", description: "Your local music collection")
+            LibraryView()
         case .playlists:
             PlaceholderView(title: "Playlists", icon: "list.bullet", description: "Your curated playlists")
         case .folders:
