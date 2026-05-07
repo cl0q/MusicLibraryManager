@@ -28,6 +28,11 @@ final class DependencyContainer {
     // MARK: - Services
 
     private(set) var importService: ImportService?
+    private(set) var audioPlayer: AudioPlayer?
+
+    // MARK: - ViewModels (shared singletons)
+
+    private(set) var playbackViewModel: PlaybackViewModel?
 
     // MARK: - State
 
@@ -62,6 +67,15 @@ final class DependencyContainer {
         self.importService = ImportService(
             database: dbPool,
             trackRepository: self.trackRepository!
+        )
+
+        let player = AudioPlayer()
+        self.audioPlayer = player
+
+        // Shared ViewModels
+        self.playbackViewModel = PlaybackViewModel(
+            audioPlayer: player,
+            configRepository: self.configRepository
         )
 
         // Check if library root is configured

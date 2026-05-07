@@ -14,6 +14,9 @@ struct MLMApp: App {
     /// Reads the sidebar selection from the focused window via FocusedValues.
     @FocusedBinding(\.selectedSection) private var selectedSection
 
+    /// Reads the playback VM from the focused window for global shortcuts.
+    @FocusedValue(\.playbackViewModel) private var playbackVM
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -34,6 +37,21 @@ struct MLMApp: App {
                     }
                     .keyboardShortcut(section.keyboardShortcut)
                 }
+            }
+
+            // Playback menu — Space (play/pause)
+            CommandMenu("Playback") {
+                Button(playbackVM?.isPlaying == true ? "Pause" : "Play") {
+                    playbackVM?.togglePlayPause()
+                }
+                .keyboardShortcut(.space, modifiers: [])
+                .disabled(playbackVM?.hasTrack != true)
+
+                Button("Stop") {
+                    playbackVM?.stop()
+                }
+                .keyboardShortcut(".", modifiers: .command)
+                .disabled(playbackVM?.hasTrack != true)
             }
         }
 

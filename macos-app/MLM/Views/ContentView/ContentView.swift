@@ -7,10 +7,20 @@ struct SelectedSectionKey: FocusedValueKey {
     typealias Value = Binding<SidebarSection>
 }
 
+/// Allows Playback CommandMenu to access the PlaybackViewModel.
+struct PlaybackViewModelKey: FocusedValueKey {
+    typealias Value = PlaybackViewModel
+}
+
 extension FocusedValues {
     var selectedSection: Binding<SidebarSection>? {
         get { self[SelectedSectionKey.self] }
         set { self[SelectedSectionKey.self] = newValue }
+    }
+
+    var playbackViewModel: PlaybackViewModel? {
+        get { self[PlaybackViewModelKey.self] }
+        set { self[PlaybackViewModelKey.self] = newValue }
     }
 }
 
@@ -35,6 +45,9 @@ struct ContentView: View {
     @State private var selectedSection: SidebarSection = .library
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var showFirstRunWizard = false
+
+    /// Track selected for detail panel (via double-click or "More Info").
+    @State private var selectedTrackForDetail: Track?
 
     var body: some View {
         Group {
@@ -67,6 +80,7 @@ struct ContentView: View {
             }
         }
         .focusedSceneValue(\.selectedSection, $selectedSection)
+        .focusedSceneValue(\.playbackViewModel, container.playbackViewModel)
     }
 
     // MARK: - Initialized layout
@@ -79,6 +93,12 @@ struct ContentView: View {
                     .frame(minWidth: MLMSpacing.sidebarWidth)
             } detail: {
                 detailView
+            }
+            .inspector(isPresented: showDetailInspector) {
+                if let track = selectedTrackForDetail {
+                    TrackDetailView(track: track)
+                        .inspectorColumnWidth(min: 320, ideal: 360, max: 480)
+                }
             }
 
             // Separator
@@ -106,7 +126,9 @@ struct ContentView: View {
     private var detailView: some View {
         switch selectedSection {
         case .library:
-            LibraryView()
+            LibraryView(onTrackDoubleClick: { track in
+                handleTrackDoubleClick(track)
+            })
         case .playlists:
             PlaceholderView(title: "Playlists", icon: "list.bullet", description: "Your curated playlists")
         case .folders:
@@ -115,6 +137,29 @@ struct ContentView: View {
             PlaceholderView(title: "Sync", icon: "arrow.triangle.2.circlepath", description: "Device sync profiles")
         case .sources:
             PlaceholderView(title: "Sources", icon: "globe", description: "Connected streaming services")
+        }
+    }
+
+    // MARK: - Track Detail Inspector
+
+    /// Whether the detail inspector should be shown.
+    private var showDetailInspector: Binding<Bool> {
+        Binding(
+            get: { selectedTrackForDetail != nil },
+            set: { if !$0 { selectedTrackForDetail = nil } }
+        )
+    }
+
+    /// Handle double-click on a track — play it and show the detail panel.
+    private func handleTrackDoubleClick(_ track: Track) {
+        // Show detail inspector
+        selectedTrackForDetail = track
+
+        // Play the track
+        if track.isLocal, let playbackVM = container.playbackViewModel {
+            Task {
+                await playbackVM.playTrack(track)
+            }
         }
     }
 

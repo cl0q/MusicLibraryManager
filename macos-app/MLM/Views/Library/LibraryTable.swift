@@ -10,6 +10,9 @@ import SwiftUI
 struct LibraryTable: View {
     @Bindable var viewModel: LibraryViewModel
 
+    /// Callback when a track is double-clicked (primary action).
+    var onDoubleClick: ((Track) -> Void)?
+
     var body: some View {
         if viewModel.isLoading {
             loadingState
@@ -128,7 +131,11 @@ struct LibraryTable: View {
                 tracks: viewModel.displayedTracks
             )
         } primaryAction: { selectedIDs in
-            // Double-click — future: play track
+            // Double-click — play track + show detail
+            if let trackID = selectedIDs.first,
+               let track = viewModel.displayedTracks.first(where: { $0.id == trackID }) {
+                onDoubleClick?(track)
+            }
         }
     }
 

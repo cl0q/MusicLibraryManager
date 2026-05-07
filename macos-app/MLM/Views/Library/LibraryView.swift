@@ -16,6 +16,9 @@ import SwiftUI
 struct LibraryView: View {
     @Environment(\.container) private var container
 
+    /// Callback when a track is double-clicked.
+    var onTrackDoubleClick: ((Track) -> Void)?
+
     @State private var viewModel: LibraryViewModel?
 
     var body: some View {
@@ -52,7 +55,7 @@ struct LibraryView: View {
         VStack(spacing: 0) {
             FilterBar(viewModel: viewModel)
 
-            LibraryTable(viewModel: viewModel)
+            LibraryTable(viewModel: viewModel, onDoubleClick: onTrackDoubleClick)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color.mlmBase)
