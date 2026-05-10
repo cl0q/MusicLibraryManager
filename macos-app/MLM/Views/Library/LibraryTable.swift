@@ -30,10 +30,10 @@ struct LibraryTable: View {
         KeyPathComparator(\.track.dateAddedSortKey, order: .reverse)
     ]
 
+    /// Already SQL-sorted — just wrap in TrackRow (no in-memory sort).
     private var rows: [TrackRow] {
         viewModel.displayedTracks
             .compactMap { t in t.id.map { TrackRow(id: $0, track: t) } }
-            .sorted(using: sortOrder)
     }
 
     var body: some View {
@@ -133,6 +133,25 @@ struct LibraryTable: View {
                let track = viewModel.displayedTracks.first(where: { $0.id == trackID }) {
                 onDoubleClick?(track)
             }
+        }
+        .onChange(of: sortOrder) { _, newOrder in
+            guard let first = newOrder.first else { return }
+            let col: SortColumn
+            switch first.keyPath {
+            case \TrackRow.track.title:          col = .title
+            case \TrackRow.track.artist:         col = .artist
+            case \TrackRow.track.album:          col = .album
+            case \TrackRow.track.durationSortKey: col = .duration
+            case \TrackRow.track.format:         col = .format
+            case \TrackRow.track.bitrateSortKey: col = .bitrate
+            case \TrackRow.track.genreSortKey:   col = .genre
+            case \TrackRow.track.yearSortKey:    col = .year
+            case \TrackRow.track.energySortKey:  col = .energy
+            case \TrackRow.track.dateAddedSortKey: col = .dateAdded
+            default: return
+            }
+            let asc = first.order == .forward
+            viewModel.sortDescriptor = TrackSortDescriptor(column: col, ascending: asc)
         }
     }
 
