@@ -25,8 +25,7 @@ final class SoundCloudClient {
 
     private let clientId: String
     private let clientSecret: String
-    private let redirectURI = "mlm://callback"
-    private let callbackScheme = "mlm"
+    private let redirectURI = LoopbackOAuthServer.redirectURI
 
     private static let authURL = URL(string: "https://soundcloud.com/connect")!
     private static let tokenURL = URL(string: "https://secure.soundcloud.com/oauth/token")!
@@ -53,25 +52,34 @@ final class SoundCloudClient {
         self.oauthManager = oauthManager
         self.trackRepository = trackRepository
         self.sourceRepository = sourceRepository
-        self.clientId = clientId ?? ProcessInfo.processInfo.environment["SOUNDCLOUD_CLIENT_ID"] ?? ""
-        self.clientSecret = clientSecret ?? ProcessInfo.processInfo.environment["SOUNDCLOUD_CLIENT_SECRET"] ?? ""
+        self.clientId = clientId ?? CredentialsLoader.credential(key: "SOUNDCLOUD_CLIENT_ID") ?? ""
+        self.clientSecret = clientSecret ?? CredentialsLoader.credential(key: "SOUNDCLOUD_CLIENT_SECRET") ?? ""
     }
 
     // MARK: - OAuth Flow
 
     /// Start the OAuth authorization flow.
     ///
-    /// Opens the system browser via `ASWebAuthenticationSession`.
-    /// Returns after the user approves and tokens are stored.
+    /// Opens the system browser, starts a local loopback HTTP server on
+    /// port 19823, waits for the callback, exchanges the code for tokens,
+    /// and stores them in the Keychain.
     @MainActor
     func authorize() async throws {
-        // Step 1: Get authorization code
-        let code = try await oauthManager.authorize(
+        guard !clientId.isEmpty, !clientSecret.isEmpty else {
+            AppLogger.shared.error(
+                "SC OAuth: missing credentials — add SOUNDCLOUD_CLIENT_ID/SECRET to " +
+                "~/Library/Application Support/MLM/.env",
+                source: "sc-oauth"
+            )
+            throw SoundCloudError.missingCredentials
+        }
+
+        // Step 1: Open browser + wait for loopback callback
+        let code = try await oauthManager.authorizeWithLoopback(
             authorizationURL: Self.authURL,
             clientId: clientId,
             redirectURI: redirectURI,
-            scopes: ["non-expiring"],
-            callbackURLScheme: callbackScheme
+            scopes: ["non-expiring"]
         )
 
         // Step 2: Exchange code for tokens
@@ -117,7 +125,12 @@ final class SoundCloudClient {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             let body = String(data: data, encoding: .utf8) ?? "Unknown"
+            AppLogger.shared.error(
+                "SC OAuth: token exchange failed: HTTP \(status) — \(body.prefix(200))",
+                source: "sc-oauth"
+            )
             throw SoundCloudError.tokenExchangeFailed(body)
         }
 
@@ -391,6 +404,7 @@ final class SoundCloudClient {
         case notAuthenticated
         case noCodeVerifier
         case noSourceId
+        case missingCredentials
         case invalidURL(String)
         case invalidResponse
         case tokenExchangeFailed(String)
@@ -401,6 +415,9 @@ final class SoundCloudClient {
             case .notAuthenticated: "Not authenticated — connect SoundCloud first"
             case .noCodeVerifier: "OAuth error: no PKCE code verifier"
             case .noSourceId: "Failed to create source record"
+            case .missingCredentials:
+                "SoundCloud credentials missing — add SOUNDCLOUD_CLIENT_ID and " +
+                "SOUNDCLOUD_CLIENT_SECRET to ~/Library/Application Support/MLM/.env"
             case .invalidURL(let endpoint): "Invalid API URL: \(endpoint)"
             case .invalidResponse: "Invalid HTTP response"
             case .tokenExchangeFailed(let body): "Token exchange failed: \(body)"
