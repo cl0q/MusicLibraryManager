@@ -79,6 +79,17 @@ final class SourcesViewModel {
         connectionStatus[service] ?? false
     }
 
+    /// Whether OAuth credentials exist for the service.
+    func hasCredentials(for service: TokenStorage.Service) -> Bool {
+        CredentialsLoader.hasCredentials(for: service)
+    }
+
+    /// Hint shown when credentials are missing (nil when credentials are present).
+    func credentialHint(for service: TokenStorage.Service) -> String? {
+        guard !hasCredentials(for: service) else { return nil }
+        return "Add credentials to ~/Library/Application Support/MLM/.env"
+    }
+
     /// Whether a source is currently syncing.
     func isSyncing(_ service: TokenStorage.Service) -> Bool {
         syncingServices.contains(service)
@@ -180,6 +191,10 @@ final class SourcesViewModel {
             connectionStatus[service] = true
         } catch {
             errors[service] = error.localizedDescription
+            AppLogger.shared.error(
+                "\(service.displayName) OAuth failed: \(error.localizedDescription)",
+                source: "sources"
+            )
         }
     }
 

@@ -187,6 +187,7 @@ struct SourceCard: View {
                         Text("Disconnect")
                     }
                 } else {
+                    let credsMissing = !viewModel.hasCredentials(for: source)
                     Button {
                         Task { await viewModel.connectSource(source) }
                     } label: {
@@ -198,6 +199,14 @@ struct SourceCard: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(brandColor)
+                    .disabled(credsMissing)
+
+                    if credsMissing, let hint = viewModel.credentialHint(for: source) {
+                        Text(hint)
+                            .font(MLMFont.muted)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.leading)
+                    }
                 }
             }
 
