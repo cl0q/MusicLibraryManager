@@ -1,3 +1,4 @@
+import AppKit
 import AuthenticationServices
 import CryptoKit
 import Foundation
@@ -177,6 +178,67 @@ final class OAuthManager: @unchecked Sendable {
         return try await postTokenRequest(tokenURL: tokenURL, body: body, clientId: clientId, clientSecret: clientSecret)
     }
 
+    // MARK: - Loopback OAuth
+
+    /// Start an OAuth 2.0 PKCE flow using a local loopback HTTP server.
+    ///
+    /// Opens the system browser via `NSWorkspace` (not ASWebAuthenticationSession)
+    /// and waits for the redirect to http://127.0.0.1:19823/callback.
+    ///
+    /// Use this when the OAuth app is registered with a loopback redirect URI.
+    func authorizeWithLoopback(
+        authorizationURL: URL,
+        clientId: String,
+        redirectURI: String,
+        scopes: [String],
+        extraParams: [String: String] = [:]
+    ) async throws -> String {
+        let verifier = generateCodeVerifier()
+        let challenge = generateCodeChallenge(from: verifier)
+        self.codeVerifier = verifier
+
+        let state = generateState()
+
+        var components = URLComponents(url: authorizationURL, resolvingAgainstBaseURL: false)!
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "client_id", value: clientId),
+            URLQueryItem(name: "response_type", value: "code"),
+            URLQueryItem(name: "redirect_uri", value: redirectURI),
+            URLQueryItem(name: "scope", value: scopes.joined(separator: " ")),
+            URLQueryItem(name: "code_challenge_method", value: "S256"),
+            URLQueryItem(name: "code_challenge", value: challenge),
+            URLQueryItem(name: "state", value: state),
+        ]
+        for (key, value) in extraParams {
+            queryItems.append(URLQueryItem(name: key, value: value))
+        }
+        components.queryItems = queryItems
+
+        guard let authURL = components.url else {
+            throw OAuthError.invalidURL
+        }
+
+        // Open in system browser — SoundCloud/Spotify are registered for loopback,
+        // so ASWebAuthenticationSession (which needs a custom scheme) cannot be used.
+        _ = await MainActor.run {
+            NSWorkspace.shared.open(authURL)
+        }
+
+        // Wait for the browser to redirect back to the loopback server.
+        let server = LoopbackOAuthServer()
+        let callback = try await server.waitForCallback()
+
+        guard callback.state == state else {
+            AppLogger.shared.error(
+                "SC OAuth: state mismatch (expected \(state), got \(callback.state))",
+                source: "sc-oauth"
+            )
+            throw OAuthError.stateMismatch
+        }
+
+        return callback.code
+    }
+
     // MARK: - Token Response
 
     /// Token response from the OAuth provider.
@@ -204,6 +266,7 @@ final class OAuthManager: @unchecked Sendable {
         case authenticationFailed(Error)
         case noCodeInCallback
         case noCodeVerifier
+        case stateMismatch
         case providerError(String)
         case tokenExchangeFailed(statusCode: Int, body: String)
 
@@ -214,6 +277,7 @@ final class OAuthManager: @unchecked Sendable {
             case .authenticationFailed(let error): "Authentication failed: \(error.localizedDescription)"
             case .noCodeInCallback: "No authorization code in callback"
             case .noCodeVerifier: "No PKCE code verifier (authorize() must be called first)"
+            case .stateMismatch: "OAuth state mismatch — possible CSRF attack"
             case .providerError(let error): "Provider error: \(error)"
             case .tokenExchangeFailed(let code, let body): "Token exchange failed (HTTP \(code)): \(body)"
             }
@@ -238,6 +302,17 @@ final class OAuthManager: @unchecked Sendable {
         let data = Data(verifier.utf8)
         let hash = SHA256.hash(data: data)
         return Data(hash)
+            .base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    /// Generate a cryptographically random state parameter for CSRF protection.
+    private func generateState() -> String {
+        var bytes = [UInt8](repeating: 0, count: 16)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        return Data(bytes)
             .base64EncodedString()
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
