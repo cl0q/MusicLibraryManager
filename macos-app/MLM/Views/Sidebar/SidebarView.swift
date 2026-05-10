@@ -6,13 +6,25 @@ import SwiftUI
 /// (wired via CommandMenu in MLMApp) and a Settings footer.
 struct SidebarView: View {
     @Binding var selectedSection: SidebarSection
+    @Environment(\.container) private var container
 
     var body: some View {
         List(selection: $selectedSection) {
             Section {
                 ForEach(SidebarSection.allCases) { section in
-                    Label(section.label, systemImage: section.icon)
-                        .tag(section)
+                    HStack {
+                        Label(section.label, systemImage: section.icon)
+
+                        // Show disconnected indicator for Library when drive is unmounted
+                        if section == .library && !container.isLibraryDriveMounted {
+                            Spacer()
+                            Circle()
+                                .fill(Color.mlmError)
+                                .frame(width: 7, height: 7)
+                                .help("Library drive disconnected")
+                        }
+                    }
+                    .tag(section)
                 }
             } header: {
                 Text("NAVIGATION")
@@ -38,7 +50,7 @@ struct SidebarView: View {
                 .font(MLMFont.body)
                 .foregroundColor(.mlmInkSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, MLMSpacing.sidebarItemPadding)
+                .padding(.horizontal, 8)
                 .padding(.vertical, 6)
         }
         .buttonStyle(.plain)

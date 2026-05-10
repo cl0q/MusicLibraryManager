@@ -61,7 +61,7 @@ struct TrackDetailView: View {
             HStack(alignment: .top) {
                 // Track icon + status
                 ZStack {
-                    RoundedRectangle(cornerRadius: MLMSpacing.cornerRadius)
+                    RoundedRectangle(cornerRadius: 6)
                         .fill(Color.mlmRaised)
                         .frame(width: 56, height: 56)
 
@@ -118,7 +118,7 @@ struct TrackDetailView: View {
                 }
             }
         }
-        .padding(MLMSpacing.cardPadding)
+        .padding(12)
     }
 
     private var formatBadge: some View {
@@ -128,7 +128,7 @@ struct TrackDetailView: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(formatColor.opacity(0.15))
-            .clipShape(RoundedRectangle(cornerRadius: MLMSpacing.cornerRadiusSmall))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
     private var formatColor: Color {
@@ -193,8 +193,8 @@ struct TrackDetailView: View {
                 }
             }
         }
-        .padding(.horizontal, MLMSpacing.cardPadding)
-        .padding(.vertical, MLMSpacing.itemGap)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .background(Color.mlmBase)
     }
 

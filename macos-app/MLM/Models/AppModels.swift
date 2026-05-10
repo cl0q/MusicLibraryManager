@@ -23,7 +23,7 @@ struct DownloadItem: Codable, Identifiable, Hashable {
 /// A duplicate review queue item.
 ///
 /// Maps to the `review_queue` table.
-struct ReviewItem: Codable, FetchableRecord, PersistableRecord, Identifiable {
+struct ReviewItem: Codable, FetchableRecord, MutablePersistableRecord, Identifiable {
     var id: Int64?
     var actionType: String
     var trackId: Int64
@@ -52,6 +52,10 @@ struct ReviewItem: Codable, FetchableRecord, PersistableRecord, Identifiable {
         static let id = Column(CodingKeys.id)
         static let status = Column(CodingKeys.status)
         static let actionType = Column(CodingKeys.actionType)
+    }
+
+    mutating func didInsert(_ inserted: InsertionSuccess) {
+        id = inserted.rowID
     }
 }
 

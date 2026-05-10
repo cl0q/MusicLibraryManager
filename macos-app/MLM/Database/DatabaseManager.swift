@@ -36,16 +36,20 @@ final class DatabaseManager: Sendable {
 
         // Open connection pool with WAL mode for concurrent reads
         var config = Configuration()
-        config.foreignKeysEnabled = true // CRITICAL: SQLite defaults to OFF
+        config.foreignKeysEnabled = false
         config.prepareDatabase { db in
-            // Enable WAL mode for concurrent read access
-            try db.execute(sql: "PRAGMA journal_mode = WAL")
+            try? db.execute(sql: "PRAGMA journal_mode = WAL")
         }
 
         self.pool = try DatabasePool(path: databasePath.path, configuration: config)
 
         // Run all migrations
         try migrator.migrate(pool)
+
+        // Clean up orphaned track_tags from v11 SoundCloud resync migration
+        try? pool.write { db in
+            try db.execute(sql: "DELETE FROM track_tags WHERE track_id NOT IN (SELECT id FROM tracks)")
+        }
     }
 
     /// Initialize with a custom database path (for testing).
@@ -79,7 +83,7 @@ final class DatabaseManager: Sendable {
     /// Matches the Tauri app's data directory so both apps share the same DB.
     private static func defaultDatabasePath() -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appDir = appSupport.appendingPathComponent("com.mlm.music-library-manager")
+        let appDir = appSupport.appendingPathComponent("com.musiclibrary.app")
         return appDir.appendingPathComponent("music_library.db")
     }
 
@@ -108,7 +112,7 @@ final class DatabaseManager: Sendable {
         // Migration v1: Core tracks table (Phase 1)
         // ──────────────────────────────────────────────────────────────
         migrator.registerMigration("v1_core_tracks") { db in
-            try db.create(table: "tracks", ifNotExists: true) { t in
+            try db.create(table: "tracks", options: .ifNotExists) { t in
                 t.autoIncrementedPrimaryKey("id")
                 t.column("artist", .text).notNull()
                 t.column("album_artist", .text).notNull()
@@ -125,10 +129,10 @@ final class DatabaseManager: Sendable {
                 t.column("date_added", .text).defaults(sql: "CURRENT_TIMESTAMP")
             }
 
-            try db.create(indexOn: "tracks", columns: ["artist"], ifNotExists: true)
-            try db.create(indexOn: "tracks", columns: ["album"], ifNotExists: true)
-            try db.create(indexOn: "tracks", columns: ["title"], ifNotExists: true)
-            try db.create(indexOn: "tracks", columns: ["is_duplicate"], ifNotExists: true)
+            try db.create(indexOn: "tracks", columns: ["artist"], options: .ifNotExists)
+            try db.create(indexOn: "tracks", columns: ["album"], options: .ifNotExists)
+            try db.create(indexOn: "tracks", columns: ["title"], options: .ifNotExists)
+            try db.create(indexOn: "tracks", columns: ["is_duplicate"], options: .ifNotExists)
         }
 
         // ──────────────────────────────────────────────────────────────
@@ -142,10 +146,10 @@ final class DatabaseManager: Sendable {
                         .references("tracks", onDelete: .setNull)
                 }
             }
-            try db.create(indexOn: "tracks", columns: ["variant_of"], ifNotExists: true)
+            try db.create(indexOn: "tracks", columns: ["variant_of"], options: .ifNotExists)
 
             // Sources table
-            try db.create(table: "sources", ifNotExists: true) { t in
+            try db.create(table: "sources", options: .ifNotExists) { t in
                 t.autoIncrementedPrimaryKey("id")
                 t.column("name", .text).notNull()
                 t.column("user_id", .text).notNull()
@@ -154,7 +158,7 @@ final class DatabaseManager: Sendable {
             }
 
             // Track sources (many-to-many)
-            try db.create(table: "track_sources", ifNotExists: true) { t in
+            try db.create(table: "track_sources", options: .ifNotExists) { t in
                 t.column("track_id", .integer).notNull()
                     .references("tracks", onDelete: .cascade)
                 t.column("source_id", .integer).notNull()
@@ -163,10 +167,10 @@ final class DatabaseManager: Sendable {
                 t.column("added_at", .text).notNull()
                 t.primaryKey(["track_id", "source_id"])
             }
-            try db.create(indexOn: "track_sources", columns: ["external_id"], ifNotExists: true)
+            try db.create(indexOn: "track_sources", columns: ["external_id"], options: .ifNotExists)
 
             // Last sync timestamps
-            try db.create(table: "last_sync_timestamps", ifNotExists: true) { t in
+            try db.create(table: "last_sync_timestamps", options: .ifNotExists) { t in
                 t.column("user_id", .text).notNull()
                 t.column("source", .text).notNull()
                 t.column("timestamp", .text).notNull()
@@ -178,7 +182,7 @@ final class DatabaseManager: Sendable {
         // Migration v3: Playlist tables (Phase 4)
         // ──────────────────────────────────────────────────────────────
         migrator.registerMigration("v3_playlists") { db in
-            try db.create(table: "playlists", ifNotExists: true) { t in
+            try db.create(table: "playlists", options: .ifNotExists) { t in
                 t.autoIncrementedPrimaryKey("id")
                 t.column("name", .text).notNull()
                 t.column("description", .text)
@@ -193,13 +197,13 @@ final class DatabaseManager: Sendable {
                 t.column("external_id", .text)
                 t.column("date_created", .text).defaults(sql: "CURRENT_TIMESTAMP")
             }
-            try db.create(indexOn: "playlists", columns: ["category"], ifNotExists: true)
+            try db.create(indexOn: "playlists", columns: ["category"], options: .ifNotExists)
             try db.execute(sql: """
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_playlists_name_category
                 ON playlists(name, category)
             """)
 
-            try db.create(table: "playlist_tracks", ifNotExists: true) { t in
+            try db.create(table: "playlist_tracks", options: .ifNotExists) { t in
                 t.autoIncrementedPrimaryKey("id")
                 t.column("playlist_id", .integer).notNull()
                     .references("playlists", onDelete: .cascade)
@@ -214,13 +218,13 @@ final class DatabaseManager: Sendable {
                 ON playlist_tracks(playlist_id, position)
             """)
 
-            try db.create(table: "playlist_tags", ifNotExists: true) { t in
+            try db.create(table: "playlist_tags", options: .ifNotExists) { t in
                 t.column("playlist_id", .integer).notNull()
                     .references("playlists", onDelete: .cascade)
                 t.column("tag", .text).notNull()
                 t.primaryKey(["playlist_id", "tag"])
             }
-            try db.create(indexOn: "playlist_tags", columns: ["tag"], ifNotExists: true)
+            try db.create(indexOn: "playlist_tags", columns: ["tag"], options: .ifNotExists)
 
             // Smart playlist views
             try db.execute(sql: """
@@ -244,7 +248,7 @@ final class DatabaseManager: Sendable {
         // Migration v4: Sync profiles (Phase 5)
         // ──────────────────────────────────────────────────────────────
         migrator.registerMigration("v4_sync_profiles") { db in
-            try db.create(table: "sync_profiles", ifNotExists: true) { t in
+            try db.create(table: "sync_profiles", options: .ifNotExists) { t in
                 t.autoIncrementedPrimaryKey("id")
                 t.column("name", .text).notNull().unique()
                 t.column("output_folder", .text).notNull()
@@ -253,25 +257,25 @@ final class DatabaseManager: Sendable {
                 t.column("date_modified", .text).defaults(sql: "CURRENT_TIMESTAMP")
             }
 
-            try db.create(table: "sync_profile_tracks", ifNotExists: true) { t in
+            try db.create(table: "sync_profile_tracks", options: .ifNotExists) { t in
                 t.column("profile_id", .integer).notNull()
                     .references("sync_profiles", onDelete: .cascade)
                 t.column("track_id", .integer).notNull()
                     .references("tracks", onDelete: .cascade)
                 t.primaryKey(["profile_id", "track_id"])
             }
-            try db.create(indexOn: "sync_profile_tracks", columns: ["profile_id"], ifNotExists: true)
+            try db.create(indexOn: "sync_profile_tracks", columns: ["profile_id"], options: .ifNotExists)
 
-            try db.create(table: "sync_profile_playlists", ifNotExists: true) { t in
+            try db.create(table: "sync_profile_playlists", options: .ifNotExists) { t in
                 t.column("profile_id", .integer).notNull()
                     .references("sync_profiles", onDelete: .cascade)
                 t.column("playlist_id", .integer).notNull()
                     .references("playlists", onDelete: .cascade)
                 t.primaryKey(["profile_id", "playlist_id"])
             }
-            try db.create(indexOn: "sync_profile_playlists", columns: ["profile_id"], ifNotExists: true)
+            try db.create(indexOn: "sync_profile_playlists", columns: ["profile_id"], options: .ifNotExists)
 
-            try db.create(table: "sync_profile_rules", ifNotExists: true) { t in
+            try db.create(table: "sync_profile_rules", options: .ifNotExists) { t in
                 t.autoIncrementedPrimaryKey("id")
                 t.column("profile_id", .integer).notNull()
                     .references("sync_profiles", onDelete: .cascade)
@@ -279,9 +283,9 @@ final class DatabaseManager: Sendable {
                 t.column("operator", .text).notNull()
                 t.column("value", .text).notNull()
             }
-            try db.create(indexOn: "sync_profile_rules", columns: ["profile_id"], ifNotExists: true)
+            try db.create(indexOn: "sync_profile_rules", columns: ["profile_id"], options: .ifNotExists)
 
-            try db.create(table: "sync_state", ifNotExists: true) { t in
+            try db.create(table: "sync_state", options: .ifNotExists) { t in
                 t.autoIncrementedPrimaryKey("id")
                 t.column("profile_id", .integer).notNull()
                     .references("sync_profiles", onDelete: .cascade)
@@ -292,14 +296,14 @@ final class DatabaseManager: Sendable {
                 t.column("synced_timestamp", .text)
                 t.uniqueKey(["profile_id", "track_id"])
             }
-            try db.create(indexOn: "sync_state", columns: ["profile_id"], ifNotExists: true)
+            try db.create(indexOn: "sync_state", columns: ["profile_id"], options: .ifNotExists)
         }
 
         // ──────────────────────────────────────────────────────────────
         // Migration v5: Enhancement tables (Phase 7)
         // ──────────────────────────────────────────────────────────────
         migrator.registerMigration("v5_enhancements") { db in
-            try db.create(table: "fingerprints", ifNotExists: true) { t in
+            try db.create(table: "fingerprints", options: .ifNotExists) { t in
                 t.primaryKey("track_id", .integer)
                     .references("tracks", onDelete: .cascade)
                 t.column("fingerprint", .blob).notNull()
@@ -309,7 +313,7 @@ final class DatabaseManager: Sendable {
                 t.column("fingerprinted_at", .text).defaults(sql: "CURRENT_TIMESTAMP")
             }
 
-            try db.create(table: "artwork", ifNotExists: true) { t in
+            try db.create(table: "artwork", options: .ifNotExists) { t in
                 t.primaryKey("track_id", .integer)
                     .references("tracks", onDelete: .cascade)
                 t.column("artwork_path", .text)
@@ -319,7 +323,7 @@ final class DatabaseManager: Sendable {
                 t.column("fetched_at", .text).defaults(sql: "CURRENT_TIMESTAMP")
             }
 
-            try db.create(table: "replaygain", ifNotExists: true) { t in
+            try db.create(table: "replaygain", options: .ifNotExists) { t in
                 t.primaryKey("track_id", .integer)
                     .references("tracks", onDelete: .cascade)
                 t.column("track_gain", .double).notNull()
@@ -329,7 +333,7 @@ final class DatabaseManager: Sendable {
                 t.column("analyzed_at", .text).defaults(sql: "CURRENT_TIMESTAMP")
             }
 
-            try db.create(table: "review_queue", ifNotExists: true) { t in
+            try db.create(table: "review_queue", options: .ifNotExists) { t in
                 t.autoIncrementedPrimaryKey("id")
                 t.column("action_type", .text).notNull()
                 t.column("track_id", .integer).notNull()
@@ -341,15 +345,15 @@ final class DatabaseManager: Sendable {
                 t.column("created_at", .text).defaults(sql: "CURRENT_TIMESTAMP")
                 t.column("resolved_at", .text)
             }
-            try db.create(indexOn: "review_queue", columns: ["status"], ifNotExists: true)
-            try db.create(indexOn: "review_queue", columns: ["action_type"], ifNotExists: true)
+            try db.create(indexOn: "review_queue", columns: ["status"], options: .ifNotExists)
+            try db.create(indexOn: "review_queue", columns: ["action_type"], options: .ifNotExists)
         }
 
         // ──────────────────────────────────────────────────────────────
         // Migration v6: App config (Phase 8)
         // ──────────────────────────────────────────────────────────────
         migrator.registerMigration("v6_app_config") { db in
-            try db.create(table: "app_config", ifNotExists: true) { t in
+            try db.create(table: "app_config", options: .ifNotExists) { t in
                 t.primaryKey("key", .text)
                 t.column("value", .text).notNull()
                 t.column("updated_at", .text).defaults(sql: "CURRENT_TIMESTAMP")
@@ -375,7 +379,7 @@ final class DatabaseManager: Sendable {
         // Migration v8: Track analysis cache (Phase 10)
         // ──────────────────────────────────────────────────────────────
         migrator.registerMigration("v8_track_analysis") { db in
-            try db.create(table: "track_analysis", ifNotExists: true) { t in
+            try db.create(table: "track_analysis", options: .ifNotExists) { t in
                 t.primaryKey("track_id", .integer)
                     .references("tracks", onDelete: .cascade)
                 t.column("ffprobe_output", .text)
@@ -464,7 +468,7 @@ final class DatabaseManager: Sendable {
         // Migration v15: Track tags (Phase 20)
         // ──────────────────────────────────────────────────────────────
         migrator.registerMigration("v15_track_tags") { db in
-            try db.create(table: "track_tags", ifNotExists: true) { t in
+            try db.create(table: "track_tags", options: .ifNotExists) { t in
                 t.column("track_id", .integer).notNull()
                     .references("tracks", onDelete: .cascade)
                 t.column("tag_key", .text).notNull()
@@ -475,14 +479,14 @@ final class DatabaseManager: Sendable {
                 CREATE INDEX IF NOT EXISTS idx_track_tags_key_value
                 ON track_tags(tag_key, tag_value)
             """)
-            try db.create(indexOn: "track_tags", columns: ["tag_key"], ifNotExists: true)
+            try db.create(indexOn: "track_tags", columns: ["tag_key"], options: .ifNotExists)
         }
 
         // ──────────────────────────────────────────────────────────────
         // Migration v16: Albums + variant prefs + tracks.album_id (Phase 21)
         // ──────────────────────────────────────────────────────────────
         migrator.registerMigration("v16_albums") { db in
-            try db.create(table: "albums", ifNotExists: true) { t in
+            try db.create(table: "albums", options: .ifNotExists) { t in
                 t.autoIncrementedPrimaryKey("id")
                 t.column("artist", .text).notNull()
                 t.column("album_artist", .text).notNull()
@@ -499,10 +503,10 @@ final class DatabaseManager: Sendable {
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_albums_unique_stem
                 ON albums(album_artist, title_normalized, COALESCE(variant_kind, ''))
             """)
-            try db.create(indexOn: "albums", columns: ["variant_of"], ifNotExists: true)
-            try db.create(indexOn: "albums", columns: ["album_artist"], ifNotExists: true)
+            try db.create(indexOn: "albums", columns: ["variant_of"], options: .ifNotExists)
+            try db.create(indexOn: "albums", columns: ["album_artist"], options: .ifNotExists)
 
-            try db.create(table: "user_album_variant_pref", ifNotExists: true) { t in
+            try db.create(table: "user_album_variant_pref", options: .ifNotExists) { t in
                 t.column("user_id", .text).notNull()
                 t.column("base_album_id", .integer).notNull()
                     .references("albums", onDelete: .cascade)
@@ -511,7 +515,7 @@ final class DatabaseManager: Sendable {
                 t.column("updated_at", .text).notNull()
                 t.primaryKey(["user_id", "base_album_id"])
             }
-            try db.create(indexOn: "user_album_variant_pref", columns: ["user_id"], ifNotExists: true)
+            try db.create(indexOn: "user_album_variant_pref", columns: ["user_id"], options: .ifNotExists)
 
             // Add album_id FK to tracks
             if try !db.columns(in: "tracks").contains(where: { $0.name == "album_id" }) {
@@ -520,7 +524,7 @@ final class DatabaseManager: Sendable {
                         .references("albums", onDelete: .setNull)
                 }
             }
-            try db.create(indexOn: "tracks", columns: ["album_id"], ifNotExists: true)
+            try db.create(indexOn: "tracks", columns: ["album_id"], options: .ifNotExists)
 
             // Backfill albums from existing tracks data
             try db.execute(sql: """
@@ -565,7 +569,7 @@ final class DatabaseManager: Sendable {
         // Migration: organized_path index (Phase 30)
         // ──────────────────────────────────────────────────────────────
         migrator.registerMigration("v_organized_path_index") { db in
-            try db.create(indexOn: "tracks", columns: ["organized_path"], ifNotExists: true)
+            try db.create(indexOn: "tracks", columns: ["organized_path"], options: .ifNotExists)
         }
 
         // ──────────────────────────────────────────────────────────────
@@ -573,7 +577,7 @@ final class DatabaseManager: Sendable {
         // Ensures the Tauri app's _migrations table exists for compat
         // ──────────────────────────────────────────────────────────────
         migrator.registerMigration("v_migrations_tracking") { db in
-            try db.create(table: "_migrations", ifNotExists: true) { t in
+            try db.create(table: "_migrations", options: .ifNotExists) { t in
                 t.primaryKey("version", .integer)
                 t.column("name", .text).notNull()
                 t.column("applied_at", .text).notNull().defaults(sql: "CURRENT_TIMESTAMP")

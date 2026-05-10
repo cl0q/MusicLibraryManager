@@ -12,6 +12,11 @@ struct PlaybackViewModelKey: FocusedValueKey {
     typealias Value = PlaybackViewModel
 }
 
+/// Allows spacebar preview to know which track is selected in the active view.
+struct SelectedTrackKey: FocusedValueKey {
+    typealias Value = Track?
+}
+
 extension FocusedValues {
     var selectedSection: Binding<SidebarSection>? {
         get { self[SelectedSectionKey.self] }
@@ -21,6 +26,11 @@ extension FocusedValues {
     var playbackViewModel: PlaybackViewModel? {
         get { self[PlaybackViewModelKey.self] }
         set { self[PlaybackViewModelKey.self] = newValue }
+    }
+
+    var selectedTrack: Track?? {
+        get { self[SelectedTrackKey.self] }
+        set { self[SelectedTrackKey.self] = newValue }
     }
 }
 
@@ -81,6 +91,18 @@ struct ContentView: View {
         }
         .focusedSceneValue(\.selectedSection, $selectedSection)
         .focusedSceneValue(\.playbackViewModel, container.playbackViewModel)
+        // Handle library drive unmount — pause playback
+        .onReceive(NotificationCenter.default.publisher(for: .libraryDriveDidUnmount)) { _ in
+            container.isLibraryDriveMounted = false
+            // Pause playback when the drive is ejected
+            if let playbackVM = container.playbackViewModel, playbackVM.isPlaying {
+                playbackVM.pause()
+            }
+        }
+        // Handle library drive remount — restore state
+        .onReceive(NotificationCenter.default.publisher(for: .libraryDriveDidMount)) { _ in
+            container.isLibraryDriveMounted = true
+        }
     }
 
     // MARK: - Initialized layout
@@ -90,7 +112,7 @@ struct ContentView: View {
             // Main content — NavigationSplitView fills available space
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 SidebarView(selectedSection: $selectedSection)
-                    .frame(minWidth: MLMSpacing.sidebarWidth)
+                    .frame(minWidth: 192)
             } detail: {
                 detailView
             }
@@ -134,11 +156,13 @@ struct ContentView: View {
                 handleTrackDoubleClick(track)
             })
         case .folders:
-            PlaceholderView(title: "Folders", icon: "folder", description: "Browse by disk folder structure")
+            FoldersView(onTrackDoubleClick: { track in
+                handleTrackDoubleClick(track)
+            })
         case .sync:
-            PlaceholderView(title: "Sync", icon: "arrow.triangle.2.circlepath", description: "Device sync profiles")
+            SyncView()
         case .sources:
-            PlaceholderView(title: "Sources", icon: "globe", description: "Connected streaming services")
+            SourcesView()
         }
     }
 

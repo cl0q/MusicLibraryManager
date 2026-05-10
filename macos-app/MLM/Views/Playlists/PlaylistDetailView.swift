@@ -88,8 +88,8 @@ struct PlaylistDetailView: View {
     // MARK: - Header
 
     private func headerBar(_ viewModel: PlaylistDetailViewModel) -> some View {
-        VStack(spacing: MLMSpacing.itemGap) {
-            HStack(spacing: MLMSpacing.itemGap) {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
                 // Back button
                 Button {
                     onBack()
@@ -107,10 +107,10 @@ struct PlaylistDetailView: View {
                 Spacer()
             }
 
-            HStack(alignment: .bottom, spacing: MLMSpacing.sectionGap) {
+            HStack(alignment: .bottom, spacing: 12) {
                 // Playlist icon
                 ZStack {
-                    RoundedRectangle(cornerRadius: MLMSpacing.cornerRadius)
+                    RoundedRectangle(cornerRadius: 6)
                         .fill(
                             LinearGradient(
                                 colors: [Color.mlmAccent.opacity(0.4), Color.mlmAccent.opacity(0.2)],
@@ -158,14 +158,14 @@ struct PlaylistDetailView: View {
                 actionButtons(viewModel)
             }
         }
-        .padding(.horizontal, MLMSpacing.pagePadding)
-        .padding(.vertical, MLMSpacing.sectionGap)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 
     // MARK: - Action Buttons
 
     private func actionButtons(_ viewModel: PlaylistDetailViewModel) -> some View {
-        HStack(spacing: MLMSpacing.itemGap) {
+        HStack(spacing: 8) {
             // Search
             HStack(spacing: 4) {
                 Image(systemName: "magnifyingglass")
@@ -183,7 +183,7 @@ struct PlaylistDetailView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .background(Color.mlmRaised)
-            .clipShape(RoundedRectangle(cornerRadius: MLMSpacing.cornerRadius))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
 
             // Import M3U
             Button {
@@ -239,7 +239,7 @@ struct PlaylistDetailView: View {
     // MARK: - Track Row
 
     private func trackRow(_ track: Track, index: Int, viewModel: PlaylistDetailViewModel) -> some View {
-        HStack(spacing: MLMSpacing.itemGap) {
+        HStack(spacing: 8) {
             // Row number
             Text("\(index)")
                 .font(MLMFont.dataSmall)
@@ -276,7 +276,7 @@ struct PlaylistDetailView: View {
                 .padding(.horizontal, 5)
                 .padding(.vertical, 1)
                 .background(formatColor(track.format).opacity(0.15))
-                .clipShape(RoundedRectangle(cornerRadius: MLMSpacing.cornerRadiusSmall))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
 
             // Duration
             Text(track.formattedDuration)
@@ -285,7 +285,7 @@ struct PlaylistDetailView: View {
                 .monospacedDigit()
                 .frame(width: 44, alignment: .trailing)
         }
-        .padding(.vertical, MLMSpacing.tableRowPaddingY)
+        .padding(.vertical, 6)
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
             onTrackDoubleClick?(track)

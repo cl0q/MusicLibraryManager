@@ -1,0 +1,25 @@
+{
+  "status": "success",
+  "track_id": "dab-12345",
+  "artist": "Test Artist",
+  "title": "Test Song",
+  "format": "flac",
+  "bitrate": 1411,
+  "file_size": 50000,
+  "duration_seconds": 1,
+  "tracks": [
+    {
+      "id": 12345,
+      "title": "Test Song",
+      "artist": "Test Artist",
+      "albumTitle": "Test Album",
+      "albumId": "album-001",
+      "duration": 1,
+      "audioQuality": {
+        "maximumBitDepth": 16,
+        "maximumSamplingRate": 44.1,
+        "isHiRes": false
+      }
+    }
+  ]
+}

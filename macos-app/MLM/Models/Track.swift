@@ -5,7 +5,7 @@ import GRDB
 ///
 /// Maps directly to the `tracks` table in SQLite.
 /// Shares the same schema as the Tauri app's Rust `Track` struct.
-struct Track: Codable, FetchableRecord, PersistableRecord, Identifiable, Hashable {
+struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, Hashable {
     var id: Int64?
     var artist: String
     var albumArtist: String
@@ -101,6 +101,36 @@ struct Track: Codable, FetchableRecord, PersistableRecord, Identifiable, Hashabl
         let seconds = dur % 60
         return String(format: "%d:%02d", minutes, seconds)
     }
+
+    // MARK: - MutablePersistableRecord
+
+    mutating func didInsert(_ inserted: InsertionSuccess) {
+        id = inserted.rowID
+    }
+}
+
+// MARK: - Sort Keys for Table columns
+
+/// `KeyPathComparator` requires `Comparable` values. Optional fields map
+/// to a non-optional sort key so that `nil` sorts last (or as empty).
+extension Track {
+    /// Duration sort key — nil sorts as 0.
+    var durationSortKey: Int { duration ?? 0 }
+
+    /// Bitrate sort key — nil sorts as 0.
+    var bitrateSortKey: Int { bitrate ?? 0 }
+
+    /// Genre sort key — nil sorts as empty string.
+    var genreSortKey: String { genre ?? "" }
+
+    /// Year sort key — nil sorts as 0.
+    var yearSortKey: Int { year ?? 0 }
+
+    /// Energy bucket sort key — nil sorts as 0.
+    var energySortKey: Int { energyBucket ?? 0 }
+
+    /// Date added sort key — nil sorts as empty string (sorts first).
+    var dateAddedSortKey: String { dateAdded ?? "" }
 }
 
 // MARK: - Defaults

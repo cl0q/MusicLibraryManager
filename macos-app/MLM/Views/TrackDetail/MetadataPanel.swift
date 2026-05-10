@@ -14,7 +14,7 @@ struct MetadataPanel: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: MLMSpacing.sectionGap) {
+            VStack(alignment: .leading, spacing: 12) {
 
                 // MARK: - Tags Section
                 metadataSection("Tags", icon: "tag") {
@@ -86,7 +86,7 @@ struct MetadataPanel: View {
                     }
                 }
             }
-            .padding(MLMSpacing.cardPadding)
+            .padding(12)
         }
     }
 
@@ -97,7 +97,7 @@ struct MetadataPanel: View {
         icon: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: MLMSpacing.tightGap) {
+        VStack(alignment: .leading, spacing: 4) {
             Label(title, systemImage: icon)
                 .font(MLMFont.sectionLabel)
                 .foregroundColor(.mlmInkSecondary)

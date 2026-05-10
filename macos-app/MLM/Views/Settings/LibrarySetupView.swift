@@ -211,7 +211,7 @@ struct LibrarySetupView: View {
 
     private var supportedFormatsView: some View {
         let formats = ["MP3", "FLAC", "AAC", "M4A", "OGG", "WAV", "AIFF", "ALAC"]
-        LazyVGrid(columns: [
+        return LazyVGrid(columns: [
             GridItem(.adaptive(minimum: 60))
         ], spacing: 6) {
             ForEach(formats, id: \.self) { format in

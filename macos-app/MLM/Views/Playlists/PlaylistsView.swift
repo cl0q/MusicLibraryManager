@@ -26,7 +26,7 @@ struct PlaylistsView: View {
     var onTrackDoubleClick: ((Track) -> Void)?
 
     private let columns = [
-        GridItem(.adaptive(minimum: MLMSpacing.playlistCardWidth, maximum: 260), spacing: MLMSpacing.sectionGap)
+        GridItem(.adaptive(minimum: 200, maximum: 260), spacing: 12)
     ]
 
     var body: some View {
@@ -77,7 +77,7 @@ struct PlaylistsView: View {
     // MARK: - Header
 
     private func headerBar(_ viewModel: PlaylistViewModel) -> some View {
-        HStack(spacing: MLMSpacing.itemGap) {
+        HStack(spacing: 8) {
             Text("Playlists")
                 .font(MLMFont.pageTitle)
                 .foregroundColor(.mlmInk)
@@ -121,7 +121,7 @@ struct PlaylistsView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .background(Color.mlmRaised)
-            .clipShape(RoundedRectangle(cornerRadius: MLMSpacing.cornerRadius))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
 
             // New playlist button
             Button {
@@ -134,7 +134,7 @@ struct PlaylistsView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                     .background(Color.mlmAccent)
-                    .clipShape(RoundedRectangle(cornerRadius: MLMSpacing.cornerRadius))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
             .keyboardShortcut("n", modifiers: .command)
@@ -142,14 +142,14 @@ struct PlaylistsView: View {
                 newPlaylistPopover(viewModel)
             }
         }
-        .padding(.horizontal, MLMSpacing.pagePadding)
-        .padding(.vertical, MLMSpacing.sectionGap)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 
     // MARK: - New Playlist Popover
 
     private func newPlaylistPopover(_ viewModel: PlaylistViewModel) -> some View {
-        VStack(spacing: MLMSpacing.itemGap) {
+        VStack(spacing: 8) {
             Text("New Playlist")
                 .font(MLMFont.sectionHeader)
                 .foregroundColor(.mlmInk)
@@ -185,7 +185,7 @@ struct PlaylistsView: View {
                 .disabled(viewModel.newPlaylistName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
-        .padding(MLMSpacing.cardPadding)
+        .padding(12)
         .frame(width: 260)
     }
 
@@ -193,7 +193,7 @@ struct PlaylistsView: View {
 
     private func scrollableGrid(_ viewModel: PlaylistViewModel) -> some View {
         ScrollView {
-            LazyVGrid(columns: columns, spacing: MLMSpacing.sectionGap) {
+            LazyVGrid(columns: columns, spacing: 12) {
                 ForEach(viewModel.displayedPlaylists) { playlist in
                     PlaylistCard(
                         playlist: playlist,
@@ -224,7 +224,7 @@ struct PlaylistsView: View {
                     )
                 }
             }
-            .padding(MLMSpacing.pagePadding)
+            .padding(16)
         }
     }
 

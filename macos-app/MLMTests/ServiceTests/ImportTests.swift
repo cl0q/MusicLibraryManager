@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import GRDB
 @testable import MLM
@@ -293,7 +294,7 @@ struct ImportTests {
         let db = try DatabaseManager.inMemory()
 
         // Insert tracks manually to simulate what ImportService does
-        try db.write { db in
+        try await db.write { db in
             var track = Track(
                 artist: "test artist",
                 albumArtist: "test artist",
@@ -308,13 +309,13 @@ struct ImportTests {
         }
 
         // Verify insertion
-        let count = try db.read { db in
+        let count = try await db.read { db in
             try Track.fetchCount(db)
         }
         #expect(count == 1)
 
         // Verify organized path was set
-        let track = try db.read { db in
+        let track = try await db.read { db in
             try Track.fetchOne(db)
         }
         #expect(track?.organizedPath == "test artist/test album/test track.mp3")
@@ -323,7 +324,7 @@ struct ImportTests {
     @Test func importSkipsDuplicateOriginalPaths() async throws {
         let db = try DatabaseManager.inMemory()
 
-        try db.write { db in
+        try await db.write { db in
             var track = Track(
                 artist: "artist",
                 album: "album",
@@ -335,12 +336,12 @@ struct ImportTests {
         }
 
         // Try inserting the same original_path again
-        let countBefore = try db.read { db in try Track.fetchCount(db) }
+        let countBefore = try await db.read { db in try Track.fetchCount(db) }
 
         // The duplicate should fail due to UNIQUE constraint on original_path
         let didThrow: Bool
         do {
-            try db.write { db in
+            try await db.write { db in
                 var track = Track(
                     artist: "artist",
                     album: "album",
@@ -358,7 +359,7 @@ struct ImportTests {
         // Should have thrown due to UNIQUE constraint
         #expect(didThrow)
 
-        let countAfter = try db.read { db in try Track.fetchCount(db) }
+        let countAfter = try await db.read { db in try Track.fetchCount(db) }
         #expect(countAfter == countBefore)
     }
 }

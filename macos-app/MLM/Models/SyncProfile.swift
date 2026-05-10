@@ -5,7 +5,7 @@ import GRDB
 ///
 /// Maps to the `sync_profiles` table. Defines which tracks/playlists
 /// sync to a device folder, with optional filter rules.
-struct SyncProfile: Codable, FetchableRecord, PersistableRecord, Identifiable, Hashable {
+struct SyncProfile: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, Hashable {
     var id: Int64?
     var name: String
     var outputFolder: String
@@ -27,6 +27,10 @@ struct SyncProfile: Codable, FetchableRecord, PersistableRecord, Identifiable, H
         static let id = Column(CodingKeys.id)
         static let name = Column(CodingKeys.name)
         static let outputFolder = Column(CodingKeys.outputFolder)
+    }
+
+    mutating func didInsert(_ inserted: InsertionSuccess) {
+        id = inserted.rowID
     }
 }
 

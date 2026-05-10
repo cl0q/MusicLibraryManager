@@ -29,16 +29,25 @@ final class DependencyContainer {
 
     private(set) var importService: ImportService?
     private(set) var audioPlayer: AudioPlayer?
+    private(set) var tokenStorage: TokenStorage?
+    private(set) var oauthManager: OAuthManager?
+    private(set) var tokenRefreshService: TokenRefreshService?
+    private(set) var mountObserver: MountObserver?
 
     // MARK: - ViewModels (shared singletons)
 
     private(set) var playbackViewModel: PlaybackViewModel?
+    private(set) var activityViewModel: ActivityViewModel?
+    private(set) var downloadViewModel: DownloadViewModel?
 
     // MARK: - State
 
     private(set) var isInitialized = false
     private(set) var initializationError: Error?
     var hasLibraryRoot = false
+
+    /// Whether the library's external drive is currently mounted.
+    var isLibraryDriveMounted = true
 
     // MARK: - Initialization
 
@@ -72,15 +81,39 @@ final class DependencyContainer {
         let player = AudioPlayer()
         self.audioPlayer = player
 
+        // Auth services (shared by all source integrations)
+        let tokens = TokenStorage()
+        self.tokenStorage = tokens
+        let oauth = OAuthManager()
+        self.oauthManager = oauth
+        let tokenRefresh = TokenRefreshService(tokenStorage: tokens, oauthManager: oauth)
+        self.tokenRefreshService = tokenRefresh
+
         // Shared ViewModels
         self.playbackViewModel = PlaybackViewModel(
             audioPlayer: player,
             configRepository: self.configRepository
         )
 
+        self.activityViewModel = ActivityViewModel()
+
+        self.downloadViewModel = DownloadViewModel(
+            trackRepository: self.trackRepository,
+            sourceRepository: self.sourceRepository
+        )
+
         // Check if library root is configured
         if let root = try await configRepository?.getLibraryRoot(), !root.isEmpty {
             hasLibraryRoot = true
+
+            // Start mount observer for external drives
+            let mount = MountObserver(libraryRoot: root)
+            self.mountObserver = mount
+            mount.start()
+            isLibraryDriveMounted = mount.isLibraryMounted
+
+            // Configure download orchestrator
+            downloadViewModel?.configure(libraryRoot: root, tokenStorage: tokens)
         }
 
         isInitialized = true

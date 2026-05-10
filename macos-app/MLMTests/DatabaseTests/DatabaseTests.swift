@@ -12,7 +12,7 @@ struct DatabaseTests {
 
     @Test func allTablesExist() async throws {
         let db = try DatabaseManager.inMemory()
-        try db.read { db in
+        try await db.read { db in
             let tables = try String.fetchAll(db, sql: """
                 SELECT name FROM sqlite_master
                 WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != 'grdb_migrations'
@@ -52,7 +52,7 @@ struct DatabaseTests {
 
     @Test func tracksTableHasAllColumns() async throws {
         let db = try DatabaseManager.inMemory()
-        try db.read { db in
+        try await db.read { db in
             let columns = try db.columns(in: "tracks").map(\.name)
 
             let expectedColumns = [
@@ -72,7 +72,7 @@ struct DatabaseTests {
 
     @Test func albumsTableHasAllColumns() async throws {
         let db = try DatabaseManager.inMemory()
-        try db.read { db in
+        try await db.read { db in
             let columns = try db.columns(in: "albums").map(\.name)
 
             let expectedColumns = [
@@ -91,7 +91,7 @@ struct DatabaseTests {
 
     @Test func trackCRUD() async throws {
         let db = try DatabaseManager.inMemory()
-        try db.write { db in
+        try await db.write { db in
             // Insert
             var track = Track(
                 artist: "Test Artist",
@@ -126,7 +126,7 @@ struct DatabaseTests {
 
     @Test func playlistCRUD() async throws {
         let db = try DatabaseManager.inMemory()
-        try db.write { db in
+        try await db.write { db in
             // Create native playlist
             var playlist = Playlist.createNative(name: "My Playlist")
             try playlist.insert(db)
@@ -146,7 +146,7 @@ struct DatabaseTests {
 
     @Test func playlistTrackOrdering() async throws {
         let db = try DatabaseManager.inMemory()
-        try db.write { db in
+        try await db.write { db in
             // Setup: create playlist and tracks
             var playlist = Playlist.createNative(name: "Ordered")
             try playlist.insert(db)
@@ -180,7 +180,7 @@ struct DatabaseTests {
 
     @Test func foreignKeysCascadeDelete() async throws {
         let db = try DatabaseManager.inMemory()
-        try db.write { db in
+        try await db.write { db in
             // Create track
             var track = Track(artist: "A", album: "A", title: "T", format: "mp3", originalPath: "/t.mp3")
             try track.insert(db)
@@ -202,7 +202,7 @@ struct DatabaseTests {
 
     @Test func appConfigCRUD() async throws {
         let db = try DatabaseManager.inMemory()
-        try db.write { db in
+        try await db.write { db in
             // Insert
             try db.execute(sql: """
                 INSERT INTO app_config (key, value) VALUES ('library_root', '/Volumes/Lexxar/Music')
@@ -224,7 +224,7 @@ struct DatabaseTests {
 
     @Test func syncProfileCRUD() async throws {
         let db = try DatabaseManager.inMemory()
-        try db.write { db in
+        try await db.write { db in
             var profile = SyncProfile(
                 id: nil,
                 name: "iPod Classic",
@@ -244,7 +244,7 @@ struct DatabaseTests {
 
     @Test func albumVariantRelationship() async throws {
         let db = try DatabaseManager.inMemory()
-        try db.write { db in
+        try await db.write { db in
             // Insert base album
             try db.execute(sql: """
                 INSERT INTO albums (artist, album_artist, title, title_normalized, year)
@@ -274,7 +274,7 @@ struct DatabaseTests {
 
     @Test func trackTagsCRUD() async throws {
         let db = try DatabaseManager.inMemory()
-        try db.write { db in
+        try await db.write { db in
             // Create track
             var track = Track(artist: "Yeat", album: "Lyfë", title: "Poppin", format: "flac", originalPath: "/y.flac")
             try track.insert(db)
@@ -300,7 +300,7 @@ struct DatabaseTests {
 
     @Test func smartPlaylistViewsExist() async throws {
         let db = try DatabaseManager.inMemory()
-        try db.read { db in
+        try await db.read { db in
             // These views should exist and be queryable
             _ = try Row.fetchAll(db, sql: "SELECT * FROM smart_playlist_recently_added LIMIT 1")
             _ = try Row.fetchAll(db, sql: "SELECT * FROM smart_playlist_most_played LIMIT 1")
@@ -312,12 +312,12 @@ struct DatabaseTests {
         let db1 = try DatabaseManager.inMemory()
         let db2 = try DatabaseManager.inMemory()
 
-        try db1.read { db in
+        try await db1.read { db in
             let count = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'")
             #expect(count! > 20)
         }
 
-        try db2.read { db in
+        try await db2.read { db in
             let count = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'")
             #expect(count! > 20)
         }

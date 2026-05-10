@@ -1,0 +1,109 @@
+[package]
+name = "music-library-manager"
+version = "0.1.0"
+description = "Unified music library manager with streaming service aggregation"
+authors = ["olli"]
+license = "MIT"
+repository = ""
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "music_library_manager"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Tauri
+tauri = { version = "2", features = [] }
+tauri-plugin-log = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Logging
+log = "0.4"
+tracing = "0.1"
+
+# Database
+rusqlite = { version = "0.34", features = ["bundled"] }
+rusqlite_migration = "2"
+
+# Audio metadata
+lofty = "0.22"
+
+# Full-text search
+tantivy = "0.22"
+
+# Fuzzy matching
+strsim = "0.11"
+m3u8-rs = "6"
+
+# Regex for string normalization
+regex = "1"
+
+# Progress indication (for CLI/logging)
+indicatif = "0.17"
+
+# Path sanitization
+sanitize-filename = "0.6"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID generation for library IDs
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# OAuth token management
+oauth2 = "5.0"
+keyring = "3.6"
+unicode-normalization = "0.1"
+
+# Environment configuration
+dotenvy = "0.15"
+
+# HTTP client (for download infrastructure)
+reqwest = { version = "0.12", features = ["json", "stream", "cookies"] }
+backoff = { version = "0.4", features = ["tokio"] }
+
+# Streaming utilities
+futures-util = "0.3"
+
+# Audio codec detection (for transcode decision logic)
+symphonia = { version = "0.5.5", features = ["all"] }
+
+# File checksums for sync state tracking
+sha2 = "0.10"
+
+# Phase 7 enhancements
+rusty-chromaprint = "0.3"
+ebur128 = "0.1"
+musicbrainz_rs = "0.12"
+image = "0.25"
+urlencoding = "2.1"
+base64 = "0.22"
+tauri-plugin-deep-link = "2.4.7"
+tauri-plugin-single-instance = { version = "2.4.0", features = ["deep-link"] }
+open = "5.3.3"
+
+# Phase 8 - Mount detection
+notify = { version = "6", features = ["macos_fsevent"] }
+rayon = "1.10.0"
+
+[dev-dependencies]
+tempfile = "3.24.0"
+serde_json = "1"
+wiremock = "0.6.5"
+tokio-test = "0.4.5"

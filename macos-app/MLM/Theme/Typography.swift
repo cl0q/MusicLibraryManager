@@ -1,63 +1,74 @@
 import SwiftUI
 
-// MARK: - Solar Design System Typography
+// MARK: - Typography Constants
 
-/// Font definitions matching the Solar design system.
+/// Font definitions using platform-native text styles.
 ///
-/// Uses IBM Plex font stack from the Tauri app's Solar theme.
-/// Falls back to system fonts since IBM Plex requires bundling.
+/// Provides semantic font aliases for consistent typography across the app.
+/// Uses SwiftUI system fonts — adapts automatically to Dynamic Type settings.
 enum MLMFont {
     // MARK: - Body Text
 
-    /// Standard body text — 13pt
-    static let body = Font.system(size: 13, weight: .regular)
+    /// Standard body text
+    static let body = Font.body
 
     /// Body text bold
-    static let bodyBold = Font.system(size: 13, weight: .semibold)
+    static let bodyBold = Font.body.weight(.semibold)
 
     // MARK: - Data/Monospace
 
     /// Monospaced data display — bitrate, duration, file paths
-    static let data = Font.system(size: 13, design: .monospaced)
+    static let data = Font.system(.body, design: .monospaced)
+
+    /// Alias for `data` — monospaced body
+    static let mono = Font.system(.body, design: .monospaced)
 
     /// Small monospaced — keyboard shortcuts, technical info
-    static let dataSmall = Font.system(size: 11, design: .monospaced)
+    static let dataSmall = Font.system(.caption, design: .monospaced)
 
     // MARK: - Labels
 
-    /// Section labels — uppercase small caps, 11pt semibold
-    static let sectionLabel = Font.system(size: 11, weight: .semibold).uppercaseSmallCaps()
+    /// Section labels — small caps, semibold
+    static let sectionLabel = Font.caption.weight(.semibold).smallCaps()
 
-    /// Muted/secondary labels — 11pt
-    static let muted = Font.system(size: 11, weight: .regular)
+    /// Muted/secondary labels
+    static let muted = Font.caption
 
-    /// Badge/count labels — 10pt medium
-    static let badge = Font.system(size: 10, weight: .medium)
+    /// Badge/count labels
+    static let badge = Font.caption2.weight(.medium)
 
     // MARK: - Headers
 
-    /// Page title — 20pt semibold
-    static let pageTitle = Font.system(size: 20, weight: .semibold)
+    /// Page title
+    static let pageTitle = Font.title2.weight(.semibold)
 
-    /// Section header — 15pt semibold
-    static let sectionHeader = Font.system(size: 15, weight: .semibold)
+    /// Section header
+    static let sectionHeader = Font.headline
 
-    /// Playlist/Album hero title — Serif, 24pt
-    static let heroTitle = Font.system(size: 24, weight: .bold, design: .serif)
+    /// Playlist/Album hero title
+    static let heroTitle = Font.title.weight(.bold)
+
+    // MARK: - Title Variants
+
+    /// Title 2 — secondary title
+    static let title2 = Font.title2
+
+    /// Title 3 — tertiary title
+    static let title3 = Font.title3
 
     // MARK: - Table
 
-    /// Table header — 11pt semibold
-    static let tableHeader = Font.system(size: 11, weight: .semibold)
+    /// Table header
+    static let tableHeader = Font.caption.weight(.semibold)
 
-    /// Table cell — 13pt
-    static let tableCell = Font.system(size: 13, weight: .regular)
+    /// Table cell
+    static let tableCell = Font.body
 
     // MARK: - Mini Player
 
-    /// Now playing track title — 12pt semibold
-    static let miniPlayerTitle = Font.system(size: 12, weight: .semibold)
+    /// Now playing track title
+    static let miniPlayerTitle = Font.subheadline.weight(.semibold)
 
-    /// Now playing artist — 11pt
-    static let miniPlayerArtist = Font.system(size: 11, weight: .regular)
+    /// Now playing artist
+    static let miniPlayerArtist = Font.caption
 }

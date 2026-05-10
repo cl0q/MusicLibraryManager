@@ -98,4 +98,50 @@ final class SourceRepository: Sendable {
             """, arguments: [userId, source, timestamp])
         }
     }
+
+    /// Count tracks linked to a source.
+    func countTracks(sourceId: Int64) async throws -> Int {
+        try await database.read { db in
+            try TrackSource
+                .filter(TrackSource.Columns.sourceId == sourceId)
+                .fetchCount(db)
+        }
+    }
+
+    /// Get last sync timestamp by source ID and sync type.
+    func getLastSync(sourceId: Int64, syncType: String) async throws -> String? {
+        try await database.read { db in
+            guard let source = try Source.fetchOne(db, id: sourceId) else { return nil }
+            let key = "\(source.name)_\(syncType)"
+            return try Row.fetchOne(db, sql: """
+                SELECT timestamp FROM last_sync_timestamps
+                WHERE source = ? ORDER BY timestamp DESC LIMIT 1
+            """, arguments: [key])?["timestamp"]
+        }
+    }
+
+    /// Update last sync timestamp by source ID and sync type.
+    func updateLastSync(sourceId: Int64, syncType: String, timestamp: String) async throws {
+        try await database.write { db in
+            guard let source = try Source.fetchOne(db, id: sourceId) else { return }
+            let key = "\(source.name)_\(syncType)"
+            try db.execute(sql: """
+                INSERT OR REPLACE INTO last_sync_timestamps (user_id, source, timestamp)
+                VALUES ('default', ?, ?)
+            """, arguments: [key, timestamp])
+        }
+    }
+
+    /// Link a track to a source (without addedAt parameter — uses current time).
+    func linkTrackToSource(trackId: Int64, sourceId: Int64, externalId: String) async throws {
+        try await linkTrackToSource(
+            trackId: trackId,
+            sourceId: sourceId,
+            externalId: externalId,
+            addedAt: ISO8601DateFormatter().string(from: Date())
+        )
+    }
+
+    /// Expose the database pool for repositories that need cross-repo access.
+    var databasePool: DatabasePool { database }
 }

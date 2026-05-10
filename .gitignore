@@ -28,6 +28,12 @@ code_map.md
 src-tauri/target/
 src-tauri/gen/
 
+# Swift / SPM build output
+macos-app/.build/
+macos-app/Package.resolved
+macos-app/.swiftpm/
+macos-app/DerivedData/
+
 # Node/build output
 ui/node_modules/
 ui/dist/

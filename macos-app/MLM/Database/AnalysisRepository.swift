@@ -21,7 +21,7 @@ final class AnalysisRepository: Sendable {
     /// Save a fingerprint.
     func saveFingerprint(_ fingerprint: Fingerprint) async throws {
         try await database.write { db in
-            var fp = fingerprint
+            let fp = fingerprint
             try fp.save(db)
         }
     }
@@ -38,7 +38,7 @@ final class AnalysisRepository: Sendable {
     /// Save artwork metadata.
     func saveArtwork(_ artwork: Artwork) async throws {
         try await database.write { db in
-            var art = artwork
+            let art = artwork
             try art.save(db)
         }
     }
@@ -55,7 +55,7 @@ final class AnalysisRepository: Sendable {
     /// Save ReplayGain data.
     func saveReplayGain(_ replayGain: ReplayGain) async throws {
         try await database.write { db in
-            var rg = replayGain
+            let rg = replayGain
             try rg.save(db)
         }
     }
@@ -72,7 +72,7 @@ final class AnalysisRepository: Sendable {
     /// Save analysis data.
     func saveAnalysis(_ analysis: TrackAnalysis) async throws {
         try await database.write { db in
-            var ta = analysis
+            let ta = analysis
             try ta.save(db)
         }
     }
@@ -146,6 +146,42 @@ final class AnalysisRepository: Sendable {
                 sql: "DELETE FROM track_tags WHERE track_id = ? AND tag_key = ? AND tag_value = ?",
                 arguments: [trackId, key, value]
             )
+        }
+    }
+
+    // MARK: - Review Queue (Write)
+
+    /// Save a review item.
+    func saveReviewItem(_ item: ReviewItem) async throws {
+        try await database.write { db in
+            var review = item
+            try review.insert(db)
+        }
+    }
+
+    // MARK: - Batch Queries
+
+    /// Fetch all tracks missing fingerprints.
+    func fetchUnfingerprintedTrackIds() async throws -> [Int64] {
+        try await database.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT t.id FROM tracks t
+                LEFT JOIN fingerprints f ON f.track_id = t.id
+                WHERE f.track_id IS NULL AND t.organized_path IS NOT NULL
+            """)
+            return rows.compactMap { $0["id"] as? Int64 }
+        }
+    }
+
+    /// Fetch all tracks missing ReplayGain analysis.
+    func fetchUnanalyzedTrackIds() async throws -> [Int64] {
+        try await database.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT t.id FROM tracks t
+                LEFT JOIN replaygain r ON r.track_id = t.id
+                WHERE r.track_id IS NULL AND t.organized_path IS NOT NULL
+            """)
+            return rows.compactMap { $0["id"] as? Int64 }
         }
     }
 }

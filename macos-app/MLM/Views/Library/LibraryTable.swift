@@ -2,17 +2,39 @@ import SwiftUI
 
 /// The library track table with sortable columns.
 ///
-/// Uses SwiftUI `Table` (macOS 13+) with all library columns:
-/// title, artist, album, format, bitrate, duration, genre, year, energy, date_added.
-///
-/// Supports multi-select via `$viewModel.selectedTrackIDs` and column sorting
-/// via `viewModel.toggleSort(column:)`.
+/// Native SwiftUI `Table` (macOS 13+). All columns are clickable headers
+/// with system sort indicators via `KeyPathComparator`. Default sort is
+/// `Added` descending (newest first).
 struct LibraryTable: View {
     @Bindable var viewModel: LibraryViewModel
     @Environment(\.container) private var container
 
     /// Callback when a track is double-clicked (primary action).
     var onDoubleClick: ((Track) -> Void)?
+
+    /// Playlists available for the "Add to Playlist" submenu — loaded by
+    /// the parent (LibraryView) so the submenu doesn't have to do its own
+    /// async fetch (which is unreliable inside `Menu`-in-`contextMenu`).
+    var availablePlaylists: [Playlist] = []
+
+    /// Identifiable wrapper so `Table` selection can use `Set<Int64>`
+    /// even though `Track.id` is `Int64?` for unsaved DB rows.
+    private struct TrackRow: Identifiable {
+        let id: Int64
+        let track: Track
+    }
+
+    /// Sort order — default to `Added` descending so the newest tracks
+    /// appear first, matching what most music apps do.
+    @State private var sortOrder: [KeyPathComparator<TrackRow>] = [
+        KeyPathComparator(\.track.dateAddedSortKey, order: .reverse)
+    ]
+
+    private var rows: [TrackRow] {
+        viewModel.displayedTracks
+            .compactMap { t in t.id.map { TrackRow(id: $0, track: t) } }
+            .sorted(using: sortOrder)
+    }
 
     var body: some View {
         if viewModel.isLoading {
@@ -29,118 +51,84 @@ struct LibraryTable: View {
     // MARK: - Table
 
     private var tableView: some View {
-        Table(viewModel.displayedTracks, selection: $viewModel.selectedTrackIDs) {
-
-            // Title
-            TableColumn("Title") { track in
+        Table(rows, selection: $viewModel.selectedTrackIDs, sortOrder: $sortOrder) {
+            TableColumn("Title", value: \.track.title) { row in
+                let track = row.track
                 HStack(spacing: 6) {
-                    // Now-playing / Local / Remote indicator
                     if isNowPlaying(track) {
                         Image(systemName: "speaker.wave.2.fill")
-                            .font(.system(size: 8))
-                            .foregroundColor(.mlmAccent)
-                            .frame(width: 6)
+                            .imageScale(.small)
+                            .foregroundStyle(Color.accentColor)
                             .symbolEffect(.variableColor, isActive: true)
-                    } else {
-                        Circle()
-                            .fill(track.isLocal ? Color.mlmSuccess : Color.mlmActive)
-                            .frame(width: 6, height: 6)
                     }
-                    Text(track.title)
-                        .font(MLMFont.tableCell)
-                        .foregroundColor(isNowPlaying(track) ? .mlmAccent : .mlmInk)
-                        .lineLimit(1)
+                    Text(track.title).lineLimit(1)
                 }
             }
-            .width(min: 120, ideal: 240)
+            .width(min: 140, ideal: 260)
 
-            // Artist
-            TableColumn("Artist") { track in
-                Text(track.artist)
-                    .font(MLMFont.tableCell)
-                    .foregroundColor(.mlmInk)
-                    .lineLimit(1)
+            TableColumn("Artist", value: \.track.artist) { row in
+                Text(row.track.artist).lineLimit(1)
             }
-            .width(min: 80, ideal: 160)
+            .width(min: 100, ideal: 180)
 
-            // Album
-            TableColumn("Album") { track in
-                Text(track.album)
-                    .font(MLMFont.tableCell)
-                    .foregroundColor(.mlmInkSecondary)
-                    .lineLimit(1)
+            TableColumn("Album", value: \.track.album) { row in
+                Text(row.track.album).foregroundStyle(.secondary).lineLimit(1)
             }
-            .width(min: 80, ideal: 160)
+            .width(min: 100, ideal: 180)
 
-            // Duration
-            TableColumn("Time") { track in
-                Text(track.formattedDuration)
-                    .font(MLMFont.data)
-                    .foregroundColor(.mlmInkSecondary)
+            TableColumn("Time", value: \.track.durationSortKey) { row in
+                Text(row.track.formattedDuration)
+                    .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
-            .width(50)
+            .width(54)
 
-            // Format
-            TableColumn("Fmt") { track in
-                Text(track.isRemote ? "Stream" : track.format.uppercased())
-                    .font(MLMFont.dataSmall)
-                    .foregroundColor(.mlmInkMuted)
+            TableColumn("Format", value: \.track.format) { row in
+                Text(row.track.isRemote ? "Stream" : row.track.format.uppercased())
+                    .foregroundStyle(.secondary)
             }
-            .width(50)
+            .width(60)
 
-            // Bitrate
-            TableColumn("kbps") { track in
-                Text(track.bitrate.map { "\($0)" } ?? "—")
-                    .font(MLMFont.data)
-                    .foregroundColor(.mlmInkMuted)
+            TableColumn("kbps", value: \.track.bitrateSortKey) { row in
+                Text(row.track.bitrate.map { "\($0)" } ?? "—")
+                    .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
-            .width(45)
+            .width(48)
 
-            // Genre
-            TableColumn("Genre") { track in
-                Text(track.genre ?? "—")
-                    .font(MLMFont.tableCell)
-                    .foregroundColor(.mlmInkMuted)
+            TableColumn("Genre", value: \.track.genreSortKey) { row in
+                Text(row.track.genre ?? "—")
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            .width(min: 60, ideal: 100)
+            .width(min: 70, ideal: 110)
 
-            // Year
-            TableColumn("Year") { track in
-                Text(track.year.map { "\($0)" } ?? "—")
-                    .font(MLMFont.data)
-                    .foregroundColor(.mlmInkMuted)
+            TableColumn("Year", value: \.track.yearSortKey) { row in
+                Text(row.track.year.map { "\($0)" } ?? "—")
+                    .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
-            .width(40)
+            .width(48)
 
-            // Energy
-            TableColumn("⚡") { track in
-                EnergyBars(level: track.energyBucket)
+            TableColumn("Energy", value: \.track.energySortKey) { row in
+                EnergyBars(level: row.track.energyBucket)
             }
-            .width(50)
+            .width(56)
 
-            // Date Added
-            TableColumn("Added") { track in
-                Text(formatDateAdded(track.dateAdded))
-                    .font(MLMFont.dataSmall)
-                    .foregroundColor(.mlmInkMuted)
+            TableColumn("Added", value: \.track.dateAddedSortKey) { row in
+                Text(formatDateAdded(row.track.dateAdded))
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            .width(70)
+            .width(78)
         }
-        .tableStyle(.inset(alternatesRowBackgrounds: false))
-        .scrollContentBackground(.hidden)
-        .background(Color.mlmBase)
         .contextMenu(forSelectionType: Int64.self) { selectedIDs in
             TrackContextMenu(
                 selectedTrackIDs: selectedIDs,
-                tracks: viewModel.displayedTracks
+                tracks: viewModel.displayedTracks,
+                availablePlaylists: availablePlaylists
             )
         } primaryAction: { selectedIDs in
-            // Double-click — play track + show detail
             if let trackID = selectedIDs.first,
                let track = viewModel.displayedTracks.first(where: { $0.id == trackID }) {
                 onDoubleClick?(track)
@@ -154,50 +142,35 @@ struct LibraryTable: View {
         VStack(spacing: 12) {
             ProgressView()
                 .controlSize(.large)
-            Text("Loading tracks...")
-                .font(MLMFont.body)
-                .foregroundColor(.mlmInkSecondary)
+            Text("Loading tracks…").foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.mlmBase)
     }
 
     private func errorState(_ message: String) -> some View {
-        VStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 32))
-                .foregroundColor(.mlmError)
-            Text("Failed to load tracks")
-                .font(MLMFont.bodyBold)
-                .foregroundColor(.mlmInk)
+        ContentUnavailableView {
+            Label("Failed to load tracks", systemImage: "exclamationmark.triangle.fill")
+        } description: {
             Text(message)
-                .font(MLMFont.muted)
-                .foregroundColor(.mlmInkSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.mlmBase)
     }
 
+    @ViewBuilder
     private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: viewModel.searchQuery.isEmpty ? "music.note" : "magnifyingglass")
-                .font(.system(size: 32))
-                .foregroundColor(.mlmInkMuted)
-            Text(viewModel.searchQuery.isEmpty
-                 ? (viewModel.selectedTab == .local ? "No local tracks" : "No remote tracks")
-                 : "No results for \"\(viewModel.searchQuery)\"")
-                .font(MLMFont.body)
-                .foregroundColor(.mlmInkSecondary)
-            if viewModel.searchQuery.isEmpty && viewModel.selectedTab == .local {
-                Text("Import music or download from Remote to get started.")
-                    .font(MLMFont.muted)
-                    .foregroundColor(.mlmInkMuted)
+        if viewModel.searchQuery.isEmpty {
+            ContentUnavailableView {
+                Label(
+                    viewModel.selectedTab == .local ? "No local tracks" : "No remote tracks",
+                    systemImage: "music.note"
+                )
+            } description: {
+                if viewModel.selectedTab == .local {
+                    Text("Import music or download from Remote to get started.")
+                }
             }
+        } else {
+            ContentUnavailableView.search(text: viewModel.searchQuery)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.mlmBase)
     }
 
     // MARK: - Helpers
@@ -217,7 +190,6 @@ struct LibraryTable: View {
     private func formatDateAdded(_ dateString: String?) -> String {
         guard let dateString else { return "—" }
 
-        // Parse ISO 8601 date (e.g., "2026-05-07T12:00:00Z" or "2026-05-07")
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withFullDate, .withDashSeparatorInDate]
 
@@ -227,7 +199,6 @@ struct LibraryTable: View {
             return display.string(from: date)
         }
 
-        // Fallback: return first 10 chars
         return String(dateString.prefix(10))
     }
 }

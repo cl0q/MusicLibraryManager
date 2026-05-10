@@ -131,6 +131,25 @@ enum PathSanitizer {
 
     // MARK: - Private Helpers
 
+    /// Sanitize a single path component — strips `/`, `:`, control characters,
+    /// trims whitespace. Suitable for artist, album, or title segments
+    /// used in organized paths and sync destinations.
+    ///
+    /// Delegates to `sanitizeFilename` for FAT32-safe character handling,
+    /// then additionally strips forward-slash and colon.
+    static func sanitizeComponent(_ raw: String) -> String {
+        let stripped = raw
+            .unicodeScalars
+            .filter { !CharacterSet.controlCharacters.contains($0) }
+            .map { String($0) }
+            .joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return sanitizeFilename(stripped)
+    }
+
+    // MARK: - Private Helpers (Reserved Names)
+
     /// Check if a name is a Windows reserved name.
     ///
     /// Handles names with extensions (CON.txt is still reserved).

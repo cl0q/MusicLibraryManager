@@ -3,11 +3,11 @@ import SwiftUI
 /// Collapsible activity panel at the bottom of the window.
 ///
 /// Shows a 36px header bar when collapsed. Expands to reveal
-/// Operations and Logs tabs. Phase 16 wires in real operation
-/// tracking and log streaming.
+/// Operations and Logs tabs. Wired to ActivityViewModel and AppLogger.
 struct ActivityPanel: View {
     @State private var isExpanded = false
     @State private var selectedTab: ActivityTab = .operations
+    @Environment(\.container) private var container
 
     enum ActivityTab: String, CaseIterable {
         case operations = "Operations"
@@ -46,13 +46,24 @@ struct ActivityPanel: View {
 
                 Spacer()
 
-                // Summary text — wired to real data in Phase 16
-                Text("No active operations")
-                    .font(MLMFont.muted)
-                    .foregroundColor(.mlmInkMuted)
+                // Summary — wired to ActivityViewModel
+                if let vm = container.activityViewModel {
+                    if vm.hasActiveOperations {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .padding(.trailing, 4)
+                    }
+                    Text(vm.summaryText)
+                        .font(MLMFont.muted)
+                        .foregroundColor(vm.hasActiveOperations ? .mlmInkPrimary : .mlmInkMuted)
+                } else {
+                    Text("No active operations")
+                        .font(MLMFont.muted)
+                        .foregroundColor(.mlmInkMuted)
+                }
             }
-            .padding(.horizontal, MLMSpacing.pagePadding)
-            .frame(height: MLMSpacing.activityCollapsed)
+            .padding(.horizontal, 16)
+            .frame(height: 36)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -71,7 +82,7 @@ struct ActivityPanel: View {
                 }
             }
             .pickerStyle(.segmented)
-            .padding(.horizontal, MLMSpacing.pagePadding)
+            .padding(.horizontal, 16)
             .padding(.vertical, 8)
 
             Group {
@@ -84,7 +95,7 @@ struct ActivityPanel: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(height: MLMSpacing.activityExpanded - MLMSpacing.activityCollapsed)
+        .frame(height: 320 - 36)
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 }

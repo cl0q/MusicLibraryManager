@@ -256,7 +256,7 @@ final class ImportService: Sendable {
     /// - Parameter batch: Metadata to insert
     /// - Returns: (succeeded count, skipped count)
     private func saveBatch(_ batch: [TrackMetadata]) async throws -> (Int, Int) {
-        try await database.write { [self] db in
+        try await database.write { db in
             var succeeded = 0
             var skipped = 0
 

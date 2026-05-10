@@ -96,12 +96,14 @@ enum MetadataExtractor {
 
         // Extract raw values from common metadata keys
         let rawArtist = await metadataValue(for: .commonKeyArtist, in: metadata)
-        let rawAlbumArtist = await metadataValue(for: .iTunesMetadataKeyAlbumArtist, in: metadata)
-            ?? await metadataValue(for: .id3MetadataKeyBand, in: metadata)
-        let rawAlbum = await metadataValue(for: .commonKeyAlbum, in: metadata)
+        let albumArtistITunes = await metadataValue(for: .iTunesMetadataKeyAlbumArtist, in: metadata)
+        let albumArtistID3 = await metadataValue(for: .id3MetadataKeyBand, in: metadata)
+        let rawAlbumArtist = albumArtistITunes ?? albumArtistID3
+        let rawAlbum = await metadataValue(for: .commonKeyAlbumName, in: metadata)
         let rawTitle = await metadataValue(for: .commonKeyTitle, in: metadata)
-        let rawGenre = await metadataValue(for: .commonKeyType, in: metadata)
-            ?? await metadataValue(for: .iTunesMetadataKeyUserGenre, in: metadata)
+        let genreType = await metadataValue(for: .commonKeyType, in: metadata)
+        let genreITunes = await metadataValue(for: .iTunesMetadataKeyUserGenre, in: metadata)
+        let rawGenre = genreType ?? genreITunes
 
         // Year extraction: try common creation date
         let rawYear = await extractYear(from: metadata)

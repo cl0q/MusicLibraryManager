@@ -1,0 +1,15 @@
+# Ignore database files to prevent restart loop during dev
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+music_library.db
+
+# Ignore download artifacts to prevent restart loop during downloads
+*.tmp
+*retry_queue*
+**/00_Artists/**
+**/00_Artists_staging/**
+**/artwork_cache/**
+transcode_cache
+**/transcode_cache/**

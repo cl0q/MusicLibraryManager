@@ -112,4 +112,94 @@ final class SyncRepository: Sendable {
             """, arguments: [profileId])
         }
     }
+
+    /// Update sync state for a track in a profile.
+    func updateSyncState(profileId: Int64, trackId: Int64, checksum: String, size: Int) async throws {
+        try await database.write { db in
+            try db.execute(sql: """
+                INSERT OR REPLACE INTO sync_state (profile_id, track_id, synced_checksum, synced_size, synced_timestamp)
+                VALUES (?, ?, ?, ?, datetime('now'))
+            """, arguments: [profileId, trackId, checksum, size])
+        }
+    }
+
+    /// Remove sync state for a track that's been removed from a profile.
+    func removeSyncState(profileId: Int64, trackId: Int64) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "DELETE FROM sync_state WHERE profile_id = ? AND track_id = ?",
+                arguments: [profileId, trackId]
+            )
+        }
+    }
+
+    /// Add a filter rule to a profile.
+    @discardableResult
+    func addRule(profileId: Int64, field: String, operator op: String, value: String) async throws -> SyncProfileRule {
+        try await database.write { db in
+            var rule = SyncProfileRule(id: nil, profileId: profileId, field: field, operator: op, value: value)
+            try rule.insert(db)
+            return rule
+        }
+    }
+
+    /// Remove a filter rule.
+    func removeRule(id: Int64) async throws {
+        _ = try await database.write { db in
+            try SyncProfileRule.deleteOne(db, id: id)
+        }
+    }
+
+    /// Update profile settings (name, output folder, etc.).
+    func updateSettings(profileId: Int64, name: String?, outputFolder: String?, playlistPathPrefix: String?) async throws {
+        try await database.write { db in
+            var sets: [String] = []
+            var args: [DatabaseValueConvertible?] = []
+
+            if let name {
+                sets.append("name = ?")
+                args.append(name)
+            }
+            if let outputFolder {
+                sets.append("output_folder = ?")
+                args.append(outputFolder)
+            }
+            if let playlistPathPrefix {
+                sets.append("playlist_path_prefix = ?")
+                args.append(playlistPathPrefix)
+            }
+
+            guard !sets.isEmpty else { return }
+            sets.append("date_modified = datetime('now')")
+            args.append(profileId)
+
+            try db.execute(
+                sql: "UPDATE sync_profiles SET \(sets.joined(separator: ", ")) WHERE id = ?",
+                arguments: StatementArguments(args)
+            )
+        }
+    }
+
+    /// Remove a track from a sync profile.
+    func removeTrack(profileId: Int64, trackId: Int64) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "DELETE FROM sync_profile_tracks WHERE profile_id = ? AND track_id = ?",
+                arguments: [profileId, trackId]
+            )
+        }
+    }
+
+    /// Remove a playlist from a sync profile.
+    func removePlaylist(profileId: Int64, playlistId: Int64) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "DELETE FROM sync_profile_playlists WHERE profile_id = ? AND playlist_id = ?",
+                arguments: [profileId, playlistId]
+            )
+        }
+    }
+
+    /// Expose the database pool for cross-repo access.
+    var databasePool: DatabasePool { database }
 }

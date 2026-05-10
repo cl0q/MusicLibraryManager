@@ -29,27 +29,25 @@ struct EnergyBars: View {
             HStack(alignment: .bottom, spacing: Self.barSpacing) {
                 ForEach(0..<5, id: \.self) { index in
                     RoundedRectangle(cornerRadius: 1)
-                        .fill(index < level ? colorForLevel(level) : Color.mlmEdgeSubtle)
+                        .fill(index < level ? colorForLevel(level) : Color(nsColor: .quaternaryLabelColor))
                         .frame(width: Self.barWidth, height: Self.barHeights[index])
                 }
             }
             .frame(height: 16)
         } else {
-            Text("—")
-                .font(MLMFont.dataSmall)
-                .foregroundColor(.mlmInkMuted)
+            Text("—").foregroundStyle(.tertiary)
         }
     }
 
-    /// Color for the entire bar group based on energy level.
+    /// Color for the entire bar group based on energy level — uses system semantic colors.
     private func colorForLevel(_ level: Int) -> Color {
         switch level {
-        case 1: Color.mlmEnergy1
-        case 2: Color.mlmEnergy2
-        case 3: Color.mlmEnergy3
-        case 4: Color.mlmEnergy4
-        case 5: Color.mlmEnergy5
-        default: Color.mlmInkMuted
+        case 1: .cyan
+        case 2: .green
+        case 3: .yellow
+        case 4: .orange
+        case 5: .red
+        default: .secondary
         }
     }
 }
@@ -67,5 +65,4 @@ struct EnergyBars: View {
         }
     }
     .padding()
-    .background(Color.mlmBase)
 }

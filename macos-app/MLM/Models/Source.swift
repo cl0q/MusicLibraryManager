@@ -4,7 +4,7 @@ import GRDB
 /// A connected music source (Spotify, SoundCloud, etc.).
 ///
 /// Maps to the `sources` table.
-struct Source: Codable, FetchableRecord, PersistableRecord, Identifiable, Hashable {
+struct Source: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, Hashable {
     var id: Int64?
     var name: String
     var userId: String
@@ -22,6 +22,10 @@ struct Source: Codable, FetchableRecord, PersistableRecord, Identifiable, Hashab
         static let name = Column(CodingKeys.name)
         static let userId = Column(CodingKeys.userId)
         static let enabled = Column(CodingKeys.enabled)
+    }
+
+    mutating func didInsert(_ inserted: InsertionSuccess) {
+        id = inserted.rowID
     }
 
     /// Source type derived from name.

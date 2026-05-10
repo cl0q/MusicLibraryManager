@@ -1,18 +1,7 @@
 import SwiftUI
 
-/// Library browser container — FilterBar + LibraryTable.
-///
-/// Layout:
-/// ```
-/// ┌─────────────────────────────────────────────────────┐
-/// │ [Local (423)] [Remote (87)]      🔍 Search   ⚙ Acts │  FilterBar
-/// ├─────────────────────────────────────────────────────┤
-/// │ Title     │ Artist │ Album  │ Fmt │ Dur │ ⚡ │ Added │  Table header
-/// │ Song A    │ Art X  │ Alb 1  │ m4a │ 3:24│▃▅▇▅▃│ May 7│  Table rows
-/// │ Song B    │ Art Y  │ Alb 2  │ flac│ 4:01│▃▅▅▃▁│ May 6│
-/// │           │        │        │     │     │      │      │
-/// └─────────────────────────────────────────────────────┘
-/// ```
+/// Library browser container — toolbar with Local/Remote picker, search,
+/// re-scan button, and the sortable `LibraryTable` for the actual rows.
 struct LibraryView: View {
     @Environment(\.container) private var container
 
@@ -20,6 +9,9 @@ struct LibraryView: View {
     var onTrackDoubleClick: ((Track) -> Void)?
 
     @State private var viewModel: LibraryViewModel?
+    @State private var importViewModel: ImportViewModel?
+    @State private var availablePlaylists: [Playlist] = []
+    @State private var isRescanning = false
 
     var body: some View {
         Group {
@@ -28,44 +20,97 @@ struct LibraryView: View {
             } else {
                 ProgressView("Initializing…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.mlmBase)
             }
         }
         .task {
             initializeViewModel()
             await viewModel?.loadTracks()
+            await reloadPlaylists()
         }
-        // Refresh library data when an import completes (FirstRunWizard, Settings re-scan, etc.)
         .onReceive(NotificationCenter.default.publisher(for: .libraryDidImport)) { _ in
             Task { await viewModel?.refresh() }
         }
-        // Refresh after track deletions
         .onReceive(NotificationCenter.default.publisher(for: .libraryDidDeleteTracks)) { _ in
             Task { await viewModel?.refresh() }
         }
-        // Refresh when a download moves a track from Remote → Local
         .onReceive(NotificationCenter.default.publisher(for: .downloadDidComplete)) { _ in
             Task { await viewModel?.refresh() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { _ in
+            Task { await reloadPlaylists() }
         }
     }
 
     // MARK: - Content
 
     private func libraryContent(_ viewModel: LibraryViewModel) -> some View {
-        VStack(spacing: 0) {
-            FilterBar(viewModel: viewModel)
-
-            LibraryTable(viewModel: viewModel, onDoubleClick: onTrackDoubleClick)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .background(Color.mlmBase)
+        LibraryTable(
+            viewModel: viewModel,
+            onDoubleClick: onTrackDoubleClick,
+            availablePlaylists: availablePlaylists
+        )
+        .searchable(
+            text: Bindable(viewModel).searchQuery,
+            placement: .toolbar,
+            prompt: "Search library"
+        )
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                Picker("Source", selection: Bindable(viewModel).selectedTab) {
+                    ForEach(LibraryTab.allCases) { tab in
+                        Text("\(tab.label) (\(countFor(tab, viewModel: viewModel)))")
+                            .tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 280)
+            }
+
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    Task { await rescan() }
+                } label: {
+                    if isRescanning {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Re-scan Library", systemImage: "arrow.clockwise")
+                    }
+                }
+                .help("Re-scan the library folder for changes")
+                .keyboardShortcut("r", modifiers: .command)
+                .disabled(isRescanning)
+            }
+
             ToolbarItem(placement: .automatic) {
                 Text("\(viewModel.displayedTracks.count) tracks")
-                    .font(MLMFont.muted)
-                    .foregroundColor(.mlmInkMuted)
+                    .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private func countFor(_ tab: LibraryTab, viewModel: LibraryViewModel) -> Int {
+        switch tab {
+        case .local: viewModel.localCount
+        case .remote: viewModel.remoteCount
+        }
+    }
+
+    // MARK: - Actions
+
+    private func rescan() async {
+        guard !isRescanning else { return }
+        ensureImportViewModel()
+        guard let importVM = importViewModel else { return }
+
+        isRescanning = true
+        await importVM.importLibrary()
+        await viewModel?.refresh()
+        isRescanning = false
+    }
+
+    private func reloadPlaylists() async {
+        guard let repo = container.playlistRepository else { return }
+        availablePlaylists = (try? await repo.fetchAll()) ?? []
     }
 
     // MARK: - Initialization
@@ -74,5 +119,15 @@ struct LibraryView: View {
         guard viewModel == nil,
               let trackRepo = container.trackRepository else { return }
         viewModel = LibraryViewModel(trackRepository: trackRepo)
+    }
+
+    private func ensureImportViewModel() {
+        guard importViewModel == nil,
+              let importService = container.importService,
+              let configRepo = container.configRepository else { return }
+        importViewModel = ImportViewModel(
+            importService: importService,
+            configRepository: configRepo
+        )
     }
 }

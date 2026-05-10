@@ -1,0 +1,34 @@
+[
+  {
+    "track_id": "Kuhler_Buhler {𝔇•𝔖•𝔖} Aura Codex",
+    "query": "Kuhler_Buhler {𝔇•𝔖•𝔖} Aura Codex",
+    "source": "youtube",
+    "attempt_count": 1,
+    "last_error": "yt-dlp produced no output",
+    "queued_at": "2026-02-11T16:13:03.934979+00:00"
+  },
+  {
+    "track_id": "81721",
+    "query": "Kuhler_Buhler {𝔇•𝔖•𝔖} Aura Codex",
+    "source": "dab",
+    "attempt_count": 1,
+    "last_error": "Request failed after retries",
+    "queued_at": "2026-02-11T16:18:58.885131+00:00"
+  },
+  {
+    "track_id": "81721",
+    "query": "Kuhler_Buhler {𝔇•𝔖•𝔖} Aura Codex",
+    "source": "dab",
+    "attempt_count": 1,
+    "last_error": "Request failed after retries",
+    "queued_at": "2026-02-11T16:23:24.342294+00:00"
+  },
+  {
+    "track_id": "81721",
+    "query": "Kuhler_Buhler {𝔇•𝔖•𝔖} Aura Codex",
+    "source": "soundcloud-transcode",
+    "attempt_count": 1,
+    "last_error": "Transcode failed: FFmpeg transcode failed with exit code: Some(234)",
+    "queued_at": "2026-02-11T16:37:00.812834+00:00"
+  }
+]

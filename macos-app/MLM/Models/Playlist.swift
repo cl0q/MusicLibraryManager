@@ -5,7 +5,7 @@ import GRDB
 ///
 /// Maps to the `playlists` table. Supports native (local-only),
 /// synced (from Spotify/SoundCloud), liked, and smart playlists.
-struct Playlist: Codable, FetchableRecord, PersistableRecord, Identifiable, Hashable {
+struct Playlist: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, Hashable {
     var id: Int64?
     var name: String
     var description: String?
@@ -48,10 +48,14 @@ struct Playlist: Codable, FetchableRecord, PersistableRecord, Identifiable, Hash
     var isNative: Bool {
         sourceId == nil && externalId == nil && isSmart == 0 && isLiked == 0
     }
+
+    mutating func didInsert(_ inserted: InsertionSuccess) {
+        id = inserted.rowID
+    }
 }
 
 /// A track's membership in a playlist with fractional position.
-struct PlaylistTrack: Codable, FetchableRecord, PersistableRecord, Identifiable {
+struct PlaylistTrack: Codable, FetchableRecord, MutablePersistableRecord, Identifiable {
     var id: Int64?
     var playlistId: Int64
     var trackId: Int64
@@ -72,6 +76,10 @@ struct PlaylistTrack: Codable, FetchableRecord, PersistableRecord, Identifiable 
         static let playlistId = Column(CodingKeys.playlistId)
         static let trackId = Column(CodingKeys.trackId)
         static let position = Column(CodingKeys.position)
+    }
+
+    mutating func didInsert(_ inserted: InsertionSuccess) {
+        id = inserted.rowID
     }
 }
 

@@ -39,9 +39,9 @@ struct PlaylistCard: View {
             infoArea
         }
         .background(isHovered ? Color.mlmRaised : Color.mlmSurface)
-        .clipShape(RoundedRectangle(cornerRadius: MLMSpacing.cornerRadiusLarge))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
-            RoundedRectangle(cornerRadius: MLMSpacing.cornerRadiusLarge)
+            RoundedRectangle(cornerRadius: 8)
                 .stroke(isHovered ? Color.mlmEdge : Color.mlmEdgeSubtle, lineWidth: 1)
         )
         .onHover { hovering in
@@ -117,7 +117,7 @@ struct PlaylistCard: View {
                     .padding(.horizontal, 4)
                     .padding(.vertical, 2)
                     .background(Color.mlmBase)
-                    .clipShape(RoundedRectangle(cornerRadius: MLMSpacing.cornerRadiusSmall))
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
                     .onSubmit { onConfirmRename() }
                     .onExitCommand { onCancelRename() }
             } else {
@@ -141,7 +141,7 @@ struct PlaylistCard: View {
                 }
             }
         }
-        .padding(MLMSpacing.cardPadding)
+        .padding(12)
     }
 
     // MARK: - Context Menu

@@ -38,8 +38,8 @@ struct MiniPlayerView: View {
             // Time display
             timeDisplay
         }
-        .padding(.horizontal, MLMSpacing.pagePadding)
-        .frame(height: MLMSpacing.miniPlayerHeight)
+        .padding(.horizontal, 16)
+        .frame(height: 36)
         .background(Color.mlmSurface)
         .onAppear {
             playbackVM = container.playbackViewModel
@@ -86,6 +86,17 @@ struct MiniPlayerView: View {
                     .font(MLMFont.miniPlayerTitle)
                     .foregroundColor(.mlmInkMuted)
                     .lineLimit(1)
+            }
+
+            // Preview mode indicator
+            if playbackVM?.isPreviewMode == true {
+                Text("PREVIEW")
+                    .font(MLMFont.badge)
+                    .foregroundColor(.mlmActive)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Color.mlmActive.opacity(0.15))
+                    .clipShape(Capsule())
             }
         }
     }

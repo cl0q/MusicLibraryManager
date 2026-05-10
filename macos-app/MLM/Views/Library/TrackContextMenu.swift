@@ -2,17 +2,11 @@ import SwiftUI
 
 /// Context menu for right-clicking track rows in the library table.
 ///
-/// Actions are grouped into categories matching the Tauri app:
-/// - Playback (Phase 5)
-/// - Playlists (Phase 6 — "Add to Playlist" submenu)
-/// - Sync (Phase 12 — placeholder)
-/// - File operations (local tracks only)
-/// - Destructive actions (remove/delete)
-///
 /// Multi-select aware: labels reflect selection count when > 1 track selected.
 struct TrackContextMenu: View {
     let selectedTrackIDs: Set<Int64>
     let tracks: [Track]
+    let availablePlaylists: [Playlist]
     @Environment(\.container) private var container
 
     /// Resolved selected tracks.
@@ -23,27 +17,21 @@ struct TrackContextMenu: View {
         }
     }
 
-    /// Whether the selection includes any local tracks.
     private var hasLocalTracks: Bool {
         selectedTracks.contains { $0.isLocal }
     }
 
-    /// Whether all selected tracks are remote (no local file).
     private var allRemote: Bool {
         selectedTracks.allSatisfy { $0.isRemote }
     }
 
-    /// Label suffix for multi-select (e.g., " (3 tracks)").
     private var countSuffix: String {
         selectedTracks.count > 1 ? " (\(selectedTracks.count) tracks)" : ""
     }
 
     var body: some View {
-        // MARK: - Playback (Phase 5)
         Section {
-            Button {
-                playSelectedTrack()
-            } label: {
+            Button { playSelectedTrack() } label: {
                 Label("Play", systemImage: "play.fill")
             }
             .disabled(selectedTracks.isEmpty || selectedTracks.first?.isRemote == true)
@@ -51,46 +39,54 @@ struct TrackContextMenu: View {
 
         Divider()
 
-        // MARK: - Playlists (Phase 6)
         Section {
-            PlaylistSubmenu(
-                selectedTrackIDs: selectedTrackIDs,
-                countSuffix: countSuffix,
-                container: container
-            )
+            Menu {
+                if availablePlaylists.isEmpty {
+                    Text("No playlists")
+                } else {
+                    ForEach(availablePlaylists) { playlist in
+                        Button {
+                            addToPlaylist(playlist)
+                        } label: {
+                            HStack {
+                                if playlist.isPinned == 1 {
+                                    Image(systemName: "pin.fill")
+                                }
+                                Text(playlist.name)
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Label("Add to Playlist\(countSuffix)", systemImage: "text.badge.plus")
+            }
+            .disabled(selectedTracks.isEmpty)
         }
 
-        // MARK: - Sync (Phase 12)
         Section {
             Button {
                 // Placeholder — Phase 12
             } label: {
                 Label("Add to Sync Profile…", systemImage: "arrow.triangle.2.circlepath")
             }
+            .disabled(true)
         }
 
         Divider()
 
-        // MARK: - File operations (local tracks only)
         if hasLocalTracks {
             Section {
-                Button {
-                    revealInFinder()
-                } label: {
+                Button { revealInFinder() } label: {
                     Label("Reveal in Finder", systemImage: "folder")
                 }
 
-                Button {
-                    copyPath()
-                } label: {
+                Button { copyPath() } label: {
                     Label("Copy File Path", systemImage: "doc.on.doc")
                 }
             }
-
             Divider()
         }
 
-        // MARK: - Download (remote tracks only)
         if allRemote {
             Section {
                 Button {
@@ -98,102 +94,69 @@ struct TrackContextMenu: View {
                 } label: {
                     Label("Download\(countSuffix)", systemImage: "arrow.down.circle")
                 }
+                .disabled(true)
             }
-
             Divider()
         }
 
-        // MARK: - Info
-        Section {
-            Button {
-                // Placeholder — Phase 5 (More Info panel)
-            } label: {
-                Label("More Info", systemImage: "info.circle")
-            }
-        }
-
-        Divider()
-
-        // MARK: - Destructive
         Section {
             Button(role: .destructive) {
-                // Placeholder — remove from library (DB only)
+                // Placeholder — remove from library
             } label: {
                 Label("Remove from Library\(countSuffix)", systemImage: "trash")
             }
+            .disabled(true)
         }
     }
 
     // MARK: - Actions
 
-    /// Play the first selected local track.
     private func playSelectedTrack() {
         guard let track = selectedTracks.first(where: { $0.isLocal }),
               let playbackVM = container.playbackViewModel else { return }
-        Task {
-            await playbackVM.playTrack(track)
-        }
+        Task { await playbackVM.playTrack(track) }
     }
 
     /// Reveal the first selected local track in Finder.
+    /// Resolves `library_root + organized_path`; falls back to `original_path`
+    /// when the organized location doesn't exist on disk.
     private func revealInFinder() {
-        guard let track = selectedTracks.first(where: { $0.isLocal }),
-              let path = track.organizedPath else { return }
-        // Will use library root + organized_path resolution in future phases
-        let url = URL(fileURLWithPath: path)
-        NSWorkspace.shared.activateFileViewerSelecting([url])
+        guard let track = selectedTracks.first(where: { $0.isLocal }) else { return }
+        Task { @MainActor in
+            if let url = await resolveLocalURL(for: track) {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            }
+        }
     }
 
-    /// Copy the file path of the first selected local track.
+    /// Copy the resolved absolute path of the first selected local track.
     private func copyPath() {
-        guard let track = selectedTracks.first(where: { $0.isLocal }),
-              let path = track.organizedPath else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(path, forType: .string)
+        guard let track = selectedTracks.first(where: { $0.isLocal }) else { return }
+        Task { @MainActor in
+            guard let url = await resolveLocalURL(for: track) else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(url.path, forType: .string)
+        }
     }
-}
 
-// MARK: - Playlist Submenu
-
-/// Submenu that loads playlists on appear and lets the user add tracks to one.
-struct PlaylistSubmenu: View {
-    let selectedTrackIDs: Set<Int64>
-    let countSuffix: String
-    let container: DependencyContainer
-
-    @State private var playlists: [Playlist] = []
-    @State private var isLoaded = false
-
-    var body: some View {
-        Menu {
-            if !isLoaded {
-                Text("Loading…")
-            } else if playlists.isEmpty {
-                Text("No playlists")
-            } else {
-                ForEach(playlists) { playlist in
-                    Button {
-                        addToPlaylist(playlist)
-                    } label: {
-                        HStack {
-                            if playlist.isPinned == 1 {
-                                Image(systemName: "pin.fill")
-                            }
-                            Text(playlist.name)
-                        }
-                    }
-                }
-            }
-        } label: {
-            Label("Add to Playlist\(countSuffix)", systemImage: "text.badge.plus")
+    /// Resolve a track to an on-disk URL using library root + organized_path,
+    /// with `original_path` as a filesystem fallback. Returns nil if no
+    /// resolvable file exists.
+    private func resolveLocalURL(for track: Track) async -> URL? {
+        let root = (try? await container.configRepository?.getLibraryRoot()) ?? nil
+        if let root, let organized = track.organizedPath, !organized.isEmpty {
+            let url = URL(fileURLWithPath: root).appendingPathComponent(organized)
+            if FileManager.default.fileExists(atPath: url.path) { return url }
         }
-        .task {
-            guard !isLoaded else { return }
-            if let repo = container.playlistRepository {
-                playlists = (try? await repo.fetchAll()) ?? []
+        // Fallback: original_path, only when it looks like a real filesystem path
+        let raw = track.originalPath
+        if raw.hasPrefix("/") || raw.hasPrefix("~") {
+            let expanded = (raw as NSString).expandingTildeInPath
+            if FileManager.default.fileExists(atPath: expanded) {
+                return URL(fileURLWithPath: expanded)
             }
-            isLoaded = true
         }
+        return nil
     }
 
     private func addToPlaylist(_ playlist: Playlist) {
@@ -201,7 +164,7 @@ struct PlaylistSubmenu: View {
               let playlistRepo = container.playlistRepository else { return }
 
         let trackIds = Array(selectedTrackIDs)
-        let position = String(format: "%06d", 999000) // Append to end
+        let position = String(format: "%06d", 999000)
 
         Task {
             try? await playlistRepo.addTracks(

@@ -4,6 +4,25 @@ import Foundation
 ///
 /// Wraps Foundation's `Process` class with async/await and stdout/stderr streaming.
 final class ProcessRunner {
+
+    /// Thread-safe output buffer for collecting process output.
+    private final class OutputBuffer: @unchecked Sendable {
+        private let lock = NSLock()
+        private var buffer = Data()
+
+        func append(_ data: Data) {
+            lock.lock()
+            buffer.append(data)
+            lock.unlock()
+        }
+
+        var data: Data {
+            lock.lock()
+            defer { lock.unlock() }
+            return buffer
+        }
+    }
+
     /// Result of a process execution.
     struct ProcessResult {
         let exitCode: Int32
@@ -40,15 +59,15 @@ final class ProcessRunner {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
-        var stdoutData = Data()
-        var stderrData = Data()
+        let stdoutBuffer = OutputBuffer()
+        let stderrBuffer = OutputBuffer()
 
-        // Stream stdout if callback provided
+        // Stream stdout — collect all data in thread-safe buffer
         if let onOutput = onOutput {
             stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
                 let data = handle.availableData
                 if !data.isEmpty {
-                    stdoutData.append(data)
+                    stdoutBuffer.append(data)
                     if let line = String(data: data, encoding: .utf8) {
                         onOutput(line)
                     }
@@ -60,9 +79,12 @@ final class ProcessRunner {
 
         // If no streaming callback, collect all output at once
         if onOutput == nil {
-            stdoutData = try stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+            let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+            stdoutBuffer.append(data)
         }
-        stderrData = try stderrPipe.fileHandleForReading.readDataToEndOfFile()
+
+        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        stderrBuffer.append(stderrData)
 
         process.waitUntilExit()
 
@@ -71,8 +93,8 @@ final class ProcessRunner {
 
         return ProcessResult(
             exitCode: process.terminationStatus,
-            stdout: String(data: stdoutData, encoding: .utf8) ?? "",
-            stderr: String(data: stderrData, encoding: .utf8) ?? ""
+            stdout: String(data: stdoutBuffer.data, encoding: .utf8) ?? "",
+            stderr: String(data: stderrBuffer.data, encoding: .utf8) ?? ""
         )
     }
 

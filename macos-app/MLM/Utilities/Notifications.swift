@@ -55,4 +55,18 @@ extension Notification.Name {
 
     /// Posted when a download completes and a track moves from Remote to Local.
     static let downloadDidComplete = Notification.Name("MLMDownloadDidComplete")
+
+    // MARK: UI Actions (Phase 19 — menu bar integration)
+
+    /// Posted when the user presses ⌘F — views should focus their search field.
+    static let focusSearchField = Notification.Name("MLMFocusSearchField")
+
+    /// Posted when the user triggers "Import from Folder…" via the Library menu.
+    static let showImportDialog = Notification.Name("MLMShowImportDialog")
+
+    /// Posted when the user triggers "Reveal in Finder" via the Library menu.
+    static let revealSelectedInFinder = Notification.Name("MLMRevealSelectedInFinder")
+
+    /// Posted when the user triggers "More Info" via the Library menu (⌘I).
+    static let showTrackDetail = Notification.Name("MLMShowTrackDetail")
 }
