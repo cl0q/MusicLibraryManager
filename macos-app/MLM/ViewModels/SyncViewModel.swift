@@ -6,7 +6,7 @@ final class SyncViewModel {
     // MARK: - State
 
     private(set) var profiles: [SyncProfile] = []
-    private(set) var selectedProfile: SyncProfile?
+    var selectedProfile: SyncProfile?
     private(set) var preview: SyncService.SyncPreview?
     private(set) var isLoading = false
     private(set) var isSyncing = false

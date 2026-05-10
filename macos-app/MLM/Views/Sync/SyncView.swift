@@ -87,13 +87,10 @@ struct SyncView: View {
             } else {
                 List(vm.profiles, selection: Binding(
                     get: { vm.selectedProfile },
-                    set: { profile in
-                        if let p = profile {
-                            Task { await vm.selectProfile(p) }
-                        }
-                    }
+                    set: { vm.selectedProfile = $0 }
                 )) { profile in
                     SyncProfileRow(profile: profile)
+                        .tag(profile)
                         .contextMenu {
                             Button("Delete", role: .destructive) {
                                 Task { await vm.deleteProfile(profile) }
@@ -101,6 +98,10 @@ struct SyncView: View {
                         }
                 }
                 .listStyle(.sidebar)
+                .onChange(of: vm.selectedProfile) { _, newProfile in
+                    guard let p = newProfile else { return }
+                    Task { await vm.loadPreview(for: p) }
+                }
             }
         }
         .background(Color.mlmSurface)
@@ -151,6 +152,9 @@ struct SyncView: View {
                     let panel = NSOpenPanel()
                     panel.canChooseDirectories = true
                     panel.canChooseFiles = false
+                    panel.canCreateDirectories = true
+                    panel.allowsMultipleSelection = false
+                    panel.prompt = "Choose"
                     if panel.runModal() == .OK, let url = panel.url {
                         newProfileOutput = url.path
                     }
