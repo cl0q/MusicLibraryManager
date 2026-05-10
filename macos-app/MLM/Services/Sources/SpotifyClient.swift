@@ -20,14 +20,13 @@ final class SpotifyClient {
 
     private let clientId: String
     private let clientSecret: String
-    private let redirectURI = "mlm://callback"
-    private let callbackScheme = "mlm"
+    private let redirectURI = LoopbackOAuthServer.redirectURI
 
     private static let authURL = URL(string: "https://accounts.spotify.com/authorize")!
     private static let tokenURL = URL(string: "https://accounts.spotify.com/api/token")!
     private static let apiBase = URL(string: "https://api.spotify.com/v1")!
 
-    private let scopes = ["user-library-read", "playlist-read-private"]
+    private let scopes = ["user-library-read", "playlist-read-private", "playlist-read-collaborative"]
 
     // MARK: - Dependencies
 
@@ -50,21 +49,32 @@ final class SpotifyClient {
         self.oauthManager = oauthManager
         self.trackRepository = trackRepository
         self.sourceRepository = sourceRepository
-        self.clientId = clientId ?? ProcessInfo.processInfo.environment["SPOTIFY_CLIENT_ID"] ?? ""
-        self.clientSecret = clientSecret ?? ProcessInfo.processInfo.environment["SPOTIFY_CLIENT_SECRET"] ?? ""
+        self.clientId = clientId ?? CredentialsLoader.credential(key: "SPOTIFY_CLIENT_ID") ?? ""
+        self.clientSecret = clientSecret ?? CredentialsLoader.credential(key: "SPOTIFY_CLIENT_SECRET") ?? ""
     }
 
     // MARK: - OAuth
 
     /// Start the Spotify OAuth authorization flow.
+    ///
+    /// Opens the system browser, waits for the loopback callback,
+    /// exchanges the code for tokens, and stores them in the Keychain.
     @MainActor
     func authorize() async throws {
-        let code = try await oauthManager.authorize(
+        guard !clientId.isEmpty, !clientSecret.isEmpty else {
+            AppLogger.shared.error(
+                "Spotify OAuth: missing credentials — add SPOTIFY_CLIENT_ID/SECRET to " +
+                "~/Library/Application Support/MLM/.env",
+                source: "spotify-oauth"
+            )
+            throw SpotifyError.missingCredentials
+        }
+
+        let code = try await oauthManager.authorizeWithLoopback(
             authorizationURL: Self.authURL,
             clientId: clientId,
             redirectURI: redirectURI,
-            scopes: scopes,
-            callbackURLScheme: callbackScheme
+            scopes: scopes
         )
 
         let tokenResponse = try await oauthManager.exchangeCode(
@@ -74,6 +84,14 @@ final class SpotifyClient {
             clientSecret: clientSecret,
             redirectURI: redirectURI
         )
+
+        if tokenResponse.accessToken.isEmpty {
+            AppLogger.shared.error(
+                "Spotify OAuth: token exchange returned empty access token",
+                source: "spotify-oauth"
+            )
+            throw SpotifyError.tokenExchangeFailed
+        }
 
         try tokenStorage.saveTokens(
             service: .spotify,
@@ -304,6 +322,8 @@ final class SpotifyClient {
 
     enum SpotifyError: LocalizedError {
         case notAuthenticated
+        case missingCredentials
+        case tokenExchangeFailed
         case invalidURL(String)
         case invalidResponse
         case apiError(statusCode: Int, body: String)
@@ -311,6 +331,10 @@ final class SpotifyClient {
         var errorDescription: String? {
             switch self {
             case .notAuthenticated: "Not authenticated — connect Spotify first"
+            case .missingCredentials:
+                "Spotify credentials missing — add SPOTIFY_CLIENT_ID and " +
+                "SPOTIFY_CLIENT_SECRET to ~/Library/Application Support/MLM/.env"
+            case .tokenExchangeFailed: "Spotify token exchange returned an empty access token"
             case .invalidURL(let ep): "Invalid URL: \(ep)"
             case .invalidResponse: "Invalid response"
             case .apiError(let code, let body): "Spotify API error (\(code)): \(body)"
