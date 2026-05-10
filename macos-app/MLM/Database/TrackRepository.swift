@@ -31,9 +31,9 @@ enum SortColumn: String, CaseIterable {
 /// Encapsulates all SQL for the `tracks` domain, matching the
 /// Tauri app's `src/database/tracks.rs` functionality.
 final class TrackRepository: Sendable {
-    private let database: DatabasePool
+    private let database: any DatabaseWriter
 
-    init(database: DatabasePool) {
+    init(database: any DatabaseWriter) {
         self.database = database
     }
 
