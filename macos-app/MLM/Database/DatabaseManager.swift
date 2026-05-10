@@ -573,6 +573,17 @@ final class DatabaseManager: Sendable {
         }
 
         // ──────────────────────────────────────────────────────────────
+        // Migration: sort-column indexes for SQL-side library sort
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v_sort_indexes") { db in
+            try db.create(indexOn: "tracks", columns: ["date_added"],    options: .ifNotExists)
+            try db.create(indexOn: "tracks", columns: ["duration"],      options: .ifNotExists)
+            try db.create(indexOn: "tracks", columns: ["bitrate"],       options: .ifNotExists)
+            try db.create(indexOn: "tracks", columns: ["year"],          options: .ifNotExists)
+            try db.create(indexOn: "tracks", columns: ["energy_bucket"], options: .ifNotExists)
+        }
+
+        // ──────────────────────────────────────────────────────────────
         // Migration: _migrations tracking table parity
         // Ensures the Tauri app's _migrations table exists for compat
         // ──────────────────────────────────────────────────────────────
