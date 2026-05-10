@@ -40,6 +40,14 @@ for arg in "$@"; do
   esac
 done
 
+# Sync credentials from repo root .env → Application Support so the .app can read them.
+REPO_ENV="$(cd "${APP_ROOT}/.." && pwd)/.env"
+APPSUPP_MLM="${HOME}/Library/Application Support/MLM"
+if [[ -f "${REPO_ENV}" ]]; then
+    mkdir -p "${APPSUPP_MLM}"
+    cp "${REPO_ENV}" "${APPSUPP_MLM}/.env"
+fi
+
 ARCH="$(uname -m)"   # arm64 or x86_64
 BIN_PATH=".build/${ARCH}-apple-macosx/${CONFIG}/MLM"
 APP_BUNDLE=".build/MLM.app"
@@ -78,7 +86,7 @@ cat > "${APP_BUNDLE}/Contents/Info.plist" <<'PLIST'
   <key>CFBundleVersion</key><string>1</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
