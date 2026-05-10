@@ -1,6 +1,31 @@
 import Foundation
 import GRDB
 
+// MARK: - SortColumn
+
+/// Whitelist of sortable columns for library queries.
+enum SortColumn: String, CaseIterable {
+    case title, artist, album, dateAdded, duration, bitrate, year, energy, genre, format
+
+    /// Maps to the actual SQLite column name.
+    var sqlColumn: String {
+        switch self {
+        case .title:     return "title"
+        case .artist:    return "artist"
+        case .album:     return "album"
+        case .dateAdded: return "date_added"
+        case .duration:  return "duration"
+        case .bitrate:   return "bitrate"
+        case .year:      return "year"
+        case .energy:    return "energy_bucket"
+        case .genre:     return "genre"
+        case .format:    return "format"
+        }
+    }
+}
+
+// MARK: - Repository
+
 /// Repository for track CRUD, search, and filtering operations.
 ///
 /// Encapsulates all SQL for the `tracks` domain, matching the
@@ -92,6 +117,80 @@ final class TrackRepository: Sendable {
                 .filter(Track.Columns.organizedPath.like(pattern))
                 .order(Track.Columns.title)
                 .fetchAll(db)
+        }
+    }
+
+    /// Fetch tracks for the library browser with SQL-side sort and filter.
+    ///
+    /// - Parameters:
+    ///   - tab: Local (organized_path IS NOT NULL) or Remote (IS NULL).
+    ///   - search: Optional search string matched against artist, album, title.
+    ///   - sortBy: Column to sort by (whitelist-safe, no SQL injection possible).
+    ///   - ascending: Sort direction.
+    ///   - limit: Optional row cap.
+    func fetchForLibrary(
+        tab: LibraryTab,
+        search: String?,
+        sortBy: SortColumn,
+        ascending: Bool,
+        limit: Int? = nil
+    ) async throws -> [Track] {
+        var conditions: [String] = []
+        var args: [DatabaseValueConvertible] = []
+
+        switch tab {
+        case .local:  conditions.append("organized_path IS NOT NULL")
+        case .remote: conditions.append("organized_path IS NULL")
+        }
+
+        let trimmed = search?.trimmingCharacters(in: .whitespaces) ?? ""
+        if !trimmed.isEmpty {
+            conditions.append("(artist LIKE ? OR album LIKE ? OR title LIKE ?)")
+            let p = "%\(trimmed)%"
+            args.append(contentsOf: [p, p, p] as [DatabaseValueConvertible])
+        }
+
+        let where_ = conditions.isEmpty ? "" : "WHERE " + conditions.joined(separator: " AND ")
+        let order   = ascending ? "ASC" : "DESC"
+        // sortBy.sqlColumn is from a closed enum — safe to interpolate.
+        let limitSQL = limit.map { "LIMIT \($0)" } ?? ""
+
+        let sql = """
+            SELECT * FROM tracks
+            \(where_)
+            ORDER BY \(sortBy.sqlColumn) \(order) NULLS LAST
+            \(limitSQL)
+            """
+
+        let stmtArgs = StatementArguments(args) ?? StatementArguments()
+        return try await database.read { db in
+            try Track.fetchAll(db, sql: sql, arguments: stmtArgs)
+        }
+    }
+
+    /// Fetch all distinct organized_path values for building the folder tree.
+    func fetchAllOrganizedPaths() async throws -> [String] {
+        try await database.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT DISTINCT organized_path
+                FROM tracks
+                WHERE organized_path IS NOT NULL
+            """)
+            return rows.compactMap { $0["organized_path"] as? String }
+        }
+    }
+
+    /// Fetch tracks directly in a folder (one level deep, no sub-folders).
+    func fetchTracksInFolder(path: String) async throws -> [Track] {
+        let prefixPattern = path + "/%"
+        let deeperPattern = path + "/%/%"
+        return try await database.read { db in
+            try Track.fetchAll(db, sql: """
+                SELECT * FROM tracks
+                WHERE organized_path LIKE ?
+                  AND organized_path NOT LIKE ?
+                ORDER BY title COLLATE NOCASE
+            """, arguments: [prefixPattern, deeperPattern])
         }
     }
 
