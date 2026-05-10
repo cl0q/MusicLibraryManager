@@ -1,10 +1,9 @@
 import SwiftUI
 
-/// Recursive folder tree using `DisclosureGroup` for lazy-loaded children.
+/// Recursive folder tree using `DisclosureGroup` for pre-loaded children.
 ///
-/// Each row shows: 📁 FolderName (trackCount)
-/// Expanding a node triggers `FolderViewModel.loadChildren(for:)`.
-/// Selecting a node sets `selectedFolderPath` → right pane shows tracks.
+/// Children are fully pre-populated by `FolderViewModel.buildTree(from:)`.
+/// Expanding a node is a pure UI state change — no SQL queries.
 struct FolderTreeView: View {
     @Bindable var viewModel: FolderViewModel
 
@@ -21,7 +20,10 @@ struct FolderTreeView: View {
 
 // MARK: - Recursive row
 
-/// A single row in the folder tree — recursively renders children via DisclosureGroup.
+/// A single row in the folder tree.
+///
+/// - Leaf nodes (no children) → plain selectable row.
+/// - Non-leaf nodes (has children) → DisclosureGroup that expands inline.
 struct FolderTreeRow: View {
     let node: FolderNode
     @Bindable var viewModel: FolderViewModel
@@ -29,49 +31,23 @@ struct FolderTreeRow: View {
     @State private var isExpanded = false
 
     var body: some View {
-        if node.isLoaded, let children = node.children, !children.isEmpty {
-            // Has loaded children → show disclosure group
-            DisclosureGroup(isExpanded: $isExpanded) {
-                ForEach(children) { child in
-                    FolderTreeRow(node: child, viewModel: viewModel)
-                }
-            } label: {
+        if let children = node.children {
+            if children.isEmpty {
+                // Leaf node: plain selectable row, no disclosure arrow.
                 folderLabel
-            }
-            .onChange(of: isExpanded) { _, expanded in
-                if expanded {
-                    Task { await viewModel.loadChildren(for: node) }
+            } else {
+                // Non-leaf: disclosure group with pre-loaded children.
+                DisclosureGroup(isExpanded: $isExpanded) {
+                    ForEach(children) { child in
+                        FolderTreeRow(node: child, viewModel: viewModel)
+                    }
+                } label: {
+                    folderLabel
                 }
-            }
-        } else if node.isLoading {
-            // Currently loading children
-            HStack(spacing: 6) {
-                folderLabel
-                Spacer()
-                ProgressView()
-                    .controlSize(.small)
             }
         } else {
-            // Not yet loaded — show as expandable
-            DisclosureGroup(isExpanded: $isExpanded) {
-                // Placeholder while loading
-                if node.isLoading {
-                    HStack {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Loading…")
-                            .font(MLMFont.muted)
-                            .foregroundColor(.mlmInkMuted)
-                    }
-                }
-            } label: {
-                folderLabel
-            }
-            .onChange(of: isExpanded) { _, expanded in
-                if expanded {
-                    Task { await viewModel.loadChildren(for: node) }
-                }
-            }
+            // Fallback for any node whose children were never populated.
+            folderLabel
         }
     }
 
@@ -104,7 +80,7 @@ struct FolderTreeRow: View {
         .contentShape(Rectangle())
         .contextMenu {
             Button {
-                revealInFinder()
+                viewModel.selectedFolderPath = node.id
             } label: {
                 Label("Reveal in Finder", systemImage: "folder")
             }
@@ -113,18 +89,5 @@ struct FolderTreeRow: View {
 
     private var isSelected: Bool {
         viewModel.selectedFolderPath == node.id
-    }
-
-    private func revealInFinder() {
-        // Use a temporary selected path to reveal
-        let previousSelection = viewModel.selectedFolderPath
-        viewModel.selectedFolderPath = node.id
-        // Restore after a short delay
-        Task {
-            try? await Task.sleep(nanoseconds: 100_000_000)
-            if viewModel.selectedFolderPath == node.id && previousSelection != node.id {
-                // Don't restore — user may have intentionally selected this
-            }
-        }
     }
 }
