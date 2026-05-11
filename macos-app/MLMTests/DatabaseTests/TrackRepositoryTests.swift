@@ -27,6 +27,7 @@ struct TrackRepositoryTests {
             t.organizedPath = organizedPath
             t.dateAdded = dateAdded ?? "2024-01-01T00:00:00Z"
             t.bitrate = bitrate
+            t.searchText = DatabaseManager.foldedSearchText(artist + " " + album + " " + title)
             try t.insert(db)
         }
     }
@@ -74,6 +75,38 @@ struct TrackRepositoryTests {
         // Non-matching search returns empty
         let noMatch = try await repo.fetchForLibrary(tab: .local, search: "zzznomatch", sortBy: .title, ascending: true)
         #expect(noMatch.isEmpty)
+    }
+
+    // MARK: - fetchForLibrary: diacritic-insensitive search
+
+    @Test func searchIsDiacriticInsensitive() async throws {
+        let (db, repo) = try makeRepo()
+        try await insertTrack(db, artist: "Yeat", album: "Up 2 Më", title: "Ön Thë Linë",
+                              organizedPath: "Yeat/Up 2 Me/On The Line.mp3")
+        try await insertTrack(db, artist: "Olivés", album: "Normal Album", title: "Regular Track",
+                              organizedPath: "Olives/Normal/Track.mp3")
+        try await insertTrack(db, artist: "Other", album: "Other", title: "Nothing",
+                              organizedPath: "Other/Other/Nothing.mp3")
+
+        // ASCII query finds diacritic-heavy title
+        let byTitle = try await repo.fetchForLibrary(tab: .local, search: "on the line", sortBy: .title, ascending: true)
+        #expect(byTitle.count == 1)
+        #expect(byTitle[0].title == "Ön Thë Linë")
+
+        // ASCII query finds diacritic album name
+        let byAlbum = try await repo.fetchForLibrary(tab: .local, search: "up 2 me", sortBy: .title, ascending: true)
+        #expect(byAlbum.count == 1)
+        #expect(byAlbum[0].artist == "Yeat")
+
+        // All-uppercase ASCII query (case + diacritic insensitive)
+        let byUpper = try await repo.fetchForLibrary(tab: .local, search: "ON THE LINE", sortBy: .title, ascending: true)
+        #expect(byUpper.count == 1)
+        #expect(byUpper[0].title == "Ön Thë Linë")
+
+        // Diacritic in artist name found by ASCII
+        let byDiacriticArtist = try await repo.fetchForLibrary(tab: .local, search: "olives", sortBy: .title, ascending: true)
+        #expect(byDiacriticArtist.count == 1)
+        #expect(byDiacriticArtist[0].artist == "Olivés")
     }
 
     // MARK: - fetchForLibrary: sort order

@@ -145,9 +145,9 @@ final class TrackRepository: Sendable {
 
         let trimmed = search?.trimmingCharacters(in: .whitespaces) ?? ""
         if !trimmed.isEmpty {
-            conditions.append("(artist LIKE ? OR album LIKE ? OR title LIKE ?)")
-            let p = "%\(trimmed)%"
-            args.append(contentsOf: [p, p, p] as [DatabaseValueConvertible])
+            let normalized = DatabaseManager.foldedSearchText(trimmed)
+            conditions.append("search_text LIKE ?")
+            args.append("%\(normalized)%")
         }
 
         let where_ = conditions.isEmpty ? "" : "WHERE " + conditions.joined(separator: " AND ")
@@ -317,6 +317,9 @@ final class TrackRepository: Sendable {
     func insert(_ track: Track) async throws -> Track {
         try await database.write { db in
             var track = track
+            track.searchText = DatabaseManager.foldedSearchText(
+                track.artist + " " + track.album + " " + track.title
+            )
             try track.insert(db)
             return track
         }
@@ -325,6 +328,10 @@ final class TrackRepository: Sendable {
     /// Update an existing track.
     func update(_ track: Track) async throws {
         try await database.write { db in
+            var track = track
+            track.searchText = DatabaseManager.foldedSearchText(
+                track.artist + " " + track.album + " " + track.title
+            )
             try track.update(db)
         }
     }

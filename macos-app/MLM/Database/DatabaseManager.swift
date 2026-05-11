@@ -595,6 +595,39 @@ final class DatabaseManager: Sendable {
             }
         }
 
+        // ──────────────────────────────────────────────────────────────
+        // Migration v_search_text_column: pre-computed normalized search
+        // Enables diacritic-insensitive search (e.g. "on the line" finds "Ön Thë Linë")
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v_search_text_column") { db in
+            try db.alter(table: "tracks") { t in
+                t.add(column: "search_text", .text)
+            }
+            try db.create(indexOn: "tracks", columns: ["search_text"], options: .ifNotExists)
+
+            let rows = try Row.fetchAll(db, sql: "SELECT id, artist, album, title FROM tracks")
+            for row in rows {
+                guard let rowId = row["id"] as? Int64 else { continue }
+                let combined = ((row["artist"] as? String) ?? "") + " " +
+                               ((row["album"] as? String) ?? "") + " " +
+                               ((row["title"] as? String) ?? "")
+                let normalized = Self.foldedSearchText(combined)
+                try db.execute(
+                    sql: "UPDATE tracks SET search_text = ? WHERE id = ?",
+                    arguments: [normalized, rowId]
+                )
+            }
+        }
+
         return migrator
+    }
+
+    // MARK: - Search Text Folding
+
+    static func foldedSearchText(_ raw: String) -> String {
+        raw
+            .folding(options: [.diacriticInsensitive, .caseInsensitive, .widthInsensitive],
+                     locale: Locale(identifier: "en_US_POSIX"))
+            .lowercased()
     }
 }

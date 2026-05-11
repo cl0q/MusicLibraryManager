@@ -27,6 +27,7 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
     var truePeak: Double?
     var energyBucket: Int?
     var albumId: Int64?
+    var searchText: String?
 
     static let databaseTableName = "tracks"
 
@@ -54,6 +55,7 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
         static let truePeak = Column(CodingKeys.truePeak)
         static let energyBucket = Column(CodingKeys.energyBucket)
         static let albumId = Column(CodingKeys.albumId)
+        static let searchText = Column(CodingKeys.searchText)
     }
 
     // MARK: - Snake case mapping
@@ -80,6 +82,7 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
         case truePeak = "true_peak"
         case energyBucket = "energy_bucket"
         case albumId = "album_id"
+        case searchText = "search_text"
     }
 
     // MARK: - Computed Properties
