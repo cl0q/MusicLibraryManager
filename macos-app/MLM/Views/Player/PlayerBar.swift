@@ -3,7 +3,6 @@ import SwiftUI
 /// Toolbar-mounted player widget — centered via `.principal` placement.
 ///
 /// Shows transport controls, album art fallback, track info, and a scrubber.
-/// Replaces the bottom-pinned MiniPlayerView.
 struct PlayerBar: View {
     let viewModel: PlaybackViewModel
 

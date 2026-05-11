@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 /// ViewModel for audio playback — owns the AudioPlayer and exposes
-/// reactive state for MiniPlayer, TrackDetailView, and keyboard shortcuts.
+/// reactive state for PlayerBar, TrackDetailView, and keyboard shortcuts.
 ///
 /// ## Responsibilities
 /// - Load and play tracks (by Track model or file URL)
