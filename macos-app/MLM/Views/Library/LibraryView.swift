@@ -12,6 +12,7 @@ struct LibraryView: View {
     @State private var importViewModel: ImportViewModel?
     @State private var availablePlaylists: [Playlist] = []
     @State private var isRescanning = false
+    @FocusState private var isSearchFocused: Bool
 
     var body: some View {
         Group {
@@ -39,6 +40,9 @@ struct LibraryView: View {
         .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { _ in
             Task { await reloadPlaylists() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .focusSearchField)) { _ in
+            isSearchFocused = true
+        }
     }
 
     // MARK: - Content
@@ -54,6 +58,7 @@ struct LibraryView: View {
             placement: .toolbar,
             prompt: "Search library"
         )
+        .searchFocused($isSearchFocused)
         .toolbar {
             ToolbarItem(placement: .principal) {
                 Picker("Source", selection: Bindable(viewModel).selectedTab) {
