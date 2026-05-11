@@ -137,8 +137,11 @@ struct MLMApp: App {
                 Button("Copy File Path") {
                     if let track = selectedTrack,
                        let path = track?.organizedPath {
+                        let pasteValue = path.rangeOfCharacter(from: .whitespaces) != nil
+                            ? "\"\(path)\""
+                            : path
                         NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(path, forType: .string)
+                        NSPasteboard.general.setString(pasteValue, forType: .string)
                     }
                 }
                 .keyboardShortcut("c", modifiers: [.command, .shift])

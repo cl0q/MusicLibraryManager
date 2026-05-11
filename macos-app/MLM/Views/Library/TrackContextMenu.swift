@@ -130,12 +130,18 @@ struct TrackContextMenu: View {
     }
 
     /// Copy the resolved absolute path of the first selected local track.
+    /// Paths containing whitespace are wrapped in double quotes so the value
+    /// can be pasted directly into a terminal.
     private func copyPath() {
         guard let track = selectedTracks.first(where: { $0.isLocal }) else { return }
         Task { @MainActor in
             guard let url = await resolveLocalURL(for: track) else { return }
+            let raw = url.path
+            let pasteValue = raw.rangeOfCharacter(from: .whitespaces) != nil
+                ? "\"\(raw)\""
+                : raw
             NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(url.path, forType: .string)
+            NSPasteboard.general.setString(pasteValue, forType: .string)
         }
     }
 
