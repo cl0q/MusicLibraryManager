@@ -175,20 +175,35 @@ final class TranscodeService: Sendable {
         encoder: String,
         stripVideo: Bool
     ) async throws -> FFmpegResult {
+        // Explicitly map the audio stream (mandatory) and the video stream
+        // when present (optional `?` modifier — ffmpeg won't fail if the
+        // input has no embedded artwork). Without explicit mapping, ffmpeg
+        // sometimes picks the wrong stream when both are present.
         var args = [
             "-i", input.path,
-            "-c:a", encoder,
-            "-b:a", "\(Self.targetBitrate)k"
+            "-map", "0:a",
         ]
 
         if stripVideo {
+            // Strip any embedded image stream. -vn is the documented way;
+            // it overrides the `-map 0:v?` we'd otherwise add.
             args += ["-vn"]
         } else {
-            // Preserve cover art
-            args += ["-c:v", "copy", "-disposition:v", "attached_pic"]
+            // Preserve cover art: copy the video stream untouched and tag
+            // it as attached_pic so iTunes/Music.app picks it up.
+            args += [
+                "-map", "0:v?",
+                "-c:v", "copy",
+                "-disposition:v", "attached_pic",
+            ]
         }
 
-        args += ["-y", output.path]
+        args += [
+            "-c:a", encoder,
+            "-b:a", "\(Self.targetBitrate)k",
+            "-movflags", "+faststart",
+            "-y", output.path,
+        ]
 
         let result = try await ProcessRunner.run(ffmpeg, arguments: args)
 
@@ -196,9 +211,25 @@ final class TranscodeService: Sendable {
             return .success
         }
 
-        // Check for cover art related failures
+        // Check for cover art / video stream related failures. PNG covers
+        // are the canonical exit-234 case but ffmpeg surfaces several
+        // wordings depending on version, so check for all of them.
         let stderr = result.stderr.lowercased()
-        if !stripVideo && (stderr.contains("video") || stderr.contains("attached_pic") || result.exitCode == 234) {
+        let isCoverArtIssue = !stripVideo && (
+            result.exitCode == 234 ||
+            stderr.contains("attached_pic") ||
+            stderr.contains("video stream") ||
+            stderr.contains("could not find tag for codec") ||
+            stderr.contains("could not write header") ||
+            stderr.contains("png") && stderr.contains("video")
+        )
+
+        if isCoverArtIssue {
+            AppLogger.shared.log(
+                "ffmpeg cover-art mux failed (exit \(result.exitCode)); retrying with -vn",
+                level: .warning,
+                source: "Download"
+            )
             return .coverArtFailure
         }
 
