@@ -50,7 +50,8 @@ struct SourcesView: View {
 
             ScrollView {
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 280, maximum: 340), spacing: 12)],
+                    columns: [GridItem(.adaptive(minimum: 280, maximum: 340), spacing: 12, alignment: .top)],
+                    alignment: .leading,
                     spacing: 12
                 ) {
                     // SoundCloud (highest priority — 585 tracks)
@@ -219,6 +220,7 @@ struct SourceCard: View {
             }
         }
         .padding(12)
+        .frame(minHeight: 220, alignment: .top)
         .background(Color.mlmSurface)
         .cornerRadius(8)
         .overlay(
