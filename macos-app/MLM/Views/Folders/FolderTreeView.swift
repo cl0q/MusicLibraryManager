@@ -1,53 +1,45 @@
 import SwiftUI
 
-/// Recursive folder tree using `DisclosureGroup` for pre-loaded children.
+/// Sidebar folder tree backed by the real disk hierarchy.
 ///
-/// Children are fully pre-populated by `FolderViewModel.buildTree(from:)`.
-/// Expanding a node is a pure UI state change — no SQL queries.
+/// Selection is bound directly to the List — FolderTreeRow does NOT
+/// observe the ViewModel, so changing the selection does not re-render
+/// all 2700+ nodes.
 struct FolderTreeView: View {
     @Bindable var viewModel: FolderViewModel
 
     var body: some View {
         List(selection: $viewModel.selectedFolderPath) {
             ForEach(viewModel.rootNodes) { node in
-                FolderTreeRow(node: node, viewModel: viewModel)
+                FolderTreeRow(node: node)
             }
         }
         .listStyle(.sidebar)
-        .background(Color.mlmSurface)
     }
 }
 
 // MARK: - Recursive row
 
-/// A single row in the folder tree.
+/// A single row in the disk folder tree.
 ///
-/// - Leaf nodes (no children) → plain selectable row.
-/// - Non-leaf nodes (has children) → DisclosureGroup that expands inline.
+/// Takes only the node as input — does NOT observe the ViewModel.
+/// This keeps selection changes from triggering a full tree re-render.
 struct FolderTreeRow: View {
-    let node: FolderNode
-    @Bindable var viewModel: FolderViewModel
+    let node: DiskFolderNode
 
     @State private var isExpanded = false
 
     var body: some View {
-        if let children = node.children {
-            if children.isEmpty {
-                // Leaf node: plain selectable row, no disclosure arrow.
-                folderLabel
-            } else {
-                // Non-leaf: disclosure group with pre-loaded children.
-                DisclosureGroup(isExpanded: $isExpanded) {
-                    ForEach(children) { child in
-                        FolderTreeRow(node: child, viewModel: viewModel)
-                    }
-                } label: {
-                    folderLabel
-                }
-            }
-        } else {
-            // Fallback for any node whose children were never populated.
+        if node.children.isEmpty {
             folderLabel
+        } else {
+            DisclosureGroup(isExpanded: $isExpanded) {
+                ForEach(node.children) { child in
+                    FolderTreeRow(node: child)
+                }
+            } label: {
+                folderLabel
+            }
         }
     }
 
@@ -55,39 +47,19 @@ struct FolderTreeRow: View {
 
     private var folderLabel: some View {
         HStack(spacing: 6) {
-            Image(systemName: isSelected ? "folder.fill" : "folder")
-                .foregroundColor(isSelected ? .accentColor : .mlmInkSecondary)
+            Image(systemName: "folder")
+                .foregroundStyle(Color.secondary)
                 .imageScale(.medium)
 
             Text(node.name)
-                .font(MLMFont.body)
-                .foregroundColor(.mlmInk)
                 .lineLimit(1)
-
-            Spacer()
-
-            if node.trackCount > 0 {
-                Text("\(node.trackCount)")
-                    .font(MLMFont.badge)
-                    .foregroundColor(.mlmInkMuted)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(Color.mlmRaised)
-                    .clipShape(Capsule())
-            }
         }
         .tag(node.id)
         .contentShape(Rectangle())
         .contextMenu {
-            Button {
-                viewModel.selectedFolderPath = node.id
-            } label: {
-                Label("Reveal in Finder", systemImage: "folder")
+            Button("In Finder anzeigen") {
+                NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: node.id)
             }
         }
-    }
-
-    private var isSelected: Bool {
-        viewModel.selectedFolderPath == node.id
     }
 }

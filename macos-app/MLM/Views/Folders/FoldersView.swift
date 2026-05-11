@@ -1,24 +1,10 @@
 import SwiftUI
 
-/// Folder browser — split pane with tree (left) and tracks (right).
-///
-/// Phase 7 implementation. Layout:
-/// ```
-/// ┌─────────────────────────────────────────────────────────────┐
-/// │  Folders                         🔍 Search                  │  Header
-/// ├───────────────────┬─────────────────────────────────────────┤
-/// │  📁 Artist A (42) │  Title     │ Album  │ Fmt │ Dur │ ⚡    │
-/// │    📁 Album 1 (12)│  Song 1    │ Alb 1  │ m4a │ 3:24│▃▅▇▅▃│  Track
-/// │    📁 Album 2 (30)│  Song 2    │ Alb 1  │ flac│ 4:01│▃▅▅▃▁│  table
-/// │  📁 Artist B (18) │  Song 3    │ Alb 1  │ m4a │ 2:58│▁▃▅▃▁│
-/// │                   │            │        │     │     │      │
-/// └───────────────────┴─────────────────────────────────────────┘
-/// ```
+/// Folder browser — split pane with disk tree (left) and tracks (right).
 struct FoldersView: View {
     @Environment(\.container) private var container
     @State private var viewModel: FolderViewModel?
 
-    /// Callback when a track is double-clicked (play + show detail).
     var onTrackDoubleClick: ((Track) -> Void)?
 
     var body: some View {
@@ -26,7 +12,7 @@ struct FoldersView: View {
             if let viewModel {
                 foldersContent(viewModel)
             } else {
-                ProgressView("Loading folders…")
+                ProgressView("Ordner werden geladen…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.mlmBase)
             }
@@ -47,13 +33,14 @@ struct FoldersView: View {
 
     private func foldersContent(_ viewModel: FolderViewModel) -> some View {
         VStack(spacing: 0) {
-            // Header bar
             headerBar(viewModel)
 
             Divider()
                 .background(Color.mlmEdge)
 
-            if viewModel.isLoading && viewModel.rootNodes.isEmpty {
+            if viewModel.isDriveNotMounted {
+                driveNotMountedState
+            } else if viewModel.isLoading && viewModel.rootNodes.isEmpty {
                 loadingState
             } else if viewModel.rootNodes.isEmpty {
                 emptyState(viewModel)
@@ -64,7 +51,7 @@ struct FoldersView: View {
         .background(Color.mlmBase)
         .toolbar {
             ToolbarItem(placement: .automatic) {
-                Text("\(viewModel.artistCount) artists · \(viewModel.totalTrackCount) tracks")
+                Text("\(viewModel.folderCount) Ordner")
                     .font(MLMFont.muted)
                     .foregroundColor(.mlmInkMuted)
             }
@@ -75,12 +62,11 @@ struct FoldersView: View {
 
     private func headerBar(_ viewModel: FolderViewModel) -> some View {
         HStack(spacing: 8) {
-            Text("Folders")
+            Text("Ordner")
                 .font(MLMFont.pageTitle)
                 .foregroundColor(.mlmInk)
 
-            // Count badge
-            Text("\(viewModel.artistCount)")
+            Text("\(viewModel.folderCount)")
                 .font(MLMFont.badge)
                 .foregroundColor(.mlmInkMuted)
                 .padding(.horizontal, 6)
@@ -90,13 +76,12 @@ struct FoldersView: View {
 
             Spacer()
 
-            // Search field
             HStack(spacing: 4) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 12))
                     .foregroundColor(.mlmInkMuted)
 
-                TextField("Filter artists…", text: Binding(
+                TextField("Ordner filtern…", text: Binding(
                     get: { viewModel.searchQuery },
                     set: { viewModel.searchQuery = $0 }
                 ))
@@ -128,13 +113,9 @@ struct FoldersView: View {
 
     private func splitPane(_ viewModel: FolderViewModel) -> some View {
         HSplitView {
-            // Left: folder tree
             FolderTreeView(viewModel: viewModel)
                 .frame(minWidth: 180, idealWidth: 240, maxWidth: 360)
 
-            // Separator is handled by HSplitView
-
-            // Right: tracks in selected folder
             folderTracksPane(viewModel)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -147,18 +128,16 @@ struct FoldersView: View {
         @Bindable var viewModel = viewModel
         if let selectedPath = viewModel.selectedFolderPath {
             VStack(spacing: 0) {
-                // Folder path breadcrumb
                 folderBreadcrumb(selectedPath, viewModel: viewModel)
 
                 Divider()
                     .background(Color.mlmEdge)
 
-                // Tracks table
                 if viewModel.tracksInFolder.isEmpty {
                     ContentUnavailableView {
-                        Label("No tracks in this folder", systemImage: "music.note")
+                        Label("Keine Tracks in diesem Ordner", systemImage: "music.note")
                     } description: {
-                        Text("Tracks may be in subfolders.")
+                        Text("Tracks können in Unterordnern liegen.")
                     }
                 } else {
                     FolderTracksTable(
@@ -170,15 +149,14 @@ struct FoldersView: View {
             }
             .background(Color.mlmBase)
         } else {
-            // No folder selected
             VStack(spacing: 12) {
                 Image(systemName: "folder")
                     .font(.system(size: 36))
                     .foregroundColor(.mlmInkMuted)
-                Text("Select a folder")
+                Text("Ordner auswählen")
                     .font(MLMFont.body)
                     .foregroundColor(.mlmInkSecondary)
-                Text("Choose an artist or album folder from the tree to view its tracks.")
+                Text("Wähle einen Ordner aus dem Baum links, um die enthaltenen Tracks zu sehen.")
                     .font(MLMFont.muted)
                     .foregroundColor(.mlmInkMuted)
                     .multilineTextAlignment(.center)
@@ -192,13 +170,16 @@ struct FoldersView: View {
     // MARK: - Breadcrumb
 
     private func folderBreadcrumb(_ path: String, viewModel: FolderViewModel) -> some View {
-        HStack(spacing: 4) {
+        let relPath = viewModel.relativePath(for: path)
+        let segments = relPath.split(separator: "/").map(String.init)
+        let rootPath = viewModel.libraryRootURL?.path ?? ""
+        let rootPrefix = rootPath.isEmpty ? "" : (rootPath.hasSuffix("/") ? rootPath : rootPath + "/")
+
+        return HStack(spacing: 4) {
             Image(systemName: "folder.fill")
                 .font(.system(size: 12))
                 .foregroundColor(.accentColor)
 
-            // Show path segments as breadcrumbs
-            let segments = path.split(separator: "/")
             ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
                 if index > 0 {
                     Image(systemName: "chevron.right")
@@ -206,14 +187,16 @@ struct FoldersView: View {
                         .foregroundColor(.mlmInkMuted)
                 }
 
-                let segmentPath = segments.prefix(index + 1).joined(separator: "/")
+                let relPart = segments.prefix(index + 1).joined(separator: "/")
+                let fullSegPath = rootPrefix + relPart
+
                 Button {
-                    viewModel.selectedFolderPath = segmentPath
+                    viewModel.selectedFolderPath = fullSegPath
                 } label: {
-                    Text(String(segment))
+                    Text(segment)
                         .font(MLMFont.body)
                         .foregroundColor(
-                            segmentPath == path ? .mlmInk : .mlmInkSecondary
+                            index == segments.count - 1 ? .mlmInk : .mlmInkSecondary
                         )
                 }
                 .buttonStyle(.plain)
@@ -221,20 +204,19 @@ struct FoldersView: View {
 
             Spacer()
 
-            Text("\(viewModel.tracksInFolder.count) tracks")
+            Text("\(viewModel.tracksInFolder.count) Tracks")
                 .font(MLMFont.muted)
                 .foregroundColor(.mlmInkMuted)
 
-            // Reveal in Finder button
             Button {
-                revealInFinder(path: path)
+                viewModel.revealInFinder()
             } label: {
                 Image(systemName: "arrow.right.circle")
                     .font(.system(size: 12))
                     .foregroundColor(.mlmInkSecondary)
             }
             .buttonStyle(.plain)
-            .help("Reveal in Finder")
+            .help("In Finder anzeigen")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -243,11 +225,19 @@ struct FoldersView: View {
 
     // MARK: - States
 
+    private var driveNotMountedState: some View {
+        ContentUnavailableView {
+            Label("Laufwerk nicht verbunden", systemImage: "externaldrive.badge.xmark")
+        } description: {
+            Text("Die externe Festplatte mit der Musikbibliothek ist nicht eingehängt.")
+        }
+    }
+
     private var loadingState: some View {
         VStack(spacing: 12) {
             ProgressView()
                 .controlSize(.large)
-            Text("Building folder tree…")
+            Text("Ordnerstruktur wird geladen…")
                 .font(MLMFont.body)
                 .foregroundColor(.mlmInkSecondary)
         }
@@ -258,9 +248,9 @@ struct FoldersView: View {
         Group {
             if viewModel.searchQuery.isEmpty {
                 ContentUnavailableView {
-                    Label("No folders", systemImage: "folder")
+                    Label("Keine Ordner", systemImage: "folder")
                 } description: {
-                    Text("Import music to see the folder structure.")
+                    Text("Musik importieren, um die Ordnerstruktur zu sehen.")
                 }
             } else {
                 ContentUnavailableView.search(text: viewModel.searchQuery)
@@ -272,28 +262,14 @@ struct FoldersView: View {
 
     private func initializeViewModel() {
         guard viewModel == nil,
-              let trackRepo = container.trackRepository else { return }
-        viewModel = FolderViewModel(trackRepository: trackRepo)
-    }
-
-    private func revealInFinder(path: String) {
-        guard let configRepo = container.configRepository else { return }
-        Task {
-            if let root = try? await configRepo.getLibraryRoot() {
-                let fullPath = URL(fileURLWithPath: root)
-                    .appendingPathComponent(path)
-                NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: fullPath.path)
-            }
-        }
+              let trackRepo = container.trackRepository,
+              let configRepo = container.configRepository else { return }
+        viewModel = FolderViewModel(trackRepository: trackRepo, configRepository: configRepo)
     }
 }
 
 // MARK: - Folder Tracks Table
 
-/// A simplified track table for the folder view's right pane.
-///
-/// Uses the same `Table` pattern as LibraryTable but without
-/// tab switching or filter bar (filtering is done at the tree level).
 struct FolderTracksTable: View {
     let tracks: [Track]
     @Binding var selectedTrackIDs: Set<Int64>
@@ -301,7 +277,6 @@ struct FolderTracksTable: View {
 
     @Environment(\.container) private var container
 
-    /// Identifiable wrapper (same pattern as LibraryTable).
     private struct TrackRow: Identifiable {
         let id: Int64
         let track: Track
