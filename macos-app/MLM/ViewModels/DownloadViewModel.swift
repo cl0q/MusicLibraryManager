@@ -122,6 +122,18 @@ final class DownloadViewModel {
         // invariants for this pipeline.
         await persistDownloadedTracks(remoteTracks: remoteTracks, result: result)
 
+        // Notify Library / Folders / Sidebar so the downloaded rows can
+        // move from the Remote tab to the Local tab without requiring a
+        // manual re-scan.
+        NotificationCenter.default.post(
+            name: .downloadDidComplete,
+            object: nil,
+            userInfo: [
+                "succeeded": result.succeeded,
+                "failed": result.failed
+            ]
+        )
+
         AppLogger.shared.log(
             "Download batch complete: \(result.succeeded) succeeded, \(result.failed) failed, \(result.skipped) skipped",
             level: .info,

@@ -29,6 +29,22 @@ struct TrackContextMenu: View {
         selectedTracks.count > 1 ? " (\(selectedTracks.count) tracks)" : ""
     }
 
+    /// Label for the Download item — shows track count when batching.
+    private var downloadButtonLabel: String {
+        let count = selectedTracks.count
+        if count <= 1 {
+            return "Download"
+        }
+        return "Download \(count) tracks"
+    }
+
+    /// Greys out Download when there's nothing to do or a batch is already
+    /// in flight.
+    private var downloadDisabled: Bool {
+        selectedTracks.isEmpty ||
+        (container.downloadViewModel?.isDownloading ?? false)
+    }
+
     var body: some View {
         Section {
             Button { playSelectedTrack() } label: {
@@ -90,11 +106,11 @@ struct TrackContextMenu: View {
         if allRemote {
             Section {
                 Button {
-                    // Placeholder — Phase 11
+                    downloadSelectedTracks()
                 } label: {
-                    Label("Download\(countSuffix)", systemImage: "arrow.down.circle")
+                    Label(downloadButtonLabel, systemImage: "arrow.down.circle")
                 }
-                .disabled(true)
+                .disabled(downloadDisabled)
             }
             Divider()
         }
@@ -115,6 +131,20 @@ struct TrackContextMenu: View {
         guard let track = selectedTracks.first(where: { $0.isLocal }),
               let playbackVM = container.playbackViewModel else { return }
         Task { await playbackVM.playTrack(track) }
+    }
+
+    /// Hand the current selection to the DownloadViewModel.
+    ///
+    /// The orchestrator runs sequentially in the background — this method
+    /// returns immediately. Progress shows up in the ActivityPanel and the
+    /// downloaded rows automatically migrate from Remote to Local once the
+    /// batch completes (via the `.downloadDidComplete` notification).
+    private func downloadSelectedTracks() {
+        guard let downloadVM = container.downloadViewModel else { return }
+        let tracksCopy = selectedTracks
+        Task {
+            await downloadVM.downloadTracks(tracksCopy)
+        }
     }
 
     /// Reveal the first selected local track in Finder.
