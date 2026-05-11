@@ -40,14 +40,14 @@ extension FocusedValues {
 ///
 /// Layout (top → bottom):
 /// ```
-/// ┌────────┬──────────────────────┐
-/// │Sidebar │  Detail content      │  NavigationSplitView
-/// │        │                      │
-/// ├────────┴──────────────────────┤
-/// │ ▶ No track playing     —:—   │  MiniPlayerView (36px)
-/// ├───────────────────────────────┤
-/// │ ▼ Activity                    │  ActivityPanel (36px collapsed)
-/// └───────────────────────────────┘
+/// ┌─────────────────────────────────────────────────┐
+/// │ 🔴🟡🟢  [prev] [play] [next]  ♪ Title · Artist  │  Toolbar (PlayerBar)
+/// ├────────┬────────────────────────────────────────┤
+/// │Sidebar │  Detail content                        │  NavigationSplitView
+/// │        │                                        │
+/// ├────────┴────────────────────────────────────────┤
+/// │ ▼ Activity                                      │  ActivityPanel (36px collapsed)
+/// └─────────────────────────────────────────────────┘
 /// ```
 struct ContentView: View {
     @Environment(\.container) private var container
@@ -124,14 +124,13 @@ struct ContentView: View {
                     .inspectorColumnWidth(min: 320, ideal: 360, max: 480)
                 }
             }
-
-            // Separator
-            Rectangle()
-                .fill(Color.mlmEdge)
-                .frame(height: 1)
-
-            // Persistent mini player bar
-            MiniPlayerView()
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    if let vm = container.playbackViewModel {
+                        PlayerBar(viewModel: vm)
+                    }
+                }
+            }
 
             // Separator
             Rectangle()
