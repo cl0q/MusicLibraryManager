@@ -209,6 +209,21 @@ struct SyncProfileDetailView: View {
     let onSync: () -> Void
     let onRefresh: () -> Void
 
+    /// Human-readable reason why the Sync Now button is disabled (nil = ready to sync).
+    private var disabledReason: String? {
+        if isSyncing { return "Sync läuft bereits…" }
+        if isLoading { return "Vorschau wird berechnet…" }
+        guard let preview else { return "Vorschau noch nicht geladen — Refresh klicken" }
+        if !FileManager.default.fileExists(atPath: profile.outputFolder) {
+            return "Output-Ordner nicht erreichbar: \(profile.outputFolder)"
+        }
+        if !preview.hasSufficientSpace { return "Nicht genug Speicherplatz auf dem Zielordner" }
+        if preview.filesToAdd.isEmpty && preview.filesToRemove.isEmpty {
+            return "Keine Änderungen — alles bereits synchronisiert"
+        }
+        return nil
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -234,6 +249,13 @@ struct SyncProfileDetailView: View {
                     }
                     .disabled(isSyncing || !(preview?.hasSufficientSpace ?? false))
                     .buttonStyle(.borderedProminent)
+                    .help(disabledReason ?? "Start syncing the profile contents to the output folder")
+                }
+
+                if let reason = disabledReason {
+                    Label(reason, systemImage: "info.circle")
+                        .font(MLMFont.muted)
+                        .foregroundColor(.secondary)
                 }
 
                 Divider()
