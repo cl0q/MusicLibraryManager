@@ -180,6 +180,26 @@ final class TrackRepository: Sendable {
         }
     }
 
+    /// Fetch tracks whose original_path matches any of the given paths.
+    ///
+    /// Both the stored paths and the input are normalized via
+    /// `standardizedFileURL.path` before comparison to handle
+    /// URL-encoding differences and trailing-slash variants.
+    func fetchTracksByOriginalPaths(_ paths: [String]) async throws -> [Track] {
+        guard !paths.isEmpty else { return [] }
+        let normalized = paths.map { URL(fileURLWithPath: $0).standardizedFileURL.path }
+        let placeholders = normalized.map { _ in "?" }.joined(separator: ", ")
+        let sql = """
+            SELECT * FROM tracks
+            WHERE original_path IN (\(placeholders))
+            ORDER BY title COLLATE NOCASE
+            """
+        let args = StatementArguments(normalized.map { $0 as DatabaseValueConvertible }) ?? StatementArguments()
+        return try await database.read { db in
+            try Track.fetchAll(db, sql: sql, arguments: args)
+        }
+    }
+
     /// Fetch tracks directly in a folder (one level deep, no sub-folders).
     func fetchTracksInFolder(path: String) async throws -> [Track] {
         let prefixPattern = path + "/%"
