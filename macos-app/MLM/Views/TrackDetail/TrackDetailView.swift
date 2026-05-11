@@ -191,8 +191,14 @@ struct TrackDetailView: View {
                 progress: isCurrentTrack ? (playbackVM?.progress ?? 0) : 0,
                 isLoading: playbackVM?.isLoadingWaveform ?? false
             ) { fraction in
+                guard let vm = playbackVM else { return }
                 if isCurrentTrack {
-                    playbackVM?.seekToProgress(fraction)
+                    vm.seekToProgress(fraction)
+                } else if track.isLocal {
+                    Task {
+                        await vm.playTrack(track)
+                        vm.seekToProgress(fraction)
+                    }
                 }
             }
             .frame(height: 64)

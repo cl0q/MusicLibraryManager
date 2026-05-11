@@ -41,13 +41,13 @@ struct WaveformView: View {
                 } else {
                     waveformCanvas(in: geometry.size)
                         .contentShape(Rectangle())
-                        .onTapGesture { location in
-                            let fraction = location.x / geometry.size.width
-                            onSeek?(min(max(fraction, 0), 1))
-                        }
                         .gesture(
                             DragGesture(minimumDistance: 0)
                                 .onChanged { value in
+                                    let fraction = value.location.x / geometry.size.width
+                                    onSeek?(min(max(fraction, 0), 1))
+                                }
+                                .onEnded { value in
                                     let fraction = value.location.x / geometry.size.width
                                     onSeek?(min(max(fraction, 0), 1))
                                 }
