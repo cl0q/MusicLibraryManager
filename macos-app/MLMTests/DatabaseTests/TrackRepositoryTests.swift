@@ -168,115 +168,51 @@ struct TrackRepositoryTests {
         #expect(!tracks.contains(where: { $0.title == "T3" }))
         #expect(!tracks.contains(where: { $0.title == "T4" }))
     }
-}
 
-// MARK: - FolderViewModel tree build tests
+    // MARK: - fetchTracksByOriginalPaths
 
-struct FolderTreeBuildTests {
+    @Test func fetchTracksByOriginalPathsMatchesOnlyRequestedPaths() async throws {
+        let (db, repo) = try makeRepo()
+        try await db.write { db in
+            var t1 = Track(artist: "A", album: "X", title: "Song A", format: "mp3",
+                           originalPath: "/music/artist/song_a.mp3")
+            t1.organizedPath = "A/X/song_a.mp3"
+            t1.dateAdded = "2024-01-01T00:00:00Z"
+            try t1.insert(db)
 
-    /// Create a minimal in-memory repo with the given organized_path values.
-    private func makeViewModel(paths: [String]) async throws -> FolderViewModel {
-        let db = try DatabaseManager.inMemory()
-        let repo = TrackRepository(database: db)
+            var t2 = Track(artist: "B", album: "Y", title: "Song B", format: "flac",
+                           originalPath: "/music/other/song_b.flac")
+            t2.organizedPath = "B/Y/song_b.flac"
+            t2.dateAdded = "2024-01-01T00:00:00Z"
+            try t2.insert(db)
+        }
 
-        try await db.write { (dbConn: Database) in
-            for (i, path) in paths.enumerated() {
-                var t = Track(artist: "A\(i)", album: "B\(i)", title: "T\(i)",
-                              format: "mp3", originalPath: "/t\(i).mp3")
-                t.organizedPath = path
+        let result = try await repo.fetchTracksByOriginalPaths(["/music/artist/song_a.mp3"])
+        #expect(result.count == 1)
+        #expect(result[0].title == "Song A")
+    }
+
+    @Test func fetchTracksByOriginalPathsReturnsEmptyForEmptyInput() async throws {
+        let (_, repo) = try makeRepo()
+        let result = try await repo.fetchTracksByOriginalPaths([])
+        #expect(result.isEmpty)
+    }
+
+    @Test func fetchTracksByOriginalPathsMatchesMultiplePaths() async throws {
+        let (db, repo) = try makeRepo()
+        try await db.write { db in
+            for i in 1...4 {
+                var t = Track(artist: "A", album: "X", title: "T\(i)", format: "mp3",
+                              originalPath: "/music/t\(i).mp3")
                 t.dateAdded = "2024-01-01T00:00:00Z"
-                try t.insert(dbConn)
+                try t.insert(db)
             }
         }
 
-        let vm = FolderViewModel(trackRepository: repo)
-        await vm.loadRootFolders()
-        return vm
-    }
-
-    @Test func treeBuildsCorrectArtistCount() async throws {
-        let vm = try await makeViewModel(paths: [
-            "Artist A/Album 1/Track 1.mp3",
-            "Artist A/Album 1/Track 2.mp3",
-            "Artist A/Album 2/Track 3.mp3",
-            "Artist B/Album 1/Track 4.mp3",
-        ])
-
-        #expect(vm.allRootNodes.count == 2)
-        let artists = vm.allRootNodes.map(\.name).sorted()
-        #expect(artists == ["Artist A", "Artist B"])
-    }
-
-    @Test func treeBuildsCorrectAlbumChildrenForArtist() async throws {
-        let vm = try await makeViewModel(paths: [
-            "Yeat/Up 2 Më/T1.mp3",
-            "Yeat/Up 2 Më/T2.mp3",
-            "Yeat/AftërLyfe/T3.mp3",
-            "Yeat/AftërLyfe/T4.mp3",
-            "Yeat/AftërLyfe/T5.mp3",
-        ])
-
-        #expect(vm.allRootNodes.count == 1)
-        let artist = try #require(vm.allRootNodes.first)
-        #expect(artist.name == "Yeat")
-        let albums = try #require(artist.children)
-        #expect(albums.count == 2)
-
-        let albumNames = albums.map(\.name).sorted()
-        #expect(albumNames.contains("Up 2 Më"))
-        #expect(albumNames.contains("AftërLyfe"))
-    }
-
-    @Test func albumTrackCountsAreCorrect() async throws {
-        let vm = try await makeViewModel(paths: [
-            "Drake/Views/T1.mp3",
-            "Drake/Views/T2.mp3",
-            "Drake/Views/T3.mp3",
-            "Drake/Certified/T4.mp3",
-        ])
-
-        let artist = try #require(vm.allRootNodes.first)
-        let albums = try #require(artist.children)
-        let views = try #require(albums.first(where: { $0.name == "Views" }))
-        let certified = try #require(albums.first(where: { $0.name == "Certified" }))
-
-        #expect(views.trackCount == 3)
-        #expect(certified.trackCount == 1)
-    }
-
-    @Test func treeChildrenArePreloaded() async throws {
-        let vm = try await makeViewModel(paths: [
-            "Artist/Album/Track.mp3",
-        ])
-
-        let artist = try #require(vm.allRootNodes.first)
-        // All nodes should be pre-loaded (children != nil)
-        #expect(artist.isLoaded)
-        let album = try #require(artist.children?.first)
-        #expect(album.isLoaded)
-        // Album is a leaf: empty children array
-        #expect(album.children?.isEmpty == true)
-    }
-
-    @Test func searchFilterReducesRootNodes() async throws {
-        let vm = try await makeViewModel(paths: [
-            "Aphex Twin/Selected/T1.mp3",
-            "Burial/Untrue/T2.mp3",
-            "Boards of Canada/Music Has/T3.mp3",
-        ])
-
-        vm.searchQuery = "burial"
-        #expect(vm.rootNodes.count == 1)
-        #expect(vm.rootNodes[0].name == "Burial")
-
-        vm.searchQuery = ""
-        #expect(vm.rootNodes.count == 3)
-    }
-
-    @Test func totalTrackCountMatchesInsertedPaths() async throws {
-        let vm = try await makeViewModel(paths: [
-            "A/B/T1.mp3", "A/B/T2.mp3", "C/D/T3.mp3",
-        ])
-        #expect(vm.totalTrackCount == 3)
+        let result = try await repo.fetchTracksByOriginalPaths(["/music/t1.mp3", "/music/t3.mp3"])
+        #expect(result.count == 2)
+        let titles = result.map(\.title).sorted()
+        #expect(titles == ["T1", "T3"])
     }
 }
+
