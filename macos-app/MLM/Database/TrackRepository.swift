@@ -393,6 +393,45 @@ final class TrackRepository: Sendable {
         }
     }
 
+    /// Mark a remote track as downloaded by updating `organized_path`,
+    /// `format`, `bitrate`, and `download_status` together in a single SQL
+    /// UPDATE.
+    ///
+    /// Updating only `organized_path` (as the previous helper did) leaves
+    /// the Library showing stale "0 kbps soundcloud" rows for tracks that
+    /// have actually been downloaded — this helper fixes all four columns
+    /// atomically.
+    ///
+    /// - Parameters:
+    ///   - trackId: The track ID.
+    ///   - organizedPath: Library-relative path (e.g. `00_Artists/<file>.m4a`).
+    ///   - format: New container format (e.g. `"m4a"`, `"flac"`).
+    ///   - bitrate: New bitrate in kbps, or `nil` if unknown.
+    ///   - downloadStatus: ISO 8601 timestamp string, or `nil` to leave
+    ///     untouched (defaults to current time).
+    func markAsDownloaded(
+        trackId: Int64,
+        organizedPath: String,
+        format: String,
+        bitrate: Int?,
+        downloadStatus: String? = nil
+    ) async throws {
+        let timestamp = downloadStatus ?? ISO8601DateFormatter().string(from: Date())
+        try await database.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE tracks
+                    SET organized_path = ?,
+                        format = ?,
+                        bitrate = ?,
+                        download_status = ?
+                    WHERE id = ?
+                """,
+                arguments: [organizedPath, format, bitrate, timestamp, trackId]
+            )
+        }
+    }
+
     /// Fetch tracks that lack fingerprints (for analysis batch).
     func fetchUnfingerprintedTracks() async throws -> [Track] {
         try await database.read { db in

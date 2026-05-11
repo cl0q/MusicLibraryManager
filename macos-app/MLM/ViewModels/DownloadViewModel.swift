@@ -110,14 +110,12 @@ final class DownloadViewModel {
         progress = 1.0
         currentTrack = ""
 
-        // Update track organized_paths in the database
-        for (trackId, path) in result.downloadedPaths {
-            do {
-                try await trackRepository?.updateOrganizedPath(trackId: trackId, organizedPath: path)
-            } catch {
-                AppLogger.shared.log("Failed to update path for track \(trackId): \(error)", level: .error, source: "Download")
-            }
-        }
+        // Persist the four download columns together for each succeeded
+        // track: organized_path + format + bitrate + download_status.
+        // Updating only organized_path leaves the Library showing stale
+        // "0 kbps soundcloud" rows, which is one of the documented
+        // invariants for this pipeline.
+        await persistDownloadedTracks(remoteTracks: remoteTracks, result: result)
 
         AppLogger.shared.log(
             "Download batch complete: \(result.succeeded) succeeded, \(result.failed) failed, \(result.skipped) skipped",
@@ -133,6 +131,50 @@ final class DownloadViewModel {
         let result = await orchestrator.retryFailed()
         lastResult = result
         isDownloading = false
+    }
+
+    // MARK: - Persistence
+
+    /// Persist successful downloads into the `tracks` table.
+    ///
+    /// For each succeeded track:
+    /// - `organized_path` ← library-relative path
+    /// - `format` ← container extension reported by the orchestrator
+    /// - `bitrate` ← `TranscodeService.targetBitrate` (248) when the file
+    ///   was transcoded, or the track's existing bitrate when the
+    ///   transcode was skipped (lossy < 248k source preserved as-is).
+    /// - `download_status` ← ISO 8601 timestamp
+    private func persistDownloadedTracks(
+        remoteTracks: [Track],
+        result: DownloadOrchestrator.BatchResult
+    ) async {
+        let trackById = Dictionary(uniqueKeysWithValues: remoteTracks.compactMap { t -> (Int64, Track)? in
+            guard let id = t.id else { return nil }
+            return (id, t)
+        })
+
+        for (trackId, _) in result.downloadedPaths {
+            // The orchestrator hands us absolute paths — converting to
+            // library-relative happens in the next commit.
+            guard let absolutePath = result.downloadedPaths[trackId] else { continue }
+            let info = result.downloadedMetadata[trackId]
+            let format = info?.format ?? (absolutePath as NSString).pathExtension.lowercased()
+            let bitrate = info?.bitrate ?? trackById[trackId]?.bitrate
+            do {
+                try await trackRepository?.markAsDownloaded(
+                    trackId: trackId,
+                    organizedPath: absolutePath,
+                    format: format,
+                    bitrate: bitrate
+                )
+            } catch {
+                AppLogger.shared.log(
+                    "Failed to update DB for track \(trackId): \(error)",
+                    level: .error,
+                    source: "Download"
+                )
+            }
+        }
     }
 
     // MARK: - Helpers

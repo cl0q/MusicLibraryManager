@@ -26,6 +26,16 @@ final class DownloadOrchestrator {
         var failed: Int = 0
         var skipped: Int = 0
         var downloadedPaths: [Int64: String] = [:]
+        /// Per-track metadata for DB updates — `format` is the container
+        /// extension without the dot (e.g. `"m4a"`, `"flac"`) and `bitrate`
+        /// is in kbps.
+        var downloadedMetadata: [Int64: DownloadedFileInfo] = [:]
+    }
+
+    /// Container-format and bitrate metadata for a freshly downloaded file.
+    struct DownloadedFileInfo {
+        let format: String
+        let bitrate: Int?
     }
 
     // MARK: - State
@@ -104,14 +114,26 @@ final class DownloadOrchestrator {
                     switch transcodeResult {
                     case .transcoded(let aacPath):
                         result.downloadedPaths[request.trackId] = aacPath.path
+                        result.downloadedMetadata[request.trackId] = DownloadedFileInfo(
+                            format: aacPath.pathExtension.lowercased(),
+                            bitrate: TranscodeService.targetBitrate
+                        )
                         result.succeeded += 1
                     case .skipped:
                         // Source was already lossy and below threshold — use as-is
                         result.downloadedPaths[request.trackId] = path.path
+                        result.downloadedMetadata[request.trackId] = DownloadedFileInfo(
+                            format: path.pathExtension.lowercased(),
+                            bitrate: nil  // Unknown — keep DB bitrate untouched
+                        )
                         result.succeeded += 1
                     case .failed(let error):
                         // Download succeeded but transcode failed
                         result.downloadedPaths[request.trackId] = path.path
+                        result.downloadedMetadata[request.trackId] = DownloadedFileInfo(
+                            format: path.pathExtension.lowercased(),
+                            bitrate: nil
+                        )
                         result.succeeded += 1
                         AppLogger.shared.log("Transcode failed for \(request.title): \(error)", level: .warning)
                     }
