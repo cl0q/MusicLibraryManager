@@ -1,45 +1,22 @@
 import AppKit
 import Foundation
 
-// MARK: - Folder tree node
-
-/// A node in the folder tree hierarchy.
-///
-/// Built in a single pass from all `organized_path` values. Children are
-/// pre-populated by `buildTree(from:)` — no lazy-loading needed.
-@Observable
-final class FolderNode: Identifiable, Hashable {
-    let id: String       // Full path, e.g. "Artist/Album"
-    let name: String     // Display name, e.g. "Album"
-    var children: [FolderNode]?  // nil = legacy unloaded; [] = leaf; [...] = has children
-    var trackCount: Int = 0
-
-    var isLoaded: Bool { children != nil }
-
-    init(id: String, name: String, children: [FolderNode]? = nil, trackCount: Int = 0) {
-        self.id = id
-        self.name = name
-        self.children = children
-        self.trackCount = trackCount
-    }
-
-    static func == (lhs: FolderNode, rhs: FolderNode) -> Bool { lhs.id == rhs.id }
-    func hash(into hasher: inout Hasher) { hasher.combine(id) }
-}
-
 // MARK: - ViewModel
 
 /// ViewModel for the Folder Browser.
 ///
-/// Loads the full tree in a single SQL query, then filters in-memory.
-/// No per-node SQL queries on expand.
+/// Drives a disk-based folder tree: the displayed hierarchy mirrors the actual
+/// filesystem under the library root, not the artist/album metadata from the DB.
 @Observable
 final class FolderViewModel {
+
     // MARK: - Published state
 
-    private(set) var rootNodes: [FolderNode] = []
-    private(set) var allRootNodes: [FolderNode] = []
+    private(set) var rootNodes: [DiskFolderNode] = []
+    private(set) var allRootNodes: [DiskFolderNode] = []
     private(set) var tracksInFolder: [Track] = []
+    private(set) var libraryRootURL: URL?
+    private(set) var isDriveNotMounted = false
 
     var selectedFolderPath: String? = nil {
         didSet {
@@ -60,109 +37,59 @@ final class FolderViewModel {
     var selectedTrackIDs: Set<Int64> = []
     private(set) var isLoading = false
     private(set) var errorMessage: String?
-    private(set) var totalTrackCount: Int = 0
 
-    var artistCount: Int { allRootNodes.count }
+    /// Number of top-level folders in the tree (for display in toolbar).
+    var folderCount: Int { allRootNodes.count }
 
     // MARK: - Dependencies
 
     private let trackRepository: TrackRepository
+    private let configRepository: ConfigRepository
+    private let diskScanner = DiskFolderScanner()
 
     // MARK: - Init
 
-    init(trackRepository: TrackRepository) {
+    init(trackRepository: TrackRepository, configRepository: ConfigRepository) {
         self.trackRepository = trackRepository
+        self.configRepository = configRepository
     }
 
-    // MARK: - Load tree (single-pass)
+    // MARK: - Load tree
 
     @MainActor
     func loadRootFolders() async {
         isLoading = true
         errorMessage = nil
+        isDriveNotMounted = false
 
         do {
-            let start = Date()
-            let allPaths = try await trackRepository.fetchAllOrganizedPaths()
-            totalTrackCount = allPaths.count
+            guard let rootPath = try await configRepository.getLibraryRoot(), !rootPath.isEmpty else {
+                allRootNodes = []
+                applyFilter()
+                isLoading = false
+                return
+            }
 
-            let roots = buildTree(from: allPaths)
-            let ms = Int(Date().timeIntervalSince(start) * 1000)
+            let rootURL = URL(fileURLWithPath: rootPath)
 
-            allRootNodes = roots
+            guard FileManager.default.fileExists(atPath: rootURL.path) else {
+                isDriveNotMounted = true
+                allRootNodes = []
+                applyFilter()
+                isLoading = false
+                return
+            }
+
+            libraryRootURL = rootURL
+
+            let nodes = try await diskScanner.scan(rootURL: rootURL)
+            allRootNodes = nodes
             applyFilter()
-
-            AppLogger.shared.info(
-                "folder tree build: \(roots.count) artists, \(allPaths.count) tracks in \(ms)ms",
-                source: "perf"
-            )
         } catch {
             errorMessage = error.localizedDescription
         }
 
         isLoading = false
-    }
-
-    /// Build the full folder tree from raw organized_path strings in one pass.
-    private func buildTree(from paths: [String]) -> [FolderNode] {
-        // Count tracks per immediate parent directory.
-        var folderCounts: [String: Int] = [:]
-        for path in paths {
-            let comps = path.split(separator: "/", omittingEmptySubsequences: true)
-            guard comps.count >= 2 else { continue }
-            let dir = comps.dropLast().joined(separator: "/")
-            folderCounts[dir, default: 0] += 1
-        }
-
-        // Collect all ancestor paths at every depth level.
-        var allDirs = Set<String>()
-        for dir in folderCounts.keys {
-            var parts = dir.split(separator: "/")
-            while !parts.isEmpty {
-                allDirs.insert(parts.joined(separator: "/"))
-                parts.removeLast()
-            }
-        }
-
-        guard !allDirs.isEmpty else { return [] }
-
-        // Create nodes (sorted so parents always precede their children).
-        var nodeDict: [String: FolderNode] = [:]
-        for dir in allDirs.sorted() {
-            let parts = dir.split(separator: "/")
-            let name  = String(parts.last!)
-            let count = folderCounts[dir] ?? 0
-            nodeDict[dir] = FolderNode(id: dir, name: name, children: [], trackCount: count)
-        }
-
-        // Wire parent → child relationships.
-        for dir in allDirs.sorted() {
-            let parts = dir.split(separator: "/")
-            guard parts.count > 1 else { continue }
-            let parentPath = parts.dropLast().joined(separator: "/")
-            if let child = nodeDict[dir] {
-                nodeDict[parentPath]?.children?.append(child)
-            }
-        }
-
-        // Sort children alphabetically at every level.
-        for node in nodeDict.values {
-            node.children?.sort {
-                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-            }
-        }
-
-        // Return only root-level nodes.
-        return allDirs
-            .filter { !$0.contains("/") }
-            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-            .compactMap { nodeDict[$0] }
-    }
-
-    /// No-op: children are pre-populated by buildTree.
-    @MainActor
-    func loadChildren(for node: FolderNode) async {
-        _ = node  // tree is already fully built
     }
 
     // MARK: - Track loading
@@ -176,7 +103,10 @@ final class FolderViewModel {
 
         let start = Date()
         do {
-            let result = try await trackRepository.fetchTracksInFolder(path: path)
+            let dirURL = URL(fileURLWithPath: path)
+            let fileURLs = try await diskScanner.filesInDirectory(dirURL)
+            let paths = fileURLs.map { $0.standardizedFileURL.path }
+            let result = try await trackRepository.fetchTracksByOriginalPaths(paths)
             let ms = Int(Date().timeIntervalSince(start) * 1000)
             tracksInFolder = result
             AppLogger.shared.info(
@@ -198,6 +128,22 @@ final class FolderViewModel {
         }
     }
 
+    // MARK: - Helpers
+
+    /// Returns the path relative to the library root (for breadcrumb display).
+    func relativePath(for fullPath: String) -> String {
+        guard let root = libraryRootURL?.path else { return fullPath }
+        let prefix = root.hasSuffix("/") ? root : root + "/"
+        guard fullPath.hasPrefix(prefix) else { return (fullPath as NSString).lastPathComponent }
+        return String(fullPath.dropFirst(prefix.count))
+    }
+
+    /// Open the currently selected folder in Finder.
+    func revealInFinder() {
+        guard let path = selectedFolderPath else { return }
+        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
+    }
+
     // MARK: - Filtering
 
     private func applyFilter() {
@@ -205,13 +151,11 @@ final class FolderViewModel {
         if query.isEmpty {
             rootNodes = allRootNodes
         } else {
-            rootNodes = allRootNodes.filter { node in
-                node.name.lowercased().contains(query)
-            }
+            rootNodes = allRootNodes.filter { $0.name.lowercased().contains(query) }
         }
     }
 
-    // MARK: - Sorting (in-memory, folder tracks are small sets)
+    // MARK: - Sorting
 
     private func applyTrackSort() {
         tracksInFolder.sort { a, b in
@@ -244,13 +188,5 @@ final class FolderViewModel {
             if a > b { return .orderedDescending }
             return .orderedSame
         }
-    }
-
-    // MARK: - Actions
-
-    func revealInFinder(libraryRoot: String) {
-        guard let path = selectedFolderPath else { return }
-        let fullPath = URL(fileURLWithPath: libraryRoot).appendingPathComponent(path)
-        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: fullPath.path)
     }
 }
