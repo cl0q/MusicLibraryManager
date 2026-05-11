@@ -117,6 +117,10 @@ final class DependencyContainer {
         }
 
         isInitialized = true
+        AppLogger.shared.info(
+            "App initialized — DB at \(dbManager.databasePath.path)",
+            source: "boot"
+        )
     }
 }
 

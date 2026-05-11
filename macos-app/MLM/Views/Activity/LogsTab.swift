@@ -1,14 +1,29 @@
+import AppKit
 import SwiftUI
 
 /// Logs tab within the ActivityPanel.
 ///
-/// Shows a streaming log of application events from AppLogger.
+/// Streams the in-memory ring buffer of `AppLogger.shared`. Supports a
+/// level filter (All / Warn+ / Error) and a "Reveal in Finder" button
+/// that opens the on-disk log file.
 struct LogsTab: View {
     private let logger = AppLogger.shared
 
+    enum Filter: String, CaseIterable, Identifiable {
+        case all = "All"
+        case warnings = "Warn+"
+        case errors = "Errors"
+        var id: String { rawValue }
+    }
+
+    @State private var filter: Filter = .all
+
     var body: some View {
         VStack(spacing: 0) {
-            if logger.entries.isEmpty {
+            toolbar
+            Divider()
+
+            if filteredEntries.isEmpty {
                 emptyState
             } else {
                 logList
@@ -17,40 +32,71 @@ struct LogsTab: View {
         .background(Color.mlmBase)
     }
 
-    private var logList: some View {
-        VStack(spacing: 0) {
-            // Toolbar
-            HStack {
-                Text("\(logger.entries.count) entries")
-                    .font(MLMFont.muted)
-                    .foregroundColor(.mlmInkMuted)
-                Spacer()
-                Button("Clear") {
-                    logger.clear()
-                }
+    private var filteredEntries: [AppLogger.LogEntry] {
+        switch filter {
+        case .all:
+            return logger.entries
+        case .warnings:
+            return logger.entries.filter { $0.level == .warning || $0.level == .error }
+        case .errors:
+            return logger.entries.filter { $0.level == .error }
+        }
+    }
+
+    // MARK: - Toolbar
+
+    private var toolbar: some View {
+        HStack(spacing: 8) {
+            Text("\(filteredEntries.count) of \(logger.entries.count)")
                 .font(MLMFont.muted)
-                .buttonStyle(.plain)
+                .foregroundColor(.mlmInkMuted)
+
+            Picker("Filter", selection: $filter) {
+                ForEach(Filter.allCases) { f in
+                    Text(f.rawValue).tag(f)
+                }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 4)
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 200)
 
-            Divider()
+            Spacer()
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(logger.entries) { entry in
-                            logRow(entry)
-                                .id(entry.id)
-                            Divider().opacity(0.3)
-                        }
+            Button {
+                NSWorkspace.shared.activateFileViewerSelecting([logger.logFileURL])
+            } label: {
+                Label("Reveal Log", systemImage: "doc.text.magnifyingglass")
+            }
+            .font(MLMFont.muted)
+            .buttonStyle(.plain)
+            .help(logger.logFileURL.path)
+
+            Button("Clear") {
+                logger.clear()
+            }
+            .font(MLMFont.muted)
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
+    }
+
+    // MARK: - List
+
+    private var logList: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(filteredEntries) { entry in
+                        logRow(entry)
+                            .id(entry.id)
+                        Divider().opacity(0.3)
                     }
                 }
-                .onChange(of: logger.entries.count) { _, _ in
-                    // Auto-scroll to bottom
-                    if let last = logger.entries.last {
-                        proxy.scrollTo(last.id, anchor: .bottom)
-                    }
+            }
+            .onChange(of: logger.entries.count) { _, _ in
+                if let last = filteredEntries.last {
+                    proxy.scrollTo(last.id, anchor: .bottom)
                 }
             }
         }
@@ -58,19 +104,16 @@ struct LogsTab: View {
 
     private func logRow(_ entry: AppLogger.LogEntry) -> some View {
         HStack(alignment: .top, spacing: 8) {
-            // Timestamp
             Text(entry.formattedTime)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(.mlmInkMuted)
                 .frame(width: 80, alignment: .leading)
 
-            // Level badge
             Text(entry.level.rawValue)
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                 .foregroundColor(levelColor(entry.level))
                 .frame(width: 36)
 
-            // Source
             if let source = entry.source {
                 Text(source)
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
@@ -78,10 +121,10 @@ struct LogsTab: View {
                     .frame(width: 70, alignment: .leading)
             }
 
-            // Message
             Text(entry.message)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(.mlmInkPrimary)
+                .textSelection(.enabled)
                 .lineLimit(3)
         }
         .padding(.horizontal, 16)
@@ -102,7 +145,7 @@ struct LogsTab: View {
             Image(systemName: "text.alignleft")
                 .font(.system(size: 24))
                 .foregroundColor(.mlmInkMuted)
-            Text("No log entries")
+            Text(filter == .all ? "No log entries" : "No entries match the filter")
                 .font(MLMFont.body)
                 .foregroundColor(.mlmInkMuted)
             Text("Application events stream here in real time")
