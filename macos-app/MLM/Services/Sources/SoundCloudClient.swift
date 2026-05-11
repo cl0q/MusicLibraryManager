@@ -178,6 +178,15 @@ final class SoundCloudClient {
             return try await apiRequest(endpoint: endpoint, queryItems: queryItems, type: type)
         }
 
+        if http.statusCode == 401 {
+            AppLogger.shared.error(
+                "SC API: 401 Unauthorized on \(endpoint) — clearing tokens, re-auth required",
+                source: "sc-api"
+            )
+            try? tokenStorage.deleteCredentials(service: .soundcloud)
+            throw SoundCloudError.tokenExpired
+        }
+
         guard http.statusCode == 200 else {
             let body = String(data: data, encoding: .utf8) ?? ""
             throw SoundCloudError.apiError(statusCode: http.statusCode, body: body)
@@ -199,12 +208,18 @@ final class SoundCloudClient {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
         let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 401 {
+            AppLogger.shared.error(
+                "SC API (paged): 401 Unauthorized on \(url) — clearing tokens, re-auth required",
+                source: "sc-api"
+            )
+            try? tokenStorage.deleteCredentials(service: .soundcloud)
+            throw SoundCloudError.tokenExpired
+        }
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             let body = String(data: data, encoding: .utf8) ?? ""
-            throw SoundCloudError.apiError(
-                statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0,
-                body: body
-            )
+            throw SoundCloudError.apiError(statusCode: status, body: body)
         }
 
         let decoder = JSONDecoder()
@@ -407,6 +422,7 @@ final class SoundCloudClient {
         case missingCredentials
         case invalidURL(String)
         case invalidResponse
+        case tokenExpired
         case tokenExchangeFailed(String)
         case apiError(statusCode: Int, body: String)
 
@@ -420,6 +436,7 @@ final class SoundCloudClient {
                 "SOUNDCLOUD_CLIENT_SECRET to ~/Library/Application Support/MLM/.env"
             case .invalidURL(let endpoint): "Invalid API URL: \(endpoint)"
             case .invalidResponse: "Invalid HTTP response"
+            case .tokenExpired: "SoundCloud session expired — click Connect to re-authenticate"
             case .tokenExchangeFailed(let body): "Token exchange failed: \(body)"
             case .apiError(let code, let body): "API error (\(code)): \(body)"
             }

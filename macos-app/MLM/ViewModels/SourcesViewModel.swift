@@ -256,6 +256,11 @@ final class SourcesViewModel {
                     userInfo: ["succeeded": newTracks, "skipped": 0]
                 )
             }
+        } catch SoundCloudClient.SoundCloudError.tokenExpired {
+            // Tokens already deleted in the client. Flip the UI to disconnected
+            // so the Connect button reappears.
+            connectionStatus[service] = false
+            errors[service] = SoundCloudClient.SoundCloudError.tokenExpired.errorDescription
         } catch {
             errors[service] = error.localizedDescription
         }
