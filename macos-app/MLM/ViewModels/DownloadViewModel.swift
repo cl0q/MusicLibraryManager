@@ -25,6 +25,10 @@ final class DownloadViewModel {
     private let trackRepository: TrackRepository?
     private let sourceRepository: SourceRepository?
 
+    /// Absolute path to the library root — used to convert orchestrator
+    /// output paths to library-relative paths before storing in the DB.
+    private(set) var libraryRoot: String = ""
+
     init(
         trackRepository: TrackRepository? = nil,
         sourceRepository: SourceRepository? = nil
@@ -35,6 +39,7 @@ final class DownloadViewModel {
 
     /// Set up the orchestrator with library root. Called after initialization.
     func configure(libraryRoot: String, tokenStorage: TokenStorage) {
+        self.libraryRoot = libraryRoot
         self.orchestrator = DownloadOrchestrator(
             libraryRoot: libraryRoot,
             tokenStorage: tokenStorage
@@ -154,16 +159,15 @@ final class DownloadViewModel {
         })
 
         for (trackId, _) in result.downloadedPaths {
-            // The orchestrator hands us absolute paths — converting to
-            // library-relative happens in the next commit.
             guard let absolutePath = result.downloadedPaths[trackId] else { continue }
             let info = result.downloadedMetadata[trackId]
             let format = info?.format ?? (absolutePath as NSString).pathExtension.lowercased()
             let bitrate = info?.bitrate ?? trackById[trackId]?.bitrate
+            let relative = relativeLibraryPath(for: absolutePath)
             do {
                 try await trackRepository?.markAsDownloaded(
                     trackId: trackId,
-                    organizedPath: absolutePath,
+                    organizedPath: relative,
                     format: format,
                     bitrate: bitrate
                 )
@@ -175,6 +179,45 @@ final class DownloadViewModel {
                 )
             }
         }
+    }
+
+    /// Convert an absolute filesystem path to a library-relative path.
+    ///
+    /// The DB stores `organized_path` and `download_destination` as paths
+    /// relative to `library_root` (e.g. `00_Artists/Yeat/Mr. Lordbow.m4a`)
+    /// — the frontend joins `library_root + organized_path` to reach the
+    /// absolute path. Storing absolute paths here breaks portability when
+    /// the library moves to a different mount point.
+    ///
+    /// Falls back to returning `path` unchanged when it doesn't sit under
+    /// the configured root (defensive — shouldn't happen in practice).
+    private func relativeLibraryPath(for path: String) -> String {
+        guard !libraryRoot.isEmpty else { return path }
+
+        let normalizedRoot = URL(fileURLWithPath: libraryRoot)
+            .standardizedFileURL.path
+        let normalizedPath = URL(fileURLWithPath: path)
+            .standardizedFileURL.path
+
+        // Use a trailing slash so we don't accidentally match a sibling
+        // directory with the same prefix as the root.
+        let rootWithSlash = normalizedRoot.hasSuffix("/")
+            ? normalizedRoot
+            : normalizedRoot + "/"
+
+        if normalizedPath.hasPrefix(rootWithSlash) {
+            return String(normalizedPath.dropFirst(rootWithSlash.count))
+        }
+        // Last-resort: strip a leading `/` so the value at least looks
+        // relative; log a warning so we notice mis-configured roots.
+        AppLogger.shared.log(
+            "Downloaded path \(normalizedPath) is not under library root \(normalizedRoot)",
+            level: .warning,
+            source: "Download"
+        )
+        var trimmed = normalizedPath
+        while trimmed.hasPrefix("/") { trimmed.removeFirst() }
+        return trimmed
     }
 
     // MARK: - Helpers
