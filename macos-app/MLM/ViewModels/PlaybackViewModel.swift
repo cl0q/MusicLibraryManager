@@ -306,6 +306,12 @@ final class PlaybackViewModel {
         seek(to: position)
     }
 
+    /// Set the playback node volume (0.0 – 1.0).
+    @MainActor
+    func setVolume(_ volume: Double) {
+        audioPlayer.setVolume(Float(volume))
+    }
+
     // MARK: - Position Timer
 
     /// Start polling the player position for smooth UI updates.

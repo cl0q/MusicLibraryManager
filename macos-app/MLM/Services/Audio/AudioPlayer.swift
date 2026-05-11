@@ -69,6 +69,9 @@ final class AudioPlayer: @unchecked Sendable {
     /// Used to calculate accurate currentPosition.
     private var seekFrameOffset: AVAudioFramePosition = 0
 
+    /// Incremented on every seek/stop so stale completion callbacks are ignored.
+    private var scheduleGeneration: Int = 0
+
     /// Current playback state.
     private(set) var state: PlaybackState = .stopped
 
@@ -178,9 +181,15 @@ final class AudioPlayer: @unchecked Sendable {
 
     /// Stop playback and reset to beginning.
     func stop() {
+        scheduleGeneration += 1
         playerNode.stop()
         seekFrameOffset = 0
         state = .stopped
+    }
+
+    /// Set the playback node volume (0.0–1.0).
+    func setVolume(_ volume: Float) {
+        playerNode.volume = min(max(volume, 0), 1)
     }
 
     // MARK: - Seek
@@ -354,7 +363,9 @@ final class AudioPlayer: @unchecked Sendable {
 
     /// Schedule the audio file for playback starting from a specific frame.
     private func scheduleFile(_ file: AVAudioFile, from startFrame: AVAudioFramePosition) {
-        // Set the file read position
+        scheduleGeneration += 1
+        let generation = scheduleGeneration
+
         file.framePosition = startFrame
 
         let remainingFrames = AVAudioFrameCount(totalFrames - startFrame)
@@ -369,10 +380,11 @@ final class AudioPlayer: @unchecked Sendable {
             frameCount: remainingFrames,
             at: nil
         ) { [weak self] in
-            // Playback completed naturally
+            // Only handle natural end-of-track; ignore callbacks from stopped/seeked segments.
             DispatchQueue.main.async {
-                self?.state = .stopped
-                self?.seekFrameOffset = 0
+                guard let self, self.scheduleGeneration == generation else { return }
+                self.state = .stopped
+                self.seekFrameOffset = 0
             }
         }
     }
