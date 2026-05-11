@@ -81,11 +81,18 @@ final class PlaylistRepository: Sendable {
     }
 
     /// Count tracks in a playlist.
+    ///
+    /// Joins `playlist_tracks` with `tracks` so the count matches what
+    /// `fetchTracks` actually returns. Orphaned `playlist_tracks` rows
+    /// (track_id pointing at a row no longer in `tracks` — possible because
+    /// FK enforcement is off in the shared Tauri DB) are excluded.
     func trackCount(playlistId: Int64) async throws -> Int {
         try await database.read { db in
-            try PlaylistTrack
-                .filter(PlaylistTrack.Columns.playlistId == playlistId)
-                .fetchCount(db)
+            try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM playlist_tracks pt
+                INNER JOIN tracks t ON pt.track_id = t.id
+                WHERE pt.playlist_id = ?
+            """, arguments: [playlistId]) ?? 0
         }
     }
 
