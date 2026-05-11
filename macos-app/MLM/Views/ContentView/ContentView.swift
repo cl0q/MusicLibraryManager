@@ -118,8 +118,10 @@ struct ContentView: View {
             }
             .inspector(isPresented: showDetailInspector) {
                 if let track = selectedTrackForDetail {
-                    TrackDetailView(track: track)
-                        .inspectorColumnWidth(min: 320, ideal: 360, max: 480)
+                    TrackDetailView(track: track, onClose: {
+                        selectedTrackForDetail = nil
+                    })
+                    .inspectorColumnWidth(min: 320, ideal: 360, max: 480)
                 }
             }
 

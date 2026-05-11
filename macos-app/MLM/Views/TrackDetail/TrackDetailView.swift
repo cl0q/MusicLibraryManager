@@ -25,6 +25,11 @@ import SwiftUI
 /// - "More Info" in TrackContextMenu
 struct TrackDetailView: View {
     let track: Track
+
+    /// Called when the user hits the X in the header. ContentView clears
+    /// `selectedTrackForDetail`, which collapses the inspector.
+    var onClose: (() -> Void)? = nil
+
     @Environment(\.container) private var container
     @State private var playbackVM: PlaybackViewModel?
 
@@ -112,9 +117,23 @@ struct TrackDetailView: View {
 
                 Spacer()
 
-                // Play button
-                if track.isLocal {
-                    playButton
+                VStack(alignment: .trailing, spacing: 6) {
+                    if onClose != nil {
+                        Button {
+                            onClose?()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 18, height: 18)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Close detail panel")
+                    }
+
+                    if track.isLocal {
+                        playButton
+                    }
                 }
             }
         }
