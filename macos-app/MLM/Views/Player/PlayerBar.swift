@@ -2,23 +2,25 @@ import SwiftUI
 
 /// Toolbar-mounted player widget — centered via `.principal` placement.
 ///
-/// Shows transport controls, album art fallback, track info, and a scrubber.
+/// Shows transport controls, album art fallback, track info, scrubber, and volume.
 struct PlayerBar: View {
     let viewModel: PlaybackViewModel
 
     @State private var isSeeking = false
     @State private var seekFraction: Double = 0
+    @State private var volume: Double = 1.0
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             transportCluster
             coverThumbnail
             trackInfoColumn
             scrubberSection
+            volumeSection
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
-        .frame(minWidth: 360, idealWidth: 480, maxWidth: 560)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .frame(minWidth: 440, idealWidth: 620, maxWidth: 800)
         .background {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(.regularMaterial)
@@ -32,11 +34,11 @@ struct PlayerBar: View {
     // MARK: - Transport Cluster
 
     private var transportCluster: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 6) {
             // TODO: wire to queue when PlaybackViewModel gains a queue
             Button {} label: {
                 Image(systemName: "backward.fill")
-                    .font(.system(size: 11))
+                    .font(.system(size: 13))
                     .foregroundStyle(.primary)
             }
             .buttonStyle(.plain)
@@ -44,9 +46,9 @@ struct PlayerBar: View {
 
             Button { viewModel.togglePlayPause() } label: {
                 Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 14))
+                    .font(.system(size: 18))
                     .foregroundStyle(viewModel.hasTrack ? .primary : .secondary)
-                    .frame(width: 20)
+                    .frame(width: 24)
             }
             .buttonStyle(.plain)
             .disabled(!viewModel.hasTrack)
@@ -54,7 +56,7 @@ struct PlayerBar: View {
             // TODO: wire to queue when PlaybackViewModel gains a queue
             Button {} label: {
                 Image(systemName: "forward.fill")
-                    .font(.system(size: 11))
+                    .font(.system(size: 13))
                     .foregroundStyle(.primary)
             }
             .buttonStyle(.plain)
@@ -65,20 +67,20 @@ struct PlayerBar: View {
     // MARK: - Cover Thumbnail
 
     private var coverThumbnail: some View {
-        RoundedRectangle(cornerRadius: 4, style: .continuous)
+        RoundedRectangle(cornerRadius: 5, style: .continuous)
             .fill(Color(nsColor: .controlColor))
             .overlay {
                 Image(systemName: "music.note")
-                    .font(.system(size: 10))
+                    .font(.system(size: 14))
                     .foregroundStyle(.secondary)
             }
-            .frame(width: 28, height: 28)
+            .frame(width: 40, height: 40)
     }
 
     // MARK: - Track Info
 
     private var trackInfoColumn: some View {
-        VStack(alignment: .leading, spacing: 1) {
+        VStack(alignment: .leading, spacing: 2) {
             if let error = viewModel.errorMessage {
                 HStack(spacing: 4) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -115,17 +117,17 @@ struct PlayerBar: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .layoutPriority(1)
+        .frame(minWidth: 80, maxWidth: 160)
     }
 
     // MARK: - Scrubber
 
     private var scrubberSection: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 5) {
             Text(viewModel.hasTrack ? viewModel.formattedPosition : "—:——")
                 .font(.system(size: 10).monospacedDigit())
                 .foregroundStyle(.secondary)
-                .frame(width: 32, alignment: .trailing)
+                .frame(width: 34, alignment: .trailing)
 
             Slider(value: scrubberBinding, in: 0...1) { editing in
                 if editing {
@@ -137,12 +139,29 @@ struct PlayerBar: View {
                 }
             }
             .disabled(!viewModel.hasTrack)
-            .frame(minWidth: 80)
 
             Text(viewModel.hasTrack ? viewModel.formattedDuration : "—:——")
                 .font(.system(size: 10).monospacedDigit())
                 .foregroundStyle(.secondary)
-                .frame(width: 32, alignment: .leading)
+                .frame(width: 34, alignment: .leading)
+        }
+        .layoutPriority(2)
+    }
+
+    // MARK: - Volume
+
+    private var volumeSection: some View {
+        HStack(spacing: 4) {
+            Image(systemName: volumeIcon)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .frame(width: 14)
+
+            Slider(value: $volume, in: 0...1)
+                .frame(width: 76)
+                .onChange(of: volume) { _, newValue in
+                    viewModel.setVolume(newValue)
+                }
         }
     }
 
@@ -153,6 +172,12 @@ struct PlayerBar: View {
             get: { isSeeking ? seekFraction : viewModel.progress },
             set: { seekFraction = $0 }
         )
+    }
+
+    private var volumeIcon: String {
+        if volume < 0.01 { return "speaker.slash.fill" }
+        if volume < 0.4 { return "speaker.fill" }
+        return "speaker.wave.2.fill"
     }
 
     private func subtitleText(for track: Track) -> String {
