@@ -161,18 +161,55 @@ final class DABClient: Sendable {
     }
 
     private func titleMatches(_ dabTitle: String, requested: String) -> Bool {
-        let a = normalize(dabTitle)
-        let b = normalize(requested)
-        return a.contains(b) || b.contains(a)
+        DABMatcher.titleMatches(dabTitle, requested: requested)
     }
 
     private func artistMatches(_ dabArtist: String, requested: String) -> Bool {
-        let a = normalize(dabArtist)
-        let b = normalize(requested)
-        return a.contains(b) || b.contains(a)
+        DABMatcher.artistMatches(dabArtist, requested: requested)
+    }
+}
+
+// MARK: - Matching helpers (visible for tests)
+
+/// Artist/title matching rules for DAB search results.
+///
+/// A DAB hit is only used when **both** artist AND title match. Without
+/// the artist check, many DAB results return wrong-artist covers and the
+/// download chain prefers DAB FLAC over YouTube — meaning the user ends
+/// up with a high-quality file of the wrong track. This is documented
+/// invariant #1 in `SONNET_PROMPT_PHASE11_DOWNLOADS.md`.
+///
+/// A match is accepted when either:
+/// - one normalized string contains the other (matches the Rust impl —
+///   handles cases like "Track (feat. X)" vs "Track"), OR
+/// - Jaro similarity on the normalized strings is ≥ `threshold` (0.85),
+///   which catches typos and small spelling variations.
+enum DABMatcher {
+    /// Minimum Jaro similarity for a fuzzy match.
+    static let threshold: Double = 0.85
+
+    static func titleMatches(_ dabTitle: String, requested: String) -> Bool {
+        match(dabTitle, requested: requested)
     }
 
-    private func normalize(_ text: String) -> String {
+    static func artistMatches(_ dabArtist: String, requested: String) -> Bool {
+        match(dabArtist, requested: requested)
+    }
+
+    static func match(_ dab: String, requested: String) -> Bool {
+        let a = normalize(dab)
+        let b = normalize(requested)
+        if a.isEmpty || b.isEmpty { return false }
+        // Cheap exact / containment short-circuit. Mirrors the Rust impl
+        // semantics so the existing Rust test cases keep matching.
+        if a == b || a.contains(b) || b.contains(a) { return true }
+        // Fuzzy fallback for typos and minor spelling variations.
+        return jaroSimilarity(a, b) >= threshold
+    }
+
+    /// Lowercase, strip non-alphanumeric (preserve spaces), collapse
+    /// whitespace. Matches the Rust normalization step exactly.
+    static func normalize(_ text: String) -> String {
         text.lowercased()
             .unicodeScalars
             .filter { CharacterSet.alphanumerics.contains($0) || $0 == " " }
@@ -180,6 +217,54 @@ final class DABClient: Sendable {
             .components(separatedBy: .whitespaces)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
+    }
+
+    /// Jaro similarity for two strings — returns a value in [0, 1].
+    ///
+    /// Classic Jaro algorithm: count matching characters within a
+    /// distance window, then factor in transpositions. We use it instead
+    /// of Levenshtein because it's well-suited to short strings (song
+    /// titles, artist names) and treats prefix differences gently.
+    static func jaroSimilarity(_ s1: String, _ s2: String) -> Double {
+        let a = Array(s1)
+        let b = Array(s2)
+        if a.isEmpty && b.isEmpty { return 1.0 }
+        if a.isEmpty || b.isEmpty { return 0.0 }
+
+        let matchDistance = max(a.count, b.count) / 2 - 1
+        var aMatches = [Bool](repeating: false, count: a.count)
+        var bMatches = [Bool](repeating: false, count: b.count)
+
+        var matches = 0
+        for i in 0..<a.count {
+            let start = max(0, i - matchDistance)
+            let end = min(i + matchDistance + 1, b.count)
+            if start >= end { continue }
+            for j in start..<end {
+                if bMatches[j] { continue }
+                if a[i] != b[j] { continue }
+                aMatches[i] = true
+                bMatches[j] = true
+                matches += 1
+                break
+            }
+        }
+        if matches == 0 { return 0.0 }
+
+        // Count transpositions
+        var transpositions = 0
+        var k = 0
+        for i in 0..<a.count {
+            if !aMatches[i] { continue }
+            while !bMatches[k] { k += 1 }
+            if a[i] != b[k] { transpositions += 1 }
+            k += 1
+        }
+
+        let m = Double(matches)
+        return (m / Double(a.count)
+                + m / Double(b.count)
+                + (m - Double(transpositions) / 2) / m) / 3.0
     }
 }
 
