@@ -27,10 +27,17 @@ final class SyncViewModel {
 
     func loadProfiles() async {
         isLoading = true
+        let start = Date()
         do {
             profiles = try await syncRepository.fetchAll()
+            let ms = Int(Date().timeIntervalSince(start) * 1000)
+            AppLogger.shared.info(
+                "sync profiles loaded: \(profiles.count) in \(ms)ms",
+                source: "perf"
+            )
         } catch {
             errorMessage = error.localizedDescription
+            AppLogger.shared.error("sync profiles load failed: \(error)", source: "sync")
         }
         isLoading = false
     }

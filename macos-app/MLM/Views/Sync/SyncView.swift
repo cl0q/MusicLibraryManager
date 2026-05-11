@@ -5,14 +5,13 @@ import SwiftUI
 /// HSplitView: profile list (left) + profile detail with preview/execute (right).
 struct SyncView: View {
     @Environment(\.container) private var container
-    @State private var viewModel: SyncViewModel?
     @State private var showCreateSheet = false
     @State private var newProfileName = ""
     @State private var newProfileOutput = ""
 
     var body: some View {
         Group {
-            if let vm = viewModel {
+            if let vm = container.syncViewModel {
                 HSplitView {
                     profileList(vm: vm)
                         .frame(minWidth: 200, maxWidth: 280)
@@ -20,28 +19,16 @@ struct SyncView: View {
                     profileDetail(vm: vm)
                         .frame(maxWidth: .infinity)
                 }
+                .task {
+                    // Refresh on first appear; subsequent re-mounts skip re-init
+                    // because VM lives in the container.
+                    if vm.profiles.isEmpty && !vm.isLoading {
+                        await vm.loadProfiles()
+                    }
+                }
             } else {
                 ProgressView("Loading...")
             }
-        }
-        .task {
-            guard let syncRepo = container.syncRepository,
-                  let trackRepo = container.trackRepository,
-                  let configRepo = container.configRepository else { return }
-
-            let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-                .appendingPathComponent("com.mlm.transcode_cache")
-            let cache = TranscodeCache(cacheDir: cacheDir)
-            let service = SyncService(
-                trackRepository: trackRepo,
-                syncRepository: syncRepo,
-                configRepository: configRepo,
-                transcodeCache: cache
-            )
-
-            let vm = SyncViewModel(syncRepository: syncRepo, syncService: service)
-            viewModel = vm
-            await vm.loadProfiles()
         }
         .sheet(isPresented: $showCreateSheet) {
             createProfileSheet
@@ -69,7 +56,11 @@ struct SyncView: View {
 
             Divider()
 
-            if vm.profiles.isEmpty {
+            if vm.isLoading && vm.profiles.isEmpty {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if vm.profiles.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "arrow.triangle.2.circlepath")
                         .font(.system(size: 28))
@@ -170,7 +161,7 @@ struct SyncView: View {
                 Spacer()
 
                 Button("Create") {
-                    guard let vm = viewModel, !newProfileName.isEmpty else { return }
+                    guard let vm = container.syncViewModel, !newProfileName.isEmpty else { return }
                     Task {
                         await vm.createProfile(name: newProfileName, outputFolder: newProfileOutput)
                         showCreateSheet = false

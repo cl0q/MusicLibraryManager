@@ -39,6 +39,7 @@ final class DependencyContainer {
     private(set) var playbackViewModel: PlaybackViewModel?
     private(set) var activityViewModel: ActivityViewModel?
     private(set) var downloadViewModel: DownloadViewModel?
+    private(set) var syncViewModel: SyncViewModel?
 
     // MARK: - State
 
@@ -101,6 +102,24 @@ final class DependencyContainer {
             trackRepository: self.trackRepository,
             sourceRepository: self.sourceRepository
         )
+
+        // SyncViewModel — held in container so navigating away from the
+        // Sync tab and back doesn't tear down + re-init the service stack.
+        if let trackRepo = self.trackRepository,
+           let syncRepo = self.syncRepository,
+           let configRepo = self.configRepository {
+            let cacheDir = FileManager.default
+                .urls(for: .cachesDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("com.mlm.transcode_cache")
+            let cache = TranscodeCache(cacheDir: cacheDir)
+            let syncSvc = SyncService(
+                trackRepository: trackRepo,
+                syncRepository: syncRepo,
+                configRepository: configRepo,
+                transcodeCache: cache
+            )
+            self.syncViewModel = SyncViewModel(syncRepository: syncRepo, syncService: syncSvc)
+        }
 
         // Check if library root is configured
         if let root = try await configRepository?.getLibraryRoot(), !root.isEmpty {
