@@ -44,6 +44,11 @@ final class DownloadOrchestrator {
     private(set) var currentItem: String = ""
     private(set) var progress: Double = 0
 
+    /// Set to `true` by `cancel()` — the batch loop checks this between
+    /// each request and exits cleanly without starting a new download.
+    /// Reset to `false` at the start of each batch.
+    private var cancelRequested = false
+
     // MARK: - Dependencies
 
     private let flacDir: URL
@@ -75,6 +80,15 @@ final class DownloadOrchestrator {
 
     // MARK: - Download Batch
 
+    /// Request that the in-flight batch stop after the current track.
+    ///
+    /// The flag is checked between requests — the currently running
+    /// scdl/yt-dlp/ffmpeg invocation is allowed to finish so the database
+    /// and on-disk state stay consistent. Safe to call from any thread.
+    func cancel() {
+        cancelRequested = true
+    }
+
     /// Download a batch of tracks following the fallback chain.
     ///
     /// Processing is sequential (not parallel) to simplify rate limiting.
@@ -84,12 +98,25 @@ final class DownloadOrchestrator {
         onProgress: ((Int, Int, String) -> Void)? = nil
     ) async -> BatchResult {
         isRunning = true
+        cancelRequested = false
         defer { isRunning = false }
 
         var result = BatchResult()
         let total = requests.count
 
         for (index, request) in requests.enumerated() {
+            // Check cancellation flag before starting a new download so
+            // the running track gets to finish but the next one is
+            // skipped — keeps the DB consistent with what's on disk.
+            if cancelRequested {
+                AppLogger.shared.log(
+                    "Download batch cancelled at \(index)/\(total)",
+                    level: .info,
+                    source: "Download"
+                )
+                break
+            }
+
             currentItem = "\(request.artist) - \(request.title)"
             progress = Double(index) / Double(max(total, 1))
             onProgress?(index, total, currentItem)

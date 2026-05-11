@@ -150,6 +150,20 @@ final class DownloadViewModel {
         isDownloading = false
     }
 
+    /// Ask the orchestrator to stop after the current track.
+    ///
+    /// The active scdl/yt-dlp/ffmpeg process is allowed to complete so
+    /// the on-disk and DB state stay consistent. Subsequent tracks are
+    /// skipped.
+    func cancel() {
+        orchestrator?.cancel()
+        AppLogger.shared.log(
+            "Download cancel requested",
+            level: .info,
+            source: "Download"
+        )
+    }
+
     // MARK: - Persistence
 
     /// Persist successful downloads into the `tracks` table.

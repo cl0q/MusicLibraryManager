@@ -11,6 +11,8 @@ struct OperationsTab: View {
         Group {
             if let vm = container.activityViewModel {
                 operationsContent(vm: vm)
+            } else if container.downloadViewModel != nil {
+                operationsContent(vm: nil)
             } else {
                 emptyState
             }
@@ -19,14 +21,26 @@ struct OperationsTab: View {
     }
 
     @ViewBuilder
-    private func operationsContent(vm: ActivityViewModel) -> some View {
-        if vm.operations.isEmpty && vm.recentOperations.isEmpty {
+    private func operationsContent(vm: ActivityViewModel?) -> some View {
+        let hasOps = (vm?.operations.isEmpty == false) || (vm?.recentOperations.isEmpty == false)
+        let hasDownloads = container.downloadViewModel.map { downloadHasState($0) } ?? false
+
+        if !hasOps && !hasDownloads {
             emptyState
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
+                    // Downloads — pinned section so users always see live
+                    // batch state, plus Cancel and Retry controls.
+                    if let downloadVM = container.downloadViewModel,
+                       downloadHasState(downloadVM) {
+                        sectionHeader("Downloads")
+                        DownloadStatusRow(vm: downloadVM)
+                        Divider().padding(.leading, 32)
+                    }
+
                     // Active operations
-                    if !vm.operations.isEmpty {
+                    if let vm, !vm.operations.isEmpty {
                         sectionHeader("Active")
                         ForEach(vm.operations) { op in
                             OperationRow(operation: op)
@@ -35,7 +49,7 @@ struct OperationsTab: View {
                     }
 
                     // Recent operations
-                    if !vm.recentOperations.isEmpty {
+                    if let vm, !vm.recentOperations.isEmpty {
                         HStack {
                             sectionHeader("Recent")
                             Spacer()
@@ -54,6 +68,12 @@ struct OperationsTab: View {
                 }
             }
         }
+    }
+
+    /// Whether the download VM has anything to display (running, or a
+    /// finished run we want to keep visible with a Retry button).
+    private func downloadHasState(_ vm: DownloadViewModel) -> Bool {
+        vm.isDownloading || vm.totalCount > 0
     }
 
     private var emptyState: some View {
@@ -158,5 +178,87 @@ struct OperationRow: View {
                     .fill(iconColor.opacity(0.15))
             )
             .foregroundColor(iconColor)
+    }
+}
+
+// MARK: - Download Status Row
+
+/// Live download batch row at the top of the Operations tab.
+///
+/// While running: shows "Downloading N / M — <Artist - Title>", a
+/// progress bar, and a Cancel button.
+/// While idle (after a run): shows the final tally ("N downloaded -
+/// X failed") and, when failures occurred, a "Retry failed" button.
+struct DownloadStatusRow: View {
+    let vm: DownloadViewModel
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.down.circle")
+                .font(.system(size: 14))
+                .foregroundColor(.accentColor)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(titleText)
+                    .font(MLMFont.body)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                if vm.isDownloading {
+                    ProgressView(value: progressValue, total: 1.0)
+                        .progressViewStyle(.linear)
+                        .frame(maxWidth: 240)
+                }
+
+                if !detailText.isEmpty {
+                    Text(detailText)
+                        .font(MLMFont.muted)
+                        .foregroundColor(.mlmInkMuted)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+
+            // Cancel while running, Retry once a batch has finished
+            // with at least one failure.
+            if vm.isDownloading {
+                Button("Cancel") {
+                    vm.cancel()
+                }
+                .buttonStyle(.bordered)
+            } else if vm.failedCount > 0 {
+                Button("Retry failed") {
+                    Task { await vm.retryFailed() }
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
+    private var titleText: String {
+        if vm.isDownloading {
+            let n = min(vm.completedCount + 1, max(vm.totalCount, 1))
+            return "Downloading \(n) / \(vm.totalCount)"
+        }
+        if vm.totalCount > 0 {
+            return "\(vm.completedCount) downloaded \u{00B7} \(vm.failedCount) failed"
+        }
+        return "Downloads"
+    }
+
+    private var detailText: String {
+        if vm.isDownloading && !vm.currentTrack.isEmpty {
+            return vm.currentTrack
+        }
+        return ""
+    }
+
+    private var progressValue: Double {
+        guard vm.totalCount > 0 else { return 0 }
+        return min(max(vm.progress, 0), 1)
     }
 }

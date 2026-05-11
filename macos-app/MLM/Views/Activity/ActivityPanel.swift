@@ -46,27 +46,52 @@ struct ActivityPanel: View {
 
                 Spacer()
 
-                // Summary — wired to ActivityViewModel
-                if let vm = container.activityViewModel {
-                    if vm.hasActiveOperations {
-                        ProgressView()
-                            .controlSize(.mini)
-                            .padding(.trailing, 4)
-                    }
-                    Text(vm.summaryText)
-                        .font(MLMFont.muted)
-                        .foregroundColor(vm.hasActiveOperations ? .mlmInkPrimary : .mlmInkMuted)
-                } else {
-                    Text("No active operations")
-                        .font(MLMFont.muted)
-                        .foregroundColor(.mlmInkMuted)
-                }
+                summarySection
             }
             .padding(.horizontal, 16)
             .frame(height: 36)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    /// Right-aligned summary in the collapsed header. Downloads take
+    /// priority over generic operations so the user can see batch progress
+    /// without expanding the panel.
+    @ViewBuilder
+    private var summarySection: some View {
+        if let downloadVM = container.downloadViewModel, downloadVM.isDownloading {
+            ProgressView()
+                .controlSize(.mini)
+                .padding(.trailing, 4)
+            Text(downloadSummary(for: downloadVM))
+                .font(MLMFont.muted)
+                .foregroundColor(.mlmInkPrimary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        } else if let vm = container.activityViewModel {
+            if vm.hasActiveOperations {
+                ProgressView()
+                    .controlSize(.mini)
+                    .padding(.trailing, 4)
+            }
+            Text(vm.summaryText)
+                .font(MLMFont.muted)
+                .foregroundColor(vm.hasActiveOperations ? .mlmInkPrimary : .mlmInkMuted)
+        } else {
+            Text("No active operations")
+                .font(MLMFont.muted)
+                .foregroundColor(.mlmInkMuted)
+        }
+    }
+
+    private func downloadSummary(for vm: DownloadViewModel) -> String {
+        let completed = vm.completedCount + 1  // +1 to show 1-based count of current
+        let total = vm.totalCount
+        if vm.currentTrack.isEmpty {
+            return "Downloading \(min(completed, total)) / \(total)"
+        }
+        return "Downloading \(min(completed, total)) / \(total) — \(vm.currentTrack)"
     }
 
     // MARK: - Expanded content
