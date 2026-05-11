@@ -150,15 +150,20 @@ final class DependencyContainer {
             forName: .libraryRootDidChange,
             object: nil,
             queue: .main
-        ) { [weak self] notification in
-            guard let self else { return }
+        ) { notification in
             let newRoot = (notification.userInfo?["path"] as? String) ?? ""
-            guard !newRoot.isEmpty, let tokens = self.tokenStorage else { return }
-            self.downloadViewModel?.configure(libraryRoot: newRoot, tokenStorage: tokens)
-            AppLogger.shared.info(
-                "Download pipeline reconfigured for new library root: \(newRoot)",
-                source: "Download"
-            )
+            guard !newRoot.isEmpty else { return }
+            Task { @MainActor in
+                guard let tokens = DependencyContainer.shared.tokenStorage else { return }
+                DependencyContainer.shared.downloadViewModel?.configure(
+                    libraryRoot: newRoot,
+                    tokenStorage: tokens
+                )
+                AppLogger.shared.info(
+                    "Download pipeline reconfigured for new library root: \(newRoot)",
+                    source: "Download"
+                )
+            }
         }
 
         isInitialized = true

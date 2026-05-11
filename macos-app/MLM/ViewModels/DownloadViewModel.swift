@@ -58,15 +58,22 @@ final class DownloadViewModel {
         completedCount = 0
         failedCount = 0
 
-        // Build download requests
-        let requests = remoteTracks.map { track in
-            DownloadOrchestrator.DownloadRequest(
-                trackId: track.id ?? 0,
-                artist: track.artist,
-                title: track.title,
-                query: "\(track.artist) - \(track.title)",
-                soundcloudURL: nil,  // TODO: Lookup from track_sources
-                userId: nil
+        // Build download requests — look up the SoundCloud permalink URL
+        // for each track so the orchestrator can attempt a direct scdl
+        // download before falling back to DAB/YouTube.
+        var requests: [DownloadOrchestrator.DownloadRequest] = []
+        requests.reserveCapacity(remoteTracks.count)
+        for track in remoteTracks {
+            let (scURL, userId) = await resolveSoundCloudURL(for: track)
+            requests.append(
+                DownloadOrchestrator.DownloadRequest(
+                    trackId: track.id ?? 0,
+                    artist: track.artist,
+                    title: track.title,
+                    query: "\(track.artist) - \(track.title)",
+                    soundcloudURL: scURL,
+                    userId: userId
+                )
             )
         }
 
@@ -126,5 +133,70 @@ final class DownloadViewModel {
         let result = await orchestrator.retryFailed()
         lastResult = result
         isDownloading = false
+    }
+
+    // MARK: - Helpers
+
+    /// Resolve the SoundCloud permalink URL and user ID for a track, if any.
+    ///
+    /// Logic:
+    /// 1. Look up `track_sources` rows for this track. If a "soundcloud"
+    ///    source link exists, capture its user_id (so scdl can be invoked
+    ///    against the correct account) and keep its `external_id` as a
+    ///    fallback synthetic URL.
+    /// 2. Prefer `track.originalPath` when it's an `https://soundcloud.com/…`
+    ///    permalink URL (set during SoundCloud sync).
+    /// 3. Otherwise, synthesize `https://api.soundcloud.com/tracks/<id>`
+    ///    from the external_id — `scdl` accepts API URLs too.
+    private func resolveSoundCloudURL(for track: Track) async -> (url: String?, userId: String?) {
+        guard let trackId = track.id, let sourceRepo = sourceRepository else {
+            // No DB lookup possible — only use originalPath if it's a real URL
+            return (soundCloudURLFromOriginalPath(track.originalPath), nil)
+        }
+
+        var externalId: String?
+        var userId: String?
+        do {
+            let trackSources = try await sourceRepo.fetchTrackSources(trackId: trackId)
+            for trackSource in trackSources {
+                // Find the source row to confirm it's SoundCloud
+                let allSources = try await sourceRepo.fetchAll()
+                if let src = allSources.first(where: { $0.id == trackSource.sourceId }),
+                   src.name == "soundcloud" {
+                    externalId = trackSource.externalId
+                    userId = src.userId
+                    break
+                }
+            }
+        } catch {
+            AppLogger.shared.log(
+                "Failed to resolve track_sources for track \(trackId): \(error)",
+                level: .warning,
+                source: "Download"
+            )
+        }
+
+        // Prefer the permalink URL stored on the Track itself.
+        if let permalink = soundCloudURLFromOriginalPath(track.originalPath) {
+            return (permalink, userId)
+        }
+        // Fall back to the SoundCloud API URL via the external_id.
+        if let id = externalId, !id.isEmpty {
+            return ("https://api.soundcloud.com/tracks/\(id)", userId)
+        }
+        return (nil, userId)
+    }
+
+    /// Returns `originalPath` only if it looks like a real SoundCloud
+    /// permalink URL. Filters out synthetic `soundcloud://<id>` schemes,
+    /// `spotify:track:<id>` URIs, and on-disk paths so the orchestrator
+    /// doesn't hand scdl something it can't resolve.
+    private func soundCloudURLFromOriginalPath(_ path: String) -> String? {
+        guard path.hasPrefix("https://soundcloud.com/") ||
+              path.hasPrefix("http://soundcloud.com/") ||
+              path.hasPrefix("https://api.soundcloud.com/") else {
+            return nil
+        }
+        return path
     }
 }
