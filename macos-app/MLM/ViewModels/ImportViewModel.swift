@@ -60,6 +60,13 @@ final class ImportViewModel {
             try await configRepository.setLibraryRoot(path)
             libraryRoot = path
             errorMessage = nil
+            // Notify dependent services (e.g. DownloadViewModel) so they can
+            // reconfigure for the new root without an app restart.
+            NotificationCenter.default.post(
+                name: .libraryRootDidChange,
+                object: nil,
+                userInfo: ["path": path]
+            )
         } catch {
             errorMessage = "Failed to save library root: \(error.localizedDescription)"
         }

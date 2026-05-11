@@ -50,9 +50,18 @@ final class DependencyContainer {
     /// Whether the library's external drive is currently mounted.
     var isLibraryDriveMounted = true
 
+    /// Observer for `libraryRootDidChange` — re-wires the download pipeline.
+    private var libraryRootObserver: NSObjectProtocol?
+
     // MARK: - Initialization
 
     private init() {}
+
+    deinit {
+        if let token = libraryRootObserver {
+            NotificationCenter.default.removeObserver(token)
+        }
+    }
 
     /// Initialize the database and all repositories.
     ///
@@ -133,6 +142,23 @@ final class DependencyContainer {
 
             // Configure download orchestrator
             downloadViewModel?.configure(libraryRoot: root, tokenStorage: tokens)
+        }
+
+        // Reconfigure the download pipeline whenever the library root is
+        // changed at runtime (e.g. from the First-Run Wizard or Settings).
+        libraryRootObserver = NotificationCenter.default.addObserver(
+            forName: .libraryRootDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self else { return }
+            let newRoot = (notification.userInfo?["path"] as? String) ?? ""
+            guard !newRoot.isEmpty, let tokens = self.tokenStorage else { return }
+            self.downloadViewModel?.configure(libraryRoot: newRoot, tokenStorage: tokens)
+            AppLogger.shared.info(
+                "Download pipeline reconfigured for new library root: \(newRoot)",
+                source: "Download"
+            )
         }
 
         isInitialized = true

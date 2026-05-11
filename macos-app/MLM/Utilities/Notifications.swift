@@ -51,9 +51,14 @@ extension Notification.Name {
     /// Posted when a sync operation completes.
     static let syncDidComplete = Notification.Name("MLMSyncDidComplete")
 
-    // MARK: Downloads (reserved for Phase 11)
+    // MARK: Downloads
 
     /// Posted when a download completes and a track moves from Remote to Local.
+    ///
+    /// Fired once per batch by `DownloadViewModel.downloadTracks` after the
+    /// database has been updated. Observers should refresh their track lists.
+    /// - `userInfo["succeeded"]`: `Int` — number of tracks downloaded
+    /// - `userInfo["failed"]`: `Int` — number of tracks that failed
     static let downloadDidComplete = Notification.Name("MLMDownloadDidComplete")
 
     // MARK: UI Actions (Phase 19 — menu bar integration)
