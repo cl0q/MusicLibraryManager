@@ -630,7 +630,7 @@ Plans:
 **Goal:** Drei gezielte Verbesserungen an WaveformView: adaptive Bin-Berechnung fuer lange Tracks (2 bins/sec, Min 200, Max 14.400), DJ-Farbkodierung der Wellenformbalken per Amplitude (Blau → Cyan → Gelb → Orange-Rot), horizontales Scrollen per 2-Finger-Trackpad mit korrekter Seek-Koordinatenberechnung nach dem Scrollen.
 **Depends on:** Phase 5 (v2.0 Playback-Pipeline)
 **Requirements**: WF-01, WF-02, WF-03, WF-04
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 
 **Success criteria** (what must be TRUE):
 1. extractWaveform() benutzt 2 bins/sec (floor 200, cap 14.400) statt hardcoded 200
@@ -641,7 +641,7 @@ Plans:
 6. swift test gruen (alle WaveformTests)
 
 Plans:
-- [ ] 35-01-PLAN.md — WaveformHelpers-Modul + adaptive Bins + DJ-Farben + PlayerBar-Fix
+- [x] 35-01-PLAN.md — WaveformHelpers-Modul + adaptive Bins + DJ-Farben + PlayerBar-Fix
 - [ ] 35-02-PLAN.md — ScrollView-Wrap + scroll-korrigiertes Seek (Wave 2, depends on 35-01)
 
 ---
@@ -657,4 +657,4 @@ Plans:
 | 32. Bulk-Add to Playlist | v1.4 | 0/TBD | Not started | - |
 | 33. Polish & E2E | v1.4 | 0/TBD | Not started | - |
 | 34. Rework Download Orchestrator | v1.4 | 0/TBD | Not started | - |
-| 35. Waveform-Verbesserungen | v2.0 | 0/2 | Not started | - |
+| 35. Waveform-Verbesserungen | v2.0 | 1/2 | In Progress|  |

@@ -34,6 +34,9 @@ struct WaveformView: View {
     /// Stride per bar in scrolled mode: barWidth + barGap.
     private let barStride: CGFloat = 3  // 2pt bar + 1pt gap
 
+    /// Current horizontal scroll offset — updated by onScrollGeometryChange.
+    @State private var scrollOffset: CGFloat = 0
+
     var body: some View {
         GeometryReader { geometry in
             ZStack {
@@ -42,19 +45,42 @@ struct WaveformView: View {
                 } else if data.isEmpty {
                     emptyPlaceholder
                 } else {
-                    waveformCanvas(in: geometry.size)
+                    let totalContentWidth = max(
+                        CGFloat(data.count) * barStride,
+                        geometry.size.width
+                    )
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        waveformCanvas(in: CGSize(
+                            width: totalContentWidth,
+                            height: geometry.size.height
+                        ))
+                        .frame(width: totalContentWidth, height: geometry.size.height)
                         .contentShape(Rectangle())
                         .gesture(
                             DragGesture(minimumDistance: 0)
                                 .onChanged { value in
-                                    let fraction = value.location.x / geometry.size.width
-                                    onSeek?(min(max(fraction, 0), 1))
+                                    let fraction = WaveformHelpers.seekFraction(
+                                        tapX: value.location.x,
+                                        scrollOffset: scrollOffset,
+                                        totalContentWidth: totalContentWidth
+                                    )
+                                    onSeek?(fraction)
                                 }
                                 .onEnded { value in
-                                    let fraction = value.location.x / geometry.size.width
-                                    onSeek?(min(max(fraction, 0), 1))
+                                    let fraction = WaveformHelpers.seekFraction(
+                                        tapX: value.location.x,
+                                        scrollOffset: scrollOffset,
+                                        totalContentWidth: totalContentWidth
+                                    )
+                                    onSeek?(fraction)
                                 }
                         )
+                    }
+                    .onScrollGeometryChange(for: CGFloat.self) { geo in
+                        geo.contentOffset.x
+                    } action: { _, newX in
+                        scrollOffset = newX
+                    }
                 }
             }
         }
@@ -71,9 +97,9 @@ struct WaveformView: View {
             let height = canvasSize.height
             let midY = height / 2
 
-            // Calculate actual bar width to fill the canvas evenly
-            let totalBarWidth = availableWidth / CGFloat(totalBars)
-            let actualBarWidth = max(totalBarWidth - barGap, 1)
+            // Fixed-stride layout: Canvas width == totalContentWidth, no fill calculation needed
+            let totalBarWidth: CGFloat = barStride    // fixed 3pt
+            let actualBarWidth: CGFloat = barWidth    // fixed 2pt
 
             // Max bar height (half the canvas, leaving a small gap at center)
             let maxBarHeight = midY - 1
