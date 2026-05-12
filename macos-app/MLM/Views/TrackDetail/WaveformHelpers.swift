@@ -14,6 +14,7 @@ enum WaveformHelpers {
     /// Floor: 200 bins (short tracks retain original resolution).
     /// Cap: 14 400 bins (2 hours at 2 bins/sec — memory-safe upper bound).
     static func adaptiveBinCount(duration: TimeInterval) -> Int {
+        guard duration.isFinite && duration > 0 else { return 200 }
         let binsPerSecond: Double = 2.0
         let minBins = 200
         let maxBins = 14_400
@@ -42,20 +43,21 @@ enum WaveformHelpers {
 
     // MARK: - Seek Fraction
 
-    /// Compute the seek fraction accounting for horizontal scroll offset.
+    /// Compute the seek fraction from a tap position in the Canvas coordinate space.
+    ///
+    /// `DragGesture.location.x` attached to a view inside a `ScrollView` is already
+    /// in the Canvas's local coordinate space (SwiftUI transforms the point for you),
+    /// so no scroll offset correction is needed here.
     ///
     /// - Parameters:
     ///   - tapX: `DragGesture.location.x` in the Canvas coordinate space.
-    ///   - scrollOffset: Current `ScrollView` content offset (from `onScrollGeometryChange`).
     ///   - totalContentWidth: Full Canvas width (`data.count * barStride`).
     /// - Returns: Fraction clamped to 0…1.
     static func seekFraction(
         tapX: CGFloat,
-        scrollOffset: CGFloat,
         totalContentWidth: CGFloat
     ) -> Double {
         guard totalContentWidth > 0 else { return 0 }
-        let absoluteX = tapX + scrollOffset
-        return max(0, min(1, Double(absoluteX / totalContentWidth)))
+        return max(0, min(1, Double(tapX / totalContentWidth)))
     }
 }

@@ -45,33 +45,34 @@ struct WaveformTests {
 
     // MARK: - seekFraction
 
-    @Test func seekFractionNoScroll() {
-        // tapX=300, offset=0, width=600 → 300/600 = 0.5
-        let f = WaveformHelpers.seekFraction(tapX: 300, scrollOffset: 0, totalContentWidth: 600)
+    @Test func seekFractionMidpoint() {
+        // tapX=300 in 600pt canvas → 300/600 = 0.5
+        let f = WaveformHelpers.seekFraction(tapX: 300, totalContentWidth: 600)
         #expect(abs(f - 0.5) < 0.001)
     }
 
-    @Test func seekFractionWithScroll() {
-        // tapX=0, offset=300, width=600 → (0+300)/600 = 0.5
-        let f = WaveformHelpers.seekFraction(tapX: 0, scrollOffset: 300, totalContentWidth: 600)
-        #expect(abs(f - 0.5) < 0.001)
+    @Test func seekFractionScrolledCanvas() {
+        // After scrolling, gesture delivers canvas-absolute tapX.
+        // tapX=450 in 600pt canvas → 450/600 = 0.75 (not 0.25 from viewport origin)
+        let f = WaveformHelpers.seekFraction(tapX: 450, totalContentWidth: 600)
+        #expect(abs(f - 0.75) < 0.001)
     }
 
     @Test func seekFractionClampsToZero() {
-        // Negative absoluteX → clamp to 0
-        let f = WaveformHelpers.seekFraction(tapX: -50, scrollOffset: 0, totalContentWidth: 600)
+        // Negative tapX → clamp to 0
+        let f = WaveformHelpers.seekFraction(tapX: -50, totalContentWidth: 600)
         #expect(f == 0.0)
     }
 
     @Test func seekFractionClampsToOne() {
-        // tapX beyond width → clamp to 1
-        let f = WaveformHelpers.seekFraction(tapX: 700, scrollOffset: 0, totalContentWidth: 600)
+        // tapX beyond canvas width → clamp to 1
+        let f = WaveformHelpers.seekFraction(tapX: 700, totalContentWidth: 600)
         #expect(f == 1.0)
     }
 
     @Test func seekFractionZeroWidth() {
         // Guard against division by zero → return 0
-        let f = WaveformHelpers.seekFraction(tapX: 100, scrollOffset: 0, totalContentWidth: 0)
+        let f = WaveformHelpers.seekFraction(tapX: 100, totalContentWidth: 0)
         #expect(f == 0.0)
     }
 }

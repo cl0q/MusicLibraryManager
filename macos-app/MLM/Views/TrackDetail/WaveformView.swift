@@ -34,9 +34,6 @@ struct WaveformView: View {
     /// Stride per bar in scrolled mode: barWidth + barGap.
     private let barStride: CGFloat = 3  // 2pt bar + 1pt gap
 
-    /// Current horizontal scroll offset — updated by onScrollGeometryChange.
-    @State private var scrollOffset: CGFloat = 0
-
     var body: some View {
         GeometryReader { geometry in
             ZStack {
@@ -56,12 +53,11 @@ struct WaveformView: View {
                         ))
                         .frame(width: totalContentWidth, height: geometry.size.height)
                         .contentShape(Rectangle())
-                        .gesture(
+                        .simultaneousGesture(
                             DragGesture(minimumDistance: 0)
                                 .onChanged { value in
                                     let fraction = WaveformHelpers.seekFraction(
                                         tapX: value.location.x,
-                                        scrollOffset: scrollOffset,
                                         totalContentWidth: totalContentWidth
                                     )
                                     onSeek?(fraction)
@@ -69,17 +65,11 @@ struct WaveformView: View {
                                 .onEnded { value in
                                     let fraction = WaveformHelpers.seekFraction(
                                         tapX: value.location.x,
-                                        scrollOffset: scrollOffset,
                                         totalContentWidth: totalContentWidth
                                     )
                                     onSeek?(fraction)
                                 }
                         )
-                    }
-                    .onScrollGeometryChange(for: CGFloat.self) { geo in
-                        geo.contentOffset.x
-                    } action: { _, newX in
-                        scrollOffset = newX
                     }
                 }
             }
@@ -128,18 +118,17 @@ struct WaveformView: View {
                     height: bottomHeight
                 )
 
-                // DJ-style amplitude color coding
+                // DJ-style amplitude color coding — opacity already baked into amplitudeColor
                 let played = x < progressX
                 let barColor = WaveformHelpers.amplitudeColor(for: peak, played: played)
-                let barOpacity: Double = played ? 1.0 : 0.55
 
                 context.fill(
                     Path(roundedRect: topRect, cornerRadius: 0.5),
-                    with: .color(barColor.opacity(barOpacity))
+                    with: .color(barColor)
                 )
                 context.fill(
                     Path(roundedRect: bottomRect, cornerRadius: 0.5),
-                    with: .color(barColor.opacity(barOpacity * 0.6))
+                    with: .color(barColor.opacity(0.6))
                 )
             }
         }
