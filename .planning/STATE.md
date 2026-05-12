@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: macOS Native
-status: executing
-stopped_at: Phase 30 context gathered
-last_updated: "2026-05-12T21:17:51.227Z"
+status: ready_to_plan
+stopped_at: Phase 36 context gathered
+last_updated: "2026-05-12T21:42:13.440Z"
 last_activity: 2026-05-12 -- Phase 35 execution started
 progress:
   total_phases: 17
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 11
   completed_plans: 5
-  percent: 45
+  percent: 18
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-05-07)
 
 ## Current Position
 
-Phase: 35 (waveform-verbesserungen-bug-fix-lange-lieder-dj-farbkodierun) — EXECUTING
-Plan: 1 of 2
+Phase: 36
+Plan: Not started
 Next: Phase 36 (Playlists v2.0) — analog zu macos-app/PLAN.md §"Phase 6 — Playlists"
-Status: Executing Phase 35
-Last activity: 2026-05-12 -- Phase 35 execution started
+Status: Ready to plan
+Last activity: 2026-05-12
 
 ## Phase 5 Summary (v2.0)
 
@@ -126,7 +126,7 @@ Tests: 421 passing / 0 failing / 23 ignored. Zero regressions from v1.2 baseline
 
 **Velocity (v1.0):**
 
-- Total plans completed: 39
+- Total plans completed: 41
 - Total execution time: ~3 days
 - Phases completed: 7
 
@@ -280,9 +280,9 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-07T17:48:58.771Z
-Stopped at: Phase 30 context gathered
-Resume file: .planning/phases/30-disk-folder-explorer/30-CONTEXT.md
+Last session: 2026-05-12T21:42:13.431Z
+Stopped at: Phase 36 context gathered
+Resume file: .planning/phases/36-playlists-v2-0-macos-native/36-CONTEXT.md
 
 ---
 *Last updated: 2026-05-04 — v1.4 Daily Driver roadmap created (Phases 28-33); v1.3 Yeat Expansion remains paused*
