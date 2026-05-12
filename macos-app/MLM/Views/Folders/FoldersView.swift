@@ -349,9 +349,6 @@ struct FolderTracksTable: View {
                 onDoubleClick?(track)
             }
         }
-        // Publish the highlighted row for the global Space shortcut.
-        .focusedSceneValue(\.selectedTrack,
-            selectedTrackIDs.first.flatMap { id in tracks.first { $0.id == id } })
     }
 
     private func isNowPlaying(_ track: Track) -> Bool {

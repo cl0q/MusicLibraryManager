@@ -12,11 +12,6 @@ struct PlaybackViewModelKey: FocusedValueKey {
     typealias Value = PlaybackViewModel
 }
 
-/// Allows spacebar preview to know which track is selected in the active view.
-struct SelectedTrackKey: FocusedValueKey {
-    typealias Value = Track?
-}
-
 extension FocusedValues {
     var selectedSection: Binding<SidebarSection>? {
         get { self[SelectedSectionKey.self] }
@@ -26,11 +21,6 @@ extension FocusedValues {
     var playbackViewModel: PlaybackViewModel? {
         get { self[PlaybackViewModelKey.self] }
         set { self[PlaybackViewModelKey.self] = newValue }
-    }
-
-    var selectedTrack: Track?? {
-        get { self[SelectedTrackKey.self] }
-        set { self[SelectedTrackKey.self] = newValue }
     }
 }
 

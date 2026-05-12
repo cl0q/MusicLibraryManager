@@ -93,15 +93,6 @@ struct PlayerBar: View {
                 }
             } else if let track = viewModel.currentTrack {
                 HStack(spacing: 4) {
-                    if viewModel.isPreviewMode {
-                        Text("PREVIEW")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(Color.accentColor)
-                            .clipShape(Capsule())
-                    }
                     Text(track.title)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.primary)
