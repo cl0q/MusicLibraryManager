@@ -412,46 +412,46 @@ final class AudioPlayer: @unchecked Sendable {
     /// - Parameter binCount: Number of output bins (default: 200)
     /// - Returns: Array of normalized peak values (0.0 to 1.0)
     func extractWaveformData(binCount: Int = 200) throws -> [Float] {
-        guard let file = audioFile else { return [] }
+        guard let file = audioFile, binCount > 0 else { return [] }
 
-        let frameCount = AVAudioFrameCount(file.length)
-        guard frameCount > 0 else { return [] }
+        let totalFrames = file.length
+        guard totalFrames > 0 else { return [] }
 
-        // Read all frames into a buffer
+        // Process in 64K-frame chunks so a 2-hour stereo float32 file caps
+        // at ~512 KB of RAM instead of the ~2.5 GB single-buffer alloc the
+        // naïve implementation produced (which caused a SIGABRT in
+        // LaunchServices via memory pressure during slider scrubbing).
+        let chunkFrames: AVAudioFrameCount = 65_536
         guard let buffer = AVAudioPCMBuffer(
             pcmFormat: file.processingFormat,
-            frameCapacity: frameCount
+            frameCapacity: chunkFrames
         ) else {
             return []
         }
 
-        file.framePosition = 0
-        try file.read(into: buffer)
-
-        // Get float channel data (use first channel for mono waveform)
-        guard let channelData = buffer.floatChannelData else { return [] }
-        let samples = channelData[0]
-        let sampleCount = Int(buffer.frameLength)
-
-        guard sampleCount > 0 else { return [] }
-
-        // Downsample into bins — take peak of each bin
-        let samplesPerBin = max(sampleCount / binCount, 1)
+        let framesPerBin = max(Int(totalFrames) / binCount, 1)
         var peaks = [Float](repeating: 0, count: binCount)
 
-        for bin in 0..<binCount {
-            let start = bin * samplesPerBin
-            let end = min(start + samplesPerBin, sampleCount)
-            var peak: Float = 0
+        file.framePosition = 0
+        var sourceFrameIndex = 0
 
-            for i in start..<end {
+        while sourceFrameIndex < Int(totalFrames) {
+            try file.read(into: buffer, frameCount: chunkFrames)
+            let chunkSampleCount = Int(buffer.frameLength)
+            if chunkSampleCount == 0 { break }
+
+            guard let channelData = buffer.floatChannelData else { break }
+            let samples = channelData[0]
+
+            for i in 0..<chunkSampleCount {
+                let bin = min((sourceFrameIndex + i) / framesPerBin, binCount - 1)
                 let absSample = abs(samples[i])
-                if absSample > peak {
-                    peak = absSample
+                if absSample > peaks[bin] {
+                    peaks[bin] = absSample
                 }
             }
 
-            peaks[bin] = peak
+            sourceFrameIndex += chunkSampleCount
         }
 
         // Normalize to 0–1 range
