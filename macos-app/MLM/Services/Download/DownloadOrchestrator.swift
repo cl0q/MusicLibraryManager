@@ -210,21 +210,32 @@ final class DownloadOrchestrator {
     /// Try downloading via SoundCloud → DAB → YouTube.
     private func downloadWithFallback(_ request: DownloadRequest) async throws -> URL? {
         // 1. SoundCloud direct (if URL available and scdl installed)
-        if let scURL = request.soundcloudURL, soundCloudDownloader.isAvailable {
-            let scResult = try await soundCloudDownloader.download(
-                trackURL: scURL,
-                outputDir: aacDir,
-                trackId: request.trackId,
-                title: request.title
-            )
-            if case .success(let path) = scResult {
-                return path
+        if let scURL = request.soundcloudURL {
+            if soundCloudDownloader.isAvailable {
+                AppLogger.shared.log("chain[SC]: trying \(scURL)", level: .info, source: "Download")
+                let scResult = try await soundCloudDownloader.download(
+                    trackURL: scURL,
+                    outputDir: aacDir,
+                    trackId: request.trackId,
+                    title: request.title
+                )
+                if case .success(let path) = scResult {
+                    AppLogger.shared.log("chain[SC]: success → \(path.lastPathComponent)", level: .info, source: "Download")
+                    return path
+                }
+                AppLogger.shared.log("chain[SC]: not found, falling through", level: .info, source: "Download")
+            } else {
+                AppLogger.shared.log(
+                    "chain[SC]: scdl not installed — skipping (install via `pip install scdl`)",
+                    level: .warning, source: "Download"
+                )
             }
         }
 
-        // 2. DAB Music API
+        // 2. DAB Music API — silently skipped if no creds and server requires auth
         if let dab = dabClient {
             do {
+                AppLogger.shared.log("chain[DAB]: searching \(request.query)", level: .info, source: "Download")
                 if let dabTrack = try await dab.searchTrack(query: request.query) {
                     if dab.matches(dabTrack: dabTrack, artist: request.artist, title: request.title) {
                         let dabResult = try await dab.download(
@@ -234,24 +245,33 @@ final class DownloadOrchestrator {
                             title: request.title
                         )
                         if case .success(let path) = dabResult {
+                            AppLogger.shared.log("chain[DAB]: success → \(path.lastPathComponent)", level: .info, source: "Download")
                             return path
                         }
+                    } else {
+                        AppLogger.shared.log(
+                            "chain[DAB]: hit rejected (artist mismatch): \(dabTrack.artist) - \(dabTrack.title)",
+                            level: .info, source: "Download"
+                        )
                     }
                 }
             } catch {
-                AppLogger.shared.log("DAB failed for \(request.query): \(error)", level: .warning)
+                AppLogger.shared.log("chain[DAB]: error: \(error)", level: .warning, source: "Download")
             }
         }
 
         // 3. YouTube (last resort)
         if youtubeDownloader.isAvailable {
+            AppLogger.shared.log("chain[YT]: searching \(request.query)", level: .info, source: "Download")
             let ytResult = try await youtubeDownloader.searchAndDownload(
                 query: request.query,
                 outputDir: flacDir
             )
             if case .success(let path) = ytResult {
+                AppLogger.shared.log("chain[YT]: success → \(path.lastPathComponent)", level: .info, source: "Download")
                 return path
             }
+            AppLogger.shared.log("chain[YT]: not found", level: .warning, source: "Download")
         }
 
         return nil
