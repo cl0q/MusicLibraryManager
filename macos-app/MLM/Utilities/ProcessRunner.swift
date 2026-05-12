@@ -100,18 +100,24 @@ final class ProcessRunner {
 
     /// Find an executable in common locations.
     ///
-    /// Searches: /opt/homebrew/bin, /usr/local/bin, /usr/bin, the app bundle.
+    /// Searches in this order: app bundle, ~/.local/bin (pip --user installs
+    /// land here), /opt/homebrew/bin, /usr/local/bin, /opt/local/bin (MacPorts),
+    /// /usr/bin. macOS apps launched via `open` inherit a stripped PATH that
+    /// does NOT include user-local bin directories, so we look them up by
+    /// absolute path instead of trusting $PATH.
     static func findExecutable(_ name: String) -> String? {
-        let searchPaths = [
-            "/opt/homebrew/bin/\(name)",
-            "/usr/local/bin/\(name)",
-            "/usr/bin/\(name)",
-        ]
-
-        // Check app bundle first
         if let bundled = Bundle.main.url(forAuxiliaryExecutable: name) {
             return bundled.path
         }
+
+        let home = NSHomeDirectory()
+        let searchPaths = [
+            "\(home)/.local/bin/\(name)",
+            "/opt/homebrew/bin/\(name)",
+            "/usr/local/bin/\(name)",
+            "/opt/local/bin/\(name)",
+            "/usr/bin/\(name)",
+        ]
 
         for path in searchPaths {
             if FileManager.default.isExecutableFile(atPath: path) {
