@@ -33,9 +33,12 @@ final class DABClient: Sendable {
     // MARK: - Search
 
     /// Search DAB for a track matching the query.
+    ///
+    /// The public Yeet-su DAB search endpoint accepts anonymous requests,
+    /// so we try without auth first. Only fall back to login when the
+    /// server hands us a 401 — and treat missing credentials as a soft
+    /// "skip DAB" rather than a hard error.
     func searchTrack(query: String) async throws -> DabTrack? {
-        try await ensureAuthenticated()
-
         let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
         let url = URL(string: "\(Self.baseURL)/search?q=\(encoded)")!
 
@@ -46,8 +49,14 @@ final class DABClient: Sendable {
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
 
         if statusCode == 401 {
-            // Try re-login
-            try await login()
+            // Token expired or anonymous search not allowed — try login,
+            // but only if we have credentials. Without DAB_EMAIL/PASSWORD,
+            // silently skip DAB by returning nil.
+            do {
+                try await login()
+            } catch DABError.noCredentials {
+                return nil
+            }
             return try await searchTrack(query: query)
         }
 
@@ -73,7 +82,13 @@ final class DABClient: Sendable {
     ///   - title: Expected title for filename
     /// - Returns: Path to the downloaded file, or `.notFound`
     func download(dabTrack: DabTrack, outputDir: URL, artist: String, title: String) async throws -> DownloadResult {
-        try await ensureAuthenticated()
+        // Try to authenticate if creds are set; otherwise proceed anonymously.
+        // Stream URL fetching will return nil if auth is actually required.
+        do {
+            try await ensureAuthenticated()
+        } catch DABError.noCredentials {
+            // Anonymous attempt — stream endpoint may still return a public URL.
+        }
 
         // Check if already downloaded
         let filename = PathSanitizer.sanitizeComponent("\(artist) - \(title).flac")
