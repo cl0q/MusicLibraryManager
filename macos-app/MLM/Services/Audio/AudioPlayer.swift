@@ -129,15 +129,22 @@ final class AudioPlayer: @unchecked Sendable {
             self.duration = Double(file.length) / file.processingFormat.sampleRate
             self.seekFrameOffset = 0
         } catch {
-            // Some library files have a wrong extension (e.g. WAV PCM saved
-            // as `.mp3` — a common pattern in SoundCloud/leak rips). Apple's
-            // ExtAudioFile opens by extension first, so it hands the WAV
-            // bytes to the MP3 parser and bails with 'dta?'. Sniff the
-            // actual format from the first bytes and retry via a temporary
-            // symlink that carries the correct extension.
-            if let sniffedURL = try? Self.symlinkWithCorrectExtension(for: url),
-               sniffedURL != url,
-               let file = try? AVAudioFile(forReading: sniffedURL) {
+            // Two known reasons Apple's ExtAudioFile rejects something
+            // ffmpeg / VLC happily play:
+            //
+            // 1. Wrong extension — WAV PCM saved as `.mp3` (SoundCloud /
+            //    leak rip pattern). Fix: symlink with correct extension.
+            //
+            // 2. ID3v2 prefix wrapping a different container — many Yeat
+            //    unreleased MP3s are actually WAV files prefixed with a
+            //    huge ID3v2.4 tag (artwork + metadata). Apple sees `ID3`
+            //    + `.mp3` extension, expects MPEG frames after the tag,
+            //    finds `RIFF` instead, bails. Fix: copy the bytes
+            //    *after* the ID3 tag into a temp file with the correct
+            //    extension and load that.
+            if let cleanedURL = try? Self.rewriteIfFormatMismatch(for: url),
+               cleanedURL != url,
+               let file = try? AVAudioFile(forReading: cleanedURL) {
                 self.audioFile = file
                 self.audioFormat = file.processingFormat
                 self.sampleRate = file.processingFormat.sampleRate
@@ -150,56 +157,98 @@ final class AudioPlayer: @unchecked Sendable {
         }
     }
 
-    /// Sniff the first bytes of `url` to detect the real audio container.
-    /// If the detected extension differs from the URL's extension, build a
-    /// temporary symlink in NSTemporaryDirectory() pointing at the original
-    /// file but renamed to the correct extension, and return its URL.
-    /// Otherwise returns the original `url` unchanged.
-    private static func symlinkWithCorrectExtension(for url: URL) throws -> URL {
+    /// Sniff `url`. If we detect a known container at a non-zero offset
+    /// (i.e. an ID3v2 tag wraps a WAV/FLAC), copy the post-tag bytes to
+    /// a temp file with the correct extension and return its URL. If the
+    /// container is at offset 0 but the extension is wrong, symlink it.
+    /// Returns the original URL when no remediation is needed or possible.
+    private static func rewriteIfFormatMismatch(for url: URL) throws -> URL {
+        guard let detected = sniffContainer(at: url) else { return url }
         let actualExt = url.pathExtension.lowercased()
-        guard let detected = sniffContainer(at: url), detected != actualExt else {
-            return url
-        }
 
         let tempDir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("mlm-format-fix", isDirectory: true)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
 
-        // Stable name so multiple plays of the same file reuse the link.
         let base = url.deletingPathExtension().lastPathComponent
         let hash = String(url.path.hashValue, radix: 16)
-        let linkURL = tempDir.appendingPathComponent("\(base)-\(hash).\(detected)")
+        let outURL = tempDir.appendingPathComponent("\(base)-\(hash).\(detected.extension)")
 
-        if !FileManager.default.fileExists(atPath: linkURL.path) {
-            try FileManager.default.createSymbolicLink(at: linkURL, withDestinationURL: url)
+        if FileManager.default.fileExists(atPath: outURL.path) {
+            return outURL
         }
-        return linkURL
+
+        if detected.offset == 0 {
+            // No prefix to strip — just hand AVAudioFile the same bytes
+            // under a name it understands.
+            if detected.extension == actualExt { return url }
+            try FileManager.default.createSymbolicLink(at: outURL, withDestinationURL: url)
+            return outURL
+        }
+
+        // Strip the prefix. Stream the source from `detected.offset` to a
+        // fresh file in 1 MiB chunks so we don't pull a 40 MiB rip into
+        // memory all at once.
+        let input = try FileHandle(forReadingFrom: url)
+        defer { try? input.close() }
+        try input.seek(toOffset: UInt64(detected.offset))
+
+        FileManager.default.createFile(atPath: outURL.path, contents: nil)
+        let output = try FileHandle(forWritingTo: outURL)
+        defer { try? output.close() }
+
+        while true {
+            let chunk = input.readData(ofLength: 1024 * 1024)
+            if chunk.isEmpty { break }
+            output.write(chunk)
+        }
+        return outURL
     }
 
-    /// Identify the audio container from magic bytes. Returns the canonical
-    /// extension that Apple's Core Audio expects, or nil when we don't
-    /// recognize the format (let the original loader's error propagate).
-    private static func sniffContainer(at url: URL) -> String? {
+    /// Detect the real audio container, accounting for ID3v2 prefixes that
+    /// can wrap an entirely different format underneath. Returns the
+    /// canonical extension and the byte offset where the real container
+    /// starts (0 when the file is unprefixed).
+    private static func sniffContainer(at url: URL) -> (extension: String, offset: Int)? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
-        let data = handle.readData(ofLength: 12)
+
+        var data = handle.readData(ofLength: 10)
         guard data.count >= 4 else { return nil }
-        let b = [UInt8](data)
-        // RIFF....WAVE
-        if b[0] == 0x52, b[1] == 0x49, b[2] == 0x46, b[3] == 0x46 { return "wav" }
-        // fLaC
-        if b[0] == 0x66, b[1] == 0x4C, b[2] == 0x61, b[3] == 0x43 { return "flac" }
-        // OggS
-        if b[0] == 0x4F, b[1] == 0x67, b[2] == 0x67, b[3] == 0x53 { return "ogg" }
-        // ID3 (MP3 with tags)
-        if b[0] == 0x49, b[1] == 0x44, b[2] == 0x33 { return "mp3" }
-        // 0xFFFx — MP3 frame sync without ID3
-        if b[0] == 0xFF, (b[1] & 0xE0) == 0xE0 { return "mp3" }
-        // ....ftyp — m4a/mp4 container at offset 4
-        if data.count >= 8,
-           b[4] == 0x66, b[5] == 0x74, b[6] == 0x79, b[7] == 0x70 {
-            return "m4a"
+        let head = [UInt8](data)
+
+        var payloadOffset = 0
+
+        // ID3v2 header at byte 0 — compute synchsafe size and skip past it.
+        if data.count >= 10, head[0] == 0x49, head[1] == 0x44, head[2] == 0x33 {
+            let size = (Int(head[6] & 0x7F) << 21) |
+                       (Int(head[7] & 0x7F) << 14) |
+                       (Int(head[8] & 0x7F) << 7) |
+                        Int(head[9] & 0x7F)
+            let hasFooter = (head[5] & 0x10) != 0
+            payloadOffset = 10 + size + (hasFooter ? 10 : 0)
+
+            try? handle.seek(toOffset: UInt64(payloadOffset))
+            data = handle.readData(ofLength: 12)
+            // If nothing follows or we can't sniff, treat as plain mp3 —
+            // the ID3 tag belongs to an MP3 file with normal frames that
+            // simply don't start at byte 0 from our 12-byte window's POV.
+            guard data.count >= 4 else { return ("mp3", 0) }
         }
+
+        let b = [UInt8](data)
+
+        if b[0] == 0x52, b[1] == 0x49, b[2] == 0x46, b[3] == 0x46 { return ("wav", payloadOffset) }
+        if b[0] == 0x66, b[1] == 0x4C, b[2] == 0x61, b[3] == 0x43 { return ("flac", payloadOffset) }
+        if b[0] == 0x4F, b[1] == 0x67, b[2] == 0x67, b[3] == 0x53 { return ("ogg", payloadOffset) }
+        if b[0] == 0xFF, (b[1] & 0xE0) == 0xE0 { return ("mp3", 0) }  // raw MP3 frame sync
+        if b.count >= 8,
+           b[4] == 0x66, b[5] == 0x74, b[6] == 0x79, b[7] == 0x70 {
+            return ("m4a", payloadOffset)
+        }
+        // If we got here after stripping an ID3 tag, assume MP3 (the tag
+        // implies it). Without a tag we can't claim anything.
+        if payloadOffset > 0 { return ("mp3", 0) }
         return nil
     }
 
