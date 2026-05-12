@@ -54,6 +54,10 @@ struct MLMApp: App {
             // MARK: - Playback menu (Space, ⌘., ⌘←, ⌘→)
             CommandMenu("Playback") {
                 Button(playbackVM?.isPlaying == true ? "Pause" : "Play") {
+                    AppLogger.shared.log(
+                        "Spacebar fired — selectedTrack=\(selectedTrack??.title ?? "nil"), hasPlaybackVM=\(playbackVM != nil)",
+                        level: .info, source: "Playback"
+                    )
                     if let playbackVM {
                         if let selectedTrack {
                             playbackVM.togglePreview(for: selectedTrack)
