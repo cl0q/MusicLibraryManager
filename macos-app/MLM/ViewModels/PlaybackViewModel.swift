@@ -64,6 +64,9 @@ final class PlaybackViewModel {
     /// Whether waveform data is being extracted.
     private(set) var isLoadingWaveform = false
 
+    /// Cancellable handle for the active waveform extraction task.
+    private var waveformTask: Task<Void, Never>?
+
     // MARK: - Dependencies
 
     private let audioPlayer: AudioPlayer
@@ -305,13 +308,21 @@ final class PlaybackViewModel {
 
     /// Extract waveform data from the current file.
     private func extractWaveform() {
-        Task { @MainActor in isLoadingWaveform = true }
+        waveformTask?.cancel()
+        isLoadingWaveform = true
 
-        Task.detached(priority: .utility) { [weak self] in
-            guard let self else { return }
-            let duration = self.audioPlayer.duration
-            let binCount = WaveformHelpers.adaptiveBinCount(duration: duration)
-            let data = (try? self.audioPlayer.extractWaveformData(binCount: binCount)) ?? []
+        // Snapshot AudioPlayer values on the main actor before entering the background task.
+        // AVAudioFile is not thread-safe; reading duration and extracting data off the main
+        // actor would race with loadFile/seek/stop. We capture what we need up front.
+        let duration = audioPlayer.duration
+        let binCount = WaveformHelpers.adaptiveBinCount(duration: duration)
+
+        waveformTask = Task.detached(priority: .utility) { [weak self] in
+            guard let self, !Task.isCancelled else { return }
+            // Route synchronous extraction through the main actor so concurrent tasks
+            // can't call extractWaveformData on the same AVAudioFile simultaneously.
+            let data = (try? await MainActor.run { try self.audioPlayer.extractWaveformData(binCount: binCount) }) ?? []
+            guard !Task.isCancelled else { return }
             await MainActor.run {
                 self.waveformData = data
                 self.isLoadingWaveform = false
