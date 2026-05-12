@@ -1,11 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// Logs tab within the ActivityPanel.
-///
-/// Streams the in-memory ring buffer of `AppLogger.shared`. Supports a
-/// level filter (All / Warn+ / Error) and a "Reveal in Finder" button
-/// that opens the on-disk log file.
 struct LogsTab: View {
     private let logger = AppLogger.shared
 
@@ -26,7 +21,7 @@ struct LogsTab: View {
             if filteredEntries.isEmpty {
                 emptyState
             } else {
-                logList
+                SelectableLogView(entries: filteredEntries)
             }
         }
         .background(Color.mlmBase)
@@ -34,12 +29,9 @@ struct LogsTab: View {
 
     private var filteredEntries: [AppLogger.LogEntry] {
         switch filter {
-        case .all:
-            return logger.entries
-        case .warnings:
-            return logger.entries.filter { $0.level == .warning || $0.level == .error }
-        case .errors:
-            return logger.entries.filter { $0.level == .error }
+        case .all:      return logger.entries
+        case .warnings: return logger.entries.filter { $0.level == .warning || $0.level == .error }
+        case .errors:   return logger.entries.filter { $0.level == .error }
         }
     }
 
@@ -81,64 +73,7 @@ struct LogsTab: View {
         .padding(.vertical, 4)
     }
 
-    // MARK: - List
-
-    private var logList: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(filteredEntries) { entry in
-                        logRow(entry)
-                            .id(entry.id)
-                        Divider().opacity(0.3)
-                    }
-                }
-            }
-            .onChange(of: logger.entries.count) { _, _ in
-                if let last = filteredEntries.last {
-                    proxy.scrollTo(last.id, anchor: .bottom)
-                }
-            }
-        }
-    }
-
-    private func logRow(_ entry: AppLogger.LogEntry) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text(entry.formattedTime)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(.mlmInkMuted)
-                .frame(width: 80, alignment: .leading)
-
-            Text(entry.level.rawValue)
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                .foregroundColor(levelColor(entry.level))
-                .frame(width: 36)
-
-            if let source = entry.source {
-                Text(source)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundColor(.accentColor)
-                    .frame(width: 70, alignment: .leading)
-            }
-
-            Text(entry.message)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(.mlmInkPrimary)
-                .textSelection(.enabled)
-                .lineLimit(3)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 3)
-    }
-
-    private func levelColor(_ level: AppLogger.Level) -> Color {
-        switch level {
-        case .info: .blue
-        case .warning: .orange
-        case .error: .red
-        case .debug: .gray
-        }
-    }
+    // MARK: - Empty state
 
     private var emptyState: some View {
         VStack(spacing: 12) {
@@ -153,5 +88,135 @@ struct LogsTab: View {
                 .foregroundColor(.mlmInkMuted)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - SelectableLogView
+
+/// NSTextView-backed log renderer so the user can select and copy any text
+/// across rows — something SwiftUI's LazyVStack cannot do.
+private struct SelectableLogView: NSViewRepresentable {
+    let entries: [AppLogger.LogEntry]
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let textView = NSTextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.drawsBackground = false
+        textView.textContainerInset = NSSize(width: 16, height: 4)
+        textView.isVerticallyResizable = true
+        textView.autoresizingMask = [.width]
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.lineFragmentPadding = 0
+
+        let scroll = NSScrollView()
+        scroll.documentView = textView
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.autohidesScrollers = true
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        guard let tv = scroll.documentView as? NSTextView,
+              let storage = tv.textStorage else { return }
+
+        guard !entries.isEmpty else {
+            if storage.length > 0 {
+                storage.setAttributedString(NSAttributedString())
+                context.coordinator.lastRenderedID = nil
+            }
+            return
+        }
+
+        let atBottom = isAtBottom(scroll)
+        let coord = context.coordinator
+
+        // Decide whether to append incrementally or rebuild from scratch.
+        let newEntries: [AppLogger.LogEntry]
+        let rebuild: Bool
+
+        if let lastID = coord.lastRenderedID,
+           let lastIdx = entries.firstIndex(where: { $0.id == lastID }) {
+            let tail = entries[(lastIdx + 1)...]
+            guard !tail.isEmpty else { return }
+            newEntries = Array(tail)
+            rebuild = false
+        } else {
+            newEntries = entries
+            rebuild = true
+            storage.setAttributedString(NSAttributedString())
+        }
+
+        storage.append(buildChunk(newEntries, prependNewline: storage.length > 0))
+        coord.lastRenderedID = entries.last?.id
+
+        if atBottom || rebuild {
+            tv.scrollToEndOfDocument(nil)
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func buildChunk(_ chunk: [AppLogger.LogEntry], prependNewline: Bool) -> NSAttributedString {
+        let mono11  = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        let mono9b  = NSFont.monospacedSystemFont(ofSize: 9,  weight: .bold)
+        let mono11m = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
+        let nlAttrs: [NSAttributedString.Key: Any] = [.font: mono11]
+
+        let out = NSMutableAttributedString()
+        for (i, entry) in chunk.enumerated() {
+            if prependNewline || i > 0 {
+                out.append(NSAttributedString(string: "\n", attributes: nlAttrs))
+            }
+
+            // Timestamp — HH:mm:ss.SSS is exactly 12 chars; fixed width via padding
+            out.append(NSAttributedString(
+                string: entry.formattedTime.padding(toLength: 12, withPad: " ", startingAt: 0) + "  ",
+                attributes: [.font: mono11, .foregroundColor: NSColor.secondaryLabelColor]
+            ))
+
+            // Level — right-pad to 5 chars (ERROR is longest)
+            out.append(NSAttributedString(
+                string: entry.level.rawValue.padding(toLength: 5, withPad: " ", startingAt: 0) + "  ",
+                attributes: [.font: mono9b, .foregroundColor: levelColor(entry.level)]
+            ))
+
+            // Source — right-pad to 14 chars
+            if let source = entry.source {
+                out.append(NSAttributedString(
+                    string: String(source.prefix(14)).padding(toLength: 14, withPad: " ", startingAt: 0) + "  ",
+                    attributes: [.font: mono11m, .foregroundColor: NSColor.controlAccentColor]
+                ))
+            }
+
+            // Message
+            out.append(NSAttributedString(
+                string: entry.message,
+                attributes: [.font: mono11, .foregroundColor: NSColor.labelColor]
+            ))
+        }
+        return out
+    }
+
+    private func isAtBottom(_ scroll: NSScrollView) -> Bool {
+        guard let doc = scroll.documentView else { return true }
+        return scroll.documentVisibleRect.maxY >= doc.bounds.height - 20
+    }
+
+    private func levelColor(_ level: AppLogger.Level) -> NSColor {
+        switch level {
+        case .info:    return .systemBlue
+        case .warning: return .systemOrange
+        case .error:   return .systemRed
+        case .debug:   return .systemGray
+        }
+    }
+
+    final class Coordinator {
+        var lastRenderedID: UUID? = nil
     }
 }
