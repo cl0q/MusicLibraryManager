@@ -31,7 +31,11 @@ final class YouTubeDownloader: Sendable {
     ///   - query: Search query (e.g., "Artist - Title")
     ///   - outputDir: Directory to save the downloaded file
     /// - Returns: Path to the downloaded file, or `.notFound`
-    func searchAndDownload(query: String, outputDir: URL) async throws -> DownloadResult {
+    func searchAndDownload(
+        query: String,
+        outputDir: URL,
+        onProgress: ((Double) -> Void)? = nil
+    ) async throws -> DownloadResult {
         guard let ytdlp = ytDlpPath else {
             return .notFound
         }
@@ -51,9 +55,20 @@ final class YouTubeDownloader: Sendable {
                 "--match-filter", "duration >= 30 & duration <= 1200",
                 "--no-playlist",
                 "--max-downloads", "1",
+                "--newline",            // one progress line at a time → parseable
+                "--progress",           // force progress lines even when not a TTY
                 "--print", "after_move:filepath",
                 "-o", outputTemplate
-            ]
+            ],
+            onStderr: onProgress.map { cb in
+                { line in
+                    for sub in line.split(separator: "\n") {
+                        if let pct = ProcessRunner.parseProgressPercent(String(sub)) {
+                            cb(pct)
+                        }
+                    }
+                }
+            }
         )
 
         // Check for "no results" indicators

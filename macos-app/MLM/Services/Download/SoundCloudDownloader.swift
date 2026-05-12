@@ -41,7 +41,8 @@ final class SoundCloudDownloader: Sendable {
         trackURL: String,
         outputDir: URL,
         trackId: Int64,
-        title: String
+        title: String,
+        onProgress: ((Double) -> Void)? = nil
     ) async throws -> DownloadResult {
         guard let scdl = scdlPath else {
             return .notFound
@@ -76,7 +77,19 @@ final class SoundCloudDownloader: Sendable {
             source: "Download"
         )
 
-        let result = try await ProcessRunner.run(scdl, arguments: arguments)
+        let result = try await ProcessRunner.run(
+            scdl,
+            arguments: arguments,
+            onStderr: onProgress.map { cb in
+                { line in
+                    for sub in line.split(separator: "\n") {
+                        if let pct = ProcessRunner.parseProgressPercent(String(sub)) {
+                            cb(pct)
+                        }
+                    }
+                }
+            }
+        )
         if !result.stderr.isEmpty {
             // scdl is chatty on stderr even on success — debug-level on
             // success, warn with the FULL message on failure so Python

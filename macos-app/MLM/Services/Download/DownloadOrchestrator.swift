@@ -95,7 +95,8 @@ final class DownloadOrchestrator {
     /// Chain: SoundCloud (if URL) → DAB → YouTube
     func downloadBatch(
         _ requests: [DownloadRequest],
-        onProgress: ((Int, Int, String) -> Void)? = nil
+        onProgress: ((Int, Int, String) -> Void)? = nil,
+        onTrackProgress: ((Double) -> Void)? = nil
     ) async -> BatchResult {
         isRunning = true
         cancelRequested = false
@@ -129,9 +130,12 @@ final class DownloadOrchestrator {
                 continue
             }
 
+            // Reset per-track progress to 0 before the next attempt.
+            onTrackProgress?(0)
+
             // Try the fallback chain
             do {
-                if let path = try await downloadWithFallback(request) {
+                if let path = try await downloadWithFallback(request, onTrackProgress: onTrackProgress) {
                     // Transcode to AAC
                     let transcodeResult = try await transcodeService.transcode(
                         input: path,
@@ -211,7 +215,10 @@ final class DownloadOrchestrator {
     // MARK: - Fallback Chain
 
     /// Try downloading via SoundCloud → DAB → YouTube.
-    private func downloadWithFallback(_ request: DownloadRequest) async throws -> URL? {
+    private func downloadWithFallback(
+        _ request: DownloadRequest,
+        onTrackProgress: ((Double) -> Void)? = nil
+    ) async throws -> URL? {
         // 1. SoundCloud direct (if URL available and scdl installed)
         if request.soundcloudURL == nil {
             AppLogger.shared.log(
@@ -226,7 +233,8 @@ final class DownloadOrchestrator {
                     trackURL: scURL,
                     outputDir: aacDir,
                     trackId: request.trackId,
-                    title: request.title
+                    title: request.title,
+                    onProgress: onTrackProgress
                 )
                 if case .success(let path) = scResult {
                     AppLogger.shared.log("chain[SC]: success → \(path.lastPathComponent)", level: .info, source: "Download")
@@ -274,7 +282,8 @@ final class DownloadOrchestrator {
             AppLogger.shared.log("chain[YT]: searching \(request.query)", level: .info, source: "Download")
             let ytResult = try await youtubeDownloader.searchAndDownload(
                 query: request.query,
-                outputDir: flacDir
+                outputDir: flacDir,
+                onProgress: onTrackProgress
             )
             if case .success(let path) = ytResult {
                 AppLogger.shared.log("chain[YT]: success → \(path.lastPathComponent)", level: .info, source: "Download")

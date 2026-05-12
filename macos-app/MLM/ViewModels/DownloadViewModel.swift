@@ -10,7 +10,12 @@ final class DownloadViewModel {
 
     private(set) var isDownloading = false
     private(set) var currentTrack: String = ""
+    /// Combined batch progress (0...1): track index plus the running
+    /// progress reported by scdl/yt-dlp for the in-flight track.
     private(set) var progress: Double = 0
+    /// Progress of the currently downloading track (0...1) — driven by
+    /// scdl/yt-dlp's `[download] XX.X%` lines on stderr.
+    private(set) var currentTrackProgress: Double = 0
     private(set) var completedCount: Int = 0
     private(set) var failedCount: Int = 0
     private(set) var totalCount: Int = 0
@@ -94,19 +99,30 @@ final class DownloadViewModel {
             )
         }
 
-        let result = await orchestrator.downloadBatch(requests) { [weak self] index, total, current in
-            self?.currentTrack = current
-            self?.progress = Double(index) / Double(max(total, 1))
-            self?.completedCount = index
+        let result = await orchestrator.downloadBatch(
+            requests,
+            onProgress: { [weak self] index, total, current in
+                guard let self else { return }
+                self.currentTrack = current
+                self.currentTrackProgress = 0
+                self.progress = Double(index) / Double(max(total, 1))
+                self.completedCount = index
 
-            // Update queue item status
-            if index < (self?.queueItems.count ?? 0) {
-                self?.queueItems[index].status = .downloading
-                if index > 0 {
-                    self?.queueItems[index - 1].status = .completed
+                if index < self.queueItems.count {
+                    self.queueItems[index].status = .downloading
+                    if index > 0 {
+                        self.queueItems[index - 1].status = .completed
+                    }
                 }
+            },
+            onTrackProgress: { [weak self] fraction in
+                guard let self, self.totalCount > 0 else { return }
+                self.currentTrackProgress = fraction
+                // Combined: completed tracks plus the running fraction of
+                // the in-flight track, normalized by total batch size.
+                self.progress = (Double(self.completedCount) + fraction) / Double(self.totalCount)
             }
-        }
+        )
 
         lastResult = result
         completedCount = result.succeeded

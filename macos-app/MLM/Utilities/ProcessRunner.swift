@@ -44,7 +44,8 @@ final class ProcessRunner {
         _ executable: String,
         arguments: [String] = [],
         workingDirectory: URL? = nil,
-        onOutput: ((String) -> Void)? = nil
+        onOutput: ((String) -> Void)? = nil,
+        onStderr: ((String) -> Void)? = nil
     ) async throws -> ProcessResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
@@ -76,6 +77,19 @@ final class ProcessRunner {
             }
         }
 
+        // Stream stderr similarly — yt-dlp writes [download] progress here.
+        if let onStderr = onStderr {
+            stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+                let data = handle.availableData
+                if !data.isEmpty {
+                    stderrBuffer.append(data)
+                    if let line = String(data: data, encoding: .utf8) {
+                        onStderr(line)
+                    }
+                }
+            }
+        }
+
         try process.run()
 
         // If no streaming callback, collect all output at once
@@ -83,20 +97,37 @@ final class ProcessRunner {
             let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
             stdoutBuffer.append(data)
         }
-
-        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-        stderrBuffer.append(stderrData)
+        if onStderr == nil {
+            let data = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+            stderrBuffer.append(data)
+        }
 
         process.waitUntilExit()
 
-        // Clear readability handler
+        // Clear readability handlers
         stdoutPipe.fileHandleForReading.readabilityHandler = nil
+        stderrPipe.fileHandleForReading.readabilityHandler = nil
 
         return ProcessResult(
             exitCode: process.terminationStatus,
             stdout: String(data: stdoutBuffer.data, encoding: .utf8) ?? "",
             stderr: String(data: stderrBuffer.data, encoding: .utf8) ?? ""
         )
+    }
+
+    /// Parse a yt-dlp / scdl progress line for a percentage 0...1.
+    ///
+    /// yt-dlp emits lines like `[download]  93.1% of ~ 4.89MiB at ...`
+    /// to stderr; the regex grabs the first decimal percentage on the
+    /// line. Returns nil when the line carries no progress.
+    static func parseProgressPercent(_ line: String) -> Double? {
+        guard line.contains("[download]") else { return nil }
+        guard let percentRange = line.range(of: #"\d+(\.\d+)?%"#, options: .regularExpression) else {
+            return nil
+        }
+        let token = line[percentRange].dropLast()  // strip '%'
+        guard let value = Double(token) else { return nil }
+        return min(max(value / 100.0, 0), 1)
     }
 
     /// Build the environment dictionary passed to child processes.
