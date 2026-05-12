@@ -118,7 +118,7 @@ struct PlayerBar: View {
             Text(viewModel.hasTrack ? viewModel.formattedPosition : "—:——")
                 .font(.system(size: 10).monospacedDigit())
                 .foregroundStyle(.secondary)
-                .frame(width: 34, alignment: .trailing)
+                .frame(width: 44, alignment: .trailing)
 
             Slider(value: scrubberBinding, in: 0...1) { editing in
                 if editing {
@@ -134,7 +134,7 @@ struct PlayerBar: View {
             Text(viewModel.hasTrack ? viewModel.formattedDuration : "—:——")
                 .font(.system(size: 10).monospacedDigit())
                 .foregroundStyle(.secondary)
-                .frame(width: 34, alignment: .leading)
+                .frame(width: 44, alignment: .leading)
         }
         .layoutPriority(2)
     }
