@@ -129,8 +129,78 @@ final class AudioPlayer: @unchecked Sendable {
             self.duration = Double(file.length) / file.processingFormat.sampleRate
             self.seekFrameOffset = 0
         } catch {
+            // Some library files have a wrong extension (e.g. WAV PCM saved
+            // as `.mp3` — a common pattern in SoundCloud/leak rips). Apple's
+            // ExtAudioFile opens by extension first, so it hands the WAV
+            // bytes to the MP3 parser and bails with 'dta?'. Sniff the
+            // actual format from the first bytes and retry via a temporary
+            // symlink that carries the correct extension.
+            if let sniffedURL = try? Self.symlinkWithCorrectExtension(for: url),
+               sniffedURL != url,
+               let file = try? AVAudioFile(forReading: sniffedURL) {
+                self.audioFile = file
+                self.audioFormat = file.processingFormat
+                self.sampleRate = file.processingFormat.sampleRate
+                self.totalFrames = file.length
+                self.duration = Double(file.length) / file.processingFormat.sampleRate
+                self.seekFrameOffset = 0
+                return
+            }
             throw AudioPlayerError.cannotOpenFile(url.path, error.localizedDescription)
         }
+    }
+
+    /// Sniff the first bytes of `url` to detect the real audio container.
+    /// If the detected extension differs from the URL's extension, build a
+    /// temporary symlink in NSTemporaryDirectory() pointing at the original
+    /// file but renamed to the correct extension, and return its URL.
+    /// Otherwise returns the original `url` unchanged.
+    private static func symlinkWithCorrectExtension(for url: URL) throws -> URL {
+        let actualExt = url.pathExtension.lowercased()
+        guard let detected = sniffContainer(at: url), detected != actualExt else {
+            return url
+        }
+
+        let tempDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("mlm-format-fix", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+        // Stable name so multiple plays of the same file reuse the link.
+        let base = url.deletingPathExtension().lastPathComponent
+        let hash = String(url.path.hashValue, radix: 16)
+        let linkURL = tempDir.appendingPathComponent("\(base)-\(hash).\(detected)")
+
+        if !FileManager.default.fileExists(atPath: linkURL.path) {
+            try FileManager.default.createSymbolicLink(at: linkURL, withDestinationURL: url)
+        }
+        return linkURL
+    }
+
+    /// Identify the audio container from magic bytes. Returns the canonical
+    /// extension that Apple's Core Audio expects, or nil when we don't
+    /// recognize the format (let the original loader's error propagate).
+    private static func sniffContainer(at url: URL) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        let data = handle.readData(ofLength: 12)
+        guard data.count >= 4 else { return nil }
+        let b = [UInt8](data)
+        // RIFF....WAVE
+        if b[0] == 0x52, b[1] == 0x49, b[2] == 0x46, b[3] == 0x46 { return "wav" }
+        // fLaC
+        if b[0] == 0x66, b[1] == 0x4C, b[2] == 0x61, b[3] == 0x43 { return "flac" }
+        // OggS
+        if b[0] == 0x4F, b[1] == 0x67, b[2] == 0x67, b[3] == 0x53 { return "ogg" }
+        // ID3 (MP3 with tags)
+        if b[0] == 0x49, b[1] == 0x44, b[2] == 0x33 { return "mp3" }
+        // 0xFFFx — MP3 frame sync without ID3
+        if b[0] == 0xFF, (b[1] & 0xE0) == 0xE0 { return "mp3" }
+        // ....ftyp — m4a/mp4 container at offset 4
+        if data.count >= 8,
+           b[4] == 0x66, b[5] == 0x74, b[6] == 0x79, b[7] == 0x70 {
+            return "m4a"
+        }
+        return nil
     }
 
     // MARK: - Playback Controls
