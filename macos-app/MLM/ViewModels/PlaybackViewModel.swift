@@ -175,11 +175,29 @@ final class PlaybackViewModel {
             // Extract waveform data in background
             extractWaveform()
         } catch {
-            errorMessage = error.localizedDescription
+            let ext = url.pathExtension.lowercased()
+            let unsupportedHint = Self.unsupportedFormatHints[ext]
+            errorMessage = unsupportedHint ?? "Wiedergabe fehlgeschlagen: \(error.localizedDescription)"
             playbackState = .stopped
+            AppLogger.shared.log(
+                "Playback failed for \(url.lastPathComponent) (.\(ext)): \(error.localizedDescription)",
+                level: .warning,
+                source: "Playback"
+            )
             postStateDidChange()
         }
     }
+
+    /// Format-specific error blurbs when AVAudioFile rejects a file.
+    /// AVAudioEngine talks to Apple Core Audio, which cannot decode opus,
+    /// webm, or some exotic mp3 frame setups even though ffmpeg / yt-dlp
+    /// can produce them. Surface that explicitly so the user knows it's
+    /// not a missing file, it's a codec mismatch.
+    private static let unsupportedFormatHints: [String: String] = [
+        "opus": "Opus-Format wird vom macOS-Audio-Engine nicht unterstützt — neu downloaden mit AAC oder per Hand zu m4a transkodieren.",
+        "ogg": "Vorbis/Ogg wird vom macOS-Audio-Engine nicht unterstützt — bitte zu m4a transkodieren.",
+        "webm": "WebM-Container wird vom macOS-Audio-Engine nicht unterstützt — bitte zu m4a transkodieren."
+    ]
 
     // MARK: - Playback Controls
 
