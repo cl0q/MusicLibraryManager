@@ -8,6 +8,7 @@ struct TrackContextMenu: View {
     let tracks: [Track]
     let availablePlaylists: [Playlist]
     @Environment(\.container) private var container
+    @State private var showRemoveConfirmation = false
 
     /// Resolved selected tracks.
     private var selectedTracks: [Track] {
@@ -117,11 +118,79 @@ struct TrackContextMenu: View {
 
         Section {
             Button(role: .destructive) {
-                // Placeholder — remove from library
+                if hasLocalTracks {
+                    showRemoveConfirmation = true
+                } else {
+                    removeSelectedTracks()
+                }
             } label: {
                 Label("Remove from Library\(countSuffix)", systemImage: "trash")
             }
-            .disabled(true)
+            .disabled(selectedTracks.isEmpty)
+            .confirmationDialog(
+                removeConfirmationTitle,
+                isPresented: $showRemoveConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("In Papierkorb verschieben", role: .destructive) {
+                    removeSelectedTracks()
+                }
+                Button("Abbrechen", role: .cancel) {}
+            } message: {
+                Text("Dateien werden in den Papierkorb verschoben, DB-Einträge gelöscht. Remote-Verlinkungen werden ebenfalls entfernt.")
+            }
+        }
+    }
+
+    // MARK: - Removal
+
+    private var removeConfirmationTitle: String {
+        let count = selectedTracks.count
+        return count > 1
+            ? "\(count) Tracks aus der Library entfernen?"
+            : "Track aus der Library entfernen?"
+    }
+
+    /// Trash any local files, then drop the track rows from the DB.
+    ///
+    /// - Local tracks → `FileManager.trashItem(at:)` so the file lands in
+    ///   the user's Trash (recoverable) before the DB row is removed.
+    /// - Remote tracks → DB row only.
+    /// - Posts `.libraryDidDeleteTracks` so Library/Folders/Playlists views
+    ///   refresh.
+    private func removeSelectedTracks() {
+        guard let trackRepo = container.trackRepository else { return }
+        let snapshot = selectedTracks
+        let ids = snapshot.compactMap(\.id)
+        guard !ids.isEmpty else { return }
+
+        Task {
+            // Trash local files first; ignore failures (missing files are fine).
+            for track in snapshot where track.isLocal {
+                if let url = await resolveLocalURL(for: track) {
+                    var trashed: NSURL? = nil
+                    try? FileManager.default.trashItem(at: url, resultingItemURL: &trashed)
+                }
+            }
+            do {
+                try await trackRepo.delete(ids: ids)
+                AppLogger.shared.log(
+                    "Removed \(ids.count) track(s) from library",
+                    level: .info,
+                    source: "Library"
+                )
+                NotificationCenter.default.post(
+                    name: .libraryDidDeleteTracks,
+                    object: nil,
+                    userInfo: ["removedIds": ids]
+                )
+            } catch {
+                AppLogger.shared.log(
+                    "Failed to remove tracks: \(error)",
+                    level: .error,
+                    source: "Library"
+                )
+            }
         }
     }
 
