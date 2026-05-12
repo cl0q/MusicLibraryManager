@@ -108,19 +108,36 @@ final class PlaybackViewModel {
     func playTrack(_ track: Track) async {
         errorMessage = nil
 
-        guard let organizedPath = track.organizedPath else {
-            errorMessage = "Track has no local file"
-            return
+        let root = (try? await configRepository?.getLibraryRoot()) ?? nil
+
+        // Try organized_path first (relative to library_root). Many rows
+        // in this DB carry a stale organized_path because the Tauri side
+        // wrote where the file *should* live after the organize step
+        // even when that step never ran — so fall back to original_path
+        // (absolute) whenever organized doesn't actually exist on disk.
+        if let root, let organized = track.organizedPath, !organized.isEmpty {
+            let url = URL(fileURLWithPath: root).appendingPathComponent(organized)
+            if FileManager.default.fileExists(atPath: url.path) {
+                await playFile(at: url, track: track)
+                return
+            }
         }
 
-        // Resolve full path using library root
-        guard let root = try? await configRepository?.getLibraryRoot() else {
-            errorMessage = "No library root configured"
-            return
+        let raw = track.originalPath
+        if raw.hasPrefix("/") || raw.hasPrefix("~") {
+            let expanded = (raw as NSString).expandingTildeInPath
+            if FileManager.default.fileExists(atPath: expanded) {
+                await playFile(at: URL(fileURLWithPath: expanded), track: track)
+                return
+            }
         }
 
-        let fileURL = URL(fileURLWithPath: root).appendingPathComponent(organizedPath)
-        await playFile(at: fileURL, track: track)
+        errorMessage = "Audio-Datei nicht gefunden — weder organized_path noch original_path existieren auf der Disk."
+        AppLogger.shared.log(
+            "Playback failed: no resolvable file for track id=\(track.id ?? -1) — organized='\(track.organizedPath ?? "")' original='\(track.originalPath)'",
+            level: .warning,
+            source: "Playback"
+        )
     }
 
     /// Load a file URL and start playback.
