@@ -22,6 +22,11 @@ final class YouTubeDownloader: Sendable {
 
     /// Search YouTube and download the first matching audio result.
     ///
+    /// Uses `ytsearch5:` with a duration filter (30s–15min) so we don't
+    /// pull in podcasts, finance-tip vlogs, or advertisements that happen
+    /// to rank above the actual song. yt-dlp picks the first candidate
+    /// that passes the filter.
+    ///
     /// - Parameters:
     ///   - query: Search query (e.g., "Artist - Title")
     ///   - outputDir: Directory to save the downloaded file
@@ -36,9 +41,13 @@ final class YouTubeDownloader: Sendable {
         let result = try await ProcessRunner.run(
             ytdlp,
             arguments: [
-                "ytsearch1:\(query)",
+                "ytsearch5:\(query)",
                 "-f", "bestaudio",
                 "-x",
+                "--match-filter", "duration > 30 & duration < 900",
+                "--break-match-filters", "duration > 30 & duration < 900",
+                "--no-playlist",
+                "--max-downloads", "1",
                 "--print", "after_move:filepath",
                 "-o", outputTemplate
             ]
