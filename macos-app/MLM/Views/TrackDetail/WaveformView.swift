@@ -31,6 +31,9 @@ struct WaveformView: View {
     /// Gap between bars in points.
     private let barGap: CGFloat = 1
 
+    /// Stride per bar in scrolled mode: barWidth + barGap.
+    private let barStride: CGFloat = 3  // 2pt bar + 1pt gap
+
     var body: some View {
         GeometryReader { geometry in
             ZStack {
@@ -99,12 +102,10 @@ struct WaveformView: View {
                     height: bottomHeight
                 )
 
-                // Color based on whether this bar is in the "played" region
-                let barColor: Color = x < progressX
-                    ? .mlmAccent
-                    : .mlmEdge
-
-                let barOpacity: Double = x < progressX ? 1.0 : 0.5
+                // DJ-style amplitude color coding
+                let played = x < progressX
+                let barColor = WaveformHelpers.amplitudeColor(for: peak, played: played)
+                let barOpacity: Double = played ? 1.0 : 0.55
 
                 context.fill(
                     Path(roundedRect: topRect, cornerRadius: 0.5),

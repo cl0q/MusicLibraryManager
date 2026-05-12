@@ -383,13 +383,13 @@ final class PlaybackViewModel {
 
     /// Extract waveform data from the current file.
     private func extractWaveform() {
-        Task { @MainActor in
-            isLoadingWaveform = true
-        }
+        Task { @MainActor in isLoadingWaveform = true }
 
         Task.detached(priority: .utility) { [weak self] in
             guard let self else { return }
-            let data = (try? self.audioPlayer.extractWaveformData(binCount: 200)) ?? []
+            let duration = self.audioPlayer.duration
+            let binCount = WaveformHelpers.adaptiveBinCount(duration: duration)
+            let data = (try? self.audioPlayer.extractWaveformData(binCount: binCount)) ?? []
             await MainActor.run {
                 self.waveformData = data
                 self.isLoadingWaveform = false
