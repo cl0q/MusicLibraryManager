@@ -210,6 +210,12 @@ final class DownloadOrchestrator {
     /// Try downloading via SoundCloud → DAB → YouTube.
     private func downloadWithFallback(_ request: DownloadRequest) async throws -> URL? {
         // 1. SoundCloud direct (if URL available and scdl installed)
+        if request.soundcloudURL == nil {
+            AppLogger.shared.log(
+                "chain[SC]: no SoundCloud URL for track id=\(request.trackId) — \(request.artist) - \(request.title)",
+                level: .info, source: "Download"
+            )
+        }
         if let scURL = request.soundcloudURL {
             if soundCloudDownloader.isAvailable {
                 AppLogger.shared.log("chain[SC]: trying \(scURL)", level: .info, source: "Download")
