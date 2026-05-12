@@ -260,42 +260,63 @@ final class DownloadViewModel {
     /// 3. Otherwise, synthesize `https://api.soundcloud.com/tracks/<id>`
     ///    from the external_id — `scdl` accepts API URLs too.
     private func resolveSoundCloudURL(for track: Track) async -> (url: String?, userId: String?) {
-        guard let trackId = track.id, let sourceRepo = sourceRepository else {
-            // No DB lookup possible — only use originalPath if it's a real URL
-            return (soundCloudURLFromOriginalPath(track.originalPath), nil)
+        // 1. Real permalink URL stored on the Track itself — always preferred.
+        if let permalink = soundCloudURLFromOriginalPath(track.originalPath) {
+            return (permalink, nil)
         }
 
         var externalId: String?
         var userId: String?
-        do {
-            let trackSources = try await sourceRepo.fetchTrackSources(trackId: trackId)
-            for trackSource in trackSources {
-                // Find the source row to confirm it's SoundCloud
+
+        // 2. Walk track_sources for a SC linkage. We accept rows with
+        //    source_id=0 or unknown source rows too, because earlier sync
+        //    versions occasionally wrote orphaned entries — as long as the
+        //    external_id parses as a SoundCloud track ID, it's usable.
+        if let trackId = track.id, let sourceRepo = sourceRepository {
+            do {
+                let trackSources = try await sourceRepo.fetchTrackSources(trackId: trackId)
                 let allSources = try await sourceRepo.fetchAll()
-                if let src = allSources.first(where: { $0.id == trackSource.sourceId }),
-                   src.name == "soundcloud" {
-                    externalId = trackSource.externalId
-                    userId = src.userId
+                for ts in trackSources {
+                    let isExplicitSC = allSources
+                        .first(where: { $0.id == ts.sourceId })?.name == "soundcloud"
+                    let looksLikeSC = ts.externalId.hasPrefix("soundcloud:") ||
+                                      ts.externalId.allSatisfy(\.isNumber)
+                    guard isExplicitSC || looksLikeSC else { continue }
+
+                    externalId = ts.externalId
+                    if let src = allSources.first(where: { $0.id == ts.sourceId }) {
+                        userId = src.userId
+                    }
                     break
                 }
+            } catch {
+                AppLogger.shared.log(
+                    "Failed to resolve track_sources for track \(trackId): \(error)",
+                    level: .warning,
+                    source: "Download"
+                )
             }
-        } catch {
-            AppLogger.shared.log(
-                "Failed to resolve track_sources for track \(trackId): \(error)",
-                level: .warning,
-                source: "Download"
-            )
         }
 
-        // Prefer the permalink URL stored on the Track itself.
-        if let permalink = soundCloudURLFromOriginalPath(track.originalPath) {
-            return (permalink, userId)
+        // 3. Fall back to synthetic `soundcloud://<id>` stored in original_path.
+        if externalId == nil, let id = soundCloudIdFromSyntheticPath(track.originalPath) {
+            externalId = id
         }
-        // Fall back to the SoundCloud API URL via the external_id.
-        if let id = externalId, !id.isEmpty {
-            return ("https://api.soundcloud.com/tracks/\(id)", userId)
+
+        guard let raw = externalId, !raw.isEmpty else {
+            return (nil, userId)
         }
-        return (nil, userId)
+
+        // Normalize: legacy entries store `soundcloud:<id>`, fresh sync stores `<id>`.
+        // scdl needs the bare numeric ID in the URL.
+        let bare = raw.hasPrefix("soundcloud:")
+            ? String(raw.dropFirst("soundcloud:".count))
+            : raw
+        guard !bare.isEmpty, bare.allSatisfy(\.isNumber) else {
+            return (nil, userId)
+        }
+
+        return ("https://api.soundcloud.com/tracks/\(bare)", userId)
     }
 
     /// Returns `originalPath` only if it looks like a real SoundCloud
@@ -309,5 +330,15 @@ final class DownloadViewModel {
             return nil
         }
         return path
+    }
+
+    /// Extract the bare SoundCloud track ID from a synthetic
+    /// `soundcloud://<id>` original_path. Returns nil for anything else.
+    private func soundCloudIdFromSyntheticPath(_ path: String) -> String? {
+        let prefix = "soundcloud://"
+        guard path.hasPrefix(prefix) else { return nil }
+        let id = String(path.dropFirst(prefix.count))
+        guard !id.isEmpty, id.allSatisfy(\.isNumber) else { return nil }
+        return id
     }
 }
