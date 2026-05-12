@@ -48,11 +48,15 @@ struct LibraryView: View {
     // MARK: - Content
 
     private func libraryContent(_ viewModel: LibraryViewModel) -> some View {
-        LibraryTable(
-            viewModel: viewModel,
-            onDoubleClick: onTrackDoubleClick,
-            availablePlaylists: availablePlaylists
-        )
+        VStack(spacing: 0) {
+            libraryHeader(viewModel)
+            Divider()
+            LibraryTable(
+                viewModel: viewModel,
+                onDoubleClick: onTrackDoubleClick,
+                availablePlaylists: availablePlaylists
+            )
+        }
         .searchable(
             text: Bindable(viewModel).searchQuery,
             placement: .toolbar,
@@ -60,17 +64,6 @@ struct LibraryView: View {
         )
         .searchFocused($isSearchFocused)
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                Picker("Source", selection: Bindable(viewModel).selectedTab) {
-                    ForEach(LibraryTab.allCases) { tab in
-                        Text("\(tab.label) (\(countFor(tab, viewModel: viewModel)))")
-                            .tag(tab)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 280)
-            }
-
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     Task { await rescan() }
@@ -91,6 +84,32 @@ struct LibraryView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// Detail-pane header: title on the left, then the Local/Remote
+    /// segment control. The window toolbar's `.principal` slot stays
+    /// reserved for the PlayerBar — putting the tab control here keeps
+    /// it associated with the Library view rather than the global player.
+    private func libraryHeader(_ viewModel: LibraryViewModel) -> some View {
+        HStack(spacing: 12) {
+            Text("Library")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(.primary)
+
+            Picker("Source", selection: Bindable(viewModel).selectedTab) {
+                ForEach(LibraryTab.allCases) { tab in
+                    Text("\(tab.label) (\(countFor(tab, viewModel: viewModel)))")
+                        .tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 280)
+            .labelsHidden()
+
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
     }
 
     private func countFor(_ tab: LibraryTab, viewModel: LibraryViewModel) -> Int {
