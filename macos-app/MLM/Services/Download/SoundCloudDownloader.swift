@@ -148,16 +148,21 @@ final class SoundCloudDownloader: Sendable {
 /// returning `nil` is fine and just means the flag won't be added.
 enum SoundCloudCredentials {
 
-    /// Discover a SoundCloud client_id, in priority order:
-    /// 1. `SOUNDCLOUD_CLIENT_ID` environment variable / `.env` file
-    /// 2. `client_id = …` line in `~/.config/scdl/scdl.cfg`
-    /// 3. `nil` — let scdl auto-generate one (3.0.4+).
+    /// Discover the WEB-pool client_id for scdl.
+    ///
+    /// scdl talks to api-v2.soundcloud.com with a client_id from the pool
+    /// SoundCloud rotates onto its web player (scraped from soundcloud.com
+    /// or pulled from `~/.config/scdl/scdl.cfg`). This is NOT the same as
+    /// the OAuth 2.1 app client_id we register for the in-app login flow —
+    /// passing the OAuth client_id to scdl makes api-v2 return 403, which
+    /// scdl 3.0.4's is_client_id_valid() unhelpfully re-raises as a fatal
+    /// Python traceback.
+    ///
+    /// So we ignore `SOUNDCLOUD_CLIENT_ID` from `.env` entirely and only
+    /// read scdl.cfg. Nil → let scdl auto-generate via soundcloud.com
+    /// scraping (3.0.4+).
     static func clientId() -> String? {
-        if let envValue = CredentialsLoader.credential(key: "SOUNDCLOUD_CLIENT_ID"),
-           !envValue.isEmpty {
-            return envValue
-        }
-        return scdlConfigValue(key: "client_id")
+        scdlConfigValue(key: "client_id")
     }
 
     /// Discover a SoundCloud `auth_token` for scdl.
