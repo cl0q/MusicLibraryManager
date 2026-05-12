@@ -49,6 +49,7 @@ final class ProcessRunner {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
+        process.environment = enrichedEnvironment()
 
         if let wd = workingDirectory {
             process.currentDirectoryURL = wd
@@ -96,6 +97,35 @@ final class ProcessRunner {
             stdout: String(data: stdoutBuffer.data, encoding: .utf8) ?? "",
             stderr: String(data: stderrBuffer.data, encoding: .utf8) ?? ""
         )
+    }
+
+    /// Build the environment dictionary passed to child processes.
+    ///
+    /// macOS apps launched via `open` inherit a stripped PATH from launchd
+    /// (`/usr/bin:/bin:/usr/sbin:/sbin`). Subprocesses like scdl that shell
+    /// out to yt-dlp / ffmpeg for client_id resolution would then fail
+    /// silently and fall back to internal defaults that frequently return
+    /// HTTP 403 from SoundCloud.
+    ///
+    /// We start from the parent process environment and prepend the bin
+    /// directories we already use in findExecutable so child tools can
+    /// locate each other on the same machine where the user installed them.
+    private static func enrichedEnvironment() -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        let home = NSHomeDirectory()
+        let extraPaths = [
+            "\(home)/.local/bin",
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/opt/local/bin",
+        ]
+        let existing = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        let existingDirs = Set(existing.split(separator: ":").map(String.init))
+        let prepend = extraPaths.filter { !existingDirs.contains($0) }
+        if !prepend.isEmpty {
+            env["PATH"] = (prepend + [existing]).joined(separator: ":")
+        }
+        return env
     }
 
     /// Find an executable in common locations.
