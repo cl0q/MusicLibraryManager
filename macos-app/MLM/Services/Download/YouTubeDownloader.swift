@@ -48,6 +48,14 @@ final class YouTubeDownloader: Sendable {
                 "ytsearch5:\(query)",
                 "-f", "bestaudio",
                 "-x",
+                // Force AAC/m4a output regardless of source codec. AVAudioEngine
+                // (the macOS playback path) cannot decode opus/vorbis, which is
+                // what yt-dlp picks by default for many YouTube streams — the
+                // file would land in the library and refuse to play with
+                // 'Cannot open audio file'. yt-dlp invokes ffmpeg internally
+                // for the conversion.
+                "--audio-format", "m4a",
+                "--audio-quality", "0",
                 // Skip non-song results (podcasts, ads, vlogs) but keep
                 // scanning the rest of the 5-hit batch. Do NOT use
                 // --break-match-filters — that aborts the scan on first
