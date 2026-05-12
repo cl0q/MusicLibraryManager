@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-05-07)
 
 Phase: 35 (waveform-verbesserungen-bug-fix-lange-lieder-dj-farbkodierun) — EXECUTING
 Plan: 1 of 2
-Next: Phase 6 (Playlists)
+Next: Phase 36 (Playlists v2.0) — analog zu macos-app/PLAN.md §"Phase 6 — Playlists"
 Status: Executing Phase 35
 Last activity: 2026-05-12 -- Phase 35 execution started
 

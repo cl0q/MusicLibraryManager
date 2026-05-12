@@ -630,7 +630,7 @@ Plans:
 **Goal:** Drei gezielte Verbesserungen an WaveformView: adaptive Bin-Berechnung fuer lange Tracks (2 bins/sec, Min 200, Max 14.400), DJ-Farbkodierung der Wellenformbalken per Amplitude (Blau → Cyan → Gelb → Orange-Rot), horizontales Scrollen per 2-Finger-Trackpad mit korrekter Seek-Koordinatenberechnung nach dem Scrollen.
 **Depends on:** Phase 5 (v2.0 Playback-Pipeline)
 **Requirements**: WF-01, WF-02, WF-03, WF-04
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 
 **Success criteria** (what must be TRUE):
 1. extractWaveform() benutzt 2 bins/sec (floor 200, cap 14.400) statt hardcoded 200
@@ -642,7 +642,35 @@ Plans:
 
 Plans:
 - [x] 35-01-PLAN.md — WaveformHelpers-Modul + adaptive Bins + DJ-Farben + PlayerBar-Fix
-- [ ] 35-02-PLAN.md — ScrollView-Wrap + scroll-korrigiertes Seek (Wave 2, depends on 35-01)
+- [x] 35-02-PLAN.md — ScrollView-Wrap + scroll-korrigiertes Seek (Wave 2, depends on 35-01)
+
+---
+
+
+### Phase 36: Playlists (v2.0 macOS Native)
+
+**Goal:** SwiftUI-Playlist-Surface — `PlaylistsView` (Grid aus Playlist-Cards), `PlaylistDetailView` (sortierbare Track-Liste), Drag-and-Drop-Reorder mit Fractional Positioning, Create/Delete/Pin, Add/Remove-Tracks via Context-Menü-Integration aus Phase 3, Playlist-Import (M3U, Spotify JSON). Entspricht Phase 6 in `macos-app/PLAN.md`.
+**Depends on:** Phase 3 (v2.0 Library Browser — Context-Menü), Phase 1 (v2.0 Data Layer — `PlaylistRepository`)
+**Milestone:** v2.0 macOS Native
+**Requirements**: PLV2-01..PLV2-07 (Playlist-Surface) — to be locked in CONTEXT/SPEC
+**Plans:** TBD (run `/gsd-plan-phase 36`)
+
+**Anchor refs:**
+- `macos-app/PLAN.md` §"Phase 6 — Playlists" — Scope definiert
+- `macos-app/MLM/Data/Repositories/PlaylistRepository.swift` — Persistenz-Layer (Phase 1)
+- `macos-app/MLM/Views/Library/TrackContextMenu.swift:1` — "Add to Playlist" Stub (Phase 3)
+- v1.0 Phase 4 `04-playlist-management/04-CONTEXT.md` — Fractional-Indexing-Entscheidungen aus Tauri-Version, als Pattern wiederverwendbar
+
+**Success criteria** (what must be TRUE):
+1. PlaylistsView zeigt Grid aus Cards (Cover/Titel/Trackzahl), Create-Button funktioniert
+2. PlaylistDetailView listet Tracks mit Drag-Reorder (Fractional Positioning, kein O(N)-Renumbering)
+3. Create/Delete/Pin funktionieren mit Confirmation-UX wo nötig (Solar/native macOS-Look)
+4. TrackContextMenu „Add to Playlist…" ist live verdrahtet (ersetzt Phase-3-Placeholder)
+5. M3U-Import + Spotify-JSON-Import landen als native Playlists in der DB
+6. swift test grün (PlaylistRepositoryTests + neue View-Tests wo sinnvoll)
+
+Plans:
+- [ ] TBD (run `/gsd-plan-phase 36` to break down)
 
 ---
 
@@ -657,4 +685,5 @@ Plans:
 | 32. Bulk-Add to Playlist | v1.4 | 0/TBD | Not started | - |
 | 33. Polish & E2E | v1.4 | 0/TBD | Not started | - |
 | 34. Rework Download Orchestrator | v1.4 | 0/TBD | Not started | - |
-| 35. Waveform-Verbesserungen | v2.0 | 1/2 | In Progress|  |
+| 35. Waveform-Verbesserungen | v2.0 | 2/2 | Complete   | 2026-05-12 |
+| 36. Playlists (v2.0) | v2.0 | 0/TBD | Not started | - |
