@@ -25,6 +25,7 @@ _archive/
 code_map.md
 
 # Rust build output
+/target/
 src-tauri/target/
 src-tauri/gen/
 
