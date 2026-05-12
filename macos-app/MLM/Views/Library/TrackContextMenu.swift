@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Context menu for right-clicking track rows in the library table.
 ///
@@ -8,7 +9,6 @@ struct TrackContextMenu: View {
     let tracks: [Track]
     let availablePlaylists: [Playlist]
     @Environment(\.container) private var container
-    @State private var showRemoveConfirmation = false
 
     /// Resolved selected tracks.
     private var selectedTracks: [Track] {
@@ -118,37 +118,56 @@ struct TrackContextMenu: View {
 
         Section {
             Button(role: .destructive) {
-                if hasLocalTracks {
-                    showRemoveConfirmation = true
-                } else {
-                    removeSelectedTracks()
-                }
+                handleRemoveTapped()
             } label: {
                 Label("Remove from Library\(countSuffix)", systemImage: "trash")
             }
             .disabled(selectedTracks.isEmpty)
-            .confirmationDialog(
-                removeConfirmationTitle,
-                isPresented: $showRemoveConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("In Papierkorb verschieben", role: .destructive) {
-                    removeSelectedTracks()
-                }
-                Button("Abbrechen", role: .cancel) {}
-            } message: {
-                Text("Dateien werden in den Papierkorb verschoben, DB-Einträge gelöscht. Remote-Verlinkungen werden ebenfalls entfernt.")
-            }
         }
     }
 
     // MARK: - Removal
 
-    private var removeConfirmationTitle: String {
-        let count = selectedTracks.count
-        return count > 1
+    /// Capture the selection (the context menu is rebuilt every right-
+    /// click so `selectedTracks` is only valid synchronously) and decide
+    /// whether to prompt before proceeding.
+    private func handleRemoveTapped() {
+        let snapshot = selectedTracks
+        let ids = snapshot.compactMap(\.id)
+        guard !ids.isEmpty else { return }
+        let needsConfirm = snapshot.contains { $0.isLocal }
+        if needsConfirm {
+            // Defer to the next runloop tick so the context menu has
+            // finished dismissing before the alert tries to attach itself
+            // to the key window — otherwise the modal can land behind the
+            // menu's dimmed layer and feel like nothing happened.
+            DispatchQueue.main.async {
+                if confirmRemovalAlert(count: snapshot.count) {
+                    performRemoval(snapshot: snapshot, ids: ids)
+                }
+            }
+        } else {
+            performRemoval(snapshot: snapshot, ids: ids)
+        }
+    }
+
+    /// Native NSAlert is synchronous and survives the context menu
+    /// teardown that breaks SwiftUI's `.confirmationDialog` here.
+    private func confirmRemovalAlert(count: Int) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = count > 1
             ? "\(count) Tracks aus der Library entfernen?"
             : "Track aus der Library entfernen?"
+        alert.informativeText = "Lokale Dateien werden in den Papierkorb verschoben. Remote-Verlinkungen werden gelöscht. Diese Aktion lässt sich über den Papierkorb wiederherstellen."
+        alert.alertStyle = .warning
+        let trash = alert.addButton(withTitle: "In Papierkorb verschieben")
+        trash.hasDestructiveAction = true
+        alert.addButton(withTitle: "Abbrechen")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    private func performRemoval(snapshot: [Track], ids: [Int64]) {
+        removeSelectedTracks(snapshot: snapshot, ids: ids)
     }
 
     /// Trash any local files, then drop the track rows from the DB.
@@ -158,12 +177,8 @@ struct TrackContextMenu: View {
     /// - Remote tracks → DB row only.
     /// - Posts `.libraryDidDeleteTracks` so Library/Folders/Playlists views
     ///   refresh.
-    private func removeSelectedTracks() {
+    private func removeSelectedTracks(snapshot: [Track], ids: [Int64]) {
         guard let trackRepo = container.trackRepository else { return }
-        let snapshot = selectedTracks
-        let ids = snapshot.compactMap(\.id)
-        guard !ids.isEmpty else { return }
-
         Task {
             // Trash local files first; ignore failures (missing files are fine).
             for track in snapshot where track.isLocal {
