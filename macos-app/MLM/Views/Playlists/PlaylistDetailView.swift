@@ -234,6 +234,11 @@ struct PlaylistDetailView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(Color.mlmBase)
+        // Publish the highlighted row for the global Space shortcut.
+        .focusedSceneValue(\.selectedTrack,
+            viewModel.selectedTrackIDs.first.flatMap { id in
+                viewModel.displayedTracks.first { $0.id == id }
+            })
     }
 
     // MARK: - Track Row

@@ -134,6 +134,9 @@ struct LibraryTable: View {
                 onDoubleClick?(track)
             }
         }
+        // Publish the highlighted row so the global Space shortcut in
+        // MLMApp can preview it. Read by @FocusedValue(\.selectedTrack).
+        .focusedSceneValue(\.selectedTrack, firstSelectedTrack)
         .onChange(of: sortOrder) { _, newOrder in
             guard let first = newOrder.first else { return }
             let col: SortColumn
@@ -153,6 +156,13 @@ struct LibraryTable: View {
             let asc = first.order == .forward
             viewModel.sortDescriptor = TrackSortDescriptor(column: col, ascending: asc)
         }
+    }
+
+    /// First currently-selected track, used by the focused-value system to
+    /// drive spacebar preview. Returns nil when the table has no selection.
+    private var firstSelectedTrack: Track? {
+        guard let id = viewModel.selectedTrackIDs.first else { return nil }
+        return viewModel.displayedTracks.first { $0.id == id }
     }
 
     // MARK: - States
