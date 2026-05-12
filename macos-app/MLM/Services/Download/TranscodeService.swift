@@ -102,6 +102,18 @@ final class TranscodeService: Sendable {
         }
     }
 
+    /// Read the actual bitrate of a file in kbps via ffprobe. Returns nil
+    /// when ffprobe is unavailable or the file has no decodable audio
+    /// stream. Used by the orchestrator to populate the `bitrate` column
+    /// after a `.skipped` transcode (lossy source preserved as-is, so the
+    /// final bitrate equals the source bitrate, not the 248k target).
+    func detectBitrateKbps(_ file: URL) async -> Int? {
+        guard let ffmpeg = ffmpegPath else { return nil }
+        let info = await detectFormat(input: file, ffmpeg: ffmpeg)
+        guard info.bitrate > 0 else { return nil }
+        return info.bitrate / 1000
+    }
+
     // MARK: - Private
 
     private enum FFmpegResult {

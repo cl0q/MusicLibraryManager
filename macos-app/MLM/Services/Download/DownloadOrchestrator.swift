@@ -147,19 +147,22 @@ final class DownloadOrchestrator {
                         )
                         result.succeeded += 1
                     case .skipped:
-                        // Source was already lossy and below threshold — use as-is
+                        // Source was already lossy and below threshold — use as-is.
+                        // Probe the file so the DB row reflects the actual quality.
+                        let kbps = await transcodeService.detectBitrateKbps(path)
                         result.downloadedPaths[request.trackId] = path.path
                         result.downloadedMetadata[request.trackId] = DownloadedFileInfo(
                             format: path.pathExtension.lowercased(),
-                            bitrate: nil  // Unknown — keep DB bitrate untouched
+                            bitrate: kbps
                         )
                         result.succeeded += 1
                     case .failed(let error):
-                        // Download succeeded but transcode failed
+                        // Download succeeded but transcode failed — keep the source file.
+                        let kbps = await transcodeService.detectBitrateKbps(path)
                         result.downloadedPaths[request.trackId] = path.path
                         result.downloadedMetadata[request.trackId] = DownloadedFileInfo(
                             format: path.pathExtension.lowercased(),
-                            bitrate: nil
+                            bitrate: kbps
                         )
                         result.succeeded += 1
                         AppLogger.shared.log("Transcode failed for \(request.title): \(error)", level: .warning)
