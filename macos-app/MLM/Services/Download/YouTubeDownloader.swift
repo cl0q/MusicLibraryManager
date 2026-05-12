@@ -44,8 +44,11 @@ final class YouTubeDownloader: Sendable {
                 "ytsearch5:\(query)",
                 "-f", "bestaudio",
                 "-x",
-                "--match-filter", "duration > 30 & duration < 900",
-                "--break-match-filters", "duration > 30 & duration < 900",
+                // Skip non-song results (podcasts, ads, vlogs) but keep
+                // scanning the rest of the 5-hit batch. Do NOT use
+                // --break-match-filters — that aborts the scan on first
+                // miss and defeats the purpose of ytsearch5.
+                "--match-filter", "duration >= 30 & duration <= 1200",
                 "--no-playlist",
                 "--max-downloads", "1",
                 "--print", "after_move:filepath",
