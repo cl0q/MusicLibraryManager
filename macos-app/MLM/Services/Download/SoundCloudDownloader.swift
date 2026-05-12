@@ -78,13 +78,22 @@ final class SoundCloudDownloader: Sendable {
 
         let result = try await ProcessRunner.run(scdl, arguments: arguments)
         if !result.stderr.isEmpty {
-            // scdl is chatty on stderr even on success — log at debug so
-            // tail-ing the log can show what's happening on a failed run.
-            AppLogger.shared.log(
-                "scdl stderr: \(result.stderr.prefix(500))",
-                level: .debug,
-                source: "Download"
-            )
+            // scdl is chatty on stderr even on success — debug-level on
+            // success, warn with the FULL message on failure so Python
+            // tracebacks aren't truncated mid-stack when something breaks.
+            if result.isSuccess {
+                AppLogger.shared.log(
+                    "scdl stderr: \(result.stderr.prefix(500))",
+                    level: .debug,
+                    source: "Download"
+                )
+            } else {
+                AppLogger.shared.log(
+                    "scdl exit=\(result.exitCode) stderr:\n\(result.stderr)",
+                    level: .warning,
+                    source: "Download"
+                )
+            }
         }
 
         // Check stderr for "not found" indicators
@@ -95,9 +104,6 @@ final class SoundCloudDownloader: Sendable {
 
         // Find the most recently created audio file in temp dir
         guard let downloadedFile = findMostRecentAudioFile(in: tmpDir) else {
-            if !result.isSuccess {
-                return .notFound
-            }
             return .notFound
         }
 
@@ -154,29 +160,18 @@ enum SoundCloudCredentials {
         return scdlConfigValue(key: "client_id")
     }
 
-    /// Discover a SoundCloud `auth_token` (i.e. the value the SoundCloud
-    /// website calls `oauth_token`). Order:
-    /// 1. `auth_token = …` line in `~/.config/scdl/scdl.cfg` — this is
-    ///    what scdl itself uses for SoundCloud Go+ authentication.
-    /// 2. Keychain credentials for the SoundCloud OAuth service (the
-    ///    access token captured during in-app OAuth).
-    /// 3. `nil` — anonymous download (no Go+ 248kbps AAC).
+    /// Discover a SoundCloud `auth_token` for scdl.
+    ///
+    /// scdl's `--auth-token` is the browser-session `oauth_token` — NOT the
+    /// API access_token returned by the public OAuth 2.1 PKCE flow. They
+    /// look similar but scdl validates them against a different endpoint
+    /// and will crash on startup with a Python traceback if the wrong one
+    /// is supplied. We therefore ONLY read it from `~/.config/scdl/scdl.cfg`
+    /// (the format scdl itself accepts) and skip the Keychain entirely.
+    /// Returns nil → scdl downloads anonymously (no Go+ 248kbps AAC).
     static func authToken() -> String? {
         if let cfg = scdlConfigValue(key: "auth_token"), !cfg.isEmpty {
             return cfg
-        }
-        do {
-            let storage = TokenStorage()
-            if let creds = try storage.getCredentials(service: .soundcloud),
-               !creds.accessToken.isEmpty {
-                return creds.accessToken
-            }
-        } catch {
-            AppLogger.shared.log(
-                "Failed to read SoundCloud Keychain credentials: \(error)",
-                level: .warning,
-                source: "Download"
-            )
         }
         return nil
     }
