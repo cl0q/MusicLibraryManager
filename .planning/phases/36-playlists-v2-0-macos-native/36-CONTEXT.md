@@ -47,8 +47,8 @@ Entspricht Phase 6 in `macos-app/PLAN.md` ("Playlists"). Spotify-JSON-Import wir
 
 ### Aus Scope ausgeschlossen (für Phase 36)
 
-- **D-12:** Spotify-JSON-Import wird zu macos-app Phase 8 (Spotify-Integration) verschoben — auch wenn Quellen wie Soundiiz/TuneMyMusic JSON ohne Spotify-Auth liefern. Phase 36 ist M3U-only.
-- **D-13:** Bulk-Add via separate Batch-Bar wird nicht hinzugefügt. `TrackContextMenu` Add-to-Playlist deckt Multi-Selection bereits ab (s. `TrackContextMenu.swift:62-78`).
+- **D-12 [informational]:** Spotify-JSON-Import wird zu macos-app Phase 8 (Spotify-Integration) verschoben — auch wenn Quellen wie Soundiiz/TuneMyMusic JSON ohne Spotify-Auth liefern. Phase 36 ist M3U-only.
+- **D-13 [informational]:** Bulk-Add via separate Batch-Bar wird nicht hinzugefügt. `TrackContextMenu` Add-to-Playlist deckt Multi-Selection bereits ab (s. `TrackContextMenu.swift:62-78`).
 
 ### Claude's Discretion
 
