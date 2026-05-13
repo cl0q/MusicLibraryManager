@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: macOS Native
 status: executing
 stopped_at: Phase 36 context gathered
-last_updated: "2026-05-13T07:36:06.404Z"
-last_activity: 2026-05-13 -- Phase 36 planning complete
+last_updated: "2026-05-13T07:44:36.650Z"
+last_activity: 2026-05-13
 progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 4
-  completed_plans: 0
-  percent: 0
+  completed_plans: 1
+  percent: 25
 ---
 
 # Project State
@@ -21,18 +21,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-07)
 
 **Core value:** Like a song anywhere and it reliably ends up in your owned library and on your devices in high quality — native macOS experience
-**Current focus:** Phase 35 — waveform-verbesserungen-bug-fix-lange-lieder-dj-farbkodierun
+**Current focus:** Phase 36 — Playlists (v2.0 macOS Native)
 **Source of truth:** `macos-app/PLAN.md` + `.planning/ROADMAP.md` v2.0 section
 **v1.4 source of truth (paused):** `.planning/REQUIREMENTS.md` v1.4 section + `.planning/ROADMAP.md` v1.4 section
 **v1.3 source of truth (paused):** `.planning/REQUIREMENTS.md` v1.3 section + `.planning/ROADMAP.md` v1.3 section
 
 ## Current Position
 
-Phase: 36
-Plan: Not started
+Phase: 36 (Playlists (v2.0 macOS Native)) — EXECUTING
+Plan: 2 of 4
 Next: Phase 36 (Playlists v2.0) — analog zu macos-app/PLAN.md §"Phase 6 — Playlists"
 Status: Ready to execute
-Last activity: 2026-05-13 -- Phase 36 planning complete
+Last activity: 2026-05-13
 
 ## Phase 5 Summary (v2.0)
 
@@ -217,6 +217,9 @@ Recent decisions affecting current work:
 - [Phase 12.1-01]: validate_organized_path is the single write-boundary guard for organized_path — called at entry of update_download_status
 - [Phase 12.1]: reveal_in_file_manager now owns path resolution — takes relative organized_path, resolves via library root (not frontend responsibility)
 - [Phase 12.1]: COALESCE(organized_path,'') in get_remote_tracks_only avoids NULL→String type failure in rusqlite without changing Track.organized_path to Option<String>
+- [Phase ?]: Phase 36-01: Single v20 migration registration in buildMigrator() covers both production + inMemory migrators (shared static factory)
+- [Phase ?]: Phase 36-01: PlaylistRepository.database typed as any DatabaseWriter (was DatabasePool) — enables in-memory tests, matches TrackRepository pattern
+- [Phase ?]: Phase 36-01: moveTrack notification carries userInfo:[playlistId:Int64] for targeted cover regen in Plan 02
 
 ### v1.3 Scope Decisions (locked, paused state)
 
@@ -280,9 +283,9 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-12T21:42:13.431Z
+Last session: 2026-05-13T07:44:24.226Z
 Stopped at: Phase 36 context gathered
-Resume file: .planning/phases/36-playlists-v2-0-macos-native/36-CONTEXT.md
+Resume file: None
 
 ---
 *Last updated: 2026-05-04 — v1.4 Daily Driver roadmap created (Phases 28-33); v1.3 Yeat Expansion remains paused*
