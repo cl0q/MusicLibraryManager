@@ -70,6 +70,15 @@ struct DatabaseTests {
         }
     }
 
+    @Test func playlistsTableHasCoverIsCustomColumn() async throws {
+        let db = try DatabaseManager.inMemory()
+        try await db.read { db in
+            let columns = try db.columns(in: "playlists").map(\.name)
+            #expect(columns.contains("cover_is_custom"),
+                    "Migration v20 must add cover_is_custom column to playlists")
+        }
+    }
+
     @Test func albumsTableHasAllColumns() async throws {
         let db = try DatabaseManager.inMemory()
         try await db.read { db in
