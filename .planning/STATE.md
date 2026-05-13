@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: macOS Native
 status: executing
-stopped_at: Completed Phase 36 Plan 02 (cover-image pipeline)
-last_updated: "2026-05-13T07:53:00Z"
+stopped_at: Completed Phase 36 Plan 04 (sidebar pinned-playlists DisclosureGroup + direct-to-detail routing + D-11 inline rename)
+last_updated: "2026-05-13T08:00:36.825Z"
 last_activity: 2026-05-13
 progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 4
-  completed_plans: 2
-  percent: 50
+  completed_plans: 3
+  percent: 75
 ---
 
 # Project State
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-05-07)
 ## Current Position
 
 Phase: 36 (Playlists (v2.0 macOS Native)) — EXECUTING
-Plan: 3 of 4
-Next: Phase 36 Plan 03 (UI surfaces — PlaylistCard, Context-Menu integration)
-Status: Plan 02 complete (cover-image pipeline services + DI)
+Plan: 4 of 4
+Next: Phase 36 Plan 03 (UI surfaces — PlaylistCard, Context-Menu integration) — still outstanding
+Status: Plans 01/02/04 shipped; Plan 03 (PlaylistCard + Context-Menu) is the remaining wave-2 item
 Last activity: 2026-05-13
 
 ## Phase 5 Summary (v2.0)
@@ -224,6 +224,10 @@ Recent decisions affecting current work:
 - [Phase ?]: Phase 36-02: PlaylistCoverService is @MainActor @Observable; deinit reads observerToken via MainActor.assumeIsolated (token is stable post-init) and DependencyContainer wraps construction in `await MainActor.run { ... }`
 - [Phase ?]: Phase 36-02: PlaylistCoverServiceTests carries .serialized — covers dir is a hardcoded `~/Library/Application Support/com.musiclibrary.app/playlist-covers/<id>.png`, parallel tests with in-memory DBs (ids start at 1) race on the same filesystem path
 - [Phase ?]: Phase 36-02: Auto1 branch widened to include "nonNilCount == 1" — playlist with 4 tracks but only 1 with art now renders as single cover instead of a mosaic with 3 gradient gaps (UI-SPEC fidelity)
+- [Phase ?]: Phase 36-04: SidebarSection enum dropped String/CaseIterable — added .playlistDetail(Int64) associated-value case + static topLevelCases array; all allCases callers (SidebarView + MLMApp.Navigate) swapped to topLevelCases; keyboardShortcut now KeyEquivalent?
+- [Phase ?]: Phase 36-04: PinnedPlaylistsDisclosure is self-contained — owns loadPinned + .playlistDidChange observer; SidebarView passes only onUnpin/onDelete/onRevealInGrid callbacks; rename is internal (TextField + @FocusState + onSubmit → repo.rename) to keep edit-state where the row is rendered (D-11)
+- [Phase ?]: Phase 36-04: PlaylistDetailViewLoader re-fetches on every .task(id: playlistId) change — one extra row-read per sidebar click in exchange for never showing stale Playlist after rename/cover-regen
+- [Phase ?]: Phase 36-04: onUnpin/onDelete callbacks explicitly post .playlistDidChange because repo.togglePin and repo.delete do NOT post the notification themselves — without these explicit posts the disclosure would not refresh after unpin/delete
 
 ### v1.3 Scope Decisions (locked, paused state)
 
@@ -287,7 +291,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-13T07:53:00Z
+Last session: 2026-05-13T08:00:14.215Z
 Stopped at: Completed Phase 36 Plan 02 (cover-image pipeline)
 Resume file: None
 
