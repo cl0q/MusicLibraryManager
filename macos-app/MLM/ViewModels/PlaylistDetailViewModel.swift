@@ -174,6 +174,16 @@ final class PlaylistDetailViewModel {
                 newPosition: newPosition
             )
             await loadTracks()
+
+            // Phase 36 / D-04 Re-Generate-Trigger: cover must regenerate
+            // when reordering touches the top-4 tracks. The userInfo payload
+            // lets Plan 02's PlaylistCoverService regenerate just one playlist
+            // instead of refreshing all on every reorder.
+            NotificationCenter.default.post(
+                name: .playlistDidChange,
+                object: nil,
+                userInfo: ["playlistId": playlistId]
+            )
         } catch {
             errorMessage = "Failed to reorder: \(error.localizedDescription)"
         }
