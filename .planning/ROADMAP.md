@@ -653,7 +653,7 @@ Plans:
 **Depends on:** Phase 3 (v2.0 Library Browser — Context-Menü), Phase 1 (v2.0 Data Layer — `PlaylistRepository`)
 **Milestone:** v2.0 macOS Native
 **Requirements**: PLV2-01..PLV2-07 (Playlist-Surface) — to be locked in CONTEXT/SPEC
-**Plans:** 3/4 plans executed
+**Plans:** 4/4 plans executed — PHASE COMPLETE (2026-05-13)
 
 **Anchor refs:**
 - `macos-app/PLAN.md` §"Phase 6 — Playlists" — Scope definiert
@@ -672,7 +672,7 @@ Plans:
 Plans:
 - [x] 36-01-PLAN.md — Schema v20 (cover_is_custom) + Model + Repository setter + moveTrack notification fix
 - [x] 36-02-PLAN.md — Cover services (ArtworkExtractor + GradientPalette + MosaicCompositor + PlaylistCoverService) + DI wiring + tests
-- [ ] 36-03-PLAN.md — PlaylistCard cover render + drop-target + Reset menu; PlaylistViewModel 8-pin pre-check + hint banner in PlaylistsView
+- [x] 36-03-PLAN.md — PlaylistCard cover render + drop-target + Reset menu; PlaylistViewModel 8-pin pre-check + hint banner in PlaylistsView
 - [x] 36-04-PLAN.md — Sidebar PinnedPlaylistsDisclosure + ContentView .playlistDetail(Int64) routing + PlaylistDetailViewLoader
 
 ---

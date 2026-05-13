@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: macOS Native
-status: executing
-stopped_at: Completed Phase 36 Plan 04 (sidebar pinned-playlists DisclosureGroup + direct-to-detail routing + D-11 inline rename)
-last_updated: "2026-05-13T08:00:36.825Z"
+status: completed
+stopped_at: Completed Phase 36 Plan 03 (PlaylistCard cover UI + 8-pin banner + drop-rejection banner) — Phase 36 fully shipped (4/4 plans)
+last_updated: "2026-05-13T08:08:00.000Z"
 last_activity: 2026-05-13
 progress:
   total_phases: 1
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 4
-  completed_plans: 3
-  percent: 75
+  completed_plans: 4
+  percent: 100
 ---
 
 # Project State
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-05-07)
 
 ## Current Position
 
-Phase: 36 (Playlists (v2.0 macOS Native)) — EXECUTING
+Phase: 36 (Playlists (v2.0 macOS Native)) — COMPLETED (4/4 plans)
 Plan: 4 of 4
-Next: Phase 36 Plan 03 (UI surfaces — PlaylistCard, Context-Menu integration) — still outstanding
-Status: Plans 01/02/04 shipped; Plan 03 (PlaylistCard + Context-Menu) is the remaining wave-2 item
+Next: Phase 37 kickoff (TBD) — or roadmap review against v2.0 milestone goals
+Status: Phase 36 fully shipped — playlist cover pipeline, sidebar disclosure, card UI, pin-limit guard all green
 Last activity: 2026-05-13
 
 ## Phase 5 Summary (v2.0)
@@ -228,6 +228,12 @@ Recent decisions affecting current work:
 - [Phase ?]: Phase 36-04: PinnedPlaylistsDisclosure is self-contained — owns loadPinned + .playlistDidChange observer; SidebarView passes only onUnpin/onDelete/onRevealInGrid callbacks; rename is internal (TextField + @FocusState + onSubmit → repo.rename) to keep edit-state where the row is rendered (D-11)
 - [Phase ?]: Phase 36-04: PlaylistDetailViewLoader re-fetches on every .task(id: playlistId) change — one extra row-read per sidebar click in exchange for never showing stale Playlist after rename/cover-regen
 - [Phase ?]: Phase 36-04: onUnpin/onDelete callbacks explicitly post .playlistDidChange because repo.togglePin and repo.delete do NOT post the notification themselves — without these explicit posts the disclosure would not refresh after unpin/delete
+- [Phase ?]: Phase 36-03: pinLimitHintMessage + coverDropErrorMessage are `var` (not `private(set) var`) on the @Observable VM — the weak-self Task-based auto-clear closures need direct write access; the View only reads them
+- [Phase ?]: Phase 36-03: 8-pin pre-check derives willPin BEFORE the count check so unpins skip the guard entirely (T-36-12 spoofing mitigation); the early `return` after setting the hint means the repo never sees the 9th-pin call
+- [Phase ?]: Phase 36-03: PlaylistViewModel.togglePin now posts .playlistDidChange on success — closes the gap where Plan 04's PinnedPlaylistsDisclosure observer would miss grid-driven pin changes
+- [Phase ?]: Phase 36-03: PlaylistCard.loadCoverImage applies `(relPath as NSString).lastPathComponent` before joining with the playlist-covers dir — T-36-09 path-traversal mitigation; a malicious coverImagePath of `../../../etc/passwd` reduces to `passwd` which won't exist and falls through to the gradient branch
+- [Phase ?]: Phase 36-03: In-app .image drag persists raw data to FileManager.default.temporaryDirectory before forwarding to onCoverDropped — gives PlaylistCoverService.setCustomCover a uniform URL input regardless of whether the source was Finder or an in-app drag
+- [Phase ?]: Phase 36-03: URL(dataRepresentation:relativeTo:isAbsolute:) needs explicit `relativeTo: nil` on Swift 5.10 / macOS 15 SDK — no default parameter; deviation Rule 1 fixed during Task 2 build
 
 ### v1.3 Scope Decisions (locked, paused state)
 
@@ -291,8 +297,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-13T08:00:14.215Z
-Stopped at: Completed Phase 36 Plan 02 (cover-image pipeline)
+Last session: 2026-05-13T08:08:00.000Z
+Stopped at: Completed Phase 36 Plan 03 (PlaylistCard UI surfaces, banners, pin-limit guard) — Phase 36 fully shipped
 Resume file: None
 
 ---
