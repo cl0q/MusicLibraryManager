@@ -6,9 +6,9 @@ import GRDB
 /// Maps to the `app_config` table. Used for library root path,
 /// theme settings, and other persistent configuration.
 final class ConfigRepository: Sendable {
-    private let database: DatabasePool
+    private let database: any DatabaseWriter
 
-    init(database: DatabasePool) {
+    init(database: any DatabaseWriter) {
         self.database = database
     }
 
