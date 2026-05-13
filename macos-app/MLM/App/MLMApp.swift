@@ -40,11 +40,11 @@ struct MLMApp: App {
 
             // MARK: - View menu — Navigate (⌘1–5)
             CommandMenu("Navigate") {
-                ForEach(SidebarSection.allCases) { section in
+                ForEach(SidebarSection.topLevelCases) { section in
                     Button(section.label) {
                         selectedSection = section
                     }
-                    .keyboardShortcut(section.keyboardShortcut)
+                    .keyboardShortcut(section.keyboardShortcut ?? "0")
                 }
             }
 
