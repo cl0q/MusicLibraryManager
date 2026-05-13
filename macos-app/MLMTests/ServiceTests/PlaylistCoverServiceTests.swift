@@ -14,7 +14,7 @@ import AppKit
 ///
 /// Phase 36 Plan 02 Task 3.
 @MainActor
-@Suite("PlaylistCoverService (Phase 36)")
+@Suite("PlaylistCoverService (Phase 36)", .serialized)
 struct PlaylistCoverServiceTests {
 
     /// Per-test redirection of `~/Library/Application Support/com.musiclibrary.app/playlist-covers/`.
