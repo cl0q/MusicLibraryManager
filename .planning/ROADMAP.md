@@ -653,7 +653,7 @@ Plans:
 **Depends on:** Phase 3 (v2.0 Library Browser — Context-Menü), Phase 1 (v2.0 Data Layer — `PlaylistRepository`)
 **Milestone:** v2.0 macOS Native
 **Requirements**: PLV2-01..PLV2-07 (Playlist-Surface) — to be locked in CONTEXT/SPEC
-**Plans:** TBD (run `/gsd-plan-phase 36`)
+**Plans:** 4 plans
 
 **Anchor refs:**
 - `macos-app/PLAN.md` §"Phase 6 — Playlists" — Scope definiert
@@ -670,7 +670,10 @@ Plans:
 6. swift test grün (PlaylistRepositoryTests + neue View-Tests wo sinnvoll)
 
 Plans:
-- [ ] TBD (run `/gsd-plan-phase 36` to break down)
+- [ ] 36-01-PLAN.md — Schema v20 (cover_is_custom) + Model + Repository setter + moveTrack notification fix
+- [ ] 36-02-PLAN.md — Cover services (ArtworkExtractor + GradientPalette + MosaicCompositor + PlaylistCoverService) + DI wiring + tests
+- [ ] 36-03-PLAN.md — PlaylistCard cover render + drop-target + Reset menu; PlaylistViewModel 8-pin pre-check + hint banner in PlaylistsView
+- [ ] 36-04-PLAN.md — Sidebar PinnedPlaylistsDisclosure + ContentView .playlistDetail(Int64) routing + PlaylistDetailViewLoader
 
 ---
 
@@ -685,5 +688,5 @@ Plans:
 | 32. Bulk-Add to Playlist | v1.4 | 0/TBD | Not started | - |
 | 33. Polish & E2E | v1.4 | 0/TBD | Not started | - |
 | 34. Rework Download Orchestrator | v1.4 | 0/TBD | Not started | - |
-| 35. Waveform-Verbesserungen | v2.0 | 2/2 | Complete   | 2026-05-12 |
-| 36. Playlists (v2.0) | v2.0 | 0/TBD | Not started | - |
+| 35. Waveform-Verbesserungen | v2.0 | 2/2 | Complete    | 2026-05-12 |
+| 36. Playlists (v2.0) | v2.0 | 0/4 | Not started | - |
