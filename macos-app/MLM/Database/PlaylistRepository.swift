@@ -5,9 +5,9 @@ import GRDB
 ///
 /// Encapsulates all SQL for playlists, playlist_tracks, and playlist_tags.
 final class PlaylistRepository: Sendable {
-    private let database: DatabasePool
+    private let database: any DatabaseWriter
 
-    init(database: DatabasePool) {
+    init(database: any DatabaseWriter) {
         self.database = database
     }
 
