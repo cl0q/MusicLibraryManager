@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: macOS Native
 status: executing
-stopped_at: Phase 36 context gathered
-last_updated: "2026-05-13T07:44:36.650Z"
+stopped_at: Completed Phase 36 Plan 02 (cover-image pipeline)
+last_updated: "2026-05-13T07:53:00Z"
 last_activity: 2026-05-13
 progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 4
-  completed_plans: 1
-  percent: 25
+  completed_plans: 2
+  percent: 50
 ---
 
 # Project State
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-05-07)
 ## Current Position
 
 Phase: 36 (Playlists (v2.0 macOS Native)) — EXECUTING
-Plan: 2 of 4
-Next: Phase 36 (Playlists v2.0) — analog zu macos-app/PLAN.md §"Phase 6 — Playlists"
-Status: Ready to execute
+Plan: 3 of 4
+Next: Phase 36 Plan 03 (UI surfaces — PlaylistCard, Context-Menu integration)
+Status: Plan 02 complete (cover-image pipeline services + DI)
 Last activity: 2026-05-13
 
 ## Phase 5 Summary (v2.0)
@@ -220,6 +220,10 @@ Recent decisions affecting current work:
 - [Phase ?]: Phase 36-01: Single v20 migration registration in buildMigrator() covers both production + inMemory migrators (shared static factory)
 - [Phase ?]: Phase 36-01: PlaylistRepository.database typed as any DatabaseWriter (was DatabasePool) — enables in-memory tests, matches TrackRepository pattern
 - [Phase ?]: Phase 36-01: moveTrack notification carries userInfo:[playlistId:Int64] for targeted cover regen in Plan 02
+- [Phase ?]: Phase 36-02: ConfigRepository.database widened to any DatabaseWriter (third repo widening) — needed so in-memory PlaylistCoverServiceTests can construct the full dep chain
+- [Phase ?]: Phase 36-02: PlaylistCoverService is @MainActor @Observable; deinit reads observerToken via MainActor.assumeIsolated (token is stable post-init) and DependencyContainer wraps construction in `await MainActor.run { ... }`
+- [Phase ?]: Phase 36-02: PlaylistCoverServiceTests carries .serialized — covers dir is a hardcoded `~/Library/Application Support/com.musiclibrary.app/playlist-covers/<id>.png`, parallel tests with in-memory DBs (ids start at 1) race on the same filesystem path
+- [Phase ?]: Phase 36-02: Auto1 branch widened to include "nonNilCount == 1" — playlist with 4 tracks but only 1 with art now renders as single cover instead of a mosaic with 3 gradient gaps (UI-SPEC fidelity)
 
 ### v1.3 Scope Decisions (locked, paused state)
 
@@ -283,8 +287,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-13T07:44:24.226Z
-Stopped at: Phase 36 context gathered
+Last session: 2026-05-13T07:53:00Z
+Stopped at: Completed Phase 36 Plan 02 (cover-image pipeline)
 Resume file: None
 
 ---
