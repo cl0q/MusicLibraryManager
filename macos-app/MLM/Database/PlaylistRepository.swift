@@ -66,16 +66,47 @@ final class PlaylistRepository: Sendable {
         }
     }
 
+    /// Set the playlist's cover image path and the auto/custom lock flag.
+    ///
+    /// Called by `PlaylistCoverService` (Phase 36 Plan 02):
+    ///   - after generating a new auto cover → `isCustom: false`
+    ///   - after the user drops a custom image → `isCustom: true`
+    ///   - when resetting to auto → `path: nil, isCustom: false`
+    ///
+    /// Atomic: both columns update in a single SQL statement so observers
+    /// never see a half-applied state.
+    ///
+    /// - Parameter path: Relative path under
+    ///   `~/Library/Application Support/com.musiclibrary.app/playlist-covers/`,
+    ///   or nil to clear.
+    /// - Parameter isCustom: true if the user explicitly set this cover
+    ///   (auto-regen will skip this row).
+    func setCoverPath(id: Int64, path: String?, isCustom: Bool) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE playlists SET cover_image_path = ?, cover_is_custom = ? WHERE id = ?",
+                arguments: [path, isCustom ? 1 : 0, id]
+            )
+        }
+    }
+
     // MARK: - Playlist Tracks
 
-    /// Fetch tracks in a playlist, ordered by position.
+    /// Fetch tracks in a playlist, ordered by position with a deterministic
+    /// tie-breaker on `added_at`.
+    ///
+    /// The `(position, added_at)` ordering is required by Phase 36 Plan 02
+    /// (PlaylistCoverService): when the cover generator picks the first 4
+    /// tracks, the selection must be stable across runs even if two
+    /// `playlist_tracks` rows share an identical fractional position
+    /// (a rare-but-possible state if the fractional indexer collides).
     func fetchTracks(playlistId: Int64) async throws -> [Track] {
         try await database.read { db in
             try Track.fetchAll(db, sql: """
                 SELECT t.* FROM tracks t
                 INNER JOIN playlist_tracks pt ON pt.track_id = t.id
                 WHERE pt.playlist_id = ?
-                ORDER BY pt.position
+                ORDER BY pt.position, pt.added_at ASC
             """, arguments: [playlistId])
         }
     }
