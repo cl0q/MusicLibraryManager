@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: macOS Native
-status: completed
-stopped_at: Completed Phase 36 Plan 03 (PlaylistCard cover UI + 8-pin banner + drop-rejection banner) — Phase 36 fully shipped (4/4 plans)
-last_updated: "2026-05-13T08:08:00.000Z"
+status: Phase 36 fully shipped — playlist cover pipeline, sidebar disclosure, card UI, pin-limit guard all green
+stopped_at: Phase 37 context gathered
+last_updated: "2026-05-15T20:23:54.654Z"
 last_activity: 2026-05-13
 progress:
-  total_phases: 1
+  total_phases: 2
   completed_phases: 1
   total_plans: 4
   completed_plans: 4
@@ -297,9 +297,9 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-13T08:08:00.000Z
-Stopped at: Completed Phase 36 Plan 03 (PlaylistCard UI surfaces, banners, pin-limit guard) — Phase 36 fully shipped
-Resume file: None
+Last session: 2026-05-15T20:23:54.645Z
+Stopped at: Phase 37 context gathered
+Resume file: .planning/phases/37-album-art-pipeline-durchziehen-import-trigger-ui-anzeige-ffm/37-CONTEXT.md
 
 ---
 *Last updated: 2026-05-04 — v1.4 Daily Driver roadmap created (Phases 28-33); v1.3 Yeat Expansion remains paused*
