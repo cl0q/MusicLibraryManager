@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: macOS Native
 status: executing
-stopped_at: Phase 37 UI-SPEC approved
-last_updated: "2026-05-15T21:01:31.093Z"
-last_activity: 2026-05-15 -- Phase 37 planning complete
+stopped_at: Completed 37-01-PLAN.md
+last_updated: "2026-05-15T21:08:04.230Z"
+last_activity: 2026-05-15
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 8
-  completed_plans: 4
-  percent: 50
+  completed_plans: 5
+  percent: 63
 ---
 
 # Project State
@@ -21,18 +21,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-07)
 
 **Core value:** Like a song anywhere and it reliably ends up in your owned library and on your devices in high quality — native macOS experience
-**Current focus:** Phase 36 — Playlists (v2.0 macOS Native)
+**Current focus:** Phase 37 — Album-Art-Pipeline durchziehen
 **Source of truth:** `macos-app/PLAN.md` + `.planning/ROADMAP.md` v2.0 section
 **v1.4 source of truth (paused):** `.planning/REQUIREMENTS.md` v1.4 section + `.planning/ROADMAP.md` v1.4 section
 **v1.3 source of truth (paused):** `.planning/REQUIREMENTS.md` v1.3 section + `.planning/ROADMAP.md` v1.3 section
 
 ## Current Position
 
-Phase: 36 (Playlists (v2.0 macOS Native)) — COMPLETED (4/4 plans)
-Plan: 4 of 4
+Phase: 37 (Album-Art-Pipeline durchziehen) — EXECUTING
+Plan: 2 of 4
 Next: Phase 37 kickoff (TBD) — or roadmap review against v2.0 milestone goals
 Status: Ready to execute
-Last activity: 2026-05-15 -- Phase 37 planning complete
+Last activity: 2026-05-15
 
 ## Phase 5 Summary (v2.0)
 
@@ -297,9 +297,9 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-15T20:33:56.084Z
-Stopped at: Phase 37 UI-SPEC approved
-Resume file: .planning/phases/37-album-art-pipeline-durchziehen-import-trigger-ui-anzeige-ffm/37-UI-SPEC.md
+Last session: 2026-05-15T21:08:04.219Z
+Stopped at: Completed 37-01-PLAN.md
+Resume file: None
 
 ---
 *Last updated: 2026-05-04 — v1.4 Daily Driver roadmap created (Phases 28-33); v1.3 Yeat Expansion remains paused*

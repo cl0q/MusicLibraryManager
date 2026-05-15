@@ -708,10 +708,10 @@ Plans:
 - Cover-Editor / Crop-UI für Track-Artwork (Phase 36 deckt nur Playlist-Cover via Drop)
 - Live-Lyrics oder andere Metadata-Bereicherung — eigene Phase
 
-**Plans:** 4 plans
+**Plans:** 1/4 plans executed
 
 Plans:
-- [ ] 37-01-PLAN.md — ffmpeg API consolidation: ArtworkService.extractEmbeddedArtwork static public async + ArtworkExtractor thin wrapper + .trackArtworkDidChange notification (Wave 1)
+- [x] 37-01-PLAN.md — ffmpeg API consolidation: ArtworkService.extractEmbeddedArtwork static public async + ArtworkExtractor thin wrapper + .trackArtworkDidChange notification (Wave 1)
 - [ ] 37-02-PLAN.md — ArtworkBackfillService: @MainActor @Observable orchestrator, .libraryDidImport trigger, TaskGroup(maxConcurrentTasks:4) + DependencyContainer wiring (Wave 2)
 - [ ] 37-03-PLAN.md — TrackArtworkCache + TrackCoverView + 3-surface integration (LibraryTable 18pt, TrackDetailView 56pt, PlayerBar 40pt) (Wave 3)
 - [ ] 37-04-PLAN.md — MaintenanceView split (2 buttons) + ArtworkExtractorTests update + full suite + human UAT (Wave 3)
@@ -731,4 +731,4 @@ Plans:
 | 34. Rework Download Orchestrator | v1.4 | 0/TBD | Not started | - |
 | 35. Waveform-Verbesserungen | v2.0 | 2/2 | Complete    | 2026-05-12 |
 | 36. Playlists (v2.0) | v2.0 | 4/4 | Complete | 2026-05-13 |
-| 37. Album-Art Pipeline | v2.0 | 0/TBD | Not started | - |
+| 37. Album-Art Pipeline | v2.0 | 1/4 | In Progress|  |
