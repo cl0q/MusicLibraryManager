@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: macOS Native
-status: Phase 36 fully shipped — playlist cover pipeline, sidebar disclosure, card UI, pin-limit guard all green
-stopped_at: Phase 37 context gathered
-last_updated: "2026-05-15T20:23:54.654Z"
-last_activity: 2026-05-13
+status: executing
+stopped_at: Phase 37 UI-SPEC approved
+last_updated: "2026-05-15T21:01:31.093Z"
+last_activity: 2026-05-15 -- Phase 37 planning complete
 progress:
   total_phases: 2
   completed_phases: 1
-  total_plans: 4
+  total_plans: 8
   completed_plans: 4
-  percent: 100
+  percent: 50
 ---
 
 # Project State
@@ -31,8 +31,8 @@ See: .planning/PROJECT.md (updated 2026-05-07)
 Phase: 36 (Playlists (v2.0 macOS Native)) — COMPLETED (4/4 plans)
 Plan: 4 of 4
 Next: Phase 37 kickoff (TBD) — or roadmap review against v2.0 milestone goals
-Status: Phase 36 fully shipped — playlist cover pipeline, sidebar disclosure, card UI, pin-limit guard all green
-Last activity: 2026-05-13
+Status: Ready to execute
+Last activity: 2026-05-15 -- Phase 37 planning complete
 
 ## Phase 5 Summary (v2.0)
 
@@ -297,9 +297,9 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-15T20:23:54.645Z
-Stopped at: Phase 37 context gathered
-Resume file: .planning/phases/37-album-art-pipeline-durchziehen-import-trigger-ui-anzeige-ffm/37-CONTEXT.md
+Last session: 2026-05-15T20:33:56.084Z
+Stopped at: Phase 37 UI-SPEC approved
+Resume file: .planning/phases/37-album-art-pipeline-durchziehen-import-trigger-ui-anzeige-ffm/37-UI-SPEC.md
 
 ---
 *Last updated: 2026-05-04 — v1.4 Daily Driver roadmap created (Phases 28-33); v1.3 Yeat Expansion remains paused*
