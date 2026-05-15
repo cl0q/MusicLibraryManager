@@ -708,10 +708,13 @@ Plans:
 - Cover-Editor / Crop-UI für Track-Artwork (Phase 36 deckt nur Playlist-Cover via Drop)
 - Live-Lyrics oder andere Metadata-Bereicherung — eigene Phase
 
-**Plans:** TBD (likely 4: Import-Trigger + ffmpeg-Umbau in ArtworkExtractor + UI-Anzeige Library/Detail/MiniPlayer + Tests)
+**Plans:** 4 plans
 
 Plans:
-- [ ] TBD (run `/gsd-plan-phase 37` to break down)
+- [ ] 37-01-PLAN.md — ffmpeg API consolidation: ArtworkService.extractEmbeddedArtwork static public async + ArtworkExtractor thin wrapper + .trackArtworkDidChange notification (Wave 1)
+- [ ] 37-02-PLAN.md — ArtworkBackfillService: @MainActor @Observable orchestrator, .libraryDidImport trigger, TaskGroup(maxConcurrentTasks:4) + DependencyContainer wiring (Wave 2)
+- [ ] 37-03-PLAN.md — TrackArtworkCache + TrackCoverView + 3-surface integration (LibraryTable 18pt, TrackDetailView 56pt, PlayerBar 40pt) (Wave 3)
+- [ ] 37-04-PLAN.md — MaintenanceView split (2 buttons) + ArtworkExtractorTests update + full suite + human UAT (Wave 3)
 
 ---
 
