@@ -2,10 +2,13 @@ import Foundation
 import GRDB
 
 /// Repository for analysis data: fingerprints, artwork, replaygain, review queue.
+///
+/// Accepts `any DatabaseWriter` so it works with both `DatabasePool` (production)
+/// and `DatabaseQueue` (in-memory tests) — both conform to GRDB's `DatabaseWriter`.
 final class AnalysisRepository: Sendable {
-    private let database: DatabasePool
+    private let database: any DatabaseWriter
 
-    init(database: DatabasePool) {
+    init(database: any DatabaseWriter) {
         self.database = database
     }
 
