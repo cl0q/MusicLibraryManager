@@ -54,7 +54,11 @@ struct LibraryTable: View {
         Table(rows, selection: $viewModel.selectedTrackIDs, sortOrder: $sortOrder) {
             TableColumn("Title", value: \.track.title) { row in
                 let track = row.track
-                HStack(spacing: 6) {
+                HStack(spacing: 8) {
+                    // UI-SPEC Surface 1: 18pt thumbnail, cornerRadius 4, HStack spacing 8
+                    TrackCoverView(trackId: track.id ?? 0, size: .small, cornerRadius: 4)
+                        .frame(width: 18, height: 18)
+
                     if isNowPlaying(track) {
                         Image(systemName: "speaker.wave.2.fill")
                             .imageScale(.small)
@@ -64,7 +68,7 @@ struct LibraryTable: View {
                     Text(track.title).lineLimit(1)
                 }
             }
-            .width(min: 140, ideal: 260)
+            .width(min: 160, ideal: 280)
 
             TableColumn("Artist", value: \.track.artist) { row in
                 Text(row.track.artist).lineLimit(1)

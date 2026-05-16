@@ -64,16 +64,25 @@ struct TrackDetailView: View {
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .top) {
-                // Track icon + status
-                ZStack {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.mlmRaised)
-                        .frame(width: 56, height: 56)
+                // UI-SPEC Surface 2: 56pt min (may grow to 128pt), cornerRadius 6
+                ZStack(alignment: .bottomTrailing) {
+                    TrackCoverView(
+                        trackId: track.id ?? 0,
+                        size: .large,
+                        cornerRadius: 6
+                    )
+                    .frame(width: 56, height: 56)
 
-                    Image(systemName: isCurrentTrackPlaying ? "waveform" : "music.note")
-                        .font(.system(size: 24))
-                        .foregroundColor(isCurrentTrackPlaying ? .mlmAccent : .mlmInkMuted)
-                        .symbolEffect(.variableColor, isActive: isCurrentTrackPlaying)
+                    // Now-playing waveform overlay badge (subtle, preserves playback state visual)
+                    if isCurrentTrackPlaying {
+                        Image(systemName: "waveform")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.mlmAccent)
+                            .padding(3)
+                            .background(Color.mlmBase.opacity(0.85))
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                            .offset(x: 2, y: 2)
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
