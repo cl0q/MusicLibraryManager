@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: macOS Native
 status: verifying
-stopped_at: Completed 37-03-PLAN.md
-last_updated: "2026-05-16T15:08:02.918Z"
+stopped_at: Phase 37 complete — code verified, UAT pending
+last_updated: "2026-05-16T15:13:39.261Z"
 last_activity: 2026-05-16
 progress:
   total_phases: 2
@@ -297,9 +297,9 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-16T15:08:02.910Z
-Stopped at: Completed 37-03-PLAN.md
-Resume file: None
+Last session: 2026-05-16T15:13:39.252Z
+Stopped at: Phase 37 complete — code verified, UAT pending
+Resume file: .planning/phases/37-album-art-pipeline-durchziehen-import-trigger-ui-anzeige-ffm/37-VERIFICATION.md
 
 ---
 *Last updated: 2026-05-04 — v1.4 Daily Driver roadmap created (Phases 28-33); v1.3 Yeat Expansion remains paused*
