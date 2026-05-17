@@ -3,11 +3,11 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: macOS Native
 status: verifying
-stopped_at: Phase 37 complete — code verified, UAT pending
-last_updated: "2026-05-16T15:13:39.261Z"
+stopped_at: Phase 38 context gathered
+last_updated: "2026-05-17T16:38:38.478Z"
 last_activity: 2026-05-16
 progress:
-  total_phases: 2
+  total_phases: 3
   completed_phases: 2
   total_plans: 8
   completed_plans: 8
@@ -297,9 +297,9 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-16T15:13:39.252Z
-Stopped at: Phase 37 complete — code verified, UAT pending
-Resume file: .planning/phases/37-album-art-pipeline-durchziehen-import-trigger-ui-anzeige-ffm/37-VERIFICATION.md
+Last session: 2026-05-17T16:38:38.467Z
+Stopped at: Phase 38 context gathered
+Resume file: .planning/phases/38-folder-device-sync-v2-0-macos-playlists-library-auswahlen-au/38-CONTEXT.md
 
 ---
 *Last updated: 2026-05-04 — v1.4 Daily Driver roadmap created (Phases 28-33); v1.3 Yeat Expansion remains paused*
