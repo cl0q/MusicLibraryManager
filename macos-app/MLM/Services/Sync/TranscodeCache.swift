@@ -17,12 +17,20 @@ final class TranscodeCache: Sendable {
 
     // MARK: - Cache Path
 
-    /// Deterministic cache path for a track.
+    /// Deterministic cache path for a track (legacy, non-bitrate-suffixed).
     func cachePath(trackId: Int64) -> URL {
         cacheDir.appendingPathComponent("\(trackId).m4a")
     }
 
-    /// Whether a valid cache entry exists for a track.
+    /// Deterministic cache path for a track at a specific bitrate.
+    /// Bitrate-suffixed so 248k and 320k cached versions coexist.
+    /// Examples: `{trackId}_248.m4a`, `{trackId}_320.m4a`
+    func cachePath(trackId: Int64, bitrateKbps: Int) -> URL {
+        // Filename pattern: {trackId}_{bitrateKbps}.m4a  e.g. 42_248.m4a or 42_320.m4a
+        cacheDir.appendingPathComponent("\(trackId)_\(bitrateKbps).m4a")
+    }
+
+    /// Whether a valid cache entry exists for a track (legacy, non-bitrate-suffixed).
     func isCached(trackId: Int64) -> Bool {
         let path = cachePath(trackId: trackId)
         guard FileManager.default.fileExists(atPath: path.path) else { return false }
@@ -34,14 +42,19 @@ final class TranscodeCache: Sendable {
 
     // MARK: - Ensure Cached
 
-    /// Ensure a track's AAC version exists in the cache.
+    /// Ensure a track's AAC version exists in the cache at the given bitrate.
     /// If not cached, transcode the source file.
-    func ensureCached(track: Track) async throws -> URL? {
+    ///
+    /// - Parameter bitrateKbps: Target AAC bitrate in kbps. Defaults to 248 for back-compat.
+    func ensureCached(track: Track, bitrateKbps: Int = 248) async throws -> URL? {
         guard let trackId = track.id else { return nil }
-        let cached = cachePath(trackId: trackId)
+        let cached = cachePath(trackId: trackId, bitrateKbps: bitrateKbps)
 
-        if isCached(trackId: trackId) {
-            return cached
+        // Check bitrate-suffixed cache entry
+        if FileManager.default.fileExists(atPath: cached.path) {
+            let attrs = try? FileManager.default.attributesOfItem(atPath: cached.path)
+            let size = attrs?[.size] as? Int ?? 0
+            if size > 0 { return cached }
         }
 
         guard let sourcePath = track.organizedPath ?? (track.isLocal ? track.originalPath : nil) else {
@@ -49,18 +62,18 @@ final class TranscodeCache: Sendable {
         }
 
         let sourceURL = URL(fileURLWithPath: sourcePath)
-        let result = try await transcodeService.transcode(input: sourceURL, outputDir: cacheDir)
+        let result = try await transcodeService.transcode(input: sourceURL, outputDir: cacheDir, bitrateKbps: bitrateKbps)
 
         switch result {
         case .transcoded(let url):
-            // Rename to standard cache name
-            if url.lastPathComponent != cached.lastPathComponent {
+            // Rename to bitrate-suffixed cache name
+            if url != cached {
                 try? FileManager.default.removeItem(at: cached)
                 try FileManager.default.moveItem(at: url, to: cached)
             }
             return cached
         case .skipped:
-            // Source is already lossy — link original
+            // Source is already lossy — copy to bitrate-suffixed cache path
             try? FileManager.default.removeItem(at: cached)
             try FileManager.default.copyItem(at: sourceURL, to: cached)
             return cached

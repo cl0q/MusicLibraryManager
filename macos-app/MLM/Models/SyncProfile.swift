@@ -21,7 +21,7 @@ struct SyncProfile: Codable, FetchableRecord, MutablePersistableRecord, Identifi
     var dateCreated: String?
     var dateModified: String?
 
-    // Phase 38 D-01: explicit folder/device toggles
+    // Phase 38 D-01: explicit folder/device toggles (added in v_sync_toggles migration)
     var generateM3U8: Bool = false
     var transcodeMode: String = "keep_originals"
     var fat32SafePaths: Bool = true
@@ -51,6 +51,31 @@ struct SyncProfile: Codable, FetchableRecord, MutablePersistableRecord, Identifi
         static let id = Column(CodingKeys.id)
         static let name = Column(CodingKeys.name)
         static let outputFolder = Column(CodingKeys.outputFolder)
+    }
+
+    /// Convenience init for tests and profile creation.
+    init(
+        id: Int64? = nil,
+        name: String,
+        outputFolder: String,
+        playlistPathPrefix: String = "",
+        dateCreated: String? = nil,
+        dateModified: String? = nil,
+        generateM3U8: Bool = false,
+        transcodeMode: String = "keep_originals",
+        fat32SafePaths: Bool = true,
+        cleanupRemovedFiles: Bool = true
+    ) {
+        self.id = id
+        self.name = name
+        self.outputFolder = outputFolder
+        self.playlistPathPrefix = playlistPathPrefix
+        self.dateCreated = dateCreated
+        self.dateModified = dateModified
+        self.generateM3U8 = generateM3U8
+        self.transcodeMode = transcodeMode
+        self.fat32SafePaths = fat32SafePaths
+        self.cleanupRemovedFiles = cleanupRemovedFiles
     }
 
     mutating func didInsert(_ inserted: InsertionSuccess) {

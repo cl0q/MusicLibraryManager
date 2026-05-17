@@ -58,15 +58,18 @@ extension Notification.Name {
 
     // MARK: - Sync
 
-    /// Posted when a sync profile is created, deleted, updated, or its content (playlists/tracks) changes.
-    ///
-    /// Observers should reload sync profile data. Used to keep SyncView,
-    /// SyncProfileDetailView, TrackContextMenu submenu, and PlaylistCard submenu in sync.
-    /// - `userInfo["profileId"]`: `Int64` — profile whose state was updated (optional; observers may reload all)
-    static let syncProfileDidChange = Notification.Name("MLMSyncProfileDidChange")
-
     /// Posted when a sync operation completes.
     static let syncDidComplete = Notification.Name("MLMSyncDidComplete")
+
+    /// Posted when a sync profile is created, deleted, updated, or its content/settings change (Phase 38).
+    ///
+    /// SyncViewModel posts this after every mutation (addPlaylists, addTracks,
+    /// removePlaylists, removeTracks, updateProfileSettings). Views (SyncView,
+    /// SyncProfileDetailView, TrackContextMenu submenu, PlaylistCard submenu) observe
+    /// and refresh their content. The VM does NOT observe this notification — only posts it.
+    ///
+    /// - `userInfo["profileId"]`: `Int64` — ID of the changed profile (optional; observers may reload all)
+    static let syncProfileDidChange = Notification.Name("MLMSyncProfileDidChange")
 
     // MARK: Downloads
 
