@@ -52,6 +52,22 @@ struct PlaylistsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { _ in
             Task { await viewModel?.refresh() }
         }
+        .onAppear {
+            // Revalidate covers for all displayed playlists when the grid becomes visible.
+            // This catches the case where artwork backfill ran while the view was not shown
+            // (e.g., user was in LibraryView during Maintenance → Refresh embedded artwork).
+            // Post one notification per displayed playlist so PlaylistCoverService can
+            // coalesce via inFlight. No origin tag — these are explicit user-triggered events.
+            guard let vm = viewModel else { return }
+            for playlist in vm.displayedPlaylists {
+                guard let pid = playlist.id else { continue }
+                NotificationCenter.default.post(
+                    name: .playlistDidChange,
+                    object: nil,
+                    userInfo: ["playlistId": pid]
+                )
+            }
+        }
     }
 
     // MARK: - Grid Content
