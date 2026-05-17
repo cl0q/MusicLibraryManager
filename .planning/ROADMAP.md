@@ -735,11 +735,11 @@ Plans:
 
 **Requirements:** SYNC-v2-01..SYNC-v2-22 (locked in RESEARCH.md and distributed across plans)
 
-**Plans:** 5 plans
+**Plans:** 2/5 plans executed
 
 Plans:
-- [ ] 38-01-PLAN.md — Wave A: v_sync_toggles migration + SyncProfile model + TranscodeMode enum + Notifications.syncProfileDidChange + MigrationTests
-- [ ] 38-02-PLAN.md — Wave A: SyncRepository.updateSettings extended + SyncViewModel 5 mutations + cancelSync + SyncService cancel/cleanup/M3U8-gate/transcode-mode + SyncViewModelTests + SyncServiceTests
+- [x] 38-01-PLAN.md — Wave A: v_sync_toggles migration + SyncProfile model + TranscodeMode enum + Notifications.syncProfileDidChange + MigrationTests
+- [x] 38-02-PLAN.md — Wave A: SyncRepository.updateSettings extended + SyncViewModel 5 mutations + cancelSync + SyncService cancel/cleanup/M3U8-gate/transcode-mode + SyncViewModelTests + SyncServiceTests
 - [ ] 38-03-PLAN.md — Wave B: SyncProfileDetailView refactor + SyncSettingsForm + SyncContentSections + SyncProgressSection + SyncFailedDisclosure + PlaylistPickerSheet + TrackPickerSheet
 - [ ] 38-04-PLAN.md — Wave B: "Sync to" context menus (PlaylistCard + TrackContextMenu) + createProfileSheet Detect-device + SyncToolbarIndicator + ContentView wiring + SyncToast + DeviceDetectorTests
 - [ ] 38-05-PLAN.md — Wave C: PickerSheetTests + SyncContextMenuTests + Human UAT (iPod end-to-end verification)
@@ -760,4 +760,4 @@ Plans:
 | 35. Waveform-Verbesserungen | v2.0 | 2/2 | Complete    | 2026-05-12 |
 | 36. Playlists (v2.0) | v2.0 | 4/4 | Complete | 2026-05-13 |
 | 37. Album-Art Pipeline | v2.0 | 4/4 | Complete   | 2026-05-16 |
-| 38. Folder & Device Sync | v2.0 | 0/5 | Not started | - |
+| 38. Folder & Device Sync | v2.0 | 2/5 | In Progress|  |

@@ -4,8 +4,8 @@ milestone: v2.0
 milestone_name: macOS Native
 status: executing
 stopped_at: Phase 38 UI-SPEC approved
-last_updated: "2026-05-17T20:46:51.330Z"
-last_activity: 2026-05-17 -- Phase 38 planning complete
+last_updated: "2026-05-17T20:58:56.321Z"
+last_activity: 2026-05-17 -- Phase 38 execution started
 progress:
   total_phases: 3
   completed_phases: 2
@@ -21,18 +21,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-07)
 
 **Core value:** Like a song anywhere and it reliably ends up in your owned library and on your devices in high quality — native macOS experience
-**Current focus:** Phase 37 — Album-Art-Pipeline durchziehen
+**Current focus:** Phase 38 — folder-device-sync-v2-0-macos-playlists-library-auswahlen-au
 **Source of truth:** `macos-app/PLAN.md` + `.planning/ROADMAP.md` v2.0 section
 **v1.4 source of truth (paused):** `.planning/REQUIREMENTS.md` v1.4 section + `.planning/ROADMAP.md` v1.4 section
 **v1.3 source of truth (paused):** `.planning/REQUIREMENTS.md` v1.3 section + `.planning/ROADMAP.md` v1.3 section
 
 ## Current Position
 
-Phase: 37 (Album-Art-Pipeline durchziehen) — EXECUTING
-Plan: 4 of 4
+Phase: 38 (folder-device-sync-v2-0-macos-playlists-library-auswahlen-au) — EXECUTING
+Plan: 1 of 5
 Next: Phase 37 kickoff (TBD) — or roadmap review against v2.0 milestone goals
-Status: Ready to execute
-Last activity: 2026-05-17 -- Phase 38 planning complete
+Status: Executing Phase 38
+Last activity: 2026-05-17 -- Phase 38 execution started
 
 ## Phase 5 Summary (v2.0)
 
