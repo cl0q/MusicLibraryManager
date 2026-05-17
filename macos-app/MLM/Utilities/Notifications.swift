@@ -56,10 +56,19 @@ extension Notification.Name {
     /// - `userInfo["artworkPath"]`: `String` — absolute path to cached artwork file (1200px version)
     static let trackArtworkDidChange = Notification.Name("MLMTrackArtworkDidChange")
 
-    // MARK: Sync (reserved for Phase 12)
+    // MARK: Sync
 
     /// Posted when a sync operation completes.
     static let syncDidComplete = Notification.Name("MLMSyncDidComplete")
+
+    /// Posted when a sync profile's content or settings change (Phase 38).
+    ///
+    /// SyncViewModel posts this after every mutation (addPlaylists, addTracks,
+    /// removePlaylists, removeTracks, updateProfileSettings). Views observe and
+    /// refresh their content. The VM does NOT observe this notification — only posts it.
+    ///
+    /// - `userInfo["profileId"]`: `Int64` — ID of the changed profile
+    static let syncProfileDidChange = Notification.Name("MLMSyncProfileDidChange")
 
     // MARK: Downloads
 
