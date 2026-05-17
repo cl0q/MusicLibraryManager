@@ -733,12 +733,16 @@ Plans:
 - `macos-app/MLM/Views/Sync/` — UI-Surfaces (vermutlich noch nicht da, GAP)
 - v1.0 Pendant: `src-tauri/src/sync/` + Phase-5-Spec aus v1.0 ROADMAP für Pattern-Inspiration
 
-**Requirements:** TBD (SYNC-v2-01..NN — to be locked in SPEC/CONTEXT)
+**Requirements:** SYNC-v2-01..SYNC-v2-22 (locked in RESEARCH.md and distributed across plans)
 
-**Plans:** 0 plans
+**Plans:** 5 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 38 to break down)
+- [ ] 38-01-PLAN.md — Wave A: v_sync_toggles migration + SyncProfile model + TranscodeMode enum + Notifications.syncProfileDidChange + MigrationTests
+- [ ] 38-02-PLAN.md — Wave A: SyncRepository.updateSettings extended + SyncViewModel 5 mutations + cancelSync + SyncService cancel/cleanup/M3U8-gate/transcode-mode + SyncViewModelTests + SyncServiceTests
+- [ ] 38-03-PLAN.md — Wave B: SyncProfileDetailView refactor + SyncSettingsForm + SyncContentSections + SyncProgressSection + SyncFailedDisclosure + PlaylistPickerSheet + TrackPickerSheet
+- [ ] 38-04-PLAN.md — Wave B: "Sync to" context menus (PlaylistCard + TrackContextMenu) + createProfileSheet Detect-device + SyncToolbarIndicator + ContentView wiring + SyncToast + DeviceDetectorTests
+- [ ] 38-05-PLAN.md — Wave C: PickerSheetTests + SyncContextMenuTests + Human UAT (iPod end-to-end verification)
 
 ---
 
@@ -756,4 +760,4 @@ Plans:
 | 35. Waveform-Verbesserungen | v2.0 | 2/2 | Complete    | 2026-05-12 |
 | 36. Playlists (v2.0) | v2.0 | 4/4 | Complete | 2026-05-13 |
 | 37. Album-Art Pipeline | v2.0 | 4/4 | Complete   | 2026-05-16 |
-| 38. Folder & Device Sync | v2.0 | 0/TBD | Not started | - |
+| 38. Folder & Device Sync | v2.0 | 0/5 | Not started | - |
