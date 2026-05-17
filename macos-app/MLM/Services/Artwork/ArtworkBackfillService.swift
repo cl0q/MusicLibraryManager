@@ -37,6 +37,7 @@ final class ArtworkBackfillService {
     private let database: any DatabaseWriter
     private let trackRepository: TrackRepository
     private let analysisRepository: AnalysisRepository
+    private let configRepository: ConfigRepository
     private let artworkService: ArtworkService
 
     // MARK: - Internal state
@@ -52,11 +53,13 @@ final class ArtworkBackfillService {
     init(
         database: any DatabaseWriter,
         trackRepository: TrackRepository,
-        analysisRepository: AnalysisRepository
+        analysisRepository: AnalysisRepository,
+        configRepository: ConfigRepository
     ) {
         self.database = database
         self.trackRepository = trackRepository
         self.analysisRepository = analysisRepository
+        self.configRepository = configRepository
 
         // ArtworkService cache dir matches MaintenanceView.runArtwork path so
         // both Maintenance-Action and Auto-Trigger share the same cache (D-08).
@@ -174,7 +177,23 @@ final class ArtworkBackfillService {
             return
         }
 
-        let trackURL = URL(fileURLWithPath: organizedPath)
+        // organizedPath is stored as a relative path (e.g., "Artist/Album/track.flac").
+        // Resolve it against the library root, mirroring PlaylistCoverService.resolveLocalURL.
+        let libraryRoot = (try? await configRepository.getLibraryRoot()) ?? nil
+        let trackURL: URL
+        if let root = libraryRoot, !root.isEmpty {
+            trackURL = URL(fileURLWithPath: root).appendingPathComponent(organizedPath)
+        } else {
+            // Fallback: treat as absolute path (handles edge cases where path is absolute)
+            trackURL = URL(fileURLWithPath: organizedPath)
+        }
+
+        guard FileManager.default.fileExists(atPath: trackURL.path) else {
+            AppLogger.shared.warn("ArtworkBackfill: audio file not found at \(trackURL.path) — skipping track \(trackId)",
+                                  source: "ArtworkBackfill")
+            inFlight.remove(trackId)
+            return
+        }
 
         // Extract embedded artwork (static async; runs ffmpeg in Task.detached internally)
         // D-07: returns nil silently if ffmpeg not found — no user-facing error

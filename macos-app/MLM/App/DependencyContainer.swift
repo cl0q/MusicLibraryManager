@@ -138,13 +138,16 @@ final class DependencyContainer {
 
         // Phase 37 — Artwork backfill orchestrator. Observes `.libraryDidImport`
         // and extracts embedded artwork for imported tracks in a background TaskGroup.
+        // configRepository is required to resolve organizedPath (relative) to an absolute URL.
         if let trRepo = self.trackRepository,
-           let aRepo = self.analysisRepository {
+           let aRepo = self.analysisRepository,
+           let cfRepo = self.configRepository {
             self.artworkBackfillService = await MainActor.run {
                 ArtworkBackfillService(
                     database: dbPool,
                     trackRepository: trRepo,
-                    analysisRepository: aRepo
+                    analysisRepository: aRepo,
+                    configRepository: cfRepo
                 )
             }
         }

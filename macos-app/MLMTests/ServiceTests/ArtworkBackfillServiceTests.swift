@@ -21,10 +21,12 @@ struct ArtworkBackfillServiceTests {
         let db = try DatabaseManager.inMemory()
         let trRepo = TrackRepository(database: db)
         let aRepo = AnalysisRepository(database: db)
+        let cfRepo = ConfigRepository(database: db)
         let svc = ArtworkBackfillService(
             database: db,
             trackRepository: trRepo,
-            analysisRepository: aRepo
+            analysisRepository: aRepo,
+            configRepository: cfRepo
         )
         return (db, svc)
     }

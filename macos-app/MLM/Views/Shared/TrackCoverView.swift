@@ -12,6 +12,11 @@ import SwiftUI
 /// Observes `.trackArtworkDidChange` to reload when background backfill completes.
 /// Fallback: Solar linearGradient mlmBase→mlmRaised + music.note in mlmInkMuted (D-11).
 ///
+/// Sizing: TrackCoverView does NOT apply its own .frame — callers are responsible
+/// for all sizing (width/height) so the component renders at whatever size is requested.
+/// The size parameter is used only to select the cached image resolution (500px vs 1200px)
+/// and to scale the fallback music note icon proportionally.
+///
 /// Phase 37 D-10, D-11, D-12, D-14.
 struct TrackCoverView: View {
 
@@ -35,7 +40,6 @@ struct TrackCoverView: View {
                 fallbackGradient
             }
         }
-        .frame(width: sizePoints, height: sizePoints)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
         .onReceive(
             NotificationCenter.default.publisher(for: .trackArtworkDidChange)
@@ -100,17 +104,18 @@ struct TrackCoverView: View {
             .overlay(
                 Image(systemName: "music.note")
                     .foregroundStyle(Color.mlmInkMuted)
-                    .font(.system(size: sizePoints / 2))
+                    .font(.system(size: fallbackIconSize))
             )
     }
 
-    // MARK: - Size mapping (D-12)
+    // MARK: - Size hints (D-12)
 
-    /// Display points per surface. Note: LibraryTable uses .frame(width: 18) override.
-    private var sizePoints: CGFloat {
+    /// Nominal display points for the fallback icon — half the expected display size.
+    /// Callers apply .frame(); this is only for the music.note proportional scaling.
+    private var fallbackIconSize: CGFloat {
         switch size {
-        case .small: return 40   // PlayerBar
-        case .large: return 128  // TrackDetailView
+        case .small: return 20   // half of 40pt PlayerBar default
+        case .large: return 28   // half of 56pt TrackDetailView (not 128 — callers constrain)
         }
     }
 }
