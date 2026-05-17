@@ -240,6 +240,20 @@ final class SyncViewModel {
         }
     }
 
+    // MARK: - Progress Forwarding (D-12 / SyncProgressSection read-only access)
+
+    /// Forwarding property — reads SyncService.progress without exposing the service.
+    var syncProgress: Double { syncService.progress }
+
+    /// Forwarding property — reads SyncService.currentFile without exposing the service.
+    var syncCurrentFile: String { syncService.currentFile }
+
+    /// Forwarding property — reads SyncService.processed without exposing the service.
+    var syncProcessed: Int { syncService.processed }
+
+    /// Forwarding property — reads SyncService.total without exposing the service.
+    var syncTotal: Int { syncService.total }
+
     // MARK: - Cancellation (D-14)
 
     func cancelSync() {
