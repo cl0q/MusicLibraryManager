@@ -716,6 +716,30 @@ Plans:
 - [x] 37-03-PLAN.md — TrackArtworkCache + TrackCoverView + 3-surface integration (LibraryTable 18pt, TrackDetailView 56pt, PlayerBar 40pt) (Wave 3)
 - [x] 37-04-PLAN.md — MaintenanceView split (2 buttons) + ArtworkExtractorTests update + full suite + human UAT (Wave 3)
 
+### Phase 38: Folder & Device Sync (v2.0 macOS Native)
+
+**Goal:** Playlists und Library-Auswahlen auf einen Zielordner kopieren+transcoden. Device-Sync (Rockbox-iPod mit M3U8 + 248k AAC) ist ein Spezialfall von Folder-Sync mit Device-spezifischen Profilen. Schließt das „endlich benutzen können"-Loop für v2.0 — der Daily-Driver-Use-Case ist erst dann komplett, wenn der User seine kuratierten Playlists auf externes Storage oder iPod ziehen kann.
+
+**Driver:** Phase 5 (Playback) + 35 (Waveform) + 36 (Playlists) + 37 (Artwork) decken Browse & Listen ab. Was komplett fehlt: vom-Mac-runter-Sync. v1.0 hatte Phase 5 Device Sync (Rockbox + M3U8); der SwiftUI-Rewrite hat das noch nicht in der UI. Folder-Sync verallgemeinert es (beliebige Ziele wie externe SSD, NAS-Mount), Device-Sync ist ein konfiguriertes Folder-Profil mit Transcode + M3U8.
+
+**Depends on:** Phase 5 (Playback/AudioEngine — AVFoundation-Basis), Phase 36 (Playlists — Sync-Source), Phase 37 (Artwork — wird im transcoded Track mitgeschrieben)
+**Milestone:** v2.0 macOS Native
+
+**Anchor refs (TO VERIFY in discuss-phase):**
+- `macos-app/MLM/Services/Sync/SyncService.swift` — bereits vorhanden (im Container exposed via DependencyContainer:144-150), Status zu prüfen: funktional vs Stub
+- `macos-app/MLM/Services/Sync/TranscodeService.swift` — Transcode-Pipeline (Phase 11 Tauri-Pendant — lossless→248kbps AAC mit cover art via ffmpeg -c:v copy -disposition:v attached_pic)
+- `macos-app/MLM/ViewModels/SyncViewModel.swift` — bereits exposed
+- `macos-app/MLM/Database/SyncRepository.swift` — sync_profiles Schema (vermutlich aus v1.0 portiert)
+- `macos-app/MLM/Views/Sync/` — UI-Surfaces (vermutlich noch nicht da, GAP)
+- v1.0 Pendant: `src-tauri/src/sync/` + Phase-5-Spec aus v1.0 ROADMAP für Pattern-Inspiration
+
+**Requirements:** TBD (SYNC-v2-01..NN — to be locked in SPEC/CONTEXT)
+
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 38 to break down)
+
 ---
 
 ## v1.4 Progress Table
@@ -732,3 +756,4 @@ Plans:
 | 35. Waveform-Verbesserungen | v2.0 | 2/2 | Complete    | 2026-05-12 |
 | 36. Playlists (v2.0) | v2.0 | 4/4 | Complete | 2026-05-13 |
 | 37. Album-Art Pipeline | v2.0 | 4/4 | Complete   | 2026-05-16 |
+| 38. Folder & Device Sync | v2.0 | 0/TBD | Not started | - |
