@@ -21,6 +21,7 @@ struct PlaylistsView: View {
     @State private var viewModel: PlaylistViewModel?
     @State private var selectedPlaylist: Playlist?
     @State private var showNewPlaylistPopover = false
+    @State private var availableSyncProfiles: [SyncProfile] = []
 
     /// Callback when a track is double-clicked in the detail view.
     var onTrackDoubleClick: ((Track) -> Void)?
@@ -48,9 +49,13 @@ struct PlaylistsView: View {
         .task {
             initializeViewModel()
             await viewModel?.loadPlaylists()
+            reloadSyncProfiles()
         }
         .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { _ in
             Task { await viewModel?.refresh() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .syncProfileDidChange)) { _ in
+            reloadSyncProfiles()
         }
         .onAppear {
             // Revalidate covers for all displayed playlists when the grid becomes visible.
@@ -268,6 +273,13 @@ struct PlaylistsView: View {
                         },
                         onCoverDropRejected: {
                             viewModel.flagCoverDropRejected()
+                        },
+                        availableSyncProfiles: availableSyncProfiles,
+                        onAddToSyncProfile: { profile, playlistId in
+                            Task {
+                                container.syncViewModel?.selectedProfile = profile
+                                await container.syncViewModel?.addPlaylists([playlistId])
+                            }
                         }
                     )
                 }
@@ -381,5 +393,9 @@ struct PlaylistsView: View {
         guard viewModel == nil,
               let playlistRepo = container.playlistRepository else { return }
         viewModel = PlaylistViewModel(playlistRepository: playlistRepo)
+    }
+
+    private func reloadSyncProfiles() {
+        availableSyncProfiles = container.syncViewModel?.profiles ?? []
     }
 }

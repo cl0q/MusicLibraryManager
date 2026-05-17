@@ -8,30 +8,42 @@ struct SyncView: View {
     @State private var showCreateSheet = false
     @State private var newProfileName = ""
     @State private var newProfileOutput = ""
+    @State private var detectedDevices: [DeviceDetector.RockboxDevice] = []
+    @State private var hasRunDetection = false
+    @State private var shouldApplyDeviceDefaults = false
+    @State private var showRockboxToast = false
 
     var body: some View {
-        Group {
-            if let vm = container.syncViewModel {
-                HSplitView {
-                    profileList(vm: vm)
-                        .frame(minWidth: 200, maxWidth: 280)
+        ZStack(alignment: .bottom) {
+            Group {
+                if let vm = container.syncViewModel {
+                    HSplitView {
+                        profileList(vm: vm)
+                            .frame(minWidth: 200, maxWidth: 280)
 
-                    profileDetail(vm: vm)
-                        .frame(maxWidth: .infinity)
-                }
-                .task {
-                    // Refresh on first appear; subsequent re-mounts skip re-init
-                    // because VM lives in the container.
-                    if vm.profiles.isEmpty && !vm.isLoading {
-                        await vm.loadProfiles()
+                        profileDetail(vm: vm)
+                            .frame(maxWidth: .infinity)
                     }
+                    .task {
+                        // Refresh on first appear; subsequent re-mounts skip re-init
+                        // because VM lives in the container.
+                        if vm.profiles.isEmpty && !vm.isLoading {
+                            await vm.loadProfiles()
+                        }
+                    }
+                } else {
+                    ProgressView("Loading...")
                 }
-            } else {
-                ProgressView("Loading...")
             }
-        }
-        .sheet(isPresented: $showCreateSheet) {
-            createProfileSheet
+            .sheet(isPresented: $showCreateSheet) {
+                createProfileSheet
+            }
+
+            // Phase 38: Rockbox smart-defaults toast (D-03)
+            SyncToast(
+                message: "Rockbox iPod erkannt — Device-Defaults aktiviert",
+                isShowing: showRockboxToast
+            )
         }
     }
 
@@ -121,43 +133,111 @@ struct SyncView: View {
 
     private var createProfileSheet: some View {
         VStack(spacing: 16) {
-            Text("New Sync Profile")
+            Text("Neues Sync-Profil")
                 .font(MLMFont.title3)
 
-            TextField("Profile Name", text: $newProfileName)
+            TextField("Profilname", text: $newProfileName)
                 .textFieldStyle(.roundedBorder)
 
             HStack {
-                TextField("Output Folder", text: $newProfileOutput)
+                TextField("Ausgabe-Ordner", text: $newProfileOutput)
                     .textFieldStyle(.roundedBorder)
-                Button("Browse...") {
+                Button("Durchsuchen…") {
                     let panel = NSOpenPanel()
                     panel.canChooseDirectories = true
                     panel.canChooseFiles = false
                     panel.canCreateDirectories = true
                     panel.allowsMultipleSelection = false
-                    panel.prompt = "Choose"
+                    panel.prompt = "Auswählen"
                     if panel.runModal() == .OK, let url = panel.url {
                         newProfileOutput = url.path
                     }
                 }
             }
 
+            // Phase 38 D-09: On-demand device detection
+            VStack(alignment: .leading, spacing: 8) {
+                Button("Gerät erkennen…") {
+                    detectedDevices = DeviceDetector.detectRockboxDevices()
+                    hasRunDetection = true
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color.mlmAccent)
+
+                if hasRunDetection {
+                    if detectedDevices.isEmpty {
+                        // D-10: Empty state copy
+                        Text("Keine Geräte gefunden — angeschlossen?")
+                            .font(MLMFont.muted)
+                            .foregroundColor(.mlmInkMuted)
+                    } else {
+                        ForEach(detectedDevices, id: \.mountPoint) { device in
+                            Button {
+                                newProfileOutput = device.mountPoint
+                                if newProfileName.isEmpty {
+                                    newProfileName = "\(device.deviceName) iPod"
+                                }
+                                shouldApplyDeviceDefaults = true
+                                showRockboxToast = true
+                                Task { try? await Task.sleep(for: .seconds(3)); showRockboxToast = false }
+                            } label: {
+                                HStack {
+                                    Image(systemName: "iphone.gen3.radiowaves.left.and.right")
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(device.deviceName)
+                                            .font(MLMFont.body)
+                                            .foregroundColor(.mlmInk)
+                                        Text("\(device.mountPoint)")
+                                            .font(MLMFont.muted)
+                                            .foregroundColor(.mlmInkMuted)
+                                    }
+                                    Spacer()
+                                    if shouldApplyDeviceDefaults && newProfileOutput == device.mountPoint {
+                                        Image(systemName: "checkmark")
+                                            .foregroundColor(.mlmAccent)
+                                    }
+                                }
+                                .padding(.vertical, 4)
+                                .padding(.horizontal, 8)
+                                .background(Color.mlmRaised)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
             HStack {
-                Button("Cancel") {
+                Button("Abbrechen") {
                     showCreateSheet = false
+                    detectedDevices = []
+                    hasRunDetection = false
+                    shouldApplyDeviceDefaults = false
                 }
                 .keyboardShortcut(.cancelAction)
 
                 Spacer()
 
-                Button("Create") {
+                Button("Erstellen") {
                     guard let vm = container.syncViewModel, !newProfileName.isEmpty else { return }
+                    let applyDefaults = shouldApplyDeviceDefaults
                     Task {
-                        await vm.createProfile(name: newProfileName, outputFolder: newProfileOutput)
+                        await vm.createProfile(
+                            name: newProfileName,
+                            outputFolder: newProfileOutput,
+                            generateM3U8: applyDefaults ? true : false,
+                            transcodeMode: applyDefaults ? "aac_248" : "keep_originals",
+                            fat32SafePaths: true,
+                            cleanupRemovedFiles: true
+                        )
                         showCreateSheet = false
                         newProfileName = ""
                         newProfileOutput = ""
+                        detectedDevices = []
+                        hasRunDetection = false
+                        shouldApplyDeviceDefaults = false
                     }
                 }
                 .keyboardShortcut(.defaultAction)
@@ -165,7 +245,7 @@ struct SyncView: View {
             }
         }
         .padding(24)
-        .frame(width: 400)
+        .frame(width: 420)
     }
 }
 

@@ -341,7 +341,9 @@ struct FolderTracksTable: View {
             TrackContextMenu(
                 selectedTrackIDs: selectedIDs,
                 tracks: tracks,
-                availablePlaylists: []
+                availablePlaylists: [],
+                availableSyncProfiles: [],
+                addToSyncProfile: { _ in }
             )
         } primaryAction: { selectedIDs in
             if let trackID = selectedIDs.first,

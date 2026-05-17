@@ -8,6 +8,8 @@ struct TrackContextMenu: View {
     let selectedTrackIDs: Set<Int64>
     let tracks: [Track]
     let availablePlaylists: [Playlist]
+    let availableSyncProfiles: [SyncProfile]
+    let addToSyncProfile: (SyncProfile) -> Void
     @Environment(\.container) private var container
 
     /// Resolved selected tracks.
@@ -81,12 +83,28 @@ struct TrackContextMenu: View {
         }
 
         Section {
-            Button {
-                // Placeholder — Phase 12
+            Menu {
+                if availableSyncProfiles.isEmpty {
+                    Text("Keine Profile — erstelle zuerst eines")
+                } else {
+                    ForEach(availableSyncProfiles) { profile in
+                        Button {
+                            addToSyncProfile(profile)
+                        } label: {
+                            Text(profile.name)
+                        }
+                    }
+                    Divider()
+                }
+                Button {
+                    NotificationCenter.default.post(name: .navigateToCreateSyncProfile, object: nil)
+                } label: {
+                    Label("Neues Profil erstellen…", systemImage: "plus.circle")
+                }
             } label: {
-                Label("Add to Sync Profile…", systemImage: "arrow.triangle.2.circlepath")
+                Label("Sync zu \u{25B8}", systemImage: "arrow.triangle.2.circlepath")
             }
-            .disabled(true)
+            .disabled(selectedTracks.isEmpty)
         }
 
         Divider()

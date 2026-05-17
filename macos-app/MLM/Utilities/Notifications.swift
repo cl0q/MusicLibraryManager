@@ -94,4 +94,11 @@ extension Notification.Name {
 
     /// Posted when the user triggers "More Info" via the Library menu (⌘I).
     static let showTrackDetail = Notification.Name("MLMShowTrackDetail")
+
+    // MARK: - Sync UI (Phase 38)
+
+    /// Posted when user selects "Neues Profil erstellen…" from a Sync to submenu
+    /// in TrackContextMenu or PlaylistCard.contextMenu.
+    /// ContentView or SyncView observes this to navigate to the create-profile sheet.
+    static let navigateToCreateSyncProfile = Notification.Name("MLMNavigateToCreateSyncProfile")
 }

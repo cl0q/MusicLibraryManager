@@ -11,6 +11,7 @@ struct LibraryView: View {
     @State private var viewModel: LibraryViewModel?
     @State private var importViewModel: ImportViewModel?
     @State private var availablePlaylists: [Playlist] = []
+    @State private var availableSyncProfiles: [SyncProfile] = []
     @State private var isRescanning = false
     @FocusState private var isSearchFocused: Bool
 
@@ -27,6 +28,7 @@ struct LibraryView: View {
             initializeViewModel()
             await viewModel?.loadTracks()
             await reloadPlaylists()
+            await reloadSyncProfiles()
         }
         .onReceive(NotificationCenter.default.publisher(for: .libraryDidImport)) { _ in
             Task { await viewModel?.refresh() }
@@ -39,6 +41,9 @@ struct LibraryView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { _ in
             Task { await reloadPlaylists() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .syncProfileDidChange)) { _ in
+            Task { await reloadSyncProfiles() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .focusSearchField)) { _ in
             isSearchFocused = true
@@ -54,7 +59,8 @@ struct LibraryView: View {
             LibraryTable(
                 viewModel: viewModel,
                 onDoubleClick: onTrackDoubleClick,
-                availablePlaylists: availablePlaylists
+                availablePlaylists: availablePlaylists,
+                availableSyncProfiles: availableSyncProfiles
             )
         }
         .searchable(
@@ -135,6 +141,10 @@ struct LibraryView: View {
     private func reloadPlaylists() async {
         guard let repo = container.playlistRepository else { return }
         availablePlaylists = (try? await repo.fetchAll()) ?? []
+    }
+
+    private func reloadSyncProfiles() async {
+        availableSyncProfiles = container.syncViewModel?.profiles ?? []
     }
 
     // MARK: - Initialization
