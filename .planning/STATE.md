@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: macOS Native
-status: executing
+status: milestone_complete
 stopped_at: Phase 38 UI-SPEC approved
 last_updated: "2026-05-18T07:45:16.716Z"
 last_activity: 2026-05-18
 progress:
   total_phases: 3
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 13
   completed_plans: 13
-  percent: 100
+  percent: 133
 ---
 
 # Project State
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-05-07)
 
 ## Current Position
 
-Phase: 38 (folder-device-sync-v2-0-macos-playlists-library-auswahlen-au) — EXECUTING
-Plan: 2 of 5
+Phase: 38
+Plan: Not started
 Next: Phase 37 kickoff (TBD) — or roadmap review against v2.0 milestone goals
-Status: Ready to execute
+Status: Milestone complete
 Last activity: 2026-05-18
 
 ## Phase 5 Summary (v2.0)
@@ -126,7 +126,7 @@ Tests: 421 passing / 0 failing / 23 ignored. Zero regressions from v1.2 baseline
 
 **Velocity (v1.0):**
 
-- Total plans completed: 41
+- Total plans completed: 46
 - Total execution time: ~3 days
 - Phases completed: 7
 

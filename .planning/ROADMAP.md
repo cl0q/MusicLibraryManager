@@ -760,4 +760,4 @@ Plans:
 | 35. Waveform-Verbesserungen | v2.0 | 2/2 | Complete    | 2026-05-12 |
 | 36. Playlists (v2.0) | v2.0 | 4/4 | Complete | 2026-05-13 |
 | 37. Album-Art Pipeline | v2.0 | 4/4 | Complete   | 2026-05-16 |
-| 38. Folder & Device Sync | v2.0 | 5/5 | Complete   | 2026-05-18 |
+| 38. Folder & Device Sync | v2.0 | 5/5 | Complete    | 2026-05-18 |
