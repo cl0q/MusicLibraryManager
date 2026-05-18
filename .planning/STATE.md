@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: macOS Native
 status: executing
 stopped_at: Phase 38 UI-SPEC approved
-last_updated: "2026-05-17T20:58:56.321Z"
-last_activity: 2026-05-17 -- Phase 38 execution started
+last_updated: "2026-05-18T07:45:16.716Z"
+last_activity: 2026-05-18
 progress:
   total_phases: 3
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 13
-  completed_plans: 8
-  percent: 62
+  completed_plans: 13
+  percent: 100
 ---
 
 # Project State
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-05-07)
 ## Current Position
 
 Phase: 38 (folder-device-sync-v2-0-macos-playlists-library-auswahlen-au) — EXECUTING
-Plan: 1 of 5
+Plan: 2 of 5
 Next: Phase 37 kickoff (TBD) — or roadmap review against v2.0 milestone goals
-Status: Executing Phase 38
-Last activity: 2026-05-17 -- Phase 38 execution started
+Status: Ready to execute
+Last activity: 2026-05-18
 
 ## Phase 5 Summary (v2.0)
 
@@ -234,6 +234,8 @@ Recent decisions affecting current work:
 - [Phase ?]: Phase 36-03: PlaylistCard.loadCoverImage applies `(relPath as NSString).lastPathComponent` before joining with the playlist-covers dir — T-36-09 path-traversal mitigation; a malicious coverImagePath of `../../../etc/passwd` reduces to `passwd` which won't exist and falls through to the gradient branch
 - [Phase ?]: Phase 36-03: In-app .image drag persists raw data to FileManager.default.temporaryDirectory before forwarding to onCoverDropped — gives PlaylistCoverService.setCustomCover a uniform URL input regardless of whether the source was Finder or an in-app drag
 - [Phase ?]: Phase 36-03: URL(dataRepresentation:relativeTo:isAbsolute:) needs explicit `relativeTo: nil` on Swift 5.10 / macOS 15 SDK — no default parameter; deviation Rule 1 fixed during Task 2 build
+- [Phase 38]: allPlaylistsReturnedOnEmptyQuery testet Playlist.fetchAll direkt — PlaylistPickerSheet nutzt container.playlistRepository, nicht SyncViewModel — SyncViewModel.allAvailablePlaylists existiert nicht; Picker geht direkt zum Repository
+- [Phase 38]: UAT auto-approved im Auto-Mode; Orchestrator persistiert als 38-HUMAN-UAT.md fuer spaeter /gsd-verify-work — Hardware-Checkpoint (iPod-Anschluss) blockiert Auto-Mode-Chain nicht
 
 ### v1.3 Scope Decisions (locked, paused state)
 
@@ -297,9 +299,9 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-17T16:56:37.737Z
+Last session: 2026-05-18T07:45:16.712Z
 Stopped at: Phase 38 UI-SPEC approved
-Resume file: .planning/phases/38-folder-device-sync-v2-0-macos-playlists-library-auswahlen-au/38-UI-SPEC.md
+Resume file: None
 
 ---
 *Last updated: 2026-05-04 — v1.4 Daily Driver roadmap created (Phases 28-33); v1.3 Yeat Expansion remains paused*
