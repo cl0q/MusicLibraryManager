@@ -47,7 +47,10 @@ final class TranscodeCache: Sendable {
     ///
     /// - Parameter bitrateKbps: Target AAC bitrate in kbps. Defaults to 248 for back-compat.
     func ensureCached(track: Track, bitrateKbps: Int = 248) async throws -> URL? {
-        guard let trackId = track.id else { return nil }
+        guard let trackId = track.id else {
+            AppLogger.shared.warn("ensureCached: track has no id", source: "Sync")
+            return nil
+        }
         let cached = cachePath(trackId: trackId, bitrateKbps: bitrateKbps)
 
         // Check bitrate-suffixed cache entry
@@ -58,10 +61,22 @@ final class TranscodeCache: Sendable {
         }
 
         guard let sourcePath = track.organizedPath ?? (track.isLocal ? track.originalPath : nil) else {
+            AppLogger.shared.error(
+                "ensureCached: track \(trackId) has no source path (organizedPath=nil, isLocal=\(track.isLocal), originalPath=\(track.originalPath))",
+                source: "Sync"
+            )
             return nil
         }
 
         let sourceURL = URL(fileURLWithPath: sourcePath)
+        if !FileManager.default.fileExists(atPath: sourceURL.path) {
+            AppLogger.shared.error(
+                "ensureCached: source file missing for track \(trackId): \(sourceURL.path)",
+                source: "Sync"
+            )
+            return nil
+        }
+
         let result = try await transcodeService.transcode(input: sourceURL, outputDir: cacheDir, bitrateKbps: bitrateKbps)
 
         switch result {
@@ -72,12 +87,20 @@ final class TranscodeCache: Sendable {
                 try FileManager.default.moveItem(at: url, to: cached)
             }
             return cached
-        case .skipped:
+        case .skipped(let reason):
             // Source is already lossy — copy to bitrate-suffixed cache path
+            AppLogger.shared.info(
+                "ensureCached: track \(trackId) skipped transcode (\(reason)); copying source to cache",
+                source: "Sync"
+            )
             try? FileManager.default.removeItem(at: cached)
             try FileManager.default.copyItem(at: sourceURL, to: cached)
             return cached
-        case .failed:
+        case .failed(let msg):
+            AppLogger.shared.error(
+                "ensureCached: transcode failed for track \(trackId) (\(sourceURL.lastPathComponent)) at \(bitrateKbps)k: \(msg)",
+                source: "Sync"
+            )
             return nil
         }
     }
@@ -87,9 +110,21 @@ final class TranscodeCache: Sendable {
     /// Link a cached file to a sync profile output folder.
     ///
     /// Uses hardlink first, falls back to copy for cross-filesystem.
-    func linkToProfile(trackId: Int64, destinationPath: URL) throws {
-        let cached = cachePath(trackId: trackId)
-        guard FileManager.default.fileExists(atPath: cached.path) else {
+    /// Looks up the bitrate-suffixed cache entry; falls back to the legacy
+    /// non-suffixed path for back-compat with pre-Phase-38 cache entries.
+    func linkToProfile(trackId: Int64, bitrateKbps: Int, destinationPath: URL) throws {
+        let cached: URL
+        let suffixed = cachePath(trackId: trackId, bitrateKbps: bitrateKbps)
+        let legacy = cachePath(trackId: trackId)
+        if FileManager.default.fileExists(atPath: suffixed.path) {
+            cached = suffixed
+        } else if FileManager.default.fileExists(atPath: legacy.path) {
+            cached = legacy
+        } else {
+            AppLogger.shared.error(
+                "linkToProfile: no cache entry for track \(trackId) at \(bitrateKbps)k (looked at \(suffixed.lastPathComponent) and \(legacy.lastPathComponent))",
+                source: "Sync"
+            )
             throw SyncError.cacheEntryMissing(trackId)
         }
 
@@ -106,7 +141,7 @@ final class TranscodeCache: Sendable {
             // Try hardlink first (same filesystem, instant, no disk space)
             try FileManager.default.linkItem(at: cached, to: destinationPath)
         } catch {
-            // Fallback to copy (cross-filesystem)
+            // Fallback to copy (cross-filesystem) — common for iPod/FAT32 destinations
             try FileManager.default.copyItem(at: cached, to: destinationPath)
         }
     }

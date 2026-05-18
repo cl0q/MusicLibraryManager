@@ -170,6 +170,11 @@ final class SyncService {
 
         var result = SyncResult()
 
+        AppLogger.shared.info(
+            "Sync starting: profile=\(profile.name) (id=\(profileId)) mode=\(profile.transcodeMode) toAdd=\(preview.filesToAdd.count) toRemove=\(preview.filesToRemove.count) output=\(profile.outputFolder)",
+            source: "Sync"
+        )
+
         // 1. Remove stale files (cleanup-deletion branch — D-04 / SYNC-v2-05)
         for file in preview.filesToRemove {
             if profile.cleanupRemovedFiles {
@@ -263,6 +268,7 @@ final class SyncService {
 
                     // For aac248/aac320, link cached file to destination
                     if profile.transcodeModeEnum != .keepOriginals {
+                        let bitrate: Int = profile.transcodeModeEnum == .aac320 ? 320 : 248
                         if let _ = cachedURL {
                             let destURL = TranscodeCache.buildProfilePath(
                                 track: track,
@@ -272,6 +278,7 @@ final class SyncService {
 
                             try transcodeCache.linkToProfile(
                                 trackId: file.trackId,
+                                bitrateKbps: bitrate,
                                 destinationPath: destURL
                             )
 
@@ -287,15 +294,27 @@ final class SyncService {
                             )
 
                             result.syncedCount += 1
+                            AppLogger.shared.info(
+                                "Sync ok: track \(file.trackId) → \(destURL.path) (\(size) bytes, \(bitrate)k)",
+                                source: "Sync"
+                            )
                         } else {
                             result.failedCount += 1
                             result.failedTracks.append((file.trackId, "Transcode failed"))
+                            AppLogger.shared.error(
+                                "Sync failed (transcode returned nil): track \(file.trackId) \(file.artist) - \(file.title) at \(bitrate)k",
+                                source: "Sync"
+                            )
                         }
                     }
                 }
             } catch {
                 result.failedCount += 1
                 result.failedTracks.append((file.trackId, error.localizedDescription))
+                AppLogger.shared.error(
+                    "Sync failed (exception): track \(file.trackId) \(file.artist) - \(file.title): \(error.localizedDescription)",
+                    source: "Sync"
+                )
             }
 
             processed += 1
@@ -361,16 +380,18 @@ final class SyncService {
                             track: track, libraryRoot: libraryRoot,
                             profileOutputFolder: profile.outputFolder
                         )
-                        try transcodeCache.linkToProfile(trackId: trackId, destinationPath: destURL)
+                        try transcodeCache.linkToProfile(trackId: trackId, bitrateKbps: 248, destinationPath: destURL)
                         let checksum = try TranscodeCache.sha256(of: url)
                         let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
                         try await syncRepository.updateSyncState(
                             profileId: profileId, trackId: trackId, checksum: checksum, size: size
                         )
                         result.syncedCount = 1
+                        AppLogger.shared.info("Retry ok: track \(trackId) at 248k", source: "Sync")
                     } else {
                         result.failedCount = 1
                         result.failedTracks.append((trackId, "Transcode failed"))
+                        AppLogger.shared.error("Retry failed (transcode returned nil): track \(trackId) at 248k", source: "Sync")
                     }
                 case .aac320:
                     if let url = try await transcodeCache.ensureCached(track: track, bitrateKbps: 320) {
@@ -378,16 +399,18 @@ final class SyncService {
                             track: track, libraryRoot: libraryRoot,
                             profileOutputFolder: profile.outputFolder
                         )
-                        try transcodeCache.linkToProfile(trackId: trackId, destinationPath: destURL)
+                        try transcodeCache.linkToProfile(trackId: trackId, bitrateKbps: 320, destinationPath: destURL)
                         let checksum = try TranscodeCache.sha256(of: url)
                         let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
                         try await syncRepository.updateSyncState(
                             profileId: profileId, trackId: trackId, checksum: checksum, size: size
                         )
                         result.syncedCount = 1
+                        AppLogger.shared.info("Retry ok: track \(trackId) at 320k", source: "Sync")
                     } else {
                         result.failedCount = 1
                         result.failedTracks.append((trackId, "Transcode failed"))
+                        AppLogger.shared.error("Retry failed (transcode returned nil): track \(trackId) at 320k", source: "Sync")
                     }
                 }
             } catch {

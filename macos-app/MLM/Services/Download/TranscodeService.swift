@@ -39,8 +39,16 @@ final class TranscodeService: Sendable {
     /// - Parameter bitrateKbps: Target AAC bitrate in kbps. Defaults to 248 for back-compat.
     func transcode(input: URL, outputDir: URL, bitrateKbps: Int = 248) async throws -> TranscodeResult {
         guard let ffmpeg = ffmpegPath else {
+            AppLogger.shared.error(
+                "transcode: ffmpeg not found in PATH (~/.local/bin, /opt/homebrew/bin, /usr/local/bin, /opt/local/bin, /usr/bin)",
+                source: "Transcode"
+            )
             return .failed("ffmpeg not found")
         }
+        AppLogger.shared.debug(
+            "transcode: input=\(input.lastPathComponent) → \(bitrateKbps)k AAC (ffmpeg=\(ffmpeg))",
+            source: "Transcode"
+        )
 
         let outputName = input.deletingPathExtension().lastPathComponent + ".m4a"
         let outputURL = outputDir.appendingPathComponent(outputName)
@@ -245,11 +253,16 @@ final class TranscodeService: Sendable {
             AppLogger.shared.log(
                 "ffmpeg cover-art mux failed (exit \(result.exitCode)); retrying with -vn",
                 level: .warning,
-                source: "Download"
+                source: "Transcode"
             )
             return .coverArtFailure
         }
 
-        return .failure("ffmpeg exited with code \(result.exitCode): \(result.stderr.prefix(500))")
+        let stderrTail = result.stderr.suffix(800)
+        AppLogger.shared.error(
+            "ffmpeg failed exit=\(result.exitCode) input=\(input.lastPathComponent) encoder=\(encoder) bitrate=\(bitrateKbps)k stripVideo=\(stripVideo) stderr=\(stderrTail)",
+            source: "Transcode"
+        )
+        return .failure("ffmpeg exited with code \(result.exitCode): \(stderrTail)")
     }
 }
