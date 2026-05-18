@@ -60,7 +60,13 @@ final class TranscodeCache: Sendable {
             if size > 0 { return cached }
         }
 
-        guard let sourcePath = track.organizedPath ?? (track.isLocal ? track.originalPath : nil) else {
+        // Candidate paths to try in order: organized_path (relative to libraryRoot, common case)
+        // then original_path (absolute on-disk path, fallback for stale/wrong organized_path).
+        var candidatePaths: [String] = []
+        if let op = track.organizedPath { candidatePaths.append(op) }
+        if track.isLocal { candidatePaths.append(track.originalPath) }
+
+        if candidatePaths.isEmpty {
             AppLogger.shared.error(
                 "ensureCached: track \(trackId) has no source path (organizedPath=nil, isLocal=\(track.isLocal), originalPath=\(track.originalPath))",
                 source: "Sync"
@@ -68,9 +74,23 @@ final class TranscodeCache: Sendable {
             return nil
         }
 
-        guard let sourceURL = Self.resolveSourceURL(sourcePath: sourcePath, libraryRoot: libraryRoot) else {
+        var sourceURL: URL?
+        for candidate in candidatePaths {
+            if let url = Self.resolveSourceURL(sourcePath: candidate, libraryRoot: libraryRoot) {
+                sourceURL = url
+                if candidate != candidatePaths.first {
+                    AppLogger.shared.warn(
+                        "ensureCached: track \(trackId) organized_path stale; resolved via fallback \(candidate)",
+                        source: "Sync"
+                    )
+                }
+                break
+            }
+        }
+
+        guard let sourceURL else {
             AppLogger.shared.error(
-                "ensureCached: source file missing for track \(trackId): tried '\(sourcePath)' and libraryRoot='\(libraryRoot ?? "<nil>")'",
+                "ensureCached: source file missing for track \(trackId): tried \(candidatePaths) with libraryRoot='\(libraryRoot ?? "<nil>")'",
                 source: "Sync"
             )
             return nil
