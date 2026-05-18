@@ -224,10 +224,8 @@ final class SyncService {
                     switch profile.transcodeModeEnum {
                     case .keepOriginals:
                         // Bypass TranscodeCache — link original file directly (no transcode)
-                        if let organizedPath = track.organizedPath {
-                            let sourceURL = URL(fileURLWithPath: organizedPath.hasPrefix("/")
-                                ? organizedPath
-                                : libraryRoot + "/" + organizedPath)
+                        if let organizedPath = track.organizedPath,
+                           let sourceURL = TranscodeCache.resolveSourceURL(sourcePath: organizedPath, libraryRoot: libraryRoot) {
                             let destURL = URL(fileURLWithPath: file.destinationPath)
                             try? FileManager.default.createDirectory(
                                 at: destURL.deletingLastPathComponent(),
@@ -261,9 +259,9 @@ final class SyncService {
                             result.failedTracks.append((file.trackId, "No organized path for keepOriginals"))
                         }
                     case .aac248:
-                        cachedURL = try await transcodeCache.ensureCached(track: track, bitrateKbps: 248)
+                        cachedURL = try await transcodeCache.ensureCached(track: track, bitrateKbps: 248, libraryRoot: libraryRoot)
                     case .aac320:
-                        cachedURL = try await transcodeCache.ensureCached(track: track, bitrateKbps: 320)
+                        cachedURL = try await transcodeCache.ensureCached(track: track, bitrateKbps: 320, libraryRoot: libraryRoot)
                     }
 
                     // For aac248/aac320, link cached file to destination
@@ -350,9 +348,8 @@ final class SyncService {
             do {
                 switch profile.transcodeModeEnum {
                 case .keepOriginals:
-                    if let organizedPath = track.organizedPath {
-                        let sourceURL = URL(fileURLWithPath: organizedPath.hasPrefix("/")
-                            ? organizedPath : libraryRoot + "/" + organizedPath)
+                    if let organizedPath = track.organizedPath,
+                       let sourceURL = TranscodeCache.resolveSourceURL(sourcePath: organizedPath, libraryRoot: libraryRoot) {
                         let destURL = URL(fileURLWithPath: filePreview.destinationPath)
                         try? FileManager.default.createDirectory(at: destURL.deletingLastPathComponent(), withIntermediateDirectories: true)
                         try? FileManager.default.removeItem(at: destURL)
@@ -375,7 +372,7 @@ final class SyncService {
                         result.failedTracks.append((trackId, "No organized path"))
                     }
                 case .aac248:
-                    if let url = try await transcodeCache.ensureCached(track: track, bitrateKbps: 248) {
+                    if let url = try await transcodeCache.ensureCached(track: track, bitrateKbps: 248, libraryRoot: libraryRoot) {
                         let destURL = TranscodeCache.buildProfilePath(
                             track: track, libraryRoot: libraryRoot,
                             profileOutputFolder: profile.outputFolder
@@ -394,7 +391,7 @@ final class SyncService {
                         AppLogger.shared.error("Retry failed (transcode returned nil): track \(trackId) at 248k", source: "Sync")
                     }
                 case .aac320:
-                    if let url = try await transcodeCache.ensureCached(track: track, bitrateKbps: 320) {
+                    if let url = try await transcodeCache.ensureCached(track: track, bitrateKbps: 320, libraryRoot: libraryRoot) {
                         let destURL = TranscodeCache.buildProfilePath(
                             track: track, libraryRoot: libraryRoot,
                             profileOutputFolder: profile.outputFolder

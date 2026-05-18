@@ -46,7 +46,7 @@ final class TranscodeCache: Sendable {
     /// If not cached, transcode the source file.
     ///
     /// - Parameter bitrateKbps: Target AAC bitrate in kbps. Defaults to 248 for back-compat.
-    func ensureCached(track: Track, bitrateKbps: Int = 248) async throws -> URL? {
+    func ensureCached(track: Track, bitrateKbps: Int = 248, libraryRoot: String? = nil) async throws -> URL? {
         guard let trackId = track.id else {
             AppLogger.shared.warn("ensureCached: track has no id", source: "Sync")
             return nil
@@ -68,10 +68,9 @@ final class TranscodeCache: Sendable {
             return nil
         }
 
-        let sourceURL = URL(fileURLWithPath: sourcePath)
-        if !FileManager.default.fileExists(atPath: sourceURL.path) {
+        guard let sourceURL = Self.resolveSourceURL(sourcePath: sourcePath, libraryRoot: libraryRoot) else {
             AppLogger.shared.error(
-                "ensureCached: source file missing for track \(trackId): \(sourceURL.path)",
+                "ensureCached: source file missing for track \(trackId): tried '\(sourcePath)' and libraryRoot='\(libraryRoot ?? "<nil>")'",
                 source: "Sync"
             )
             return nil
@@ -103,6 +102,38 @@ final class TranscodeCache: Sendable {
             )
             return nil
         }
+    }
+
+    // MARK: - Path Resolution
+
+    /// Resolve a DB source path (organizedPath/originalPath) to a real on-disk URL.
+    ///
+    /// Handles three cases observed in the wild:
+    /// 1. Absolute path that already includes libraryRoot (`/Volumes/Lexxar/Music/…`)
+    /// 2. Relative path without leading slash (`01_SoundCloud/foo.m4a`)
+    /// 3. Relative path that erroneously starts with a slash (`/01_SoundCloud/foo.m4a`)
+    ///
+    /// Returns nil only if no candidate resolves to an existing file.
+    static func resolveSourceURL(sourcePath: String, libraryRoot: String?) -> URL? {
+        let fm = FileManager.default
+
+        // Candidate 1: as-is (handles already-absolute paths)
+        if fm.fileExists(atPath: sourcePath) {
+            return URL(fileURLWithPath: sourcePath)
+        }
+
+        // Candidates 2 + 3: prepend libraryRoot
+        if let root = libraryRoot, !root.isEmpty {
+            // Normalize: strip trailing slash on root, ensure leading slash on path
+            let normalizedRoot = root.hasSuffix("/") ? String(root.dropLast()) : root
+            let normalizedPath = sourcePath.hasPrefix("/") ? sourcePath : "/" + sourcePath
+            let candidate = normalizedRoot + normalizedPath
+            if fm.fileExists(atPath: candidate) {
+                return URL(fileURLWithPath: candidate)
+            }
+        }
+
+        return nil
     }
 
     // MARK: - Link to Profile
