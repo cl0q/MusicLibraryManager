@@ -251,7 +251,11 @@ final class ImportService: Sendable {
     /// Save a single batch of metadata within a transaction.
     ///
     /// Generates organized paths and inserts tracks. Skips tracks whose
-    /// `original_path` already exists (UNIQUE constraint).
+    /// `original_path` already exists. Existence is checked against three
+    /// normalisations of the path so a rescan does not create duplicate
+    /// rows (with a fresh `date_added`) when the same file is encountered
+    /// under a slightly different Unicode form or path-standardisation —
+    /// the prior single-string `==` check missed those.
     ///
     /// - Parameter batch: Metadata to insert
     /// - Returns: (succeeded count, skipped count)
@@ -261,9 +265,23 @@ final class ImportService: Sendable {
             var skipped = 0
 
             for metadata in batch {
-                // Check if the track already exists (by original_path)
+                // Build path variants: raw, standardized (resolves "//" etc),
+                // and Unicode-normalised (NFC + NFD). Most macOS path APIs
+                // emit NFD ("Aaron" Composed vs Decomposed for accented chars)
+                // while user-typed/library paths are usually NFC. Comparing
+                // only `==` against the DB-stored path misses this.
+                let raw = metadata.originalPath
+                let standardized = (raw as NSString).standardizingPath
+                let nfc = raw.precomposedStringWithCanonicalMapping
+                let nfd = raw.decomposedStringWithCanonicalMapping
+                let stdNFC = standardized.precomposedStringWithCanonicalMapping
+                let stdNFD = standardized.decomposedStringWithCanonicalMapping
+
+                var candidates = [raw, standardized, nfc, nfd, stdNFC, stdNFD]
+                candidates = Array(Set(candidates))  // dedupe
+
                 let exists = try Track
-                    .filter(Track.Columns.originalPath == metadata.originalPath)
+                    .filter(candidates.contains(Track.Columns.originalPath))
                     .fetchCount(db) > 0
 
                 if exists {
@@ -293,8 +311,21 @@ final class ImportService: Sendable {
                     track.artist + " " + track.album + " " + track.title
                 )
 
-                try track.insert(db)
-                succeeded += 1
+                do {
+                    try track.insert(db)
+                    succeeded += 1
+                } catch let error as DatabaseError where error.resultCode == .SQLITE_CONSTRAINT {
+                    // A UNIQUE-constraint violation here means a row with
+                    // this original_path already exists but slipped through
+                    // the candidate match above (e.g. a normalisation we
+                    // didn't anticipate). Treat as skip — do NOT clobber the
+                    // existing row's date_added with a fresh insert.
+                    AppLogger.shared.warn(
+                        "Import: UNIQUE conflict for \(metadata.originalPath) — keeping existing row (date_added preserved)",
+                        source: "Import"
+                    )
+                    skipped += 1
+                }
             }
 
             return (succeeded, skipped)
