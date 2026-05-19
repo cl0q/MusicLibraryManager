@@ -10,14 +10,20 @@ import Foundation
 /// - Download: `GET /api/download-music?track_id=<id>&quality=<5|6|7|27>`
 ///             → either `{ success: true, data: { url: ... } }` or `{ success: false, error: "Captcha required." }`
 ///
-/// ## Captcha / Cloudflare
-/// The download endpoint sits behind Cloudflare Bot Fight Mode. Without a
-/// valid `cf_clearance` cookie every request gets a 403 "Captcha
-/// required" response. The user obtains the cookie once by visiting the
-/// site in a browser, solving the challenge, copying the value of the
-/// `cf_clearance` cookie out of dev-tools, and exporting it via the
-/// `MLM_SQUID_CF_COOKIE` environment variable. The client then attaches
-/// it on every request.
+/// ## Captcha
+/// The download endpoint gates on a `captcha_verified_at` cookie that
+/// the site sets after the user passes its in-page captcha. Without it,
+/// every download request returns `{success:false,"error":"Captcha
+/// required."}`. Obtain it once by visiting `qobuz.squid.wtf` in a
+/// browser, downloading any track (this triggers the captcha), then
+/// opening dev-tools → Storage → Cookies → copying the value of
+/// `captcha_verified_at` and exporting it via the
+/// `MLM_SQUID_CAPTCHA` environment variable. The client attaches it
+/// on every request.
+///
+/// (For back-compat we also accept the older `MLM_SQUID_CF_COOKIE`
+/// name — initial assumption was Cloudflare-based; turns out it's a
+/// site-specific captcha mechanism.)
 ///
 /// ## Override
 /// `MLM_SQUID_API_BASE` overrides the base URL the same way
@@ -30,11 +36,19 @@ final class SquidWtfClient: Sendable {
         ProcessInfo.processInfo.environment["MLM_SQUID_API_BASE"] ?? defaultBaseURL
     }
 
-    static var cfClearance: String? {
-        let raw = ProcessInfo.processInfo.environment["MLM_SQUID_CF_COOKIE"]
-        guard let raw, !raw.isEmpty else { return nil }
-        return raw
+    /// Value of the `captcha_verified_at` cookie. Sourced from either
+    /// `MLM_SQUID_CAPTCHA` (preferred) or the legacy `MLM_SQUID_CF_COOKIE`.
+    static var captchaCookie: String? {
+        let env = ProcessInfo.processInfo.environment
+        for key in ["MLM_SQUID_CAPTCHA", "MLM_SQUID_CF_COOKIE"] {
+            if let raw = env[key], !raw.isEmpty { return raw }
+        }
+        return nil
     }
+
+    /// Back-compat alias used by the orchestrator's boot-time
+    /// healthcheck. Returns the same value as `captchaCookie`.
+    static var cfClearance: String? { captchaCookie }
 
     private let session: URLSession
 
@@ -207,10 +221,11 @@ final class SquidWtfClient: Sendable {
     // MARK: - Helpers
 
     private func attachCloudflareCookie(to request: inout URLRequest) {
-        guard let value = Self.cfClearance else { return }
-        // Browser would send multiple cookies — we forward cf_clearance
-        // only, which is all the bot-fight check needs.
-        request.addValue("cf_clearance=\(value)", forHTTPHeaderField: "Cookie")
+        guard let value = Self.captchaCookie else { return }
+        // Site sets `captcha_verified_at=<unix-ms>` after the user
+        // solves the in-page captcha. Forwarding this cookie alone is
+        // enough to unlock the download endpoint.
+        request.addValue("captcha_verified_at=\(value)", forHTTPHeaderField: "Cookie")
     }
 
     private func inferExtension(from urlString: String, quality: Int) -> String {

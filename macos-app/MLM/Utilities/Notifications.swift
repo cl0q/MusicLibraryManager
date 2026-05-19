@@ -95,6 +95,10 @@ extension Notification.Name {
     /// Posted when the user triggers "More Info" via the Library menu (⌘I).
     static let showTrackDetail = Notification.Name("MLMShowTrackDetail")
 
+    /// Posted when the user picks "Settings…" (⌘,) from the app menu.
+    /// ContentView listens and presents the Settings sheet.
+    static let openSettings = Notification.Name("MLMOpenSettings")
+
     // MARK: - Sync UI (Phase 38)
 
     /// Posted when user selects "Neues Profil erstellen…" from a Sync to submenu

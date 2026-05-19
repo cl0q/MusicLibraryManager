@@ -85,18 +85,27 @@ final class TrackRepository: Sendable {
         }
     }
 
-    /// Filter a set of candidate track IDs down to those that have a
-    /// non-null organized_path (i.e. are actually local files, not
-    /// remote streaming references). Used by source-sync code that
-    /// wants to mirror only locally-downloaded items into a playlist.
+    /// Filter a set of candidate track IDs down to those that look like
+    /// real playable local files: organized_path is set AND format is
+    /// an audio container, not a streaming-service marker (`soundcloud`,
+    /// `spotify`, `youtube`, …).
+    ///
+    /// Some legacy rows carry both an organized_path and a streaming-
+    /// service format string. They show up as "local" in the UI but
+    /// fail to play; we must not pull them into source playlists.
     func filterLocalIds(_ trackIds: [Int64]) async throws -> Set<Int64> {
         guard !trackIds.isEmpty else { return [] }
+        let audioFormats: [String] = [
+            "mp3", "m4a", "aac", "flac", "wav", "ogg", "opus", "alac",
+            "aiff", "aif", "wma", "ape", "wv", "mp4"
+        ]
         return try await database.read { db in
             let rows = try Int64.fetchAll(
                 db,
                 Track
                     .filter(trackIds.contains(Track.Columns.id))
                     .filter(Track.Columns.organizedPath != nil)
+                    .filter(audioFormats.contains(Track.Columns.format))
                     .select(Track.Columns.id, as: Int64.self)
             )
             return Set(rows)

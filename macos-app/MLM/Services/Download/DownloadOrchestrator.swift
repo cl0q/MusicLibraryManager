@@ -90,7 +90,7 @@ final class DownloadOrchestrator {
             await Self.healthCheck(label: "Squid", endpoint: squidEndpoint, configKey: "MLM_SQUID_API_BASE")
             if !squidHasCookie {
                 AppLogger.shared.info(
-                    "Squid: no MLM_SQUID_CF_COOKIE set — search will run, but download requires a cf_clearance cookie (solve the captcha at qobuz.squid.wtf once in a browser, copy the cookie value, export MLM_SQUID_CF_COOKIE=…)",
+                    "Squid: no MLM_SQUID_CAPTCHA set — search will run, but download needs the `captcha_verified_at` cookie. Trigger any download once at qobuz.squid.wtf, open dev-tools → Storage → Cookies → copy the value of captcha_verified_at, then export MLM_SQUID_CAPTCHA=…",
                     source: "Download"
                 )
             }
@@ -345,7 +345,7 @@ final class DownloadOrchestrator {
                     return path
                 case .captchaRequired:
                     AppLogger.shared.log(
-                        "chain[Squid]: search hit but download needs cf_clearance — set MLM_SQUID_CF_COOKIE from your browser's cookie for qobuz.squid.wtf, then retry",
+                        "chain[Squid]: search hit but download needs captcha_verified_at — set MLM_SQUID_CAPTCHA from your browser's cookie for qobuz.squid.wtf (open dev-tools, Storage → Cookies), then retry",
                         level: .warning, source: "Download"
                     )
                 case .notFound:

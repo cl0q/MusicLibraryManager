@@ -91,7 +91,17 @@ final class YouTubeDownloader: Sendable {
             }
         )
 
-        // Check for "no results" indicators
+        // Trust the printed filepath FIRST — yt-dlp commonly exits
+        // with code 101 ("--max-downloads reached") even though the
+        // file was successfully downloaded and printed via
+        // `--print after_move:filepath`. Treating that as failure
+        // (the old behaviour) was throwing away valid downloads.
+        let outputPath = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !outputPath.isEmpty && FileManager.default.fileExists(atPath: outputPath) {
+            return .success(URL(fileURLWithPath: outputPath))
+        }
+
+        // No file path on stdout: now inspect the failure modes.
         let combined = (result.stdout + result.stderr).lowercased()
         if combined.contains("no video results") || combined.contains("unable to extract") {
             let stderrTail = String(result.stderr.suffix(600))
@@ -105,7 +115,7 @@ final class YouTubeDownloader: Sendable {
 
         guard result.isSuccess else {
             // Surface enough stderr + stdout context to debug *why*
-            // yt-dlp gave up. The Logs tab is now the diagnosis surface.
+            // yt-dlp gave up. The Logs tab is the diagnosis surface.
             let stderrTail = String(result.stderr.suffix(800))
                 .replacingOccurrences(of: "\n", with: " | ")
             let stdoutTail = String(result.stdout.suffix(400))
@@ -117,13 +127,10 @@ final class YouTubeDownloader: Sendable {
             return .notFound
         }
 
-        // The --print flag outputs the final filepath to stdout
-        let outputPath = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !outputPath.isEmpty && FileManager.default.fileExists(atPath: outputPath) {
-            return .success(URL(fileURLWithPath: outputPath))
-        }
-
-        // Fallback: look for most recent file in output dir
+        // Last-resort: pick up the most recently modified audio file in
+        // outputDir. This catches the case where --print emitted the
+        // pre-move name but the file actually exists under a different
+        // suffix.
         if let found = findMostRecentFile(in: outputDir) {
             return .success(found)
         }
