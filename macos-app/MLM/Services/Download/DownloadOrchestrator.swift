@@ -76,6 +76,37 @@ final class DownloadOrchestrator {
         // Create directories
         try? FileManager.default.createDirectory(at: flacDir, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: aacDir, withIntermediateDirectories: true)
+
+        // Once-at-boot DAB endpoint reachability log so the Logs tab tells
+        // the user whether the FLAC step is live or has degraded to the
+        // YouTube fallback. Background task — never blocks init.
+        let endpoint = DABClient.baseURL
+        Task.detached(priority: .background) {
+            if endpoint.isEmpty {
+                AppLogger.shared.info(
+                    "DAB endpoint disabled (MLM_DAB_API_BASE = \"\")",
+                    source: "Download"
+                )
+                return
+            }
+            guard let url = URL(string: endpoint) else { return }
+            var req = URLRequest(url: url)
+            req.httpMethod = "HEAD"
+            req.timeoutInterval = 8
+            do {
+                let (_, resp) = try await URLSession.shared.data(for: req)
+                let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                AppLogger.shared.info(
+                    "DAB endpoint reachable: \(endpoint) (HTTP \(code))",
+                    source: "Download"
+                )
+            } catch {
+                AppLogger.shared.warn(
+                    "DAB endpoint NOT reachable: \(endpoint) — \(error.localizedDescription). Pipeline will skip DAB and fall through to YouTube. Set MLM_DAB_API_BASE to override.",
+                    source: "Download"
+                )
+            }
+        }
     }
 
     // MARK: - Download Batch

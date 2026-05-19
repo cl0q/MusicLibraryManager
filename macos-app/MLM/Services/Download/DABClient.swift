@@ -5,9 +5,24 @@ import os
 ///
 /// Mirrors the Rust `DabClient` — authenticates via session cookie,
 /// searches for tracks, and downloads FLAC files.
+///
+/// The base URL is overridable via the `MLM_DAB_API_BASE` environment
+/// variable. The default endpoint (`dab.yeet.su`) has been observed to
+/// drop offline; setting this var lets you point at a working mirror
+/// without recompiling. Set to an empty string to disable DAB entirely.
 final class DABClient: Sendable {
-    /// Base URL for the DAB API.
-    private static let baseURL = "https://dab.yeet.su/api"
+    /// Hardcoded fallback if no env override is set.
+    private static let defaultBaseURL = "https://dab.yeet.su/api"
+
+    /// Resolved base URL — env override or the hardcoded default.
+    /// Empty string disables the client.
+    static var baseURL: String {
+        if let override = ProcessInfo.processInfo.environment["MLM_DAB_API_BASE"] {
+            return override
+        }
+        return defaultBaseURL
+    }
+
     private static let tokenSource = "dab"
     private static let tokenUser = "default"
 
@@ -38,14 +53,33 @@ final class DABClient: Sendable {
     /// so we try without auth first. Only fall back to login when the
     /// server hands us a 401 — and treat missing credentials as a soft
     /// "skip DAB" rather than a hard error.
+    ///
+    /// Returns nil when the endpoint is configured as empty, when the
+    /// hostname cannot be resolved (offline / DNS failure), or when the
+    /// request times out — the orchestrator's fallback chain takes it
+    /// from there.
     func searchTrack(query: String) async throws -> DabTrack? {
+        let base = Self.baseURL
+        guard !base.isEmpty else { return nil }
         let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        let url = URL(string: "\(Self.baseURL)/search?q=\(encoded)")!
+        guard let url = URL(string: "\(base)/search?q=\(encoded)") else {
+            return nil
+        }
 
         var request = URLRequest(url: url)
         addAuthCookie(to: &request)
 
-        let (data, response) = try await session.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let urlError as URLError where Self.isUnreachable(urlError) {
+            AppLogger.shared.warn(
+                "DAB: endpoint unreachable (\(urlError.code.rawValue) \(urlError.localizedDescription)) — set MLM_DAB_API_BASE to override",
+                source: "Download"
+            )
+            return nil
+        }
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
 
         if statusCode == 401 {
@@ -64,6 +98,22 @@ final class DABClient: Sendable {
 
         let searchResponse = try JSONDecoder().decode(DabSearchResponse.self, from: data)
         return searchResponse.tracks.first
+    }
+
+    /// URLError codes we treat as "skip DAB silently, don't raise":
+    /// network outright unreachable, DNS resolution failed, timeout.
+    private static func isUnreachable(_ err: URLError) -> Bool {
+        switch err.code {
+        case .cannotFindHost,            // -1003 — what the user saw
+             .cannotConnectToHost,       // -1004
+             .networkConnectionLost,     // -1005
+             .dnsLookupFailed,           // -1006
+             .notConnectedToInternet,    // -1009
+             .timedOut:                  // -1001
+            return true
+        default:
+            return false
+        }
     }
 
     // MARK: - Download
@@ -123,11 +173,20 @@ final class DABClient: Sendable {
     // MARK: - Private
 
     private func getStreamURL(trackId: UInt64) async throws -> String? {
-        let url = URL(string: "\(Self.baseURL)/stream?trackId=\(trackId)")!
+        let base = Self.baseURL
+        guard !base.isEmpty, let url = URL(string: "\(base)/stream?trackId=\(trackId)") else {
+            return nil
+        }
         var request = URLRequest(url: url)
         addAuthCookie(to: &request)
 
-        let (data, response) = try await session.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let urlError as URLError where Self.isUnreachable(urlError) {
+            return nil
+        }
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
 
         let streamResponse = try JSONDecoder().decode(DabStreamResponse.self, from: data)
