@@ -30,6 +30,18 @@ struct MLMApp: App {
             // Remove default New Document item
             CommandGroup(replacing: .newItem) {}
 
+            // Explicit Settings command. macOS's auto-generated "Settings…"
+            // item silently no-ops in some builds (the underlying
+            // showSettingsWindow: selector doesn't reach our Settings scene
+            // unless we wire it ourselves). SettingsLink (macOS 14+) opens
+            // the Settings scene directly and binds ⌘,.
+            CommandGroup(replacing: .appSettings) {
+                SettingsLink {
+                    Text("Settings…")
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
+
             // MARK: - File menu additions
             CommandGroup(after: .newItem) {
                 Button("New Playlist") {
