@@ -222,8 +222,11 @@ final class TranscodeCache: Sendable {
 
     /// Build the destination path for a track on a sync profile.
     ///
-    /// Preserves library folder hierarchy. Falls back to `Artist/Album/Track.m4a`.
-    /// SoundCloud tracks go to `03_Club/SoundCloud/title.m4a`.
+    /// Preserves library folder hierarchy. Falls back to `Artist/Album/Track.m4a`
+    /// when `organized_path` is missing or looks like a stale internal path
+    /// (Tauri-era `.mlm_staging/`, `.ln/` staging dirs, or dot-prefixed
+    /// hidden folders). Such paths would otherwise leak into the
+    /// destination layout and the generated M3U8 playlists.
     static func buildProfilePath(
         track: Track,
         libraryRoot: String,
@@ -231,7 +234,8 @@ final class TranscodeCache: Sendable {
     ) -> URL {
         let profileDir = URL(fileURLWithPath: profileOutputFolder)
 
-        if let organizedPath = track.organizedPath {
+        if let organizedPath = track.organizedPath,
+           !Self.isStaleOrganizedPath(organizedPath) {
             // Strip library root prefix
             var relativePath = organizedPath
             if relativePath.hasPrefix(libraryRoot) {
@@ -241,9 +245,17 @@ final class TranscodeCache: Sendable {
                 }
             }
 
-            // Change extension to .m4a
+            // Force the destination extension to .m4a and strip any legacy
+            // double extensions (e.g. "Foo.mp3.m4a" -> "Foo.m4a") that
+            // earlier transcode pipelines accidentally produced.
             let pathURL = URL(fileURLWithPath: relativePath)
-            let m4aPath = pathURL.deletingPathExtension().appendingPathExtension("m4a")
+            var stem = pathURL.deletingPathExtension()
+            // Peel a second extension if it looks like a codec hint left
+            // over from the source filename ("Foo.mp3" -> "Foo").
+            if Self.codecExtensions.contains(stem.pathExtension.lowercased()) {
+                stem = stem.deletingPathExtension()
+            }
+            let m4aPath = stem.appendingPathExtension("m4a")
             return profileDir.appendingPathComponent(m4aPath.relativePath)
         }
 
@@ -255,6 +267,30 @@ final class TranscodeCache: Sendable {
             .appendingPathComponent(artist)
             .appendingPathComponent(album)
             .appendingPathComponent("\(title).m4a")
+    }
+
+    /// Library-relative paths that are internal staging dirs from earlier
+    /// pipeline iterations. A row with one of these prefixes should be
+    /// treated as if it had no organized_path at all.
+    private static let stalePathPrefixes: [String] = [
+        ".mlm_staging/",
+        ".ln/",
+    ]
+
+    /// Audio extensions we treat as codec hints when collapsing a legacy
+    /// "Stem.mp3.m4a" -> "Stem.m4a".
+    private static let codecExtensions: Set<String> = [
+        "mp3", "flac", "wav", "ogg", "opus", "aac", "alac", "m4a", "wma"
+    ]
+
+    /// Decide whether `organized_path` points at an internal staging
+    /// location we should never write back into a sync destination or a
+    /// generated M3U8 entry.
+    static func isStaleOrganizedPath(_ path: String) -> Bool {
+        for prefix in stalePathPrefixes {
+            if path.hasPrefix(prefix) { return true }
+        }
+        return false
     }
 }
 

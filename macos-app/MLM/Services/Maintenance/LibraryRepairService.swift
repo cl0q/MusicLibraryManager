@@ -69,8 +69,14 @@ final class LibraryRepairService {
                 continue
             }
 
-            // Step 1 — current organized_path resolves?
-            if TranscodeCache.resolveSourceURL(sourcePath: organizedPath, libraryRoot: normalizedRoot) != nil {
+            // Step 1 — current organized_path resolves AND is not a known
+            // internal staging path. `.mlm_staging/...` / `.ln/...` entries
+            // are Tauri-era leftovers — even if the file happens to exist
+            // we want to rewrite them to the proper library-relative path
+            // so the M3U8 generator stops emitting them.
+            let pathIsStale = TranscodeCache.isStaleOrganizedPath(organizedPath)
+            if !pathIsStale,
+               TranscodeCache.resolveSourceURL(sourcePath: organizedPath, libraryRoot: normalizedRoot) != nil {
                 result.alreadyValid += 1
                 continue
             }
