@@ -30,15 +30,17 @@ struct MLMApp: App {
             // Remove default New Document item
             CommandGroup(replacing: .newItem) {}
 
-            // Settings command. Apple's `Settings { … }` scene and the
-            // separate `Window` + openWindow approach both failed in
-            // practice on this build (auto-duplicated item / dead click).
-            // Final approach: post a notification and let ContentView
-            // present a sheet. Boring, works, no SwiftUI scene-routing
-            // magic involved.
+            // Settings command. SwiftUI's `Settings { … }` scene,
+            // Window-scene + openWindow, and Notification + sheet all
+            // failed in this app's setup (auto-duplicated item, dead
+            // click, or the sheet never presented). Final approach:
+            // hand the click straight to AppDelegate, which owns a
+            // plain NSWindowController hosting SettingsView.
             CommandGroup(replacing: .appSettings) {
-                Button("Settings…") {
-                    NotificationCenter.default.post(name: .openSettings, object: nil)
+                Button("Einstellungen…") {
+                    if let delegate = NSApp.delegate as? AppDelegate {
+                        Task { @MainActor in delegate.showSettingsWindow() }
+                    }
                 }
                 .keyboardShortcut(",", modifiers: .command)
             }

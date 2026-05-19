@@ -8,32 +8,24 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Einstellungen")
-                    .font(MLMFont.bodyBold)
-                    .foregroundColor(.mlmInk)
-                Spacer()
-                Button("Fertig") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            Divider()
+        TabView {
+            LibrarySetupView()
+                .tabItem {
+                    Label("Library", systemImage: "music.note.house")
+                }
+                .tag("library")
 
-            TabView {
-                LibrarySetupView()
-                    .tabItem {
-                        Label("Library", systemImage: "music.note.house")
-                    }
-                    .tag("library")
+            SourcesSetupView()
+                .tabItem {
+                    Label("Sources", systemImage: "antenna.radiowaves.left.and.right")
+                }
+                .tag("sources")
 
-                MaintenanceView()
-                    .tabItem {
-                        Label("Maintenance", systemImage: "wrench.and.screwdriver")
-                    }
-                    .tag("maintenance")
-            }
+            MaintenanceView()
+                .tabItem {
+                    Label("Maintenance", systemImage: "wrench.and.screwdriver")
+                }
+                .tag("maintenance")
         }
         .frame(minWidth: 500, minHeight: 400)
     }

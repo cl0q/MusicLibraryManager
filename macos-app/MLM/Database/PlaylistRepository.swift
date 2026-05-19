@@ -198,7 +198,7 @@ final class PlaylistRepository: Sendable {
         legacyNameMatches: [String] = []
     ) async throws -> Playlist {
         try await database.write { db in
-            // 1 — modern match
+            // 1 — modern match: same source_id + is_liked.
             if let existing = try Playlist
                 .filter(Playlist.Columns.sourceId == sourceId)
                 .filter(Playlist.Columns.isLiked == 1)
@@ -207,10 +207,14 @@ final class PlaylistRepository: Sendable {
                 return existing
             }
 
-            // 2 — legacy match (no source_id yet, recognisable name)
+            // 2 — name-based match. is_liked=1 plus a recognisable name
+            //     wins regardless of whether source_id is null OR already
+            //     set (Tauri-era rows had source_id pointing at the old
+            //     Tauri source table whose IDs don't survive to macOS).
+            //     We adopt the row and rewrite its source_id.
             if !legacyNameMatches.isEmpty {
                 let candidates = try Playlist
-                    .filter(Playlist.Columns.sourceId == nil)
+                    .filter(Playlist.Columns.isLiked == 1)
                     .fetchAll(db)
                 let lowered = legacyNameMatches.map { $0.lowercased() }
                 if let legacy = candidates.first(where: { p in
@@ -245,6 +249,47 @@ final class PlaylistRepository: Sendable {
             )
             try playlist.insert(db)
             return playlist
+        }
+    }
+
+    /// Return every is_liked=1 playlist OTHER than `survivorId` whose
+    /// name matches one of `legacyNameMatches`. Used by the SoundCloud
+    /// sync to clean up duplicate Likes-playlists from earlier code
+    /// paths.
+    func findDuplicateLikedPlaylists(
+        survivorId: Int64,
+        legacyNameMatches: [String]
+    ) async throws -> [Playlist] {
+        guard !legacyNameMatches.isEmpty else { return [] }
+        let lowered = legacyNameMatches.map { $0.lowercased() }
+        return try await database.read { db in
+            try Playlist
+                .filter(Playlist.Columns.isLiked == 1)
+                .filter(Playlist.Columns.id != survivorId)
+                .fetchAll(db)
+                .filter { p in
+                    let n = p.name.lowercased()
+                    return lowered.contains(where: { n.contains($0) })
+                }
+        }
+    }
+
+    /// Drop a duplicate playlist row and all its playlist_tracks rows.
+    /// Used to reconcile the duplicate "SoundCloud Likes" / "Liked from
+    /// SoundCloud" entries created on databases that lived through both
+    /// the Tauri-era and the macOS-era sync code paths. The caller is
+    /// responsible for repopulating the survivor (the SoundCloud sync
+    /// runs `replaceTrackList` right after this merge call).
+    func mergePlaylists(survivorId: Int64, victimId: Int64) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "DELETE FROM playlist_tracks WHERE playlist_id = ?",
+                arguments: [victimId]
+            )
+            try db.execute(
+                sql: "DELETE FROM playlists WHERE id = ?",
+                arguments: [victimId]
+            )
         }
     }
 

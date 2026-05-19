@@ -45,7 +45,6 @@ struct ContentView: View {
     @State private var selectedSection: SidebarSection = .library
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var showFirstRunWizard = false
-    @State private var showSettings = false
 
     /// Track selected for detail panel (via double-click or "More Info").
     @State private var selectedTrackForDetail: Track?
@@ -93,15 +92,6 @@ struct ContentView: View {
         // Handle library drive remount — restore state
         .onReceive(NotificationCenter.default.publisher(for: .libraryDriveDidMount)) { _ in
             container.isLibraryDriveMounted = true
-        }
-        // ⌘, / "Settings…" — open the Settings sheet.
-        .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
-            showSettings = true
-        }
-        .sheet(isPresented: $showSettings) {
-            SettingsView()
-                .environment(container)
-                .frame(minWidth: 600, minHeight: 500)
         }
     }
 

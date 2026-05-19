@@ -313,6 +313,10 @@ final class SoundCloudClient {
             do {
                 let localIds = try await trackRepository.filterLocalIds(orderedTrackIds)
                 let playable = orderedTrackIds.filter { localIds.contains($0) }
+                AppLogger.shared.info(
+                    "SoundCloud: filterLocalIds → \(playable.count) playable of \(orderedTrackIds.count) collected",
+                    source: "SoundCloud"
+                )
                 let playlist = try await playlistRepo.findOrCreateLikedPlaylist(
                     name: "Liked from SoundCloud",
                     sourceId: sourceId,
@@ -327,6 +331,30 @@ final class SoundCloudClient {
                     ]
                 )
                 if let playlistId = playlist.id {
+                    // Reconcile duplicate likes playlists (a previous
+                    // sync may have created a second row before
+                    // findOrCreate matched name-based). Find every
+                    // other is_liked=1 row whose name matches the
+                    // legacy patterns and merge its tracks into ours.
+                    let duplicates = try await playlistRepo.findDuplicateLikedPlaylists(
+                        survivorId: playlistId,
+                        legacyNameMatches: [
+                            "soundcloud likes",
+                            "soundcloud liked",
+                            "liked from soundcloud",
+                            "soundcloud favorites"
+                        ]
+                    )
+                    for dup in duplicates {
+                        if let dupId = dup.id {
+                            try await playlistRepo.mergePlaylists(survivorId: playlistId, victimId: dupId)
+                            AppLogger.shared.info(
+                                "SoundCloud: merged duplicate liked playlist '\(dup.name)' (id=\(dupId)) into survivor id=\(playlistId)",
+                                source: "SoundCloud"
+                            )
+                        }
+                    }
+
                     try await playlistRepo.replaceTrackList(
                         playlistId: playlistId,
                         trackIds: playable

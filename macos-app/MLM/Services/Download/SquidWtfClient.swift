@@ -36,15 +36,32 @@ final class SquidWtfClient: Sendable {
         ProcessInfo.processInfo.environment["MLM_SQUID_API_BASE"] ?? defaultBaseURL
     }
 
-    /// Value of the `captcha_verified_at` cookie. Sourced from either
-    /// `MLM_SQUID_CAPTCHA` (preferred) or the legacy `MLM_SQUID_CF_COOKIE`.
+    /// Value of the `captcha_verified_at` cookie.
+    ///
+    /// Lookup order:
+    /// 1. `MLM_SQUID_CAPTCHA` env var (preferred, useful for one-off
+    ///    runs from the shell).
+    /// 2. Legacy `MLM_SQUID_CF_COOKIE` env var.
+    /// 3. UserDefaults key `squid.captcha_cookie` — the value the user
+    ///    paste-in via the Settings → Sources sheet. Persists across
+    ///    launches so the user doesn't have to re-export every time.
+    ///
+    /// `nil` if none of the above is set.
     static var captchaCookie: String? {
         let env = ProcessInfo.processInfo.environment
         for key in ["MLM_SQUID_CAPTCHA", "MLM_SQUID_CF_COOKIE"] {
             if let raw = env[key], !raw.isEmpty { return raw }
         }
+        if let stored = UserDefaults.standard.string(forKey: "squid.captcha_cookie"),
+           !stored.isEmpty {
+            return stored
+        }
         return nil
     }
+
+    /// Where the persistent cookie lives. Exposed so the Settings UI
+    /// can write to it without duplicating the magic string.
+    static let userDefaultsKey = "squid.captcha_cookie"
 
     /// Back-compat alias used by the orchestrator's boot-time
     /// healthcheck. Returns the same value as `captchaCookie`.

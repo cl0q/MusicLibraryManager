@@ -72,10 +72,12 @@ struct MetadataPanel: View {
 
                 // MARK: - Library Section
                 metadataSection("Library", icon: "music.note.house") {
-                    metadataRow("Date Added", value: track.dateAdded ?? "—")
+                    metadataRow("Date Added", value: Self.formatLocalDateTime(track.dateAdded))
                     metadataRow("Status", value: track.isLocal ? "Local" : "Remote")
                     if let status = track.downloadStatus {
-                        metadataRow("Download", value: status.capitalized)
+                        // download_status is also an ISO 8601 timestamp in
+                        // modern rows; render it in local time too.
+                        metadataRow("Download", value: Self.formatLocalDateTime(status))
                     }
                     metadataRow("Duplicate", value: track.isDuplicate == 1 ? "Yes" : "No")
                     if let albumId = track.albumId {
@@ -125,4 +127,33 @@ struct MetadataPanel: View {
             Spacer()
         }
     }
+
+    // MARK: - Date Formatting
+
+    /// Parse an ISO 8601 timestamp (UTC) and render it in the user's
+    /// local timezone. Previously the raw UTC string was shown, which
+    /// looked two hours early to a CEST user.
+    static func formatLocalDateTime(_ iso: String?) -> String {
+        guard let iso, !iso.isEmpty else { return "—" }
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = parser.date(from: iso) {
+            return Self.localFormatter.string(from: date)
+        }
+        parser.formatOptions = [.withInternetDateTime]
+        if let date = parser.date(from: iso) {
+            return Self.localFormatter.string(from: date)
+        }
+        // Date-only fallback ("YYYY-MM-DD"): keep as-is.
+        return iso
+    }
+
+    private static let localFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        f.timeZone = .current
+        f.locale = .current
+        return f
+    }()
 }
