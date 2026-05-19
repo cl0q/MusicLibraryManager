@@ -62,6 +62,8 @@ struct SyncSettingsForm: View {
                     }
             }
             .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+            .background(Color.mlmSurface)
             .padding(.vertical, 8)
         } label: {
             Text("Einstellungen")
@@ -69,7 +71,9 @@ struct SyncSettingsForm: View {
                 .foregroundColor(.mlmInkMuted)
         }
         .padding(.horizontal, 16)
+        .padding(.vertical, 8)
         .background(Color.mlmSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
         // Re-sync local mirrors when profile identity changes (e.g., after VM reloads from DB)
         .onChange(of: profile.id) { _, _ in
             localM3U8 = profile.generateM3U8

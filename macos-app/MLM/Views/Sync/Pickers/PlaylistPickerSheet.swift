@@ -66,16 +66,29 @@ struct PlaylistPickerSheet: View {
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .padding(16)
 
-            // Playlist list (multi-select)
-            List(filtered, id: \.id, selection: $selectedIds) { playlist in
-                HStack {
+            // Playlist list — checkbox-style toggle per row.
+            // Plain click toggles selection (no Cmd/Shift needed).
+            List(filtered, id: \.id) { playlist in
+                let pid = playlist.id ?? -1
+                let isSelected = selectedIds.contains(pid)
+                HStack(spacing: 10) {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 16))
+                        .foregroundColor(isSelected ? .accentColor : .mlmInkMuted)
                     Text(playlist.name)
                         .font(MLMFont.body)
                         .foregroundColor(.mlmInk)
                     Spacer()
                 }
                 .padding(.vertical, 4)
-                .tag(playlist.id ?? -1)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if isSelected {
+                        selectedIds.remove(pid)
+                    } else {
+                        selectedIds.insert(pid)
+                    }
+                }
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)

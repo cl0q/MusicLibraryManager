@@ -30,6 +30,22 @@ struct TrackPickerSheet: View {
         }
     }
 
+    private var resultCountLabel: String {
+        let total = allTracks.count
+        let shown = filtered.count
+        let selected = selectedIds.count
+        let countPart: String
+        if searchQuery.isEmpty {
+            countPart = "\(total) Tracks"
+        } else {
+            countPart = "\(shown) von \(total) Tracks"
+        }
+        if selected > 0 {
+            return "\(countPart) · \(selected) ausgewählt"
+        }
+        return countPart
+    }
+
     var body: some View {
         VStack(spacing: 0) {
 
@@ -45,14 +61,14 @@ struct TrackPickerSheet: View {
 
             Divider().background(Color.mlmEdge)
 
-            // Search field
-            HStack(spacing: 4) {
+            // Search field — prominent: larger font, more padding, focus ring.
+            HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11))
+                    .font(.system(size: 14))
                     .foregroundColor(.mlmInkMuted)
                 TextField("Nach Künstler oder Titel suchen…", text: $searchQuery)
                     .textFieldStyle(.plain)
-                    .font(MLMFont.body)
+                    .font(.system(size: 15))
                     .foregroundColor(.mlmInk)
                     .focused($searchFocused)
                 if !searchQuery.isEmpty {
@@ -60,24 +76,59 @@ struct TrackPickerSheet: View {
                         searchQuery = ""
                     } label: {
                         Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
                             .foregroundColor(.mlmInkMuted)
                     }
                     .buttonStyle(.borderless)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
             .background(Color.mlmRaised)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .padding(16)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(searchFocused ? Color.accentColor.opacity(0.6) : Color.mlmEdge, lineWidth: 1)
+            )
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
 
-            // Track list — SwiftUI List virtualizes for 10k+ rows (T-38-04 mitigation)
-            List(filtered, id: \.id, selection: $selectedIds) { track in
-                HStack(spacing: 8) {
-                    Text("\(track.artist) — \(track.title)")
-                        .font(MLMFont.body)
-                        .foregroundColor(.mlmInk)
-                        .lineLimit(1)
+            // Result count line
+            HStack {
+                Text(resultCountLabel)
+                    .font(MLMFont.muted)
+                    .foregroundColor(.mlmInkMuted)
+                Spacer()
+                if !selectedIds.isEmpty {
+                    Button("Auswahl zurücksetzen") { selectedIds.removeAll() }
+                        .buttonStyle(.borderless)
+                        .font(MLMFont.muted)
+                        .foregroundColor(.mlmInkSecondary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 6)
+
+            // Track list — checkbox-style toggle per row, plain click toggles.
+            // SwiftUI List virtualises for 10k+ rows (T-38-04 mitigation).
+            List(filtered, id: \.id) { track in
+                let tid = track.id ?? -1
+                let isSelected = selectedIds.contains(tid)
+                HStack(spacing: 10) {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 16))
+                        .foregroundColor(isSelected ? .accentColor : .mlmInkMuted)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(track.title)
+                            .font(MLMFont.body)
+                            .foregroundColor(.mlmInk)
+                            .lineLimit(1)
+                        Text(track.artist)
+                            .font(MLMFont.muted)
+                            .foregroundColor(.mlmInkSecondary)
+                            .lineLimit(1)
+                    }
                     Spacer()
                     Text(track.format.uppercased())
                         .font(MLMFont.badge)
@@ -87,8 +138,15 @@ struct TrackPickerSheet: View {
                         .background(Color.mlmRaised)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
-                .padding(.vertical, 2)
-                .tag(track.id ?? -1)
+                .padding(.vertical, 3)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if isSelected {
+                        selectedIds.remove(tid)
+                    } else {
+                        selectedIds.insert(tid)
+                    }
+                }
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)

@@ -146,10 +146,19 @@ struct SyncProfileDetailView: View {
                         .truncationMode(.middle)
                 }
                 Spacer()
-                Button("Aktualisieren") {
+                if v.isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                        .padding(.trailing, 4)
+                }
+                Button {
                     Task { await v.loadPreview(for: profile) }
+                } label: {
+                    Label("Aktualisieren", systemImage: "arrow.clockwise")
                 }
                 .disabled(v.isLoading)
+                .keyboardShortcut("r", modifiers: .command)
+                .help("Vorschau und Profil-Inhalt neu laden (⌘R)")
 
                 Button("Sync starten") {
                     Task { await v.executeSync() }
