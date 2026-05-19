@@ -240,7 +240,7 @@ struct MaintenanceView: View {
 
         do {
             let r = try await service.repairStaleOrganizedPaths()
-            resultMessage = "Stale Pfade: \(r.inspected) geprüft · \(r.alreadyValid) intakt · \(r.repaired) repariert · \(r.unrepairable) nicht reparierbar"
+            resultMessage = "Stale Pfade: \(r.inspected) geprüft · \(r.alreadyValid) intakt · \(r.repaired) repariert · \(r.demotedToRemote) → remote · \(r.unrepairable) nicht reparierbar"
         } catch {
             resultMessage = "Repair fehlgeschlagen: \(error.localizedDescription)"
         }

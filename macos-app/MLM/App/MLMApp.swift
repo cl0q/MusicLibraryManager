@@ -30,22 +30,14 @@ struct MLMApp: App {
             // Remove default New Document item
             CommandGroup(replacing: .newItem) {}
 
-            // Explicit Settings command. macOS's auto-generated "Settings…"
-            // item silently no-ops in some builds because the
-            // showSettingsWindow: selector isn't wired to our Settings
-            // scene by default. Replacing .appSettings with a plain
-            // Button that fires the AppKit selector ourselves both
-            // unifies the menu (no duplicate item, which SettingsLink
-            // produced) and reliably opens the scene under ⌘,.
+            // Settings command. We deliberately do NOT use SwiftUI's
+            // `Settings { … }` scene any more — it produced a phantom
+            // duplicate "Settings…" entry that no-op'd. Instead we own a
+            // separate Window scene (declared below) and replace
+            // .appSettings with a Button that calls openWindow on it,
+            // which both removes Apple's auto item and binds ⌘,.
             CommandGroup(replacing: .appSettings) {
-                Button("Settings…") {
-                    if #available(macOS 14, *) {
-                        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                    } else {
-                        NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-                    }
-                }
-                .keyboardShortcut(",", modifiers: .command)
+                SettingsMenuItem()
             }
 
             // MARK: - File menu additions
@@ -145,13 +137,32 @@ struct MLMApp: App {
             }
         }
 
-        Settings {
+        // Dedicated Settings window — single-instance, opens via the
+        // SettingsMenuItem command above (⌘,).
+        Window("Settings", id: "settings") {
             SettingsView()
                 .environment(container)
+                .frame(minWidth: 600, minHeight: 500)
         }
+        .windowResizability(.contentSize)
+        .defaultSize(width: 720, height: 560)
     }
 
     // MARK: - Menu Actions
+
+    /// Settings menu item — small wrapper so `openWindow` can be pulled
+    /// from the SwiftUI environment (you can't use @Environment inside
+    /// the App struct's `commands` block directly).
+    private struct SettingsMenuItem: View {
+        @Environment(\.openWindow) private var openWindow
+
+        var body: some View {
+            Button("Settings…") {
+                openWindow(id: "settings")
+            }
+            .keyboardShortcut(",", modifiers: .command)
+        }
+    }
 
     /// Create a new unnamed playlist via the PlaylistRepository.
     private func createNewPlaylist() {

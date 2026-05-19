@@ -18,6 +18,9 @@ final class LibraryRepairService {
         var inspected: Int = 0
         var alreadyValid: Int = 0
         var repaired: Int = 0
+        /// Streaming-source rows whose stale organized_path was cleared
+        /// (track demoted back to remote-only).
+        var demotedToRemote: Int = 0
         var unrepairable: Int = 0
         /// `(trackId, reason)` for rows that could not be repaired.
         var failures: [(Int64, String)] = []
@@ -89,6 +92,20 @@ final class LibraryRepairService {
                     libraryRoot: normalizedRoot
                 )
             else {
+                // If original_path is a streaming URL there was never a
+                // local file — the stale organized_path is just leftover
+                // download-pipeline metadata. Demote the row back to
+                // remote-only instead of treating it as a failure.
+                if Self.isStreamingSource(originalPath) {
+                    do {
+                        try await trackRepository.demoteToRemote(trackId: trackId)
+                        result.demotedToRemote += 1
+                    } catch {
+                        result.unrepairable += 1
+                        result.failures.append((trackId, "Demote failed: \(error.localizedDescription)"))
+                    }
+                    continue
+                }
                 AppLogger.shared.warn(
                     "LibraryRepair: track \(trackId) unrepairable — neither organized_path (\(organizedPath)) nor original_path (\(originalPath)) resolve",
                     source: "Repair"
@@ -137,9 +154,26 @@ final class LibraryRepairService {
         }
 
         AppLogger.shared.info(
-            "LibraryRepair: done — inspected \(result.inspected), already-valid \(result.alreadyValid), repaired \(result.repaired), unrepairable \(result.unrepairable)",
+            "LibraryRepair: done — inspected \(result.inspected), already-valid \(result.alreadyValid), repaired \(result.repaired), demoted-to-remote \(result.demotedToRemote), unrepairable \(result.unrepairable)",
             source: "Repair"
         )
         return result
+    }
+
+    /// True if the path looks like a streaming-service identifier (http,
+    /// soundcloud://, spotify:track:, youtube:, etc) rather than a real
+    /// local file. Such tracks were never downloaded, so their stale
+    /// organized_path is meaningless and should be cleared.
+    private static func isStreamingSource(_ path: String) -> Bool {
+        let lower = path.lowercased()
+        if lower.hasPrefix("http://") || lower.hasPrefix("https://") {
+            return true
+        }
+        for scheme in ["soundcloud:", "spotify:", "youtube:", "ytmusic:", "applemusic:", "apple-music:"] {
+            if lower.hasPrefix(scheme) {
+                return true
+            }
+        }
+        return false
     }
 }

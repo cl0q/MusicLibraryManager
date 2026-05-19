@@ -305,8 +305,14 @@ final class SoundCloudClient {
         // Mirror the API order into the local "Liked from SoundCloud"
         // playlist. Replace-in-place: a removed Like upstream disappears
         // locally on the next sync, a new Like appears at the top.
+        //
+        // We intentionally drop remote-only tracks here — the playlist is
+        // meant to be the *playable* slice of likes. Remote-only items
+        // would just be greyed-out clutter inside it.
         if let playlistRepo = playlistRepository {
             do {
+                let localIds = try await trackRepository.filterLocalIds(orderedTrackIds)
+                let playable = orderedTrackIds.filter { localIds.contains($0) }
                 let playlist = try await playlistRepo.findOrCreateLikedPlaylist(
                     name: "Liked from SoundCloud",
                     sourceId: sourceId,
@@ -323,10 +329,10 @@ final class SoundCloudClient {
                 if let playlistId = playlist.id {
                     try await playlistRepo.replaceTrackList(
                         playlistId: playlistId,
-                        trackIds: orderedTrackIds
+                        trackIds: playable
                     )
                     AppLogger.shared.info(
-                        "SoundCloud: liked playlist refreshed (\(orderedTrackIds.count) tracks)",
+                        "SoundCloud: liked playlist refreshed (\(playable.count) playable of \(orderedTrackIds.count) likes)",
                         source: "SoundCloud"
                     )
                     NotificationCenter.default.post(name: .playlistDidChange, object: nil)

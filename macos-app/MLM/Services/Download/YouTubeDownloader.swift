@@ -89,10 +89,23 @@ final class YouTubeDownloader: Sendable {
         // Check for "no results" indicators
         let combined = (result.stdout + result.stderr).lowercased()
         if combined.contains("no video results") || combined.contains("unable to extract") {
+            AppLogger.shared.warn(
+                "chain[YT]: yt-dlp reported no results for '\(normalizedQuery)'",
+                source: "Download"
+            )
             return .notFound
         }
 
         guard result.isSuccess else {
+            // Surface enough stderr context to debug *why* yt-dlp gave up.
+            // The Logs tab is now the diagnosis surface for this — the
+            // "not found" line alone is opaque.
+            let stderrTail = String(result.stderr.suffix(800))
+                .replacingOccurrences(of: "\n", with: " | ")
+            AppLogger.shared.warn(
+                "chain[YT]: yt-dlp exited non-zero. stderr tail: \(stderrTail)",
+                source: "Download"
+            )
             return .notFound
         }
 

@@ -85,6 +85,24 @@ final class TrackRepository: Sendable {
         }
     }
 
+    /// Filter a set of candidate track IDs down to those that have a
+    /// non-null organized_path (i.e. are actually local files, not
+    /// remote streaming references). Used by source-sync code that
+    /// wants to mirror only locally-downloaded items into a playlist.
+    func filterLocalIds(_ trackIds: [Int64]) async throws -> Set<Int64> {
+        guard !trackIds.isEmpty else { return [] }
+        return try await database.read { db in
+            let rows = try Int64.fetchAll(
+                db,
+                Track
+                    .filter(trackIds.contains(Track.Columns.id))
+                    .filter(Track.Columns.organizedPath != nil)
+                    .select(Track.Columns.id, as: Int64.self)
+            )
+            return Set(rows)
+        }
+    }
+
     /// Count remote tracks.
     func countRemoteTracks() async throws -> Int {
         try await database.read { db in
@@ -402,6 +420,19 @@ final class TrackRepository: Sendable {
             try db.execute(
                 sql: "UPDATE tracks SET organized_path = ? WHERE id = ?",
                 arguments: [organizedPath, trackId]
+            )
+        }
+    }
+
+    /// Demote a track back to remote-only by clearing organized_path
+    /// AND download_status together. Used by the repair pass when a row
+    /// carries a stale staging path but the original_path is a streaming
+    /// URL (so there was never a real local file to begin with).
+    func demoteToRemote(trackId: Int64) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE tracks SET organized_path = NULL, download_status = NULL WHERE id = ?",
+                arguments: [trackId]
             )
         }
     }
