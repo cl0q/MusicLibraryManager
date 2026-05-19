@@ -49,32 +49,37 @@ final class YouTubeDownloader: Sendable {
             )
         }
 
+        let arguments = [
+            "ytsearch5:\(normalizedQuery)",
+            "-f", "bestaudio",
+            "-x",
+            // Force AAC/m4a output regardless of source codec. AVAudioEngine
+            // (the macOS playback path) cannot decode opus/vorbis, which is
+            // what yt-dlp picks by default for many YouTube streams — the
+            // file would land in the library and refuse to play with
+            // 'Cannot open audio file'. yt-dlp invokes ffmpeg internally
+            // for the conversion.
+            "--audio-format", "m4a",
+            "--audio-quality", "0",
+            // Match-filter intentionally removed (it was rejecting valid
+            // hits for tracks under 30s or over 20min and leaving the
+            // chain with "not found" even when YouTube clearly has the
+            // song). If garbage results sneak in we'll restore a looser
+            // filter later.
+            "--no-playlist",
+            "--max-downloads", "1",
+            "--newline",            // one progress line at a time → parseable
+            "--progress",           // force progress lines even when not a TTY
+            "--print", "after_move:filepath",
+            "-o", outputTemplate
+        ]
+        AppLogger.shared.debug(
+            "chain[YT]: yt-dlp \(arguments.joined(separator: " "))",
+            source: "Download"
+        )
         let result = try await ProcessRunner.run(
             ytdlp,
-            arguments: [
-                "ytsearch5:\(normalizedQuery)",
-                "-f", "bestaudio",
-                "-x",
-                // Force AAC/m4a output regardless of source codec. AVAudioEngine
-                // (the macOS playback path) cannot decode opus/vorbis, which is
-                // what yt-dlp picks by default for many YouTube streams — the
-                // file would land in the library and refuse to play with
-                // 'Cannot open audio file'. yt-dlp invokes ffmpeg internally
-                // for the conversion.
-                "--audio-format", "m4a",
-                "--audio-quality", "0",
-                // Skip non-song results (podcasts, ads, vlogs) but keep
-                // scanning the rest of the 5-hit batch. Do NOT use
-                // --break-match-filters — that aborts the scan on first
-                // miss and defeats the purpose of ytsearch5.
-                "--match-filter", "duration >= 30 & duration <= 1200",
-                "--no-playlist",
-                "--max-downloads", "1",
-                "--newline",            // one progress line at a time → parseable
-                "--progress",           // force progress lines even when not a TTY
-                "--print", "after_move:filepath",
-                "-o", outputTemplate
-            ],
+            arguments: arguments,
             onStderr: onProgress.map { cb in
                 { line in
                     for sub in line.split(separator: "\n") {
@@ -89,21 +94,24 @@ final class YouTubeDownloader: Sendable {
         // Check for "no results" indicators
         let combined = (result.stdout + result.stderr).lowercased()
         if combined.contains("no video results") || combined.contains("unable to extract") {
+            let stderrTail = String(result.stderr.suffix(600))
+                .replacingOccurrences(of: "\n", with: " | ")
             AppLogger.shared.warn(
-                "chain[YT]: yt-dlp reported no results for '\(normalizedQuery)'",
+                "chain[YT]: yt-dlp reported no results for '\(normalizedQuery)'. stderr tail: \(stderrTail)",
                 source: "Download"
             )
             return .notFound
         }
 
         guard result.isSuccess else {
-            // Surface enough stderr context to debug *why* yt-dlp gave up.
-            // The Logs tab is now the diagnosis surface for this — the
-            // "not found" line alone is opaque.
+            // Surface enough stderr + stdout context to debug *why*
+            // yt-dlp gave up. The Logs tab is now the diagnosis surface.
             let stderrTail = String(result.stderr.suffix(800))
                 .replacingOccurrences(of: "\n", with: " | ")
+            let stdoutTail = String(result.stdout.suffix(400))
+                .replacingOccurrences(of: "\n", with: " | ")
             AppLogger.shared.warn(
-                "chain[YT]: yt-dlp exited non-zero. stderr tail: \(stderrTail)",
+                "chain[YT]: yt-dlp exited non-zero (code=\(result.exitCode)). stderr tail: \(stderrTail) | stdout tail: \(stdoutTail)",
                 source: "Download"
             )
             return .notFound

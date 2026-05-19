@@ -58,6 +58,7 @@ final class DownloadOrchestrator {
     private let youtubeDownloader: YouTubeDownloader
     private let retryQueue: DownloadQueue
     private var dabClient: DABClient?
+    private let squidClient: SquidWtfClient
 
     init(
         libraryRoot: String,
@@ -72,40 +73,54 @@ final class DownloadOrchestrator {
         self.youtubeDownloader = YouTubeDownloader()
         self.retryQueue = DownloadQueue(directory: flacDir)
         self.dabClient = DABClient(tokenStorage: tokenStorage)
+        self.squidClient = SquidWtfClient()
 
         // Create directories
         try? FileManager.default.createDirectory(at: flacDir, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: aacDir, withIntermediateDirectories: true)
 
-        // Once-at-boot DAB endpoint reachability log so the Logs tab tells
-        // the user whether the FLAC step is live or has degraded to the
-        // YouTube fallback. Background task — never blocks init.
-        let endpoint = DABClient.baseURL
+        // Once-at-boot endpoint reachability logs for the optional FLAC
+        // stages (DAB + Squid) so the Logs tab tells the user up front
+        // which stages are live and whether the chain has degraded.
+        let dabEndpoint = DABClient.baseURL
+        let squidEndpoint = SquidWtfClient.baseURL
+        let squidHasCookie = SquidWtfClient.cfClearance != nil
         Task.detached(priority: .background) {
-            if endpoint.isEmpty {
+            await Self.healthCheck(label: "DAB", endpoint: dabEndpoint, configKey: "MLM_DAB_API_BASE")
+            await Self.healthCheck(label: "Squid", endpoint: squidEndpoint, configKey: "MLM_SQUID_API_BASE")
+            if !squidHasCookie {
                 AppLogger.shared.info(
-                    "DAB endpoint disabled (MLM_DAB_API_BASE = \"\")",
-                    source: "Download"
-                )
-                return
-            }
-            guard let url = URL(string: endpoint) else { return }
-            var req = URLRequest(url: url)
-            req.httpMethod = "HEAD"
-            req.timeoutInterval = 8
-            do {
-                let (_, resp) = try await URLSession.shared.data(for: req)
-                let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-                AppLogger.shared.info(
-                    "DAB endpoint reachable: \(endpoint) (HTTP \(code))",
-                    source: "Download"
-                )
-            } catch {
-                AppLogger.shared.warn(
-                    "DAB endpoint NOT reachable: \(endpoint) — \(error.localizedDescription). Pipeline will skip DAB and fall through to YouTube. Set MLM_DAB_API_BASE to override.",
+                    "Squid: no MLM_SQUID_CF_COOKIE set — search will run, but download requires a cf_clearance cookie (solve the captcha at qobuz.squid.wtf once in a browser, copy the cookie value, export MLM_SQUID_CF_COOKIE=…)",
                     source: "Download"
                 )
             }
+        }
+    }
+
+    private static func healthCheck(label: String, endpoint: String, configKey: String) async {
+        if endpoint.isEmpty {
+            AppLogger.shared.info(
+                "\(label) endpoint disabled (\(configKey) = \"\")",
+                source: "Download"
+            )
+            return
+        }
+        guard let url = URL(string: endpoint) else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "HEAD"
+        req.timeoutInterval = 8
+        do {
+            let (_, resp) = try await URLSession.shared.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            AppLogger.shared.info(
+                "\(label) endpoint reachable: \(endpoint) (HTTP \(code))",
+                source: "Download"
+            )
+        } catch {
+            AppLogger.shared.warn(
+                "\(label) endpoint NOT reachable: \(endpoint) — \(error.localizedDescription). Pipeline will skip this stage. Set \(configKey) to override.",
+                source: "Download"
+            )
         }
     }
 
@@ -308,7 +323,42 @@ final class DownloadOrchestrator {
             }
         }
 
-        // 3. YouTube (last resort)
+        // 3. Squid.wtf (Qobuz mirror) — requires MLM_SQUID_CF_COOKIE env
+        //    for the actual download (Cloudflare bot-fight blocks
+        //    cookie-less calls with "Captcha required").
+        do {
+            AppLogger.shared.log("chain[Squid]: searching \(request.query)", level: .info, source: "Download")
+            if let squidTrack = try await squidClient.searchTrack(
+                query: request.query,
+                artist: request.artist,
+                title: request.title
+            ) {
+                let squidResult = try await squidClient.download(
+                    track: squidTrack,
+                    outputDir: flacDir,
+                    artist: request.artist,
+                    title: request.title
+                )
+                switch squidResult {
+                case .success(let path):
+                    AppLogger.shared.log("chain[Squid]: success → \(path.lastPathComponent)", level: .info, source: "Download")
+                    return path
+                case .captchaRequired:
+                    AppLogger.shared.log(
+                        "chain[Squid]: search hit but download needs cf_clearance — set MLM_SQUID_CF_COOKIE from your browser's cookie for qobuz.squid.wtf, then retry",
+                        level: .warning, source: "Download"
+                    )
+                case .notFound:
+                    AppLogger.shared.log("chain[Squid]: download endpoint returned nothing usable", level: .info, source: "Download")
+                }
+            } else {
+                AppLogger.shared.log("chain[Squid]: no convincing match for \(request.artist) - \(request.title)", level: .info, source: "Download")
+            }
+        } catch {
+            AppLogger.shared.log("chain[Squid]: error: \(error)", level: .warning, source: "Download")
+        }
+
+        // 4. YouTube (last resort)
         if youtubeDownloader.isAvailable {
             AppLogger.shared.log("chain[YT]: searching \(request.query)", level: .info, source: "Download")
             let ytResult = try await youtubeDownloader.searchAndDownload(
