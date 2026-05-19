@@ -30,16 +30,23 @@ struct MLMApp: App {
             // Remove default New Document item
             CommandGroup(replacing: .newItem) {}
 
-            // Settings command. SwiftUI's `Settings { … }` scene,
-            // Window-scene + openWindow, and Notification + sheet all
-            // failed in this app's setup (auto-duplicated item, dead
-            // click, or the sheet never presented). Final approach:
-            // hand the click straight to AppDelegate, which owns a
-            // plain NSWindowController hosting SettingsView.
+            // Settings command. Every SwiftUI-native approach failed
+            // before this one — see AppDelegate.showSettingsWindow().
+            // We add a diagnostic log line so when the click *still*
+            // does nothing we know whether the button itself is firing
+            // or the delegate lookup is the failure point.
             CommandGroup(replacing: .appSettings) {
                 Button("Einstellungen…") {
+                    AppLogger.shared.info(
+                        "Settings menu clicked. NSApp.delegate=\(String(describing: NSApp.delegate)) class=\(NSApp.delegate.map { String(describing: type(of: $0)) } ?? "nil")",
+                        source: "menu"
+                    )
                     if let delegate = NSApp.delegate as? AppDelegate {
                         Task { @MainActor in delegate.showSettingsWindow() }
+                    } else {
+                        // Fallback: build the window inline so the user
+                        // is never stuck with a dead menu item.
+                        Task { @MainActor in Self.openSettingsFallback() }
                     }
                 }
                 .keyboardShortcut(",", modifiers: .command)
@@ -145,6 +152,40 @@ struct MLMApp: App {
     }
 
     // MARK: - Menu Actions
+
+    /// Fallback NSWindow opener used if the AppDelegate cast above
+    /// fails (e.g. NSApplicationDelegateAdaptor handed SwiftUI its own
+    /// wrapper instead of our subclass). Uses a singleton window
+    /// controller so a second ⌘, just focuses the existing window.
+    @MainActor
+    static func openSettingsFallback() {
+        FallbackSettings.shared.show()
+    }
+
+    @MainActor
+    private final class FallbackSettings {
+        static let shared = FallbackSettings()
+        private var controller: NSWindowController?
+
+        func show() {
+            if controller == nil {
+                let hosting = NSHostingController(
+                    rootView: SettingsView()
+                        .environment(\.container, DependencyContainer.shared)
+                        .frame(minWidth: 600, minHeight: 500)
+                )
+                let window = NSWindow(contentViewController: hosting)
+                window.title = "MLM Einstellungen"
+                window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+                window.setContentSize(NSSize(width: 720, height: 560))
+                window.isReleasedWhenClosed = false
+                window.center()
+                controller = NSWindowController(window: window)
+            }
+            NSApp.activate(ignoringOtherApps: true)
+            controller?.showWindow(nil)
+        }
+    }
 
     /// Create a new unnamed playlist via the PlaylistRepository.
     private func createNewPlaylist() {

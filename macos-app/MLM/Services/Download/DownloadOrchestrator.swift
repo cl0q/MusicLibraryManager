@@ -151,6 +151,31 @@ final class DownloadOrchestrator {
         var result = BatchResult()
         let total = requests.count
 
+        // Bail out loudly if the download directories can't be created
+        // (most likely the library drive isn't mounted right now). The
+        // previous behaviour was to swallow the createDirectory throw
+        // inside each per-track call, which made every track fail in
+        // ~0.3 ms with no log lines other than "chain[SC]: trying".
+        do {
+            try FileManager.default.createDirectory(at: flacDir, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: aacDir, withIntermediateDirectories: true)
+        } catch {
+            AppLogger.shared.error(
+                "Download dirs not writable (\(error.localizedDescription)). Library drive offline? aacDir=\(aacDir.path) flacDir=\(flacDir.path)",
+                source: "Download"
+            )
+            result.failed = total
+            for req in requests {
+                retryQueue.enqueue(
+                    trackId: req.trackId,
+                    query: req.query,
+                    source: "youtube",
+                    error: "Library drive not writable: \(error.localizedDescription)"
+                )
+            }
+            return result
+        }
+
         for (index, request) in requests.enumerated() {
             // Check cancellation flag before starting a new download so
             // the running track gets to finish but the next one is
@@ -228,6 +253,10 @@ final class DownloadOrchestrator {
                 }
             } catch {
                 result.failed += 1
+                AppLogger.shared.error(
+                    "Download failed for track \(request.trackId) (\(request.artist) - \(request.title)): \(error.localizedDescription) [type=\(String(describing: type(of: error)))]",
+                    source: "Download"
+                )
                 retryQueue.enqueue(
                     trackId: request.trackId,
                     query: request.query,
