@@ -71,6 +71,15 @@ struct MaintenanceView: View {
                     // TODO: Implement via ImportService
                     resultMessage = "Metadata rescan not yet implemented"
                 }
+
+                maintenanceRow(
+                    title: "Stale Pfade reparieren",
+                    description: "Findet Tracks, deren organized_path ins Leere zeigt, und leitet den Pfad aus original_path neu ab",
+                    icon: "wrench.and.screwdriver",
+                    action: "repair-paths"
+                ) {
+                    await runRepairStalePaths()
+                }
             }
 
             if let result = resultMessage {
@@ -212,6 +221,30 @@ struct MaintenanceView: View {
         )
 
         resultMessage = "Artwork: \(result.fetched) fetched, \(result.alreadyCached) cached, \(result.notFound) not found"
+        isRunning = nil
+    }
+
+    /// Repair tracks whose organized_path no longer resolves to a file
+    /// on disk (Task 4 — stale path remediation).
+    private func runRepairStalePaths() async {
+        guard let trackRepo = container.trackRepository,
+              let configRepo = container.configRepository else { return }
+
+        isRunning = "repair-paths"
+        resultMessage = nil
+
+        let service = LibraryRepairService(
+            trackRepository: trackRepo,
+            configRepository: configRepo
+        )
+
+        do {
+            let r = try await service.repairStaleOrganizedPaths()
+            resultMessage = "Stale Pfade: \(r.inspected) geprüft · \(r.alreadyValid) intakt · \(r.repaired) repariert · \(r.unrepairable) nicht reparierbar"
+        } catch {
+            resultMessage = "Repair fehlgeschlagen: \(error.localizedDescription)"
+        }
+
         isRunning = nil
     }
 

@@ -393,6 +393,19 @@ final class TrackRepository: Sendable {
         }
     }
 
+    /// Rewrite only the organized_path column — leaves download_status,
+    /// format, and bitrate untouched. Used by the stale-path repair
+    /// maintenance action (Task 4): the track has already been downloaded,
+    /// so we must not clobber its existing download_status timestamp.
+    func setOrganizedPathOnly(trackId: Int64, organizedPath: String) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE tracks SET organized_path = ? WHERE id = ?",
+                arguments: [organizedPath, trackId]
+            )
+        }
+    }
+
     /// Mark a remote track as downloaded by updating `organized_path`,
     /// `format`, `bitrate`, and `download_status` together in a single SQL
     /// UPDATE.
