@@ -11,7 +11,12 @@ struct LogsTab: View {
         var id: String { rawValue }
     }
 
+    /// `nil` source filter == "all sources". Otherwise filter to entries
+    /// whose `source` matches this string. `""` matches entries with no
+    /// source attached.
     @State private var filter: Filter = .all
+    @State private var sourceFilter: String? = nil
+    @State private var searchQuery: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -28,49 +33,162 @@ struct LogsTab: View {
     }
 
     private var filteredEntries: [AppLogger.LogEntry] {
+        let base: [AppLogger.LogEntry]
         switch filter {
-        case .all:      return logger.entries
-        case .warnings: return logger.entries.filter { $0.level == .warning || $0.level == .error }
-        case .errors:   return logger.entries.filter { $0.level == .error }
+        case .all:      base = logger.entries
+        case .warnings: base = logger.entries.filter { $0.level == .warning || $0.level == .error }
+        case .errors:   base = logger.entries.filter { $0.level == .error }
         }
+
+        let sourceFiltered: [AppLogger.LogEntry]
+        if let sf = sourceFilter {
+            if sf.isEmpty {
+                sourceFiltered = base.filter { $0.source == nil }
+            } else {
+                sourceFiltered = base.filter { $0.source == sf }
+            }
+        } else {
+            sourceFiltered = base
+        }
+
+        let query = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !query.isEmpty else { return sourceFiltered }
+        return sourceFiltered.filter { entry in
+            entry.message.lowercased().contains(query) ||
+            (entry.source?.lowercased().contains(query) ?? false)
+        }
+    }
+
+    /// Unique source strings present in the buffer, alphabetised.
+    /// Drives the Source picker entries.
+    private var availableSources: [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for e in logger.entries {
+            if let s = e.source, !seen.contains(s) {
+                seen.insert(s)
+                out.append(s)
+            }
+        }
+        return out.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
     // MARK: - Toolbar
 
     private var toolbar: some View {
-        HStack(spacing: 8) {
-            Text("\(filteredEntries.count) of \(logger.entries.count)")
-                .font(MLMFont.muted)
-                .foregroundColor(.mlmInkMuted)
+        VStack(spacing: 6) {
+            HStack(spacing: 8) {
+                Text("\(filteredEntries.count) of \(logger.entries.count)")
+                    .font(MLMFont.muted)
+                    .foregroundColor(.mlmInkMuted)
+                    .frame(minWidth: 96, alignment: .leading)
 
-            Picker("Filter", selection: $filter) {
-                ForEach(Filter.allCases) { f in
-                    Text(f.rawValue).tag(f)
+                Picker("Filter", selection: $filter) {
+                    ForEach(Filter.allCases) { f in
+                        Text(f.rawValue).tag(f)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 200)
+
+                sourceMenu
+
+                Spacer()
+
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([logger.logFileURL])
+                } label: {
+                    Label("Reveal Log", systemImage: "doc.text.magnifyingglass")
+                }
+                .font(MLMFont.muted)
+                .buttonStyle(.plain)
+                .help(logger.logFileURL.path)
+
+                Button("Clear") {
+                    logger.clear()
+                }
+                .font(MLMFont.muted)
+                .buttonStyle(.plain)
+            }
+
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11))
+                    .foregroundColor(.mlmInkMuted)
+                TextField("Logs durchsuchen (Nachricht oder Source)…", text: $searchQuery)
+                    .textFieldStyle(.plain)
+                    .font(MLMFont.body)
+                if !searchQuery.isEmpty {
+                    Button {
+                        searchQuery = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.mlmInkMuted)
+                    }
+                    .buttonStyle(.borderless)
                 }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 200)
-
-            Spacer()
-
-            Button {
-                NSWorkspace.shared.activateFileViewerSelecting([logger.logFileURL])
-            } label: {
-                Label("Reveal Log", systemImage: "doc.text.magnifyingglass")
-            }
-            .font(MLMFont.muted)
-            .buttonStyle(.plain)
-            .help(logger.logFileURL.path)
-
-            Button("Clear") {
-                logger.clear()
-            }
-            .font(MLMFont.muted)
-            .buttonStyle(.plain)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.mlmRaised)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
+    }
+
+    private var sourceMenu: some View {
+        Menu {
+            Button {
+                sourceFilter = nil
+            } label: {
+                HStack {
+                    if sourceFilter == nil { Image(systemName: "checkmark") }
+                    Text("Alle Sources")
+                }
+            }
+            Divider()
+            ForEach(availableSources, id: \.self) { src in
+                Button {
+                    sourceFilter = src
+                } label: {
+                    HStack {
+                        if sourceFilter == src { Image(systemName: "checkmark") }
+                        Text(src)
+                    }
+                }
+            }
+            if logger.entries.contains(where: { $0.source == nil }) {
+                Divider()
+                Button {
+                    sourceFilter = ""
+                } label: {
+                    HStack {
+                        if sourceFilter == "" { Image(systemName: "checkmark") }
+                        Text("(ohne Source)")
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "tag")
+                    .font(.system(size: 11))
+                Text(sourceMenuLabel)
+                    .lineLimit(1)
+            }
+            .font(MLMFont.muted)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    private var sourceMenuLabel: String {
+        switch sourceFilter {
+        case .none:       return "Alle Sources"
+        case .some(""):   return "(ohne Source)"
+        case .some(let s): return s
+        }
     }
 
     // MARK: - Empty state

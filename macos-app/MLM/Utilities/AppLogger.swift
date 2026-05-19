@@ -40,7 +40,8 @@ final class AppLogger {
     }
 
     /// Maximum number of log entries retained in memory.
-    private static let maxEntries = 500
+    /// File-on-disk (`mlm.log`) keeps the full history beyond this window.
+    private static let maxEntries = 5000
 
     /// Maximum log file size before rotation.
     private static let maxFileSize: UInt64 = 5 * 1024 * 1024  // 5 MB
