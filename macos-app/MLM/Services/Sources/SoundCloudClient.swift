@@ -310,7 +310,15 @@ final class SoundCloudClient {
                 let playlist = try await playlistRepo.findOrCreateLikedPlaylist(
                     name: "Liked from SoundCloud",
                     sourceId: sourceId,
-                    externalId: String(user.id)
+                    externalId: String(user.id),
+                    // Very specific so user-created playlists like "SoundCloud
+                    // Daily Mix" don't get accidentally hijacked.
+                    legacyNameMatches: [
+                        "soundcloud likes",
+                        "soundcloud liked",
+                        "liked from soundcloud",
+                        "soundcloud favorites"
+                    ]
                 )
                 if let playlistId = playlist.id {
                     try await playlistRepo.replaceTrackList(

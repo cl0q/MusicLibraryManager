@@ -116,11 +116,16 @@ final class LibraryRepairService {
                     trackId: trackId,
                     organizedPath: newOrganizedPath
                 )
-                AppLogger.shared.info(
-                    "LibraryRepair: track \(trackId) repaired — \(organizedPath) → \(newOrganizedPath)",
-                    source: "Repair"
-                )
                 result.repaired += 1
+                // Per-track repair logs spammed the Logs tab (one line per
+                // row across thousands of tracks). Roll up into a single
+                // progress line every 500 rows instead.
+                if result.repaired % 500 == 0 {
+                    AppLogger.shared.info(
+                        "LibraryRepair: \(result.repaired) tracks repaired so far…",
+                        source: "Repair"
+                    )
+                }
             } catch {
                 AppLogger.shared.error(
                     "LibraryRepair: failed to write track \(trackId): \(error.localizedDescription)",

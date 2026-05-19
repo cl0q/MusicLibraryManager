@@ -180,16 +180,25 @@ final class PlaylistRepository: Sendable {
     }
 
     /// Find or create the "Liked from <source>" playlist for a given
-    /// source (SoundCloud, Spotify, …). The playlist is matched by
-    /// (source_id, is_liked=1) so renames on the user's side don't
-    /// duplicate it.
+    /// source (SoundCloud, Spotify, …).
+    ///
+    /// Matching order:
+    /// 1. Modern row: `source_id = sourceId AND is_liked = 1`.
+    /// 2. Legacy row (Tauri-era): a playlist whose name matches one of
+    ///    `legacyNameMatches` and that has no `source_id` yet. When
+    ///    found, it gets upgraded in place (source_id + is_liked + name)
+    ///    so the user's familiar playlist stays — its tracks are about
+    ///    to be replaced by the caller anyway.
+    /// 3. Otherwise create a fresh row.
     @discardableResult
     func findOrCreateLikedPlaylist(
         name: String,
         sourceId: Int64,
-        externalId: String?
+        externalId: String?,
+        legacyNameMatches: [String] = []
     ) async throws -> Playlist {
         try await database.write { db in
+            // 1 — modern match
             if let existing = try Playlist
                 .filter(Playlist.Columns.sourceId == sourceId)
                 .filter(Playlist.Columns.isLiked == 1)
@@ -198,6 +207,27 @@ final class PlaylistRepository: Sendable {
                 return existing
             }
 
+            // 2 — legacy match (no source_id yet, recognisable name)
+            if !legacyNameMatches.isEmpty {
+                let candidates = try Playlist
+                    .filter(Playlist.Columns.sourceId == nil)
+                    .fetchAll(db)
+                let lowered = legacyNameMatches.map { $0.lowercased() }
+                if let legacy = candidates.first(where: { p in
+                    let n = p.name.lowercased()
+                    return lowered.contains(where: { n.contains($0) })
+                }) {
+                    try db.execute(
+                        sql: "UPDATE playlists SET source_id = ?, external_id = ?, is_liked = 1, name = ?, category = 'synced' WHERE id = ?",
+                        arguments: [sourceId, externalId, name, legacy.id ?? -1]
+                    )
+                    if let id = legacy.id, let updated = try Playlist.fetchOne(db, id: id) {
+                        return updated
+                    }
+                }
+            }
+
+            // 3 — fresh row
             var playlist = Playlist(
                 id: nil,
                 name: name,

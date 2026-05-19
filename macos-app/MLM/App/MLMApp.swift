@@ -31,13 +31,19 @@ struct MLMApp: App {
             CommandGroup(replacing: .newItem) {}
 
             // Explicit Settings command. macOS's auto-generated "Settings…"
-            // item silently no-ops in some builds (the underlying
-            // showSettingsWindow: selector doesn't reach our Settings scene
-            // unless we wire it ourselves). SettingsLink (macOS 14+) opens
-            // the Settings scene directly and binds ⌘,.
+            // item silently no-ops in some builds because the
+            // showSettingsWindow: selector isn't wired to our Settings
+            // scene by default. Replacing .appSettings with a plain
+            // Button that fires the AppKit selector ourselves both
+            // unifies the menu (no duplicate item, which SettingsLink
+            // produced) and reliably opens the scene under ⌘,.
             CommandGroup(replacing: .appSettings) {
-                SettingsLink {
-                    Text("Settings…")
+                Button("Settings…") {
+                    if #available(macOS 14, *) {
+                        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                    } else {
+                        NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+                    }
                 }
                 .keyboardShortcut(",", modifiers: .command)
             }

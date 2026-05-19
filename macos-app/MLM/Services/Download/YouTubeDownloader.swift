@@ -41,11 +41,18 @@ final class YouTubeDownloader: Sendable {
         }
 
         let outputTemplate = outputDir.appendingPathComponent("%(title)s.%(ext)s").path
+        let normalizedQuery = Self.normalizeQueryForYouTube(query)
+        if normalizedQuery != query {
+            AppLogger.shared.info(
+                "chain[YT]: query normalised → '\(normalizedQuery)' (was '\(query)')",
+                source: "Download"
+            )
+        }
 
         let result = try await ProcessRunner.run(
             ytdlp,
             arguments: [
-                "ytsearch5:\(query)",
+                "ytsearch5:\(normalizedQuery)",
                 "-f", "bestaudio",
                 "-x",
                 // Force AAC/m4a output regardless of source codec. AVAudioEngine
@@ -130,6 +137,51 @@ final class YouTubeDownloader: Sendable {
         }
 
         return .notFound
+    }
+
+    // MARK: - Query Normalisation
+
+    /// Strip the parenthetical / bracket noise that turns valid song titles
+    /// into queries no YouTube video matches verbatim. Things like
+    /// `(feat. Hittman, Six-Two, Nate Dogg & Kurupt)`,
+    /// `[Official Music Video]`, `(Remastered 2024)` make ytsearch5 return
+    /// zero hits even when the song is on YouTube several times over.
+    ///
+    /// We collapse to "Artist - Title" with all `(...)` / `[...]` content
+    /// removed and whitespace squashed. Visible for testability.
+    static func normalizeQueryForYouTube(_ raw: String) -> String {
+        var s = raw
+        // Repeatedly strip balanced parentheses and brackets — handles
+        // nested groups like "Title (Mix) [Remastered]".
+        let patterns = ["\\([^()]*\\)", "\\[[^\\[\\]]*\\]"]
+        var changed = true
+        while changed {
+            changed = false
+            for pattern in patterns {
+                if let regex = try? NSRegularExpression(pattern: pattern) {
+                    let range = NSRange(s.startIndex..., in: s)
+                    let replaced = regex.stringByReplacingMatches(
+                        in: s, range: range, withTemplate: ""
+                    )
+                    if replaced != s {
+                        s = replaced
+                        changed = true
+                    }
+                }
+            }
+        }
+        // Collapse repeated whitespace and tidy stray punctuation that
+        // strip-bracket left behind ("Artist -  Title  - " -> "Artist - Title").
+        s = s.replacingOccurrences(
+            of: "\\s+", with: " ",
+            options: .regularExpression
+        )
+        s = s.trimmingCharacters(in: .whitespaces)
+        // Trim trailing " - " or " -" if removal left an orphan separator.
+        while s.hasSuffix(" -") || s.hasSuffix("-") {
+            s = String(s.dropLast()).trimmingCharacters(in: .whitespaces)
+        }
+        return s.isEmpty ? raw : s
     }
 
     // MARK: - Private
