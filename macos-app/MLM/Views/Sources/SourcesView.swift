@@ -102,7 +102,8 @@ struct SourcesView: View {
             tokenStorage: tokenStorage,
             sourceRepository: sourceRepo,
             oauthManager: container.oauthManager,
-            trackRepository: container.trackRepository
+            trackRepository: container.trackRepository,
+            playlistRepository: container.playlistRepository
         )
     }
 }

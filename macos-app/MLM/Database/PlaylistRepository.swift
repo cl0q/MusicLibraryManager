@@ -178,4 +178,69 @@ final class PlaylistRepository: Sendable {
             )
         }
     }
+
+    /// Find or create the "Liked from <source>" playlist for a given
+    /// source (SoundCloud, Spotify, …). The playlist is matched by
+    /// (source_id, is_liked=1) so renames on the user's side don't
+    /// duplicate it.
+    @discardableResult
+    func findOrCreateLikedPlaylist(
+        name: String,
+        sourceId: Int64,
+        externalId: String?
+    ) async throws -> Playlist {
+        try await database.write { db in
+            if let existing = try Playlist
+                .filter(Playlist.Columns.sourceId == sourceId)
+                .filter(Playlist.Columns.isLiked == 1)
+                .fetchOne(db)
+            {
+                return existing
+            }
+
+            var playlist = Playlist(
+                id: nil,
+                name: name,
+                description: nil,
+                category: "synced",
+                isLiked: 1,
+                isSmart: 0,
+                isPinned: 0,
+                coverIsCustom: 0,
+                coverImagePath: nil,
+                coverImageUrl: nil,
+                sourceId: sourceId,
+                externalId: externalId,
+                dateCreated: ISO8601DateFormatter().string(from: Date())
+            )
+            try playlist.insert(db)
+            return playlist
+        }
+    }
+
+    /// Replace the entire ordered track list for a playlist atomically.
+    ///
+    /// Used by source-sync code (SoundCloud Likes, Spotify Liked) to
+    /// keep a playlist in lockstep with the upstream order. Positions
+    /// are dense lexicographic strings ("000000000000", "000000000001", …)
+    /// so existing position-based ordering keeps working.
+    func replaceTrackList(playlistId: Int64, trackIds: [Int64]) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "DELETE FROM playlist_tracks WHERE playlist_id = ?",
+                arguments: [playlistId]
+            )
+            for (index, trackId) in trackIds.enumerated() {
+                let position = String(format: "%012d", index)
+                var entry = PlaylistTrack(
+                    id: nil,
+                    playlistId: playlistId,
+                    trackId: trackId,
+                    position: position,
+                    addedAt: nil
+                )
+                try entry.insert(db, onConflict: .ignore)
+            }
+        }
+    }
 }
