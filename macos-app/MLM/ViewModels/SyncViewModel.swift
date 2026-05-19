@@ -240,7 +240,7 @@ final class SyncViewModel {
         }
     }
 
-    // MARK: - Progress Forwarding (D-12 / SyncProgressSection read-only access)
+    // MARK: - Progress Forwarding (read-only access for SyncStatusRow in OperationsTab)
 
     /// Forwarding property — reads SyncService.progress without exposing the service.
     var syncProgress: Double { syncService.progress }

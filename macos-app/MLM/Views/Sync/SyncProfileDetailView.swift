@@ -68,11 +68,9 @@ struct SyncProfileDetailView: View {
 
                 Divider().background(Color.mlmEdgeSubtle)
 
-                // 4. Progress OR Preview stats (D-12)
+                // 4. Preview stats — Live-Progress läuft jetzt im Operations-Tab
                 if let v = vm {
-                    if v.isSyncing {
-                        SyncProgressSection(vm: v, onCancel: { v.cancelSync() })
-                    } else if v.isLoading {
+                    if v.isLoading {
                         HStack {
                             ProgressView()
                                 .controlSize(.small)
@@ -83,6 +81,13 @@ struct SyncProfileDetailView: View {
                         .padding(.vertical, 8)
                     } else if let preview = v.preview {
                         previewStatsSection(preview)
+                    }
+
+                    if v.isSyncing {
+                        Label("Sync läuft — Details im Operations-Tab", systemImage: "arrow.triangle.2.circlepath")
+                            .font(MLMFont.muted)
+                            .foregroundColor(.mlmInkSecondary)
+                            .padding(.top, 4)
                     }
 
                     // Error

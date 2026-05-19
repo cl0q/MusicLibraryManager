@@ -167,6 +167,8 @@ final class DependencyContainer {
                 configRepository: configRepo,
                 transcodeCache: cache
             )
+            // Bridge sync progress into the global Operations panel.
+            syncSvc.activityViewModel = self.activityViewModel
             self.syncViewModel = SyncViewModel(syncRepository: syncRepo, syncService: syncSvc)
         }
 

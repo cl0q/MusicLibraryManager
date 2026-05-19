@@ -58,6 +58,11 @@ final class SyncService {
     private let configRepository: ConfigRepository
     private let transcodeCache: TranscodeCache
 
+    /// Optional bridge to the global Operations panel.
+    /// When set, executeSync registers itself as an ActivityViewModel.Operation
+    /// so the Operations tab can render a live row.
+    var activityViewModel: ActivityViewModel?
+
     /// Space buffer: require 50MB free beyond needed space.
     private static let spaceBuffer: Int64 = 50_000_000
 
@@ -175,6 +180,16 @@ final class SyncService {
             source: "Sync"
         )
 
+        // Register with global Operations panel (Task 1 — Sync-Progress moved
+        // from SyncView into Operations-Tab).
+        let operationId: UUID? = await MainActor.run {
+            activityViewModel?.startOperation(
+                type: .sync,
+                title: "Sync: \(profile.name)",
+                detail: "0 / \(total)"
+            )
+        }
+
         // 1. Remove stale files (cleanup-deletion branch — D-04 / SYNC-v2-05)
         for file in preview.filesToRemove {
             if profile.cleanupRemovedFiles {
@@ -208,6 +223,15 @@ final class SyncService {
             )
             processed += 1
             progress = Double(processed) / Double(max(total, 1))
+            if let operationId {
+                await MainActor.run {
+                    activityViewModel?.updateProgress(
+                        id: operationId,
+                        progress: progress,
+                        detail: "\(processed) / \(total) — Entfernt: \(file.artist) - \(file.title)"
+                    )
+                }
+            }
             if cancellationRequested { break }
         }
 
@@ -216,6 +240,15 @@ final class SyncService {
         for file in preview.filesToAdd {
             currentFile = "\(file.artist) - \(file.title)"
             progress = Double(processed) / Double(max(total, 1))
+            if let operationId {
+                await MainActor.run {
+                    activityViewModel?.updateProgress(
+                        id: operationId,
+                        progress: progress,
+                        detail: "\(processed) / \(total) — \(file.artist) - \(file.title)"
+                    )
+                }
+            }
 
             do {
                 if let track = try await trackRepository.fetchTrack(id: file.trackId) {
@@ -326,6 +359,21 @@ final class SyncService {
 
         currentFile = ""
         progress = 1.0
+
+        // Finalise the Operations-tab row.
+        if let operationId {
+            let summary = "\(result.syncedCount) synchronisiert · \(result.failedCount) fehlgeschlagen"
+            await MainActor.run {
+                if cancellationRequested {
+                    activityViewModel?.failOperation(id: operationId, error: "Abgebrochen — \(summary)")
+                } else if result.failedCount > 0 && result.syncedCount == 0 {
+                    activityViewModel?.failOperation(id: operationId, error: summary)
+                } else {
+                    activityViewModel?.completeOperation(id: operationId, detail: summary)
+                }
+            }
+        }
+
         return result
     }
 
