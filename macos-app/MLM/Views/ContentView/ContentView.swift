@@ -120,10 +120,6 @@ struct ContentView: View {
                         PlayerBar(viewModel: vm)
                     }
                 }
-                // Phase 38: Sync indicator visible across all routes (D-11)
-                ToolbarItem(placement: .primaryAction) {
-                    SyncToolbarIndicator(selectedSection: $selectedSection)
-                }
             }
 
             // Separator
