@@ -66,15 +66,16 @@ struct PlayerBar: View {
 
     // MARK: - Cover Thumbnail
 
+    @Environment(\.container) private var container
+
     private var coverThumbnail: some View {
-        RoundedRectangle(cornerRadius: 5, style: .continuous)
-            .fill(Color(nsColor: .controlColor))
-            .overlay {
-                Image(systemName: "music.note")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-            }
-            .frame(width: 40, height: 40)
+        // UI-SPEC Surface 3: 40pt thumbnail, cornerRadius 5
+        TrackCoverView(
+            trackId: viewModel.currentTrack?.id ?? 0,
+            size: .small,
+            cornerRadius: 5
+        )
+        .frame(width: 40, height: 40)
     }
 
     // MARK: - Track Info

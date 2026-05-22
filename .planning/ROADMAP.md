@@ -677,6 +677,47 @@ Plans:
 
 ---
 
+
+### Phase 37: Album-Art-Pipeline durchziehen (Import-Trigger + UI-Anzeige + ffmpeg-Pfad)
+
+**Goal:** Album-Art systematisch durch MLM ziehen — beim Import automatisch extrahieren (statt nur manuell via Settings → Maintenance), in LibraryTable + TrackDetail + MiniPlayer anzeigen, und Phase-36-Cover-Pipeline auf den bewährten ffmpeg-Pfad umstellen (statt AVFoundation `commonMetadata`, das bei FLAC/manchen MP3s inkonsistent ist).
+
+**Driver:** Phase-36-UAT zeigt: Auto-Mosaic + Gradient-Fallback laufen visuell durch (Notification-Bug `780a0cc` gefixt), aber selbst wenn der Service triggert findet AVFoundation in vielen User-Files keine Embedded-Artwork. Das ist nicht Phase-36-spezifisch — Album-Art ist in MLM bisher nirgends in der UI sichtbar, `ArtworkService.swift` (mit funktionierendem ffmpeg-Pfad) läuft nur manuell, niemand triggert ihn beim Import. Phase 36 hat das Problem nur sichtbar gemacht.
+
+**Depends on:** Phase 36 (Playlist-Cover-Service bleibt als Konsument); Phase 4 (Import-Pipeline)
+**Milestone:** v2.0 macOS Native
+
+**Anchor refs:**
+- `macos-app/MLM/Services/Analysis/ArtworkService.swift` — bewährter ffmpeg-Subprocess-Pfad + MusicBrainz-Fallback (existiert, läuft nur on-demand)
+- `macos-app/MLM/Services/MetadataExtractor.swift` — Import-Pipeline (extrahiert Tags, **nicht** Artwork — Gap)
+- `macos-app/MLM/Services/Playlists/ArtworkExtractor.swift` — Phase-36 AVFoundation-Wrapper (umstellen auf ffmpeg)
+- `macos-app/MLM/Views/Settings/MaintenanceView.swift:175` — bisheriger einziger ArtworkService-Trigger
+- `macos-app/MLM/Database/DatabaseManager.swift:319` — `track_artwork.artwork_path` Schema-Spalte (schon da, nicht genutzt in UI)
+
+**Success criteria** (what must be TRUE):
+1. Import-Pipeline triggert `ArtworkService.fetchArtwork` automatisch nach jedem Track-Insert (Background-Queue, blockt UI nicht)
+2. `LibraryTable` zeigt Album-Cover-Thumbnail in der Title-Spalte (16-24pt, Solar-Fallback wenn nicht vorhanden)
+3. `TrackDetailView` zeigt großes Cover im Header (128pt min, mit Loading-State)
+4. `MiniPlayer` zeigt Track-Cover als 36pt Thumbnail
+5. `PlaylistCoverService.ArtworkExtractor` ruft `ArtworkService.extractEmbeddedArtwork` (ffmpeg-Pfad) statt AVFoundation `commonMetadata` — Mosaic-Cover funktioniert für FLAC + MP3 + AAC zuverlässig
+6. Settings-Maintenance "Fetch Artwork" funktioniert weiter (rückwärts-kompatibel, plus „Fetch from MusicBrainz" als separate Option)
+7. swift test grün (neue Tests: Import→Artwork-Pipeline, LibraryTable-Cover-Render, ArtworkExtractor-ffmpeg-Pfad)
+
+**Out of scope:**
+- MusicBrainz-Bulk-Fetch beim Import (Rate-Limit blockt) — bleibt Settings-Maintenance-only
+- Cover-Editor / Crop-UI für Track-Artwork (Phase 36 deckt nur Playlist-Cover via Drop)
+- Live-Lyrics oder andere Metadata-Bereicherung — eigene Phase
+
+**Plans:** 4/4 plans complete
+
+Plans:
+- [x] 37-01-PLAN.md — ffmpeg API consolidation: ArtworkService.extractEmbeddedArtwork static public async + ArtworkExtractor thin wrapper + .trackArtworkDidChange notification (Wave 1)
+- [x] 37-02-PLAN.md — ArtworkBackfillService: @MainActor @Observable orchestrator, .libraryDidImport trigger, TaskGroup(maxConcurrentTasks:4) + DependencyContainer wiring (Wave 2)
+- [x] 37-03-PLAN.md — TrackArtworkCache + TrackCoverView + 3-surface integration (LibraryTable 18pt, TrackDetailView 56pt, PlayerBar 40pt) (Wave 3)
+- [x] 37-04-PLAN.md — MaintenanceView split (2 buttons) + ArtworkExtractorTests update + full suite + human UAT (Wave 3)
+
+---
+
 ## v1.4 Progress Table
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -689,4 +730,5 @@ Plans:
 | 33. Polish & E2E | v1.4 | 0/TBD | Not started | - |
 | 34. Rework Download Orchestrator | v1.4 | 0/TBD | Not started | - |
 | 35. Waveform-Verbesserungen | v2.0 | 2/2 | Complete    | 2026-05-12 |
-| 36. Playlists (v2.0) | v2.0 | 3/4 | In Progress|  |
+| 36. Playlists (v2.0) | v2.0 | 4/4 | Complete | 2026-05-13 |
+| 37. Album-Art Pipeline | v2.0 | 4/4 | Complete   | 2026-05-16 |

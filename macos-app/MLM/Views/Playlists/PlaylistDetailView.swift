@@ -59,6 +59,16 @@ struct PlaylistDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { _ in
             Task { await viewModel?.refresh() }
         }
+        .onAppear {
+            // Revalidate the detail playlist's cover when the view becomes visible.
+            // Handles the case where backfill ran while navigated away.
+            guard let pid = playlist.id else { return }
+            NotificationCenter.default.post(
+                name: .playlistDidChange,
+                object: nil,
+                userInfo: ["playlistId": pid]
+            )
+        }
         .fileImporter(
             isPresented: $showM3UImporter,
             allowedContentTypes: [

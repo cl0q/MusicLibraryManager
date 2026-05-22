@@ -32,12 +32,21 @@ struct MaintenanceView: View {
                 }
 
                 maintenanceRow(
-                    title: "Fetch Artwork",
-                    description: "Download missing album art from MusicBrainz",
-                    icon: "photo",
-                    action: "artwork"
+                    title: "Refresh embedded artwork",
+                    description: "Extract embedded artwork from audio files (ffmpeg, no network)",
+                    icon: "waveform.circle.fill",
+                    action: "artwork-embedded"
                 ) {
-                    await runArtwork()
+                    await runArtworkEmbedded()
+                }
+
+                maintenanceRow(
+                    title: "Fetch from MusicBrainz",
+                    description: "Download missing album art from MusicBrainz Cover Art Archive (rate-limited)",
+                    icon: "globe",
+                    action: "artwork-musicbrainz"
+                ) {
+                    await runArtworkMusicBrainz()
                 }
             }
 
@@ -163,11 +172,33 @@ struct MaintenanceView: View {
         isRunning = nil
     }
 
-    private func runArtwork() async {
+    /// Backfill embedded artwork via ArtworkBackfillService (ffmpeg, no network, D-16).
+    private func runArtworkEmbedded() async {
+        guard let service = container.artworkBackfillService else {
+            AppLogger.shared.warn("MaintenanceView: artworkBackfillService not available",
+                                  source: "MaintenanceView")
+            resultMessage = "Artwork backfill service not available"
+            return
+        }
+
+        isRunning = "artwork-embedded"
+        resultMessage = nil
+
+        await service.refreshMissing()
+
+        resultMessage = "Embedded artwork: refresh complete"
+        isRunning = nil
+    }
+
+    /// Fetch artwork from MusicBrainz for tracks without embedded art (network, rate-limited, D-16).
+    ///
+    /// ArtworkService is instantiated inline — it is not exposed on DependencyContainer.
+    /// This mirrors the pattern from the former runArtwork() method.
+    private func runArtworkMusicBrainz() async {
         guard let trackRepo = container.trackRepository,
               let analysisRepo = container.analysisRepository else { return }
 
-        isRunning = "artwork"
+        isRunning = "artwork-musicbrainz"
         resultMessage = nil
 
         let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!

@@ -36,6 +36,10 @@ final class DependencyContainer {
     /// Cover-image orchestrator (Phase 36 Plan 02). Observes `.playlistDidChange`
     /// and regenerates auto covers (skips rows with `cover_is_custom = 1`).
     private(set) var playlistCoverService: PlaylistCoverService?
+    /// Embedded artwork extraction orchestrator (Phase 37 Plan 02).
+    /// Observes `.libraryDidImport`; runs background TaskGroup(maxConcurrentTasks: 4)
+    /// to extract embedded artwork for all tracks without an artwork DB row.
+    private(set) var artworkBackfillService: ArtworkBackfillService?
 
     // MARK: - ViewModels (shared singletons)
 
@@ -127,6 +131,22 @@ final class DependencyContainer {
                     database: dbPool,
                     playlistRepository: plRepo,
                     trackRepository: trRepo,
+                    configRepository: cfRepo
+                )
+            }
+        }
+
+        // Phase 37 — Artwork backfill orchestrator. Observes `.libraryDidImport`
+        // and extracts embedded artwork for imported tracks in a background TaskGroup.
+        // configRepository is required to resolve organizedPath (relative) to an absolute URL.
+        if let trRepo = self.trackRepository,
+           let aRepo = self.analysisRepository,
+           let cfRepo = self.configRepository {
+            self.artworkBackfillService = await MainActor.run {
+                ArtworkBackfillService(
+                    database: dbPool,
+                    trackRepository: trRepo,
+                    analysisRepository: aRepo,
                     configRepository: cfRepo
                 )
             }

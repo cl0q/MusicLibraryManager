@@ -37,8 +37,11 @@ final class PlaylistCoverService {
     /// Coalesces concurrent regenerations per playlist id.
     private var inFlight: Set<Int64> = []
 
-    /// NotificationCenter observer token (removed in deinit).
-    private var observerToken: NSObjectProtocol?
+    /// NotificationCenter observer token for `.playlistDidChange` (removed in deinit).
+    private var playlistObserverToken: NSObjectProtocol?
+
+    /// NotificationCenter observer token for `.trackArtworkDidChange` (removed in deinit).
+    private var trackArtworkObserverToken: NSObjectProtocol?
 
     // MARK: - Init
 
@@ -59,13 +62,12 @@ final class PlaylistCoverService {
         // `deinit` is nonisolated; read the MainActor-isolated token via the
         // safe escape hatch. The observer token is a stable opaque value once
         // assigned in `init`, so concurrent mutation isn't a real concern.
-        if let token = MainActor.assumeIsolated({ observerToken }) {
-            NotificationCenter.default.removeObserver(token)
-        }
+        let tokens = MainActor.assumeIsolated({ [playlistObserverToken, trackArtworkObserverToken] })
+        tokens.compactMap { $0 }.forEach { NotificationCenter.default.removeObserver($0) }
     }
 
     private func startObserving() {
-        observerToken = NotificationCenter.default.addObserver(
+        playlistObserverToken = NotificationCenter.default.addObserver(
             forName: .playlistDidChange,
             object: nil,
             queue: .main
@@ -82,6 +84,22 @@ final class PlaylistCoverService {
                 }
                 // No-target notifications (rare; createPlaylist/delete) currently NOOP.
                 // Cards reload covers when their playlist re-renders via @Observable.
+            }
+        }
+
+        trackArtworkObserverToken = NotificationCenter.default.addObserver(
+            forName: .trackArtworkDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            // origin guard: ArtworkBackfillService posts "artworkBackfill" — not "coverService".
+            // PlaylistCoverService's own posts tag "coverService" on .playlistDidChange (not
+            // .trackArtworkDidChange), so there is no cross-notification re-entry risk.
+
+            guard let trackId = note.userInfo?["trackId"] as? Int64 else { return }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.regenerateCoversContainingTrack(trackId: trackId)
             }
         }
     }
@@ -226,6 +244,37 @@ final class PlaylistCoverService {
     }
 
     // MARK: - Private helpers
+
+    /// Find all playlists that (a) contain `trackId` and (b) have cover_is_custom = 0,
+    /// then schedule a cover regen for each. Coalesced via inFlight Set (per-playlist).
+    ///
+    /// Uses a direct DB read rather than a PlaylistRepository method because no such
+    /// method exists; adding a dedicated repo method for this one-off query is not
+    /// worth the repository surface growth.
+    private func regenerateCoversContainingTrack(trackId: Int64) async {
+        let playlistIds: [Int64]
+        do {
+            playlistIds = try await database.read { db in
+                try Int64.fetchAll(db, sql: """
+                    SELECT p.id
+                    FROM playlists p
+                    INNER JOIN playlist_tracks pt ON pt.playlist_id = p.id
+                    WHERE pt.track_id = ?
+                      AND p.cover_is_custom = 0
+                """, arguments: [trackId])
+            }
+        } catch {
+            AppLogger.shared.error(
+                "PlaylistCoverService: failed to query playlists for track \(trackId): \(error)",
+                source: "PlaylistCover"
+            )
+            return
+        }
+
+        for pid in playlistIds {
+            await regenerateCover(playlistId: pid)
+        }
+    }
 
     private func ensureCoversDir() throws -> URL {
         let dir = FileManager.default

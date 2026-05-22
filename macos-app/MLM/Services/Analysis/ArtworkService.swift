@@ -79,7 +79,8 @@ final class ArtworkService: Sendable {
 
             // 1. Try extracting embedded artwork from audio file
             if let filePath = track.organizedPath {
-                if let embeddedData = extractEmbeddedArtwork(from: filePath) {
+                let trackURL = URL(fileURLWithPath: filePath)
+                if let embeddedData = await Self.extractEmbeddedArtwork(from: trackURL) {
                     do {
                         try saveResized(data: embeddedData, trackId: trackId)
                         try await saveArtworkRecord(
@@ -116,37 +117,48 @@ final class ArtworkService: Sendable {
     // MARK: - Embedded Artwork
 
     /// Extract embedded cover art from an audio file using ffmpeg.
-    private func extractEmbeddedArtwork(from path: String) -> Data? {
-        guard let ffmpeg = ProcessRunner.findExecutable("ffmpeg") else { return nil }
-
-        let tmpOutput = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString + ".jpg")
-
-        // ffmpeg -i input -an -vcodec mjpeg -vframes 1 output.jpg
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: ffmpeg)
-        process.arguments = [
-            "-i", path,
-            "-an", "-vcodec", "mjpeg", "-vframes", "1",
-            "-y", tmpOutput.path
-        ]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-
-            if process.terminationStatus == 0,
-               FileManager.default.fileExists(atPath: tmpOutput.path) {
-                let data = try Data(contentsOf: tmpOutput)
-                try? FileManager.default.removeItem(at: tmpOutput)
-                return data.isEmpty ? nil : data
+    ///
+    /// Static and async so callers on @MainActor can call without blocking the UI.
+    /// Runs in Task.detached to isolate the blocking Process.waitUntilExit() call.
+    /// Returns nil silently if ffmpeg is not installed (D-07) or if no embedded art exists.
+    static func extractEmbeddedArtwork(from url: URL) async -> Data? {
+        return await Task.detached(priority: .utility) { () -> Data? in
+            guard let ffmpeg = ProcessRunner.findExecutable("ffmpeg") else {
+                AppLogger.shared.warn("ffmpeg not found — artwork extraction disabled")
+                return nil
             }
-        } catch {}
 
-        try? FileManager.default.removeItem(at: tmpOutput)
-        return nil
+            let tmpOutput = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString + ".jpg")
+
+            // ffmpeg -i input -an -vcodec mjpeg -vframes 1 output.jpg
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: ffmpeg)
+            process.arguments = [
+                "-i", url.path,
+                "-an", "-vcodec", "mjpeg", "-vframes", "1",
+                "-y", tmpOutput.path
+            ]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+
+                if process.terminationStatus == 0,
+                   FileManager.default.fileExists(atPath: tmpOutput.path) {
+                    let data = try Data(contentsOf: tmpOutput)
+                    try? FileManager.default.removeItem(at: tmpOutput)
+                    return data.isEmpty ? nil : data
+                }
+            } catch {
+                AppLogger.shared.warn("ffmpeg extraction error: \(error.localizedDescription)")
+            }
+
+            try? FileManager.default.removeItem(at: tmpOutput)
+            return nil
+        }.value
     }
 
     // MARK: - MusicBrainz
@@ -198,7 +210,7 @@ final class ArtworkService: Sendable {
     // MARK: - Helpers
 
     /// Save artwork data resized to both 500px and 1200px.
-    private func saveResized(data: Data, trackId: Int64) throws {
+    internal func saveResized(data: Data, trackId: Int64) throws {
         // Save the original as the "large" version
         let largePath = cachedPath(trackId: trackId, size: .large)
         try data.write(to: largePath)

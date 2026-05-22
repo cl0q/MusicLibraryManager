@@ -46,6 +46,16 @@ extension Notification.Name {
     /// TrackContextMenu submenu, and SidebarView in sync.
     static let playlistDidChange = Notification.Name("MLMPlaylistDidChange")
 
+    // MARK: Artwork
+
+    /// Posted by `ArtworkBackfillService` after successful embedded-art extraction + DB save.
+    ///
+    /// Views (`TrackCoverView`, `LibraryTable`, etc.) observe and invalidate cache for the track.
+    ///
+    /// - `userInfo["trackId"]`: `Int64` — track whose artwork was updated
+    /// - `userInfo["artworkPath"]`: `String` — absolute path to cached artwork file (1200px version)
+    static let trackArtworkDidChange = Notification.Name("MLMTrackArtworkDidChange")
+
     // MARK: Sync (reserved for Phase 12)
 
     /// Posted when a sync operation completes.
