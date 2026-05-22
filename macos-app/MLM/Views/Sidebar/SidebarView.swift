@@ -11,20 +11,51 @@ struct SidebarView: View {
     var body: some View {
         List(selection: $selectedSection) {
             Section {
-                ForEach(SidebarSection.allCases) { section in
-                    HStack {
-                        Label(section.label, systemImage: section.icon)
+                // Phase 36 Plan 04: `.allCases` was removed when SidebarSection
+                // gained the `.playlistDetail(Int64)` associated-value case.
+                // Top-level rows iterate the explicit `topLevelCases` array;
+                // the `.playlists` row is replaced by `PinnedPlaylistsDisclosure`
+                // which nests pinned-playlist children under a DisclosureGroup
+                // (D-07/D-08) and routes their clicks via `.playlistDetail` (D-09).
+                ForEach(SidebarSection.topLevelCases) { section in
+                    if section == .playlists {
+                        PinnedPlaylistsDisclosure(
+                            topLevelLabel: section.label,
+                            topLevelIcon: section.icon,
+                            topLevelSection: section,
+                            onUnpin: { pid in
+                                Task {
+                                    try? await container.playlistRepository?.togglePin(id: pid)
+                                    // togglePin does not post .playlistDidChange itself —
+                                    // fire here so the disclosure refreshes after unpin.
+                                    NotificationCenter.default.post(name: .playlistDidChange, object: nil)
+                                }
+                            },
+                            onDelete: { pid in
+                                Task {
+                                    try? await container.playlistRepository?.delete(id: pid)
+                                    NotificationCenter.default.post(name: .playlistDidChange, object: nil)
+                                }
+                            },
+                            onRevealInGrid: {
+                                selectedSection = .playlists
+                            }
+                        )
+                    } else {
+                        HStack {
+                            Label(section.label, systemImage: section.icon)
 
-                        // Show disconnected indicator for Library when drive is unmounted
-                        if section == .library && !container.isLibraryDriveMounted {
-                            Spacer()
-                            Circle()
-                                .fill(Color.mlmError)
-                                .frame(width: 7, height: 7)
-                                .help("Library drive disconnected")
+                            // Show disconnected indicator for Library when drive is unmounted
+                            if section == .library && !container.isLibraryDriveMounted {
+                                Spacer()
+                                Circle()
+                                    .fill(Color.mlmError)
+                                    .frame(width: 7, height: 7)
+                                    .help("Library drive disconnected")
+                            }
                         }
+                        .tag(section)
                     }
-                    .tag(section)
                 }
             } header: {
                 Text("NAVIGATION")

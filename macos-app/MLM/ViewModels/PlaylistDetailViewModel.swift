@@ -96,7 +96,12 @@ final class PlaylistDetailViewModel {
             )
             await loadTracks()
 
-            NotificationCenter.default.post(name: .playlistDidChange, object: nil)
+            // D-04 Re-Generate-Trigger: userInfo lets PlaylistCoverService regenerate.
+            NotificationCenter.default.post(
+                name: .playlistDidChange,
+                object: nil,
+                userInfo: ["playlistId": playlistId]
+            )
         } catch {
             errorMessage = "Failed to add tracks: \(error.localizedDescription)"
         }
@@ -120,7 +125,11 @@ final class PlaylistDetailViewModel {
             selectedTrackIDs.removeAll()
             await loadTracks()
 
-            NotificationCenter.default.post(name: .playlistDidChange, object: nil)
+            NotificationCenter.default.post(
+                name: .playlistDidChange,
+                object: nil,
+                userInfo: ["playlistId": playlistId]
+            )
         } catch {
             errorMessage = "Failed to remove tracks: \(error.localizedDescription)"
         }
@@ -135,7 +144,11 @@ final class PlaylistDetailViewModel {
             try await playlistRepository.removeTrack(playlistId: playlistId, trackId: trackId)
             await loadTracks()
 
-            NotificationCenter.default.post(name: .playlistDidChange, object: nil)
+            NotificationCenter.default.post(
+                name: .playlistDidChange,
+                object: nil,
+                userInfo: ["playlistId": playlistId]
+            )
         } catch {
             errorMessage = "Failed to remove track: \(error.localizedDescription)"
         }
@@ -174,6 +187,16 @@ final class PlaylistDetailViewModel {
                 newPosition: newPosition
             )
             await loadTracks()
+
+            // Phase 36 / D-04 Re-Generate-Trigger: cover must regenerate
+            // when reordering touches the top-4 tracks. The userInfo payload
+            // lets Plan 02's PlaylistCoverService regenerate just one playlist
+            // instead of refreshing all on every reorder.
+            NotificationCenter.default.post(
+                name: .playlistDidChange,
+                object: nil,
+                userInfo: ["playlistId": playlistId]
+            )
         } catch {
             errorMessage = "Failed to reorder: \(error.localizedDescription)"
         }
@@ -228,7 +251,11 @@ final class PlaylistDetailViewModel {
             )
 
             await loadTracks()
-            NotificationCenter.default.post(name: .playlistDidChange, object: nil)
+            NotificationCenter.default.post(
+                name: .playlistDidChange,
+                object: nil,
+                userInfo: ["playlistId": playlistId]
+            )
         } catch {
             errorMessage = "Failed to import M3U: \(error.localizedDescription)"
         }

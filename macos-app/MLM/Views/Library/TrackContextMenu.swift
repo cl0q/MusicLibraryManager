@@ -292,7 +292,12 @@ struct TrackContextMenu: View {
                 trackIds: trackIds,
                 startPosition: position
             )
-            NotificationCenter.default.post(name: .playlistDidChange, object: nil)
+            // D-04: userInfo lets PlaylistCoverService regenerate this playlist's cover.
+            NotificationCenter.default.post(
+                name: .playlistDidChange,
+                object: nil,
+                userInfo: ["playlistId": playlistId]
+            )
         }
     }
 }

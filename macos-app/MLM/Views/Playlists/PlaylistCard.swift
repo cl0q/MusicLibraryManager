@@ -1,14 +1,18 @@
 import SwiftUI
+import UniformTypeIdentifiers
+import AppKit
 
 /// A single playlist card in the Playlists grid.
 ///
-/// Shows playlist name, track count, pin indicator, and category icon.
-/// Supports inline rename, right-click context menu for pin/rename/delete.
+/// Shows playlist name, track count, pin indicator, and either the cached
+/// cover PNG (Phase 36) or a category gradient + SF Symbol fallback.
+/// Supports inline rename, right-click context menu (pin/rename/reset/delete),
+/// and drag-drop acceptance for custom covers.
 ///
 /// Layout:
 /// ```
 /// ┌─────────────────────────────┐
-/// │  🎵                         │  Icon area (tinted by category)
+/// │  [cover or gradient]        │  Icon area (100pt tall)
 /// │                             │
 /// │  📌 My Playlist             │  Name (w/ pin indicator)
 /// │  42 tracks                  │  Track count
@@ -28,7 +32,23 @@ struct PlaylistCard: View {
     var onTogglePin: () -> Void
     var onDelete: () -> Void
 
+    /// Forwards a resolved local image URL to the parent for `setCustomCover`.
+    /// Defaults to a no-op so SwiftUI Previews + non-grid callers keep compiling.
+    var onCoverDropped: (URL) async -> Void = { _ in }
+
+    /// Triggered by the "Reset to Auto Cover" context-menu entry. Parent calls
+    /// `PlaylistCoverService.resetToAuto`.
+    var onResetCover: () -> Void = {}
+
+    /// Bubbles up to the parent so `PlaylistViewModel.flagCoverDropRejected()`
+    /// can show the UI-SPEC line 174 banner.
+    var onCoverDropRejected: () -> Void = {}
+
     @State private var isHovered = false
+
+    /// `true` while a Finder/in-app drag is hovering over the card. Drives
+    /// the accent stroke + thicker line per UI-SPEC §"Cover-Card states".
+    @State private var isDropTargeted = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -42,8 +62,9 @@ struct PlaylistCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(isHovered ? Color.mlmEdge : Color.mlmEdgeSubtle, lineWidth: 1)
+                .stroke(strokeColor, lineWidth: isDropTargeted ? 2 : 1)
         )
+        .animation(.easeInOut(duration: 0.12), value: isDropTargeted)
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {
                 isHovered = hovering
@@ -57,26 +78,36 @@ struct PlaylistCard: View {
         .contextMenu {
             contextMenuItems
         }
+        .onDrop(of: [.fileURL, .image], isTargeted: $isDropTargeted) { providers in
+            handleDrop(providers: providers)
+        }
     }
 
     // MARK: - Icon Area
 
     private var iconArea: some View {
         ZStack {
-            // Gradient background
-            LinearGradient(
-                colors: categoryGradient,
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .frame(height: 100)
+            if let coverImage = loadCoverImage() {
+                Image(nsImage: coverImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(height: 100)
+                    .clipped()
+            } else {
+                // Fallback: category gradient + SF Symbol (pre-Phase 36 visual).
+                LinearGradient(
+                    colors: categoryGradient,
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .frame(height: 100)
 
-            // Category icon
-            Image(systemName: categoryIcon)
-                .font(.system(size: 32, weight: .light))
-                .foregroundColor(.white.opacity(0.8))
+                Image(systemName: categoryIcon)
+                    .font(.system(size: 32, weight: .light))
+                    .foregroundColor(.white.opacity(0.8))
+            }
 
-            // Pin indicator
+            // Pin indicator — overlaid on either branch
             if playlist.isPinned == 1 {
                 VStack {
                     HStack {
@@ -172,6 +203,15 @@ struct PlaylistCard: View {
             }
         }
 
+        // D-06: Reset entry only visible when the user has a locked custom cover.
+        if playlist.coverIsCustom == 1 {
+            Button {
+                onResetCover()
+            } label: {
+                Label("Reset to Auto Cover", systemImage: "arrow.counterclockwise")
+            }
+        }
+
         Divider()
 
         Button(role: .destructive) {
@@ -179,6 +219,91 @@ struct PlaylistCard: View {
         } label: {
             Label("Delete Playlist", systemImage: "trash")
         }
+    }
+
+    // MARK: - Cover Loading (Phase 36 Plan 02 cache)
+
+    /// Loads the cached cover PNG from the playlist-covers directory.
+    /// Returns `nil` if `coverImagePath` is unset or the file is missing,
+    /// triggering the gradient fallback branch in `iconArea`.
+    ///
+    /// Path-traversal safety (T-36-09): the stored relative path is reduced
+    /// to its last component before joining with `coversDir`, so any `../`
+    /// segment cannot escape the playlist-covers directory.
+    private func loadCoverImage() -> NSImage? {
+        guard let relPath = playlist.coverImagePath else { return nil }
+        let fileName = (relPath as NSString).lastPathComponent
+        let url = coversDir.appendingPathComponent(fileName)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return NSImage(contentsOf: url)
+    }
+
+    /// Resolved on-disk URL of the playlist-covers cache directory.
+    /// Same path as `PlaylistCoverService.ensureCoversDir`.
+    private var coversDir: URL {
+        FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("com.musiclibrary.app")
+            .appendingPathComponent("playlist-covers")
+    }
+
+    // MARK: - Drop Target
+
+    /// Combines hover + drop-target states into a single stroke color.
+    /// During a drop drag, the accent color wins; otherwise hover toggles
+    /// between mlmEdge (hover) and mlmEdgeSubtle (resting).
+    private var strokeColor: Color {
+        if isDropTargeted { return .mlmAccent }
+        return isHovered ? .mlmEdge : .mlmEdgeSubtle
+    }
+
+    /// Resolves the dropped provider to a local image URL and forwards it
+    /// to `onCoverDropped`. Falls through to `onCoverDropRejected` when no
+    /// loadable image data is present (UI-SPEC §"Drop-Target Acceptance Rules").
+    private func handleDrop(providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first else {
+            onCoverDropRejected()
+            return false
+        }
+
+        // Branch 1: Finder file drop — load as .fileURL.
+        if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+            _ = provider.loadDataRepresentation(for: .fileURL) { data, _ in
+                guard let data,
+                      let url = URL(dataRepresentation: data, relativeTo: nil, isAbsolute: true)
+                          ?? URL(string: String(decoding: data, as: UTF8.self))
+                else {
+                    Task { @MainActor in onCoverDropRejected() }
+                    return
+                }
+                Task { await onCoverDropped(url) }
+            }
+            return true
+        }
+
+        // Branch 2: In-app image drag (NSImage) — load raw image data,
+        // persist to a temp file so the service has a uniform URL input.
+        if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+            _ = provider.loadDataRepresentation(for: .image) { data, _ in
+                guard let data else {
+                    Task { @MainActor in onCoverDropRejected() }
+                    return
+                }
+                let tmp = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("inapp_cover_\(UUID().uuidString)")
+                do {
+                    try data.write(to: tmp)
+                    Task { await onCoverDropped(tmp) }
+                } catch {
+                    Task { @MainActor in onCoverDropRejected() }
+                }
+            }
+            return true
+        }
+
+        // Anything else (text, folder, multi-format payload without image): reject.
+        onCoverDropRejected()
+        return false
     }
 
     // MARK: - Category Styling

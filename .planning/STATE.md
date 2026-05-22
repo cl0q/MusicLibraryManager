@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: macOS Native
-status: executing
-stopped_at: Phase 30 context gathered
-last_updated: "2026-05-12T21:17:51.227Z"
-last_activity: 2026-05-12 -- Phase 35 execution started
+status: completed
+stopped_at: Completed Phase 36 Plan 03 (PlaylistCard cover UI + 8-pin banner + drop-rejection banner) — Phase 36 fully shipped (4/4 plans)
+last_updated: "2026-05-13T08:08:00.000Z"
+last_activity: 2026-05-13
 progress:
-  total_phases: 17
-  completed_phases: 2
-  total_plans: 11
-  completed_plans: 5
-  percent: 45
+  total_phases: 1
+  completed_phases: 1
+  total_plans: 4
+  completed_plans: 4
+  percent: 100
 ---
 
 # Project State
@@ -21,18 +21,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-07)
 
 **Core value:** Like a song anywhere and it reliably ends up in your owned library and on your devices in high quality — native macOS experience
-**Current focus:** Phase 35 — waveform-verbesserungen-bug-fix-lange-lieder-dj-farbkodierun
+**Current focus:** Phase 36 — Playlists (v2.0 macOS Native)
 **Source of truth:** `macos-app/PLAN.md` + `.planning/ROADMAP.md` v2.0 section
 **v1.4 source of truth (paused):** `.planning/REQUIREMENTS.md` v1.4 section + `.planning/ROADMAP.md` v1.4 section
 **v1.3 source of truth (paused):** `.planning/REQUIREMENTS.md` v1.3 section + `.planning/ROADMAP.md` v1.3 section
 
 ## Current Position
 
-Phase: 35 (waveform-verbesserungen-bug-fix-lange-lieder-dj-farbkodierun) — EXECUTING
-Plan: 1 of 2
-Next: Phase 6 (Playlists)
-Status: Executing Phase 35
-Last activity: 2026-05-12 -- Phase 35 execution started
+Phase: 36 (Playlists (v2.0 macOS Native)) — COMPLETED (4/4 plans)
+Plan: 4 of 4
+Next: Phase 37 kickoff (TBD) — or roadmap review against v2.0 milestone goals
+Status: Phase 36 fully shipped — playlist cover pipeline, sidebar disclosure, card UI, pin-limit guard all green
+Last activity: 2026-05-13
 
 ## Phase 5 Summary (v2.0)
 
@@ -126,7 +126,7 @@ Tests: 421 passing / 0 failing / 23 ignored. Zero regressions from v1.2 baseline
 
 **Velocity (v1.0):**
 
-- Total plans completed: 39
+- Total plans completed: 41
 - Total execution time: ~3 days
 - Phases completed: 7
 
@@ -217,6 +217,23 @@ Recent decisions affecting current work:
 - [Phase 12.1-01]: validate_organized_path is the single write-boundary guard for organized_path — called at entry of update_download_status
 - [Phase 12.1]: reveal_in_file_manager now owns path resolution — takes relative organized_path, resolves via library root (not frontend responsibility)
 - [Phase 12.1]: COALESCE(organized_path,'') in get_remote_tracks_only avoids NULL→String type failure in rusqlite without changing Track.organized_path to Option<String>
+- [Phase ?]: Phase 36-01: Single v20 migration registration in buildMigrator() covers both production + inMemory migrators (shared static factory)
+- [Phase ?]: Phase 36-01: PlaylistRepository.database typed as any DatabaseWriter (was DatabasePool) — enables in-memory tests, matches TrackRepository pattern
+- [Phase ?]: Phase 36-01: moveTrack notification carries userInfo:[playlistId:Int64] for targeted cover regen in Plan 02
+- [Phase ?]: Phase 36-02: ConfigRepository.database widened to any DatabaseWriter (third repo widening) — needed so in-memory PlaylistCoverServiceTests can construct the full dep chain
+- [Phase ?]: Phase 36-02: PlaylistCoverService is @MainActor @Observable; deinit reads observerToken via MainActor.assumeIsolated (token is stable post-init) and DependencyContainer wraps construction in `await MainActor.run { ... }`
+- [Phase ?]: Phase 36-02: PlaylistCoverServiceTests carries .serialized — covers dir is a hardcoded `~/Library/Application Support/com.musiclibrary.app/playlist-covers/<id>.png`, parallel tests with in-memory DBs (ids start at 1) race on the same filesystem path
+- [Phase ?]: Phase 36-02: Auto1 branch widened to include "nonNilCount == 1" — playlist with 4 tracks but only 1 with art now renders as single cover instead of a mosaic with 3 gradient gaps (UI-SPEC fidelity)
+- [Phase ?]: Phase 36-04: SidebarSection enum dropped String/CaseIterable — added .playlistDetail(Int64) associated-value case + static topLevelCases array; all allCases callers (SidebarView + MLMApp.Navigate) swapped to topLevelCases; keyboardShortcut now KeyEquivalent?
+- [Phase ?]: Phase 36-04: PinnedPlaylistsDisclosure is self-contained — owns loadPinned + .playlistDidChange observer; SidebarView passes only onUnpin/onDelete/onRevealInGrid callbacks; rename is internal (TextField + @FocusState + onSubmit → repo.rename) to keep edit-state where the row is rendered (D-11)
+- [Phase ?]: Phase 36-04: PlaylistDetailViewLoader re-fetches on every .task(id: playlistId) change — one extra row-read per sidebar click in exchange for never showing stale Playlist after rename/cover-regen
+- [Phase ?]: Phase 36-04: onUnpin/onDelete callbacks explicitly post .playlistDidChange because repo.togglePin and repo.delete do NOT post the notification themselves — without these explicit posts the disclosure would not refresh after unpin/delete
+- [Phase ?]: Phase 36-03: pinLimitHintMessage + coverDropErrorMessage are `var` (not `private(set) var`) on the @Observable VM — the weak-self Task-based auto-clear closures need direct write access; the View only reads them
+- [Phase ?]: Phase 36-03: 8-pin pre-check derives willPin BEFORE the count check so unpins skip the guard entirely (T-36-12 spoofing mitigation); the early `return` after setting the hint means the repo never sees the 9th-pin call
+- [Phase ?]: Phase 36-03: PlaylistViewModel.togglePin now posts .playlistDidChange on success — closes the gap where Plan 04's PinnedPlaylistsDisclosure observer would miss grid-driven pin changes
+- [Phase ?]: Phase 36-03: PlaylistCard.loadCoverImage applies `(relPath as NSString).lastPathComponent` before joining with the playlist-covers dir — T-36-09 path-traversal mitigation; a malicious coverImagePath of `../../../etc/passwd` reduces to `passwd` which won't exist and falls through to the gradient branch
+- [Phase ?]: Phase 36-03: In-app .image drag persists raw data to FileManager.default.temporaryDirectory before forwarding to onCoverDropped — gives PlaylistCoverService.setCustomCover a uniform URL input regardless of whether the source was Finder or an in-app drag
+- [Phase ?]: Phase 36-03: URL(dataRepresentation:relativeTo:isAbsolute:) needs explicit `relativeTo: nil` on Swift 5.10 / macOS 15 SDK — no default parameter; deviation Rule 1 fixed during Task 2 build
 
 ### v1.3 Scope Decisions (locked, paused state)
 
@@ -280,9 +297,9 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-07T17:48:58.771Z
-Stopped at: Phase 30 context gathered
-Resume file: .planning/phases/30-disk-folder-explorer/30-CONTEXT.md
+Last session: 2026-05-13T08:08:00.000Z
+Stopped at: Completed Phase 36 Plan 03 (PlaylistCard UI surfaces, banners, pin-limit guard) — Phase 36 fully shipped
+Resume file: None
 
 ---
 *Last updated: 2026-05-04 — v1.4 Daily Driver roadmap created (Phases 28-33); v1.3 Yeat Expansion remains paused*

@@ -13,6 +13,10 @@ struct Playlist: Codable, FetchableRecord, MutablePersistableRecord, Identifiabl
     var isLiked: Int
     var isSmart: Int
     var isPinned: Int
+    /// Auto/custom cover lock (Phase 36 / migration v20).
+    /// 0 = auto-generated (eligible for regeneration); 1 = user-set custom (skip auto-regen).
+    /// Stored as Int per SQLite-bool convention used by `isLiked`/`isSmart`/`isPinned`.
+    var coverIsCustom: Int = 0
     var coverImagePath: String?
     var coverImageUrl: String?
     var sourceId: Int64?
@@ -26,6 +30,7 @@ struct Playlist: Codable, FetchableRecord, MutablePersistableRecord, Identifiabl
         case isLiked = "is_liked"
         case isSmart = "is_smart"
         case isPinned = "is_pinned"
+        case coverIsCustom = "cover_is_custom"
         case coverImagePath = "cover_image_path"
         case coverImageUrl = "cover_image_url"
         case sourceId = "source_id"
@@ -40,6 +45,7 @@ struct Playlist: Codable, FetchableRecord, MutablePersistableRecord, Identifiabl
         static let isLiked = Column(CodingKeys.isLiked)
         static let isSmart = Column(CodingKeys.isSmart)
         static let isPinned = Column(CodingKeys.isPinned)
+        static let coverIsCustom = Column(CodingKeys.coverIsCustom)
         static let sourceId = Column(CodingKeys.sourceId)
         static let dateCreated = Column(CodingKeys.dateCreated)
     }
@@ -109,6 +115,7 @@ extension Playlist {
             isLiked: 0,
             isSmart: 0,
             isPinned: 0,
+            coverIsCustom: 0,
             coverImagePath: nil,
             coverImageUrl: nil,
             sourceId: nil,

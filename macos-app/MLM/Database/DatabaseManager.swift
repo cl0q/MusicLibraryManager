@@ -596,6 +596,21 @@ final class DatabaseManager: Sendable {
         }
 
         // ──────────────────────────────────────────────────────────────
+        // Migration v20: playlist cover lock flag (Phase 36)
+        // Adds cover_is_custom column so PlaylistCoverService can skip
+        // auto-regenerate when the user has set their own cover.
+        // Registered inside buildMigrator() so both production migrator
+        // and inMemoryMigrator (Self.inMemoryMigrator) pick it up.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v20_playlist_cover_custom") { db in
+            if try !db.columns(in: "playlists").contains(where: { $0.name == "cover_is_custom" }) {
+                try db.alter(table: "playlists") { t in
+                    t.add(column: "cover_is_custom", .integer).notNull().defaults(to: 0)
+                }
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────────
         // Migration v_search_text_column: pre-computed normalized search
         // Enables diacritic-insensitive search (e.g. "on the line" finds "Ön Thë Linë")
         // ──────────────────────────────────────────────────────────────

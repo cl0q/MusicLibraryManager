@@ -61,6 +61,20 @@ struct PlaylistsView: View {
             // Header bar
             headerBar(viewModel)
 
+            // D-10: 8-pin soft-limit hint banner — appears above the divider
+            // when togglePin hard-blocks the 9th attempt; auto-clears after 3s.
+            if let hintMessage = viewModel.pinLimitHintMessage {
+                pinLimitBanner(message: hintMessage)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            // UI-SPEC line 174: drop-rejected banner — appears when a non-image
+            // payload is dropped on a card; auto-clears after 4s.
+            if let dropError = viewModel.coverDropErrorMessage {
+                coverDropErrorBanner(message: dropError)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             Divider()
                 .background(Color.mlmEdge)
 
@@ -72,6 +86,8 @@ struct PlaylistsView: View {
             }
         }
         .background(Color.mlmBase)
+        .animation(.easeInOut(duration: 0.2), value: viewModel.pinLimitHintMessage)
+        .animation(.easeInOut(duration: 0.2), value: viewModel.coverDropErrorMessage)
     }
 
     // MARK: - Header
@@ -220,6 +236,22 @@ struct PlaylistsView: View {
                         },
                         onDelete: {
                             Task { await viewModel.deletePlaylist(id: playlist.id!) }
+                        },
+                        onCoverDropped: { url in
+                            guard let pid = playlist.id else { return }
+                            await container.playlistCoverService?.setCustomCover(
+                                playlistId: pid,
+                                sourceURL: url
+                            )
+                        },
+                        onResetCover: {
+                            guard let pid = playlist.id else { return }
+                            Task {
+                                await container.playlistCoverService?.resetToAuto(playlistId: pid)
+                            }
+                        },
+                        onCoverDropRejected: {
+                            viewModel.flagCoverDropRejected()
                         }
                     )
                 }
@@ -261,6 +293,70 @@ struct PlaylistsView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Banners (Phase 36)
+
+    /// 8-pin soft-limit hint banner (D-10, UI-SPEC §"8-pin Soft-Limit Hint UI").
+    /// Inline row between the header and the grid; pushes the grid down ~44pt
+    /// while visible. Auto-dismiss is owned by `PlaylistViewModel` (3s).
+    @ViewBuilder
+    private func pinLimitBanner(message: String) -> some View {
+        HStack(spacing: 8) {
+            // 3pt-wide warning accent bar
+            Rectangle()
+                .fill(Color.mlmWarning)
+                .frame(width: 3)
+                .frame(maxHeight: .infinity)
+
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 14))
+                .foregroundColor(.mlmWarning)
+                .padding(.leading, 4)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(message)
+                    .font(MLMFont.bodyBold)
+                    .foregroundColor(.mlmInk)
+                Text("Unpin one playlist before pinning another. (Maximum: 8)")
+                    .font(MLMFont.muted)
+                    .foregroundColor(.mlmInkSecondary)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.mlmRaised)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Pin limit reached. Maximum eight pinned playlists. Unpin one to free a slot.")
+    }
+
+    /// Drop-rejected banner (UI-SPEC line 174). Same visual structure as the
+    /// pin-limit banner, single line of body, octagon-X glyph. Auto-dismiss
+    /// is owned by `PlaylistViewModel.flagCoverDropRejected` (4s).
+    @ViewBuilder
+    private func coverDropErrorBanner(message: String) -> some View {
+        HStack(spacing: 8) {
+            Rectangle()
+                .fill(Color.mlmWarning)
+                .frame(width: 3)
+                .frame(maxHeight: .infinity)
+
+            Image(systemName: "xmark.octagon.fill")
+                .font(.system(size: 14))
+                .foregroundColor(.mlmWarning)
+                .padding(.leading, 4)
+
+            Text(message)
+                .font(MLMFont.body)
+                .foregroundColor(.mlmInk)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.mlmRaised)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Cover drop rejected. \(message)")
     }
 
     // MARK: - Initialization

@@ -33,6 +33,9 @@ final class DependencyContainer {
     private(set) var oauthManager: OAuthManager?
     private(set) var tokenRefreshService: TokenRefreshService?
     private(set) var mountObserver: MountObserver?
+    /// Cover-image orchestrator (Phase 36 Plan 02). Observes `.playlistDidChange`
+    /// and regenerates auto covers (skips rows with `cover_is_custom = 1`).
+    private(set) var playlistCoverService: PlaylistCoverService?
 
     // MARK: - ViewModels (shared singletons)
 
@@ -111,6 +114,23 @@ final class DependencyContainer {
             trackRepository: self.trackRepository,
             sourceRepository: self.sourceRepository
         )
+
+        // Phase 36 — Playlist cover orchestrator. Observes `.playlistDidChange`
+        // and regenerates auto covers. Mirrors the existing service-init pattern.
+        // PlaylistCoverService is `@MainActor`, so construction must hop to the
+        // main actor (matches the libraryRootObserver-init pattern below).
+        if let plRepo = self.playlistRepository,
+           let trRepo = self.trackRepository,
+           let cfRepo = self.configRepository {
+            self.playlistCoverService = await MainActor.run {
+                PlaylistCoverService(
+                    database: dbPool,
+                    playlistRepository: plRepo,
+                    trackRepository: trRepo,
+                    configRepository: cfRepo
+                )
+            }
+        }
 
         // SyncViewModel — held in container so navigating away from the
         // Sync tab and back doesn't tear down + re-init the service stack.

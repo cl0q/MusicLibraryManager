@@ -146,6 +146,14 @@ struct ContentView: View {
             PlaylistsView(onTrackDoubleClick: { track in
                 handleTrackDoubleClick(track)
             })
+        case .playlistDetail(let id):
+            PlaylistDetailViewLoader(
+                playlistId: id,
+                onBack: { selectedSection = .playlists },
+                onTrackDoubleClick: { track in
+                    handleTrackDoubleClick(track)
+                }
+            )
         case .folders:
             FoldersView(onTrackDoubleClick: { track in
                 handleTrackDoubleClick(track)
@@ -218,19 +226,43 @@ struct ContentView: View {
 // MARK: - Navigation sections
 
 /// Navigation sections matching the Tauri app sidebar.
-enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
+///
+/// The `.playlistDetail(Int64)` associated-value case is produced dynamically
+/// inside the pinned-playlists DisclosureGroup (see `PinnedPlaylistsDisclosure`)
+/// and routed by `ContentView.detailView` straight to `PlaylistDetailViewLoader`.
+/// Once an associated value is present, Swift cannot synthesise `CaseIterable`,
+/// so call sites iterate `SidebarSection.topLevelCases` instead.
+enum SidebarSection: Hashable, Identifiable {
     case library
     case playlists
+    case playlistDetail(Int64)
     case folders
     case sync
     case sources
 
-    var id: String { rawValue }
+    var id: String {
+        switch self {
+        case .library: return "library"
+        case .playlists: return "playlists"
+        case .playlistDetail(let pid): return "playlistDetail-\(pid)"
+        case .folders: return "folders"
+        case .sync: return "sync"
+        case .sources: return "sources"
+        }
+    }
+
+    /// Manual replacement for synthesised `CaseIterable.allCases`.
+    /// Sidebar iterates these for top-level rows; `.playlistDetail` cases are
+    /// produced dynamically inside `PinnedPlaylistsDisclosure` (Plan 36-04).
+    static let topLevelCases: [SidebarSection] = [
+        .library, .playlists, .folders, .sync, .sources
+    ]
 
     var label: String {
         switch self {
         case .library: "Library"
         case .playlists: "Playlists"
+        case .playlistDetail: ""   // never displayed at top-level; disclosure children render the playlist name directly
         case .folders: "Folders"
         case .sync: "Sync"
         case .sources: "Sources"
@@ -241,16 +273,19 @@ enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .library: "music.note.list"
         case .playlists: "list.bullet"
+        case .playlistDetail: "music.note.list"
         case .folders: "folder"
         case .sync: "arrow.triangle.2.circlepath"
         case .sources: "globe"
         }
     }
 
-    var keyboardShortcut: KeyEquivalent {
+    /// `nil` for `.playlistDetail` — those rows are not bound to a global ⌘1–5 shortcut.
+    var keyboardShortcut: KeyEquivalent? {
         switch self {
         case .library: "1"
         case .playlists: "2"
+        case .playlistDetail: nil
         case .folders: "3"
         case .sync: "4"
         case .sources: "5"
