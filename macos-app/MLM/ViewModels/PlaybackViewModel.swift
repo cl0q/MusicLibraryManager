@@ -64,18 +64,8 @@ final class PlaybackViewModel {
     /// Whether waveform data is being extracted.
     private(set) var isLoadingWaveform = false
 
-    // MARK: - Preview State (Spacebar Quick Preview)
-
-    /// Whether we are currently in preview mode (spacebar preview).
-    ///
-    /// Preview mode is separate from the main "currentTrack" concept:
-    /// - Pressing spacebar on a *selected-but-not-playing* track starts a preview.
-    /// - Pressing spacebar again stops the preview.
-    /// - Double-clicking a track still does a full "Play" which clears preview state.
-    private(set) var isPreviewMode = false
-
-    /// The track being previewed (may differ from currentTrack).
-    private(set) var previewTrack: Track?
+    /// Cancellable handle for the active waveform extraction task.
+    private var waveformTask: Task<Void, Never>?
 
     // MARK: - Dependencies
 
@@ -251,71 +241,6 @@ final class PlaybackViewModel {
         playbackState = .stopped
         currentPosition = 0
         currentTrack = nil
-        isPreviewMode = false
-        previewTrack = nil
-        waveformData = []
-        stopPositionTimer()
-        postTrackDidChange()
-        postStateDidChange()
-    }
-
-    // MARK: - Spacebar Preview
-
-    /// Toggle spacebar preview for a track.
-    ///
-    /// Behavior:
-    /// - If nothing is playing → start preview of the given track.
-    /// - If previewing the same track → stop preview.
-    /// - If previewing a different track → switch preview to new track.
-    /// - If a main track is playing (not preview) → pause/resume it.
-    ///
-    /// - Parameter track: The track to preview (from the current selection).
-    @MainActor
-    func togglePreview(for track: Track?) {
-        // If no track provided, just toggle play/pause on whatever is loaded
-        guard let track else {
-            if hasTrack { togglePlayPause() }
-            return
-        }
-
-        // If we're previewing the same track → stop preview
-        if isPreviewMode, let previewTrack, previewTrack.id == track.id {
-            stopPreview()
-            return
-        }
-
-        // If the main track is playing and it's the same track → just toggle
-        if !isPreviewMode, let currentTrack, currentTrack.id == track.id {
-            togglePlayPause()
-            return
-        }
-
-        // Start a new preview
-        startPreview(track)
-    }
-
-    /// Start preview playback for a track.
-    @MainActor
-    private func startPreview(_ track: Track) {
-        isPreviewMode = true
-        previewTrack = track
-
-        Task {
-            await playTrack(track)
-        }
-    }
-
-    /// Stop the current preview and restore previous state.
-    @MainActor
-    func stopPreview() {
-        guard isPreviewMode else { return }
-
-        audioPlayer.stop()
-        playbackState = .stopped
-        currentPosition = 0
-        currentTrack = nil
-        isPreviewMode = false
-        previewTrack = nil
         waveformData = []
         stopPositionTimer()
         postTrackDidChange()
@@ -383,13 +308,21 @@ final class PlaybackViewModel {
 
     /// Extract waveform data from the current file.
     private func extractWaveform() {
-        Task { @MainActor in
-            isLoadingWaveform = true
-        }
+        waveformTask?.cancel()
+        isLoadingWaveform = true
 
-        Task.detached(priority: .utility) { [weak self] in
-            guard let self else { return }
-            let data = (try? self.audioPlayer.extractWaveformData(binCount: 200)) ?? []
+        // Snapshot AudioPlayer values on the main actor before entering the background task.
+        // AVAudioFile is not thread-safe; reading duration and extracting data off the main
+        // actor would race with loadFile/seek/stop. We capture what we need up front.
+        let duration = audioPlayer.duration
+        let binCount = WaveformHelpers.adaptiveBinCount(duration: duration)
+
+        waveformTask = Task.detached(priority: .utility) { [weak self] in
+            guard let self, !Task.isCancelled else { return }
+            // Route synchronous extraction through the main actor so concurrent tasks
+            // can't call extractWaveformData on the same AVAudioFile simultaneously.
+            let data = (try? await MainActor.run { try self.audioPlayer.extractWaveformData(binCount: binCount) }) ?? []
+            guard !Task.isCancelled else { return }
             await MainActor.run {
                 self.waveformData = data
                 self.isLoadingWaveform = false

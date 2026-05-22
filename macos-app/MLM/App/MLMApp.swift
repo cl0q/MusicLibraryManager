@@ -17,9 +17,6 @@ struct MLMApp: App {
     /// Reads the playback VM from the focused window for global shortcuts.
     @FocusedValue(\.playbackViewModel) private var playbackVM
 
-    /// Reads the selected track from the active table for spacebar preview.
-    @FocusedValue(\.selectedTrack) private var selectedTrack
-
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -51,18 +48,12 @@ struct MLMApp: App {
                 }
             }
 
-            // MARK: - Playback menu (Space, ⌘., ⌘←, ⌘→)
+            // MARK: - Playback menu (⌘., ⌘←, ⌘→)
             CommandMenu("Playback") {
                 Button(playbackVM?.isPlaying == true ? "Pause" : "Play") {
-                    if let playbackVM {
-                        if let selectedTrack {
-                            playbackVM.togglePreview(for: selectedTrack)
-                        } else {
-                            playbackVM.togglePlayPause()
-                        }
-                    }
+                    playbackVM?.togglePlayPause()
                 }
-                .keyboardShortcut(.space, modifiers: [])
+                .disabled(playbackVM?.hasTrack != true)
 
                 Button("Stop") {
                     playbackVM?.stop()
@@ -124,29 +115,6 @@ struct MLMApp: App {
                     )
                 }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
-
-                Divider()
-
-                Button("Reveal in Finder") {
-                    NotificationCenter.default.post(
-                        name: .revealSelectedInFinder, object: nil
-                    )
-                }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
-                .disabled(selectedTrack == nil)
-
-                Button("Copy File Path") {
-                    if let track = selectedTrack,
-                       let path = track?.organizedPath {
-                        let pasteValue = path.rangeOfCharacter(from: .whitespaces) != nil
-                            ? "\"\(path)\""
-                            : path
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(pasteValue, forType: .string)
-                    }
-                }
-                .keyboardShortcut("c", modifiers: [.command, .shift])
-                .disabled(selectedTrack == nil)
 
                 Divider()
 

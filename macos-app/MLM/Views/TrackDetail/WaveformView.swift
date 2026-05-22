@@ -31,6 +31,9 @@ struct WaveformView: View {
     /// Gap between bars in points.
     private let barGap: CGFloat = 1
 
+    /// Stride per bar in scrolled mode: barWidth + barGap.
+    private let barStride: CGFloat = 3  // 2pt bar + 1pt gap
+
     var body: some View {
         GeometryReader { geometry in
             ZStack {
@@ -39,19 +42,35 @@ struct WaveformView: View {
                 } else if data.isEmpty {
                     emptyPlaceholder
                 } else {
-                    waveformCanvas(in: geometry.size)
+                    let totalContentWidth = max(
+                        CGFloat(data.count) * barStride,
+                        geometry.size.width
+                    )
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        waveformCanvas(in: CGSize(
+                            width: totalContentWidth,
+                            height: geometry.size.height
+                        ))
+                        .frame(width: totalContentWidth, height: geometry.size.height)
                         .contentShape(Rectangle())
-                        .gesture(
+                        .simultaneousGesture(
                             DragGesture(minimumDistance: 0)
                                 .onChanged { value in
-                                    let fraction = value.location.x / geometry.size.width
-                                    onSeek?(min(max(fraction, 0), 1))
+                                    let fraction = WaveformHelpers.seekFraction(
+                                        tapX: value.location.x,
+                                        totalContentWidth: totalContentWidth
+                                    )
+                                    onSeek?(fraction)
                                 }
                                 .onEnded { value in
-                                    let fraction = value.location.x / geometry.size.width
-                                    onSeek?(min(max(fraction, 0), 1))
+                                    let fraction = WaveformHelpers.seekFraction(
+                                        tapX: value.location.x,
+                                        totalContentWidth: totalContentWidth
+                                    )
+                                    onSeek?(fraction)
                                 }
                         )
+                    }
                 }
             }
         }
@@ -68,9 +87,9 @@ struct WaveformView: View {
             let height = canvasSize.height
             let midY = height / 2
 
-            // Calculate actual bar width to fill the canvas evenly
-            let totalBarWidth = availableWidth / CGFloat(totalBars)
-            let actualBarWidth = max(totalBarWidth - barGap, 1)
+            // Fixed-stride layout: Canvas width == totalContentWidth, no fill calculation needed
+            let totalBarWidth: CGFloat = barStride    // fixed 3pt
+            let actualBarWidth: CGFloat = barWidth    // fixed 2pt
 
             // Max bar height (half the canvas, leaving a small gap at center)
             let maxBarHeight = midY - 1
@@ -99,20 +118,17 @@ struct WaveformView: View {
                     height: bottomHeight
                 )
 
-                // Color based on whether this bar is in the "played" region
-                let barColor: Color = x < progressX
-                    ? .mlmAccent
-                    : .mlmEdge
-
-                let barOpacity: Double = x < progressX ? 1.0 : 0.5
+                // DJ-style amplitude color coding — opacity already baked into amplitudeColor
+                let played = x < progressX
+                let barColor = WaveformHelpers.amplitudeColor(for: peak, played: played)
 
                 context.fill(
                     Path(roundedRect: topRect, cornerRadius: 0.5),
-                    with: .color(barColor.opacity(barOpacity))
+                    with: .color(barColor)
                 )
                 context.fill(
                     Path(roundedRect: bottomRect, cornerRadius: 0.5),
-                    with: .color(barColor.opacity(barOpacity * 0.6))
+                    with: .color(barColor.opacity(0.6))
                 )
             }
         }
