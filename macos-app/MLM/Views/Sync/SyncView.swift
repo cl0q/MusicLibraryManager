@@ -8,30 +8,42 @@ struct SyncView: View {
     @State private var showCreateSheet = false
     @State private var newProfileName = ""
     @State private var newProfileOutput = ""
+    @State private var detectedDevices: [DeviceDetector.RockboxDevice] = []
+    @State private var hasRunDetection = false
+    @State private var shouldApplyDeviceDefaults = false
+    @State private var showRockboxToast = false
 
     var body: some View {
-        Group {
-            if let vm = container.syncViewModel {
-                HSplitView {
-                    profileList(vm: vm)
-                        .frame(minWidth: 200, maxWidth: 280)
+        ZStack(alignment: .bottom) {
+            Group {
+                if let vm = container.syncViewModel {
+                    HSplitView {
+                        profileList(vm: vm)
+                            .frame(minWidth: 200, maxWidth: 280)
 
-                    profileDetail(vm: vm)
-                        .frame(maxWidth: .infinity)
-                }
-                .task {
-                    // Refresh on first appear; subsequent re-mounts skip re-init
-                    // because VM lives in the container.
-                    if vm.profiles.isEmpty && !vm.isLoading {
-                        await vm.loadProfiles()
+                        profileDetail(vm: vm)
+                            .frame(maxWidth: .infinity)
                     }
+                    .task {
+                        // Refresh on first appear; subsequent re-mounts skip re-init
+                        // because VM lives in the container.
+                        if vm.profiles.isEmpty && !vm.isLoading {
+                            await vm.loadProfiles()
+                        }
+                    }
+                } else {
+                    ProgressView("Loading...")
                 }
-            } else {
-                ProgressView("Loading...")
             }
-        }
-        .sheet(isPresented: $showCreateSheet) {
-            createProfileSheet
+            .sheet(isPresented: $showCreateSheet) {
+                createProfileSheet
+            }
+
+            // Phase 38: Rockbox smart-defaults toast (D-03)
+            SyncToast(
+                message: "Rockbox iPod erkannt — Device-Defaults aktiviert",
+                isShowing: showRockboxToast
+            )
         }
     }
 
@@ -103,22 +115,13 @@ struct SyncView: View {
     @ViewBuilder
     private func profileDetail(vm: SyncViewModel) -> some View {
         if let profile = vm.selectedProfile {
-            SyncProfileDetailView(
-                profile: profile,
-                preview: vm.preview,
-                isLoading: vm.isLoading,
-                isSyncing: vm.isSyncing,
-                lastResult: vm.lastResult,
-                errorMessage: vm.errorMessage,
-                onSync: { Task { await vm.executeSync() } },
-                onRefresh: { Task { await vm.loadPreview(for: profile) } }
-            )
+            SyncProfileDetailView(profile: profile)
         } else {
             VStack(spacing: 12) {
                 Image(systemName: "arrow.triangle.2.circlepath")
                     .font(.system(size: 32))
                     .foregroundColor(.mlmInkMuted)
-                Text("Select a sync profile")
+                Text("Profil aus der Liste auswählen")
                     .font(MLMFont.body)
                     .foregroundColor(.mlmInkMuted)
             }
@@ -130,43 +133,111 @@ struct SyncView: View {
 
     private var createProfileSheet: some View {
         VStack(spacing: 16) {
-            Text("New Sync Profile")
+            Text("Neues Sync-Profil")
                 .font(MLMFont.title3)
 
-            TextField("Profile Name", text: $newProfileName)
+            TextField("Profilname", text: $newProfileName)
                 .textFieldStyle(.roundedBorder)
 
             HStack {
-                TextField("Output Folder", text: $newProfileOutput)
+                TextField("Ausgabe-Ordner", text: $newProfileOutput)
                     .textFieldStyle(.roundedBorder)
-                Button("Browse...") {
+                Button("Durchsuchen…") {
                     let panel = NSOpenPanel()
                     panel.canChooseDirectories = true
                     panel.canChooseFiles = false
                     panel.canCreateDirectories = true
                     panel.allowsMultipleSelection = false
-                    panel.prompt = "Choose"
+                    panel.prompt = "Auswählen"
                     if panel.runModal() == .OK, let url = panel.url {
                         newProfileOutput = url.path
                     }
                 }
             }
 
+            // Phase 38 D-09: On-demand device detection
+            VStack(alignment: .leading, spacing: 8) {
+                Button("Gerät erkennen…") {
+                    detectedDevices = DeviceDetector.detectRockboxDevices()
+                    hasRunDetection = true
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color.mlmAccent)
+
+                if hasRunDetection {
+                    if detectedDevices.isEmpty {
+                        // D-10: Empty state copy
+                        Text("Keine Geräte gefunden — angeschlossen?")
+                            .font(MLMFont.muted)
+                            .foregroundColor(.mlmInkMuted)
+                    } else {
+                        ForEach(detectedDevices, id: \.mountPoint) { device in
+                            Button {
+                                newProfileOutput = device.mountPoint
+                                if newProfileName.isEmpty {
+                                    newProfileName = "\(device.deviceName) iPod"
+                                }
+                                shouldApplyDeviceDefaults = true
+                                showRockboxToast = true
+                                Task { try? await Task.sleep(for: .seconds(3)); showRockboxToast = false }
+                            } label: {
+                                HStack {
+                                    Image(systemName: "iphone.gen3.radiowaves.left.and.right")
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(device.deviceName)
+                                            .font(MLMFont.body)
+                                            .foregroundColor(.mlmInk)
+                                        Text("\(device.mountPoint)")
+                                            .font(MLMFont.muted)
+                                            .foregroundColor(.mlmInkMuted)
+                                    }
+                                    Spacer()
+                                    if shouldApplyDeviceDefaults && newProfileOutput == device.mountPoint {
+                                        Image(systemName: "checkmark")
+                                            .foregroundColor(.mlmAccent)
+                                    }
+                                }
+                                .padding(.vertical, 4)
+                                .padding(.horizontal, 8)
+                                .background(Color.mlmRaised)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
             HStack {
-                Button("Cancel") {
+                Button("Abbrechen") {
                     showCreateSheet = false
+                    detectedDevices = []
+                    hasRunDetection = false
+                    shouldApplyDeviceDefaults = false
                 }
                 .keyboardShortcut(.cancelAction)
 
                 Spacer()
 
-                Button("Create") {
+                Button("Erstellen") {
                     guard let vm = container.syncViewModel, !newProfileName.isEmpty else { return }
+                    let applyDefaults = shouldApplyDeviceDefaults
                     Task {
-                        await vm.createProfile(name: newProfileName, outputFolder: newProfileOutput)
+                        await vm.createProfile(
+                            name: newProfileName,
+                            outputFolder: newProfileOutput,
+                            generateM3U8: applyDefaults ? true : false,
+                            transcodeMode: applyDefaults ? "aac_248" : "keep_originals",
+                            fat32SafePaths: true,
+                            cleanupRemovedFiles: true
+                        )
                         showCreateSheet = false
                         newProfileName = ""
                         newProfileOutput = ""
+                        detectedDevices = []
+                        hasRunDetection = false
+                        shouldApplyDeviceDefaults = false
                     }
                 }
                 .keyboardShortcut(.defaultAction)
@@ -174,7 +245,7 @@ struct SyncView: View {
             }
         }
         .padding(24)
-        .frame(width: 400)
+        .frame(width: 420)
     }
 }
 
@@ -197,166 +268,3 @@ struct SyncProfileRow: View {
     }
 }
 
-// MARK: - Profile Detail
-
-struct SyncProfileDetailView: View {
-    let profile: SyncProfile
-    let preview: SyncService.SyncPreview?
-    let isLoading: Bool
-    let isSyncing: Bool
-    let lastResult: SyncService.SyncResult?
-    let errorMessage: String?
-    let onSync: () -> Void
-    let onRefresh: () -> Void
-
-    /// Human-readable reason why the Sync Now button is disabled (nil = ready to sync).
-    private var disabledReason: String? {
-        if isSyncing { return "Sync läuft bereits…" }
-        if isLoading { return "Vorschau wird berechnet…" }
-        guard let preview else { return "Vorschau noch nicht geladen — Refresh klicken" }
-        if !FileManager.default.fileExists(atPath: profile.outputFolder) {
-            return "Output-Ordner nicht erreichbar: \(profile.outputFolder)"
-        }
-        if !preview.hasSufficientSpace { return "Nicht genug Speicherplatz auf dem Zielordner" }
-        if preview.filesToAdd.isEmpty && preview.filesToRemove.isEmpty {
-            return "Keine Änderungen — alles bereits synchronisiert"
-        }
-        return nil
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                // Header
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(profile.name)
-                            .font(MLMFont.title2)
-                        Text(profile.outputFolder)
-                            .font(MLMFont.muted)
-                            .foregroundColor(.mlmInkMuted)
-                    }
-
-                    Spacer()
-
-                    Button("Refresh") {
-                        onRefresh()
-                    }
-                    .disabled(isLoading)
-
-                    Button("Sync Now") {
-                        onSync()
-                    }
-                    .disabled(isSyncing || !(preview?.hasSufficientSpace ?? false))
-                    .buttonStyle(.borderedProminent)
-                    .help(disabledReason ?? "Start syncing the profile contents to the output folder")
-                }
-
-                if let reason = disabledReason {
-                    Label(reason, systemImage: "info.circle")
-                        .font(MLMFont.muted)
-                        .foregroundColor(.secondary)
-                }
-
-                Divider()
-
-                // Preview
-                if isLoading {
-                    HStack {
-                        ProgressView()
-                        Text("Computing preview...")
-                            .font(MLMFont.body)
-                    }
-                } else if let preview {
-                    previewSection(preview)
-                }
-
-                // Error
-                if let error = errorMessage {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundColor(.red)
-                        .font(MLMFont.body)
-                }
-
-                // Last result
-                if let result = lastResult {
-                    resultSection(result)
-                }
-            }
-            .padding(16)
-        }
-        .background(Color.mlmBase)
-    }
-
-    @ViewBuilder
-    private func previewSection(_ preview: SyncService.SyncPreview) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Sync Preview")
-                .font(MLMFont.sectionLabel)
-
-            HStack(spacing: 24) {
-                VStack {
-                    Text("\(preview.filesToAdd.count)")
-                        .font(.system(size: 24, weight: .semibold, design: .monospaced))
-                        .foregroundColor(.green)
-                    Text("To Add")
-                        .font(MLMFont.muted)
-                }
-                VStack {
-                    Text("\(preview.filesToRemove.count)")
-                        .font(.system(size: 24, weight: .semibold, design: .monospaced))
-                        .foregroundColor(.red)
-                    Text("To Remove")
-                        .font(MLMFont.muted)
-                }
-                VStack {
-                    Text(formatBytes(preview.totalNewSize))
-                        .font(.system(size: 24, weight: .semibold, design: .monospaced))
-                    Text("New Size")
-                        .font(MLMFont.muted)
-                }
-                VStack {
-                    Text(formatBytes(preview.deviceAvailableSpace))
-                        .font(.system(size: 24, weight: .semibold, design: .monospaced))
-                        .foregroundColor(preview.hasSufficientSpace ? .mlmInkPrimary : .red)
-                    Text("Available")
-                        .font(MLMFont.muted)
-                }
-            }
-
-            if !preview.hasSufficientSpace {
-                Label("Insufficient disk space", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundColor(.red)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func resultSection(_ result: SyncService.SyncResult) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Last Sync Result")
-                .font(MLMFont.sectionLabel)
-
-            HStack(spacing: 16) {
-                Label("\(result.syncedCount) synced", systemImage: "checkmark.circle.fill")
-                    .foregroundColor(.green)
-
-                if result.failedCount > 0 {
-                    Label("\(result.failedCount) failed", systemImage: "xmark.circle.fill")
-                        .foregroundColor(.red)
-                }
-            }
-            .font(MLMFont.body)
-        }
-    }
-
-    private func formatBytes(_ bytes: Int64) -> String {
-        if bytes >= 1_000_000_000 {
-            return String(format: "%.1f GB", Double(bytes) / 1_000_000_000)
-        } else if bytes >= 1_000_000 {
-            return String(format: "%.0f MB", Double(bytes) / 1_000_000)
-        } else {
-            return String(format: "%.0f KB", Double(bytes) / 1_000)
-        }
-    }
-}

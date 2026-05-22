@@ -58,6 +58,7 @@ final class DownloadOrchestrator {
     private let youtubeDownloader: YouTubeDownloader
     private let retryQueue: DownloadQueue
     private var dabClient: DABClient?
+    private let squidClient: SquidWtfClient
 
     init(
         libraryRoot: String,
@@ -72,10 +73,55 @@ final class DownloadOrchestrator {
         self.youtubeDownloader = YouTubeDownloader()
         self.retryQueue = DownloadQueue(directory: flacDir)
         self.dabClient = DABClient(tokenStorage: tokenStorage)
+        self.squidClient = SquidWtfClient()
 
         // Create directories
         try? FileManager.default.createDirectory(at: flacDir, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: aacDir, withIntermediateDirectories: true)
+
+        // Once-at-boot endpoint reachability logs for the optional FLAC
+        // stages (DAB + Squid) so the Logs tab tells the user up front
+        // which stages are live and whether the chain has degraded.
+        let dabEndpoint = DABClient.baseURL
+        let squidEndpoint = SquidWtfClient.baseURL
+        let squidHasCookie = SquidWtfClient.cfClearance != nil
+        Task.detached(priority: .background) {
+            await Self.healthCheck(label: "DAB", endpoint: dabEndpoint, configKey: "MLM_DAB_API_BASE")
+            await Self.healthCheck(label: "Squid", endpoint: squidEndpoint, configKey: "MLM_SQUID_API_BASE")
+            if !squidHasCookie {
+                AppLogger.shared.info(
+                    "Squid: no MLM_SQUID_CAPTCHA set — search will run, but download needs the `captcha_verified_at` cookie. Trigger any download once at qobuz.squid.wtf, open dev-tools → Storage → Cookies → copy the value of captcha_verified_at, then export MLM_SQUID_CAPTCHA=…",
+                    source: "Download"
+                )
+            }
+        }
+    }
+
+    private static func healthCheck(label: String, endpoint: String, configKey: String) async {
+        if endpoint.isEmpty {
+            AppLogger.shared.info(
+                "\(label) endpoint disabled (\(configKey) = \"\")",
+                source: "Download"
+            )
+            return
+        }
+        guard let url = URL(string: endpoint) else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "HEAD"
+        req.timeoutInterval = 8
+        do {
+            let (_, resp) = try await URLSession.shared.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            AppLogger.shared.info(
+                "\(label) endpoint reachable: \(endpoint) (HTTP \(code))",
+                source: "Download"
+            )
+        } catch {
+            AppLogger.shared.warn(
+                "\(label) endpoint NOT reachable: \(endpoint) — \(error.localizedDescription). Pipeline will skip this stage. Set \(configKey) to override.",
+                source: "Download"
+            )
+        }
     }
 
     // MARK: - Download Batch
@@ -104,6 +150,31 @@ final class DownloadOrchestrator {
 
         var result = BatchResult()
         let total = requests.count
+
+        // Bail out loudly if the download directories can't be created
+        // (most likely the library drive isn't mounted right now). The
+        // previous behaviour was to swallow the createDirectory throw
+        // inside each per-track call, which made every track fail in
+        // ~0.3 ms with no log lines other than "chain[SC]: trying".
+        do {
+            try FileManager.default.createDirectory(at: flacDir, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: aacDir, withIntermediateDirectories: true)
+        } catch {
+            AppLogger.shared.error(
+                "Download dirs not writable (\(error.localizedDescription)). Library drive offline? aacDir=\(aacDir.path) flacDir=\(flacDir.path)",
+                source: "Download"
+            )
+            result.failed = total
+            for req in requests {
+                retryQueue.enqueue(
+                    trackId: req.trackId,
+                    query: req.query,
+                    source: "youtube",
+                    error: "Library drive not writable: \(error.localizedDescription)"
+                )
+            }
+            return result
+        }
 
         for (index, request) in requests.enumerated() {
             // Check cancellation flag before starting a new download so
@@ -182,6 +253,10 @@ final class DownloadOrchestrator {
                 }
             } catch {
                 result.failed += 1
+                AppLogger.shared.error(
+                    "Download failed for track \(request.trackId) (\(request.artist) - \(request.title)): \(error.localizedDescription) [type=\(String(describing: type(of: error)))]",
+                    source: "Download"
+                )
                 retryQueue.enqueue(
                     trackId: request.trackId,
                     query: request.query,
@@ -277,7 +352,42 @@ final class DownloadOrchestrator {
             }
         }
 
-        // 3. YouTube (last resort)
+        // 3. Squid.wtf (Qobuz mirror) — requires MLM_SQUID_CF_COOKIE env
+        //    for the actual download (Cloudflare bot-fight blocks
+        //    cookie-less calls with "Captcha required").
+        do {
+            AppLogger.shared.log("chain[Squid]: searching \(request.query)", level: .info, source: "Download")
+            if let squidTrack = try await squidClient.searchTrack(
+                query: request.query,
+                artist: request.artist,
+                title: request.title
+            ) {
+                let squidResult = try await squidClient.download(
+                    track: squidTrack,
+                    outputDir: flacDir,
+                    artist: request.artist,
+                    title: request.title
+                )
+                switch squidResult {
+                case .success(let path):
+                    AppLogger.shared.log("chain[Squid]: success → \(path.lastPathComponent)", level: .info, source: "Download")
+                    return path
+                case .captchaRequired:
+                    AppLogger.shared.log(
+                        "chain[Squid]: search hit but download needs captcha_verified_at — set MLM_SQUID_CAPTCHA from your browser's cookie for qobuz.squid.wtf (open dev-tools, Storage → Cookies), then retry",
+                        level: .warning, source: "Download"
+                    )
+                case .notFound:
+                    AppLogger.shared.log("chain[Squid]: download endpoint returned nothing usable", level: .info, source: "Download")
+                }
+            } else {
+                AppLogger.shared.log("chain[Squid]: no convincing match for \(request.artist) - \(request.title)", level: .info, source: "Download")
+            }
+        } catch {
+            AppLogger.shared.log("chain[Squid]: error: \(error)", level: .warning, source: "Download")
+        }
+
+        // 4. YouTube (last resort)
         if youtubeDownloader.isAvailable {
             AppLogger.shared.log("chain[YT]: searching \(request.query)", level: .info, source: "Download")
             let ytResult = try await youtubeDownloader.searchAndDownload(

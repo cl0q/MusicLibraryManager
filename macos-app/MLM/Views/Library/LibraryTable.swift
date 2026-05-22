@@ -17,6 +17,9 @@ struct LibraryTable: View {
     /// async fetch (which is unreliable inside `Menu`-in-`contextMenu`).
     var availablePlaylists: [Playlist] = []
 
+    /// Sync profiles available for the "Sync zu" submenu — loaded by LibraryView.
+    var availableSyncProfiles: [SyncProfile] = []
+
     /// Identifiable wrapper so `Table` selection can use `Set<Int64>`
     /// even though `Track.id` is `Int64?` for unsaved DB rows.
     private struct TrackRow: Identifiable {
@@ -130,7 +133,14 @@ struct LibraryTable: View {
             TrackContextMenu(
                 selectedTrackIDs: selectedIDs,
                 tracks: viewModel.displayedTracks,
-                availablePlaylists: availablePlaylists
+                availablePlaylists: availablePlaylists,
+                availableSyncProfiles: availableSyncProfiles,
+                addToSyncProfile: { profile in
+                    Task {
+                        container.syncViewModel?.selectedProfile = profile
+                        await container.syncViewModel?.addTracks(Array(selectedIDs))
+                    }
+                }
             )
         } primaryAction: { selectedIDs in
             if let trackID = selectedIDs.first,

@@ -41,12 +41,27 @@ final class SyncService {
     private(set) var progress: Double = 0
     private(set) var currentFile: String = ""
 
+    // MARK: - Cancellation + Progress Tracking (D-14)
+
+    private(set) var cancellationRequested: Bool = false
+    private(set) var processed: Int = 0
+    private(set) var total: Int = 0
+
+    func cancelSync() {
+        cancellationRequested = true
+    }
+
     // MARK: - Dependencies
 
     private let trackRepository: TrackRepository
     private let syncRepository: SyncRepository
     private let configRepository: ConfigRepository
     private let transcodeCache: TranscodeCache
+
+    /// Optional bridge to the global Operations panel.
+    /// When set, executeSync registers itself as an ActivityViewModel.Operation
+    /// so the Operations tab can render a live row.
+    var activityViewModel: ActivityViewModel?
 
     /// Space buffer: require 50MB free beyond needed space.
     private static let spaceBuffer: Int64 = 50_000_000
@@ -150,22 +165,74 @@ final class SyncService {
             )
         }
 
+        // Reset cancellation flag + progress tracking at start (D-14)
+        cancellationRequested = false
+        total = preview.filesToAdd.count + preview.filesToRemove.count
+        processed = 0
+
         isRunning = true
         defer { isRunning = false }
 
         var result = SyncResult()
-        let total = preview.filesToAdd.count + preview.filesToRemove.count
-        var processed = 0
 
-        // 1. Remove stale files
+        AppLogger.shared.info(
+            "Sync starting: profile=\(profile.name) (id=\(profileId)) mode=\(profile.transcodeMode) toAdd=\(preview.filesToAdd.count) toRemove=\(preview.filesToRemove.count) output=\(profile.outputFolder)",
+            source: "Sync"
+        )
+
+        // Register with global Operations panel (Task 1 — Sync-Progress moved
+        // from SyncView into Operations-Tab).
+        let operationId: UUID? = await MainActor.run {
+            activityViewModel?.startOperation(
+                type: .sync,
+                title: "Sync: \(profile.name)",
+                detail: "0 / \(total)"
+            )
+        }
+
+        // 1. Remove stale files (cleanup-deletion branch — D-04 / SYNC-v2-05)
         for file in preview.filesToRemove {
-            // Clean up sync_state entry
+            if profile.cleanupRemovedFiles {
+                let url = URL(fileURLWithPath: file.destinationPath)
+                // Security guard: only delete within profile.outputFolder (T-38-02)
+                guard file.destinationPath.hasPrefix(profile.outputFolder) else {
+                    AppLogger.shared.log(
+                        "Cleanup skipped: path outside outputFolder: \(file.destinationPath)",
+                        level: .warning,
+                        source: "sync"
+                    )
+                    continue
+                }
+                // Resolve symlinks to prevent symlink-following attacks (T-38-03)
+                let canonicalURL = url.resolvingSymlinksInPath()
+                guard canonicalURL.path.hasPrefix(profile.outputFolder) else { continue }
+
+                if FileManager.default.fileExists(atPath: canonicalURL.path) {
+                    var trashed: NSURL? = nil
+                    do {
+                        try FileManager.default.trashItem(at: canonicalURL, resultingItemURL: &trashed)
+                    } catch {
+                        // FAT32/exFAT destinations don't support Trash — fall back to direct remove
+                        try? FileManager.default.removeItem(at: canonicalURL)
+                    }
+                }
+            }
             try? await syncRepository.removeSyncState(
                 profileId: profileId,
                 trackId: file.trackId
             )
             processed += 1
             progress = Double(processed) / Double(max(total, 1))
+            if let operationId {
+                await MainActor.run {
+                    activityViewModel?.updateProgress(
+                        id: operationId,
+                        progress: progress,
+                        detail: "\(processed) / \(total) — Entfernt: \(file.artist) - \(file.title)"
+                    )
+                }
+            }
+            if cancellationRequested { break }
         }
 
         // 2. Sync new files
@@ -173,52 +240,229 @@ final class SyncService {
         for file in preview.filesToAdd {
             currentFile = "\(file.artist) - \(file.title)"
             progress = Double(processed) / Double(max(total, 1))
+            if let operationId {
+                await MainActor.run {
+                    activityViewModel?.updateProgress(
+                        id: operationId,
+                        progress: progress,
+                        detail: "\(processed) / \(total) — \(file.artist) - \(file.title)"
+                    )
+                }
+            }
 
             do {
-                // Ensure cached AAC exists
                 if let track = try await trackRepository.fetchTrack(id: file.trackId) {
-                    if let cachedURL = try await transcodeCache.ensureCached(track: track) {
-                        let destURL = TranscodeCache.buildProfilePath(
-                            track: track,
-                            libraryRoot: libraryRoot,
-                            profileOutputFolder: profile.outputFolder
-                        )
+                    // Transcode-mode branching (SYNC-v2-19)
+                    let cachedURL: URL?
+                    switch profile.transcodeModeEnum {
+                    case .keepOriginals:
+                        // Bypass TranscodeCache — link original file directly (no transcode)
+                        if let organizedPath = track.organizedPath,
+                           let sourceURL = TranscodeCache.resolveSourceURL(sourcePath: organizedPath, libraryRoot: libraryRoot) {
+                            let destURL = URL(fileURLWithPath: file.destinationPath)
+                            try? FileManager.default.createDirectory(
+                                at: destURL.deletingLastPathComponent(),
+                                withIntermediateDirectories: true
+                            )
+                            try? FileManager.default.removeItem(at: destURL)
+                            do {
+                                try FileManager.default.linkItem(at: sourceURL, to: destURL)
+                            } catch {
+                                try? FileManager.default.copyItem(at: sourceURL, to: destURL)
+                            }
+                            // For keepOriginals, file is already at destURL — update sync state directly
+                            if FileManager.default.fileExists(atPath: destURL.path) {
+                                let checksum = try TranscodeCache.sha256(of: destURL)
+                                let size = try FileManager.default.attributesOfItem(atPath: destURL.path)[.size] as? Int ?? 0
+                                try await syncRepository.updateSyncState(
+                                    profileId: profileId,
+                                    trackId: file.trackId,
+                                    checksum: checksum,
+                                    size: size
+                                )
+                                result.syncedCount += 1
+                            } else {
+                                result.failedCount += 1
+                                result.failedTracks.append((file.trackId, "Source file not found"))
+                            }
+                            cachedURL = nil  // Already handled above
+                        } else {
+                            cachedURL = nil
+                            result.failedCount += 1
+                            result.failedTracks.append((file.trackId, "No organized path for keepOriginals"))
+                        }
+                    case .aac248:
+                        cachedURL = try await transcodeCache.ensureCached(track: track, bitrateKbps: 248, libraryRoot: libraryRoot)
+                    case .aac320:
+                        cachedURL = try await transcodeCache.ensureCached(track: track, bitrateKbps: 320, libraryRoot: libraryRoot)
+                    }
 
-                        try transcodeCache.linkToProfile(
-                            trackId: file.trackId,
-                            destinationPath: destURL
-                        )
+                    // For aac248/aac320, link cached file to destination
+                    if profile.transcodeModeEnum != .keepOriginals {
+                        let bitrate: Int = profile.transcodeModeEnum == .aac320 ? 320 : 248
+                        if let _ = cachedURL {
+                            let destURL = TranscodeCache.buildProfilePath(
+                                track: track,
+                                libraryRoot: libraryRoot,
+                                profileOutputFolder: profile.outputFolder
+                            )
 
-                        // Update sync state
-                        let checksum = try TranscodeCache.sha256(of: cachedURL)
-                        let size = try FileManager.default.attributesOfItem(atPath: destURL.path)[.size] as? Int ?? 0
+                            try transcodeCache.linkToProfile(
+                                trackId: file.trackId,
+                                bitrateKbps: bitrate,
+                                destinationPath: destURL
+                            )
 
-                        try await syncRepository.updateSyncState(
-                            profileId: profileId,
-                            trackId: file.trackId,
-                            checksum: checksum,
-                            size: size
-                        )
+                            // Update sync state
+                            let checksum = try TranscodeCache.sha256(of: destURL)
+                            let size = try FileManager.default.attributesOfItem(atPath: destURL.path)[.size] as? Int ?? 0
 
-                        result.syncedCount += 1
-                    } else {
-                        result.failedCount += 1
-                        result.failedTracks.append((file.trackId, "Transcode failed"))
+                            try await syncRepository.updateSyncState(
+                                profileId: profileId,
+                                trackId: file.trackId,
+                                checksum: checksum,
+                                size: size
+                            )
+
+                            result.syncedCount += 1
+                            AppLogger.shared.info(
+                                "Sync ok: track \(file.trackId) → \(destURL.path) (\(size) bytes, \(bitrate)k)",
+                                source: "Sync"
+                            )
+                        } else {
+                            result.failedCount += 1
+                            result.failedTracks.append((file.trackId, "Transcode failed"))
+                            AppLogger.shared.error(
+                                "Sync failed (transcode returned nil): track \(file.trackId) \(file.artist) - \(file.title) at \(bitrate)k",
+                                source: "Sync"
+                            )
+                        }
                     }
                 }
             } catch {
                 result.failedCount += 1
                 result.failedTracks.append((file.trackId, error.localizedDescription))
+                AppLogger.shared.error(
+                    "Sync failed (exception): track \(file.trackId) \(file.artist) - \(file.title): \(error.localizedDescription)",
+                    source: "Sync"
+                )
             }
 
             processed += 1
+            if cancellationRequested { break }
         }
 
-        // 3. Generate M3U8 playlists
-        try await generatePlaylists(profileId: profileId, profile: profile, libraryRoot: libraryRoot)
+        // 3. Generate M3U8 playlists (M3U8 gate — SYNC-v2-20)
+        if profile.generateM3U8 {
+            try await generatePlaylists(profileId: profileId, profile: profile, libraryRoot: libraryRoot)
+        }
 
         currentFile = ""
         progress = 1.0
+
+        // Finalise the Operations-tab row.
+        if let operationId {
+            let summary = "\(result.syncedCount) synchronisiert · \(result.failedCount) fehlgeschlagen"
+            await MainActor.run {
+                if cancellationRequested {
+                    activityViewModel?.failOperation(id: operationId, error: "Abgebrochen — \(summary)")
+                } else if result.failedCount > 0 && result.syncedCount == 0 {
+                    activityViewModel?.failOperation(id: operationId, error: summary)
+                } else {
+                    activityViewModel?.completeOperation(id: operationId, detail: summary)
+                }
+            }
+        }
+
+        return result
+    }
+
+    // MARK: - Single-Track Retry (D-13 / SYNC-v2-17)
+
+    /// Execute sync for a single track (for retry of failed tracks).
+    func executeSyncSingleTrack(profileId: Int64, trackId: Int64) async throws -> SyncResult {
+        guard let profile = try await syncRepository.fetch(id: profileId) else {
+            throw SyncError.profileNotFound(profileId)
+        }
+        let fullPreview = try await previewSync(profileId: profileId)
+        let libraryRoot = try await configRepository.getLibraryRoot() ?? ""
+
+        var result = SyncResult()
+        guard let filePreview = fullPreview.filesToAdd.first(where: { $0.trackId == trackId }) else {
+            return result
+        }
+
+        if let track = try await trackRepository.fetchTrack(id: trackId) {
+            do {
+                switch profile.transcodeModeEnum {
+                case .keepOriginals:
+                    if let organizedPath = track.organizedPath,
+                       let sourceURL = TranscodeCache.resolveSourceURL(sourcePath: organizedPath, libraryRoot: libraryRoot) {
+                        let destURL = URL(fileURLWithPath: filePreview.destinationPath)
+                        try? FileManager.default.createDirectory(at: destURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                        try? FileManager.default.removeItem(at: destURL)
+                        do { try FileManager.default.linkItem(at: sourceURL, to: destURL) } catch {
+                            try? FileManager.default.copyItem(at: sourceURL, to: destURL)
+                        }
+                        if FileManager.default.fileExists(atPath: destURL.path) {
+                            let checksum = try TranscodeCache.sha256(of: destURL)
+                            let size = (try? FileManager.default.attributesOfItem(atPath: destURL.path)[.size] as? Int) ?? 0
+                            try await syncRepository.updateSyncState(
+                                profileId: profileId, trackId: trackId, checksum: checksum, size: size
+                            )
+                            result.syncedCount = 1
+                        } else {
+                            result.failedCount = 1
+                            result.failedTracks.append((trackId, "Source file not found"))
+                        }
+                    } else {
+                        result.failedCount = 1
+                        result.failedTracks.append((trackId, "No organized path"))
+                    }
+                case .aac248:
+                    if let url = try await transcodeCache.ensureCached(track: track, bitrateKbps: 248, libraryRoot: libraryRoot) {
+                        let destURL = TranscodeCache.buildProfilePath(
+                            track: track, libraryRoot: libraryRoot,
+                            profileOutputFolder: profile.outputFolder
+                        )
+                        try transcodeCache.linkToProfile(trackId: trackId, bitrateKbps: 248, destinationPath: destURL)
+                        let checksum = try TranscodeCache.sha256(of: url)
+                        let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+                        try await syncRepository.updateSyncState(
+                            profileId: profileId, trackId: trackId, checksum: checksum, size: size
+                        )
+                        result.syncedCount = 1
+                        AppLogger.shared.info("Retry ok: track \(trackId) at 248k", source: "Sync")
+                    } else {
+                        result.failedCount = 1
+                        result.failedTracks.append((trackId, "Transcode failed"))
+                        AppLogger.shared.error("Retry failed (transcode returned nil): track \(trackId) at 248k", source: "Sync")
+                    }
+                case .aac320:
+                    if let url = try await transcodeCache.ensureCached(track: track, bitrateKbps: 320, libraryRoot: libraryRoot) {
+                        let destURL = TranscodeCache.buildProfilePath(
+                            track: track, libraryRoot: libraryRoot,
+                            profileOutputFolder: profile.outputFolder
+                        )
+                        try transcodeCache.linkToProfile(trackId: trackId, bitrateKbps: 320, destinationPath: destURL)
+                        let checksum = try TranscodeCache.sha256(of: url)
+                        let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+                        try await syncRepository.updateSyncState(
+                            profileId: profileId, trackId: trackId, checksum: checksum, size: size
+                        )
+                        result.syncedCount = 1
+                        AppLogger.shared.info("Retry ok: track \(trackId) at 320k", source: "Sync")
+                    } else {
+                        result.failedCount = 1
+                        result.failedTracks.append((trackId, "Transcode failed"))
+                        AppLogger.shared.error("Retry failed (transcode returned nil): track \(trackId) at 320k", source: "Sync")
+                    }
+                }
+            } catch {
+                result.failedCount = 1
+                result.failedTracks.append((trackId, error.localizedDescription))
+            }
+        }
         return result
     }
 
@@ -230,7 +474,7 @@ final class SyncService {
         let profileDir = URL(fileURLWithPath: profile.outputFolder)
 
         for playlist in playlists {
-            let playlistRepo = PlaylistRepository(database: syncRepository.databasePool)
+            let playlistRepo = PlaylistRepository(database: syncRepository.databaseWriter)
             let tracks = try await playlistRepo.fetchTracks(playlistId: playlist.id!)
 
             var m3u = "#EXTM3U\n"

@@ -3,9 +3,9 @@ import GRDB
 
 /// Repository for sync profile CRUD and content resolution.
 final class SyncRepository: Sendable {
-    private let database: DatabasePool
+    private let database: any DatabaseWriter
 
-    init(database: DatabasePool) {
+    init(database: any DatabaseWriter) {
         self.database = database
     }
 
@@ -150,8 +150,17 @@ final class SyncRepository: Sendable {
         }
     }
 
-    /// Update profile settings (name, output folder, etc.).
-    func updateSettings(profileId: Int64, name: String?, outputFolder: String?, playlistPathPrefix: String?) async throws {
+    /// Update profile settings (name, output folder, toggle flags, etc.).
+    func updateSettings(
+        profileId: Int64,
+        name: String? = nil,
+        outputFolder: String? = nil,
+        playlistPathPrefix: String? = nil,
+        generateM3U8: Bool? = nil,
+        transcodeMode: String? = nil,
+        fat32SafePaths: Bool? = nil,
+        cleanupRemovedFiles: Bool? = nil
+    ) async throws {
         try await database.write { db in
             var sets: [String] = []
             var args: [DatabaseValueConvertible?] = []
@@ -167,6 +176,22 @@ final class SyncRepository: Sendable {
             if let playlistPathPrefix {
                 sets.append("playlist_path_prefix = ?")
                 args.append(playlistPathPrefix)
+            }
+            if let generateM3U8 {
+                sets.append("generate_m3u8 = ?")
+                args.append(generateM3U8 ? 1 : 0)
+            }
+            if let transcodeMode {
+                sets.append("transcode_mode = ?")
+                args.append(transcodeMode)
+            }
+            if let fat32SafePaths {
+                sets.append("fat32_safe_paths = ?")
+                args.append(fat32SafePaths ? 1 : 0)
+            }
+            if let cleanupRemovedFiles {
+                sets.append("cleanup_removed_files = ?")
+                args.append(cleanupRemovedFiles ? 1 : 0)
             }
 
             guard !sets.isEmpty else { return }
@@ -200,6 +225,6 @@ final class SyncRepository: Sendable {
         }
     }
 
-    /// Expose the database pool for cross-repo access.
-    var databasePool: DatabasePool { database }
+    /// Expose the database writer for cross-repo access (e.g. for PlaylistRepository in generatePlaylists).
+    var databaseWriter: any DatabaseWriter { database }
 }

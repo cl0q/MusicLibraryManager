@@ -13,6 +13,10 @@ final class SyncViewModel {
     private(set) var lastResult: SyncService.SyncResult?
     private(set) var errorMessage: String?
 
+    // Loaded content for the selected profile (used by SyncContentSections)
+    private(set) var profilePlaylists: [Playlist] = []
+    private(set) var profileTracks: [Track] = []
+
     // MARK: - Dependencies
 
     private let syncRepository: SyncRepository
@@ -42,11 +46,28 @@ final class SyncViewModel {
         isLoading = false
     }
 
-    func createProfile(name: String, outputFolder: String) async {
+    func createProfile(
+        name: String,
+        outputFolder: String,
+        generateM3U8: Bool = false,
+        transcodeMode: String = "keep_originals",
+        fat32SafePaths: Bool = true,
+        cleanupRemovedFiles: Bool = true
+    ) async {
         do {
             let profile = try await syncRepository.create(name: name, outputFolder: outputFolder)
-            profiles.append(profile)
-            selectedProfile = profile
+            // Apply toggle settings immediately after creation
+            if let id = profile.id {
+                try await syncRepository.updateSettings(
+                    profileId: id,
+                    generateM3U8: generateM3U8,
+                    transcodeMode: transcodeMode,
+                    fat32SafePaths: fat32SafePaths,
+                    cleanupRemovedFiles: cleanupRemovedFiles
+                )
+            }
+            await loadProfiles()
+            selectedProfile = profiles.first { $0.id == profile.id }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -78,10 +99,23 @@ final class SyncViewModel {
         isLoading = true
         do {
             preview = try await syncService.previewSync(profileId: id)
+            await loadProfileContent(profileId: id)
         } catch {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+    }
+
+    // MARK: - Profile Content (D-08)
+
+    @MainActor
+    func loadProfileContent(profileId: Int64) async {
+        do {
+            profilePlaylists = try await syncRepository.fetchProfilePlaylists(profileId: profileId)
+            profileTracks = try await syncRepository.fetchProfileTracks(profileId: profileId)
+        } catch {
+            AppLogger.shared.error("loadProfileContent failed: \(error)", source: "sync")
+        }
     }
 
     // MARK: - Sync
@@ -103,5 +137,144 @@ final class SyncViewModel {
         }
 
         isSyncing = false
+    }
+
+    // MARK: - Content Mutations (D-08)
+
+    @MainActor
+    func addPlaylists(_ playlistIds: [Int64]) async {
+        guard let profileId = selectedProfile?.id else { return }
+        do {
+            for id in playlistIds {
+                try await syncRepository.addPlaylist(profileId: profileId, playlistId: id)
+            }
+            await loadProfileContent(profileId: profileId)
+            NotificationCenter.default.post(
+                name: .syncProfileDidChange, object: nil, userInfo: ["profileId": profileId]
+            )
+        } catch {
+            errorMessage = "Failed to add playlists: \(error.localizedDescription)"
+        }
+    }
+
+    @MainActor
+    func addTracks(_ trackIds: [Int64]) async {
+        guard let profileId = selectedProfile?.id else { return }
+        do {
+            for id in trackIds {
+                try await syncRepository.addTrack(profileId: profileId, trackId: id)
+            }
+            await loadProfileContent(profileId: profileId)
+            NotificationCenter.default.post(
+                name: .syncProfileDidChange, object: nil, userInfo: ["profileId": profileId]
+            )
+        } catch {
+            errorMessage = "Failed to add tracks: \(error.localizedDescription)"
+        }
+    }
+
+    @MainActor
+    func removePlaylists(_ playlistIds: [Int64]) async {
+        guard let profileId = selectedProfile?.id else { return }
+        do {
+            for id in playlistIds {
+                try await syncRepository.removePlaylist(profileId: profileId, playlistId: id)
+            }
+            await loadProfileContent(profileId: profileId)
+            NotificationCenter.default.post(
+                name: .syncProfileDidChange, object: nil, userInfo: ["profileId": profileId]
+            )
+        } catch {
+            errorMessage = "Failed to remove playlists: \(error.localizedDescription)"
+        }
+    }
+
+    @MainActor
+    func removeTracks(_ trackIds: [Int64]) async {
+        guard let profileId = selectedProfile?.id else { return }
+        do {
+            for id in trackIds {
+                try await syncRepository.removeTrack(profileId: profileId, trackId: id)
+            }
+            await loadProfileContent(profileId: profileId)
+            NotificationCenter.default.post(
+                name: .syncProfileDidChange, object: nil, userInfo: ["profileId": profileId]
+            )
+        } catch {
+            errorMessage = "Failed to remove tracks: \(error.localizedDescription)"
+        }
+    }
+
+    @MainActor
+    func updateProfileSettings(
+        name: String? = nil,
+        outputFolder: String? = nil,
+        generateM3U8: Bool? = nil,
+        transcodeMode: String? = nil,
+        fat32SafePaths: Bool? = nil,
+        cleanupRemovedFiles: Bool? = nil,
+        playlistPathPrefix: String? = nil
+    ) async {
+        guard let profileId = selectedProfile?.id else { return }
+        do {
+            try await syncRepository.updateSettings(
+                profileId: profileId,
+                name: name,
+                outputFolder: outputFolder,
+                playlistPathPrefix: playlistPathPrefix,
+                generateM3U8: generateM3U8,
+                transcodeMode: transcodeMode,
+                fat32SafePaths: fat32SafePaths,
+                cleanupRemovedFiles: cleanupRemovedFiles
+            )
+            await loadProfiles()
+            // Refresh selectedProfile from the reloaded list to reflect updated fields
+            if let updated = profiles.first(where: { $0.id == profileId }) {
+                selectedProfile = updated
+            }
+            NotificationCenter.default.post(
+                name: .syncProfileDidChange, object: nil, userInfo: ["profileId": profileId]
+            )
+        } catch {
+            errorMessage = "Failed to update profile settings: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - Progress Forwarding (read-only access for SyncStatusRow in OperationsTab)
+
+    /// Forwarding property — reads SyncService.progress without exposing the service.
+    var syncProgress: Double { syncService.progress }
+
+    /// Forwarding property — reads SyncService.currentFile without exposing the service.
+    var syncCurrentFile: String { syncService.currentFile }
+
+    /// Forwarding property — reads SyncService.processed without exposing the service.
+    var syncProcessed: Int { syncService.processed }
+
+    /// Forwarding property — reads SyncService.total without exposing the service.
+    var syncTotal: Int { syncService.total }
+
+    // MARK: - Cancellation (D-14)
+
+    func cancelSync() {
+        syncService.cancelSync()
+    }
+
+    // MARK: - Single-Track Retry (D-13)
+
+    @MainActor
+    func retryFailedTrack(_ trackId: Int64) async {
+        guard let profile = selectedProfile, let profileId = profile.id else { return }
+        do {
+            let result = try await syncService.executeSyncSingleTrack(profileId: profileId, trackId: trackId)
+            if result.syncedCount > 0 {
+                await loadProfileContent(profileId: profileId)
+            }
+            NotificationCenter.default.post(
+                name: .syncProfileDidChange, object: nil, userInfo: ["profileId": profileId]
+            )
+        } catch {
+            errorMessage = "Retry failed: \(error.localizedDescription)"
+        }
     }
 }

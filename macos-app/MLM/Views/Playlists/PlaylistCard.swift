@@ -44,6 +44,13 @@ struct PlaylistCard: View {
     /// can show the UI-SPEC line 174 banner.
     var onCoverDropRejected: () -> Void = {}
 
+    /// Sync profiles available for the "Sync zu" submenu (Phase 38 D-05).
+    var availableSyncProfiles: [SyncProfile] = []
+
+    /// Called when user picks a profile from the "Sync zu" submenu.
+    /// Provides the chosen profile and the playlist's DB id.
+    var onAddToSyncProfile: ((SyncProfile, Int64) -> Void)?
+
     @State private var isHovered = false
 
     /// `true` while a Finder/in-app drag is hovering over the card. Drives
@@ -209,6 +216,33 @@ struct PlaylistCard: View {
                 onResetCover()
             } label: {
                 Label("Reset to Auto Cover", systemImage: "arrow.counterclockwise")
+            }
+        }
+
+        Divider()
+
+        // Phase 38 D-05: "Sync zu" submenu
+        Section {
+            Menu {
+                if availableSyncProfiles.isEmpty {
+                    Text("Keine Profile — erstelle zuerst eines")
+                } else {
+                    ForEach(availableSyncProfiles) { profile in
+                        Button {
+                            onAddToSyncProfile?(profile, playlist.id ?? -1)
+                        } label: {
+                            Text(profile.name)
+                        }
+                    }
+                    Divider()
+                }
+                Button {
+                    NotificationCenter.default.post(name: .navigateToCreateSyncProfile, object: nil)
+                } label: {
+                    Label("Neues Profil erstellen…", systemImage: "plus.circle")
+                }
+            } label: {
+                Label("Sync zu \u{25B8}", systemImage: "arrow.triangle.2.circlepath")
             }
         }
 

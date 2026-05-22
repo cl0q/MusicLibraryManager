@@ -24,8 +24,9 @@ struct OperationsTab: View {
     private func operationsContent(vm: ActivityViewModel?) -> some View {
         let hasOps = (vm?.operations.isEmpty == false) || (vm?.recentOperations.isEmpty == false)
         let hasDownloads = container.downloadViewModel.map { downloadHasState($0) } ?? false
+        let hasSync = container.syncViewModel.map { syncHasState($0) } ?? false
 
-        if !hasOps && !hasDownloads {
+        if !hasOps && !hasDownloads && !hasSync {
             emptyState
         } else {
             ScrollView {
@@ -39,12 +40,24 @@ struct OperationsTab: View {
                         Divider().padding(.leading, 32)
                     }
 
-                    // Active operations
-                    if let vm, !vm.operations.isEmpty {
-                        sectionHeader("Active")
-                        ForEach(vm.operations) { op in
-                            OperationRow(operation: op)
-                            Divider().padding(.leading, 32)
+                    // Sync — pinned section, same treatment as Downloads.
+                    if let syncVM = container.syncViewModel,
+                       syncHasState(syncVM) {
+                        sectionHeader("Sync")
+                        SyncStatusRow(vm: syncVM)
+                        Divider().padding(.leading, 32)
+                    }
+
+                    // Active operations — hide `.sync` here because the
+                    // pinned Sync row above is the canonical live view.
+                    if let vm {
+                        let active = vm.operations.filter { $0.type != .sync }
+                        if !active.isEmpty {
+                            sectionHeader("Active")
+                            ForEach(active) { op in
+                                OperationRow(operation: op)
+                                Divider().padding(.leading, 32)
+                            }
                         }
                     }
 
@@ -74,6 +87,12 @@ struct OperationsTab: View {
     /// finished run we want to keep visible with a Retry button).
     private func downloadHasState(_ vm: DownloadViewModel) -> Bool {
         vm.isDownloading || vm.totalCount > 0
+    }
+
+    /// Whether the sync VM has anything to display (running, or a finished
+    /// run we want to keep visible with a Retry button).
+    private func syncHasState(_ vm: SyncViewModel) -> Bool {
+        vm.isSyncing || vm.lastResult != nil
     }
 
     private var emptyState: some View {
@@ -260,5 +279,83 @@ struct DownloadStatusRow: View {
     private var progressValue: Double {
         guard vm.totalCount > 0 else { return 0 }
         return min(max(vm.progress, 0), 1)
+    }
+}
+
+// MARK: - Sync Status Row
+
+/// Live sync row at the top of the Operations tab.
+///
+/// While running: title "Syncing N / M", linear progress, current track
+/// as a sub-line, and a Cancel button.
+/// After completion: final tally ("N synced · M failed") plus a Retry
+/// button when failures occurred (jumps to the Sync tab so the user can
+/// inspect / retry individual tracks).
+struct SyncStatusRow: View {
+    let vm: SyncViewModel
+    @Environment(\.container) private var container
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .font(.system(size: 14))
+                .foregroundColor(.accentColor)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(titleText)
+                    .font(MLMFont.body)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                if vm.isSyncing {
+                    ProgressView(value: progressValue, total: 1.0)
+                        .progressViewStyle(.linear)
+                        .frame(maxWidth: 240)
+                }
+
+                if !detailText.isEmpty {
+                    Text(detailText)
+                        .font(MLMFont.muted)
+                        .foregroundColor(.mlmInkMuted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+
+            Spacer()
+
+            if vm.isSyncing {
+                Button("Abbrechen") {
+                    vm.cancelSync()
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
+    private var titleText: String {
+        if vm.isSyncing {
+            let n = min(vm.syncProcessed + 1, max(vm.syncTotal, 1))
+            return "Syncing \(n) / \(vm.syncTotal)"
+        }
+        if let result = vm.lastResult {
+            return "\(result.syncedCount) synchronisiert \u{00B7} \(result.failedCount) fehlgeschlagen"
+        }
+        return "Sync"
+    }
+
+    private var detailText: String {
+        if vm.isSyncing && !vm.syncCurrentFile.isEmpty {
+            return vm.syncCurrentFile
+        }
+        return ""
+    }
+
+    private var progressValue: Double {
+        guard vm.syncTotal > 0 else { return 0 }
+        return min(max(vm.syncProgress, 0), 1)
     }
 }

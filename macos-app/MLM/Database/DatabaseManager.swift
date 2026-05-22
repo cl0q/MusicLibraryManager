@@ -611,6 +611,33 @@ final class DatabaseManager: Sendable {
         }
 
         // ──────────────────────────────────────────────────────────────
+        // Migration v21_sync_profile_toggles: 4 toggle columns on sync_profiles (Phase 38)
+        // Adds generate_m3u8, transcode_mode, fat32_safe_paths, cleanup_removed_files.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v21_sync_profile_toggles") { db in
+            if try !db.columns(in: "sync_profiles").contains(where: { $0.name == "generate_m3u8" }) {
+                try db.alter(table: "sync_profiles") { t in
+                    t.add(column: "generate_m3u8", .integer).notNull().defaults(to: 0)
+                }
+            }
+            if try !db.columns(in: "sync_profiles").contains(where: { $0.name == "transcode_mode" }) {
+                try db.alter(table: "sync_profiles") { t in
+                    t.add(column: "transcode_mode", .text).notNull().defaults(to: "keep_originals")
+                }
+            }
+            if try !db.columns(in: "sync_profiles").contains(where: { $0.name == "fat32_safe_paths" }) {
+                try db.alter(table: "sync_profiles") { t in
+                    t.add(column: "fat32_safe_paths", .integer).notNull().defaults(to: 1)
+                }
+            }
+            if try !db.columns(in: "sync_profiles").contains(where: { $0.name == "cleanup_removed_files" }) {
+                try db.alter(table: "sync_profiles") { t in
+                    t.add(column: "cleanup_removed_files", .integer).notNull().defaults(to: 1)
+                }
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────────
         // Migration v_search_text_column: pre-computed normalized search
         // Enables diacritic-insensitive search (e.g. "on the line" finds "Ön Thë Linë")
         // ──────────────────────────────────────────────────────────────
@@ -631,6 +658,37 @@ final class DatabaseManager: Sendable {
                     sql: "UPDATE tracks SET search_text = ? WHERE id = ?",
                     arguments: [normalized, rowId]
                 )
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        // Migration v_sync_toggles: Phase 38 — explicit folder/device toggles
+        // Adds 4 columns to sync_profiles for D-01:
+        //   generate_m3u8         — emit M3U8 playlists on sync (Rockbox)
+        //   transcode_mode        — 'keep_originals' | 'aac_248' | 'aac_320'
+        //   fat32_safe_paths      — apply PathSanitizer to dest paths
+        //   cleanup_removed_files — actually unlink m4a files on remove
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v_sync_toggles") { db in
+            if try !db.columns(in: "sync_profiles").contains(where: { $0.name == "generate_m3u8" }) {
+                try db.alter(table: "sync_profiles") { t in
+                    t.add(column: "generate_m3u8", .integer).notNull().defaults(to: 0)
+                }
+            }
+            if try !db.columns(in: "sync_profiles").contains(where: { $0.name == "transcode_mode" }) {
+                try db.alter(table: "sync_profiles") { t in
+                    t.add(column: "transcode_mode", .text).notNull().defaults(to: "keep_originals")
+                }
+            }
+            if try !db.columns(in: "sync_profiles").contains(where: { $0.name == "fat32_safe_paths" }) {
+                try db.alter(table: "sync_profiles") { t in
+                    t.add(column: "fat32_safe_paths", .integer).notNull().defaults(to: 1)
+                }
+            }
+            if try !db.columns(in: "sync_profiles").contains(where: { $0.name == "cleanup_removed_files" }) {
+                try db.alter(table: "sync_profiles") { t in
+                    t.add(column: "cleanup_removed_files", .integer).notNull().defaults(to: 1)
+                }
             }
         }
 

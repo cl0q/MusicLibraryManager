@@ -85,6 +85,33 @@ final class TrackRepository: Sendable {
         }
     }
 
+    /// Filter a set of candidate track IDs down to those that look like
+    /// real playable local files: organized_path is set AND format is
+    /// an audio container, not a streaming-service marker (`soundcloud`,
+    /// `spotify`, `youtube`, …).
+    ///
+    /// Some legacy rows carry both an organized_path and a streaming-
+    /// service format string. They show up as "local" in the UI but
+    /// fail to play; we must not pull them into source playlists.
+    func filterLocalIds(_ trackIds: [Int64]) async throws -> Set<Int64> {
+        guard !trackIds.isEmpty else { return [] }
+        let audioFormats: [String] = [
+            "mp3", "m4a", "aac", "flac", "wav", "ogg", "opus", "alac",
+            "aiff", "aif", "wma", "ape", "wv", "mp4"
+        ]
+        return try await database.read { db in
+            let rows = try Int64.fetchAll(
+                db,
+                Track
+                    .filter(trackIds.contains(Track.Columns.id))
+                    .filter(Track.Columns.organizedPath != nil)
+                    .filter(audioFormats.contains(Track.Columns.format))
+                    .select(Track.Columns.id, as: Int64.self)
+            )
+            return Set(rows)
+        }
+    }
+
     /// Count remote tracks.
     func countRemoteTracks() async throws -> Int {
         try await database.read { db in
@@ -389,6 +416,32 @@ final class TrackRepository: Sendable {
             try db.execute(
                 sql: "UPDATE tracks SET organized_path = ?, download_status = 'completed' WHERE id = ?",
                 arguments: [organizedPath, trackId]
+            )
+        }
+    }
+
+    /// Rewrite only the organized_path column — leaves download_status,
+    /// format, and bitrate untouched. Used by the stale-path repair
+    /// maintenance action (Task 4): the track has already been downloaded,
+    /// so we must not clobber its existing download_status timestamp.
+    func setOrganizedPathOnly(trackId: Int64, organizedPath: String) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE tracks SET organized_path = ? WHERE id = ?",
+                arguments: [organizedPath, trackId]
+            )
+        }
+    }
+
+    /// Demote a track back to remote-only by clearing organized_path
+    /// AND download_status together. Used by the repair pass when a row
+    /// carries a stale staging path but the original_path is a streaming
+    /// URL (so there was never a real local file to begin with).
+    func demoteToRemote(trackId: Int64) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE tracks SET organized_path = NULL, download_status = NULL WHERE id = ?",
+                arguments: [trackId]
             )
         }
     }

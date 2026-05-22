@@ -56,10 +56,20 @@ extension Notification.Name {
     /// - `userInfo["artworkPath"]`: `String` — absolute path to cached artwork file (1200px version)
     static let trackArtworkDidChange = Notification.Name("MLMTrackArtworkDidChange")
 
-    // MARK: Sync (reserved for Phase 12)
+    // MARK: - Sync
 
     /// Posted when a sync operation completes.
     static let syncDidComplete = Notification.Name("MLMSyncDidComplete")
+
+    /// Posted when a sync profile is created, deleted, updated, or its content/settings change (Phase 38).
+    ///
+    /// SyncViewModel posts this after every mutation (addPlaylists, addTracks,
+    /// removePlaylists, removeTracks, updateProfileSettings). Views (SyncView,
+    /// SyncProfileDetailView, TrackContextMenu submenu, PlaylistCard submenu) observe
+    /// and refresh their content. The VM does NOT observe this notification — only posts it.
+    ///
+    /// - `userInfo["profileId"]`: `Int64` — ID of the changed profile (optional; observers may reload all)
+    static let syncProfileDidChange = Notification.Name("MLMSyncProfileDidChange")
 
     // MARK: Downloads
 
@@ -84,4 +94,15 @@ extension Notification.Name {
 
     /// Posted when the user triggers "More Info" via the Library menu (⌘I).
     static let showTrackDetail = Notification.Name("MLMShowTrackDetail")
+
+    /// Posted when the user picks "Settings…" (⌘,) from the app menu.
+    /// ContentView listens and presents the Settings sheet.
+    static let openSettings = Notification.Name("MLMOpenSettings")
+
+    // MARK: - Sync UI (Phase 38)
+
+    /// Posted when user selects "Neues Profil erstellen…" from a Sync to submenu
+    /// in TrackContextMenu or PlaylistCard.contextMenu.
+    /// ContentView or SyncView observes this to navigate to the create-profile sheet.
+    static let navigateToCreateSyncProfile = Notification.Name("MLMNavigateToCreateSyncProfile")
 }

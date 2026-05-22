@@ -37,6 +37,7 @@ final class SoundCloudClient {
     private let oauthManager: OAuthManager
     private let trackRepository: TrackRepository
     private let sourceRepository: SourceRepository
+    private let playlistRepository: PlaylistRepository?
 
     // MARK: - Init
 
@@ -45,6 +46,7 @@ final class SoundCloudClient {
         oauthManager: OAuthManager,
         trackRepository: TrackRepository,
         sourceRepository: SourceRepository,
+        playlistRepository: PlaylistRepository? = nil,
         clientId: String? = nil,
         clientSecret: String? = nil
     ) {
@@ -52,6 +54,7 @@ final class SoundCloudClient {
         self.oauthManager = oauthManager
         self.trackRepository = trackRepository
         self.sourceRepository = sourceRepository
+        self.playlistRepository = playlistRepository
         self.clientId = clientId ?? CredentialsLoader.credential(key: "SOUNDCLOUD_CLIENT_ID") ?? ""
         self.clientSecret = clientSecret ?? CredentialsLoader.credential(key: "SOUNDCLOUD_CLIENT_SECRET") ?? ""
     }
@@ -254,6 +257,14 @@ final class SoundCloudClient {
         var nextURL: URL?
         let baseTime = Date()
         var trackIndex = 0
+        // Track IDs in SoundCloud-like-order (newest first). Drives the
+        // local "Liked from SoundCloud" playlist replacement at the end.
+        var orderedTrackIds: [Int64] = []
+
+        AppLogger.shared.info(
+            "SoundCloud: syncLikes starting (user=\(user.username))",
+            source: "SoundCloud"
+        )
 
         // First page
         let firstPage: SoundCloudCollection<SoundCloudTrack> = try await apiRequest(
@@ -266,7 +277,11 @@ final class SoundCloudClient {
         )
 
         newCount += try await processLikedTracks(
-            firstPage.collection, sourceId: sourceId, baseTime: baseTime, startIndex: &trackIndex
+            firstPage.collection,
+            sourceId: sourceId,
+            baseTime: baseTime,
+            startIndex: &trackIndex,
+            collectedIds: &orderedTrackIds
         )
         nextURL = firstPage.nextHref.flatMap { URL(string: $0) }
 
@@ -278,9 +293,89 @@ final class SoundCloudClient {
             )
 
             newCount += try await processLikedTracks(
-                page.collection, sourceId: sourceId, baseTime: baseTime, startIndex: &trackIndex
+                page.collection,
+                sourceId: sourceId,
+                baseTime: baseTime,
+                startIndex: &trackIndex,
+                collectedIds: &orderedTrackIds
             )
             nextURL = page.nextHref.flatMap { URL(string: $0) }
+        }
+
+        // Mirror the API order into the local "Liked from SoundCloud"
+        // playlist. Replace-in-place: a removed Like upstream disappears
+        // locally on the next sync, a new Like appears at the top.
+        //
+        // We intentionally drop remote-only tracks here — the playlist is
+        // meant to be the *playable* slice of likes. Remote-only items
+        // would just be greyed-out clutter inside it.
+        if let playlistRepo = playlistRepository {
+            do {
+                let localIds = try await trackRepository.filterLocalIds(orderedTrackIds)
+                let playable = orderedTrackIds.filter { localIds.contains($0) }
+                AppLogger.shared.info(
+                    "SoundCloud: filterLocalIds → \(playable.count) playable of \(orderedTrackIds.count) collected",
+                    source: "SoundCloud"
+                )
+                let playlist = try await playlistRepo.findOrCreateLikedPlaylist(
+                    name: "Liked from SoundCloud",
+                    sourceId: sourceId,
+                    externalId: String(user.id),
+                    // Very specific so user-created playlists like "SoundCloud
+                    // Daily Mix" don't get accidentally hijacked.
+                    legacyNameMatches: [
+                        "soundcloud likes",
+                        "soundcloud liked",
+                        "liked from soundcloud",
+                        "soundcloud favorites"
+                    ]
+                )
+                if let playlistId = playlist.id {
+                    // Reconcile duplicate likes playlists (a previous
+                    // sync may have created a second row before
+                    // findOrCreate matched name-based). Find every
+                    // other is_liked=1 row whose name matches the
+                    // legacy patterns and merge its tracks into ours.
+                    let duplicates = try await playlistRepo.findDuplicateLikedPlaylists(
+                        survivorId: playlistId,
+                        legacyNameMatches: [
+                            "soundcloud likes",
+                            "soundcloud liked",
+                            "liked from soundcloud",
+                            "soundcloud favorites"
+                        ]
+                    )
+                    for dup in duplicates {
+                        if let dupId = dup.id {
+                            try await playlistRepo.mergePlaylists(survivorId: playlistId, victimId: dupId)
+                            AppLogger.shared.info(
+                                "SoundCloud: merged duplicate liked playlist '\(dup.name)' (id=\(dupId)) into survivor id=\(playlistId)",
+                                source: "SoundCloud"
+                            )
+                        }
+                    }
+
+                    try await playlistRepo.replaceTrackList(
+                        playlistId: playlistId,
+                        trackIds: playable
+                    )
+                    AppLogger.shared.info(
+                        "SoundCloud: liked playlist refreshed (\(playable.count) playable of \(orderedTrackIds.count) likes)",
+                        source: "SoundCloud"
+                    )
+                    NotificationCenter.default.post(name: .playlistDidChange, object: nil)
+                }
+            } catch {
+                AppLogger.shared.warn(
+                    "SoundCloud: liked-playlist update failed: \(error.localizedDescription)",
+                    source: "SoundCloud"
+                )
+            }
+        } else {
+            AppLogger.shared.warn(
+                "SoundCloud: no playlistRepository wired — liked playlist not refreshed",
+                source: "SoundCloud"
+            )
         }
 
         // Update last sync timestamp
@@ -290,24 +385,27 @@ final class SoundCloudClient {
             timestamp: ISO8601DateFormatter().string(from: Date())
         )
 
+        AppLogger.shared.info(
+            "SoundCloud: syncLikes done (new=\(newCount), total=\(orderedTrackIds.count))",
+            source: "SoundCloud"
+        )
+
         return newCount
     }
 
-    /// Process a batch of liked tracks — deduplicate and insert new ones.
+    /// Process a batch of liked tracks — deduplicate, insert new ones,
+    /// and append the resulting track ID to `collectedIds` in API order.
     private func processLikedTracks(
         _ tracks: [SoundCloudTrack],
         sourceId: Int64,
         baseTime: Date,
-        startIndex: inout Int
+        startIndex: inout Int,
+        collectedIds: inout [Int64]
     ) async throws -> Int {
         var newCount = 0
 
         for scTrack in tracks {
             let externalId = String(scTrack.id)
-
-            // Check if already linked to this source
-            // (simple dedup by external_id — Rust impl also does fuzzy matching)
-            _ = try await sourceRepository.fetchTrackSources(trackId: 0) // Will skip if no match
 
             // Generate synthetic timestamp to preserve ordering
             let likedAt = baseTime.addingTimeInterval(-TimeInterval(startIndex) * 60)
@@ -332,16 +430,15 @@ final class SoundCloudClient {
                 artist: track.artist
             )
 
-            if let existingTrack = existing {
-                // Already exists — just make sure it's linked
-                if let trackId = existingTrack.id {
-                    try await sourceRepository.linkTrackToSource(
-                        trackId: trackId,
-                        sourceId: sourceId,
-                        externalId: externalId,
-                        addedAt: isoDate
-                    )
-                }
+            let resolvedTrackId: Int64?
+            if let existingTrack = existing, let trackId = existingTrack.id {
+                try await sourceRepository.linkTrackToSource(
+                    trackId: trackId,
+                    sourceId: sourceId,
+                    externalId: externalId,
+                    addedAt: isoDate
+                )
+                resolvedTrackId = trackId
             } else {
                 // New track — insert and link
                 let inserted = try await trackRepository.insert(track)
@@ -353,7 +450,14 @@ final class SoundCloudClient {
                         addedAt: isoDate
                     )
                     newCount += 1
+                    resolvedTrackId = trackId
+                } else {
+                    resolvedTrackId = nil
                 }
+            }
+
+            if let id = resolvedTrackId {
+                collectedIds.append(id)
             }
 
             startIndex += 1

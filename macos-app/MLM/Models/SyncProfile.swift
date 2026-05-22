@@ -1,6 +1,14 @@
 import Foundation
 import GRDB
 
+/// Type-safe transcode mode for sync profiles (D-01).
+/// Stored as TEXT in DB. Use `transcodeModeEnum` computed property for switch statements.
+enum TranscodeMode: String, CaseIterable {
+    case keepOriginals = "keep_originals"
+    case aac248 = "aac_248"
+    case aac320 = "aac_320"
+}
+
 /// A device sync profile.
 ///
 /// Maps to the `sync_profiles` table. Defines which tracks/playlists
@@ -13,6 +21,18 @@ struct SyncProfile: Codable, FetchableRecord, MutablePersistableRecord, Identifi
     var dateCreated: String?
     var dateModified: String?
 
+    // Phase 38 D-01: explicit folder/device toggles (added in v_sync_toggles migration)
+    var generateM3U8: Bool = false
+    var transcodeMode: String = "keep_originals"
+    var fat32SafePaths: Bool = true
+    var cleanupRemovedFiles: Bool = true
+
+    /// Type-safe computed accessor. All consumers (SyncService, SyncSettingsForm, tests)
+    /// use this for switch statements. DB writes always use `.rawValue` strings.
+    var transcodeModeEnum: TranscodeMode {
+        TranscodeMode(rawValue: transcodeMode) ?? .keepOriginals
+    }
+
     static let databaseTableName = "sync_profiles"
 
     enum CodingKeys: String, CodingKey {
@@ -21,12 +41,41 @@ struct SyncProfile: Codable, FetchableRecord, MutablePersistableRecord, Identifi
         case playlistPathPrefix = "playlist_path_prefix"
         case dateCreated = "date_created"
         case dateModified = "date_modified"
+        case generateM3U8 = "generate_m3u8"
+        case transcodeMode = "transcode_mode"
+        case fat32SafePaths = "fat32_safe_paths"
+        case cleanupRemovedFiles = "cleanup_removed_files"
     }
 
     enum Columns {
         static let id = Column(CodingKeys.id)
         static let name = Column(CodingKeys.name)
         static let outputFolder = Column(CodingKeys.outputFolder)
+    }
+
+    /// Convenience init for tests and profile creation.
+    init(
+        id: Int64? = nil,
+        name: String,
+        outputFolder: String,
+        playlistPathPrefix: String = "",
+        dateCreated: String? = nil,
+        dateModified: String? = nil,
+        generateM3U8: Bool = false,
+        transcodeMode: String = "keep_originals",
+        fat32SafePaths: Bool = true,
+        cleanupRemovedFiles: Bool = true
+    ) {
+        self.id = id
+        self.name = name
+        self.outputFolder = outputFolder
+        self.playlistPathPrefix = playlistPathPrefix
+        self.dateCreated = dateCreated
+        self.dateModified = dateModified
+        self.generateM3U8 = generateM3U8
+        self.transcodeMode = transcodeMode
+        self.fat32SafePaths = fat32SafePaths
+        self.cleanupRemovedFiles = cleanupRemovedFiles
     }
 
     mutating func didInsert(_ inserted: InsertionSuccess) {

@@ -29,16 +29,26 @@ final class TranscodeService: Sendable {
 
     // MARK: - Public
 
-    /// Transcode an audio file to 248kbps AAC (.m4a).
+    /// Transcode an audio file to AAC (.m4a) at the specified bitrate.
     ///
     /// Decision logic (matches Rust `transcode_audio`):
     /// - Lossless (FLAC, ALAC, WAV) → always transcode
-    /// - Lossy < 248kbps → skip (preserve quality)
-    /// - Lossy >= 248kbps → transcode to reduce size
-    func transcode(input: URL, outputDir: URL) async throws -> TranscodeResult {
+    /// - Lossy < bitrateKbps → skip (preserve quality)
+    /// - Lossy >= bitrateKbps → transcode to reduce size
+    ///
+    /// - Parameter bitrateKbps: Target AAC bitrate in kbps. Defaults to 248 for back-compat.
+    func transcode(input: URL, outputDir: URL, bitrateKbps: Int = 248) async throws -> TranscodeResult {
         guard let ffmpeg = ffmpegPath else {
+            AppLogger.shared.error(
+                "transcode: ffmpeg not found in PATH (~/.local/bin, /opt/homebrew/bin, /usr/local/bin, /opt/local/bin, /usr/bin)",
+                source: "Transcode"
+            )
             return .failed("ffmpeg not found")
         }
+        AppLogger.shared.debug(
+            "transcode: input=\(input.lastPathComponent) → \(bitrateKbps)k AAC (ffmpeg=\(ffmpeg))",
+            source: "Transcode"
+        )
 
         let outputName = input.deletingPathExtension().lastPathComponent + ".m4a"
         let outputURL = outputDir.appendingPathComponent(outputName)
@@ -51,9 +61,9 @@ final class TranscodeService: Sendable {
         // Detect format to decide transcode vs skip
         let formatInfo = await detectFormat(input: input, ffmpeg: ffmpeg)
 
-        if formatInfo.isLossy && formatInfo.bitrate > 0 && formatInfo.bitrate < Self.targetBitrate * 1000 {
+        if formatInfo.isLossy && formatInfo.bitrate > 0 && formatInfo.bitrate < bitrateKbps * 1000 {
             // Lossy and lower quality than target — preserve original
-            return .skipped("Lossy source below target bitrate (\(formatInfo.bitrate / 1000)kbps < \(Self.targetBitrate)kbps)")
+            return .skipped("Lossy source below target bitrate (\(formatInfo.bitrate / 1000)kbps < \(bitrateKbps)kbps)")
         }
 
         // Determine which encoder to use
@@ -66,7 +76,8 @@ final class TranscodeService: Sendable {
             input: input,
             output: tmpOutput,
             encoder: encoder,
-            stripVideo: false
+            stripVideo: false,
+            bitrateKbps: bitrateKbps
         )
 
         switch result {
@@ -82,7 +93,8 @@ final class TranscodeService: Sendable {
                 input: input,
                 output: tmpOutput,
                 encoder: encoder,
-                stripVideo: true
+                stripVideo: true,
+                bitrateKbps: bitrateKbps
             )
             switch retry {
             case .success:
@@ -185,7 +197,8 @@ final class TranscodeService: Sendable {
         input: URL,
         output: URL,
         encoder: String,
-        stripVideo: Bool
+        stripVideo: Bool,
+        bitrateKbps: Int = 248
     ) async throws -> FFmpegResult {
         // Explicitly map the audio stream (mandatory) and the video stream
         // when present (optional `?` modifier — ffmpeg won't fail if the
@@ -212,7 +225,7 @@ final class TranscodeService: Sendable {
 
         args += [
             "-c:a", encoder,
-            "-b:a", "\(Self.targetBitrate)k",
+            "-b:a", "\(bitrateKbps)k",
             "-movflags", "+faststart",
             "-y", output.path,
         ]
@@ -240,11 +253,16 @@ final class TranscodeService: Sendable {
             AppLogger.shared.log(
                 "ffmpeg cover-art mux failed (exit \(result.exitCode)); retrying with -vn",
                 level: .warning,
-                source: "Download"
+                source: "Transcode"
             )
             return .coverArtFailure
         }
 
-        return .failure("ffmpeg exited with code \(result.exitCode): \(result.stderr.prefix(500))")
+        let stderrTail = result.stderr.suffix(800)
+        AppLogger.shared.error(
+            "ffmpeg failed exit=\(result.exitCode) input=\(input.lastPathComponent) encoder=\(encoder) bitrate=\(bitrateKbps)k stripVideo=\(stripVideo) stderr=\(stderrTail)",
+            source: "Transcode"
+        )
+        return .failure("ffmpeg exited with code \(result.exitCode): \(stderrTail)")
     }
 }

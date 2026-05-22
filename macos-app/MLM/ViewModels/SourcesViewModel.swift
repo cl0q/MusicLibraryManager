@@ -44,7 +44,8 @@ final class SourcesViewModel {
         tokenStorage: TokenStorage,
         sourceRepository: SourceRepository,
         oauthManager: OAuthManager?,
-        trackRepository: TrackRepository? = nil
+        trackRepository: TrackRepository? = nil,
+        playlistRepository: PlaylistRepository? = nil
     ) {
         self.tokenStorage = tokenStorage
         self.sourceRepository = sourceRepository
@@ -56,7 +57,8 @@ final class SourcesViewModel {
                 tokenStorage: tokenStorage,
                 oauthManager: oauth,
                 trackRepository: trackRepo,
-                sourceRepository: sourceRepository
+                sourceRepository: sourceRepository,
+                playlistRepository: playlistRepository
             )
             self.spotifyClient = SpotifyClient(
                 tokenStorage: tokenStorage,
