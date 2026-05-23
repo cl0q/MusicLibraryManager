@@ -7,6 +7,7 @@ import SwiftUI
 struct SidebarView: View {
     @Binding var selectedSection: SidebarSection
     @Environment(\.container) private var container
+    @State private var pendingDuplicatesCount: Int = 0
 
     var body: some View {
         List(selection: $selectedSection) {
@@ -37,8 +38,8 @@ struct SidebarView: View {
                                     NotificationCenter.default.post(name: .playlistDidChange, object: nil)
                                 }
                             },
-                            onRevealInGrid: {
-                                selectedSection = .playlists
+                            onSelectSection: { targetSection in
+                                selectedSection = targetSection
                             }
                         )
                     } else {
@@ -53,8 +54,25 @@ struct SidebarView: View {
                                     .frame(width: 7, height: 7)
                                     .help("Library drive disconnected")
                             }
+
+                            // Show pending duplicates badge count
+                            if section == .duplicates && pendingDuplicatesCount > 0 {
+                                Spacer()
+                                Text("\(pendingDuplicatesCount)")
+                                    .font(MLMFont.mono)
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(
+                                        Capsule()
+                                            .fill(Color.orange)
+                                    )
+                            }
                         }
                         .tag(section)
+                        .springLoadableHover {
+                            selectedSection = section
+                        }
                     }
                 }
             } header: {
@@ -68,14 +86,26 @@ struct SidebarView: View {
             settingsFooter
         }
         .background(Color.mlmSurface)
+        .task {
+            updatePendingDuplicatesCount()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .reviewQueueDidChange)) { _ in
+            updatePendingDuplicatesCount()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .libraryDidImport)) { _ in
+            updatePendingDuplicatesCount()
+        }
     }
 
     // MARK: - Settings footer
 
     private var settingsFooter: some View {
         Button {
-            // Open the Settings window (macOS 13+)
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            if let delegate = AppDelegate.shared {
+                delegate.showSettingsWindow()
+            } else {
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            }
         } label: {
             Label("Settings", systemImage: "gearshape")
                 .font(MLMFont.body)
@@ -87,6 +117,16 @@ struct SidebarView: View {
         .buttonStyle(.plain)
         .padding(.horizontal, 8)
         .padding(.bottom, 8)
-        .keyboardShortcut(",")
+    }
+
+    private func updatePendingDuplicatesCount() {
+        guard let analysisRepo = container.analysisRepository else { return }
+        Task {
+            if let count = try? await analysisRepo.countPendingReviews() {
+                await MainActor.run {
+                    self.pendingDuplicatesCount = count
+                }
+            }
+        }
     }
 }

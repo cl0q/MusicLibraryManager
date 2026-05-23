@@ -426,6 +426,7 @@ final class SoundCloudClient {
             // Try to find existing track by external_id in track_sources
             let existing = try await findExistingTrack(
                 externalId: externalId,
+                permalink: track.originalPath,
                 title: track.title,
                 artist: track.artist
             )
@@ -469,12 +470,23 @@ final class SoundCloudClient {
     /// Find an existing track by external ID or fuzzy title/artist matching.
     private func findExistingTrack(
         externalId: String,
+        permalink: String?,
         title: String,
         artist: String
     ) async throws -> Track? {
-        // Search by title + artist (simplified from Rust's Jaro-Winkler matching)
-        let results = try await trackRepository.search(query: title)
-        return results.first { track in
+        // 1. Try to find by track_sources link (external_id + "soundcloud" source)
+        if let track = try? await trackRepository.fetchTrackByExternalId(externalId, sourceName: "soundcloud") {
+            return track
+        }
+        
+        // 2. Try to find by original_path schemes/permalink
+        if let track = try? await trackRepository.fetchTrackBySoundCloudPath(externalId: externalId, permalink: permalink) {
+            return track
+        }
+        
+        // 3. Fallback: Search by title + artist (fuzzy / exact text match)
+        let results = try? await trackRepository.search(query: title)
+        return results?.first { track in
             track.title.lowercased() == title.lowercased() &&
             track.artist.lowercased() == artist.lowercased()
         }

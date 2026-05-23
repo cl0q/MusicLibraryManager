@@ -41,7 +41,9 @@ struct MLMApp: App {
                         "Settings menu clicked. NSApp.delegate=\(String(describing: NSApp.delegate)) class=\(NSApp.delegate.map { String(describing: type(of: $0)) } ?? "nil")",
                         source: "menu"
                     )
-                    if let delegate = NSApp.delegate as? AppDelegate {
+                    if let delegate = AppDelegate.shared {
+                        Task { @MainActor in delegate.showSettingsWindow() }
+                    } else if let delegate = NSApp.delegate as? AppDelegate {
                         Task { @MainActor in delegate.showSettingsWindow() }
                     } else {
                         // Fallback: build the window inline so the user
@@ -60,13 +62,15 @@ struct MLMApp: App {
                 .keyboardShortcut("n")
             }
 
-            // MARK: - View menu — Navigate (⌘1–5)
+            // MARK: - View menu — Navigate (⌘1–6)
             CommandMenu("Navigate") {
                 ForEach(SidebarSection.topLevelCases) { section in
-                    Button(section.label) {
-                        selectedSection = section
+                    if let shortcut = section.keyboardShortcut {
+                        Button(section.label) {
+                            selectedSection = section
+                        }
+                        .keyboardShortcut(shortcut)
                     }
-                    .keyboardShortcut(section.keyboardShortcut ?? "0")
                 }
             }
 
@@ -118,13 +122,10 @@ struct MLMApp: App {
                 .disabled(true)
             }
 
-            // MARK: - Library menu
             CommandMenu("Library") {
                 Button("Search Library") {
-                    selectedSection = .library
-                    // ⌘F — focus search field via notification
                     NotificationCenter.default.post(
-                        name: .focusSearchField, object: nil
+                        name: .searchCommandTriggered, object: nil
                     )
                 }
                 .keyboardShortcut("f")
@@ -146,6 +147,14 @@ struct MLMApp: App {
                     )
                 }
                 .keyboardShortcut("i")
+
+                Divider()
+
+                Button("Stale Pfade reparieren…") {
+                    NotificationCenter.default.post(
+                        name: .triggerLibraryRepair, object: nil
+                    )
+                }
             }
         }
 

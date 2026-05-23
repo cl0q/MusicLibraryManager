@@ -65,6 +65,20 @@ struct MetadataPanel: View {
                         }
                         Spacer()
                     }
+
+                    HStack {
+                        Text("Danceability")
+                            .font(MLMFont.muted)
+                            .foregroundColor(.mlmInkMuted)
+                            .frame(width: 110, alignment: .leading)
+                        DanceabilitySteps(score: track.danceability)
+                        if let d = track.danceability {
+                            Text(String(format: "%.0f%%", d * 100))
+                                .font(MLMFont.dataSmall)
+                                .foregroundColor(.mlmInkMuted)
+                        }
+                        Spacer()
+                    }
                 }
 
                 Divider()

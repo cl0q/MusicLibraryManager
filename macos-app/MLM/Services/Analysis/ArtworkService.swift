@@ -55,63 +55,166 @@ final class ArtworkService: Sendable {
         var failed: Int = 0
     }
 
-    /// Batch-fetch artwork for tracks.
+    /// Thread-safe result collector for batch operations.
+///
+/// Uses an actor to ensure safe concurrent mutations from parallel tasks.
+actor BatchResultCollector {
+    private var result: BatchResult
+    
+    init() {
+        self.result = BatchResult()
+    }
+    
+    func addFetched() { result.fetched += 1 }
+    func addAlreadyCached() { result.alreadyCached += 1 }
+    func addNotFound() { result.notFound += 1 }
+    func addFailed() { result.failed += 1 }
+    
+    func getResult() -> BatchResult { result }
+}    /// Batch-fetch artwork for tracks with turbo mode and true parallelism.
+    /// Note: MusicBrainz is rate-limited to 1 req/sec, so turbo mode primarily helps with embedded artwork extraction.
     func batchFetchArtwork(
         tracks: [Track],
         repository: AnalysisRepository,
-        onProgress: ((Int, Int) -> Void)? = nil
+        libraryRoot: String? = nil,
+        turboMode: Bool = false,
+        progressHandler: ((MaintenanceProgressTracker.ProgressState) -> Void)? = nil
     ) async -> BatchResult {
-        var result = BatchResult()
-
-        for (index, track) in tracks.enumerated() {
-            onProgress?(index, tracks.count)
-
-            guard let trackId = track.id else {
-                result.failed += 1
-                continue
-            }
-
-            // Already cached?
-            if isCached(trackId: trackId) {
-                result.alreadyCached += 1
-                continue
-            }
-
-            // 1. Try extracting embedded artwork from audio file
-            if let filePath = track.organizedPath {
-                let trackURL = URL(fileURLWithPath: filePath)
-                if let embeddedData = await Self.extractEmbeddedArtwork(from: trackURL) {
-                    do {
-                        try saveResized(data: embeddedData, trackId: trackId)
-                        try await saveArtworkRecord(
-                            trackId: trackId,
-                            source: "embedded",
-                            repository: repository
+        let tracker = MaintenanceProgressTracker(total: tracks.count, turboMode: turboMode, progressHandler: progressHandler)
+        let resultCollector = BatchResultCollector()
+        
+        let limiter = BatchControl.limiter(turboMode: turboMode)
+        let workerCount = BatchControl.workerCount(turboMode: turboMode)
+        
+        AppLogger.shared.info("Starting artwork batch: \(tracks.count) tracks, \(workerCount) workers (turbo: \(turboMode))", source: "Artwork")
+        
+        // Process all tracks with enforced parallelism
+        await withTaskGroup(of: Void.self) { group in
+            for track in tracks {
+                if tracker.isCancelled {
+                    AppLogger.shared.info("Artwork batch cancelled", source: "Artwork")
+                    return
+                }
+                
+                group.addTask {
+                    await limiter.run {
+                        await self.processSingleArtwork(
+                            track: track,
+                            repository: repository,
+                            libraryRoot: libraryRoot,
+                            tracker: tracker,
+                            collector: resultCollector
                         )
-                        result.fetched += 1
-                        continue
-                    } catch {
-                        // Fall through to MusicBrainz
                     }
                 }
             }
+        }
 
-            // 2. Try MusicBrainz / Cover Art Archive
-            do {
-                if try await fetchFromMusicBrainz(track: track, repository: repository) {
-                    result.fetched += 1
-                } else {
-                    result.notFound += 1
+        let result = await resultCollector.getResult()
+        AppLogger.shared.info("Artwork batch complete: \(result.fetched) fetched, \(result.alreadyCached) cached, \(result.notFound) not found, \(result.failed) failed", source: "Artwork")
+        return result
+    }
+    
+    /// Process a single track artwork with progress tracking
+    private func processSingleArtwork(
+        track: Track,
+        repository: AnalysisRepository,
+        libraryRoot: String?,
+        tracker: MaintenanceProgressTracker,
+        collector: BatchResultCollector
+    ) async {
+        guard let trackId = track.id else {
+            await collector.addFailed()
+            tracker.updateProgress(
+                trackId: 0,
+                trackTitle: track.title,
+                trackArtist: track.artist,
+                savedToDb: false
+            )
+            return
+        }
+
+        // Already cached?
+        if isCached(trackId: trackId) {
+            await collector.addAlreadyCached()
+            tracker.updateProgress(
+                trackId: trackId,
+                trackTitle: track.title,
+                trackArtist: track.artist,
+                savedToDb: false
+            )
+            return
+        }
+
+        // Resolve absolute track path (organizedPath is relative to libraryRoot)
+        let filePath: String?
+        if let organized = track.organizedPath {
+            if let root = libraryRoot, !root.isEmpty {
+                filePath = URL(fileURLWithPath: root).appendingPathComponent(organized).path
+            } else {
+                filePath = organized
+            }
+        } else {
+            filePath = track.isLocal ? track.originalPath : nil
+        }
+
+        // 1. Try extracting embedded artwork from audio file
+        if let resolvedPath = filePath, !resolvedPath.isEmpty {
+            let trackURL = URL(fileURLWithPath: resolvedPath)
+            if let embeddedData = await Self.extractEmbeddedArtwork(from: trackURL) {
+                do {
+                    try saveResized(data: embeddedData, trackId: trackId)
+                    try await saveArtworkRecord(
+                        trackId: trackId,
+                        source: "embedded",
+                        repository: repository
+                    )
+                    await collector.addFetched()
+                    tracker.updateProgress(
+                        trackId: trackId,
+                        trackTitle: track.title,
+                        trackArtist: track.artist,
+                        savedToDb: true
+                    )
+                    AppLogger.shared.debug("Artwork [\(tracker.currentState.current)/\(tracker.currentState.total)] \(track.artist) - \(track.title) → embedded ✓", source: "Artwork")
+                    return
+                } catch {
+                    // Fall through to MusicBrainz
                 }
-
-                // Rate limit: 1 req/sec to MusicBrainz
-                try await Task.sleep(for: .seconds(1))
-            } catch {
-                result.failed += 1
             }
         }
 
-        return result
+        // 2. Try MusicBrainz / Cover Art Archive
+        do {
+            if try await fetchFromMusicBrainz(track: track, repository: repository) {
+                await collector.addFetched()
+                tracker.updateProgress(
+                    trackId: trackId,
+                    trackTitle: track.title,
+                    trackArtist: track.artist,
+                    savedToDb: true
+                )
+            } else {
+                await collector.addNotFound()
+                tracker.updateProgress(
+                    trackId: trackId,
+                    trackTitle: track.title,
+                    trackArtist: track.artist,
+                    savedToDb: false
+                )
+            }
+
+            // Rate limit: 1 req/sec to MusicBrainz
+            try await Task.sleep(for: .seconds(1))
+        } catch {
+            await collector.addFailed()
+            tracker.updateProgress(
+                trackId: trackId,
+                trackTitle: track.title,
+                trackArtist: track.artist,
+                savedToDb: false
+            )
+        }
     }
 
     // MARK: - Embedded Artwork
@@ -137,6 +240,7 @@ final class ArtworkService: Sendable {
             process.arguments = [
                 "-i", url.path,
                 "-an", "-vcodec", "mjpeg", "-vframes", "1",
+                "-update", "1",
                 "-y", tmpOutput.path
             ]
             process.standardOutput = FileHandle.nullDevice

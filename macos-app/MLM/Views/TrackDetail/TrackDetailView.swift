@@ -32,6 +32,10 @@ struct TrackDetailView: View {
 
     @Environment(\.container) private var container
     @State private var playbackVM: PlaybackViewModel?
+    @State private var zoomLevel: CGFloat = 1.0
+    @State private var exponent: Float = 1.5
+    @State private var gain: Float = 1.0
+    @State private var waveformHeight: CGFloat = 80.0
 
     var body: some View {
         ScrollView {
@@ -198,7 +202,11 @@ struct TrackDetailView: View {
             WaveformView(
                 data: playbackVM?.waveformData ?? [],
                 progress: isCurrentTrack ? (playbackVM?.progress ?? 0) : 0,
-                isLoading: playbackVM?.isLoadingWaveform ?? false
+                isLoading: playbackVM?.isLoadingWaveform ?? false,
+                zoomLevel: $zoomLevel,
+                exponent: $exponent,
+                gain: $gain,
+                waveformHeight: $waveformHeight
             ) { fraction in
                 guard let vm = playbackVM else { return }
                 if isCurrentTrack {
@@ -210,8 +218,8 @@ struct TrackDetailView: View {
                     }
                 }
             }
-            .frame(height: 64)
-
+            .frame(height: waveformHeight)
+ 
             // Time display
             if isCurrentTrack, let vm = playbackVM {
                 HStack {
@@ -226,6 +234,27 @@ struct TrackDetailView: View {
                         .monospacedDigit()
                 }
             }
+
+            // Resize Splitter Handle
+            Rectangle()
+                .fill(Color.mlmEdge.opacity(0.15))
+                .frame(height: 4)
+                .contentShape(Rectangle())
+                .onHover { inside in
+                    if inside {
+                        NSCursor.resizeUpDown.push()
+                    } else {
+                        NSCursor.pop()
+                    }
+                }
+                .gesture(
+                    DragGesture()
+                        .onChanged { value in
+                            let newHeight = waveformHeight + value.translation.height
+                            waveformHeight = min(max(newHeight, 60), 250)
+                        }
+                )
+                .padding(.top, 2)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

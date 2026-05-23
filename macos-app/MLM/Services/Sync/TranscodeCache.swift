@@ -57,7 +57,18 @@ final class TranscodeCache: Sendable {
         if FileManager.default.fileExists(atPath: cached.path) {
             let attrs = try? FileManager.default.attributesOfItem(atPath: cached.path)
             let size = attrs?[.size] as? Int ?? 0
-            if size > 0 { return cached }
+            if size > 0 {
+                // Self-healing: verify the cached .m4a file is a valid AAC/MP4 container, not a renamed MP3/FLAC
+                if await verifyCacheCodec(cached) {
+                    return cached
+                } else {
+                    AppLogger.shared.warn(
+                        "ensureCached: cached file \(cached.lastPathComponent) is not a valid AAC file (possibly stale/fake .m4a from old version); deleting and re-transcoding",
+                        source: "Sync"
+                    )
+                    try? FileManager.default.removeItem(at: cached)
+                }
+            }
         }
 
         // Candidate paths to try in order: organized_path (relative to libraryRoot, common case)
@@ -122,6 +133,35 @@ final class TranscodeCache: Sendable {
             )
             return nil
         }
+    }
+
+    /// Verify that a cached .m4a file is a valid AAC/MP4/M4A file and not a renamed MP3/FLAC file.
+    func verifyCacheCodec(_ url: URL) async -> Bool {
+        guard let ffmpeg = ProcessRunner.findExecutable("ffmpeg") else { return true } // Fallback to true if ffmpeg unavailable
+        let ffprobe = ffmpeg.replacingOccurrences(of: "ffmpeg", with: "ffprobe")
+        guard FileManager.default.isExecutableFile(atPath: ffprobe) else { return true }
+        
+        do {
+            let result = try await ProcessRunner.run(
+                ffprobe,
+                arguments: [
+                    "-v", "quiet",
+                    "-show_entries", "stream=codec_name",
+                    "-of", "json",
+                    url.path
+                ]
+            )
+            if result.isSuccess, let data = result.stdout.data(using: .utf8) {
+                let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                if let streams = json?["streams"] as? [[String: Any]],
+                   let stream = streams.first {
+                    let codec = (stream["codec_name"] as? String ?? "").lowercased()
+                    // Cached files always end in .m4a and must be AAC/MP4
+                    return codec.contains("aac") || codec.contains("mp4")
+                }
+            }
+        } catch {}
+        return false
     }
 
     // MARK: - Path Resolution
@@ -230,7 +270,8 @@ final class TranscodeCache: Sendable {
     static func buildProfilePath(
         track: Track,
         libraryRoot: String,
-        profileOutputFolder: String
+        profileOutputFolder: String,
+        transcodeMode: TranscodeMode = .aac248
     ) -> URL {
         let profileDir = URL(fileURLWithPath: profileOutputFolder)
 
@@ -245,28 +286,64 @@ final class TranscodeCache: Sendable {
                 }
             }
 
-            // Force the destination extension to .m4a and strip any legacy
-            // double extensions (e.g. "Foo.mp3.m4a" -> "Foo.m4a") that
-            // earlier transcode pipelines accidentally produced.
-            let pathURL = URL(fileURLWithPath: relativePath)
-            var stem = pathURL.deletingPathExtension()
-            // Peel a second extension if it looks like a codec hint left
-            // over from the source filename ("Foo.mp3" -> "Foo").
-            if Self.codecExtensions.contains(stem.pathExtension.lowercased()) {
-                stem = stem.deletingPathExtension()
+            // Split relativePath into components
+            let components = relativePath.split(separator: "/").map(String.init)
+            if !components.isEmpty {
+                // Sanitize all directory components
+                let sanitizedDirs = components.dropLast().map { PathSanitizer.sanitizeComponent($0) }
+                
+                // Extract and sanitize filename stem
+                let filename = components.last!
+                var stem = filename
+                
+                // Extract original extension
+                var originalExtension = "m4a"
+                if let dotIndex = filename.lastIndex(of: ".") {
+                    originalExtension = String(filename[filename.index(after: dotIndex)...]).lowercased()
+                }
+                
+                // Peel extensions (up to 2 levels e.g. .mp3.m4a -> .m4a)
+                var extensionsPeeled = 0
+                while let dotIndex = stem.lastIndex(of: "."), extensionsPeeled < 2 {
+                    let ext = String(stem[stem.index(after: dotIndex)...]).lowercased()
+                    if extensionsPeeled == 0 || Self.codecExtensions.contains(ext) {
+                        stem = String(stem[..<dotIndex])
+                        extensionsPeeled += 1
+                    } else {
+                        break
+                    }
+                }
+                
+                let sanitizedStem = PathSanitizer.sanitizeComponent(stem)
+                let finalExtension = transcodeMode == .keepOriginals ? originalExtension : "m4a"
+                let sanitizedFilename = "\(sanitizedStem).\(finalExtension)"
+                
+                var finalURL = profileDir
+                for dir in sanitizedDirs {
+                    finalURL = finalURL.appendingPathComponent(dir)
+                }
+                return finalURL.appendingPathComponent(sanitizedFilename)
             }
-            let m4aPath = stem.appendingPathExtension("m4a")
-            return profileDir.appendingPathComponent(m4aPath.relativePath)
         }
 
-        // Fallback: Artist/Album/Title.m4a
+        // SoundCloud routing parity check (Phase 38 Plan parity)
+        let ext = transcodeMode == .keepOriginals ? (track.format.isEmpty ? "m4a" : track.format.lowercased()) : "m4a"
+        if track.originalPath.lowercased().contains("soundcloud.com") {
+            let title = PathSanitizer.sanitizeComponent(track.title)
+            return profileDir
+                .appendingPathComponent("03_Club")
+                .appendingPathComponent("SoundCloud")
+                .appendingPathComponent("\(title).\(ext)")
+        }
+
+        // Fallback: Artist/Album/Title.ext
         let artist = PathSanitizer.sanitizeComponent(track.artist)
         let album = PathSanitizer.sanitizeComponent(track.album)
         let title = PathSanitizer.sanitizeComponent(track.title)
         return profileDir
             .appendingPathComponent(artist)
             .appendingPathComponent(album)
-            .appendingPathComponent("\(title).m4a")
+            .appendingPathComponent("\(title).\(ext)")
     }
 
     /// Library-relative paths that are internal staging dirs from earlier
@@ -287,10 +364,8 @@ final class TranscodeCache: Sendable {
     /// location we should never write back into a sync destination or a
     /// generated M3U8 entry.
     static func isStaleOrganizedPath(_ path: String) -> Bool {
-        for prefix in stalePathPrefixes {
-            if path.hasPrefix(prefix) { return true }
-        }
-        return false
+        let lower = path.lowercased()
+        return lower.contains(".mlm_staging/") || lower.contains(".ln/")
     }
 }
 

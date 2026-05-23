@@ -53,6 +53,7 @@ final class ReviewQueueViewModel {
         do {
             try await analysisRepository.resolveReview(id: id)
             pendingItems.removeAll { $0.id == id }
+            NotificationCenter.default.post(name: .reviewQueueDidChange, object: nil)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -63,6 +64,7 @@ final class ReviewQueueViewModel {
         do {
             try await analysisRepository.dismissReview(id: id)
             pendingItems.removeAll { $0.id == id }
+            NotificationCenter.default.post(name: .reviewQueueDidChange, object: nil)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -72,10 +74,11 @@ final class ReviewQueueViewModel {
         isScanning = true
         errorMessage = nil
         do {
-            scanResult = try await deepScanService.deepScan { processed, total in
-                // Progress tracking happens in AppLogger
-            }
+            scanResult = try await deepScanService.deepScan(turboMode: false, progressHandler: { state in
+                // Progress tracking via MaintenanceProgressTracker
+            })
             await loadPendingReviews()
+            NotificationCenter.default.post(name: .reviewQueueDidChange, object: nil)
         } catch {
             errorMessage = error.localizedDescription
         }

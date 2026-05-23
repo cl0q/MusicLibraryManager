@@ -34,7 +34,7 @@ struct PinnedPlaylistsDisclosure: View {
     let topLevelSection: SidebarSection
     let onUnpin: (Int64) -> Void
     let onDelete: (Int64) -> Void
-    let onRevealInGrid: () -> Void
+    let onSelectSection: (SidebarSection) -> Void
 
     @AppStorage("sidebar.pinnedPlaylists.expanded") private var pinnedExpanded = true
     @Environment(\.container) private var container
@@ -64,6 +64,9 @@ struct PinnedPlaylistsDisclosure: View {
         } label: {
             Label(topLevelLabel, systemImage: topLevelIcon)
                 .tag(topLevelSection)   // label-click still selects .playlists (grid)
+                .springLoadableHover {
+                    onSelectSection(topLevelSection)
+                }
         }
         .task { await loadPinned() }
         .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { _ in
@@ -100,6 +103,11 @@ struct PinnedPlaylistsDisclosure: View {
                 .tag(SidebarSection.playlistDetail(pl.id ?? -1))
                 .contextMenu { contextMenu(for: pl) }
                 .help(pl.name)
+                .springLoadableHover {
+                    if let pid = pl.id {
+                        onSelectSection(.playlistDetail(pid))
+                    }
+                }
         }
     }
 
@@ -115,11 +123,13 @@ struct PinnedPlaylistsDisclosure: View {
         }
         Divider()
         Button("Reveal in Grid") {
-            onRevealInGrid()
+            onSelectSection(.playlists)
         }
         Divider()
-        Button("Delete", role: .destructive) {
-            if let pid = pl.id { onDelete(pid) }
+        if pl.isLiked == 0 {
+            Button("Delete", role: .destructive) {
+                if let pid = pl.id { onDelete(pid) }
+            }
         }
     }
 

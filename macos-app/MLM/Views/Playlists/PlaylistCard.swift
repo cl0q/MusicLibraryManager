@@ -31,6 +31,7 @@ struct PlaylistCard: View {
     var onCancelRename: () -> Void
     var onTogglePin: () -> Void
     var onDelete: () -> Void
+    var onSpringLoad: (() -> Void)? = nil
 
     /// Forwards a resolved local image URL to the parent for `setCustomCover`.
     /// Defaults to a no-op so SwiftUI Previews + non-grid callers keep compiling.
@@ -51,11 +52,15 @@ struct PlaylistCard: View {
     /// Provides the chosen profile and the playlist's DB id.
     var onAddToSyncProfile: ((SyncProfile, Int64) -> Void)?
 
+    /// Called when tracks are dropped directly onto the card.
+    var onTracksDropped: (([Int64]) async -> Void)? = nil
+
     @State private var isHovered = false
 
     /// `true` while a Finder/in-app drag is hovering over the card. Drives
     /// the accent stroke + thicker line per UI-SPEC §"Cover-Card states".
     @State private var isDropTargeted = false
+    @State private var timer: Timer? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -85,8 +90,23 @@ struct PlaylistCard: View {
         .contextMenu {
             contextMenuItems
         }
-        .onDrop(of: [.fileURL, .image], isTargeted: $isDropTargeted) { providers in
+        .onDrop(of: [.trackDrag, .fileURL, .image], isTargeted: $isDropTargeted) { providers in
             handleDrop(providers: providers)
+        }
+        .onChange(of: isDropTargeted) { _, targeted in
+            if targeted {
+                timer?.invalidate()
+                timer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: false) { _ in
+                    Task { @MainActor in
+                        if isDropTargeted {
+                            onSpringLoad?()
+                        }
+                    }
+                }
+            } else {
+                timer?.invalidate()
+                timer = nil
+            }
         }
     }
 
@@ -98,8 +118,6 @@ struct PlaylistCard: View {
                 Image(nsImage: coverImage)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-                    .frame(height: 100)
-                    .clipped()
             } else {
                 // Fallback: category gradient + SF Symbol (pre-Phase 36 visual).
                 LinearGradient(
@@ -107,10 +125,9 @@ struct PlaylistCard: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
-                .frame(height: 100)
 
                 Image(systemName: categoryIcon)
-                    .font(.system(size: 32, weight: .light))
+                    .font(.system(size: 44, weight: .light))
                     .foregroundColor(.white.opacity(0.8))
             }
 
@@ -120,9 +137,9 @@ struct PlaylistCard: View {
                     HStack {
                         Spacer()
                         Image(systemName: "pin.fill")
-                            .font(.system(size: 10))
+                            .font(.system(size: 11))
                             .foregroundColor(.white.opacity(0.9))
-                            .padding(6)
+                            .padding(8)
                     }
                     Spacer()
                 }
@@ -133,13 +150,15 @@ struct PlaylistCard: View {
                 VStack {
                     HStack {
                         sourceBadge
-                            .padding(6)
+                            .padding(8)
                         Spacer()
                     }
                     Spacer()
                 }
             }
         }
+        .aspectRatio(1, contentMode: .fit)
+        .clipped()
     }
 
     // MARK: - Info Area
@@ -248,10 +267,12 @@ struct PlaylistCard: View {
 
         Divider()
 
-        Button(role: .destructive) {
-            onDelete()
-        } label: {
-            Label("Delete Playlist", systemImage: "trash")
+        if playlist.isLiked == 0 {
+            Button(role: .destructive) {
+                onDelete()
+            } label: {
+                Label("Delete Playlist", systemImage: "trash")
+            }
         }
     }
 
@@ -295,6 +316,40 @@ struct PlaylistCard: View {
     /// to `onCoverDropped`. Falls through to `onCoverDropRejected` when no
     /// loadable image data is present (UI-SPEC §"Drop-Target Acceptance Rules").
     private func handleDrop(providers: [NSItemProvider]) -> Bool {
+        // Track drag branch:
+        let trackProviders = providers.filter { $0.hasItemConformingToTypeIdentifier("com.musiclibrary.trackdrag") }
+        if !trackProviders.isEmpty {
+            let group = DispatchGroup()
+            let lock = NSLock()
+            var trackIds: [Int64] = []
+            
+            for provider in trackProviders {
+                group.enter()
+                _ = provider.loadDataRepresentation(for: UTType("com.musiclibrary.trackdrag")!) { data, _ in
+                    defer { group.leave() }
+                    guard let data else { return }
+                    do {
+                        let dragData = try JSONDecoder().decode(TrackDragData.self, from: data)
+                        lock.lock()
+                        trackIds.append(dragData.trackId)
+                        lock.unlock()
+                    } catch {
+                        // ignore malformed items
+                    }
+                }
+            }
+            
+            group.notify(queue: .main) {
+                if !trackIds.isEmpty, let onTracksDropped = self.onTracksDropped {
+                    Task {
+                        await onTracksDropped(trackIds)
+                    }
+                }
+            }
+            return true
+        }
+
+        // Cover file/image drop branch:
         guard let provider = providers.first else {
             onCoverDropRejected()
             return false

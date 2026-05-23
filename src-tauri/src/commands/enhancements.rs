@@ -17,7 +17,7 @@
 //! 11k are done.
 
 use crate::commands::batch_control::{
-    cancel_flag, is_cancelled, reset_cancel, worker_count, BATCH_SIZE,
+    cancel_flag, is_cancelled, is_turbo_mode, reset_cancel, worker_count, BATCH_SIZE, TURBO_BATCH_SIZE,
 };
 use crate::database::get_connection;
 use std::collections::HashMap;
@@ -76,7 +76,12 @@ where
 {
     use futures_util::stream::{FuturesUnordered, StreamExt};
 
-    let parallelism = worker_count();
+    let turbo_mode = is_turbo_mode();
+    let parallelism = worker_count(turbo_mode);
+    let batch_size = if turbo_mode { TURBO_BATCH_SIZE } else { BATCH_SIZE };
+    
+    log::info!("Running {} with {} workers (turbo: {})", prefix, parallelism, turbo_mode);
+    
     let mut iter = tasks.into_iter();
     let mut in_flight: FuturesUnordered<tokio::task::JoinHandle<()>> = FuturesUnordered::new();
     let mut dispatched: usize = 0;
@@ -107,7 +112,7 @@ where
 
             // Give tokio a tick to process events every batch so the
             // cancel flag gets a chance to be flipped from the UI side.
-            if dispatched % BATCH_SIZE == 0 {
+            if dispatched % batch_size == 0 {
                 tokio::task::yield_now().await;
             }
         }
@@ -187,6 +192,14 @@ pub async fn fingerprint_library_cmd(app: tauri::AppHandle) -> Result<serde_json
                         Ok(_) => {
                             processed.fetch_add(1, Ordering::Relaxed);
                             let cur = counter.fetch_add(1, Ordering::Relaxed) + 1;
+                            log::debug(
+                                "Fingerprint [{}/{}] {} — {} → saved (duration: {:.2}s)",
+                                cur,
+                                total,
+                                artist,
+                                title,
+                                duration
+                            );
                             let _ = app.emit(
                                 "fingerprint:progress",
                                 serde_json::json!({
@@ -197,6 +210,7 @@ pub async fn fingerprint_library_cmd(app: tauri::AppHandle) -> Result<serde_json
                                     "title": title,
                                     "path": path,
                                     "percent": (cur as f64 / total.max(1) as f64 * 100.0) as u32,
+                                    "saved_to_db": true,
                                 }),
                             );
                         }
@@ -437,6 +451,14 @@ pub async fn analyze_replaygain_cmd(app: tauri::AppHandle) -> Result<serde_json:
                         (Ok(_), Ok(_)) => {
                             analyzed.fetch_add(1, Ordering::Relaxed);
                             let cur = counter.fetch_add(1, Ordering::Relaxed) + 1;
+                            log::debug(
+                                "ReplayGain [{}/{}] {} — {} → LUFS-I {:.1}, saved to DB",
+                                cur,
+                                total,
+                                artist,
+                                title,
+                                analysis.loudness.lufs_i
+                            );
                             let _ = app.emit(
                                 "replaygain:progress",
                                 serde_json::json!({
@@ -451,6 +473,7 @@ pub async fn analyze_replaygain_cmd(app: tauri::AppHandle) -> Result<serde_json:
                                     "lufs_range": analysis.loudness.lufs_range,
                                     "true_peak": analysis.loudness.true_peak_dbfs,
                                     "energy_bucket": analysis.energy_bucket,
+                                    "saved_to_db": true,
                                 }),
                             );
                         }

@@ -1,5 +1,8 @@
 import Foundation
 import GRDB
+import UniformTypeIdentifiers
+import SwiftUI
+
 
 /// A music track in the library.
 ///
@@ -26,10 +29,13 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
     var lufsRange: Double?
     var truePeak: Double?
     var energyBucket: Int?
+    var danceability: Double?
     var albumId: Int64?
     var searchText: String?
+    var playlistPosition: String? = nil
 
     static let databaseTableName = "tracks"
+
 
     // MARK: - Column mapping
 
@@ -54,6 +60,7 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
         static let lufsRange = Column(CodingKeys.lufsRange)
         static let truePeak = Column(CodingKeys.truePeak)
         static let energyBucket = Column(CodingKeys.energyBucket)
+        static let danceability = Column(CodingKeys.danceability)
         static let albumId = Column(CodingKeys.albumId)
         static let searchText = Column(CodingKeys.searchText)
     }
@@ -81,8 +88,10 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
         case lufsRange = "lufs_range"
         case truePeak = "true_peak"
         case energyBucket = "energy_bucket"
+        case danceability
         case albumId = "album_id"
         case searchText = "search_text"
+        case playlistPosition = "playlist_position"
     }
 
     // MARK: - Computed Properties
@@ -106,6 +115,32 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
     }
 
     // MARK: - MutablePersistableRecord
+
+    func encode(to container: inout PersistenceContainer) throws {
+        container[Columns.id] = id
+        container[Columns.artist] = artist
+        container[Columns.albumArtist] = albumArtist
+        container[Columns.album] = album
+        container[Columns.title] = title
+        container[Columns.genre] = genre
+        container[Columns.year] = year
+        container[Columns.bitrate] = bitrate
+        container[Columns.duration] = duration
+        container[Columns.format] = format
+        container[Columns.originalPath] = originalPath
+        container[Columns.organizedPath] = organizedPath
+        container[Columns.isDuplicate] = isDuplicate
+        container[Columns.dateAdded] = dateAdded
+        container[Columns.variantOf] = variantOf
+        container[Columns.downloadStatus] = downloadStatus
+        container[Columns.lufsI] = lufsI
+        container[Columns.lufsRange] = lufsRange
+        container[Columns.truePeak] = truePeak
+        container[Columns.energyBucket] = energyBucket
+        container[Columns.danceability] = danceability
+        container[Columns.albumId] = albumId
+        container[Columns.searchText] = searchText
+    }
 
     mutating func didInsert(_ inserted: InsertionSuccess) {
         id = inserted.rowID
@@ -131,6 +166,9 @@ extension Track {
 
     /// Energy bucket sort key — nil sorts as 0.
     var energySortKey: Int { energyBucket ?? 0 }
+
+    /// Danceability sort key — nil sorts as 0.0.
+    var danceabilitySortKey: Double { danceability ?? 0.0 }
 
     /// Date added sort key — nil sorts as empty string (sorts first).
     var dateAddedSortKey: String { dateAdded ?? "" }
@@ -168,6 +206,27 @@ extension Track {
         self.lufsRange = nil
         self.truePeak = nil
         self.energyBucket = nil
+        self.danceability = nil
         self.albumId = nil
+        self.playlistPosition = nil
     }
 }
+
+// MARK: - Drag and Drop Transferable
+
+/// Transferable representation for dragging tracks.
+struct TrackDragData: Codable, Transferable {
+    let trackId: Int64
+    let sourcePlaylistId: Int64? // nil if dragged from Library or Folders
+
+    static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: .trackDrag)
+    }
+}
+
+extension UTType {
+    static var trackDrag: UTType {
+        UTType("com.musiclibrary.trackdrag") ?? .data
+    }
+}
+

@@ -62,7 +62,7 @@ pub use albums::{
     RescanAlbumsResult,
 };
 pub use analysis::get_track_analysis;
-pub use batch_control::stop_analysis_cmd;
+pub use batch_control::{stop_analysis_cmd, set_turbo_mode, get_turbo_mode};
 pub use download::{download_tracks, get_retry_queue_status, retry_failed_downloads};
 pub use duplicate::detect_duplicates;
 pub use enhancements::{

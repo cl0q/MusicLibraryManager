@@ -67,6 +67,28 @@ final class LibraryRepairService {
             source: "Repair"
         )
 
+        // Build a cache of all files in libraryRoot for fast lookup in case of renamed directories
+        var fileCache: [String: String] = [:]
+        let fm = FileManager.default
+        let rootURL = URL(fileURLWithPath: normalizedRoot)
+        AppLogger.shared.info("LibraryRepair: building file cache for fast lookup...", source: "Repair")
+        if let enumerator = fm.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants],
+            errorHandler: nil
+        ) {
+            for case let fileURL as URL in enumerator {
+                let path = fileURL.path
+                if path.hasPrefix(normalizedRoot + "/") {
+                    let relative = String(path.dropFirst(normalizedRoot.count + 1))
+                    let filename = fileURL.lastPathComponent.lowercased()
+                    fileCache[filename] = relative
+                }
+            }
+        }
+        AppLogger.shared.info("LibraryRepair: indexed \(fileCache.count) files on disk", source: "Repair")
+
         for track in tracks {
             guard let trackId = track.id, let organizedPath = track.organizedPath else {
                 continue
@@ -92,6 +114,30 @@ final class LibraryRepairService {
                     libraryRoot: normalizedRoot
                 )
             else {
+                // Step 2.5 — Check if the file exists elsewhere in the library due to a directory rename
+                let filename = URL(fileURLWithPath: organizedPath).lastPathComponent
+                if let relativeNewPath = fileCache[filename.lowercased()] {
+                    let absoluteNewPath = normalizedRoot + "/" + relativeNewPath
+                    do {
+                        try await trackRepository.setPathsOnly(
+                            trackId: trackId,
+                            organizedPath: relativeNewPath,
+                            originalPath: absoluteNewPath
+                        )
+                        result.repaired += 1
+                        AppLogger.shared.info(
+                            "LibraryRepair: track \(trackId) (\(filename)) resolved and repaired via directory-rename to \(relativeNewPath)",
+                            source: "Repair"
+                        )
+                        continue
+                    } catch {
+                        AppLogger.shared.error(
+                            "LibraryRepair: failed to update paths for track \(trackId): \(error.localizedDescription)",
+                            source: "Repair"
+                        )
+                    }
+                }
+
                 // If original_path is a streaming URL there was never a
                 // local file — the stale organized_path is just leftover
                 // download-pipeline metadata. Demote the row back to

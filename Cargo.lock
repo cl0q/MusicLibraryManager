@@ -3202,6 +3202,7 @@ dependencies = [
  "regex",
  "reqwest 0.12.28",
  "rusqlite",
+ "rusqlite_migration",
  "rusty-chromaprint",
  "sanitize-filename",
  "serde",
@@ -4890,6 +4891,16 @@ dependencies = [
  "hashlink",
  "libsqlite3-sys",
  "smallvec",
+]
+
+[[package]]
+name = "rusqlite_migration"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad5c6b56a977875727f3d3a8d1baa8d875ed914719529ddc8b9330afaa8f0fda"
+dependencies = [
+ "log",
+ "rusqlite",
 ]
 
 [[package]]

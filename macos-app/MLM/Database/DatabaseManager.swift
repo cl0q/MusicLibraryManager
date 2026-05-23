@@ -692,6 +692,22 @@ final class DatabaseManager: Sendable {
             }
         }
 
+        migrator.registerMigration("v22_danceability") { db in
+            if try !db.columns(in: "tracks").contains(where: { $0.name == "danceability" }) {
+                try db.alter(table: "tracks") { t in
+                    t.add(column: "danceability", .double)
+                }
+            }
+        }
+
+        migrator.registerMigration("v23_playlist_format") { db in
+            if try !db.columns(in: "sync_profiles").contains(where: { $0.name == "playlist_format" }) {
+                try db.alter(table: "sync_profiles") { t in
+                    t.add(column: "playlist_format", .text).notNull().defaults(to: "rockbox")
+                }
+            }
+        }
+
         return migrator
     }
 

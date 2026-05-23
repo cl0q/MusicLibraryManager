@@ -62,8 +62,13 @@ final class TranscodeService: Sendable {
         let formatInfo = await detectFormat(input: input, ffmpeg: ffmpeg)
 
         if formatInfo.isLossy && formatInfo.bitrate > 0 && formatInfo.bitrate < bitrateKbps * 1000 {
-            // Lossy and lower quality than target — preserve original
-            return .skipped("Lossy source below target bitrate (\(formatInfo.bitrate / 1000)kbps < \(bitrateKbps)kbps)")
+            // Only skip transcode if the source format is ALREADY an AAC file!
+            // E.g. codec contains "aac". If it is "mp3", we MUST transcode it so that 
+            // the resulting .m4a file is a valid AAC file in an MP4 container, not an MP3 renamed to .m4a!
+            let isAlreadyAAC = formatInfo.codec.contains("aac") || formatInfo.codec.contains("mp4")
+            if isAlreadyAAC {
+                return .skipped("Lossy source already AAC below target bitrate (\(formatInfo.bitrate / 1000)kbps < \(bitrateKbps)kbps)")
+            }
         }
 
         // Determine which encoder to use
@@ -137,13 +142,14 @@ final class TranscodeService: Sendable {
     private struct FormatInfo {
         var isLossy: Bool
         var bitrate: Int  // bits per second
+        var codec: String // e.g. "mp3", "aac", "flac"
     }
 
     /// Detect audio format using ffprobe.
     private func detectFormat(input: URL, ffmpeg: String) async -> FormatInfo {
         let ffprobe = ffmpeg.replacingOccurrences(of: "ffmpeg", with: "ffprobe")
         guard FileManager.default.isExecutableFile(atPath: ffprobe) else {
-            return FormatInfo(isLossy: false, bitrate: 0)
+            return FormatInfo(isLossy: false, bitrate: 0, codec: "")
         }
 
         do {
@@ -168,13 +174,13 @@ final class TranscodeService: Sendable {
                     let losslessCodecs = Set(["flac", "alac", "wavpack", "pcm_s16le", "pcm_s24le", "pcm_s32le"])
                     let isLossy = !losslessCodecs.contains(codec.lowercased())
 
-                    return FormatInfo(isLossy: isLossy, bitrate: bitrate)
+                    return FormatInfo(isLossy: isLossy, bitrate: bitrate, codec: codec.lowercased())
                 }
             }
         } catch {}
 
         // Default: treat as lossless (always transcode)
-        return FormatInfo(isLossy: false, bitrate: 0)
+        return FormatInfo(isLossy: false, bitrate: 0, codec: "")
     }
 
     /// Check if libfdk_aac encoder is available.

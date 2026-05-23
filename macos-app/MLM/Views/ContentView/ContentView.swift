@@ -49,6 +49,15 @@ struct ContentView: View {
     /// Track selected for detail panel (via double-click or "More Info").
     @State private var selectedTrackForDetail: Track?
 
+    /// Library repair alert states
+    @State private var showingRepairAlert = false
+    @State private var repairRunning = false
+    @State private var repairResult: String = ""
+
+    /// Selection-based sheet states
+    @State private var playlistSelectionContainer: TrackSelectionContainer? = nil
+    @State private var syncProfileSelectionContainer: TrackSelectionContainer? = nil
+
     var body: some View {
         Group {
             if container.isInitialized {
@@ -93,6 +102,64 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .libraryDriveDidMount)) { _ in
             container.isLibraryDriveMounted = true
         }
+        // Handle library repair trigger from main menu
+        .onReceive(NotificationCenter.default.publisher(for: .triggerLibraryRepair)) { _ in
+            runGlobalLibraryRepair()
+        }
+        .alert("Stale Pfade reparieren", isPresented: $showingRepairAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(repairResult)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .triggerNewPlaylistFromSelection)) { notification in
+            if let trackIds = extractTrackIds(from: notification.userInfo) {
+                playlistSelectionContainer = TrackSelectionContainer(trackIds: Set(trackIds))
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .triggerNewSyncProfileFromSelection)) { notification in
+            if let trackIds = extractTrackIds(from: notification.userInfo) {
+                syncProfileSelectionContainer = TrackSelectionContainer(trackIds: Set(trackIds))
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .libraryDidImport)) { _ in
+            if let selected = selectedTrackForDetail, let id = selected.id {
+                Task {
+                    if let freshTrack = try? await container.trackRepository?.fetchTrack(id: id) {
+                        await MainActor.run {
+                            self.selectedTrackForDetail = freshTrack
+                        }
+                    }
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .searchCommandTriggered)) { _ in
+            if selectedSection == .folders {
+                NotificationCenter.default.post(name: .focusFolderSearchField, object: nil)
+            } else {
+                selectedSection = .library
+                NotificationCenter.default.post(name: .focusSearchField, object: nil)
+            }
+        }
+        .sheet(item: $playlistSelectionContainer) { selection in
+            NewPlaylistFromSelectionSheet(trackIds: selection.trackIds)
+        }
+        .sheet(item: $syncProfileSelectionContainer) { selection in
+            NewSyncProfileFromSelectionSheet(trackIds: selection.trackIds)
+        }
+    }
+
+    private func extractTrackIds(from userInfo: [AnyHashable: Any]?) -> [Int64]? {
+        guard let raw = userInfo?["trackIds"] else { return nil }
+        if let array = raw as? [Int64] {
+            return array
+        }
+        if let nsArray = raw as? [NSNumber] {
+            return nsArray.map { $0.int64Value }
+        }
+        if let array = raw as? [Int] {
+            return array.map { Int64($0) }
+        }
+        return nil
     }
 
     // MARK: - Initialized layout
@@ -158,6 +225,8 @@ struct ContentView: View {
             FoldersView(onTrackDoubleClick: { track in
                 handleTrackDoubleClick(track)
             })
+        case .duplicates:
+            ReviewQueueView()
         case .sync:
             SyncView()
         case .sources:
@@ -185,6 +254,38 @@ struct ContentView: View {
             Task {
                 await playbackVM.playTrack(track)
             }
+        }
+    }
+
+    /// Triggered from the main menu CommandMenu to repair database organized_path columns.
+    private func runGlobalLibraryRepair() {
+        guard let trackRepo = container.trackRepository,
+              let configRepo = container.configRepository else { return }
+        
+        repairRunning = true
+        repairResult = "Die Reparatur verwaister Pfade wurde im Hintergrund gestartet. Bitte warten..."
+        showingRepairAlert = true
+        
+        Task {
+            let service = LibraryRepairService(
+                trackRepository: trackRepo,
+                configRepository: configRepo
+            )
+            do {
+                let r = try await service.repairStaleOrganizedPaths()
+                repairResult = """
+                    Stale Pfade repariert!
+                    
+                    Geprüft: \(r.inspected)
+                    Intakt: \(r.alreadyValid)
+                    Repariert: \(r.repaired)
+                    Demoted to Remote: \(r.demotedToRemote)
+                    Nicht reparierbar: \(r.unrepairable)
+                    """
+            } catch {
+                repairResult = "Fehler bei der Reparatur: \(error.localizedDescription)"
+            }
+            repairRunning = false
         }
     }
 
@@ -237,6 +338,7 @@ enum SidebarSection: Hashable, Identifiable {
     case playlists
     case playlistDetail(Int64)
     case folders
+    case duplicates
     case sync
     case sources
 
@@ -246,6 +348,7 @@ enum SidebarSection: Hashable, Identifiable {
         case .playlists: return "playlists"
         case .playlistDetail(let pid): return "playlistDetail-\(pid)"
         case .folders: return "folders"
+        case .duplicates: return "duplicates"
         case .sync: return "sync"
         case .sources: return "sources"
         }
@@ -255,7 +358,7 @@ enum SidebarSection: Hashable, Identifiable {
     /// Sidebar iterates these for top-level rows; `.playlistDetail` cases are
     /// produced dynamically inside `PinnedPlaylistsDisclosure` (Plan 36-04).
     static let topLevelCases: [SidebarSection] = [
-        .library, .playlists, .folders, .sync, .sources
+        .library, .playlists, .folders, .duplicates, .sync, .sources
     ]
 
     var label: String {
@@ -264,6 +367,7 @@ enum SidebarSection: Hashable, Identifiable {
         case .playlists: "Playlists"
         case .playlistDetail: ""   // never displayed at top-level; disclosure children render the playlist name directly
         case .folders: "Folders"
+        case .duplicates: "Duplicates"
         case .sync: "Sync"
         case .sources: "Sources"
         }
@@ -275,6 +379,7 @@ enum SidebarSection: Hashable, Identifiable {
         case .playlists: "list.bullet"
         case .playlistDetail: "music.note.list"
         case .folders: "folder"
+        case .duplicates: "doc.on.doc"
         case .sync: "arrow.triangle.2.circlepath"
         case .sources: "globe"
         }
@@ -287,6 +392,7 @@ enum SidebarSection: Hashable, Identifiable {
         case .playlists: "2"
         case .playlistDetail: nil
         case .folders: "3"
+        case .duplicates: "6"
         case .sync: "4"
         case .sources: "5"
         }

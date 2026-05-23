@@ -49,9 +49,22 @@ final class PlaylistRepository: Sendable {
         }
     }
 
+    /// Update the source ID of a playlist.
+    func updateSourceId(id: Int64, sourceId: Int64?) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE playlists SET source_id = ? WHERE id = ?",
+                arguments: [sourceId, id]
+            )
+        }
+    }
+
     /// Delete a playlist.
     func delete(id: Int64) async throws {
-        _ = try await database.write { db in
+        try await database.write { db in
+            if let playlist = try Playlist.fetchOne(db, id: id), playlist.isLiked == 1 {
+                throw PlaylistRepositoryError.cannotDeleteLikedPlaylist
+            }
             try Playlist.deleteOne(db, id: id)
         }
     }
@@ -103,7 +116,7 @@ final class PlaylistRepository: Sendable {
     func fetchTracks(playlistId: Int64) async throws -> [Track] {
         try await database.read { db in
             try Track.fetchAll(db, sql: """
-                SELECT t.* FROM tracks t
+                SELECT t.*, pt.position AS playlist_position FROM tracks t
                 INNER JOIN playlist_tracks pt ON pt.track_id = t.id
                 WHERE pt.playlist_id = ?
                 ORDER BY pt.position, pt.added_at ASC
@@ -144,14 +157,16 @@ final class PlaylistRepository: Sendable {
     /// Add multiple tracks to a playlist in a single transaction.
     func addTracks(playlistId: Int64, trackIds: [Int64], startPosition: String) async throws {
         try await database.write { db in
-            // Generate fractional positions by appending index
+            var currentPos = startPosition
             for (index, trackId) in trackIds.enumerated() {
-                let position = "\(startPosition)\(String(format: "%06d", index))"
+                if index > 0 {
+                    currentPos = FractionalIndexer.positionBetween(left: currentPos, right: nil)
+                }
                 var entry = PlaylistTrack(
                     id: nil,
                     playlistId: playlistId,
                     trackId: trackId,
-                    position: position,
+                    position: currentPos,
                     addedAt: nil
                 )
                 try entry.insert(db, onConflict: .ignore)
@@ -316,6 +331,17 @@ final class PlaylistRepository: Sendable {
                 )
                 try entry.insert(db, onConflict: .ignore)
             }
+        }
+    }
+}
+
+enum PlaylistRepositoryError: LocalizedError {
+    case cannotDeleteLikedPlaylist
+
+    var errorDescription: String? {
+        switch self {
+        case .cannotDeleteLikedPlaylist:
+            return "Cannot delete a synchronized 'Liked' playlist."
         }
     }
 }

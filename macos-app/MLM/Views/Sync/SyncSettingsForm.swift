@@ -1,14 +1,10 @@
 import SwiftUI
 
-/// Collapsible settings form for a sync profile (D-02 / SYNC-v2-04).
+/// Collapsible settings form for a sync profile.
 ///
-/// GREENFIELD — no existing Form+Toggle+Picker pattern in MLM (per PATTERNS.md).
-/// Wraps four toggles and one transcode-mode picker in a DisclosureGroup
-/// that defaults to collapsed to reduce cognitive load on first view.
-///
-/// Each toggle/picker onChange commits immediately to the DB via
-/// `vm.updateProfileSettings(...)` using local mirrors to provide
-/// responsive feedback before the async write completes.
+/// Features custom icons, segmented controls, descriptions, rotating animated chevrons,
+/// and full row clickability to expand/collapse. Commits changes instantly to the DB via
+/// SyncViewModel.updateProfileSettings.
 struct SyncSettingsForm: View {
     let profile: SyncProfile
     let vm: SyncViewModel
@@ -20,6 +16,7 @@ struct SyncSettingsForm: View {
     @State private var localTranscodeMode: String
     @State private var localFat32: Bool
     @State private var localCleanup: Bool
+    @State private var localPlaylistFormat: String
 
     init(profile: SyncProfile, vm: SyncViewModel) {
         self.profile = profile
@@ -28,58 +25,172 @@ struct SyncSettingsForm: View {
         _localTranscodeMode = State(initialValue: profile.transcodeMode)
         _localFat32 = State(initialValue: profile.fat32SafePaths)
         _localCleanup = State(initialValue: profile.cleanupRemovedFiles)
+        _localPlaylistFormat = State(initialValue: profile.playlistFormat)
     }
 
     var body: some View {
-        DisclosureGroup(isExpanded: $isExpanded) {
-            Form {
-                // Field 1: Generate M3U8 playlists (Rockbox/device use)
-                Toggle("M3U8-Playlisten generieren", isOn: $localM3U8)
-                    .onChange(of: localM3U8) { _, newValue in
-                        Task { await vm.updateProfileSettings(generateM3U8: newValue) }
-                    }
-
-                // Field 2: Transcode mode
-                Picker("Transcode-Modus", selection: $localTranscodeMode) {
-                    Text("Originals behalten").tag("keep_originals")
-                    Text("248 kbps AAC").tag("aac_248")
-                    Text("320 kbps AAC").tag("aac_320")
+        VStack(alignment: .leading, spacing: 0) {
+            // Header Button - clickable everywhere
+            Button {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                    isExpanded.toggle()
                 }
-                .onChange(of: localTranscodeMode) { _, newValue in
-                    Task { await vm.updateProfileSettings(transcodeMode: newValue) }
+            } label: {
+                HStack {
+                    Image(systemName: "gearshape.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(.mlmAccent)
+                        .frame(width: 24, height: 24)
+                        .background(Color.mlmAccent.opacity(0.1))
+                        .cornerRadius(6)
+                    
+                    Text("Einstellungen")
+                        .font(MLMFont.bodyBold)
+                        .foregroundColor(.mlmInk)
+                    
+                    Spacer()
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.mlmInkMuted)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 }
-
-                // Field 3: FAT32-safe filenames
-                Toggle("FAT32-sichere Dateinamen", isOn: $localFat32)
-                    .onChange(of: localFat32) { _, newValue in
-                        Task { await vm.updateProfileSettings(fat32SafePaths: newValue) }
-                    }
-
-                // Field 4: Cleanup removed files from destination
-                Toggle("Gelöschte Dateien vom Ziel entfernen", isOn: $localCleanup)
-                    .onChange(of: localCleanup) { _, newValue in
-                        Task { await vm.updateProfileSettings(cleanupRemovedFiles: newValue) }
-                    }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .contentShape(Rectangle())
             }
-            .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
-            .background(Color.mlmSurface)
-            .padding(.vertical, 8)
-        } label: {
-            Text("Einstellungen")
-                .font(MLMFont.sectionLabel)
-                .foregroundColor(.mlmInkMuted)
+            .buttonStyle(.plain)
+            
+            if isExpanded {
+                VStack(spacing: 12) {
+                    Divider().background(Color.mlmEdgeSubtle)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 4)
+
+                    VStack(spacing: 16) {
+                        settingRow(
+                            icon: "music.note.list",
+                            title: "Wiedergabelisten",
+                            description: "Erstellt Wiedergabelistendateien für Rockbox oder Doppi",
+                            content: Toggle("", isOn: $localM3U8)
+                                .toggleStyle(.switch)
+                                .labelsHidden()
+                        )
+                        .onChange(of: localM3U8) { _, newValue in
+                            Task { await vm.updateProfileSettings(generateM3U8: newValue) }
+                        }
+
+                        if localM3U8 {
+                            settingRow(
+                                icon: "doc.plaintext",
+                                title: "Format & App",
+                                description: "Wähle das passende App-Profil (.m3u/.m3u8) als Ziel",
+                                content: Picker("", selection: $localPlaylistFormat) {
+                                    Text("Rockbox").tag("rockbox")
+                                    Text("Doppi").tag("doppi")
+                                }
+                                .pickerStyle(.segmented)
+                                .frame(width: 220)
+                                .labelsHidden()
+                            )
+                            .padding(.leading, 16)
+                            .onChange(of: localPlaylistFormat) { _, newValue in
+                                Task { await vm.updateProfileSettings(playlistFormat: newValue) }
+                            }
+                        }
+
+                        Divider().background(Color.mlmEdgeSubtle)
+
+                        settingRow(
+                            icon: "arrow.triangle.2.circlepath",
+                            title: "Transcode-Modus",
+                            description: "Lieder beim Kopieren konvertieren (AAC)",
+                            content: Picker("", selection: $localTranscodeMode) {
+                                Text("Originals").tag("keep_originals")
+                                Text("248k AAC").tag("aac_248")
+                                Text("320k AAC").tag("aac_320")
+                            }
+                            .pickerStyle(.segmented)
+                            .frame(width: 220)
+                            .labelsHidden()
+                        )
+                        .onChange(of: localTranscodeMode) { _, newValue in
+                            Task { await vm.updateProfileSettings(transcodeMode: newValue) }
+                        }
+
+                        Divider().background(Color.mlmEdgeSubtle)
+
+                        settingRow(
+                            icon: "folder.badge.gearshape",
+                            title: "Kompatible Pfade",
+                            description: "Bereinigt Sonderzeichen im Dateipfad für FAT32/SD-Karten",
+                            content: Toggle("", isOn: $localFat32)
+                                .toggleStyle(.switch)
+                                .labelsHidden()
+                        )
+                        .onChange(of: localFat32) { _, newValue in
+                            Task { await vm.updateProfileSettings(fat32SafePaths: newValue) }
+                        }
+
+                        Divider().background(Color.mlmEdgeSubtle)
+
+                        settingRow(
+                            icon: "trash",
+                            title: "Aufräumen",
+                            description: "Entfernt gelöschte Lieder automatisch vom Zielordner",
+                            content: Toggle("", isOn: $localCleanup)
+                                .toggleStyle(.switch)
+                                .labelsHidden()
+                        )
+                        .onChange(of: localCleanup) { _, newValue in
+                            Task { await vm.updateProfileSettings(cleanupRemovedFiles: newValue) }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
+        .background(Color.mlmSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.mlmEdgeSubtle, lineWidth: 1)
+        )
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(Color.mlmSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        // Re-sync local mirrors when profile identity changes (e.g., after VM reloads from DB)
         .onChange(of: profile.id) { _, _ in
             localM3U8 = profile.generateM3U8
             localTranscodeMode = profile.transcodeMode
             localFat32 = profile.fat32SafePaths
             localCleanup = profile.cleanupRemovedFiles
+            localPlaylistFormat = profile.playlistFormat
+        }
+    }
+
+    private func settingRow(icon: String, title: String, description: String, content: some View) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 14))
+                .foregroundColor(.mlmAccent)
+                .frame(width: 28, height: 28)
+                .background(Color.mlmAccent.opacity(0.1))
+                .cornerRadius(8)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(MLMFont.bodyBold)
+                    .foregroundColor(.mlmInk)
+                Text(description)
+                    .font(MLMFont.muted)
+                    .foregroundColor(.mlmInkMuted)
+                    .lineLimit(2)
+            }
+
+            Spacer()
+
+            content
         }
     }
 }

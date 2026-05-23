@@ -144,7 +144,12 @@ struct LibraryView: View {
     }
 
     private func reloadSyncProfiles() async {
-        availableSyncProfiles = container.syncViewModel?.profiles ?? []
+        if let syncVM = container.syncViewModel {
+            if syncVM.profiles.isEmpty {
+                await syncVM.loadProfiles()
+            }
+            availableSyncProfiles = syncVM.profiles
+        }
     }
 
     // MARK: - Initialization

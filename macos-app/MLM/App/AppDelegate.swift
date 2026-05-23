@@ -5,6 +5,13 @@ import SwiftUI
 ///
 /// Handles app-level events like launch, termination, and dock menu.
 class AppDelegate: NSObject, NSApplicationDelegate {
+    static private(set) var shared: AppDelegate?
+
+    override init() {
+        super.init()
+        AppDelegate.shared = self
+    }
+
     /// Lazily-created Settings window. We own this directly via AppKit
     /// because every SwiftUI-native path (Settings scene, Window scene
     /// + openWindow, sheet via NotificationCenter) failed in practice
@@ -12,6 +19,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindowController: NSWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Set app icon at runtime — ensures Dock shows the correct icon
+        // even when macOS icon caches are stale after a rebuild.
+        if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let icon = NSImage(contentsOf: iconURL) {
+            NSApp.applicationIconImage = icon
+        } else if let iconURL = Bundle.module.url(forResource: "AppIcon", withExtension: "icns"),
+                  let icon = NSImage(contentsOf: iconURL) {
+            NSApp.applicationIconImage = icon
+        }
+
         // Initialize database on launch
         Task {
             do {

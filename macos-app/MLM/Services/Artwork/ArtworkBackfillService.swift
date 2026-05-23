@@ -45,8 +45,9 @@ final class ArtworkBackfillService {
     /// Coalesces concurrent extractions per track id.
     private var inFlight: Set<Int64> = []
 
-    /// NotificationCenter observer token (removed in deinit).
-    private var observerToken: NSObjectProtocol?
+    /// NotificationCenter observer tokens (removed in deinit).
+    private var libraryImportObserverToken: NSObjectProtocol?
+    private var downloadCompleteObserverToken: NSObjectProtocol?
 
     // MARK: - Init
 
@@ -72,9 +73,12 @@ final class ArtworkBackfillService {
     }
 
     deinit {
-        // `deinit` is nonisolated; read the MainActor-isolated token via the
+        // `deinit` is nonisolated; read the MainActor-isolated tokens via the
         // safe escape hatch (mirrors PlaylistCoverService deinit pattern).
-        if let token = MainActor.assumeIsolated({ observerToken }) {
+        if let token = MainActor.assumeIsolated({ libraryImportObserverToken }) {
+            NotificationCenter.default.removeObserver(token)
+        }
+        if let token = MainActor.assumeIsolated({ downloadCompleteObserverToken }) {
             NotificationCenter.default.removeObserver(token)
         }
     }
@@ -82,7 +86,7 @@ final class ArtworkBackfillService {
     // MARK: - Notification observer
 
     private func startObserving() {
-        observerToken = NotificationCenter.default.addObserver(
+        libraryImportObserverToken = NotificationCenter.default.addObserver(
             forName: .libraryDidImport,
             object: nil,
             queue: .main
@@ -94,15 +98,26 @@ final class ArtworkBackfillService {
                 await self.backfillMissing()
             }
         }
+
+        downloadCompleteObserverToken = NotificationCenter.default.addObserver(
+            forName: .downloadDidComplete,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, !self.isBackfilling else { return }
+                await self.backfillMissing()
+            }
+        }
     }
 
     // MARK: - Public API
 
     /// Backfill embedded artwork for all tracks that have no artwork DB row.
     /// Called automatically on `.libraryDidImport`; also manually from MaintenanceView (D-16).
-    public func refreshMissing() async {
+    public func refreshMissing(turboMode: Bool = false, progressHandler: ((MaintenanceProgressTracker.ProgressState) -> Void)? = nil) async {
         guard !isBackfilling else { return }
-        await backfillMissing()
+        await backfillMissing(turboMode: turboMode, progressHandler: progressHandler)
     }
 
     /// Re-extract artwork for a single track (D-14 self-healing path).
@@ -116,7 +131,7 @@ final class ArtworkBackfillService {
 
     // MARK: - Backfill orchestration
 
-    private func backfillMissing() async {
+    private func backfillMissing(turboMode: Bool = false, progressHandler: ((MaintenanceProgressTracker.ProgressState) -> Void)? = nil) async {
         isBackfilling = true
         progress = (0, 0)
         defer {
@@ -137,39 +152,54 @@ final class ArtworkBackfillService {
         let total = tracks.count
         guard total > 0 else { return }
         progress = (0, total)
+        
+        let tracker = MaintenanceProgressTracker(total: total, turboMode: turboMode, progressHandler: progressHandler)
+        
+        AppLogger.shared.info("ArtworkBackfill: starting \(total) tracks (turbo: \(turboMode))", source: "ArtworkBackfill")
 
         // D-02: TaskGroup with maxConcurrentTasks: 4 (caps concurrent ffmpeg subprocesses)
+        // Turbo mode increases this to 8 for M4 Macs
+        let concurrentLimit = turboMode ? 8 : maxConcurrentTasks
+        
         await withTaskGroup(of: Void.self) { group in
             var pending = tracks.makeIterator()
             var running = 0
 
-            // Seed initial batch up to maxConcurrentTasks
-            while running < maxConcurrentTasks, let track = pending.next() {
+            // Seed initial batch up to concurrentLimit
+            while running < concurrentLimit, let track = pending.next() {
                 guard let trackId = track.id else { continue }
                 inFlight.insert(trackId)
                 running += 1
                 group.addTask { [weak self] in
-                    await self?.extractForTrack(track)
+                    await self?.extractForTrack(track, tracker: tracker)
                 }
             }
 
-            // As tasks complete, add next batch to maintain maxConcurrentTasks in flight
+            // As tasks complete, add next batch to maintain concurrentLimit in flight
             for await _ in group {
                 progress.current += 1
+                tracker.updateProgress(
+                    trackId: 0,
+                    trackTitle: "",
+                    trackArtist: "",
+                    savedToDb: false
+                )
                 if let track = pending.next() {
                     guard let trackId = track.id else { continue }
                     inFlight.insert(trackId)
                     group.addTask { [weak self] in
-                        await self?.extractForTrack(track)
+                        await self?.extractForTrack(track, tracker: tracker)
                     }
                 }
             }
         }
+        
+        AppLogger.shared.info("ArtworkBackfill: complete", source: "ArtworkBackfill")
     }
 
     // MARK: - Per-track extraction
 
-    private func extractForTrack(_ track: Track) async {
+    private func extractForTrack(_ track: Track, tracker: MaintenanceProgressTracker? = nil) async {
         guard let trackId = track.id,
               let organizedPath = track.organizedPath,
               !organizedPath.isEmpty else {
@@ -180,18 +210,34 @@ final class ArtworkBackfillService {
         // organizedPath is stored as a relative path (e.g., "Artist/Album/track.flac").
         // Resolve it against the library root, mirroring PlaylistCoverService.resolveLocalURL.
         let libraryRoot = (try? await configRepository.getLibraryRoot()) ?? nil
-        let trackURL: URL
+        var trackURL: URL
+        let resolvedOrganized: URL
         if let root = libraryRoot, !root.isEmpty {
-            trackURL = URL(fileURLWithPath: root).appendingPathComponent(organizedPath)
+            resolvedOrganized = URL(fileURLWithPath: root).appendingPathComponent(organizedPath)
         } else {
-            // Fallback: treat as absolute path (handles edge cases where path is absolute)
-            trackURL = URL(fileURLWithPath: organizedPath)
+            resolvedOrganized = URL(fileURLWithPath: organizedPath)
+        }
+
+        if FileManager.default.fileExists(atPath: resolvedOrganized.path) {
+            trackURL = resolvedOrganized
+        } else if FileManager.default.fileExists(atPath: track.originalPath) {
+            trackURL = URL(fileURLWithPath: track.originalPath)
+        } else {
+            trackURL = resolvedOrganized // Fall back so the warning log below formats nicely
         }
 
         guard FileManager.default.fileExists(atPath: trackURL.path) else {
             AppLogger.shared.warn("ArtworkBackfill: audio file not found at \(trackURL.path) — skipping track \(trackId)",
                                   source: "ArtworkBackfill")
             inFlight.remove(trackId)
+            if let tracker = tracker {
+                tracker.updateProgress(
+                    trackId: trackId,
+                    trackTitle: track.title,
+                    trackArtist: track.artist,
+                    savedToDb: false
+                )
+            }
             return
         }
 
@@ -199,6 +245,14 @@ final class ArtworkBackfillService {
         // D-07: returns nil silently if ffmpeg not found — no user-facing error
         guard let data = await ArtworkService.extractEmbeddedArtwork(from: trackURL) else {
             inFlight.remove(trackId)
+            if let tracker = tracker {
+                tracker.updateProgress(
+                    trackId: trackId,
+                    trackTitle: track.title,
+                    trackArtist: track.artist,
+                    savedToDb: false
+                )
+            }
             return
         }
 
@@ -209,6 +263,14 @@ final class ArtworkBackfillService {
             AppLogger.shared.warn("ArtworkBackfill: saveResized failed for track \(trackId): \(error)",
                                   source: "ArtworkBackfill")
             inFlight.remove(trackId)
+            if let tracker = tracker {
+                tracker.updateProgress(
+                    trackId: trackId,
+                    trackTitle: track.title,
+                    trackArtist: track.artist,
+                    savedToDb: false
+                )
+            }
             return
         }
 
@@ -222,15 +284,34 @@ final class ArtworkBackfillService {
             resolution: "1200",
             fetchedAt: ISO8601DateFormatter().string(from: Date())
         )
-        do {
+do {
             try await analysisRepository.saveArtwork(artwork)
+            if let tracker = tracker {
+                tracker.updateProgress(
+                    trackId: trackId,
+                    trackTitle: track.title,
+                    trackArtist: track.artist,
+                    savedToDb: true
+                )
+                AppLogger.shared.debug("ArtworkBackfill [\(tracker.currentState.current)/\(tracker.currentState.total)] \(track.artist) - \(track.title) → saved ✓", source: "ArtworkBackfill")
+            }
         } catch {
             AppLogger.shared.warn("ArtworkBackfill: saveArtwork DB failed for track \(trackId): \(error)",
                                   source: "ArtworkBackfill")
+            if let tracker = tracker {
+                tracker.updateProgress(
+                    trackId: trackId,
+                    trackTitle: track.title,
+                    trackArtist: track.artist,
+                    savedToDb: false
+                )
+            }
             inFlight.remove(trackId)
             return
         }
 
+        inFlight.remove(trackId)
+        
         // D-03: Notify UI per-track so covers appear incrementally ("pop-in" effect)
         NotificationCenter.default.post(
             name: .trackArtworkDidChange,
@@ -241,7 +322,5 @@ final class ArtworkBackfillService {
                 "origin": "artworkBackfill"   // Re-entry guard tag (analogous to PlaylistCoverService "coverService")
             ]
         )
-
-        inFlight.remove(trackId)
     }
 }

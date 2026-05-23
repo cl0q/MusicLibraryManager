@@ -18,8 +18,6 @@ struct SyncProfileDetailView: View {
     let profile: SyncProfile
 
     @Environment(\.container) private var container
-    @State private var showPlaylistPicker = false
-    @State private var showTrackPicker = false
 
     private var vm: SyncViewModel? { container.syncViewModel }
 
@@ -57,11 +55,7 @@ struct SyncProfileDetailView: View {
                     SyncSettingsForm(profile: profile, vm: v)
                 }
 
-                Divider().background(Color.mlmEdgeSubtle)
-
-                // 3. Content header + sections (D-07)
-                contentHeader
-
+                // 3. Content sections (Playlists & Tracks)
                 if let v = vm {
                     SyncContentSections(profile: profile, vm: v)
                 }
@@ -92,10 +86,21 @@ struct SyncProfileDetailView: View {
 
                     // Error
                     if let error = v.errorMessage {
-                        Label(error, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundColor(.mlmError)
-                            .font(MLMFont.muted)
-                            .padding(.vertical, 4)
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.mlmError)
+                            Text(error)
+                                .font(MLMFont.muted)
+                                .foregroundColor(.mlmError)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.mlmError.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.mlmError.opacity(0.15), lineWidth: 1)
+                        )
                     }
 
                     // 5. Result section (D-13)
@@ -107,16 +112,6 @@ struct SyncProfileDetailView: View {
             .padding(16)
         }
         .background(Color.mlmBase)
-        .sheet(isPresented: $showPlaylistPicker) {
-            if let v = vm {
-                PlaylistPickerSheet(vm: v)
-            }
-        }
-        .sheet(isPresented: $showTrackPicker) {
-            if let v = vm {
-                TrackPickerSheet(vm: v)
-            }
-        }
         // VIEW observes .syncProfileDidChange — VM only posts (confirmed in 38-02)
         .onReceive(NotificationCenter.default.publisher(for: .syncProfileDidChange)) { notification in
             guard let profileId = notification.userInfo?["profileId"] as? Int64,
@@ -170,29 +165,23 @@ struct SyncProfileDetailView: View {
             }
 
             if let reason {
-                Label(reason, systemImage: "info.circle")
-                    .font(MLMFont.muted)
-                    .foregroundColor(.mlmInkSecondary)
+                HStack(spacing: 8) {
+                    Image(systemName: "info.circle.fill")
+                        .foregroundColor(.mlmAccent)
+                    Text(reason)
+                        .font(MLMFont.muted)
+                        .foregroundColor(.mlmInkSecondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.mlmAccent.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.mlmAccent.opacity(0.15), lineWidth: 1)
+                )
             }
         }
-    }
-
-    // MARK: - Content Header
-
-    private var contentHeader: some View {
-        HStack(spacing: 8) {
-            Text("Inhalt")
-                .font(MLMFont.bodyBold)
-                .foregroundColor(.mlmInk)
-            Spacer()
-            Button("Playlists hinzufügen…") { showPlaylistPicker = true }
-                .buttonStyle(.borderless)
-                .tint(.mlmAccent)
-            Button("Tracks hinzufügen…") { showTrackPicker = true }
-                .buttonStyle(.borderless)
-                .tint(.mlmAccent)
-        }
-        .padding(.top, 4)
     }
 
     // MARK: - Preview Stats
@@ -204,46 +193,85 @@ struct SyncProfileDetailView: View {
                 .font(MLMFont.sectionLabel)
                 .foregroundColor(.mlmInkMuted)
 
-            HStack(spacing: 24) {
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 12),
+                GridItem(.flexible(), spacing: 12),
+                GridItem(.flexible(), spacing: 12),
+                GridItem(.flexible(), spacing: 12)
+            ], spacing: 12) {
                 statCard(
                     value: "\(preview.filesToAdd.count)",
                     label: "Hinzufügen",
+                    systemImage: "plus.circle.fill",
                     color: .green
                 )
                 statCard(
                     value: "\(preview.filesToRemove.count)",
                     label: "Entfernen",
+                    systemImage: "minus.circle.fill",
                     color: .mlmError
                 )
                 statCard(
                     value: formatBytes(preview.totalNewSize),
                     label: "Neue Größe",
-                    color: .mlmInk
+                    systemImage: "arrow.triangle.2.circlepath",
+                    color: .mlmAccent
                 )
                 statCard(
                     value: formatBytes(preview.deviceAvailableSpace),
                     label: "Verfügbar",
-                    color: preview.hasSufficientSpace ? .mlmInk : .mlmError
+                    systemImage: "sdcard.fill",
+                    color: preview.hasSufficientSpace ? .green : .mlmError
                 )
             }
 
             if !preview.hasSufficientSpace {
-                Label("Nicht genug Speicherplatz", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundColor(.mlmError)
-                    .font(MLMFont.muted)
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.mlmError)
+                    Text("Nicht genug Speicherplatz auf dem Zielgerät")
+                        .font(MLMFont.muted)
+                        .foregroundColor(.mlmError)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.mlmError.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.mlmError.opacity(0.15), lineWidth: 1)
+                )
             }
         }
     }
 
-    private func statCard(value: String, label: String, color: Color) -> some View {
-        VStack(spacing: 4) {
-            Text(value)
-                .font(.system(size: 22, weight: .semibold, design: .monospaced))
+    private func statCard(value: String, label: String, systemImage: String, color: Color) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16))
                 .foregroundColor(color)
-            Text(label)
-                .font(MLMFont.muted)
-                .foregroundColor(.mlmInkMuted)
+                .frame(width: 32, height: 32)
+                .background(color.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(value)
+                    .font(.system(size: 15, weight: .bold, design: .monospaced))
+                    .foregroundColor(.mlmInk)
+                Text(label)
+                    .font(MLMFont.muted)
+                    .foregroundColor(.mlmInkMuted)
+            }
+            Spacer()
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color.mlmSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.mlmEdgeSubtle, lineWidth: 1)
+        )
     }
 
     // MARK: - Result Section

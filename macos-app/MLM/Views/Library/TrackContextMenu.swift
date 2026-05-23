@@ -10,6 +10,8 @@ struct TrackContextMenu: View {
     let availablePlaylists: [Playlist]
     let availableSyncProfiles: [SyncProfile]
     let addToSyncProfile: (SyncProfile) -> Void
+    var playlist: Playlist? = nil
+    var onRemoveFromPlaylist: (() -> Void)? = nil
     @Environment(\.container) private var container
 
     /// Resolved selected tracks.
@@ -49,6 +51,17 @@ struct TrackContextMenu: View {
     }
 
     var body: some View {
+        if playlist != nil {
+            Section {
+                Button(role: .destructive) {
+                    onRemoveFromPlaylist?()
+                } label: {
+                    Label("Remove from Playlist\(countSuffix)", systemImage: "minus.circle")
+                }
+            }
+            Divider()
+        }
+
         Section {
             Button { playSelectedTrack() } label: {
                 Label("Play", systemImage: "play.fill")
@@ -56,10 +69,23 @@ struct TrackContextMenu: View {
             .disabled(selectedTracks.isEmpty || selectedTracks.first?.isRemote == true)
         }
 
+
         Divider()
 
         Section {
             Menu {
+                Button {
+                    NotificationCenter.default.post(
+                        name: .triggerNewPlaylistFromSelection,
+                        object: nil,
+                        userInfo: ["trackIds": Array(selectedTrackIDs)]
+                    )
+                } label: {
+                    Label("New Playlist…", systemImage: "plus.square.on.square")
+                }
+
+                Divider()
+
                 if availablePlaylists.isEmpty {
                     Text("No playlists")
                 } else {
@@ -84,6 +110,18 @@ struct TrackContextMenu: View {
 
         Section {
             Menu {
+                Button {
+                    NotificationCenter.default.post(
+                        name: .triggerNewSyncProfileFromSelection,
+                        object: nil,
+                        userInfo: ["trackIds": Array(selectedTrackIDs)]
+                    )
+                } label: {
+                    Label("Neues Profil erstellen…", systemImage: "plus.circle")
+                }
+
+                Divider()
+
                 if availableSyncProfiles.isEmpty {
                     Text("Keine Profile — erstelle zuerst eines")
                 } else {
@@ -99,7 +137,7 @@ struct TrackContextMenu: View {
                 Button {
                     NotificationCenter.default.post(name: .navigateToCreateSyncProfile, object: nil)
                 } label: {
-                    Label("Neues Profil erstellen…", systemImage: "plus.circle")
+                    Label("Neues Profil erstellen… (Settings)", systemImage: "plus.circle")
                 }
             } label: {
                 Label("Sync zu \u{25B8}", systemImage: "arrow.triangle.2.circlepath")

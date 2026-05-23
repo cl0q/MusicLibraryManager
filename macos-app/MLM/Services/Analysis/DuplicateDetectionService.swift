@@ -146,12 +146,14 @@ enum DuplicateMatcher {
             let start = max(0, i - matchDistance)
             let end = min(i + matchDistance + 1, len2)
 
-            for j in start..<end {
-                if matched2[j] || chars1[i] != chars2[j] { continue }
-                matched1[i] = true
-                matched2[j] = true
-                matches += 1
-                break
+            if start < end {
+                for j in start..<end {
+                    if matched2[j] || chars1[i] != chars2[j] { continue }
+                    matched1[i] = true
+                    matched2[j] = true
+                    matches += 1
+                    break
+                }
             }
         }
 
@@ -161,9 +163,11 @@ enum DuplicateMatcher {
         var k = 0
         for i in 0..<len1 {
             if !matched1[i] { continue }
-            while !matched2[k] { k += 1 }
-            if chars1[i] != chars2[k] { transpositions += 1 }
-            k += 1
+            while k < len2 && !matched2[k] { k += 1 }
+            if k < len2 {
+                if chars1[i] != chars2[k] { transpositions += 1 }
+                k += 1
+            }
         }
 
         let jaro = (
@@ -195,10 +199,15 @@ final class DeepScanService {
     }
 
     /// Match threshold for fingerprint comparison.
-    private static let fingerprintThreshold: Double = 0.4
+    ///
+    /// With correct Chromaprint int32 XOR comparison, random pairs score ~0.50.
+    /// True duplicates (same recording) score 0.90–1.00.
+    private static let fingerprintThreshold: Double = 0.85
 
     /// Metadata agreement threshold (Jaro-Winkler).
-    private static let metadataAgreementThreshold: Double = 0.7
+    ///
+    /// Raised to 0.80 to cut down on noise conflicts from genre/album-mates.
+    private static let metadataAgreementThreshold: Double = 0.80
 
     private let trackRepository: TrackRepository
     private let analysisRepository: AnalysisRepository
@@ -208,13 +217,23 @@ final class DeepScanService {
         self.analysisRepository = analysisRepository
     }
 
-    /// Run a deep scan comparing all fingerprinted tracks for duplicates.
+    /// Run a deep scan comparing all fingerprinted tracks for duplicates with turbo mode.
     ///
     /// O(n²) comparison. For large libraries this can be slow.
-    func deepScan(onProgress: ((Int, Int) -> Void)? = nil) async throws -> DeepScanResult {
+    /// Turbo mode uses parallel processing for batch operations.
+    func deepScan(
+        turboMode: Bool = false,
+        progressHandler: ((MaintenanceProgressTracker.ProgressState) -> Void)? = nil
+    ) async throws -> DeepScanResult {
         let tracks = try await trackRepository.fetchFingerprintedTracks()
         var result = DeepScanResult()
-
+        
+        let tracker = MaintenanceProgressTracker(
+            total: tracks.count,
+            turboMode: turboMode,
+            progressHandler: progressHandler
+        )
+        
         // Load all fingerprints
         var fingerprints: [Int64: Data] = [:]
         for track in tracks {
@@ -227,12 +246,26 @@ final class DeepScanService {
         let trackList = tracks.filter { fingerprints[$0.id ?? 0] != nil }
         let totalPairs = trackList.count * (trackList.count - 1) / 2
 
+        AppLogger.shared.info("Starting deep scan: \(trackList.count) tracks, \(totalPairs) pairs (turbo: \(turboMode))", source: "Dedup")
+
         var pairIndex = 0
         for i in 0..<trackList.count {
             for j in (i + 1)..<trackList.count {
                 pairIndex += 1
-                if pairIndex % 100 == 0 {
-                    onProgress?(pairIndex, totalPairs)
+                
+                if tracker.isCancelled {
+                    AppLogger.shared.info("Deep scan cancelled at \(result.pairsCompared) pairs", source: "Dedup")
+                    return result
+                }
+                
+                if pairIndex % BatchControl.batchSize(turboMode: turboMode) == 0 {
+                    tracker.updateProgress(
+                        current: pairIndex,
+                        trackId: 0,
+                        trackTitle: "Comparing pairs",
+                        trackArtist: "",
+                        savedToDb: false
+                    )
                 }
 
                 let trackA = trackList[i]

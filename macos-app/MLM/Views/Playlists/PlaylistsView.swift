@@ -32,7 +32,7 @@ struct PlaylistsView: View {
 
     var body: some View {
         Group {
-            if let selectedPlaylist, let viewModel {
+            if let selectedPlaylist, viewModel != nil {
                 PlaylistDetailView(
                     playlist: selectedPlaylist,
                     onBack: { self.selectedPlaylist = nil },
@@ -49,13 +49,13 @@ struct PlaylistsView: View {
         .task {
             initializeViewModel()
             await viewModel?.loadPlaylists()
-            reloadSyncProfiles()
+            await reloadSyncProfiles()
         }
         .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { _ in
             Task { await viewModel?.refresh() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .syncProfileDidChange)) { _ in
-            reloadSyncProfiles()
+            Task { await reloadSyncProfiles() }
         }
         .onAppear {
             // Revalidate covers for all displayed playlists when the grid becomes visible.
@@ -232,55 +232,11 @@ struct PlaylistsView: View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: 12) {
                 ForEach(viewModel.displayedPlaylists) { playlist in
-                    PlaylistCard(
+                    PlaylistsGridCard(
                         playlist: playlist,
-                        trackCount: viewModel.trackCounts[playlist.id ?? 0] ?? 0,
-                        isRenaming: viewModel.renamingPlaylistID == playlist.id,
-                        renameText: Binding(
-                            get: { viewModel.renameText },
-                            set: { viewModel.renameText = $0 }
-                        ),
-                        onTap: {
-                            selectedPlaylist = playlist
-                        },
-                        onRename: {
-                            viewModel.startRename(playlist: playlist)
-                        },
-                        onConfirmRename: {
-                            Task { await viewModel.confirmRename() }
-                        },
-                        onCancelRename: {
-                            viewModel.cancelRename()
-                        },
-                        onTogglePin: {
-                            Task { await viewModel.togglePin(id: playlist.id!) }
-                        },
-                        onDelete: {
-                            Task { await viewModel.deletePlaylist(id: playlist.id!) }
-                        },
-                        onCoverDropped: { url in
-                            guard let pid = playlist.id else { return }
-                            await container.playlistCoverService?.setCustomCover(
-                                playlistId: pid,
-                                sourceURL: url
-                            )
-                        },
-                        onResetCover: {
-                            guard let pid = playlist.id else { return }
-                            Task {
-                                await container.playlistCoverService?.resetToAuto(playlistId: pid)
-                            }
-                        },
-                        onCoverDropRejected: {
-                            viewModel.flagCoverDropRejected()
-                        },
+                        viewModel: viewModel,
                         availableSyncProfiles: availableSyncProfiles,
-                        onAddToSyncProfile: { profile, playlistId in
-                            Task {
-                                container.syncViewModel?.selectedProfile = profile
-                                await container.syncViewModel?.addPlaylists([playlistId])
-                            }
-                        }
+                        selectedPlaylist: $selectedPlaylist
                     )
                 }
             }
@@ -395,7 +351,103 @@ struct PlaylistsView: View {
         viewModel = PlaylistViewModel(playlistRepository: playlistRepo)
     }
 
-    private func reloadSyncProfiles() {
-        availableSyncProfiles = container.syncViewModel?.profiles ?? []
+    private func reloadSyncProfiles() async {
+        if let syncVM = container.syncViewModel {
+            if syncVM.profiles.isEmpty {
+                await syncVM.loadProfiles()
+            }
+            availableSyncProfiles = syncVM.profiles
+        }
+    }
+}
+
+/// Helper view to avoid Swift compiler timeout by breaking up complex nested grid card layout.
+private struct PlaylistsGridCard: View {
+    let playlist: Playlist
+    @Bindable var viewModel: PlaylistViewModel
+    let availableSyncProfiles: [SyncProfile]
+    @Binding var selectedPlaylist: Playlist?
+
+    @Environment(\.container) private var container
+
+    var body: some View {
+        PlaylistCard(
+            playlist: playlist,
+            trackCount: viewModel.trackCounts[playlist.id ?? 0] ?? 0,
+            isRenaming: viewModel.renamingPlaylistID == playlist.id,
+            renameText: Binding(
+                get: { viewModel.renameText },
+                set: { viewModel.renameText = $0 }
+            ),
+            onTap: {
+                selectedPlaylist = playlist
+            },
+            onRename: {
+                viewModel.startRename(playlist: playlist)
+            },
+            onConfirmRename: {
+                Task { await viewModel.confirmRename() }
+            },
+            onCancelRename: {
+                viewModel.cancelRename()
+            },
+            onTogglePin: {
+                Task { await viewModel.togglePin(id: playlist.id!) }
+            },
+            onDelete: {
+                Task { await viewModel.deletePlaylist(id: playlist.id!) }
+            },
+            onSpringLoad: {
+                selectedPlaylist = playlist
+            },
+            onCoverDropped: { url in
+                guard let pid = playlist.id else { return }
+                await container.playlistCoverService?.setCustomCover(
+                    playlistId: pid,
+                    sourceURL: url
+                )
+            },
+            onResetCover: {
+                guard let pid = playlist.id else { return }
+                Task {
+                    await container.playlistCoverService?.resetToAuto(playlistId: pid)
+                }
+            },
+            onCoverDropRejected: {
+                viewModel.flagCoverDropRejected()
+            },
+            availableSyncProfiles: availableSyncProfiles,
+            onAddToSyncProfile: { profile, playlistId in
+                Task {
+                    container.syncViewModel?.selectedProfile = profile
+                    await container.syncViewModel?.addPlaylists([playlistId])
+                }
+            },
+            onTracksDropped: { trackIds in
+                guard let pid = playlist.id,
+                      let playlistRepo = container.playlistRepository else { return }
+                do {
+                    let existingTracks = try await playlistRepo.fetchTracks(playlistId: pid)
+                    let lastPos = existingTracks.last?.playlistPosition
+                    let nextPos = FractionalIndexer.positionBetween(left: lastPos, right: nil)
+                    
+                    try await playlistRepo.addTracks(
+                        playlistId: pid,
+                        trackIds: trackIds,
+                        startPosition: nextPos
+                    )
+                    
+                    NotificationCenter.default.post(
+                        name: .playlistDidChange,
+                        object: nil,
+                        userInfo: ["playlistId": pid]
+                    )
+                    
+                    await viewModel.loadPlaylists()
+                } catch {
+                    AppLogger.shared.error("Failed to add dropped tracks: \(error.localizedDescription)", source: "PlaylistsView")
+                }
+            }
+        )
     }
 }

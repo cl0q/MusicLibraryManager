@@ -12,6 +12,7 @@ struct SyncView: View {
     @State private var hasRunDetection = false
     @State private var shouldApplyDeviceDefaults = false
     @State private var showRockboxToast = false
+    @State private var isCreating = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -57,6 +58,7 @@ struct SyncView: View {
                     .font(MLMFont.sectionLabel)
                 Spacer()
                 Button {
+                    vm.clearError()
                     showCreateSheet = true
                 } label: {
                     Image(systemName: "plus")
@@ -209,6 +211,13 @@ struct SyncView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
+            if let vm = container.syncViewModel, let err = vm.errorMessage {
+                Text(err)
+                    .foregroundColor(.red)
+                    .font(MLMFont.muted)
+                    .multilineTextAlignment(.center)
+            }
+
             HStack {
                 Button("Abbrechen") {
                     showCreateSheet = false
@@ -217,12 +226,14 @@ struct SyncView: View {
                     shouldApplyDeviceDefaults = false
                 }
                 .keyboardShortcut(.cancelAction)
+                .disabled(isCreating)
 
                 Spacer()
 
                 Button("Erstellen") {
                     guard let vm = container.syncViewModel, !newProfileName.isEmpty else { return }
                     let applyDefaults = shouldApplyDeviceDefaults
+                    isCreating = true
                     Task {
                         await vm.createProfile(
                             name: newProfileName,
@@ -232,16 +243,19 @@ struct SyncView: View {
                             fat32SafePaths: true,
                             cleanupRemovedFiles: true
                         )
-                        showCreateSheet = false
-                        newProfileName = ""
-                        newProfileOutput = ""
-                        detectedDevices = []
-                        hasRunDetection = false
-                        shouldApplyDeviceDefaults = false
+                        if vm.errorMessage == nil {
+                            showCreateSheet = false
+                            newProfileName = ""
+                            newProfileOutput = ""
+                            detectedDevices = []
+                            hasRunDetection = false
+                            shouldApplyDeviceDefaults = false
+                        }
+                        isCreating = false
                     }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(newProfileName.isEmpty)
+                .disabled(newProfileName.isEmpty || isCreating)
             }
         }
         .padding(24)

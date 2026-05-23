@@ -5,7 +5,7 @@ import GRDB
 
 /// Whitelist of sortable columns for library queries.
 enum SortColumn: String, CaseIterable {
-    case title, artist, album, dateAdded, duration, bitrate, year, energy, genre, format
+    case title, artist, album, dateAdded, duration, bitrate, year, energy, danceability, genre, format
 
     /// Maps to the actual SQLite column name.
     var sqlColumn: String {
@@ -18,6 +18,7 @@ enum SortColumn: String, CaseIterable {
         case .bitrate:   return "bitrate"
         case .year:      return "year"
         case .energy:    return "energy_bucket"
+        case .danceability: return "danceability"
         case .genre:     return "genre"
         case .format:    return "format"
         }
@@ -44,6 +45,25 @@ final class TrackRepository: Sendable {
         try await database.read { db in
             try Track
                 .filter(Track.Columns.organizedPath != nil)
+                .order(Track.Columns.artist, Track.Columns.album, Track.Columns.title)
+                .fetchAll(db)
+        }
+    }
+
+    /// Fetch all track IDs that have an associated artwork path.
+    func fetchTrackIdsWithArtwork() async throws -> Set<Int64> {
+        try await database.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT DISTINCT track_id FROM artwork WHERE artwork_path IS NOT NULL
+            """)
+            return Set(rows.compactMap { $0["track_id"] as? Int64 })
+        }
+    }
+
+    /// Fetch all tracks (both local and remote).
+    func fetchAllTracks() async throws -> [Track] {
+        try await database.read { db in
+            try Track
                 .order(Track.Columns.artist, Track.Columns.album, Track.Columns.title)
                 .fetchAll(db)
         }
@@ -433,6 +453,17 @@ final class TrackRepository: Sendable {
         }
     }
 
+    /// Rewrite both organized_path and original_path columns.
+    /// Used by the directory-rename repair maintenance action.
+    func setPathsOnly(trackId: Int64, organizedPath: String, originalPath: String) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE tracks SET organized_path = ?, original_path = ? WHERE id = ?",
+                arguments: [organizedPath, originalPath, trackId]
+            )
+        }
+    }
+
     /// Demote a track back to remote-only by clearing organized_path
     /// AND download_status together. Used by the repair pass when a row
     /// carries a stale staging path but the original_path is a streaming
@@ -509,6 +540,17 @@ final class TrackRepository: Sendable {
         }
     }
 
+    /// Fetch tracks that lack Danceability analysis.
+    func fetchTracksWithoutDanceability() async throws -> [Track] {
+        try await database.read { db in
+            try Track.fetchAll(db, sql: """
+                SELECT * FROM tracks
+                WHERE danceability IS NULL AND organized_path IS NOT NULL
+                ORDER BY id
+            """)
+        }
+    }
+
     /// Fetch tracks that lack artwork.
     func fetchTracksWithoutArtwork() async throws -> [Track] {
         try await database.read { db in
@@ -521,12 +563,31 @@ final class TrackRepository: Sendable {
         }
     }
 
-    /// Update energy bucket for a track.
-    func updateEnergyBucket(trackId: Int64, energyBucket: Int, lufsI: Double) async throws {
+    /// Update energy bucket and loudness info for a track.
+    func updateEnergyBucket(
+        trackId: Int64,
+        energyBucket: Int,
+        lufsI: Double,
+        lufsRange: Double? = nil,
+        truePeak: Double? = nil
+    ) async throws {
         try await database.write { db in
             try db.execute(
-                sql: "UPDATE tracks SET energy_bucket = ?, lufs_i = ? WHERE id = ?",
-                arguments: [energyBucket, lufsI, trackId]
+                sql: "UPDATE tracks SET energy_bucket = ?, lufs_i = ?, lufs_range = ?, true_peak = ? WHERE id = ?",
+                arguments: [energyBucket, lufsI, lufsRange, truePeak, trackId]
+            )
+        }
+    }
+
+    /// Update danceability for a track.
+    func updateDanceability(
+        trackId: Int64,
+        danceability: Double
+    ) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE tracks SET danceability = ? WHERE id = ?",
+                arguments: [danceability, trackId]
             )
         }
     }
@@ -637,6 +698,34 @@ final class TrackRepository: Sendable {
         case "contains": "LIKE"
         case "in": "IN"
         default: "="
+        }
+    }
+
+    /// Fetch track by external ID linked to a specific source name.
+    func fetchTrackByExternalId(_ externalId: String, sourceName: String) async throws -> Track? {
+        try await database.read { db in
+            try Track.fetchOne(db, sql: """
+                SELECT t.* FROM tracks t
+                INNER JOIN track_sources ts ON ts.track_id = t.id
+                INNER JOIN sources s ON s.id = ts.source_id
+                WHERE ts.external_id = ? AND s.name = ?
+                LIMIT 1
+            """, arguments: [externalId, sourceName])
+        }
+    }
+
+    /// Fetch track by SoundCloud permalink/schemes.
+    func fetchTrackBySoundCloudPath(externalId: String, permalink: String?) async throws -> Track? {
+        var paths = ["soundcloud://\(externalId)", "https://api.soundcloud.com/tracks/\(externalId)"]
+        if let permalink = permalink, !permalink.isEmpty {
+            paths.append(permalink)
+        }
+        return try await database.read { db in
+            try Track.fetchOne(db, sql: """
+                SELECT * FROM tracks
+                WHERE original_path IN (\(paths.map { _ in "?" }.joined(separator: ", ")))
+                LIMIT 1
+            """, arguments: StatementArguments(paths))
         }
     }
 }

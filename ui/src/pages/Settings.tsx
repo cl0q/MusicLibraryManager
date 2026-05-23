@@ -8,6 +8,12 @@ import {
   analyzeLoudnessAll,
   rescanAlbums,
   backfillYeatTagsFromDb,
+  fingerprintLibrary,
+  fetchArtwork,
+  analyzeReplayGain,
+  deepScan,
+  setTurboMode,
+  getTurboMode,
 } from "../utils/tauri-commands";
 import { useTheme, type ThemeName } from "../contexts/ThemeContext";
 
@@ -50,6 +56,11 @@ export default function Settings() {
   const [customApp, setCustomApp] = useState("");
   const [saving, setSaving] = useState(false);
   const [maintenanceRunning, setMaintenanceRunning] = useState<string | null>(null);
+  const [turboMode, setTurboModeState] = useState(false);
+
+  useEffect(() => {
+    getTurboMode().then(setTurboModeState);
+  }, []);
 
   useEffect(() => {
     getAppSetting("file_manager").then((val) => {
@@ -193,8 +204,104 @@ export default function Settings() {
         <LibrarySetup />
       </Section>
 
+      {/* ── Performance ────────────────────────── */}
+      <Section label="Performance">
+        <Row label="Turbo Mode">
+          <button
+            onClick={() => {
+              setTurboModeState(!turboMode);
+              setTurboMode(!turboMode);
+              toast.success(turboMode ? "Turbo mode disabled" : "Turbo mode enabled - using 80% of cores");
+            }}
+            className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+              turboMode
+                ? "bg-accent/20 text-accent border border-accent/30"
+                : "bg-raised text-ink-secondary border border-edge hover:bg-raised/60"
+            }`}
+          >
+            {turboMode ? "ON (80% cores)" : "OFF"}
+          </button>
+        </Row>
+      </Section>
+
       {/* ── Maintenance ────────────────────────── */}
       <Section label="Maintenance" last>
+        <MaintenanceRow
+          label="Fingerprint All Tracks"
+          hint="Generate Chromaprint fingerprints for all unfingerprinted tracks"
+          running={maintenanceRunning === "fingerprint"}
+          disabled={maintenanceRunning !== null}
+          actions={[
+            {
+              label: "Run",
+              loadingLabel: "Fingerprinting…",
+              onClick: () =>
+                runMaintenance("fingerprint", async () => {
+                  const r = await fingerprintLibrary();
+                  toast.success(
+                    `Fingerprint — ${r.processed} processed, ${r.failed} failed`,
+                  );
+                }),
+            },
+          ]}
+        />
+        <MaintenanceRow
+          label="Fetch Album Artwork"
+          hint="Download artwork from MusicBrainz/CAA for tracks without artwork"
+          running={maintenanceRunning === "artwork"}
+          disabled={maintenanceRunning !== null}
+          actions={[
+            {
+              label: "Run",
+              loadingLabel: "Fetching…",
+              onClick: () =>
+                runMaintenance("artwork", async () => {
+                  const r = await fetchArtwork();
+                  toast.success(
+                    `Artwork — ${r.fetched} fetched, ${r.already_cached} cached, ${r.not_found} not found, ${r.failed} failed`,
+                  );
+                }),
+            },
+          ]}
+        />
+        <MaintenanceRow
+          label="ReplayGain Analysis"
+          hint="Analyze ReplayGain + loudness for all unanalyzed tracks"
+          running={maintenanceRunning === "replaygain"}
+          disabled={maintenanceRunning !== null}
+          actions={[
+            {
+              label: "Run",
+              loadingLabel: "Analyzing…",
+              onClick: () =>
+                runMaintenance("replaygain", async () => {
+                  const r = await analyzeReplayGain();
+                  toast.success(
+                    `ReplayGain — ${r.analyzed} analyzed, ${r.failed} failed`,
+                  );
+                }),
+            },
+          ]}
+        />
+        <MaintenanceRow
+          label="Deep Scan for Duplicates"
+          hint="Fingerprint-based duplicate detection"
+          running={maintenanceRunning === "deepscan"}
+          disabled={maintenanceRunning !== null}
+          actions={[
+            {
+              label: "Run",
+              loadingLabel: "Scanning…",
+              onClick: () =>
+                runMaintenance("deepscan", async () => {
+                  const r = await deepScan();
+                  toast.success(
+                    `Deep Scan — ${r.pairs_compared} pairs, ${r.duplicates_found} duplicates, ${r.conflicts_flagged} conflicts`,
+                  );
+                }),
+            },
+          ]}
+        />
         <MaintenanceRow
           label="Analyze Loudness"
           hint="LUFS-I, LRA, peak, energy for all tracks"

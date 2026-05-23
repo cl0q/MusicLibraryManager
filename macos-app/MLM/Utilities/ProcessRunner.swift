@@ -65,54 +65,129 @@ final class ProcessRunner {
         let stderrBuffer = OutputBuffer()
 
         // Stream stdout — collect all data in thread-safe buffer
-        if let onOutput = onOutput {
-            stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
-                let data = handle.availableData
-                if !data.isEmpty {
-                    stdoutBuffer.append(data)
-                    if let line = String(data: data, encoding: .utf8) {
-                        onOutput(line)
-                    }
+        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if !data.isEmpty {
+                stdoutBuffer.append(data)
+                if let onOutput = onOutput, let line = String(data: data, encoding: .utf8) {
+                    onOutput(line)
                 }
             }
         }
 
         // Stream stderr similarly — yt-dlp writes [download] progress here.
-        if let onStderr = onStderr {
-            stderrPipe.fileHandleForReading.readabilityHandler = { handle in
-                let data = handle.availableData
-                if !data.isEmpty {
-                    stderrBuffer.append(data)
-                    if let line = String(data: data, encoding: .utf8) {
-                        onStderr(line)
-                    }
+        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if !data.isEmpty {
+                stderrBuffer.append(data)
+                if let onStderr = onStderr, let line = String(data: data, encoding: .utf8) {
+                    onStderr(line)
                 }
             }
         }
 
-        try process.run()
-
-        // If no streaming callback, collect all output at once
-        if onOutput == nil {
-            let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-            stdoutBuffer.append(data)
+        // Wait for process completion using checked continuation and terminationHandler
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            process.terminationHandler = { _ in
+                continuation.resume()
+            }
+            do {
+                try process.run()
+            } catch {
+                process.terminationHandler = nil
+                stdoutPipe.fileHandleForReading.readabilityHandler = nil
+                stderrPipe.fileHandleForReading.readabilityHandler = nil
+                continuation.resume(throwing: error)
+            }
         }
-        if onStderr == nil {
-            let data = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-            stderrBuffer.append(data)
-        }
 
-        process.waitUntilExit()
-
-        // Clear readability handlers
+        // Disable readability handlers
         stdoutPipe.fileHandleForReading.readabilityHandler = nil
         stderrPipe.fileHandleForReading.readabilityHandler = nil
+
+        // Flush any remaining data in the pipes
+        let remainingStdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        if !remainingStdout.isEmpty {
+            stdoutBuffer.append(remainingStdout)
+            if let onOutput = onOutput, let line = String(data: remainingStdout, encoding: .utf8) {
+                onOutput(line)
+            }
+        }
+
+        let remainingStderr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        if !remainingStderr.isEmpty {
+            stderrBuffer.append(remainingStderr)
+            if let onStderr = onStderr, let line = String(data: remainingStderr, encoding: .utf8) {
+                onStderr(line)
+            }
+        }
 
         return ProcessResult(
             exitCode: process.terminationStatus,
             stdout: String(data: stdoutBuffer.data, encoding: .utf8) ?? "",
             stderr: String(data: stderrBuffer.data, encoding: .utf8) ?? ""
         )
+    }
+
+    /// Run a CLI process and return the raw stdout binary Data.
+    /// Useful for reading audio streams decodes (PCM) without UTF-8 corruption.
+    static func runBinary(
+        _ executable: String,
+        arguments: [String] = [],
+        workingDirectory: URL? = nil
+    ) async throws -> Data {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        process.environment = enrichedEnvironment()
+
+        if let wd = workingDirectory {
+            process.currentDirectoryURL = wd
+        }
+
+        let stdoutPipe = Pipe()
+        // Divert standard error to a separate pipe so it doesn't pollute standard output
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        let stdoutBuffer = OutputBuffer()
+
+        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if !data.isEmpty {
+                stdoutBuffer.append(data)
+            }
+        }
+
+        // Drain stderr to prevent blocking/deadlocks when the OS buffer fills up (finite capacity)
+        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+            _ = handle.availableData
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            process.terminationHandler = { _ in
+                continuation.resume()
+            }
+            do {
+                try process.run()
+            } catch {
+                process.terminationHandler = nil
+                stdoutPipe.fileHandleForReading.readabilityHandler = nil
+                stderrPipe.fileHandleForReading.readabilityHandler = nil
+                continuation.resume(throwing: error)
+            }
+        }
+
+        stdoutPipe.fileHandleForReading.readabilityHandler = nil
+        stderrPipe.fileHandleForReading.readabilityHandler = nil
+
+        let remainingStdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        if !remainingStdout.isEmpty {
+            stdoutBuffer.append(remainingStdout)
+        }
+
+        return stdoutBuffer.data
     }
 
     /// Parse a yt-dlp / scdl progress line for a percentage 0...1.
@@ -141,7 +216,12 @@ final class ProcessRunner {
     /// We start from the parent process environment and prepend the bin
     /// directories we already use in findExecutable so child tools can
     /// locate each other on the same machine where the user installed them.
-    private static func enrichedEnvironment() -> [String: String] {
+    ///
+    /// **Thread-safety**: The environment is computed exactly once and cached.
+    /// `ProcessInfo.processInfo.environment` is not safe to call concurrently
+    /// from many threads (the returned dictionary's copy-on-write storage can
+    /// race), so we eagerly snapshot it on first access behind a lock.
+    private static let cachedEnvironment: [String: String] = {
         var env = ProcessInfo.processInfo.environment
         let home = NSHomeDirectory()
         let extraPaths = [
@@ -157,6 +237,10 @@ final class ProcessRunner {
             env["PATH"] = (prepend + [existing]).joined(separator: ":")
         }
         return env
+    }()
+
+    private static func enrichedEnvironment() -> [String: String] {
+        cachedEnvironment
     }
 
     /// Find an executable in common locations.

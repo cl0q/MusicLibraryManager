@@ -59,6 +59,11 @@ final class PlaylistDetailViewModel {
         errorMessage = nil
 
         do {
+            // Re-fetch playlist metadata from the database to update stale columns (e.g. sourceId after reauth)
+            if let freshPlaylist = try await playlistRepository.fetch(id: playlistId) {
+                self.playlist = freshPlaylist
+            }
+
             tracks = try await playlistRepository.fetchTracks(playlistId: playlistId)
             applyFilter()
         } catch {
@@ -72,6 +77,160 @@ final class PlaylistDetailViewModel {
     @MainActor
     func refresh() async {
         await loadTracks()
+    }
+
+    // MARK: - Source Synchronization
+
+    /// Whether this playlist supports synchronization from an external source.
+    var canSync: Bool {
+        playlist.isLiked == 1 && playlist.sourceId != nil
+    }
+
+    /// Whether the playlist is currently syncing.
+    private(set) var isSyncingSource = false
+
+    /// Trigger synchronization with the upstream source (e.g. SoundCloud Likes).
+    @MainActor
+    func syncSource() async {
+        guard let playlistId = playlist.id else { return }
+
+        isSyncingSource = true
+        errorMessage = nil
+
+        do {
+            // 1. Fetch fresh playlist from DB to update any stale in-memory fields (e.g. from reauth)
+            if let freshPlaylist = try await playlistRepository.fetch(id: playlistId) {
+                self.playlist = freshPlaylist
+            }
+
+            // After refresh, double check if we can actually sync
+            guard canSync else {
+                throw NSError(domain: "PlaylistDetailViewModel", code: 400, userInfo: [NSLocalizedDescriptionKey: "This playlist does not support source synchronization"])
+            }
+
+            guard let sourceId = playlist.sourceId else {
+                throw NSError(domain: "PlaylistDetailViewModel", code: 400, userInfo: [NSLocalizedDescriptionKey: "Source ID is missing"])
+            }
+
+            let container = DependencyContainer.shared
+            guard let sourceRepo = container.sourceRepository else {
+                throw NSError(domain: "PlaylistDetailViewModel", code: 500, userInfo: [NSLocalizedDescriptionKey: "Source repository is unavailable"])
+            }
+
+            // 2. Fetch the source
+            var source = try await sourceRepo.fetch(id: sourceId)
+
+            // 3. Robust Self-Healing Fallback
+            if source == nil {
+                var expectedSourceName: String? = nil
+                let lowerName = playlist.name.lowercased()
+                if lowerName.contains("soundcloud") {
+                    expectedSourceName = "soundcloud"
+                } else if lowerName.contains("spotify") {
+                    expectedSourceName = "spotify"
+                } else if lowerName.contains("apple music") || lowerName.contains("applemusic") {
+                    expectedSourceName = "apple_music"
+                }
+
+                if let sourceName = expectedSourceName {
+                    let allSources = try await sourceRepo.fetchAll()
+                    if let matchingSource = allSources.first(where: { $0.name == sourceName }) {
+                        if let freshSourceId = matchingSource.id {
+                            // Update the sourceId in DB
+                            try await playlistRepository.updateSourceId(id: playlistId, sourceId: freshSourceId)
+                            // Refetch fresh playlist
+                            if let freshPlaylist = try await playlistRepository.fetch(id: playlistId) {
+                                self.playlist = freshPlaylist
+                            }
+                            source = matchingSource
+                            AppLogger.shared.info(
+                                "PlaylistDetailViewModel: healed stale source reference for '\(playlist.name)' to source id \(freshSourceId)",
+                                source: "PlaylistDetailViewModel"
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 4. If we still don't have a source, throw the error
+            guard let activeSource = source else {
+                throw NSError(domain: "PlaylistDetailViewModel", code: 404, userInfo: [NSLocalizedDescriptionKey: "Linked source not found"])
+            }
+
+            let sourceType = activeSource.sourceType
+            var newTracks = 0
+
+            switch sourceType {
+            case .soundcloud:
+                guard let tokenStorage = container.tokenStorage,
+                      let oauthManager = container.oauthManager,
+                      let trackRepo = container.trackRepository,
+                      let plRepo = container.playlistRepository else {
+                    throw NSError(domain: "PlaylistDetailViewModel", code: 500, userInfo: [NSLocalizedDescriptionKey: "Missing dependencies for SoundCloud sync"])
+                }
+                let client = SoundCloudClient(
+                    tokenStorage: tokenStorage,
+                    oauthManager: oauthManager,
+                    trackRepository: trackRepo,
+                    sourceRepository: sourceRepo,
+                    playlistRepository: plRepo
+                )
+                newTracks = try await client.syncLikes()
+
+            case .spotify:
+                guard let tokenStorage = container.tokenStorage,
+                      let oauthManager = container.oauthManager,
+                      let trackRepo = container.trackRepository else {
+                    throw NSError(domain: "PlaylistDetailViewModel", code: 500, userInfo: [NSLocalizedDescriptionKey: "Missing dependencies for Spotify sync"])
+                }
+                let client = SpotifyClient(
+                    tokenStorage: tokenStorage,
+                    oauthManager: oauthManager,
+                    trackRepository: trackRepo,
+                    sourceRepository: sourceRepo
+                )
+                newTracks = try await client.syncLikedSongs()
+
+            case .appleMusic:
+                guard let tokenStorage = container.tokenStorage,
+                      let trackRepo = container.trackRepository else {
+                    throw NSError(domain: "PlaylistDetailViewModel", code: 500, userInfo: [NSLocalizedDescriptionKey: "Missing dependencies for Apple Music sync"])
+                }
+                let client = AppleMusicClient(
+                    tokenStorage: tokenStorage,
+                    trackRepository: trackRepo,
+                    sourceRepository: sourceRepo
+                )
+                newTracks = try await client.syncLibrary()
+
+            case .unknown:
+                throw NSError(domain: "PlaylistDetailViewModel", code: 400, userInfo: [NSLocalizedDescriptionKey: "Unsupported source sync"])
+            }
+
+            // Reload the tracks in this playlist
+            await loadTracks()
+
+            if newTracks > 0 {
+                // Post notification to refresh library
+                NotificationCenter.default.post(
+                    name: .libraryDidImport,
+                    object: nil,
+                    userInfo: ["succeeded": newTracks, "skipped": 0]
+                )
+            }
+
+            // Post notification that playlist changed so covers can regenerate if needed
+            NotificationCenter.default.post(
+                name: .playlistDidChange,
+                object: nil,
+                userInfo: ["playlistId": playlistId]
+            )
+
+        } catch {
+            errorMessage = "Sync failed: \(error.localizedDescription)"
+        }
+
+        isSyncingSource = false
     }
 
     // MARK: - Add Tracks
@@ -106,6 +265,44 @@ final class PlaylistDetailViewModel {
             errorMessage = "Failed to add tracks: \(error.localizedDescription)"
         }
     }
+
+    /// Add tracks to the playlist at a specific index.
+    ///
+    /// Generates fractional positions for the new tracks.
+    ///
+    /// - Parameters:
+    ///   - trackIds: IDs of tracks to add
+    ///   - index: Target insertion index
+    @MainActor
+    func addTracks(_ trackIds: [Int64], at index: Int) async {
+        guard let playlistId = playlist.id else { return }
+        guard !trackIds.isEmpty else { return }
+
+        let targetPos: String
+        if tracks.isEmpty {
+            targetPos = FractionalIndexer.positionBetween(left: nil, right: nil)
+        } else {
+            targetPos = fractionalPosition(insertingAt: index, excluding: -1)
+        }
+
+        do {
+            try await playlistRepository.addTracks(
+                playlistId: playlistId,
+                trackIds: trackIds,
+                startPosition: targetPos
+            )
+            await loadTracks()
+
+            NotificationCenter.default.post(
+                name: .playlistDidChange,
+                object: nil,
+                userInfo: ["playlistId": playlistId]
+            )
+        } catch {
+            errorMessage = "Failed to add tracks: \(error.localizedDescription)"
+        }
+    }
+
 
     // MARK: - Remove Tracks
 
@@ -280,17 +477,15 @@ final class PlaylistDetailViewModel {
 
     /// Generate a position string after the last track.
     ///
-    /// Uses a simple incrementing scheme: the position is the count
-    /// formatted as a zero-padded 6-digit string.
+    /// Uses FractionalIndexer to generate a valid base-62 position after the last track.
     private func generateNextPosition() -> String {
-        let count = tracks.count
-        return String(format: "%06d", count + 1)
+        let lastPos = tracks.last?.playlistPosition
+        return FractionalIndexer.positionBetween(left: lastPos, right: nil)
     }
 
     /// Calculate a fractional position for inserting at a given index.
     ///
-    /// For simplicity with string-based positions, we re-index in steps
-    /// of 1000 and place the new item at the calculated slot.
+    /// Uses FractionalIndexer to compute a base-62 midpoint between surrounding tracks.
     ///
     /// - Parameters:
     ///   - index: Target insertion index
@@ -298,27 +493,34 @@ final class PlaylistDetailViewModel {
     /// - Returns: Position string for the new location
     private func fractionalPosition(insertingAt index: Int, excluding excludedIndex: Int) -> String {
         // Build list without the moving item
-        var positions: [Int] = []
-        for i in 0..<tracks.count where i != excludedIndex {
-            positions.append(i)
+        var filteredTracks: [Track] = []
+        for i in 0..<tracks.count {
+            if i != excludedIndex {
+                filteredTracks.append(tracks[i])
+            }
         }
 
         // Insert position between neighbors
-        let clampedIndex = min(max(index, 0), positions.count)
+        let clampedIndex = min(max(index, 0), filteredTracks.count)
+
+        let leftPos: String?
+        let rightPos: String?
 
         if clampedIndex == 0 {
             // Before first
-            return String(format: "%06d", 0)
-        } else if clampedIndex >= positions.count {
+            leftPos = nil
+            rightPos = filteredTracks.first?.playlistPosition
+        } else if clampedIndex >= filteredTracks.count {
             // After last
-            return String(format: "%06d", (positions.count + 1) * 1000)
+            leftPos = filteredTracks.last?.playlistPosition
+            rightPos = nil
         } else {
             // Between two items
-            let beforeIdx = clampedIndex - 1
-            let afterIdx = clampedIndex
-            let midpoint = (beforeIdx + afterIdx + 1) * 500
-            return String(format: "%06d", midpoint)
+            leftPos = filteredTracks[clampedIndex - 1].playlistPosition
+            rightPos = filteredTracks[clampedIndex].playlistPosition
         }
+
+        return FractionalIndexer.positionBetween(left: leftPos, right: rightPos)
     }
 
     // MARK: - Track Lookup

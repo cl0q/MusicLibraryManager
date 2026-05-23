@@ -11,6 +11,13 @@ final class SourceRepository: Sendable {
 
     // MARK: - Sources
 
+    /// Fetch a source by ID.
+    func fetch(id: Int64) async throws -> Source? {
+        try await database.read { db in
+            try Source.fetchOne(db, id: id)
+        }
+    }
+
     /// Fetch all sources.
     func fetchAll() async throws -> [Source] {
         try await database.read { db in

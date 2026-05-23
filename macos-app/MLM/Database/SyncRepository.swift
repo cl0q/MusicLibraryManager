@@ -159,7 +159,8 @@ final class SyncRepository: Sendable {
         generateM3U8: Bool? = nil,
         transcodeMode: String? = nil,
         fat32SafePaths: Bool? = nil,
-        cleanupRemovedFiles: Bool? = nil
+        cleanupRemovedFiles: Bool? = nil,
+        playlistFormat: String? = nil
     ) async throws {
         try await database.write { db in
             var sets: [String] = []
@@ -192,6 +193,10 @@ final class SyncRepository: Sendable {
             if let cleanupRemovedFiles {
                 sets.append("cleanup_removed_files = ?")
                 args.append(cleanupRemovedFiles ? 1 : 0)
+            }
+            if let playlistFormat {
+                sets.append("playlist_format = ?")
+                args.append(playlistFormat)
             }
 
             guard !sets.isEmpty else { return }

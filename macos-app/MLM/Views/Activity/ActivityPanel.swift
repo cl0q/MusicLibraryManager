@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Collapsible activity panel at the bottom of the window.
@@ -8,6 +9,9 @@ struct ActivityPanel: View {
     @State private var isExpanded = false
     @State private var selectedTab: ActivityTab = .operations
     @Environment(\.container) private var container
+
+    @State private var expandedHeight: CGFloat = 284
+    @State private var baseHeight: CGFloat = 284
 
     enum ActivityTab: String, CaseIterable {
         case operations = "Operations"
@@ -24,6 +28,33 @@ struct ActivityPanel: View {
         }
         .background(Color.mlmSurface)
         .clipped()
+        .overlay(
+            Group {
+                if isExpanded {
+                    Color.clear
+                        .frame(height: 6)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture()
+                                .onChanged { value in
+                                    let newHeight = baseHeight - value.translation.height
+                                    expandedHeight = min(max(newHeight, 150), 700)
+                                }
+                                .onEnded { value in
+                                    baseHeight = expandedHeight
+                                }
+                        )
+                        .onHover { inside in
+                            if inside {
+                                NSCursor.resizeUpDown.push()
+                            } else {
+                                NSCursor.pop()
+                            }
+                        }
+                }
+            },
+            alignment: .top
+        )
     }
 
     // MARK: - Header
@@ -120,7 +151,7 @@ struct ActivityPanel: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(height: 320 - 36)
+        .frame(height: expandedHeight)
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 }

@@ -271,6 +271,21 @@ export async function stopAnalysis(prefix: string): Promise<boolean> {
   return invoke<boolean>("stop_analysis_cmd", { prefix });
 }
 
+/**
+ * Enable or disable turbo mode for enhancement operations.
+ * Turbo mode uses 80% of available cores for maximum throughput.
+ */
+export async function setTurboMode(enabled: boolean): Promise<void> {
+  return invoke<void>("set_turbo_mode", { enabled });
+}
+
+/**
+ * Check if turbo mode is currently enabled.
+ */
+export async function getTurboMode(): Promise<boolean> {
+  return invoke<boolean>("get_turbo_mode");
+}
+
 export async function getReviewQueue(status?: string): Promise<ReviewQueueItem[]> {
   return invoke<ReviewQueueItem[]>("get_review_queue_cmd", { status });
 }

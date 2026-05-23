@@ -30,6 +30,9 @@ struct PlaylistDetailView: View {
     @State private var showDeleteConfirmation = false
     @State private var trackToDelete: Track?
 
+    @State private var availablePlaylists: [Playlist] = []
+    @State private var availableSyncProfiles: [SyncProfile] = []
+
     var body: some View {
         Group {
             if let viewModel {
@@ -55,6 +58,7 @@ struct PlaylistDetailView: View {
         .task {
             initializeViewModel()
             await viewModel?.loadTracks()
+            await loadPlaylistsAndProfiles()
         }
         .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { _ in
             Task { await viewModel?.refresh() }
@@ -118,21 +122,29 @@ struct PlaylistDetailView: View {
             }
 
             HStack(alignment: .bottom, spacing: 12) {
-                // Playlist icon
+                // Playlist cover / icon
                 ZStack {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.mlmAccent.opacity(0.4), Color.mlmAccent.opacity(0.2)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+                    if let coverImage = loadCoverImage() {
+                        Image(nsImage: coverImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 64, height: 64)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                    } else {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(
+                                LinearGradient(
+                                    colors: categoryGradient,
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
                             )
-                        )
-                        .frame(width: 64, height: 64)
+                            .frame(width: 64, height: 64)
 
-                    Image(systemName: playlist.isLiked == 1 ? "heart.fill" : "music.note.list")
-                        .font(.system(size: 24))
-                        .foregroundColor(.mlmAccent)
+                        Image(systemName: categoryIcon)
+                            .font(.system(size: 24))
+                            .foregroundColor(playlist.isLiked == 1 || playlist.isSmart == 1 || playlist.sourceId != nil ? .white.opacity(0.9) : .mlmAccent)
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
@@ -167,6 +179,16 @@ struct PlaylistDetailView: View {
                 // Actions
                 actionButtons(viewModel)
             }
+
+            if let error = viewModel.errorMessage {
+                HStack {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundColor(.mlmError)
+                        .font(MLMFont.muted)
+                    Spacer()
+                }
+                .padding(.top, 4)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -176,6 +198,23 @@ struct PlaylistDetailView: View {
 
     private func actionButtons(_ viewModel: PlaylistDetailViewModel) -> some View {
         HStack(spacing: 8) {
+            // Sync button
+            if viewModel.canSync {
+                Button {
+                    Task { await viewModel.syncSource() }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .rotationEffect(.degrees(viewModel.isSyncingSource ? 360 : 0))
+                            .animation(viewModel.isSyncingSource ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: viewModel.isSyncingSource)
+                        Text(viewModel.isSyncingSource ? "Syncing…" : "Sync")
+                    }
+                    .font(MLMFont.body)
+                }
+                .buttonStyle(.bordered)
+                .disabled(viewModel.isSyncingSource)
+            }
+
             // Search
             HStack(spacing: 4) {
                 Image(systemName: "magnifyingglass")
@@ -195,11 +234,11 @@ struct PlaylistDetailView: View {
             .background(Color.mlmRaised)
             .clipShape(RoundedRectangle(cornerRadius: 6))
 
-            // Import M3U
+            // Import M3U8
             Button {
                 showM3UImporter = true
             } label: {
-                Label("Import M3U", systemImage: "doc.badge.plus")
+                Label("Import M3U8", systemImage: "doc.badge.plus")
                     .font(MLMFont.body)
             }
             .buttonStyle(.bordered)
@@ -221,121 +260,19 @@ struct PlaylistDetailView: View {
     // MARK: - Track List
 
     private func trackList(_ viewModel: PlaylistDetailViewModel) -> some View {
-        List(selection: Binding(
-            get: { viewModel.selectedTrackIDs },
-            set: { viewModel.selectedTrackIDs = $0 }
-        )) {
-            ForEach(Array(viewModel.displayedTracks.enumerated()), id: \.element.id) { index, track in
-                trackRow(track, index: index + 1, viewModel: viewModel)
-                    .listRowBackground(
-                        viewModel.selectedTrackIDs.contains(track.id ?? -1)
-                            ? Color.mlmAccent.opacity(0.15)
-                            : Color.clear
-                    )
-                    .listRowSeparator(.hidden)
-            }
-            .onMove { from, to in
-                guard let sourceIndex = from.first else { return }
-                Task {
-                    await viewModel.moveTrack(from: sourceIndex, to: to)
+        PlaylistTable(
+            playlist: playlist,
+            viewModel: viewModel,
+            availablePlaylists: availablePlaylists,
+            availableSyncProfiles: availableSyncProfiles,
+            onTrackDoubleClick: onTrackDoubleClick,
+            onRemoveTracks: { ids in
+                for id in ids {
+                    await viewModel.removeTrack(id)
                 }
             }
-        }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
+        )
         .background(Color.mlmBase)
-    }
-
-    // MARK: - Track Row
-
-    private func trackRow(_ track: Track, index: Int, viewModel: PlaylistDetailViewModel) -> some View {
-        HStack(spacing: 8) {
-            // Row number
-            Text("\(index)")
-                .font(MLMFont.dataSmall)
-                .foregroundColor(.mlmInkMuted)
-                .frame(width: 28, alignment: .trailing)
-                .monospacedDigit()
-
-            // Title + Artist
-            VStack(alignment: .leading, spacing: 1) {
-                Text(track.title)
-                    .font(MLMFont.tableCell)
-                    .foregroundColor(.mlmInk)
-                    .lineLimit(1)
-
-                Text(track.artist)
-                    .font(MLMFont.muted)
-                    .foregroundColor(.mlmInkSecondary)
-                    .lineLimit(1)
-            }
-
-            Spacer()
-
-            // Album
-            Text(track.album)
-                .font(MLMFont.tableCell)
-                .foregroundColor(.mlmInkSecondary)
-                .lineLimit(1)
-                .frame(maxWidth: 200, alignment: .leading)
-
-            // Format badge
-            Text(track.format.uppercased())
-                .font(MLMFont.badge)
-                .foregroundColor(formatColor(track.format))
-                .padding(.horizontal, 5)
-                .padding(.vertical, 1)
-                .background(formatColor(track.format).opacity(0.15))
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-
-            // Duration
-            Text(track.formattedDuration)
-                .font(MLMFont.dataSmall)
-                .foregroundColor(.mlmInkMuted)
-                .monospacedDigit()
-                .frame(width: 44, alignment: .trailing)
-        }
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            onTrackDoubleClick?(track)
-        }
-        .contextMenu {
-            trackContextMenu(track, viewModel: viewModel)
-        }
-    }
-
-    // MARK: - Track Context Menu
-
-    @ViewBuilder
-    private func trackContextMenu(_ track: Track, viewModel: PlaylistDetailViewModel) -> some View {
-        if track.isLocal {
-            Button {
-                onTrackDoubleClick?(track)
-            } label: {
-                Label("Play", systemImage: "play.fill")
-            }
-
-            Divider()
-        }
-
-        Button {
-            trackToDelete = track
-            showDeleteConfirmation = true
-        } label: {
-            Label("Remove from Playlist", systemImage: "minus.circle")
-        }
-
-        Divider()
-
-        Button {
-            if let path = track.organizedPath ?? track.originalPath as String? {
-                NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
-            }
-        } label: {
-            Label("Reveal in Finder", systemImage: "folder")
-        }
-        .disabled(!track.isLocal)
     }
 
     // MARK: - Empty State
@@ -362,7 +299,7 @@ struct PlaylistDetailView: View {
                 Button {
                     showM3UImporter = true
                 } label: {
-                    Label("Import M3U File…", systemImage: "doc.badge.plus")
+                    Label("Import M3U8 Datei…", systemImage: "doc.badge.plus")
                         .font(MLMFont.bodyBold)
                 }
                 .buttonStyle(.bordered)
@@ -398,5 +335,62 @@ struct PlaylistDetailView: View {
             playlistRepository: playlistRepo,
             trackRepository: trackRepo
         )
+    }
+
+    private func loadPlaylistsAndProfiles() async {
+        if let repo = container.playlistRepository {
+            availablePlaylists = (try? await repo.fetchAll()) ?? []
+        }
+        if let syncVM = container.syncViewModel {
+            if syncVM.profiles.isEmpty {
+                await syncVM.loadProfiles()
+            }
+            availableSyncProfiles = syncVM.profiles
+        }
+    }
+
+    // MARK: - Header Artwork & Fallbacks
+
+    private func loadCoverImage() -> NSImage? {
+        guard let relPath = playlist.coverImagePath else { return nil }
+        let fileName = (relPath as NSString).lastPathComponent
+        let url = coversDir.appendingPathComponent(fileName)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return NSImage(contentsOf: url)
+    }
+
+    private var coversDir: URL {
+        FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("com.musiclibrary.app")
+            .appendingPathComponent("playlist-covers")
+    }
+
+    private var categoryIcon: String {
+        if playlist.isLiked == 1 {
+            return "heart.fill"
+        }
+        if playlist.isSmart == 1 {
+            return "wand.and.stars"
+        }
+        switch playlist.category {
+        case "regular": return "music.note.list"
+        case "liked": return "heart.fill"
+        case "album": return "opticaldisc"
+        default: return "music.note.list"
+        }
+    }
+
+    private var categoryGradient: [Color] {
+        if playlist.isLiked == 1 {
+            return [Color.mlmError.opacity(0.6), Color.mlmError.opacity(0.3)]
+        }
+        if playlist.isSmart == 1 {
+            return [Color.mlmActive.opacity(0.6), Color.mlmActive.opacity(0.3)]
+        }
+        if playlist.sourceId != nil {
+            return [Color.mlmAccent.opacity(0.4), Color.mlmAccent.opacity(0.2)]
+        }
+        return [Color.mlmRaised, Color.mlmSurface]
     }
 }

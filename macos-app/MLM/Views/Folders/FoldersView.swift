@@ -4,6 +4,9 @@ import SwiftUI
 struct FoldersView: View {
     @Environment(\.container) private var container
     @State private var viewModel: FolderViewModel?
+    @State private var availablePlaylists: [Playlist] = []
+    @State private var availableSyncProfiles: [SyncProfile] = []
+    @FocusState private var isSearchFocused: Bool
 
     var onTrackDoubleClick: ((Track) -> Void)?
 
@@ -20,12 +23,23 @@ struct FoldersView: View {
         .task {
             initializeViewModel()
             await viewModel?.loadRootFolders()
+            await reloadPlaylists()
+            await reloadSyncProfiles()
         }
         .onReceive(NotificationCenter.default.publisher(for: .libraryDidImport)) { _ in
             Task { await viewModel?.refresh() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .libraryDidDeleteTracks)) { _ in
             Task { await viewModel?.refresh() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { _ in
+            Task { await reloadPlaylists() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .syncProfileDidChange)) { _ in
+            Task { await reloadSyncProfiles() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .focusFolderSearchField)) { _ in
+            isSearchFocused = true
         }
     }
 
@@ -88,6 +102,7 @@ struct FoldersView: View {
                 .textFieldStyle(.plain)
                 .font(MLMFont.body)
                 .frame(width: 180)
+                .focused($isSearchFocused)
 
                 if !viewModel.searchQuery.isEmpty {
                     Button {
@@ -121,32 +136,220 @@ struct FoldersView: View {
         }
     }
 
-    // MARK: - Tracks Pane
-
     @ViewBuilder
     private func folderTracksPane(_ viewModel: FolderViewModel) -> some View {
         @Bindable var viewModel = viewModel
-        if let selectedPath = viewModel.selectedFolderPath {
+        
+        if !viewModel.searchQuery.isEmpty {
+            let results = viewModel.searchResults
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 12))
+                        .foregroundColor(.accentColor)
+                    Text("Suchergebnisse für \"\(viewModel.searchQuery)\"")
+                        .font(MLMFont.sectionHeader)
+                        .foregroundColor(.mlmInk)
+                    
+                    if viewModel.isSearching {
+                        ProgressView()
+                            .controlSize(.small)
+                            .padding(.leading, 4)
+                    }
+                    
+                    Spacer()
+                    Text("\(results.count) Ordner gefunden")
+                        .font(MLMFont.muted)
+                        .foregroundColor(.mlmInkMuted)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.mlmSurface)
+                
+                Divider()
+                    .background(Color.mlmEdge)
+                
+                if results.isEmpty && !viewModel.isSearching {
+                    VStack {
+                        Spacer()
+                        ContentUnavailableView.search(text: viewModel.searchQuery)
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if results.isEmpty && viewModel.isSearching {
+                    VStack {
+                        Spacer()
+                        ProgressView("Suche läuft…")
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    FolderSearchResultsTable(
+                        results: results,
+                        viewModel: viewModel,
+                        onDoubleClick: { node in
+                            viewModel.selectedFolderPath = node.id
+                            viewModel.searchQuery = "" // Clear search to open folder
+                        }
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(Color.mlmBase)
+        } else if let selectedPath = viewModel.selectedFolderPath {
+            let selectedNode = viewModel.findNode(for: selectedPath)
+            let subfolders = (selectedNode?.children ?? []).filter { !$0.id.hasSuffix("/__placeholder__") }
+            let tracks = viewModel.tracksInFolder
+            let hasSubfolders = !(selectedNode?.children.isEmpty ?? true)
+
             VStack(spacing: 0) {
                 folderBreadcrumb(selectedPath, viewModel: viewModel)
 
                 Divider()
                     .background(Color.mlmEdge)
 
-                if viewModel.tracksInFolder.isEmpty {
-                    ContentUnavailableView {
-                        Label("Keine Tracks in diesem Ordner", systemImage: "music.note")
-                    } description: {
-                        Text("Tracks können in Unterordnern liegen.")
+                if !hasSubfolders && tracks.isEmpty {
+                    VStack {
+                        Spacer()
+                        ContentUnavailableView {
+                            Label("Ordner ist leer", systemImage: "folder")
+                        } description: {
+                            Text("Dieser Ordner enthält keine Musiktracks oder Unterordner.")
+                        }
+                        Spacer()
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if hasSubfolders && !tracks.isEmpty {
+                    VSplitView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            HStack(spacing: 8) {
+                                Text("Unterordner")
+                                    .font(MLMFont.sectionHeader)
+                                    .foregroundColor(.mlmInk)
+                                Text("\(subfolders.count)")
+                                    .font(MLMFont.badge)
+                                    .foregroundColor(.mlmInkMuted)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.mlmRaised)
+                                    .clipShape(Capsule())
+                                
+                                if viewModel.loadingNodePaths.contains(selectedPath) {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            
+                            Divider()
+                                .background(Color.mlmEdge)
+
+                            FolderSubfoldersTable(
+                                subfolders: subfolders,
+                                viewModel: viewModel,
+                                onDoubleClick: { node in
+                                    viewModel.selectedFolderPath = node.id
+                                }
+                            )
+                        }
+                        .frame(minHeight: 120, idealHeight: 200, maxHeight: .infinity)
+
+                        VStack(alignment: .leading, spacing: 0) {
+                            HStack {
+                                Text("Tracks")
+                                    .font(MLMFont.sectionHeader)
+                                    .foregroundColor(.mlmInk)
+                                Text("\(tracks.count)")
+                                    .font(MLMFont.badge)
+                                    .foregroundColor(.mlmInkMuted)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.mlmRaised)
+                                    .clipShape(Capsule())
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            
+                            Divider()
+                                .background(Color.mlmEdge)
+
+                            FolderTracksTable(
+                                tracks: tracks,
+                                selectedTrackIDs: $viewModel.selectedTrackIDs,
+                                availablePlaylists: availablePlaylists,
+                                availableSyncProfiles: availableSyncProfiles,
+                                onDoubleClick: onTrackDoubleClick
+                            )
+                        }
+                        .frame(minHeight: 120, idealHeight: 300, maxHeight: .infinity)
+                    }
+                } else if hasSubfolders {
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(spacing: 8) {
+                            Text("Unterordner")
+                                .font(MLMFont.sectionHeader)
+                                .foregroundColor(.mlmInk)
+                            Text("\(subfolders.count)")
+                                .font(MLMFont.badge)
+                                .foregroundColor(.mlmInkMuted)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.mlmRaised)
+                                .clipShape(Capsule())
+                            
+                            if viewModel.loadingNodePaths.contains(selectedPath) {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        
+                        Divider()
+                            .background(Color.mlmEdge)
+
+                        FolderSubfoldersTable(
+                            subfolders: subfolders,
+                            viewModel: viewModel,
+                            onDoubleClick: { node in
+                                viewModel.selectedFolderPath = node.id
+                            }
+                        )
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    FolderTracksTable(
-                        tracks: viewModel.tracksInFolder,
-                        selectedTrackIDs: $viewModel.selectedTrackIDs,
-                        onDoubleClick: onTrackDoubleClick
-                    )
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack {
+                            Text("Tracks")
+                                .font(MLMFont.sectionHeader)
+                                .foregroundColor(.mlmInk)
+                            Text("\(tracks.count)")
+                                .font(MLMFont.badge)
+                                .foregroundColor(.mlmInkMuted)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.mlmRaised)
+                                .clipShape(Capsule())
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        
+                        Divider()
+                            .background(Color.mlmEdge)
+
+                        FolderTracksTable(
+                            tracks: tracks,
+                            selectedTrackIDs: $viewModel.selectedTrackIDs,
+                            availablePlaylists: availablePlaylists,
+                            availableSyncProfiles: availableSyncProfiles,
+                            onDoubleClick: onTrackDoubleClick
+                        )
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background(Color.mlmBase)
         } else {
             VStack(spacing: 12) {
@@ -266,6 +469,20 @@ struct FoldersView: View {
               let configRepo = container.configRepository else { return }
         viewModel = FolderViewModel(trackRepository: trackRepo, configRepository: configRepo)
     }
+
+    private func reloadPlaylists() async {
+        guard let repo = container.playlistRepository else { return }
+        availablePlaylists = (try? await repo.fetchAll()) ?? []
+    }
+
+    private func reloadSyncProfiles() async {
+        if let syncVM = container.syncViewModel {
+            if syncVM.profiles.isEmpty {
+                await syncVM.loadProfiles()
+            }
+            availableSyncProfiles = syncVM.profiles
+        }
+    }
 }
 
 // MARK: - Folder Tracks Table
@@ -273,6 +490,8 @@ struct FoldersView: View {
 struct FolderTracksTable: View {
     let tracks: [Track]
     @Binding var selectedTrackIDs: Set<Int64>
+    var availablePlaylists: [Playlist]
+    var availableSyncProfiles: [SyncProfile]
     var onDoubleClick: ((Track) -> Void)?
 
     @Environment(\.container) private var container
@@ -293,7 +512,7 @@ struct FolderTracksTable: View {
     }
 
     var body: some View {
-        Table(rows, selection: $selectedTrackIDs, sortOrder: $sortOrder) {
+        Table(selection: $selectedTrackIDs, sortOrder: $sortOrder) {
             TableColumn("Title", value: \.track.title) { row in
                 HStack(spacing: 6) {
                     if isNowPlaying(row.track) {
@@ -336,14 +555,29 @@ struct FolderTracksTable: View {
                 EnergyBars(level: row.track.energyBucket)
             }
             .width(56)
+
+            TableColumn("Dance", value: \.track.danceabilitySortKey) { row in
+                DanceabilitySteps(score: row.track.danceability)
+            }
+            .width(56)
+        } rows: {
+            ForEach(rows) { row in
+                TableRow(row)
+                    .draggable(TrackDragData(trackId: row.id, sourcePlaylistId: nil))
+            }
         }
         .contextMenu(forSelectionType: Int64.self) { selectedIDs in
             TrackContextMenu(
                 selectedTrackIDs: selectedIDs,
                 tracks: tracks,
-                availablePlaylists: [],
-                availableSyncProfiles: [],
-                addToSyncProfile: { _ in }
+                availablePlaylists: availablePlaylists,
+                availableSyncProfiles: availableSyncProfiles,
+                addToSyncProfile: { profile in
+                    Task {
+                        container.syncViewModel?.selectedProfile = profile
+                        await container.syncViewModel?.addTracks(Array(selectedIDs))
+                    }
+                }
             )
         } primaryAction: { selectedIDs in
             if let trackID = selectedIDs.first,
@@ -361,5 +595,141 @@ struct FolderTracksTable: View {
             return false
         }
         return currentID == trackID && playbackVM.isPlaying
+    }
+}
+
+// MARK: - Folder Subfolders Table
+
+struct FolderSubfoldersTable: View {
+    let subfolders: [DiskFolderNode]
+    let viewModel: FolderViewModel
+    var onDoubleClick: (DiskFolderNode) -> Void
+
+    private struct FolderRow: Identifiable {
+        let id: String
+        let node: DiskFolderNode
+    }
+
+    @State private var selectedFolderID: String?
+    @State private var sortOrder: [KeyPathComparator<FolderRow>] = [
+        KeyPathComparator(\.node.name, order: .forward)
+    ]
+
+    private var rows: [FolderRow] {
+        subfolders
+            .map { FolderRow(id: $0.id, node: $0) }
+            .sorted(using: sortOrder)
+    }
+
+    var body: some View {
+        Table(selection: $selectedFolderID, sortOrder: $sortOrder) {
+            TableColumn("Name", value: \.node.name) { row in
+                HStack(spacing: 6) {
+                    Image(systemName: "folder.fill")
+                        .foregroundColor(.accentColor)
+                        .imageScale(.medium)
+                    Text(row.node.name)
+                        .lineLimit(1)
+                }
+            }
+            .width(min: 150, ideal: 300)
+
+            TableColumn("Unterordner", value: \.node.children.count.description) { row in
+                Text(row.node.children.isEmpty ? "—" : "\(row.node.children.count)")
+                    .foregroundColor(.secondary)
+            }
+            .width(100)
+
+            TableColumn("Pfad", value: \.node.id) { row in
+                Text(viewModel.relativePath(for: row.node.id))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+            .width(min: 150, ideal: 300)
+        } rows: {
+            ForEach(rows) { row in
+                TableRow(row)
+            }
+        }
+        .contextMenu(forSelectionType: String.self) { selectedIDs in
+            if let firstID = selectedIDs.first {
+                Button("In Finder anzeigen") {
+                    NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: firstID)
+                }
+            }
+        } primaryAction: { selectedIDs in
+            if let firstID = selectedIDs.first,
+               let node = subfolders.first(where: { $0.id == firstID }) {
+                onDoubleClick(node)
+            }
+        }
+    }
+}
+
+// MARK: - Folder Search Results Table
+
+struct FolderSearchResultsTable: View {
+    let results: [DiskFolderNode]
+    let viewModel: FolderViewModel
+    var onDoubleClick: (DiskFolderNode) -> Void
+
+    private struct FolderRow: Identifiable {
+        let id: String
+        let node: DiskFolderNode
+    }
+
+    @State private var selectedFolderID: String?
+    @State private var sortOrder: [KeyPathComparator<FolderRow>] = [
+        KeyPathComparator(\.node.name, order: .forward)
+    ]
+
+    private var rows: [FolderRow] {
+        results
+            .map { FolderRow(id: $0.id, node: $0) }
+            .sorted(using: sortOrder)
+    }
+
+    var body: some View {
+        Table(selection: $selectedFolderID, sortOrder: $sortOrder) {
+            TableColumn("Name", value: \.node.name) { row in
+                HStack(spacing: 6) {
+                    Image(systemName: "folder.fill")
+                        .foregroundColor(.accentColor)
+                        .imageScale(.medium)
+                    Text(row.node.name)
+                        .lineLimit(1)
+                }
+            }
+            .width(min: 150, ideal: 300)
+
+            TableColumn("Unterordner", value: \.node.children.count.description) { row in
+                Text(row.node.children.isEmpty ? "—" : "\(row.node.children.count)")
+                    .foregroundColor(.secondary)
+            }
+            .width(100)
+
+            TableColumn("Pfad", value: \.node.id) { row in
+                Text(viewModel.relativePath(for: row.node.id))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+            .width(min: 200, ideal: 400)
+        } rows: {
+            ForEach(rows) { row in
+                TableRow(row)
+            }
+        }
+        .contextMenu(forSelectionType: String.self) { selectedIDs in
+            if let firstID = selectedIDs.first {
+                Button("In Finder anzeigen") {
+                    NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: firstID)
+                }
+            }
+        } primaryAction: { selectedIDs in
+            if let firstID = selectedIDs.first,
+               let node = results.first(where: { $0.id == firstID }) {
+                onDoubleClick(node)
+            }
+        }
     }
 }

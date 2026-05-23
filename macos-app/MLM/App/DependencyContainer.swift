@@ -170,6 +170,10 @@ final class DependencyContainer {
             // Bridge sync progress into the global Operations panel.
             syncSvc.activityViewModel = self.activityViewModel
             self.syncViewModel = SyncViewModel(syncRepository: syncRepo, syncService: syncSvc)
+            // Pre-load profiles to ensure context menus have access from launch
+            Task {
+                await self.syncViewModel?.loadProfiles()
+            }
         }
 
         // Check if library root is configured

@@ -54,80 +54,94 @@ struct LibraryTable: View {
     // MARK: - Table
 
     private var tableView: some View {
-        Table(rows, selection: $viewModel.selectedTrackIDs, sortOrder: $sortOrder) {
-            TableColumn("Title", value: \.track.title) { row in
-                let track = row.track
-                HStack(spacing: 8) {
-                    // UI-SPEC Surface 1: 18pt thumbnail, cornerRadius 4, HStack spacing 8
-                    TrackCoverView(trackId: track.id ?? 0, size: .small, cornerRadius: 4)
-                        .frame(width: 18, height: 18)
+        Table(selection: $viewModel.selectedTrackIDs, sortOrder: $sortOrder) {
+            Group {
+                TableColumn("Title", value: \TrackRow.track.title) { row in
+                    let track = row.track
+                    HStack(spacing: 8) {
+                        // UI-SPEC Surface 1: 18pt thumbnail, cornerRadius 4, HStack spacing 8
+                        TrackCoverView(trackId: track.id ?? 0, size: .small, cornerRadius: 4)
+                            .frame(width: 18, height: 18)
 
-                    if isNowPlaying(track) {
-                        Image(systemName: "speaker.wave.2.fill")
-                            .imageScale(.small)
-                            .foregroundStyle(Color.accentColor)
-                            .symbolEffect(.variableColor, isActive: true)
+                        if isNowPlaying(track) {
+                            Image(systemName: "speaker.wave.2.fill")
+                                .imageScale(.small)
+                                .foregroundStyle(Color.accentColor)
+                                .symbolEffect(.variableColor, isActive: true)
+                        }
+                        Text(track.title).lineLimit(1)
                     }
-                    Text(track.title).lineLimit(1)
                 }
-            }
-            .width(min: 160, ideal: 280)
+                .width(min: 160, ideal: 280)
 
-            TableColumn("Artist", value: \.track.artist) { row in
-                Text(row.track.artist).lineLimit(1)
-            }
-            .width(min: 100, ideal: 180)
+                TableColumn("Artist", value: \TrackRow.track.artist) { row in
+                    Text(row.track.artist).lineLimit(1)
+                }
+                .width(min: 100, ideal: 180)
 
-            TableColumn("Album", value: \.track.album) { row in
-                Text(row.track.album).foregroundStyle(.secondary).lineLimit(1)
-            }
-            .width(min: 100, ideal: 180)
+                TableColumn("Album", value: \TrackRow.track.album) { row in
+                    Text(row.track.album).foregroundStyle(.secondary).lineLimit(1)
+                }
+                .width(min: 100, ideal: 180)
 
-            TableColumn("Time", value: \.track.durationSortKey) { row in
-                Text(row.track.formattedDuration)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            .width(54)
+                TableColumn("Time", value: \TrackRow.track.durationSortKey) { row in
+                    Text(row.track.formattedDuration)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                .width(54)
 
-            TableColumn("Format", value: \.track.format) { row in
-                Text(row.track.isRemote ? "Stream" : row.track.format.uppercased())
-                    .foregroundStyle(.secondary)
+                TableColumn("Format", value: \TrackRow.track.format) { row in
+                    Text(row.track.isRemote ? "Stream" : row.track.format.uppercased())
+                        .foregroundStyle(.secondary)
+                }
+                .width(60)
             }
-            .width(60)
 
-            TableColumn("kbps", value: \.track.bitrateSortKey) { row in
-                Text(row.track.bitrate.map { "\($0)" } ?? "—")
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            .width(48)
+            Group {
+                TableColumn("kbps", value: \TrackRow.track.bitrateSortKey) { row in
+                    Text(row.track.bitrate.map { "\($0)" } ?? "—")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                .width(48)
 
-            TableColumn("Genre", value: \.track.genreSortKey) { row in
-                Text(row.track.genre ?? "—")
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            .width(min: 70, ideal: 110)
+                TableColumn("Genre", value: \TrackRow.track.genreSortKey) { row in
+                    Text(row.track.genre ?? "—")
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .width(min: 70, ideal: 110)
 
-            TableColumn("Year", value: \.track.yearSortKey) { row in
-                Text(row.track.year.map { "\($0)" } ?? "—")
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            .width(48)
+                TableColumn("Year", value: \TrackRow.track.yearSortKey) { row in
+                    Text(row.track.year.map { "\($0)" } ?? "—")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                .width(48)
 
-            TableColumn("Energy", value: \.track.energySortKey) { row in
-                EnergyBars(level: row.track.energyBucket)
-            }
-            .width(56)
+                TableColumn("Energy", value: \TrackRow.track.energySortKey) { row in
+                    EnergyBars(level: row.track.energyBucket)
+                }
+                .width(56)
 
-            TableColumn("Added", value: \.track.dateAddedSortKey) { row in
-                Text(formatDateAdded(row.track.dateAdded))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                TableColumn("Dance", value: \TrackRow.track.danceabilitySortKey) { row in
+                    DanceabilitySteps(score: row.track.danceability)
+                }
+                .width(56)
+
+                TableColumn("Added", value: \TrackRow.track.dateAddedSortKey) { row in
+                    Text(formatDateAdded(row.track.dateAdded))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .width(78)
             }
-            .width(78)
+        } rows: {
+            ForEach(rows) { row in
+                TableRow(row)
+                    .draggable(TrackDragData(trackId: row.id, sourcePlaylistId: nil))
+            }
         }
         .contextMenu(forSelectionType: Int64.self) { selectedIDs in
             TrackContextMenu(
@@ -161,6 +175,7 @@ struct LibraryTable: View {
             case \TrackRow.track.genreSortKey:   col = .genre
             case \TrackRow.track.yearSortKey:    col = .year
             case \TrackRow.track.energySortKey:  col = .energy
+            case \TrackRow.track.danceabilitySortKey: col = .danceability
             case \TrackRow.track.dateAddedSortKey: col = .dateAdded
             default: return
             }

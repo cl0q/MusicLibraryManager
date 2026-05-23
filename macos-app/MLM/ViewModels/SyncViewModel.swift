@@ -46,6 +46,10 @@ final class SyncViewModel {
         isLoading = false
     }
 
+    func clearError() {
+        errorMessage = nil
+    }
+
     func createProfile(
         name: String,
         outputFolder: String,
@@ -54,6 +58,7 @@ final class SyncViewModel {
         fat32SafePaths: Bool = true,
         cleanupRemovedFiles: Bool = true
     ) async {
+        errorMessage = nil
         do {
             let profile = try await syncRepository.create(name: name, outputFolder: outputFolder)
             // Apply toggle settings immediately after creation
@@ -69,7 +74,12 @@ final class SyncViewModel {
             await loadProfiles()
             selectedProfile = profiles.first { $0.id == profile.id }
         } catch {
-            errorMessage = error.localizedDescription
+            let errMsg = error.localizedDescription
+            if errMsg.contains("UNIQUE constraint failed") {
+                errorMessage = "Ein Sync-Profil mit diesem Namen existiert bereits."
+            } else {
+                errorMessage = errMsg
+            }
         }
     }
 
@@ -213,7 +223,8 @@ final class SyncViewModel {
         transcodeMode: String? = nil,
         fat32SafePaths: Bool? = nil,
         cleanupRemovedFiles: Bool? = nil,
-        playlistPathPrefix: String? = nil
+        playlistPathPrefix: String? = nil,
+        playlistFormat: String? = nil
     ) async {
         guard let profileId = selectedProfile?.id else { return }
         do {
@@ -225,7 +236,8 @@ final class SyncViewModel {
                 generateM3U8: generateM3U8,
                 transcodeMode: transcodeMode,
                 fat32SafePaths: fat32SafePaths,
-                cleanupRemovedFiles: cleanupRemovedFiles
+                cleanupRemovedFiles: cleanupRemovedFiles,
+                playlistFormat: playlistFormat
             )
             await loadProfiles()
             // Refresh selectedProfile from the reloaded list to reflect updated fields

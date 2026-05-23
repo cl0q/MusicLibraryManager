@@ -9,6 +9,13 @@ enum TranscodeMode: String, CaseIterable {
     case aac320 = "aac_320"
 }
 
+/// Type-safe playlist format for sync profiles.
+/// Stored as TEXT in DB. Use `playlistFormatEnum` computed property.
+enum PlaylistFormat: String, CaseIterable, Codable {
+    case rockbox = "rockbox"
+    case doppi = "doppi"
+}
+
 /// A device sync profile.
 ///
 /// Maps to the `sync_profiles` table. Defines which tracks/playlists
@@ -26,11 +33,17 @@ struct SyncProfile: Codable, FetchableRecord, MutablePersistableRecord, Identifi
     var transcodeMode: String = "keep_originals"
     var fat32SafePaths: Bool = true
     var cleanupRemovedFiles: Bool = true
+    var playlistFormat: String = "rockbox"
 
     /// Type-safe computed accessor. All consumers (SyncService, SyncSettingsForm, tests)
     /// use this for switch statements. DB writes always use `.rawValue` strings.
     var transcodeModeEnum: TranscodeMode {
         TranscodeMode(rawValue: transcodeMode) ?? .keepOriginals
+    }
+
+    /// Type-safe computed accessor for playlist format.
+    var playlistFormatEnum: PlaylistFormat {
+        PlaylistFormat(rawValue: playlistFormat) ?? .rockbox
     }
 
     static let databaseTableName = "sync_profiles"
@@ -45,6 +58,7 @@ struct SyncProfile: Codable, FetchableRecord, MutablePersistableRecord, Identifi
         case transcodeMode = "transcode_mode"
         case fat32SafePaths = "fat32_safe_paths"
         case cleanupRemovedFiles = "cleanup_removed_files"
+        case playlistFormat = "playlist_format"
     }
 
     enum Columns {
@@ -64,7 +78,8 @@ struct SyncProfile: Codable, FetchableRecord, MutablePersistableRecord, Identifi
         generateM3U8: Bool = false,
         transcodeMode: String = "keep_originals",
         fat32SafePaths: Bool = true,
-        cleanupRemovedFiles: Bool = true
+        cleanupRemovedFiles: Bool = true,
+        playlistFormat: String = "rockbox"
     ) {
         self.id = id
         self.name = name
@@ -76,6 +91,7 @@ struct SyncProfile: Codable, FetchableRecord, MutablePersistableRecord, Identifi
         self.transcodeMode = transcodeMode
         self.fat32SafePaths = fat32SafePaths
         self.cleanupRemovedFiles = cleanupRemovedFiles
+        self.playlistFormat = playlistFormat
     }
 
     mutating func didInsert(_ inserted: InsertionSuccess) {

@@ -90,12 +90,20 @@ cat > "${APP_BUNDLE}/Contents/Info.plist" <<'PLIST'
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
 </dict>
 </plist>
 PLIST
 
 cp "${BIN_PATH}" "${APP_BUNDLE}/Contents/MacOS/MLM"
 chmod +x "${APP_BUNDLE}/Contents/MacOS/MLM"
+
+# Copy app icon into the bundle
+ICON_SRC="${APP_ROOT}/MLM/Resources/AppIcon.icns"
+if [[ -f "${ICON_SRC}" ]]; then
+  cp "${ICON_SRC}" "${APP_BUNDLE}/Contents/Resources/AppIcon.icns"
+  echo "› app icon installed"
+fi
 
 # Ad-hoc sign so macOS picks up Info.plist changes (bundle id, display name, etc.)
 # without bumping into stale signature caches. Errors are non-fatal — unsigned

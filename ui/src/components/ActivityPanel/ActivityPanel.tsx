@@ -84,6 +84,11 @@ export default function ActivityPanel() {
     title?: string;
     percent?: number;
     status: "running" | "completed";
+    saved_to_db?: boolean;
+    lufs_i?: number;
+    lufs_range?: number;
+    true_peak?: number;
+    energy_bucket?: string;
   }
   const [enhancementOps, setEnhancementOps] = useState<Map<string, EnhancementOp>>(new Map());
 
@@ -141,7 +146,18 @@ export default function ActivityPanel() {
         })
       );
       unlisteners.push(
-        listen<{ current: number; total: number; artist?: string; title?: string; percent?: number }>(
+        listen<{ 
+          current: number; 
+          total: number; 
+          artist?: string; 
+          title?: string; 
+          percent?: number;
+          saved_to_db?: boolean;
+          lufs_i?: number;
+          lufs_range?: number;
+          true_peak?: number;
+          energy_bucket?: string;
+        }>(
           `${type}:progress`,
           (event) => {
             setEnhancementOps((prev) => {
@@ -154,6 +170,11 @@ export default function ActivityPanel() {
                 title: event.payload.title,
                 percent: event.payload.percent,
                 status: "running",
+                saved_to_db: event.payload.saved_to_db,
+                lufs_i: event.payload.lufs_i,
+                lufs_range: event.payload.lufs_range,
+                true_peak: event.payload.true_peak,
+                energy_bucket: event.payload.energy_bucket,
               });
               return next;
             });
@@ -420,6 +441,8 @@ export default function ActivityPanel() {
                 const trackName = op.artist && op.title
                   ? `${op.artist} - ${op.title}`
                   : undefined;
+                const dbStatus = op.saved_to_db ? "✓ saved" : null;
+                const loudnessInfo = op.lufs_i ? `LUFS-I: ${op.lufs_i.toFixed(1)} | LRA: ${op.lufs_range?.toFixed(1)}` : null;
                 return (
                   <div key={op.type} className="bg-raised/60 rounded px-3 py-[7px]">
                     <div className="flex items-center justify-between gap-3 mb-1">
@@ -448,6 +471,14 @@ export default function ActivityPanel() {
                         </div>
                         {trackName && (
                           <p className="text-[11px] text-ink-muted truncate mt-1">{trackName}</p>
+                        )}
+                        {dbStatus && (
+                          <p className="text-[10px] text-emerald-400 mt-0.5">{dbStatus}</p>
+                        )}
+                        {loudnessInfo && (
+                          <p className="text-[10px] text-ink-muted mt-0.5" style={{ fontFamily: "var(--font-mono)" }}>
+                            {loudnessInfo}
+                          </p>
                         )}
                       </>
                     )}

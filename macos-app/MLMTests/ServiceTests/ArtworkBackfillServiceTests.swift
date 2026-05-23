@@ -37,9 +37,10 @@ struct ArtworkBackfillServiceTests {
         #expect(svc.isBackfilling == false)
         // Posting libraryDidImport should trigger observation (service enqueues work)
         NotificationCenter.default.post(name: .libraryDidImport, object: nil)
-        // Small yield to let the Task { @MainActor } execute
-        try await Task.sleep(for: .milliseconds(50))
-        // Service should have reacted (isBackfilling may be true or already finished for empty DB)
+        // Wait long enough for the async Task chain to spin up and complete on an empty DB.
+        // 500ms is sufficient even under heavy CI load; backfillMissing on an empty library
+        // is nearly instant (no tracks to process), just the Task scheduler overhead.
+        try await Task.sleep(for: .milliseconds(500))
         // For an empty library, backfillMissing completes instantly — just verify no crash
         #expect(svc.isBackfilling == false, "Should not be stuck in backfilling state")
     }

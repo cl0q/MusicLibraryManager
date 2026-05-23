@@ -20,11 +20,31 @@ struct TrackPickerSheet: View {
     @State private var searchQuery: String = ""
     @FocusState private var searchFocused: Bool
 
+    enum FilterChip: String, CaseIterable {
+        case all = "Alle Tracks"
+        case local = "Nur lokal"
+        case artwork = "Mit Artwork"
+    }
+
+    @State private var activeFilter: FilterChip = .all
+    @State private var artworkTrackIds: Set<Int64> = []
+
     /// In-memory filter — faster than DB round-trip for keystroke search on 10k+ tracks.
     private var filtered: [Track] {
-        guard !searchQuery.isEmpty else { return allTracks }
+        var tracks = allTracks
+        
+        switch activeFilter {
+        case .all:
+            break
+        case .local:
+            tracks = tracks.filter { $0.isLocal }
+        case .artwork:
+            tracks = tracks.filter { artworkTrackIds.contains($0.id ?? -1) }
+        }
+        
+        guard !searchQuery.isEmpty else { return tracks }
         let query = searchQuery.lowercased()
-        return allTracks.filter {
+        return tracks.filter {
             $0.title.lowercased().contains(query) ||
             $0.artist.lowercased().contains(query)
         }
@@ -93,6 +113,28 @@ struct TrackPickerSheet: View {
             .padding(.horizontal, 16)
             .padding(.top, 12)
             .padding(.bottom, 8)
+
+            // Filter chips
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(FilterChip.allCases, id: \.self) { chip in
+                        Button {
+                            activeFilter = chip
+                        } label: {
+                            Text(chip.rawValue)
+                                .font(MLMFont.muted)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(activeFilter == chip ? Color.accentColor : Color.mlmRaised)
+                                .foregroundColor(activeFilter == chip ? .white : .mlmInk)
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .padding(.vertical, 4)
 
             // Result count line
             HStack {
@@ -180,7 +222,8 @@ struct TrackPickerSheet: View {
         .background(Color.mlmBase)
         .task {
             if let repo = container.trackRepository {
-                allTracks = (try? await repo.fetchLocalTracks()) ?? []
+                allTracks = (try? await repo.fetchAllTracks()) ?? []
+                artworkTrackIds = (try? await repo.fetchTrackIdsWithArtwork()) ?? []
             }
             searchFocused = true
         }

@@ -11,6 +11,12 @@ struct LogsTab: View {
         var id: String { rawValue }
     }
 
+    private struct LogSourceChip: Identifiable {
+        let label: String
+        let tag: String?
+        var id: String { label }
+    }
+
     /// `nil` source filter == "all sources". Otherwise filter to entries
     /// whose `source` matches this string. `""` matches entries with no
     /// source attached.
@@ -111,6 +117,40 @@ struct LogsTab: View {
                 .font(MLMFont.muted)
                 .buttonStyle(.plain)
             }
+
+            let chips = [
+                LogSourceChip(label: "All", tag: nil),
+                LogSourceChip(label: "Sync", tag: "Sync"),
+                LogSourceChip(label: "Transcode", tag: "Transcode"),
+                LogSourceChip(label: "Downloader", tag: "Download"),
+                LogSourceChip(label: "perf", tag: "perf"),
+                LogSourceChip(label: "boot", tag: "boot")
+            ]
+
+            // Quick-Filter-Chips für Log-Quellen
+            HStack(spacing: 8) {
+                Text("Quellen:")
+                    .font(MLMFont.muted)
+                    .foregroundColor(.mlmInkMuted)
+                
+                ForEach(chips) { chip in
+                    let isSelected = (chip.tag == nil && sourceFilter == nil) || (chip.tag != nil && sourceFilter == chip.tag)
+                    Button {
+                        sourceFilter = chip.tag
+                    } label: {
+                        Text(chip.label)
+                            .font(.system(size: 10, weight: isSelected ? .bold : .regular))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(isSelected ? Color.accentColor : Color.mlmRaised)
+                            .foregroundColor(isSelected ? .white : .mlmInk)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
+            }
+            .padding(.vertical, 2)
 
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")

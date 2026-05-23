@@ -31,6 +31,7 @@ final class ReplayGainAnalyzer: Sendable {
         let trackGain: Double   // dB to apply
         let trackPeak: Double   // true peak (linear)
         let loudness: Double    // measured LUFS
+        let lufsRange: Double   // measured LRA (LU)
     }
 
     /// Analyze loudness of a single track using ffmpeg's ebur128 filter.
@@ -51,64 +52,181 @@ final class ReplayGainAnalyzer: Sendable {
         return parseEBUR128Output(result.stderr)
     }
 
-    /// Batch-analyze multiple tracks for ReplayGain.
+    /// Batch-analyze multiple tracks for ReplayGain with true parallel processing.
+    ///
+    /// Uses a `ConcurrencyLimiter` to enforce exactly `workerCount` ffmpeg
+    /// subprocesses running at once. In turbo mode this saturates 80% of
+    /// available CPU cores — each slot runs a blocking ffmpeg ebur128 analysis.
     ///
     /// - Parameters:
     ///   - tracks: Tracks to analyze
     ///   - repository: Analysis repository for saving results
     ///   - trackRepository: Track repository for updating energy buckets
-    ///   - onProgress: Progress callback (index, total)
-    /// - Returns: Count of analyzed and failed tracks
+    ///   - turboMode: Enable turbo mode (80% core utilization, no cap)
+    ///   - progressHandler: Optional progress callback
+    /// - Returns: Count of analyzed, failed, and cancelled tracks
     func batchAnalyze(
         tracks: [Track],
         repository: AnalysisRepository,
         trackRepository: TrackRepository,
-        onProgress: ((Int, Int) -> Void)? = nil
-    ) async -> (analyzed: Int, failed: Int) {
+        libraryRoot: String? = nil,
+        turboMode: Bool = false,
+        progressHandler: ((MaintenanceProgressTracker.ProgressState) -> Void)? = nil
+    ) async -> (analyzed: Int, failed: Int, cancelled: Bool) {
+        let tracker = MaintenanceProgressTracker(total: tracks.count, turboMode: turboMode, progressHandler: progressHandler)
+        
+        let workerCount = BatchControl.workerCount(turboMode: turboMode)
+        let limiter = BatchControl.limiter(turboMode: turboMode)
+        
+        AppLogger.shared.info("Starting ReplayGain batch: \(tracks.count) tracks, \(workerCount) workers (turbo: \(turboMode))", source: "ReplayGain")
+        
+        // Feed ALL tracks into a single task group. The ConcurrencyLimiter
+        // ensures exactly `workerCount` ffmpeg subprocesses run at once.
+        let results: [Result<Void, Error>] = await withTaskGroup(of: Result<Void, Error>.self) { group in
+            for track in tracks {
+                group.addTask {
+                    // Check cancellation before acquiring a slot
+                    guard !tracker.isCancelled else {
+                        return .failure(CancellationError())
+                    }
+                    return await limiter.run {
+                        await self.processSingleAnalysis(
+                            track: track,
+                            repository: repository,
+                            trackRepository: trackRepository,
+                            libraryRoot: libraryRoot,
+                            tracker: tracker
+                        )
+                    }
+                }
+            }
+            
+            var collected: [Result<Void, Error>] = []
+            collected.reserveCapacity(tracks.count)
+            for await result in group {
+                collected.append(result)
+                // Early exit: stop collecting if cancelled
+                if tracker.isCancelled { break }
+            }
+            return collected
+        }
+        
         var analyzed = 0
         var failed = 0
-
-        for (index, track) in tracks.enumerated() {
-            onProgress?(index, tracks.count)
-
-            guard let trackId = track.id,
-                  let filePath = track.organizedPath ?? (track.isLocal ? track.originalPath : nil) else {
-                failed += 1
-                continue
-            }
-
-            do {
-                if let gain = try await analyzeTrack(path: filePath) {
-                    // Save ReplayGain data
-                    let rg = ReplayGain(
-                        trackId: trackId,
-                        trackGain: gain.trackGain,
-                        trackPeak: gain.trackPeak,
-                        albumGain: nil,
-                        albumPeak: nil,
-                        analyzedAt: ISO8601DateFormatter().string(from: Date())
-                    )
-                    try await repository.saveReplayGain(rg)
-
-                    // Compute and save energy bucket
-                    let bucket = EnergyBucketer.bucket(lufs: gain.loudness)
-                    try await trackRepository.updateEnergyBucket(
-                        trackId: trackId,
-                        energyBucket: bucket,
-                        lufsI: gain.loudness
-                    )
-
-                    analyzed += 1
-                } else {
-                    failed += 1
-                }
-            } catch {
-                failed += 1
-                AppLogger.shared.log("ReplayGain failed for \(track.title): \(error)", level: .warning, source: "Analysis")
+        for result in results {
+            switch result {
+            case .success: analyzed += 1
+            case .failure: failed += 1
             }
         }
+        
+        AppLogger.shared.info("ReplayGain batch complete: \(analyzed) analyzed, \(failed) failed", source: "ReplayGain")
+        return (analyzed, failed, tracker.isCancelled)
+    }
+    
+    /// Process a single track analysis with progress tracking
+    private func processSingleAnalysis(
+        track: Track,
+        repository: AnalysisRepository,
+        trackRepository: TrackRepository,
+        libraryRoot: String?,
+        tracker: MaintenanceProgressTracker
+    ) async -> Result<Void, Error> {
+        guard let trackId = track.id else {
+            tracker.updateProgress(
+                trackId: 0,
+                trackTitle: track.title,
+                trackArtist: track.artist,
+                savedToDb: false
+            )
+            return .failure(NSError(domain: "ReplayGain", code: -1, userInfo: [NSLocalizedDescriptionKey: "No track ID"]))
+        }
+        
+        // Resolve the actual file path (organizedPath is relative to libraryRoot)
+        let filePath: String?
+        if let organized = track.organizedPath {
+            let path: String
+            if let root = libraryRoot, !root.isEmpty {
+                path = URL(fileURLWithPath: root).appendingPathComponent(organized).path
+            } else {
+                path = organized
+            }
+            if FileManager.default.fileExists(atPath: path) {
+                filePath = path
+            } else if FileManager.default.fileExists(atPath: track.originalPath) {
+                filePath = track.originalPath
+            } else {
+                filePath = nil
+            }
+        } else {
+            filePath = track.isLocal && FileManager.default.fileExists(atPath: track.originalPath) ? track.originalPath : nil
+        }
+        
+        guard let resolvedPath = filePath else {
+            tracker.updateProgress(
+                trackId: trackId,
+                trackTitle: track.title,
+                trackArtist: track.artist,
+                savedToDb: false
+            )
+            return .failure(NSError(domain: "ReplayGain", code: -1, userInfo: [NSLocalizedDescriptionKey: "No file path"]))
+        }
+        
+        do {
+            if let gain = try await analyzeTrack(path: resolvedPath) {
+                // Save ReplayGain data
+                let rg = ReplayGain(
+                    trackId: trackId,
+                    trackGain: gain.trackGain,
+                    trackPeak: gain.trackPeak,
+                    albumGain: nil,
+                    albumPeak: nil,
+                    analyzedAt: ISO8601DateFormatter().string(from: Date())
+                )
+                try await repository.saveReplayGain(rg)
 
-        return (analyzed, failed)
+                // Compute and save energy bucket
+                let bucket = EnergyBucketer.bucket(lufs: gain.loudness)
+                try await trackRepository.updateEnergyBucket(
+                    trackId: trackId,
+                    energyBucket: bucket,
+                    lufsI: gain.loudness,
+                    lufsRange: gain.lufsRange,
+                    truePeak: gain.trackPeak
+                )
+                
+                tracker.updateProgress(
+                    trackId: trackId,
+                    trackTitle: track.title,
+                    trackArtist: track.artist,
+                    savedToDb: true
+                )
+                
+                AppLogger.shared.debug(
+                    "ReplayGain [\(tracker.currentState.current)/\(tracker.currentState.total)] \(track.artist) - \(track.title) → LUFS-I \(gain.loudness.format(1)), saved to DB",
+                    source: "ReplayGain"
+                )
+                
+                return .success(())
+            } else {
+                tracker.updateProgress(
+                    trackId: trackId,
+                    trackTitle: track.title,
+                    trackArtist: track.artist,
+                    savedToDb: false
+                )
+                return .failure(NSError(domain: "ReplayGain", code: -1, userInfo: [NSLocalizedDescriptionKey: "Analysis failed"]))
+            }
+        } catch {
+            tracker.updateProgress(
+                trackId: trackId,
+                trackTitle: track.title,
+                trackArtist: track.artist,
+                savedToDb: false
+            )
+            AppLogger.shared.log("ReplayGain failed for \(track.title): \(error)", level: .warning, source: "Analysis")
+            return .failure(error)
+        }
     }
 
     // MARK: - Parsing
@@ -121,6 +239,7 @@ final class ReplayGainAnalyzer: Sendable {
 
         var loudness: Double?
         var truePeak: Double?
+        var lufsRange: Double?
 
         let lines = output.components(separatedBy: "\n")
         for line in lines {
@@ -144,19 +263,28 @@ final class ReplayGainAnalyzer: Sendable {
                     }
                 }
             }
+
+            // Loudness range
+            if trimmed.contains("LRA:") && trimmed.contains("LU") {
+                let parts = trimmed.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+                if let idx = parts.firstIndex(of: "LU"), idx > 0 {
+                    lufsRange = Double(parts[idx - 1])
+                }
+            }
         }
 
         guard let lufs = loudness else { return nil }
 
         // Handle silence
         if lufs < Self.silenceThreshold || lufs.isInfinite || lufs.isNaN {
-            return GainResult(trackGain: Self.maxGain, trackPeak: 0.0, loudness: lufs)
+            return GainResult(trackGain: Self.maxGain, trackPeak: 0.0, loudness: lufs, lufsRange: 0.0)
         }
 
         let gain = Self.referenceLevel - lufs
         let peak = truePeak ?? 0.0
+        let lra = lufsRange ?? 0.0
 
-        return GainResult(trackGain: gain, trackPeak: peak, loudness: lufs)
+        return GainResult(trackGain: gain, trackPeak: peak, loudness: lufs, lufsRange: lra)
     }
 }
 

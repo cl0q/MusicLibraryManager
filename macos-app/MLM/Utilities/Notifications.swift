@@ -56,6 +56,13 @@ extension Notification.Name {
     /// - `userInfo["artworkPath"]`: `String` — absolute path to cached artwork file (1200px version)
     static let trackArtworkDidChange = Notification.Name("MLMTrackArtworkDidChange")
 
+    // MARK: - Review Queue
+
+    /// Posted when the duplicate review queue changes (deep scan completed, item resolved/dismissed).
+    ///
+    /// SidebarView observes this to refresh its pending-count badge on the Duplicates row.
+    static let reviewQueueDidChange = Notification.Name("MLMReviewQueueDidChange")
+
     // MARK: - Sync
 
     /// Posted when a sync operation completes.
@@ -86,6 +93,12 @@ extension Notification.Name {
     /// Posted when the user presses ⌘F — views should focus their search field.
     static let focusSearchField = Notification.Name("MLMFocusSearchField")
 
+    /// Posted when the user presses ⌘F globally from the menu bar.
+    static let searchCommandTriggered = Notification.Name("MLMSearchCommandTriggered")
+
+    /// Posted when the user presses ⌘F while in Folder view.
+    static let focusFolderSearchField = Notification.Name("MLMFocusFolderSearchField")
+
     /// Posted when the user triggers "Import from Folder…" via the Library menu.
     static let showImportDialog = Notification.Name("MLMShowImportDialog")
 
@@ -105,4 +118,15 @@ extension Notification.Name {
     /// in TrackContextMenu or PlaylistCard.contextMenu.
     /// ContentView or SyncView observes this to navigate to the create-profile sheet.
     static let navigateToCreateSyncProfile = Notification.Name("MLMNavigateToCreateSyncProfile")
+
+    /// Posted when the user triggers "Stale Pfade reparieren" from the Library menu.
+    static let triggerLibraryRepair = Notification.Name("MLMTriggerLibraryRepair")
+
+    // MARK: - Selection Actions
+
+    /// Posted when the user triggers "New Playlist..." with a track selection.
+    static let triggerNewPlaylistFromSelection = Notification.Name("MLMTriggerNewPlaylistFromSelection")
+
+    /// Posted when the user triggers "Neues Profil erstellen..." with a track selection.
+    static let triggerNewSyncProfileFromSelection = Notification.Name("MLMTriggerNewSyncProfileFromSelection")
 }

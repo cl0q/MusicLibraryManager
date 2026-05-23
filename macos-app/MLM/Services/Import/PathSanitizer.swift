@@ -56,9 +56,10 @@ enum PathSanitizer {
         // Check reserved names BEFORE sanitization (match Rust behavior)
         let isReserved = isWindowsReserved(trimmed)
 
-        // Replace unsafe characters with underscore
+        // Replace unsafe characters with underscore and filter out non-ASCII emojis
         var sanitized = trimmed
             .unicodeScalars
+            .filter { !($0.value > 127 && $0.properties.isEmoji) }
             .map { unsafeCharacters.contains($0) ? "_" : String($0) }
             .joined()
 
