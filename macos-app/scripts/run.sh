@@ -7,6 +7,7 @@
 #   ./scripts/run.sh --no-open      # build only, don't launch
 #   ./scripts/run.sh --clean        # nuke .build/ before building
 #   ./scripts/run.sh --kill         # kill any running MLM before launch
+#   ./scripts/run.sh --install      # install compiled app to /Applications/
 #
 # Flags can be combined, e.g. `./scripts/run.sh --release --kill`.
 
@@ -21,6 +22,7 @@ CONFIG="debug"
 DO_OPEN=1
 DO_CLEAN=0
 DO_KILL=0
+DO_INSTALL=0
 
 for arg in "$@"; do
   case "${arg}" in
@@ -29,8 +31,9 @@ for arg in "$@"; do
     --no-open)  DO_OPEN=0 ;;
     --clean)    DO_CLEAN=1 ;;
     --kill)     DO_KILL=1 ;;
+    --install)  DO_INSTALL=1 ;;
     -h|--help)
-      sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,13p' "${SCRIPT_DIR}/$(basename "$0")" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -112,6 +115,19 @@ codesign --force --sign - "${APP_BUNDLE}" 2>/dev/null || true
 
 ABS_BUNDLE="${APP_ROOT}/${APP_BUNDLE}"
 
+if [[ "${DO_INSTALL}" == "1" ]]; then
+  echo "› installing to /Applications/MLM.app"
+  if [[ ! -w "/Applications" ]] || { [[ -e "/Applications/MLM.app" ]] && [[ ! -w "/Applications/MLM.app" ]]; }; then
+    echo "› Administrator privileges required to install to /Applications"
+    sudo rm -rf "/Applications/MLM.app"
+    sudo cp -R "${APP_BUNDLE}" "/Applications/"
+  else
+    rm -rf "/Applications/MLM.app"
+    cp -R "${APP_BUNDLE}" "/Applications/"
+  fi
+  ABS_BUNDLE="/Applications/MLM.app"
+fi
+
 if [[ "${DO_KILL}" == "1" ]]; then
   echo "› killing any running MLM"
   pkill -x MLM 2>/dev/null || true
@@ -119,8 +135,16 @@ if [[ "${DO_KILL}" == "1" ]]; then
 fi
 
 if [[ "${DO_OPEN}" == "1" ]]; then
-  echo "› open ${APP_BUNDLE}"
+  if [[ "${DO_INSTALL}" == "1" ]]; then
+    echo "› open /Applications/MLM.app"
+  else
+    echo "› open ${APP_BUNDLE}"
+  fi
   open "${ABS_BUNDLE}"
 else
-  echo "› built: ${ABS_BUNDLE}"
+  if [[ "${DO_INSTALL}" == "1" ]]; then
+    echo "› installed: ${ABS_BUNDLE}"
+  else
+    echo "› built: ${ABS_BUNDLE}"
+  fi
 fi

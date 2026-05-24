@@ -20,7 +20,7 @@ final class SyncViewModel {
     // MARK: - Dependencies
 
     private let syncRepository: SyncRepository
-    private let syncService: SyncService
+    let syncService: SyncService
 
     init(syncRepository: SyncRepository, syncService: SyncService) {
         self.syncRepository = syncRepository

@@ -37,7 +37,12 @@ final class TranscodeService: Sendable {
     /// - Lossy >= bitrateKbps → transcode to reduce size
     ///
     /// - Parameter bitrateKbps: Target AAC bitrate in kbps. Defaults to 248 for back-compat.
-    func transcode(input: URL, outputDir: URL, bitrateKbps: Int = 248) async throws -> TranscodeResult {
+    func transcode(
+        input: URL,
+        outputDir: URL,
+        outputName: String? = nil,
+        bitrateKbps: Int = 248
+    ) async throws -> TranscodeResult {
         guard let ffmpeg = ffmpegPath else {
             AppLogger.shared.error(
                 "transcode: ffmpeg not found in PATH (~/.local/bin, /opt/homebrew/bin, /usr/local/bin, /opt/local/bin, /usr/bin)",
@@ -50,8 +55,8 @@ final class TranscodeService: Sendable {
             source: "Transcode"
         )
 
-        let outputName = input.deletingPathExtension().lastPathComponent + ".m4a"
-        let outputURL = outputDir.appendingPathComponent(outputName)
+        let finalOutputName = outputName ?? (input.deletingPathExtension().lastPathComponent + ".m4a")
+        let outputURL = outputDir.appendingPathComponent(finalOutputName)
 
         // Skip if output already exists
         if FileManager.default.fileExists(atPath: outputURL.path) {
@@ -73,7 +78,7 @@ final class TranscodeService: Sendable {
 
         // Determine which encoder to use
         let encoder = await detectEncoder(ffmpeg: ffmpeg)
-        let tmpOutput = outputDir.appendingPathComponent(outputName + ".tmp.m4a")
+        let tmpOutput = outputDir.appendingPathComponent(finalOutputName + ".tmp.m4a")
 
         // First attempt: preserve cover art
         let result = try await runTranscode(

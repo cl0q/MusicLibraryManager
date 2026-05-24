@@ -107,7 +107,13 @@ final class TranscodeCache: Sendable {
             return nil
         }
 
-        let result = try await transcodeService.transcode(input: sourceURL, outputDir: cacheDir, bitrateKbps: bitrateKbps)
+        let targetName = "\(trackId)_\(bitrateKbps).m4a"
+        let result = try await transcodeService.transcode(
+            input: sourceURL,
+            outputDir: cacheDir,
+            outputName: targetName,
+            bitrateKbps: bitrateKbps
+        )
 
         switch result {
         case .transcoded(let url):

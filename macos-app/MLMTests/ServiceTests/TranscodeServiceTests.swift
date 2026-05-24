@@ -164,4 +164,30 @@ struct TranscodeServiceTests {
             Issue.record("Second transcode failed: \(error)")
         }
     }
+
+    /// Output file should land in the requested output directory using
+    /// the custom outputName parameter if specified.
+    @Test
+    func transcodeOutputRespectsCustomOutputName() async throws {
+        try #require(Self.ffmpegAvailable, "ffmpeg + ffprobe required for transcode test")
+
+        let tmp = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let input = tmp.appendingPathComponent("silent.flac")
+        try await makeSilentFlac(at: input)
+
+        let outputDir = tmp.appendingPathComponent("out")
+        try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
+
+        let service = TranscodeService()
+        let customName = "12345_248.m4a"
+        let result = try await service.transcode(input: input, outputDir: outputDir, outputName: customName)
+        if case .transcoded(let outputURL) = result {
+            #expect(outputURL.lastPathComponent == customName)
+            #expect(outputURL.deletingLastPathComponent().path == outputDir.path)
+        } else {
+            Issue.record("Expected transcoded result with custom name")
+        }
+    }
 }

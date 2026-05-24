@@ -306,6 +306,25 @@ struct SyncServiceTests {
         doppiProfile.playlistFormat = "doppi"
         #expect(doppiProfile.playlistFormatEnum == .doppi)
     }
+
+    @Test func testSyncTurboLevelDefaultsAndSetting() throws {
+        let (_, service) = try makeService()
+        
+        // Default should be medium
+        #expect(service.syncTurboLevel == .medium)
+        
+        // Setting it should persist and update the property
+        service.setSyncTurboLevel(.full)
+        #expect(service.syncTurboLevel == .full)
+        #expect(UserDefaults.standard.string(forKey: "sync_turbo_level") == "100%")
+        
+        service.setSyncTurboLevel(.low)
+        #expect(service.syncTurboLevel == .low)
+        #expect(UserDefaults.standard.string(forKey: "sync_turbo_level") == "60%")
+        
+        // Clean up
+        UserDefaults.standard.removeObject(forKey: "sync_turbo_level")
+    }
 }
 
 

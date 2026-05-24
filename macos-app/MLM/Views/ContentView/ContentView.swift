@@ -187,6 +187,9 @@ struct ContentView: View {
                         PlayerBar(viewModel: vm)
                     }
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    SyncTurboToggle()
+                }
             }
 
             // Separator

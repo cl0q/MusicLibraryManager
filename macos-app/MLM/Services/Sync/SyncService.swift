@@ -42,6 +42,7 @@ final class SyncService {
     private(set) var isRunning = false
     private(set) var progress: Double = 0
     private(set) var currentFile: String = ""
+    private(set) var syncTurboLevel: SyncTurboLevel = .medium
 
     // MARK: - Cancellation + Progress Tracking (D-14)
 
@@ -51,6 +52,13 @@ final class SyncService {
 
     func cancelSync() {
         cancellationRequested = true
+    }
+
+    /// Update the sync turbo level preference
+    func setSyncTurboLevel(_ level: SyncTurboLevel) {
+        syncTurboLevel = level
+        UserDefaults.standard.set(level.rawValue, forKey: "sync_turbo_level")
+        AppLogger.shared.info("Sync turbo level set to \(level.rawValue) (\(level.workerCount()) workers)", source: "Sync")
     }
 
     // MARK: - Dependencies
@@ -78,6 +86,13 @@ final class SyncService {
         self.syncRepository = syncRepository
         self.configRepository = configRepository
         self.transcodeCache = transcodeCache
+        
+        if let rawValue = UserDefaults.standard.string(forKey: "sync_turbo_level"),
+           let level = SyncTurboLevel(rawValue: rawValue) {
+            self.syncTurboLevel = level
+        } else {
+            self.syncTurboLevel = .medium
+        }
     }
 
     // MARK: - Preview
@@ -172,6 +187,174 @@ final class SyncService {
         return preview
     }
 
+    // MARK: - Parallel Sync Helpers
+
+    enum FileSyncOutcome: Sendable {
+        case synced(Int64, Int) // trackId, size
+        case skipped(Int64)
+        case failed(Int64, String) // trackId, error description
+    }
+
+    private func incrementProcessed(currentFile: String, operationId: UUID?) async {
+        await MainActor.run {
+            self.processed += 1
+            self.currentFile = currentFile
+            self.progress = Double(self.processed) / Double(max(self.total, 1))
+            if let operationId {
+                self.activityViewModel?.updateProgress(
+                    id: operationId,
+                    progress: self.progress,
+                    detail: "\(self.processed) / \(self.total) — \(currentFile)"
+                )
+            }
+        }
+    }
+
+    private func syncSingleFile(
+        file: FilePreview,
+        profileId: Int64,
+        profile: SyncProfile,
+        libraryRoot: String,
+        operationId: UUID?
+    ) async throws -> FileSyncOutcome {
+        let currentFile = "\(file.artist) - \(file.title)"
+        
+        guard let track = try await trackRepository.fetchTrack(id: file.trackId) else {
+            await incrementProcessed(currentFile: "Failed: \(currentFile)", operationId: operationId)
+            return .failed(file.trackId, "Track metadata not found in database")
+        }
+
+        // Determine if the track is actually syncable (has a local file/source)
+        var isSyncable = false
+        var candidatePaths: [String] = []
+        if let op = track.organizedPath { candidatePaths.append(op) }
+        if track.isLocal { candidatePaths.append(track.originalPath) }
+        
+        for candidate in candidatePaths {
+            if TranscodeCache.resolveSourceURL(sourcePath: candidate, libraryRoot: libraryRoot) != nil {
+                isSyncable = true
+                break
+            }
+        }
+        
+        if !isSyncable {
+            AppLogger.shared.warn(
+                "Sync skipped (no local file): track \(file.trackId) \(file.artist) - \(file.title) is stream-only or missing on-disk",
+                source: "Sync"
+            )
+            await incrementProcessed(currentFile: "Skipped: \(currentFile)", operationId: operationId)
+            return .skipped(file.trackId)
+        }
+
+        // Transcode-mode branching (SYNC-v2-19)
+        let cachedURL: URL?
+        switch profile.transcodeModeEnum {
+        case .keepOriginals:
+            // Bypass TranscodeCache — link original file directly (no transcode)
+            if let organizedPath = track.organizedPath,
+               let sourceURL = TranscodeCache.resolveSourceURL(sourcePath: organizedPath, libraryRoot: libraryRoot) {
+                let destURL = URL(fileURLWithPath: file.destinationPath)
+                try FileManager.default.createDirectory(
+                    at: destURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                // Clean up any alternative extensions of the same track to prevent stale or duplicate files (e.g. old fake .m4a)
+                let stemURL = destURL.deletingPathExtension()
+                let alternativeExtensions = ["m4a", "mp3", "wav", "flac", "aac", "ogg"]
+                for ext in alternativeExtensions {
+                    let altURL = stemURL.appendingPathExtension(ext)
+                    if altURL.path != destURL.path {
+                        try? FileManager.default.removeItem(at: altURL)
+                    }
+                }
+                try? FileManager.default.removeItem(at: destURL)
+                do {
+                    try FileManager.default.linkItem(at: sourceURL, to: destURL)
+                } catch {
+                    try FileManager.default.copyItem(at: sourceURL, to: destURL)
+                }
+                // For keepOriginals, file is already at destURL — update sync state directly
+                if FileManager.default.fileExists(atPath: destURL.path) {
+                    let checksum = try TranscodeCache.sha256(of: destURL)
+                    let size = try FileManager.default.attributesOfItem(atPath: destURL.path)[.size] as? Int ?? 0
+                    try await syncRepository.updateSyncState(
+                        profileId: profileId,
+                        trackId: file.trackId,
+                        checksum: checksum,
+                        size: size
+                    )
+                    await incrementProcessed(currentFile: currentFile, operationId: operationId)
+                    return .synced(file.trackId, size)
+                } else {
+                    await incrementProcessed(currentFile: "Failed: \(currentFile)", operationId: operationId)
+                    return .failed(file.trackId, "Source file not found")
+                }
+            } else {
+                await incrementProcessed(currentFile: "Failed: \(currentFile)", operationId: operationId)
+                return .failed(file.trackId, "No organized path for keepOriginals")
+            }
+        case .aac248:
+            cachedURL = try await transcodeCache.ensureCached(track: track, bitrateKbps: 248, libraryRoot: libraryRoot)
+        case .aac320:
+            cachedURL = try await transcodeCache.ensureCached(track: track, bitrateKbps: 320, libraryRoot: libraryRoot)
+        }
+
+        // For aac248/aac320, link cached file to destination
+        if profile.transcodeModeEnum != .keepOriginals {
+            let bitrate: Int = profile.transcodeModeEnum == .aac320 ? 320 : 248
+            if let _ = cachedURL {
+                let destURL = TranscodeCache.buildProfilePath(
+                    track: track,
+                    libraryRoot: libraryRoot,
+                    profileOutputFolder: profile.outputFolder,
+                    transcodeMode: profile.transcodeModeEnum
+                )
+                // Clean up any alternative extensions of the same track to prevent stale or duplicate files (e.g. old fake .m4a)
+                let stemURL = destURL.deletingPathExtension()
+                let alternativeExtensions = ["m4a", "mp3", "wav", "flac", "aac", "ogg"]
+                for ext in alternativeExtensions {
+                    let altURL = stemURL.appendingPathExtension(ext)
+                    if altURL.path != destURL.path {
+                        try? FileManager.default.removeItem(at: altURL)
+                    }
+                }
+
+                try transcodeCache.linkToProfile(
+                    trackId: file.trackId,
+                    bitrateKbps: bitrate,
+                    destinationPath: destURL
+                )
+
+                // Update sync state
+                let checksum = try TranscodeCache.sha256(of: destURL)
+                let size = try FileManager.default.attributesOfItem(atPath: destURL.path)[.size] as? Int ?? 0
+
+                try await syncRepository.updateSyncState(
+                    profileId: profileId,
+                    trackId: file.trackId,
+                    checksum: checksum,
+                    size: size
+                )
+
+                AppLogger.shared.info(
+                    "Sync ok: track \(file.trackId) → \(destURL.path) (\(size) bytes, \(bitrate)k)",
+                    source: "Sync"
+                )
+                await incrementProcessed(currentFile: currentFile, operationId: operationId)
+                return .synced(file.trackId, size)
+            } else {
+                AppLogger.shared.error(
+                    "Sync failed (transcode returned nil): track \(file.trackId) \(file.artist) - \(file.title) at \(bitrate)k",
+                    source: "Sync"
+                )
+                await incrementProcessed(currentFile: "Failed: \(currentFile)", operationId: operationId)
+                return .failed(file.trackId, "Transcode failed")
+            }
+        }
+        
+        return .failed(file.trackId, "Unknown transcode mode")
+    }
+
     // MARK: - Execute
 
     /// Execute sync for a profile.
@@ -260,162 +443,62 @@ final class SyncService {
 
         // 2. Sync new files
         let libraryRoot = try await configRepository.getLibraryRoot() ?? ""
-        for file in preview.filesToAdd {
-            currentFile = "\(file.artist) - \(file.title)"
-            progress = Double(processed) / Double(max(total, 1))
-            if let operationId {
-                await MainActor.run {
-                    activityViewModel?.updateProgress(
-                        id: operationId,
-                        progress: progress,
-                        detail: "\(processed) / \(total) — \(file.artist) - \(file.title)"
-                    )
-                }
-            }
-
-            do {
-                if let track = try await trackRepository.fetchTrack(id: file.trackId) {
-                    // Determine if the track is actually syncable (has a local file/source)
-                    var isSyncable = false
-                    var candidatePaths: [String] = []
-                    if let op = track.organizedPath { candidatePaths.append(op) }
-                    if track.isLocal { candidatePaths.append(track.originalPath) }
-                    
-                    for candidate in candidatePaths {
-                        if TranscodeCache.resolveSourceURL(sourcePath: candidate, libraryRoot: libraryRoot) != nil {
-                            isSyncable = true
-                            break
-                        }
+        let workerCount = syncTurboLevel.workerCount()
+        let limiter = ConcurrencyLimiter(maxConcurrency: workerCount)
+        
+        AppLogger.shared.info("Syncing new files: \(preview.filesToAdd.count) tracks, \(workerCount) workers (level: \(syncTurboLevel.rawValue))", source: "Sync")
+        
+        let outcomes: [FileSyncOutcome] = await withTaskGroup(of: FileSyncOutcome.self) { group in
+            for file in preview.filesToAdd {
+                group.addTask {
+                    guard !self.cancellationRequested else {
+                        return .failed(file.trackId, "Cancelled")
                     }
                     
-                    if !isSyncable {
-                        result.skippedCount += 1
-                        AppLogger.shared.warn(
-                            "Sync skipped (no local file): track \(file.trackId) \(file.artist) - \(file.title) is stream-only or missing on-disk (tried \(candidatePaths))",
-                            source: "Sync"
-                        )
-                        processed += 1
-                        if cancellationRequested { break }
-                        continue
-                    }
-
-                    // Transcode-mode branching (SYNC-v2-19)
-                    let cachedURL: URL?
-                    switch profile.transcodeModeEnum {
-                    case .keepOriginals:
-                        // Bypass TranscodeCache — link original file directly (no transcode)
-                        if let organizedPath = track.organizedPath,
-                           let sourceURL = TranscodeCache.resolveSourceURL(sourcePath: organizedPath, libraryRoot: libraryRoot) {
-                            let destURL = URL(fileURLWithPath: file.destinationPath)
-                            try? FileManager.default.createDirectory(
-                                at: destURL.deletingLastPathComponent(),
-                                withIntermediateDirectories: true
-                            )
-                            // Clean up any alternative extensions of the same track to prevent stale or duplicate files (e.g. old fake .m4a)
-                            let stemURL = destURL.deletingPathExtension()
-                            let alternativeExtensions = ["m4a", "mp3", "wav", "flac", "aac", "ogg"]
-                            for ext in alternativeExtensions {
-                                let altURL = stemURL.appendingPathExtension(ext)
-                                if altURL.path != destURL.path {
-                                    try? FileManager.default.removeItem(at: altURL)
-                                }
-                            }
-                            try? FileManager.default.removeItem(at: destURL)
-                            do {
-                                try FileManager.default.linkItem(at: sourceURL, to: destURL)
-                            } catch {
-                                try? FileManager.default.copyItem(at: sourceURL, to: destURL)
-                            }
-                            // For keepOriginals, file is already at destURL — update sync state directly
-                            if FileManager.default.fileExists(atPath: destURL.path) {
-                                let checksum = try TranscodeCache.sha256(of: destURL)
-                                let size = try FileManager.default.attributesOfItem(atPath: destURL.path)[.size] as? Int ?? 0
-                                try await syncRepository.updateSyncState(
-                                    profileId: profileId,
-                                    trackId: file.trackId,
-                                    checksum: checksum,
-                                    size: size
-                                )
-                                result.syncedCount += 1
-                            } else {
-                                result.failedCount += 1
-                                result.failedTracks.append((file.trackId, "Source file not found"))
-                            }
-                            cachedURL = nil  // Already handled above
-                        } else {
-                            cachedURL = nil
-                            result.failedCount += 1
-                            result.failedTracks.append((file.trackId, "No organized path for keepOriginals"))
+                    return await limiter.run {
+                        guard !self.cancellationRequested else {
+                            return .failed(file.trackId, "Cancelled")
                         }
-                    case .aac248:
-                        cachedURL = try await transcodeCache.ensureCached(track: track, bitrateKbps: 248, libraryRoot: libraryRoot)
-                    case .aac320:
-                        cachedURL = try await transcodeCache.ensureCached(track: track, bitrateKbps: 320, libraryRoot: libraryRoot)
-                    }
-
-                    // For aac248/aac320, link cached file to destination
-                    if profile.transcodeModeEnum != .keepOriginals {
-                        let bitrate: Int = profile.transcodeModeEnum == .aac320 ? 320 : 248
-                        if let _ = cachedURL {
-                            let destURL = TranscodeCache.buildProfilePath(
-                                track: track,
-                                libraryRoot: libraryRoot,
-                                profileOutputFolder: profile.outputFolder,
-                                transcodeMode: profile.transcodeModeEnum
-                            )
-                            // Clean up any alternative extensions of the same track to prevent stale or duplicate files (e.g. old fake .m4a)
-                            let stemURL = destURL.deletingPathExtension()
-                            let alternativeExtensions = ["m4a", "mp3", "wav", "flac", "aac", "ogg"]
-                            for ext in alternativeExtensions {
-                                let altURL = stemURL.appendingPathExtension(ext)
-                                if altURL.path != destURL.path {
-                                    try? FileManager.default.removeItem(at: altURL)
-                                }
-                            }
-
-                            try transcodeCache.linkToProfile(
-                                trackId: file.trackId,
-                                bitrateKbps: bitrate,
-                                destinationPath: destURL
-                            )
-
-                            // Update sync state
-                            let checksum = try TranscodeCache.sha256(of: destURL)
-                            let size = try FileManager.default.attributesOfItem(atPath: destURL.path)[.size] as? Int ?? 0
-
-                            try await syncRepository.updateSyncState(
+                        
+                        do {
+                            return try await self.syncSingleFile(
+                                file: file,
                                 profileId: profileId,
-                                trackId: file.trackId,
-                                checksum: checksum,
-                                size: size
+                                profile: profile,
+                                libraryRoot: libraryRoot,
+                                operationId: operationId
                             )
-
-                            result.syncedCount += 1
-                            AppLogger.shared.info(
-                                "Sync ok: track \(file.trackId) → \(destURL.path) (\(size) bytes, \(bitrate)k)",
-                                source: "Sync"
-                            )
-                        } else {
-                            result.failedCount += 1
-                            result.failedTracks.append((file.trackId, "Transcode failed"))
-                            AppLogger.shared.error(
-                                "Sync failed (transcode returned nil): track \(file.trackId) \(file.artist) - \(file.title) at \(bitrate)k",
-                                source: "Sync"
-                            )
+                        } catch {
+                            await self.incrementProcessed(currentFile: "Failed: \(file.artist) - \(file.title)", operationId: operationId)
+                            return .failed(file.trackId, error.localizedDescription)
                         }
                     }
                 }
-            } catch {
-                result.failedCount += 1
-                result.failedTracks.append((file.trackId, error.localizedDescription))
-                AppLogger.shared.error(
-                    "Sync failed (exception): track \(file.trackId) \(file.artist) - \(file.title): \(error.localizedDescription)",
-                    source: "Sync"
-                )
             }
-
-            processed += 1
-            if cancellationRequested { break }
+            
+            var collected: [FileSyncOutcome] = []
+            collected.reserveCapacity(preview.filesToAdd.count)
+            for await outcome in group {
+                collected.append(outcome)
+            }
+            return collected
+        }
+        
+        // Aggregate outcomes
+        for outcome in outcomes {
+            switch outcome {
+            case .synced:
+                result.syncedCount += 1
+            case .skipped:
+                result.skippedCount += 1
+            case .failed(let id, let errMsg):
+                if errMsg == "Cancelled" {
+                    result.skippedCount += 1
+                } else {
+                    result.failedCount += 1
+                    result.failedTracks.append((id, errMsg))
+                }
+            }
         }
 
         // 3. Generate M3U8 playlists (M3U8 gate — SYNC-v2-20)
