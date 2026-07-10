@@ -23,6 +23,7 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
     var organizedPath: String?
     var isDuplicate: Int
     var dateAdded: String?
+    var dateAddedLibrary: String?
     var variantOf: Int64?
     var downloadStatus: String?
     var lufsI: Double?
@@ -55,6 +56,7 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
         static let organizedPath = Column(CodingKeys.organizedPath)
         static let isDuplicate = Column(CodingKeys.isDuplicate)
         static let dateAdded = Column(CodingKeys.dateAdded)
+        static let dateAddedLibrary = Column(CodingKeys.dateAddedLibrary)
         static let variantOf = Column(CodingKeys.variantOf)
         static let downloadStatus = Column(CodingKeys.downloadStatus)
         static let lufsI = Column(CodingKeys.lufsI)
@@ -84,6 +86,7 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
         case organizedPath = "organized_path"
         case isDuplicate = "is_duplicate"
         case dateAdded = "date_added"
+        case dateAddedLibrary = "date_added_library"
         case variantOf = "variant_of"
         case downloadStatus = "download_status"
         case lufsI = "lufs_i"
@@ -137,6 +140,7 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
         container[Columns.organizedPath] = organizedPath
         container[Columns.isDuplicate] = isDuplicate
         container[Columns.dateAdded] = dateAdded
+        container[Columns.dateAddedLibrary] = dateAddedLibrary
         container[Columns.variantOf] = variantOf
         container[Columns.downloadStatus] = downloadStatus
         container[Columns.lufsI] = lufsI
@@ -182,6 +186,10 @@ extension Track {
 
     /// Date added sort key — nil sorts as empty string (sorts first).
     var dateAddedSortKey: String { dateAdded ?? "" }
+
+    /// Library-added date sort key — falls back to the remote date when the
+    /// library date is missing so mixed rows still sort sensibly.
+    var dateAddedLibrarySortKey: String { dateAddedLibrary ?? dateAdded ?? "" }
 
     // MARK: - Enhanced Search Properties
 
@@ -238,6 +246,7 @@ extension Track {
         self.organizedPath = nil
         self.isDuplicate = 0
         self.dateAdded = nil
+        self.dateAddedLibrary = nil
         self.variantOf = nil
         self.downloadStatus = nil
         self.lufsI = nil

@@ -795,6 +795,30 @@ final class DatabaseManager: Sendable {
             try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_tracks_genre ON tracks(genre)")
         }
 
+        // ──────────────────────────────────────────────────────────────
+        // Migration v30_date_added_library: split "added" into two dates.
+        // `date_added`         → when the track was added at its REMOTE
+        //                        source (e.g. liked on SoundCloud). Managed
+        //                        by remote sync; drives the Remote tab order.
+        // `date_added_library` → when the local file landed on disk
+        //                        (download/import). Drives the Local tab
+        //                        order. NULL for remote-only tracks.
+        // Backfill existing local rows so their library date isn't empty.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v30_date_added_library") { db in
+            if try !db.columns(in: "tracks").contains(where: { $0.name == "date_added_library" }) {
+                try db.alter(table: "tracks") { t in
+                    t.add(column: "date_added_library", .text)
+                }
+            }
+            try db.execute(sql: """
+                UPDATE tracks
+                SET date_added_library = date_added
+                WHERE organized_path IS NOT NULL AND date_added_library IS NULL
+            """)
+            try db.create(indexOn: "tracks", columns: ["date_added_library"], options: .ifNotExists)
+        }
+
         return migrator
     }
 

@@ -127,6 +127,9 @@ private struct RemotePlaylistDetailView: View {
 
     @State private var mode: SelectionMode = .all
     @State private var count: Int = 50
+    @State private var countText: String = "50"
+    /// The exact tracks that will be downloaded — what the list shows.
+    @State private var previewTracks: [Track] = []
 
     private enum SelectionMode: String, CaseIterable, Identifiable {
         case all = "Alle"
@@ -141,6 +144,25 @@ private struct RemotePlaylistDetailView: View {
         case .firstN: return .firstN(count)
         case .randomN: return .randomN(count)
         }
+    }
+
+    /// Recompute the preview list from the current mode + count. Random is
+    /// shuffled once here (not per render) so the preview stays stable and
+    /// matches exactly what gets downloaded.
+    private func recomputePreview() {
+        let all = viewModel.selectedTracks
+        switch mode {
+        case .all:
+            previewTracks = all
+        case .firstN:
+            previewTracks = Array(all.prefix(max(0, count)))
+        case .randomN:
+            previewTracks = Array(all.shuffled().prefix(max(0, count)))
+        }
+    }
+
+    private var previewDurationSeconds: Int {
+        previewTracks.reduce(0) { $0 + ($1.duration ?? 0) }
     }
 
     var body: some View {
@@ -162,7 +184,7 @@ private struct RemotePlaylistDetailView: View {
                 ProgressView("Playlist wird geladen…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                Text("\(viewModel.selectedTracks.count) Titel · \(durationText)")
+                Text("\(previewTracks.count) von \(viewModel.selectedTracks.count) Titeln · \(durationText)")
                     .font(.caption)
                     .foregroundColor(.secondary)
 
@@ -174,7 +196,7 @@ private struct RemotePlaylistDetailView: View {
 
                 selectionControls
 
-                List(viewModel.selectedTracks, id: \.id) { track in
+                List(previewTracks, id: \.id) { track in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(track.title).font(.body)
                         Text(track.artist).font(.caption).foregroundColor(.secondary)
@@ -187,16 +209,25 @@ private struct RemotePlaylistDetailView: View {
                 }
 
                 Button {
-                    Task { await viewModel.download(selection: selection) }
+                    Task { await viewModel.download(tracks: previewTracks) }
                 } label: {
-                    Label("Herunterladen", systemImage: "arrow.down.circle")
+                    Label("\(previewTracks.count) herunterladen", systemImage: "arrow.down.circle")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(viewModel.selectedTracks.isEmpty)
+                .disabled(previewTracks.isEmpty)
             }
         }
         .padding(16)
+        .onAppear { recomputePreview() }
+        .onChange(of: mode) { _ in recomputePreview() }
+        .onChange(of: count) { _ in recomputePreview() }
+        .onChange(of: viewModel.selectedTracks.count) { _ in
+            // Clamp N to the newly loaded track count and refresh.
+            let maxN = max(1, viewModel.selectedTracks.count)
+            if count > maxN { count = maxN; countText = "\(maxN)" }
+            recomputePreview()
+        }
     }
 
     private var selectionControls: some View {
@@ -210,14 +241,40 @@ private struct RemotePlaylistDetailView: View {
             .labelsHidden()
 
             if mode != .all {
-                Stepper(value: $count, in: 1...max(1, viewModel.selectedTracks.count)) {
-                    Text("\(count)")
+                HStack(spacing: 4) {
+                    TextField("N", text: $countText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 56)
+                        .multilineTextAlignment(.trailing)
                         .monospacedDigit()
-                        .frame(minWidth: 36, alignment: .trailing)
+                        .onSubmit { commitCountText() }
+                        .onChange(of: countText) { _ in commitCountText() }
+
+                    Stepper("") {
+                        setCount(count + 1)
+                    } onDecrement: {
+                        setCount(count - 1)
+                    }
+                    .labelsHidden()
                 }
                 .fixedSize()
             }
         }
+    }
+
+    /// Parse and clamp the typed N, then refresh the preview.
+    private func commitCountText() {
+        let digits = countText.filter(\.isNumber)
+        let parsed = Int(digits) ?? 0
+        setCount(parsed)
+    }
+
+    private func setCount(_ value: Int) {
+        let maxN = max(1, viewModel.selectedTracks.count)
+        let clamped = min(max(1, value), maxN)
+        if clamped != count { count = clamped }
+        let text = "\(clamped)"
+        if countText != text { countText = text }
     }
 
     private var durationText: String {

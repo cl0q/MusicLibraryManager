@@ -142,7 +142,7 @@ struct LibraryTable: View {
                 .width(48)
 
                 TableColumn("Added", value: \TrackRow.track.dateAddedSortKey) { row in
-                    Text(formatDateAdded(row.track.dateAdded))
+                    Text(formatDateAdded(row.track.dateAddedLibrary ?? row.track.dateAdded))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }

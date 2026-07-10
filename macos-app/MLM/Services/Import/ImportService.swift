@@ -315,6 +315,7 @@ final class ImportService: Sendable {
                 track.duration = metadata.duration
                 track.organizedPath = organizedPath
                 track.dateAdded = ISO8601DateFormatter().string(from: Date())
+                track.dateAddedLibrary = track.dateAdded
                 track.searchText = DatabaseManager.foldedSearchText(
                     track.artist + " " + track.album + " " + track.title
                 )

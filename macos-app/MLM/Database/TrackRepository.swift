@@ -206,10 +206,25 @@ final class TrackRepository: Sendable {
         // sortBy.sqlColumn is from a closed enum — safe to interpolate.
         let limitSQL = limit.map { "LIMIT \($0)" } ?? ""
 
+        // The "Added" column means different things per tab: on the Local
+        // tab it's when the file landed on disk (date_added_library), on
+        // the Remote tab it's when the track was added at its source /
+        // liked (date_added). Resolve the sort expression accordingly so
+        // downloading a track never reshuffles the Remote liked order.
+        let orderColumn: String
+        if sortBy == .dateAdded {
+            switch tab {
+            case .local:  orderColumn = "COALESCE(date_added_library, date_added)"
+            case .remote: orderColumn = "date_added"
+            }
+        } else {
+            orderColumn = sortBy.sqlColumn
+        }
+
         let sql = """
             SELECT * FROM tracks
             \(where_)
-            ORDER BY \(sortBy.sqlColumn) \(order) NULLS LAST
+            ORDER BY \(orderColumn) \(order) NULLS LAST
             \(limitSQL)
             """
 
@@ -508,10 +523,11 @@ final class TrackRepository: Sendable {
                     SET organized_path = ?,
                         format = ?,
                         bitrate = ?,
-                        download_status = ?
+                        download_status = ?,
+                        date_added_library = COALESCE(date_added_library, ?)
                     WHERE id = ?
                 """,
-                arguments: [organizedPath, format, bitrate, timestamp, trackId]
+                arguments: [organizedPath, format, bitrate, timestamp, timestamp, trackId]
             )
         }
     }

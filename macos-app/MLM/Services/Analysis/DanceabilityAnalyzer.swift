@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 
 /// Rhythmic analysis engine for computing danceability scores.
 ///
@@ -146,8 +147,48 @@ final class DanceabilityAnalyzer: Sendable {
             bpm = Int(tempo.rounded())
         }
 
+        // Prefer an authoritative BPM from the file's tags (ID3 TBPM /
+        // iTunes tmpo) when present — tag values are usually exact, while
+        // the onset-interval estimate can be a few BPM off or octave-folded.
+        if let tagBPM = await Self.readTagBPM(path: path) {
+            bpm = tagBPM
+        }
+
         return (danceability, bpm)
     }
+
+    /// Read a BPM value embedded in the file's metadata tags, if any.
+    /// Handles ID3 `TBPM` and iTunes `tmpo`/`beatsPerMin` keys via AVFoundation.
+    /// Returns nil when there's no usable tag or the value is out of range.
+    static func readTagBPM(path: String) async -> Int? {
+        let asset = AVURLAsset(url: URL(fileURLWithPath: path))
+        guard let items = try? await asset.load(.metadata) else { return nil }
+        for item in items {
+            let key = item.commonKey?.rawValue ?? (item.key as? String) ?? ""
+            let identifier = item.identifier?.rawValue ?? ""
+            let looksLikeBPM = key.lowercased().contains("bpm")
+                || key.lowercased().contains("tmpo")
+                || identifier.lowercased().contains("tbpm")
+                || identifier.lowercased().contains("tmpo")
+            guard looksLikeBPM else { continue }
+
+            if let number = try? await item.load(.numberValue), number.intValue > 0 {
+                return clampTempo(number.intValue)
+            }
+            if let str = try? await item.load(.stringValue),
+               let value = Int(str.trimmingCharacters(in: .whitespaces)), value > 0 {
+                return clampTempo(value)
+            }
+        }
+        return nil
+    }
+
+    /// Clamp a tag BPM into a sane musical range (reject garbage like 0 or 9999).
+    private static func clampTempo(_ raw: Int) -> Int? {
+        guard raw >= 30 && raw <= 400 else { return nil }
+        return raw
+    }
+
 
     /// A time span of a track with an estimated tempo.
     struct BpmSegment: Identifiable, Hashable {

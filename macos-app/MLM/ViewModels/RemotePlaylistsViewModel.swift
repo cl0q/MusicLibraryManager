@@ -92,6 +92,13 @@ final class RemotePlaylistsViewModel {
         await downloadViewModel.downloadTracks(chosen, preferredSource: provider.preferredSource)
     }
 
+    /// Download an explicit set of tracks (the exact list previewed in the UI),
+    /// pinned to the provider's source.
+    func download(tracks: [Track]) async {
+        guard !tracks.isEmpty else { return }
+        await downloadViewModel.downloadTracks(tracks, preferredSource: provider.preferredSource)
+    }
+
     // MARK: - Helpers
 
     private func loadTracks(title: String, importer: @escaping () async throws -> Int64?) async {
@@ -104,6 +111,12 @@ final class RemotePlaylistsViewModel {
             guard let localId = try await importer() else {
                 errorMessage = "Playlist konnte nicht importiert werden."
                 return
+            }
+            // Adopt the real playlist name from the DB (e.g. the actual
+            // YouTube playlist title resolved during import).
+            if let playlist = try? await playlistRepository.fetch(id: localId),
+               !playlist.name.isEmpty {
+                selectedTitle = playlist.name
             }
             selectedTracks = try await playlistRepository.fetchTracks(playlistId: localId)
         } catch {

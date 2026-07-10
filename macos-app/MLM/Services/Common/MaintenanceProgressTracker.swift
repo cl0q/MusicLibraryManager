@@ -67,6 +67,15 @@ final class MaintenanceProgressTracker: @unchecked Sendable {
         )
     }
     
+    /// Re-anchor the tracker to a new total and reset the counter. Used when
+    /// the real work unit only becomes known after setup (e.g. the dedup
+    /// candidate-pair count computed after duration blocking).
+    func reset(total: Int) {
+        lock.lock()
+        state.update(current: 0, total: total)
+        lock.unlock()
+    }
+
     /// Update progress with current item info
     func updateProgress(
         current: Int? = nil,
@@ -97,9 +106,14 @@ final class MaintenanceProgressTracker: @unchecked Sendable {
         
         // Log every batch for visibility without spam
         if newCurrent % batchSize == 0 || newCurrent == 1 {
-            let loudnessInfo = lufsI != nil ? " [LUFS: \(lufsI!.format(1))]" : ""
+            // Human-readable progress line. Only note "saved" when a row was
+            // actually written; the old cryptic "[DB: ✓/✗]" marker on every
+            // line just added noise to the Logs tab.
+            let loudnessInfo = lufsI != nil ? " (LUFS \(lufsI!.format(1)))" : ""
+            let savedInfo = savedToDb ? " — saved" : ""
+            let trackInfo = trackTitle.isEmpty ? "" : " — \(trackArtist) - \(trackTitle)"
             AppLogger.shared.info(
-                "Progress: \(newCurrent)/\(currentStateSnapshot.total) (\(currentStateSnapshot.percent.format(1))%) - \(trackArtist) - \(trackTitle) [DB: \(savedToDb ? "✓" : "✗")]\(loudnessInfo)",
+                "Progress \(newCurrent)/\(currentStateSnapshot.total) (\(currentStateSnapshot.percent.format(1))%)\(trackInfo)\(savedInfo)\(loudnessInfo)",
                 source: "Maintenance"
             )
         }

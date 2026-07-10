@@ -68,10 +68,20 @@ struct TrackCoverView: View {
             return
         }
 
+        // 1b. Negative-cache hit — we already know this track has no artwork,
+        // so skip the per-cell DB round-trip (critical for smooth scrolling
+        // through large remote lists where most rows have no art).
+        if TrackArtworkCache.shared.isKnownNoArtwork(trackId: trackId) {
+            return
+        }
+
         // 2. DB lookup — analysisRepository is optional, fetchArtwork returns optional Artwork
         guard let artworkPath = (try? await container.analysisRepository?.fetchArtwork(trackId: trackId))??.artworkPath,
               !artworkPath.isEmpty else {
-            return  // No DB row or no artworkPath → keep fallback
+            // No DB row or NULL/empty path (incl. "no embedded art" sentinel)
+            // → remember so we don't query again on the next scroll pass.
+            TrackArtworkCache.shared.markNoArtwork(trackId: trackId)
+            return
         }
 
         // 3. File existence check (D-14)

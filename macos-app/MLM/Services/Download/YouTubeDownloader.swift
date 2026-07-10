@@ -270,13 +270,21 @@ final class YouTubeDownloader: Sendable {
         let id: String
         let title: String
         let uploader: String?
+        let durationSeconds: Int?
         let url: String
     }
 
+    /// A resolved playlist: its title plus ordered entries.
+    struct PlaylistListing {
+        let title: String?
+        let entries: [PlaylistEntry]
+    }
+
     /// List a YouTube playlist without downloading, via
-    /// `yt-dlp --flat-playlist -J`. Returns the entries in playlist order.
-    func listPlaylist(url: String) async throws -> [PlaylistEntry] {
-        guard let ytdlp = ytDlpPath else { return [] }
+    /// `yt-dlp --flat-playlist -J`. Returns the playlist title and entries
+    /// in order.
+    func listPlaylist(url: String) async throws -> PlaylistListing {
+        guard let ytdlp = ytDlpPath else { return PlaylistListing(title: nil, entries: []) }
 
         let result = try await ProcessRunner.run(
             ytdlp,
@@ -292,24 +300,29 @@ final class YouTubeDownloader: Sendable {
                 "YT: flat-playlist listing failed (code=\(result.exitCode))",
                 source: "Download"
             )
-            return []
+            return PlaylistListing(title: nil, entries: [])
         }
 
-        guard let data = result.stdout.data(using: .utf8) else { return [] }
+        guard let data = result.stdout.data(using: .utf8) else {
+            return PlaylistListing(title: nil, entries: [])
+        }
         let root = try JSONDecoder().decode(FlatPlaylistRoot.self, from: data)
-        return root.entries.compactMap { entry in
+        let entries = root.entries.compactMap { entry -> PlaylistEntry? in
             guard let id = entry.id else { return nil }
             let watchURL = entry.url ?? "https://www.youtube.com/watch?v=\(id)"
             return PlaylistEntry(
                 id: id,
                 title: entry.title ?? "Unknown",
                 uploader: entry.uploader ?? entry.channel,
+                durationSeconds: entry.duration.map { Int($0) },
                 url: watchURL
             )
         }
+        return PlaylistListing(title: root.title, entries: entries)
     }
 
     private struct FlatPlaylistRoot: Decodable {
+        let title: String?
         let entries: [FlatEntry]
     }
 
@@ -319,6 +332,7 @@ final class YouTubeDownloader: Sendable {
         let url: String?
         let uploader: String?
         let channel: String?
+        let duration: Double?
     }
 
     /// Search YouTube (no download) via `yt-dlp "ytsearchN:query" --flat-playlist -J`.

@@ -126,7 +126,8 @@ final class YouTubePlaylistProvider: RemotePlaylistProvider {
     }
 
     func importPlaylist(fromURL url: String) async throws -> Int64? {
-        let entries = try await downloader.listPlaylist(url: url)
+        let listing = try await downloader.listPlaylist(url: url)
+        let entries = listing.entries
         guard !entries.isEmpty else { return nil }
 
         let source = try await sourceRepository.upsert(name: "youtube", userId: "local")
@@ -139,13 +140,14 @@ final class YouTubePlaylistProvider: RemotePlaylistProvider {
                 orderedIds.append(id)
                 continue
             }
-            let track = Track(
+            var track = Track(
                 artist: entry.uploader ?? "Unknown",
                 album: "YouTube",
                 title: entry.title,
                 format: "youtube",
                 originalPath: entry.url
             )
+            track.duration = entry.durationSeconds
             let inserted = try await trackRepository.insert(track)
             if let id = inserted.id {
                 try await sourceRepository.linkTrackToSource(
@@ -157,8 +159,16 @@ final class YouTubePlaylistProvider: RemotePlaylistProvider {
             }
         }
 
+        // Prefer the real playlist title; fall back to a URL-derived name so
+        // the browser never shows a generic "YouTube Playlist" for two
+        // different playlists (which would also collide on name+category).
+        let playlistName = listing.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedName = (playlistName?.isEmpty == false)
+            ? playlistName!
+            : "YouTube Playlist \(url.suffix(11))"
+
         let dbPlaylist = try await playlistRepository.findOrCreateSourcePlaylist(
-            name: "YouTube Playlist",
+            name: resolvedName,
             sourceId: sourceId,
             externalId: url
         )

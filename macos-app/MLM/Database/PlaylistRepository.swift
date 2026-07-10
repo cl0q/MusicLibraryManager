@@ -338,6 +338,30 @@ final class PlaylistRepository: Sendable {
                 return existing
             }
 
+            // Fallback: a row with the same (name, category='synced') already
+            // exists — the UNIQUE(name, category) index would reject a fresh
+            // INSERT. Adopt it in place (rewrite source_id/external_id) so a
+            // re-import or a same-named playlist from another source doesn't
+            // crash with "UNIQUE constraint failed: playlists.name,
+            // playlists.category".
+            if let clash = try Playlist
+                .filter(Playlist.Columns.name == name)
+                .filter(Playlist.Columns.category == "synced")
+                .filter(Playlist.Columns.isLiked == 0)
+                .fetchOne(db)
+            {
+                if let id = clash.id {
+                    try db.execute(
+                        sql: "UPDATE playlists SET source_id = ?, external_id = ? WHERE id = ?",
+                        arguments: [sourceId, externalId, id]
+                    )
+                    if let updated = try Playlist.fetchOne(db, id: id) {
+                        return updated
+                    }
+                }
+                return clash
+            }
+
             var playlist = Playlist(
                 id: nil,
                 name: name,

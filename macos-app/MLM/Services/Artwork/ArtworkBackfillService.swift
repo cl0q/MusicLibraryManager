@@ -244,6 +244,19 @@ final class ArtworkBackfillService {
         // Extract embedded artwork (static async; runs ffmpeg in Task.detached internally)
         // D-07: returns nil silently if ffmpeg not found — no user-facing error
         guard let data = await ArtworkService.extractEmbeddedArtwork(from: trackURL) else {
+            // No embedded art. Write a sentinel row (NULL path) so this track
+            // is no longer returned by `fetchTracksWithoutArtwork()` — otherwise
+            // every future download/import re-runs ffmpeg over the whole set of
+            // art-less tracks, which is why backfill appeared to run constantly.
+            let sentinel = Artwork(
+                trackId: trackId,
+                artworkPath: nil,
+                source: "none",
+                musicbrainzReleaseGroupId: nil,
+                resolution: nil,
+                fetchedAt: ISO8601DateFormatter().string(from: Date())
+            )
+            try? await analysisRepository.saveArtwork(sentinel)
             inFlight.remove(trackId)
             if let tracker = tracker {
                 tracker.updateProgress(

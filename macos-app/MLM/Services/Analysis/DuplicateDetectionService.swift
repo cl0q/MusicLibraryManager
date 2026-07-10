@@ -244,76 +244,130 @@ final class DeepScanService {
         }
 
         let trackList = tracks.filter { fingerprints[$0.id ?? 0] != nil }
-        let totalPairs = trackList.count * (trackList.count - 1) / 2
 
-        AppLogger.shared.info("Starting deep scan: \(trackList.count) tracks, \(totalPairs) pairs (turbo: \(turboMode))", source: "Dedup")
+        // Blocking: instead of comparing all O(n²) pairs (60M+ for an 11k
+        // library, which is why the scan ran to "21 million of 11000" and
+        // never finished), only compare tracks whose duration is within a
+        // small tolerance window. Two copies of the same recording have
+        // near-identical length, so this preserves recall while cutting the
+        // candidate set to a tiny fraction.
+        let durationTolerance = 2  // seconds
+        var byDuration: [Int: [Int]] = [:]  // duration bucket -> indices into trackList
+        var noDuration: [Int] = []
+        for (idx, track) in trackList.enumerated() {
+            if let d = track.duration, d > 0 {
+                byDuration[d, default: []].append(idx)
+            } else {
+                noDuration.append(idx)
+            }
+        }
+
+        // Build the unique candidate-pair set within the tolerance window.
+        var candidatePairs: [(Int, Int)] = []
+        var seen = Set<Int64>()  // encodes (min<<32 | max) to dedupe
+        func addPair(_ a: Int, _ b: Int) {
+            let lo = min(a, b), hi = max(a, b)
+            let key = Int64(lo) << 32 | Int64(hi)
+            if seen.insert(key).inserted {
+                candidatePairs.append((lo, hi))
+            }
+        }
+        for (bucket, indices) in byDuration {
+            // Pairs inside this bucket.
+            for a in 0..<indices.count {
+                for b in (a + 1)..<indices.count {
+                    addPair(indices[a], indices[b])
+                }
+            }
+            // Pairs between this bucket and the higher neighbour buckets
+            // (within the duration tolerance window).
+            let neighbours = (1...durationTolerance).flatMap { byDuration[bucket + $0] ?? [] }
+            for a in indices {
+                for b in neighbours {
+                    addPair(a, b)
+                }
+            }
+        }
+        // Tracks with unknown duration: only compare among themselves (rare,
+        // and keeps the explosion contained).
+        for a in 0..<noDuration.count {
+            for b in (a + 1)..<noDuration.count {
+                addPair(noDuration[a], noDuration[b])
+            }
+        }
+
+        let totalPairs = candidatePairs.count
+
+        AppLogger.shared.info("Starting deep scan: \(trackList.count) tracks, \(totalPairs) candidate pairs (duration-blocked, turbo: \(turboMode))", source: "Dedup")
+
+        // Re-anchor the progress tracker to the real work unit (pairs), not
+        // the track count — otherwise the UI shows "21M of 11000".
+        tracker.reset(total: totalPairs)
 
         var pairIndex = 0
-        for i in 0..<trackList.count {
-            for j in (i + 1)..<trackList.count {
-                pairIndex += 1
-                
-                if tracker.isCancelled {
-                    AppLogger.shared.info("Deep scan cancelled at \(result.pairsCompared) pairs", source: "Dedup")
-                    return result
-                }
-                
-                if pairIndex % BatchControl.batchSize(turboMode: turboMode) == 0 {
-                    tracker.updateProgress(
-                        current: pairIndex,
-                        trackId: 0,
-                        trackTitle: "Comparing pairs",
-                        trackArtist: "",
-                        savedToDb: false
-                    )
-                }
+        for (i, j) in candidatePairs {
+            pairIndex += 1
 
-                let trackA = trackList[i]
-                let trackB = trackList[j]
-                guard let idA = trackA.id, let idB = trackB.id,
-                      let fpA = fingerprints[idA], let fpB = fingerprints[idB] else {
-                    continue
-                }
+            if tracker.isCancelled {
+                AppLogger.shared.info("Deep scan cancelled at \(result.pairsCompared) pairs", source: "Dedup")
+                return result
+            }
 
-                result.pairsCompared += 1
-
-                // Fingerprint similarity
-                let score = FingerprintService.compareFingerprints(fpA, fpB)
-                guard score >= Self.fingerprintThreshold else { continue }
-
-                // Check metadata agreement
-                let titleSim = DuplicateMatcher.jaroWinkler(
-                    DeduplicationNormalizer.normalize(trackA.title),
-                    DeduplicationNormalizer.normalize(trackB.title)
+            if pairIndex % BatchControl.batchSize(turboMode: turboMode) == 0 {
+                tracker.updateProgress(
+                    current: pairIndex,
+                    trackId: 0,
+                    trackTitle: "Comparing pairs",
+                    trackArtist: "",
+                    savedToDb: false
                 )
-                let artistSim = DuplicateMatcher.jaroWinkler(
-                    DeduplicationNormalizer.normalizeArtist(trackA.artist),
-                    DeduplicationNormalizer.normalizeArtist(trackB.artist)
-                )
+            }
 
-                if titleSim < Self.metadataAgreementThreshold || artistSim < Self.metadataAgreementThreshold {
-                    // Metadata conflict — flag for review
-                    try await flagForReview(
-                        trackA: trackA, trackB: trackB,
-                        score: score,
-                        actionType: "metadata_conflict"
-                    )
-                    result.conflictsFlagged += 1
-                } else {
-                    // Auto-keep better quality
-                    let (keepTrack, dupTrack) = isBetterQuality(trackA, trackB) ? (trackA, trackB) : (trackB, trackA)
-                    try await trackRepository.markDuplicate(
-                        trackId: dupTrack.id!,
-                        variantOf: keepTrack.id!
-                    )
-                    try await flagForReview(
-                        trackA: keepTrack, trackB: dupTrack,
-                        score: score,
-                        actionType: "fingerprint_dedup",
-                        autoAction: "kept_higher_quality"
-                    )
-                    result.duplicatesFound += 1
-                }
+            let trackA = trackList[i]
+            let trackB = trackList[j]
+            guard let idA = trackA.id, let idB = trackB.id,
+                  let fpA = fingerprints[idA], let fpB = fingerprints[idB] else {
+                continue
+            }
+
+            result.pairsCompared += 1
+
+            // Fingerprint similarity
+            let score = FingerprintService.compareFingerprints(fpA, fpB)
+            guard score >= Self.fingerprintThreshold else { continue }
+
+            // Check metadata agreement
+            let titleSim = DuplicateMatcher.jaroWinkler(
+                DeduplicationNormalizer.normalize(trackA.title),
+                DeduplicationNormalizer.normalize(trackB.title)
+            )
+            let artistSim = DuplicateMatcher.jaroWinkler(
+                DeduplicationNormalizer.normalizeArtist(trackA.artist),
+                DeduplicationNormalizer.normalizeArtist(trackB.artist)
+            )
+
+            if titleSim < Self.metadataAgreementThreshold || artistSim < Self.metadataAgreementThreshold {
+                // Metadata conflict — flag for review
+                try await flagForReview(
+                    trackA: trackA, trackB: trackB,
+                    score: score,
+                    actionType: "metadata_conflict"
+                )
+                result.conflictsFlagged += 1
+            } else {
+                // Auto-keep better quality
+                let (keepTrack, dupTrack) = isBetterQuality(trackA, trackB) ? (trackA, trackB) : (trackB, trackA)
+                try await trackRepository.markDuplicate(
+                    trackId: dupTrack.id!,
+                    variantOf: keepTrack.id!
+                )
+                try await flagForReview(
+                    trackA: keepTrack, trackB: dupTrack,
+                    score: score,
+                    actionType: "fingerprint_dedup",
+                    autoAction: "kept_higher_quality"
+                )
+                result.duplicatesFound += 1
             }
         }
 

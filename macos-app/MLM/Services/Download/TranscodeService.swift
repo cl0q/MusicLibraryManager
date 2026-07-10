@@ -250,6 +250,8 @@ final class TranscodeService: Sendable {
         // sometimes picks the wrong stream when both are present.
         var args = [
             "-i", input.path,
+            // Let ffmpeg use all available cores for decode + filtering.
+            "-threads", "0",
             "-map", "0:a",
         ]
 
