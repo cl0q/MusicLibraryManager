@@ -53,7 +53,7 @@ final class DownloadOrchestrator {
 
     private let flacDir: URL
     private let aacDir: URL
-    private let transcodeService: TranscodeService
+    let transcodeService: TranscodeService
     private let soundCloudDownloader: SoundCloudDownloader
     private let youtubeDownloader: YouTubeDownloader
     private let retryQueue: DownloadQueue
@@ -287,6 +287,114 @@ final class DownloadOrchestrator {
         return await downloadBatch(requests)
     }
 
+    /// Download a single discovery track to a custom output directory.
+    ///
+    /// - Parameters:
+    ///   - artist: The track artist
+    ///   - title: The track title
+    ///   - soundcloudURL: SoundCloud permalink URL, if any
+    ///   - targetDir: Directory where the final file should be stored
+    /// - Returns: The URL of the downloaded file on success, or nil
+    func downloadDiscoveryTrack(
+        artist: String,
+        title: String,
+        soundcloudURL: String?,
+        targetDir: URL,
+        onProgress: ((Double) -> Void)? = nil
+    ) async throws -> URL? {
+        try FileManager.default.createDirectory(at: targetDir, withIntermediateDirectories: true)
+
+        let query = "\(artist) - \(title)"
+        let request = DownloadRequest(
+            trackId: -999,
+            artist: artist,
+            title: title,
+            query: query,
+            soundcloudURL: soundcloudURL,
+            userId: nil
+        )
+
+        // 1. SoundCloud direct (if URL available and scdl installed)
+        if let scURL = request.soundcloudURL {
+            if soundCloudDownloader.isAvailable {
+                AppLogger.shared.log("discovery[SC]: trying \(scURL)", level: .info, source: "Download")
+                let scResult = try await soundCloudDownloader.download(
+                    trackURL: scURL,
+                    outputDir: targetDir,
+                    trackId: -999,
+                    title: "\(request.artist) - \(request.title)",
+                    onProgress: onProgress
+                )
+                if case .success(let path) = scResult {
+                    AppLogger.shared.log("discovery[SC]: success → \(path.lastPathComponent)", level: .info, source: "Download")
+                    return path
+                }
+            }
+        }
+
+        // 2. DAB Music API
+        if let dab = dabClient {
+            do {
+                AppLogger.shared.log("discovery[DAB]: searching \(request.query)", level: .info, source: "Download")
+                if let dabTrack = try await dab.searchTrack(query: request.query) {
+                    if dab.matches(dabTrack: dabTrack, artist: request.artist, title: request.title) {
+                        let dabResult = try await dab.download(
+                            dabTrack: dabTrack,
+                            outputDir: targetDir,
+                            artist: request.artist,
+                            title: request.title
+                        )
+                        if case .success(let path) = dabResult {
+                            AppLogger.shared.log("discovery[DAB]: success → \(path.lastPathComponent)", level: .info, source: "Download")
+                            return path
+                        }
+                    }
+                }
+            } catch {
+                AppLogger.shared.log("discovery[DAB]: error: \(error)", level: .warning, source: "Download")
+            }
+        }
+
+        // 3. Squid.wtf
+        do {
+            AppLogger.shared.log("discovery[Squid]: searching \(request.query)", level: .info, source: "Download")
+            if let squidTrack = try await squidClient.searchTrack(
+                query: request.query,
+                artist: request.artist,
+                title: request.title
+            ) {
+                let squidResult = try await squidClient.download(
+                    track: squidTrack,
+                    outputDir: targetDir,
+                    artist: request.artist,
+                    title: request.title
+                )
+                if case .success(let path) = squidResult {
+                    AppLogger.shared.log("discovery[Squid]: success → \(path.lastPathComponent)", level: .info, source: "Download")
+                    return path
+                }
+            }
+        } catch {
+            AppLogger.shared.log("discovery[Squid]: error: \(error)", level: .warning, source: "Download")
+        }
+
+        // 4. YouTube
+        if youtubeDownloader.isAvailable {
+            AppLogger.shared.log("discovery[YT]: searching \(request.query)", level: .info, source: "Download")
+            let ytResult = try await youtubeDownloader.searchAndDownload(
+                query: request.query,
+                outputDir: targetDir,
+                onProgress: onProgress
+            )
+            if case .success(let path) = ytResult {
+                AppLogger.shared.log("discovery[YT]: success → \(path.lastPathComponent)", level: .info, source: "Download")
+                return path
+            }
+        }
+
+        return nil
+    }
+
     // MARK: - Fallback Chain
 
     /// Try downloading via SoundCloud → DAB → YouTube.
@@ -308,7 +416,7 @@ final class DownloadOrchestrator {
                     trackURL: scURL,
                     outputDir: aacDir,
                     trackId: request.trackId,
-                    title: request.title,
+                    title: "\(request.artist) - \(request.title)",
                     onProgress: onTrackProgress
                 )
                 if case .success(let path) = scResult {

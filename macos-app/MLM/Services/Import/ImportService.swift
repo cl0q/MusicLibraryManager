@@ -202,7 +202,7 @@ final class ImportService: Sendable {
         ))
 
         // Phase 3: Batch insert into database
-        let (succeeded, skipped, dbFailures) = await saveBatches(successfulMetadata)
+        let (succeeded, skipped, dbFailures, insertedTracks) = await saveBatches(successfulMetadata)
         failures.append(contentsOf: dbFailures)
 
         onProgress?(ImportProgress(
@@ -211,6 +211,11 @@ final class ImportService: Sendable {
             phase: "Complete",
             currentFile: nil
         ))
+
+        // Enqueue successfully imported tracks for background analysis
+        for track in insertedTracks {
+            await PerformanceQueueService.shared.enqueueAnalysis(track: track)
+        }
 
         return ImportResult(
             succeeded: succeeded,
@@ -229,23 +234,25 @@ final class ImportService: Sendable {
     /// Each batch runs in an atomic transaction.
     ///
     /// - Parameter metadata: Array of extracted metadata
-    /// - Returns: (succeeded count, skipped count, failure messages)
-    private func saveBatches(_ metadata: [TrackMetadata]) async -> (Int, Int, [String]) {
+    /// - Returns: (succeeded count, skipped count, failure messages, successfully inserted tracks)
+    private func saveBatches(_ metadata: [TrackMetadata]) async -> (Int, Int, [String], [Track]) {
         var totalSucceeded = 0
         var totalSkipped = 0
         var failures: [String] = []
+        var allInsertedTracks: [Track] = []
 
         for batch in metadata.chunked(into: Self.batchSize) {
             do {
-                let (succeeded, skipped) = try await saveBatch(batch)
+                let (succeeded, skipped, insertedTracks) = try await saveBatch(batch)
                 totalSucceeded += succeeded
                 totalSkipped += skipped
+                allInsertedTracks.append(contentsOf: insertedTracks)
             } catch {
                 failures.append("Database error for batch of \(batch.count): \(error.localizedDescription)")
             }
         }
 
-        return (totalSucceeded, totalSkipped, failures)
+        return (totalSucceeded, totalSkipped, failures, allInsertedTracks)
     }
 
     /// Save a single batch of metadata within a transaction.
@@ -258,11 +265,12 @@ final class ImportService: Sendable {
     /// the prior single-string `==` check missed those.
     ///
     /// - Parameter batch: Metadata to insert
-    /// - Returns: (succeeded count, skipped count)
-    private func saveBatch(_ batch: [TrackMetadata]) async throws -> (Int, Int) {
+    /// - Returns: (succeeded count, skipped count, successfully inserted tracks)
+    private func saveBatch(_ batch: [TrackMetadata]) async throws -> (Int, Int, [Track]) {
         try await database.write { db in
             var succeeded = 0
             var skipped = 0
+            var insertedTracks: [Track] = []
 
             for metadata in batch {
                 // Build path variants: raw, standardized (resolves "//" etc),
@@ -314,6 +322,7 @@ final class ImportService: Sendable {
                 do {
                     try track.insert(db)
                     succeeded += 1
+                    insertedTracks.append(track)
                 } catch let error as DatabaseError where error.resultCode == .SQLITE_CONSTRAINT {
                     // A UNIQUE-constraint violation here means a row with
                     // this original_path already exists but slipped through
@@ -328,7 +337,7 @@ final class ImportService: Sendable {
                 }
             }
 
-            return (succeeded, skipped)
+            return (succeeded, skipped, insertedTracks)
         }
     }
 

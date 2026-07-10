@@ -190,11 +190,14 @@ final class TrackRepository: Sendable {
         case .remote: conditions.append("organized_path IS NULL")
         }
 
-        let trimmed = search?.trimmingCharacters(in: .whitespaces) ?? ""
+        let trimmed = search?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !trimmed.isEmpty {
-            let normalized = DatabaseManager.foldedSearchText(trimmed)
-            conditions.append("search_text LIKE ?")
-            args.append("%\(normalized)%")
+            let terms = trimmed.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+            for term in terms {
+                let normalized = DatabaseManager.foldedSearchText(term)
+                conditions.append("search_text LIKE ?")
+                args.append("%\(normalized)%")
+            }
         }
 
         let where_ = conditions.isEmpty ? "" : "WHERE " + conditions.joined(separator: " AND ")
@@ -384,9 +387,7 @@ final class TrackRepository: Sendable {
     func insert(_ track: Track) async throws -> Track {
         try await database.write { db in
             var track = track
-            track.searchText = DatabaseManager.foldedSearchText(
-                track.artist + " " + track.album + " " + track.title
-            )
+            track.searchText = DatabaseManager.foldedSearchText(track.rawSearchText)
             try track.insert(db)
             return track
         }
@@ -396,9 +397,7 @@ final class TrackRepository: Sendable {
     func update(_ track: Track) async throws {
         try await database.write { db in
             var track = track
-            track.searchText = DatabaseManager.foldedSearchText(
-                track.artist + " " + track.album + " " + track.title
-            )
+            track.searchText = DatabaseManager.foldedSearchText(track.rawSearchText)
             try track.update(db)
         }
     }
@@ -547,6 +546,18 @@ final class TrackRepository: Sendable {
                 SELECT * FROM tracks
                 WHERE danceability IS NULL AND organized_path IS NOT NULL
                 ORDER BY id
+            """)
+        }
+    }
+
+    /// Fetch tracks that lack Groove (CoreML audio embedding) analysis.
+    func fetchTracksWithoutGrooveEmbedding() async throws -> [Track] {
+        try await database.read { db in
+            try Track.fetchAll(db, sql: """
+                SELECT t.* FROM tracks t
+                LEFT JOIN track_embeddings e ON e.track_id = t.id
+                WHERE e.track_id IS NULL AND t.organized_path IS NOT NULL
+                ORDER BY t.id
             """)
         }
     }
@@ -726,6 +737,455 @@ final class TrackRepository: Sendable {
                 WHERE original_path IN (\(paths.map { _ in "?" }.joined(separator: ", ")))
                 LIMIT 1
             """, arguments: StatementArguments(paths))
+        }
+    }
+
+    // MARK: - Smart Audio Embeddings & Similarity Feedback
+
+    /// Save a track's master audio embedding.
+    func saveTrackEmbedding(trackId: Int64, embedding: [Float], dropOffset: Double, mixCategory: String?) async throws {
+        try await database.write { db in
+            let masterData = embedding.toData
+            var row = TrackEmbedding(
+                trackId: trackId,
+                masterEmbeddingData: masterData,
+                dropOffset: dropOffset,
+                mixCategory: mixCategory
+            )
+            try row.insert(db, onConflict: .replace)
+        }
+    }
+
+    /// Save a track's detailed 10-second segment embeddings.
+    func saveTrackSegmentEmbeddings(trackId: Int64, segments: [(offset: Double, embedding: [Float])]) async throws {
+        try await database.write { db in
+            try db.execute(sql: "DELETE FROM track_segment_embeddings WHERE track_id = ?", arguments: [trackId])
+            for segment in segments {
+                var row = TrackSegmentEmbedding(
+                    trackId: trackId,
+                    offsetSeconds: segment.offset,
+                    segmentEmbeddingData: segment.embedding.toData
+                )
+                try row.insert(db)
+            }
+        }
+    }
+
+    /// Save similarity thumbs up/down feedback for a seed track and target track.
+    func saveSimilarityFeedback(seedTrackId: Int64, targetTrackId: Int64, feedbackValue: Int) async throws {
+        try await database.write { db in
+            var row = TrackSimilarityFeedback(
+                seedTrackId: seedTrackId,
+                targetTrackId: targetTrackId,
+                feedbackValue: feedbackValue
+            )
+            try row.insert(db, onConflict: .replace)
+        }
+    }
+
+    /// Fetch similar tracks based on a composite score of CoreML embeddings, Danceability, LUFS, and genres.
+    ///
+    /// - Parameters:
+    ///   - seedTrackId: The track ID to find matches for.
+    ///   - limit: Maximum matches to return.
+    /// - Returns: A ranked list of matching tracks with their similarity score and best matching segment timestamp.
+    func fetchSimilarTracks(seedTrackId: Int64, limit: Int = 10, temperature: Double = 0.0) async throws -> [(track: Track, score: Float, bestMatchOffset: Double)] {
+        // 1. Fetch seed track with its embeddings and acoustics
+        guard let seedTrack = try await fetchTrack(id: seedTrackId),
+              let seedRow = try await database.read({ db in
+                  try TrackEmbedding.fetchOne(db, key: seedTrackId)
+              }) else {
+            return []
+        }
+        
+        let seedEmbedding = seedRow.masterEmbedding
+        let seedCategory = seedRow.mixCategory
+        let seedDance = seedTrack.danceability
+        let seedLufs = seedTrack.lufsI
+
+        // Helper struct for joined SQLite results
+        struct CandidateWithAcoustics {
+            let trackId: Int64
+            let masterEmbeddingData: Data
+            let dropOffset: Double
+            let mixCategory: String?
+            let danceability: Double?
+            let lufsI: Double?
+            let lufsRange: Double?
+            let genre: String?
+            let artist: String
+            let title: String
+            
+            var masterEmbedding: [Float] {
+                [Float].fromData(masterEmbeddingData)
+            }
+        }
+
+        let seedArtist = seedTrack.artist
+        let seedTitle = seedTrack.title
+
+        // 2. Fetch candidates with joined acoustic attributes hocheffizient
+        let candidates = try await database.read { db -> [CandidateWithAcoustics] in
+            let sql: String
+            let args: StatementArguments
+            if let cat = seedCategory {
+                sql = """
+                    SELECT e.track_id, e.master_embedding, e.drop_offset, e.mix_category,
+                           t.danceability, t.lufs_i, t.lufs_range, t.genre, t.artist, t.title
+                    FROM track_embeddings e
+                    JOIN tracks t ON t.id = e.track_id
+                    WHERE e.mix_category = ? 
+                      AND e.track_id != ?
+                      AND NOT (LOWER(t.artist) = LOWER(?) AND LOWER(t.title) = LOWER(?))
+                """
+                args = [cat, seedTrackId, seedArtist, seedTitle]
+            } else {
+                sql = """
+                    SELECT e.track_id, e.master_embedding, e.drop_offset, e.mix_category,
+                           t.danceability, t.lufs_i, t.lufs_range, t.genre, t.artist, t.title
+                    FROM track_embeddings e
+                    JOIN tracks t ON t.id = e.track_id
+                    WHERE e.mix_category IS NULL 
+                      AND e.track_id != ?
+                      AND NOT (LOWER(t.artist) = LOWER(?) AND LOWER(t.title) = LOWER(?))
+                """
+                args = [seedTrackId, seedArtist, seedTitle]
+            }
+            
+            let rows = try Row.fetchAll(db, sql: sql, arguments: args)
+            return rows.map { row in
+                CandidateWithAcoustics(
+                    trackId: row["track_id"],
+                    masterEmbeddingData: row["master_embedding"],
+                    dropOffset: row["drop_offset"],
+                    mixCategory: row["mix_category"],
+                    danceability: row["danceability"],
+                    lufsI: row["lufs_i"],
+                    lufsRange: row["lufs_range"],
+                    genre: row["genre"],
+                    artist: row["artist"],
+                    title: row["title"]
+                )
+            }
+        }
+
+        // 3. Fetch user feedback for this seed
+        let feedbackRows = try await database.read { db -> [TrackSimilarityFeedback] in
+            try TrackSimilarityFeedback.filter(TrackSimilarityFeedback.Columns.seedTrackId == seedTrackId).fetchAll(db)
+        }
+        let feedbackMap = Dictionary(uniqueKeysWithValues: feedbackRows.map { ($0.targetTrackId, $0.feedbackValue) })
+
+        // Fetch discovery sources for all recommendations linked to this seed track in a single thread-safe batch query
+        let discoverySourceMap = try await database.read { db -> [Int64: String] in
+            let sql = "SELECT discovered_track_id, discovery_source FROM track_discovery_log WHERE seed_track_id = ?"
+            let rows = try Row.fetchAll(db, sql: sql, arguments: [seedTrackId])
+            var dict: [Int64: String] = [:]
+            for row in rows {
+                if let trackId = row["discovered_track_id"] as? Int64, let source = row["discovery_source"] as? String {
+                    dict[trackId] = source
+                }
+            }
+            return dict
+        }
+
+        // 4. Calculate composite similarity scores and sort
+        var scoredCandidates: [(trackId: Int64, score: Float)] = []
+        for candidate in candidates {
+            // Exclude negative feedback targets
+            if let feedbackVal = feedbackMap[candidate.trackId], feedbackVal < 0 {
+                continue
+            }
+
+            let candEmbedding = candidate.masterEmbedding
+            
+            let baseCosine = VectorMath.cosineSimilarity(seedEmbedding, candEmbedding)
+
+            // E. Combine into a musically intelligent composite score using dynamic weight normalization.
+            // Weights: Groove (40%), Danceability (30%), LUFS Energy (20%), Genre Affinity (10%)
+            var totalWeight: Float = 0.0
+            var weightedScore: Float = 0.0
+
+            // A. Base Cosine Similarity of CoreML class probabilities (0.0 ... 1.0)
+            weightedScore += baseCosine * 0.40
+            totalWeight += 0.40
+            
+            // B. Danceability similarity score (0.0 ... 1.0)
+            if let sDance = seedDance, let cDance = candidate.danceability {
+                var danceScore: Float = 0.5
+                if sDance == 0.0 && cDance == 0.0 {
+                    danceScore = 0.5 // Neutral fallback for non-danceable or failed analysis
+                } else {
+                    let diff = abs(sDance - cDance)
+                    danceScore = Float(1.0 - diff)
+                }
+                weightedScore += danceScore * 0.30
+                totalWeight += 0.30
+            }
+            
+            // C. Energy (integrated loudness LUFS) similarity score (0.0 ... 1.0)
+            if let sLufs = seedLufs, let cLufs = candidate.lufsI {
+                let diff = abs(sLufs - cLufs)
+                // Exponential decay: 0 LUFS diff = 1.0, 3 LUFS diff = 0.47, 8 LUFS diff = 0.13
+                let energyScore = Float(exp(-diff / 4.0))
+                weightedScore += energyScore * 0.20
+                totalWeight += 0.20
+            }
+            
+            // D. Genre match boost (0.0 ... 1.0)
+            var genreScore: Float = 0.4 // Neutral fallback for missing metadata
+            let sGenre = seedTrack.genre ?? ""
+            let cGenre = candidate.genre ?? ""
+            if !sGenre.isEmpty && !cGenre.isEmpty {
+                let sGen = sGenre.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                let cGen = cGenre.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                if sGen == cGen {
+                    genreScore = 1.0
+                } else if (sGen.contains("house") && cGen.contains("house")) || 
+                           (sGen.contains("rap") && cGen.contains("rap")) || 
+                           (sGen.contains("club") && cGen.contains("club")) ||
+                           (sGen.contains("vixa") && cGen.contains("vixa")) {
+                    genreScore = 0.8
+                } else {
+                    genreScore = 0.1 // Mismatched genres are penalized
+                }
+            }
+            weightedScore += genreScore * 0.10
+            totalWeight += 0.10
+
+            var score = totalWeight > 0.0 ? (weightedScore / totalWeight) : 0.0
+
+            // Boost positive feedback targets
+            if let feedbackVal = feedbackMap[candidate.trackId], feedbackVal > 0 {
+                // Downgrade Last.fm positive feedback weight (+0.03 boost) compared to SoundCloud (+0.15 boost)
+                let source = discoverySourceMap[candidate.trackId]
+                let boost: Float = (source?.lowercased() == "lastfm") ? 0.03 : 0.15
+                score += boost
+            }
+
+            // Clamp score between 0.0 and 1.0
+            score = max(0.0, min(1.0, score))
+
+            // Add temperature-based variance
+            var finalScore = score
+            if temperature > 0.0 {
+                let noiseRange = Float(temperature * 0.15)
+                let noise = Float.random(in: -noiseRange...noiseRange)
+                finalScore = max(0.0, min(1.0, score + noise))
+            }
+
+            scoredCandidates.append((candidate.trackId, finalScore))
+        }
+
+        // Sort descending by score
+        scoredCandidates.sort(by: { $0.score > $1.score })
+        let topCandidates = Array(scoredCandidates.prefix(limit))
+
+        if topCandidates.isEmpty { return [] }
+
+        // 5. Load full Track models and find dynamic best matching segment offset
+        var results: [(track: Track, score: Float, bestMatchOffset: Double)] = []
+        for candidate in topCandidates {
+            guard let track = try await fetchTrack(id: candidate.trackId) else { continue }
+            
+            let bestOffset = try await database.read { db -> Double in
+                let segments = try TrackSegmentEmbedding.filter(TrackSegmentEmbedding.Columns.trackId == candidate.trackId).fetchAll(db)
+                // Default to standard drop offset if no sub-segments exist
+                var bestSegOffset = candidate.trackId == track.id ? (try? TrackEmbedding.fetchOne(db, key: candidate.trackId))??.dropOffset ?? 0.0 : 0.0
+                var maxSegScore: Float = -1.0
+                
+                for segment in segments {
+                    let segScore = VectorMath.cosineSimilarity(seedEmbedding, segment.segmentEmbedding)
+                    if segScore > maxSegScore {
+                        maxSegScore = segScore
+                        bestSegOffset = segment.offsetSeconds
+                    }
+                }
+                return bestSegOffset
+            }
+            
+            results.append((track, candidate.score, bestOffset))
+        }
+
+        return results
+    }
+
+    // MARK: - Swarm Recommendations & Discovery Inbox
+    
+    /// Save a row in the track_discovery_log table.
+    func saveDiscoveryLog(discoveredTrackId: Int64, seedTrackId: Int64?, source: String, status: String = "new") async throws {
+        try await database.write { db in
+            var row = TrackDiscoveryLog(
+                discoveredTrackId: discoveredTrackId,
+                seedTrackId: seedTrackId,
+                discoverySource: source,
+                status: status
+            )
+            try row.insert(db, onConflict: .replace)
+        }
+    }
+    
+    /// Fetch all tracks in the "Discovery Inbox" (status is 'new').
+    func fetchDiscoveryInboxTracks() async throws -> [(track: Track, log: TrackDiscoveryLog, seedTrack: Track?)] {
+        try await database.read { db -> [(track: Track, log: TrackDiscoveryLog, seedTrack: Track?)] in
+            let sql = """
+                SELECT l.*, t.*
+                FROM track_discovery_log l
+                JOIN tracks t ON t.id = l.discovered_track_id
+                WHERE l.status = 'new'
+                ORDER BY l.date_added DESC
+            """
+            let rows = try Row.fetchAll(db, sql: sql)
+            var results: [(track: Track, log: TrackDiscoveryLog, seedTrack: Track?)] = []
+            
+            for row in rows {
+                let log = try TrackDiscoveryLog(row: row)
+                let track = try Track(row: row)
+                
+                var seedTrack: Track? = nil
+                if let seedId = log.seedTrackId {
+                    seedTrack = try Track.fetchOne(db, key: seedId)
+                }
+                
+                results.append((track, log, seedTrack))
+            }
+            return results
+        }
+    }
+    
+    /// Update the status of a discovered track (e.g. 'approved' or 'rejected').
+    func updateDiscoveryStatus(discoveredTrackId: Int64, status: String) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE track_discovery_log SET status = ? WHERE discovered_track_id = ?",
+                arguments: [status, discoveredTrackId]
+            )
+        }
+    }
+
+    /// Fetch the embedding and drop offset for a track, if it exists.
+    func fetchTrackEmbedding(id: Int64) async throws -> TrackEmbedding? {
+        try await database.read { db in
+            try TrackEmbedding.fetchOne(db, key: id)
+        }
+    }
+
+    /// Apply a small gravitational pull (e.g. 5%) to pull two track embeddings closer together.
+    /// Warps the local vector space over time based on approved remote recommendations.
+    func applyVectorGravity(seedTrackId: Int64, targetTrackId: Int64, pullRate: Float = 0.05) async throws {
+        try await database.write { db in
+            guard var seedRow = try TrackEmbedding.fetchOne(db, key: seedTrackId),
+                  var targetRow = try TrackEmbedding.fetchOne(db, key: targetTrackId) else {
+                return
+            }
+            
+            var seedEmbedding = seedRow.masterEmbedding
+            var targetEmbedding = targetRow.masterEmbedding
+            
+            guard seedEmbedding.count == targetEmbedding.count, seedEmbedding.count > 0 else {
+                return
+            }
+            
+            // Apply Vector Gravity:
+            // E_seed = E_seed + pullRate * (E_target - E_seed)
+            // E_target = E_target + pullRate * (E_seed - E_target)
+            for i in 0..<seedEmbedding.count {
+                let sVal = seedEmbedding[i]
+                let tVal = targetEmbedding[i]
+                
+                seedEmbedding[i] = sVal + pullRate * (tVal - sVal)
+                targetEmbedding[i] = tVal + pullRate * (sVal - tVal)
+            }
+            
+            // Re-normalize vectors (essential for maintaining cosine similarity integrity)
+            func normalize(_ v: [Float]) -> [Float] {
+                let sumSquare = v.reduce(0.0) { $0 + $1 * $1 }
+                let norm = sqrt(sumSquare)
+                return norm > 0 ? v.map { $0 / norm } : v
+            }
+            
+            seedRow.masterEmbeddingData = normalize(seedEmbedding).toData
+            targetRow.masterEmbeddingData = normalize(targetEmbedding).toData
+            
+            try seedRow.update(db)
+            try targetRow.update(db)
+        }
+    }
+
+    /// Fetch a track by exact artist and title match.
+    func fetchTrackByArtistAndTitle(artist: String, title: String) async throws -> Track? {
+        try await database.read { db in
+            try Track.fetchOne(db, sql: "SELECT * FROM tracks WHERE artist = ? AND title = ? LIMIT 1", arguments: [artist, title])
+        }
+    }
+
+    /// Fetch all similarity feedback records for a given seed track.
+    func fetchSimilarityFeedback(seedTrackId: Int64) async throws -> [TrackSimilarityFeedback] {
+        try await database.read { db in
+            try TrackSimilarityFeedback.filter(TrackSimilarityFeedback.Columns.seedTrackId == seedTrackId).fetchAll(db)
+        }
+    }
+
+    /// Fetch all tracks discovered and downloaded for a given seed track.
+    func fetchDiscoveryTracksForSeed(seedTrackId: Int64) async throws -> [Track] {
+        try await database.read { db in
+            let sql = """
+                SELECT t.* FROM tracks t
+                JOIN track_discovery_log l ON l.discovered_track_id = t.id
+                WHERE l.seed_track_id = ?
+            """
+            return try Track.fetchAll(db, sql: sql, arguments: [seedTrackId])
+        }
+    }
+
+    /// Fetch all unique genres with their track counts.
+    func fetchUniqueGenres() async throws -> [(genre: String, count: Int)] {
+        try await database.read { db in
+            let sql = """
+                SELECT genre, COUNT(*) as count 
+                FROM tracks 
+                WHERE genre IS NOT NULL AND genre != '' 
+                GROUP BY genre 
+                ORDER BY count DESC
+            """
+            let rows = try Row.fetchAll(db, sql: sql)
+            return rows.map { row in
+                let genre: String = row["genre"] ?? ""
+                let count: Int = row["count"] ?? 0
+                return (genre: genre, count: count)
+            }
+        }
+    }
+
+    /// Fetch all tracks belonging to a specific genre.
+    func fetchTracks(genre: String) async throws -> [Track] {
+        try await database.read { db in
+            try Track.filter(Track.Columns.genre == genre).fetchAll(db)
+        }
+    }
+
+    /// Update only the mix category of a track embedding in track_embeddings.
+    func updateMixCategory(trackId: Int64, mixCategory: String?) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE track_embeddings SET mix_category = ? WHERE track_id = ?",
+                arguments: [mixCategory, trackId]
+            )
+        }
+    }
+
+    /// Merge multiple genres into a single canonical target genre.
+    func mergeGenres(sources: [String], target: String) async throws {
+        try await database.write { db in
+            let placeholders = Array(repeating: "?", count: sources.count).joined(separator: ", ")
+            let sql = "UPDATE tracks SET genre = ? WHERE genre IN (\(placeholders))"
+            try db.execute(sql: sql, arguments: StatementArguments([target] + sources))
+        }
+    }
+
+    /// Fetch all tracks in the library that have a non-empty genre.
+    func fetchTracksWithGenre() async throws -> [Track] {
+        try await database.read { db in
+            try Track.filter(Track.Columns.genre != nil && Track.Columns.genre != "").fetchAll(db)
         }
     }
 }

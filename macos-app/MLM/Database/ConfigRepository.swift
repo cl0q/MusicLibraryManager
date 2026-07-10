@@ -64,6 +64,16 @@ final class ConfigRepository: Sendable {
         try await set(key: "library_root", value: path)
     }
 
+    /// Get the custom transcode cache path.
+    func getTranscodeCachePath() async throws -> String? {
+        try await get(key: "transcode_cache_path")
+    }
+
+    /// Set the custom transcode cache path.
+    func setTranscodeCachePath(_ path: String) async throws {
+        try await set(key: "transcode_cache_path", value: path)
+    }
+
     /// Get the current theme.
     func getTheme() async throws -> String {
         try await get(key: "theme") ?? "solar"

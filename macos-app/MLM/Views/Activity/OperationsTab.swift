@@ -25,8 +25,9 @@ struct OperationsTab: View {
         let hasOps = (vm?.operations.isEmpty == false) || (vm?.recentOperations.isEmpty == false)
         let hasDownloads = container.downloadViewModel.map { downloadHasState($0) } ?? false
         let hasSync = container.syncViewModel.map { syncHasState($0) } ?? false
+        let hasQueueState = PerformanceQueueService.shared.pendingAnalysesCount > 0 || PerformanceQueueService.shared.pendingDownloadsCount > 0 || PerformanceQueueService.shared.activeJobDescription != nil
 
-        if !hasOps && !hasDownloads && !hasSync {
+        if !hasOps && !hasDownloads && !hasSync && !hasQueueState {
             emptyState
         } else {
             ScrollView {
@@ -45,6 +46,13 @@ struct OperationsTab: View {
                        syncHasState(syncVM) {
                         sectionHeader("Sync")
                         SyncStatusRow(vm: syncVM)
+                        Divider().padding(.leading, 32)
+                    }
+
+                    // Auto-Analysis Queue
+                    if hasQueueState {
+                        sectionHeader("Auto-Analysis Queue")
+                        PerformanceQueueStatusRow()
                         Divider().padding(.leading, 32)
                     }
 
@@ -174,6 +182,7 @@ struct OperationRow: View {
         case .analysis: "waveform"
         case .fingerprint: "hand.point.up.braille"
         case .artwork: "photo"
+        case .createMLExport: "brain"
         }
     }
 
@@ -357,5 +366,49 @@ struct SyncStatusRow: View {
     private var progressValue: Double {
         guard vm.syncTotal > 0 else { return 0 }
         return min(max(vm.syncProgress, 0), 1)
+    }
+}
+
+// MARK: - Performance Queue Status Row
+
+struct PerformanceQueueStatusRow: View {
+    var service = PerformanceQueueService.shared
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "cpu")
+                .font(.system(size: 14))
+                .foregroundColor(.accentColor)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 4) {
+                if let activeDesc = service.activeJobDescription {
+                    Text(activeDesc)
+                        .font(MLMFont.body)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                } else {
+                    Text("Queue Idle")
+                        .font(MLMFont.body)
+                        .foregroundColor(.mlmInkMuted)
+                }
+
+                Text("\(service.pendingAnalysesCount) analyses pending \u{00B7} \(service.pendingDownloadsCount) downloads pending")
+                    .font(MLMFont.muted)
+                    .foregroundColor(.mlmInkMuted)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            if service.pendingAnalysesCount > 0 || service.pendingDownloadsCount > 0 {
+                Button("Clear") {
+                    service.clearQueue()
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 }

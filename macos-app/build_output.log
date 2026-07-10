@@ -1,0 +1,56 @@
+warning: 'macos-app': found 1 file(s) which are unhandled; explicitly declare them as resources or exclude from the target
+    /Users/olli/schenanigans/MusicLibraryManager/macos-app/MLMTests/Fixtures/playlist-cover-fixtures/README.md
+[0/1] Planning build
+Building for debugging...
+[0/4] Write swift-version--58304C5D6DBC2206.txt
+error: emit-module command failed with exit code 1 (use -v to see invocation)
+[2/6] Emitting module MLM
+/Users/olli/schenanigans/MusicLibraryManager/macos-app/MLM/Database/TrackRepository.swift:962:26: error: cannot convert value of type 'Double' to expected argument type 'Float'
+ 960 |                 let source = discoverySourceMap[candidate.trackId]
+ 961 |                 let boost = (source?.lowercased() == "lastfm") ? 0.03 : 0.15
+ 962 |                 score += boost
+     |                          `- error: cannot convert value of type 'Double' to expected argument type 'Float'
+ 963 |             }
+ 964 | 
+
+/Users/olli/schenanigans/MusicLibraryManager/macos-app/MLM/Services/Common/MaintenanceProgressTracker.swift:48:17: warning: stored property 'state' of 'Sendable'-conforming class 'MaintenanceProgressTracker' is mutable; this is an error in the Swift 6 language mode
+ 46 |     
+ 47 |     private let lock = NSRecursiveLock()
+ 48 |     private var state: ProgressState = ProgressState()
+    |                 `- warning: stored property 'state' of 'Sendable'-conforming class 'MaintenanceProgressTracker' is mutable; this is an error in the Swift 6 language mode
+ 49 |     private let progressHandler: ProgressHandler?
+ 50 |     private let batchSize: Int
+[3/6] Compiling MLM TrackRepository.swift
+/Users/olli/schenanigans/MusicLibraryManager/macos-app/MLM/Database/TrackRepository.swift:414:28: warning: result of call to 'write' is unused [#no-usage]
+ 412 |     /// Delete multiple tracks by IDs.
+ 413 |     func delete(ids: [Int64]) async throws {
+ 414 |         try await database.write { db in
+     |                            `- warning: result of call to 'write' is unused [#no-usage]
+ 415 |             try Track.deleteAll(db, ids: ids)
+ 416 |         }
+
+/Users/olli/schenanigans/MusicLibraryManager/macos-app/MLM/Database/TrackRepository.swift:737:43: warning: reference to captured var 'paths' in concurrently-executing code; this is an error in the Swift 6 language mode [#SendableClosureCaptures]
+ 735 |             try Track.fetchOne(db, sql: """
+ 736 |                 SELECT * FROM tracks
+ 737 |                 WHERE original_path IN (\(paths.map { _ in "?" }.joined(separator: ", ")))
+     |                                           `- warning: reference to captured var 'paths' in concurrently-executing code; this is an error in the Swift 6 language mode [#SendableClosureCaptures]
+ 738 |                 LIMIT 1
+ 739 |             """, arguments: StatementArguments(paths))
+
+/Users/olli/schenanigans/MusicLibraryManager/macos-app/MLM/Database/TrackRepository.swift:739:48: warning: reference to captured var 'paths' in concurrently-executing code; this is an error in the Swift 6 language mode [#SendableClosureCaptures]
+ 737 |                 WHERE original_path IN (\(paths.map { _ in "?" }.joined(separator: ", ")))
+ 738 |                 LIMIT 1
+ 739 |             """, arguments: StatementArguments(paths))
+     |                                                `- warning: reference to captured var 'paths' in concurrently-executing code; this is an error in the Swift 6 language mode [#SendableClosureCaptures]
+ 740 |         }
+ 741 |     }
+
+/Users/olli/schenanigans/MusicLibraryManager/macos-app/MLM/Database/TrackRepository.swift:962:26: error: cannot convert value of type 'Double' to expected argument type 'Float'
+ 960 |                 let source = discoverySourceMap[candidate.trackId]
+ 961 |                 let boost = (source?.lowercased() == "lastfm") ? 0.03 : 0.15
+ 962 |                 score += boost
+     |                          `- error: cannot convert value of type 'Double' to expected argument type 'Float'
+ 963 |             }
+ 964 | 
+
+[#SendableClosureCaptures]: <https://docs.swift.org/compiler/documentation/diagnostics/sendable-closure-captures>

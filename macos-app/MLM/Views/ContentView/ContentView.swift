@@ -230,10 +230,16 @@ struct ContentView: View {
             })
         case .duplicates:
             ReviewQueueView()
+        case .discoveryInbox:
+            DiscoveryInboxView()
+        case .grooveStudio:
+            GrooveStudioView()
         case .sync:
             SyncView()
         case .sources:
             SourcesView()
+        case .reelsInbox:
+            ReelsInboxView()
         }
     }
 
@@ -342,8 +348,11 @@ enum SidebarSection: Hashable, Identifiable {
     case playlistDetail(Int64)
     case folders
     case duplicates
+    case discoveryInbox
+    case grooveStudio
     case sync
     case sources
+    case reelsInbox
 
     var id: String {
         switch self {
@@ -352,8 +361,11 @@ enum SidebarSection: Hashable, Identifiable {
         case .playlistDetail(let pid): return "playlistDetail-\(pid)"
         case .folders: return "folders"
         case .duplicates: return "duplicates"
+        case .discoveryInbox: return "discoveryInbox"
+        case .grooveStudio: return "grooveStudio"
         case .sync: return "sync"
         case .sources: return "sources"
+        case .reelsInbox: return "reelsInbox"
         }
     }
 
@@ -361,7 +373,7 @@ enum SidebarSection: Hashable, Identifiable {
     /// Sidebar iterates these for top-level rows; `.playlistDetail` cases are
     /// produced dynamically inside `PinnedPlaylistsDisclosure` (Plan 36-04).
     static let topLevelCases: [SidebarSection] = [
-        .library, .playlists, .folders, .duplicates, .sync, .sources
+        .library, .playlists, .folders, .duplicates, .discoveryInbox, .reelsInbox, .grooveStudio, .sync, .sources
     ]
 
     var label: String {
@@ -371,8 +383,11 @@ enum SidebarSection: Hashable, Identifiable {
         case .playlistDetail: ""   // never displayed at top-level; disclosure children render the playlist name directly
         case .folders: "Folders"
         case .duplicates: "Duplicates"
+        case .discoveryInbox: "Discovery Inbox"
+        case .grooveStudio: "Groove Studio"
         case .sync: "Sync"
         case .sources: "Sources"
+        case .reelsInbox: "Reels Inbox"
         }
     }
 
@@ -383,8 +398,11 @@ enum SidebarSection: Hashable, Identifiable {
         case .playlistDetail: "music.note.list"
         case .folders: "folder"
         case .duplicates: "doc.on.doc"
+        case .discoveryInbox: "sparkles"
+        case .grooveStudio: "waveform"
         case .sync: "arrow.triangle.2.circlepath"
         case .sources: "globe"
+        case .reelsInbox: "play.rectangle.on.rectangle"
         }
     }
 
@@ -396,8 +414,11 @@ enum SidebarSection: Hashable, Identifiable {
         case .playlistDetail: nil
         case .folders: "3"
         case .duplicates: "6"
+        case .discoveryInbox: nil
+        case .grooveStudio: nil
         case .sync: "4"
         case .sources: "5"
+        case .reelsInbox: "7"
         }
     }
 }

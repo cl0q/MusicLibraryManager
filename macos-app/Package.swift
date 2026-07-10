@@ -21,7 +21,14 @@ let package = Package(
             ],
             path: "MLM",
             resources: [
-                .process("Resources"),
+                .copy("Resources/YAMNet.mlmodelc"),
+                .process("Resources/AppIcon.icns"),
+                .process("Resources/MLM.entitlements"),
+                .process("Resources/README.md")
+            ],
+            linkerSettings: [
+                .linkedFramework("AVKit"),
+                .linkedFramework("AVFoundation")
             ]
         ),
         .testTarget(

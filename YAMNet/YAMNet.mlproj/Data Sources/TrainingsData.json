@@ -1,0 +1,51 @@
+{
+  "activityEntities" : [
+    "dataSourceTrainingStarted",
+    [
+      {
+        "createdDate" : "2026-05-27T12:20:22Z",
+        "event" : "dataSourceTrainingStarted",
+        "id" : "87189AA1-17D7-4621-833C-15C7711E675F",
+        "subtitle" : "YAMNet 1",
+        "title" : "Used By"
+      }
+    ],
+    "dataSourceMetrics",
+    [
+      {
+        "createdDate" : "2026-05-27T12:20:22Z",
+        "event" : "dataSourceMetrics",
+        "id" : "8EFB74E4-5E1C-44D2-91A9-31E66461FBB3",
+        "subtitle" : "15 Classes, 5.060 Items",
+        "title" : "Data Summary"
+      }
+    ],
+    "dataSourceCreated",
+    [
+      {
+        "createdDate" : "2026-05-27T12:20:14Z",
+        "event" : "dataSourceCreated",
+        "id" : "D6AE0111-FFAE-4637-92A1-238E7F7A73FE",
+        "subtitle" : "TrainingsData",
+        "title" : "Data Source Created"
+      }
+    ]
+  ],
+  "createdDate" : "2026-05-27T12:20:14Z",
+  "dataPathRelativeToProjectURL" : "../../../../../../Volumes/Lexxar/schenanigans/MusicLibraryManager/YAMNet/TrainingsData/",
+  "dataResult" : {
+    "createdDate" : "2026-05-27T12:20:14Z",
+    "dataSourceID" : "8B44E181-319B-413C-AA57-DBAFD3409891",
+    "dataURL" : "file:///Volumes/Lexxar/schenanigans/MusicLibraryManager/YAMNet/TrainingsData/"
+  },
+  "dataURL" : "file:///Volumes/Lexxar/schenanigans/MusicLibraryManager/YAMNet/TrainingsData/",
+  "experimentIDs" : [
+    "76E75725-F865-4F31-8CCB-13287DC8454D"
+  ],
+  "id" : "8B44E181-319B-413C-AA57-DBAFD3409891",
+  "modifiedDate" : "2026-05-27T12:20:22Z",
+  "pathType" : 0,
+  "preferredFilename" : "TrainingsData",
+  "title" : "TrainingsData",
+  "version" : "1.0"
+}

@@ -37,6 +37,46 @@ struct MaintenanceView: View {
                 }
             }
             
+            Section("Transcode Cache") {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Speicherort für transkodierte Audiodateien")
+                                    .font(MLMFont.body)
+                                if let path = container.transcodeCache?.cacheDir.path {
+                                    Text(path)
+                                        .font(MLMFont.mono)
+                                        .font(.caption)
+                                        .foregroundColor(.mlmInkSecondary)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                } else {
+                                    Text("Standard-Pfad (intern)")
+                                        .font(MLMFont.muted)
+                                        .foregroundColor(.mlmInkMuted)
+                                }
+                            }
+                        } icon: {
+                            Image(systemName: "folder.badge.gearshape")
+                                .frame(width: 20)
+                        }
+                        
+                        Spacer()
+                        
+                        Button("Speicherort ändern...") {
+                            chooseNewCacheFolder()
+                        }
+                        .disabled(isRunning != nil)
+                    }
+                    
+                    Text("Hinweis: Wenn du einen neuen Pfad auswählst, verschiebt MLM all deine existierenden Cache-Dateien automatisch im Hintergrund dorthin und löscht die alten Dateien, um sofort Speicherplatz auf deiner internen SSD freizugeben.")
+                        .font(MLMFont.muted)
+                        .foregroundColor(.mlmInkMuted)
+                }
+                .padding(.vertical, 4)
+            }
+            
             Section("Analysis") {
                 maintenanceRow(
                     title: "Fingerprint All Tracks",
@@ -63,6 +103,15 @@ struct MaintenanceView: View {
                     action: "danceability"
                 ) {
                     await runDanceability()
+                }
+
+                maintenanceRow(
+                    title: "Groove Analysis (Smart Suggestions)",
+                    description: "Generate CoreML acoustic embeddings for smart song suggestions",
+                    icon: "music.note.list",
+                    action: "groove"
+                ) {
+                    await runGrooveAnalysis()
                 }
 
                 maintenanceRow(
@@ -102,8 +151,7 @@ struct MaintenanceView: View {
                     icon: "arrow.clockwise",
                     action: "rescan"
                 ) {
-                    // TODO: Implement via ImportService
-                    resultMessage = "Metadata rescan not yet implemented"
+                    await runRescanMetadata()
                 }
 
                 maintenanceRow(
@@ -339,6 +387,41 @@ struct MaintenanceView: View {
         NotificationCenter.default.post(name: .libraryDidImport, object: nil)
     }
 
+    private func runGrooveAnalysis() async {
+        guard let trackRepo = container.trackRepository,
+              let analyzer = container.grooveBatchAnalyzer else { return }
+
+        isRunning = "groove"
+        resultMessage = nil
+        progressState = nil
+
+        guard analyzer.isAvailable else {
+            resultMessage = "CoreML preprocessor or model not available. Ensure ffmpeg is installed."
+            isRunning = nil
+            return
+        }
+
+        let tracks = (try? await trackRepo.fetchTracksWithoutGrooveEmbedding()) ?? []
+        let libraryRoot = try? await container.configRepository?.getLibraryRoot()
+        let (analyzed, failed, _) = await analyzer.batchAnalyze(
+            tracks: tracks,
+            trackRepository: trackRepo,
+            libraryRoot: libraryRoot,
+            turboMode: turboMode
+        ) { state in
+            Task { @MainActor in
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    self.progressState = state
+                }
+            }
+        }
+
+        resultMessage = "Groove embeddings: \(analyzed) analyzed, \(failed) failed (Turbo: \(turboMode ? "ON" : "OFF"))"
+        progressState = nil
+        isRunning = nil
+        NotificationCenter.default.post(name: .libraryDidImport, object: nil)
+    }
+
     /// Backfill embedded artwork via ArtworkBackfillService (ffmpeg, no network, D-16).
     private func runArtworkEmbedded() async {
         guard let service = container.artworkBackfillService else {
@@ -428,6 +511,39 @@ struct MaintenanceView: View {
         isRunning = nil
     }
 
+    private func runRescanMetadata() async {
+        guard let trackRepo = container.trackRepository,
+              let configRepo = container.configRepository else { return }
+
+        isRunning = "rescan"
+        resultMessage = nil
+        progressState = nil
+
+        let service = LibraryRepairService(
+            trackRepository: trackRepo,
+            configRepository: configRepo
+        )
+
+        do {
+            let (succeeded, failed) = try await service.rescanMetadata(
+                turboMode: turboMode
+            ) { state in
+                Task { @MainActor in
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        self.progressState = state
+                    }
+                }
+            }
+            resultMessage = "Metadata Rescan abgeschlossen: \(succeeded) aktualisiert · \(failed) fehlgeschlagen"
+            NotificationCenter.default.post(name: .libraryDidImport, object: nil)
+        } catch {
+            resultMessage = "Metadata Rescan fehlgeschlagen: \(error.localizedDescription)"
+        }
+
+        progressState = nil
+        isRunning = nil
+    }
+
     private func runDeepScan() async {
         guard let trackRepo = container.trackRepository,
               let analysisRepo = container.analysisRepository else { return }
@@ -500,5 +616,18 @@ struct MaintenanceView: View {
         }
 
         isRunning = nil
+    }
+
+    private func chooseNewCacheFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.title = "Speicherort für Transcode-Cache wählen"
+        panel.prompt = "Ordner wählen"
+        
+        if panel.runModal() == .OK, let url = panel.url {
+            container.relocateTranscodeCache(to: url.path)
+        }
     }
 }

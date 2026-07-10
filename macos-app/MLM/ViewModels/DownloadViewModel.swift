@@ -24,6 +24,25 @@ final class DownloadViewModel {
     /// Queue of pending download items for display.
     private(set) var queueItems: [DownloadItem] = []
 
+    enum DiscoveryStatus: String, Sendable, Codable {
+        case queued = "queued"
+        case downloading = "downloading"
+        case downloaded = "downloaded"
+        case failed = "failed"
+    }
+
+    struct DiscoveryDownloadRequest: Sendable, Hashable {
+        let artist: String
+        let title: String
+        let soundcloudURL: String?
+        let source: String
+        let seedTrack: Track
+    }
+
+    private(set) var discoveryStatuses: [String: DiscoveryStatus] = [:]
+    private var discoveryQueue: [DiscoveryDownloadRequest] = []
+    private var isProcessingDiscoveryQueue = false
+
     // MARK: - Dependencies
 
     private var orchestrator: DownloadOrchestrator?
@@ -62,6 +81,14 @@ final class DownloadViewModel {
 
         let remoteTracks = tracks.filter { $0.isRemote }
         guard !remoteTracks.isEmpty else { return }
+
+        // Notify priority queue service that download is active
+        await PerformanceQueueService.shared.setExternalDownloadActive(true)
+        defer {
+            Task {
+                await PerformanceQueueService.shared.setExternalDownloadActive(false)
+            }
+        }
 
         isDownloading = true
         totalCount = remoteTracks.count
@@ -160,6 +187,14 @@ final class DownloadViewModel {
     /// Retry failed downloads from the queue.
     func retryFailed() async {
         guard let orchestrator else { return }
+        
+        await PerformanceQueueService.shared.setExternalDownloadActive(true)
+        defer {
+            Task {
+                await PerformanceQueueService.shared.setExternalDownloadActive(false)
+            }
+        }
+        
         isDownloading = true
         let result = await orchestrator.retryFailed()
         lastResult = result
@@ -178,6 +213,169 @@ final class DownloadViewModel {
             level: .info,
             source: "Download"
         )
+    }
+
+    /// Download a recommended swarm track, extract its metadata, insert it in the DB, and register in track_discovery_log as 'new'.
+    func downloadDiscoveryTrack(
+        artist: String,
+        title: String,
+        soundcloudURL: String?,
+        source: String,
+        seedTrack: Track
+    ) {
+        let key = soundcloudURL ?? "\(artist) - \(title)"
+        
+        // Don't duplicate downloads
+        if discoveryStatuses[key] == .queued || discoveryStatuses[key] == .downloading {
+            return
+        }
+        
+        let request = DiscoveryDownloadRequest(
+            artist: artist,
+            title: title,
+            soundcloudURL: soundcloudURL,
+            source: source,
+            seedTrack: seedTrack
+        )
+        
+        discoveryStatuses[key] = .queued
+        discoveryQueue.append(request)
+        
+        // Start background processing if not already running
+        if !isProcessingDiscoveryQueue {
+            Task {
+                await processDiscoveryQueue()
+            }
+        }
+    }
+
+    private func processDiscoveryQueue() async {
+        guard let orchestrator, let trackRepository else { return }
+        isProcessingDiscoveryQueue = true
+        
+        await PerformanceQueueService.shared.setExternalDownloadActive(true)
+        defer {
+            Task {
+                await PerformanceQueueService.shared.setExternalDownloadActive(false)
+            }
+        }
+        
+        while !discoveryQueue.isEmpty {
+            let request = discoveryQueue.removeFirst()
+            let key = request.soundcloudURL ?? "\(request.artist) - \(request.title)"
+            
+            await MainActor.run {
+                self.discoveryStatuses[key] = .downloading
+                self.isDownloading = true
+                self.currentTrack = "\(request.artist) - \(request.title)"
+                self.currentTrackProgress = 0
+                self.progress = 0
+            }
+            
+            // Determine destination folder inside "Discovered Neighbors"
+            let libURL = URL(fileURLWithPath: libraryRoot)
+            let discoveryRoot = libURL.appendingPathComponent("Discovered Neighbors")
+            let seedFolder = "\(request.seedTrack.artist) - \(request.seedTrack.title)"
+            let targetDir = discoveryRoot.appendingPathComponent(seedFolder)
+            
+            do {
+                // Perform download
+                let fileURL = try await orchestrator.downloadDiscoveryTrack(
+                    artist: request.artist,
+                    title: request.title,
+                    soundcloudURL: request.soundcloudURL,
+                    targetDir: targetDir,
+                    onProgress: { [weak self] pct in
+                        Task { @MainActor [weak self] in
+                            self?.currentTrackProgress = pct
+                            self?.progress = pct
+                        }
+                    }
+                )
+                
+                guard let fileURL = fileURL else {
+                    await MainActor.run {
+                        self.discoveryStatuses[key] = .failed
+                    }
+                    continue
+                }
+                
+                // Extract metadata using MetadataExtractor
+                let metadata = try? await MetadataExtractor.extract(from: fileURL)
+                
+                // Generate absolute organized path relative to libraryRoot to keep DB consistent
+                let relativePath = fileURL.path.replacingOccurrences(of: libURL.path + "/", with: "")
+                
+                // Determine format and bitrate
+                let format = fileURL.pathExtension.lowercased()
+                let bitrate = await orchestrator.transcodeService.detectBitrateKbps(fileURL)
+                
+                // Create the Track struct
+                let newTrack = Track(
+                    id: nil,
+                    artist: metadata?.artist.isEmpty == false ? metadata!.artist : request.artist,
+                    albumArtist: metadata?.albumArtist.isEmpty == false ? metadata!.albumArtist : request.artist,
+                    album: metadata?.album.isEmpty == false ? metadata!.album : "Discovered Neighbors",
+                    title: metadata?.title.isEmpty == false ? metadata!.title : request.title,
+                    genre: metadata?.genre,
+                    year: metadata?.year,
+                    bitrate: bitrate,
+                    duration: metadata?.duration,
+                    format: format,
+                    originalPath: fileURL.path,
+                    organizedPath: relativePath,
+                    isDuplicate: 0,
+                    dateAdded: ISO8601DateFormatter().string(from: Date()),
+                    downloadStatus: ISO8601DateFormatter().string(from: Date())
+                )
+                
+                // Save track to DB
+                let insertedTrack = try await trackRepository.insert(newTrack)
+                guard let newTrackId = insertedTrack.id else {
+                    await MainActor.run {
+                        self.discoveryStatuses[key] = .failed
+                    }
+                    continue
+                }
+                
+                // Enqueue discovery track for auto-analysis
+                await PerformanceQueueService.shared.enqueueAnalysis(track: insertedTrack)
+                
+                // Register in track_discovery_log
+                try await trackRepository.saveDiscoveryLog(
+                    discoveredTrackId: newTrackId,
+                    seedTrackId: request.seedTrack.id,
+                    source: request.source,
+                    status: "new"
+                )
+                
+                await MainActor.run {
+                    self.discoveryStatuses[key] = .downloaded
+                }
+                
+                // Post notification so the library and inbox views reload
+                NotificationCenter.default.post(
+                    name: .downloadDidComplete,
+                    object: nil,
+                    userInfo: [
+                        "succeeded": 1,
+                        "failed": 0
+                    ]
+                )
+            } catch {
+                AppLogger.shared.log("Discovery queue download failed for \(request.title): \(error)", level: .error, source: "Download")
+                await MainActor.run {
+                    self.discoveryStatuses[key] = .failed
+                }
+            }
+        }
+        
+        await MainActor.run {
+            self.isDownloading = false
+            self.currentTrack = ""
+            self.progress = 1.0
+            self.isProcessingDiscoveryQueue = false
+        }
     }
 
     // MARK: - Persistence
@@ -213,6 +411,11 @@ final class DownloadViewModel {
                     format: format,
                     bitrate: bitrate
                 )
+                
+                // Enqueue downloaded track for auto-analysis
+                if let updatedTrack = try await trackRepository?.fetchTrack(id: trackId) {
+                    await PerformanceQueueService.shared.enqueueAnalysis(track: updatedTrack)
+                }
             } catch {
                 AppLogger.shared.log(
                     "Failed to update DB for track \(trackId): \(error)",

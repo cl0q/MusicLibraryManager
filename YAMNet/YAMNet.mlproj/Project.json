@@ -1,0 +1,29 @@
+{
+  "activityEntities" : [
+    "projectCreated",
+    [
+      {
+        "createdDate" : "2026-05-27T12:20:08Z",
+        "event" : "projectCreated",
+        "id" : "D2AF7913-40CD-4040-AC1A-DA8E17993682",
+        "subtitle" : "YAMNet",
+        "title" : "Project Created"
+      }
+    ]
+  ],
+  "authorName" : "Oliver Ilczuk",
+  "createdDate" : "2026-05-27T12:20:08Z",
+  "description" : "",
+  "id" : "8ED74D47-650B-4553-AF62-AFEB233A3758",
+  "license" : "",
+  "location" : "",
+  "modifiedDate" : "2026-05-27T12:20:08Z",
+  "projectName" : "YAMNet",
+  "settingsEntity" : {
+    "snapshotOnExtendTraining" : true,
+    "snapshotOnResumeTraining" : false
+  },
+  "taskType" : "audioClassifier",
+  "title" : "Sound Classification",
+  "version" : "1.1"
+}

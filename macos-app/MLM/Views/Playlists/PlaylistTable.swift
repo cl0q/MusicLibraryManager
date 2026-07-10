@@ -29,13 +29,7 @@ struct PlaylistTable: View {
         KeyPathComparator(\.index, order: .forward)
     ]
 
-    /// In-memory sorted rows based on current sortOrder
-    private var rows: [TrackRow] {
-        let mapped = viewModel.displayedTracks
-            .enumerated()
-            .compactMap { idx, t in t.id.map { TrackRow(index: idx + 1, id: $0, track: t) } }
-        return mapped.sorted(using: sortOrder)
-    }
+    @State private var cachedRows: [TrackRow] = []
 
     /// Reordering/custom-positioning is only meaningful when in the default index order.
     private var isDefaultOrder: Bool {
@@ -44,96 +38,107 @@ struct PlaylistTable: View {
     }
 
     var body: some View {
-        Table(selection: $viewModel.selectedTrackIDs, sortOrder: $sortOrder) {
-            Group {
-                TableColumn("#", value: \TrackRow.index) { row in
-                    PlaylistTableIndexCell(index: row.index)
-                }
-                .width(28)
+        Group {
+            Table(selection: $viewModel.selectedTrackIDs, sortOrder: $sortOrder) {
+                Group {
+                    TableColumn("#", value: \TrackRow.index) { row in
+                        PlaylistTableIndexCell(index: row.index)
+                    }
+                    .width(28)
 
-                TableColumn("Title", value: \TrackRow.track.title) { row in
-                    PlaylistTableTitleCell(track: row.track, isPlaying: isNowPlaying(row.track))
-                }
-                .width(min: 160, ideal: 280)
+                    TableColumn("Title", value: \TrackRow.track.title) { row in
+                        PlaylistTableTitleCell(track: row.track, isPlaying: isNowPlaying(row.track))
+                    }
+                    .width(min: 160, ideal: 280)
 
-                TableColumn("Artist", value: \TrackRow.track.artist) { row in
-                    PlaylistTableArtistCell(artist: row.track.artist)
-                }
-                .width(min: 100, ideal: 180)
+                    TableColumn("Artist", value: \TrackRow.track.artist) { row in
+                        PlaylistTableArtistCell(artist: row.track.artist)
+                    }
+                    .width(min: 100, ideal: 180)
 
-                TableColumn("Album", value: \TrackRow.track.album) { row in
-                    PlaylistTableAlbumCell(album: row.track.album)
-                }
-                .width(min: 100, ideal: 180)
+                    TableColumn("Album", value: \TrackRow.track.album) { row in
+                        PlaylistTableAlbumCell(album: row.track.album)
+                    }
+                    .width(min: 100, ideal: 180)
 
-                TableColumn("Time", value: \TrackRow.track.durationSortKey) { row in
-                    PlaylistTableTimeCell(formattedDuration: row.track.formattedDuration)
-                }
-                .width(54)
+                    TableColumn("Time", value: \TrackRow.track.durationSortKey) { row in
+                        PlaylistTableTimeCell(formattedDuration: row.track.formattedDuration)
+                    }
+                    .width(54)
 
-                TableColumn("Format", value: \TrackRow.track.format) { row in
-                    PlaylistTableFormatCell(track: row.track, formatColor: formatColor)
+                    TableColumn("Format", value: \TrackRow.track.format) { row in
+                        PlaylistTableFormatCell(track: row.track, formatColor: formatColor)
+                    }
+                    .width(60)
                 }
-                .width(60)
+
+                Group {
+                    TableColumn("Genre", value: \TrackRow.track.genreSortKey) { row in
+                        PlaylistTableGenreCell(genre: row.track.genre)
+                    }
+                    .width(min: 70, ideal: 110)
+
+                    TableColumn("Year", value: \TrackRow.track.yearSortKey) { row in
+                        PlaylistTableYearCell(year: row.track.year)
+                    }
+                    .width(48)
+
+                    TableColumn("Energy", value: \TrackRow.track.energySortKey) { row in
+                        PlaylistTableEnergyCell(level: row.track.energyBucket)
+                    }
+                    .width(56)
+
+                    TableColumn("Dance", value: \TrackRow.track.danceabilitySortKey) { row in
+                        DanceabilitySteps(score: row.track.danceability)
+                    }
+                    .width(56)
+
+                    TableColumn("Added", value: \TrackRow.track.dateAddedSortKey) { row in
+                        PlaylistTableAddedCell(dateAdded: row.track.dateAdded, formatDate: formatDateAdded)
+                    }
+                    .width(78)
+                }
+            } rows: {
+                ForEach(cachedRows) { row in
+                    TableRow(row)
+                        .draggable(TrackDragData(trackId: row.id, sourcePlaylistId: playlist.id))
+                }
+                .dropDestination(for: TrackDragData.self) { index, items in
+                    _ = handleDrop(items: items, destinationIndex: index)
+                }
             }
-
-            Group {
-                TableColumn("Genre", value: \TrackRow.track.genreSortKey) { row in
-                    PlaylistTableGenreCell(genre: row.track.genre)
+            .contextMenu(forSelectionType: Int64.self) { selectedIDs in
+                TrackContextMenu(
+                    selectedTrackIDs: selectedIDs,
+                    tracks: viewModel.displayedTracks,
+                    availablePlaylists: availablePlaylists,
+                    availableSyncProfiles: availableSyncProfiles,
+                    addToSyncProfile: { profile in
+                        Task {
+                            container.syncViewModel?.selectedProfile = profile
+                            await container.syncViewModel?.addTracks(Array(selectedIDs))
+                        }
+                    },
+                    playlist: playlist,
+                    onRemoveFromPlaylist: {
+                        Task { await onRemoveTracks(selectedIDs) }
+                    }
+                )
+            } primaryAction: { selectedIDs in
+                if let trackID = selectedIDs.first,
+                   let track = viewModel.displayedTracks.first(where: { $0.id == trackID }) {
+                    onTrackDoubleClick?(track)
                 }
-                .width(min: 70, ideal: 110)
-
-                TableColumn("Year", value: \TrackRow.track.yearSortKey) { row in
-                    PlaylistTableYearCell(year: row.track.year)
-                }
-                .width(48)
-
-                TableColumn("Energy", value: \TrackRow.track.energySortKey) { row in
-                    PlaylistTableEnergyCell(level: row.track.energyBucket)
-                }
-                .width(56)
-
-                TableColumn("Dance", value: \TrackRow.track.danceabilitySortKey) { row in
-                    DanceabilitySteps(score: row.track.danceability)
-                }
-                .width(56)
-
-                TableColumn("Added", value: \TrackRow.track.dateAddedSortKey) { row in
-                    PlaylistTableAddedCell(dateAdded: row.track.dateAdded, formatDate: formatDateAdded)
-                }
-                .width(78)
-            }
-        } rows: {
-            ForEach(rows) { row in
-                TableRow(row)
-                    .draggable(TrackDragData(trackId: row.id, sourcePlaylistId: playlist.id))
-            }
-            .dropDestination(for: TrackDragData.self) { index, items in
-                _ = handleDrop(items: items, destinationIndex: index)
             }
         }
-        .contextMenu(forSelectionType: Int64.self) { selectedIDs in
-            TrackContextMenu(
-                selectedTrackIDs: selectedIDs,
-                tracks: viewModel.displayedTracks,
-                availablePlaylists: availablePlaylists,
-                availableSyncProfiles: availableSyncProfiles,
-                addToSyncProfile: { profile in
-                    Task {
-                        container.syncViewModel?.selectedProfile = profile
-                        await container.syncViewModel?.addTracks(Array(selectedIDs))
-                    }
-                },
-                playlist: playlist,
-                onRemoveFromPlaylist: {
-                    Task { await onRemoveTracks(selectedIDs) }
-                }
-            )
-        } primaryAction: { selectedIDs in
-            if let trackID = selectedIDs.first,
-               let track = viewModel.displayedTracks.first(where: { $0.id == trackID }) {
-                onTrackDoubleClick?(track)
-            }
+        .task {
+            updateCachedRows()
+        }
+        .onChange(of: viewModel.displayedTracks) {
+            updateCachedRows()
+        }
+        .onChange(of: sortOrder) {
+            updateCachedRows()
         }
     }
 
@@ -170,21 +175,21 @@ struct PlaylistTable: View {
 
     /// Map visual table insertion index to the actual index in the full viewModel.tracks array.
     private func getTargetTrackIndex(for destinationIndex: Int) -> Int {
-        if rows.isEmpty {
+        if cachedRows.isEmpty {
             return 0
         }
         if destinationIndex == 0 {
-            let firstRowTrackId = rows[0].track.id
+            let firstRowTrackId = cachedRows[0].track.id
             return viewModel.tracks.firstIndex(where: { $0.id == firstRowTrackId }) ?? 0
         }
-        if destinationIndex >= rows.count {
-            let lastRowTrackId = rows.last!.track.id
+        if destinationIndex >= cachedRows.count {
+            let lastRowTrackId = cachedRows.last!.track.id
             if let lastIdx = viewModel.tracks.firstIndex(where: { $0.id == lastRowTrackId }) {
                 return lastIdx + 1
             }
             return viewModel.tracks.count
         }
-        let targetRowTrackId = rows[destinationIndex].track.id
+        let targetRowTrackId = cachedRows[destinationIndex].track.id
         return viewModel.tracks.firstIndex(where: { $0.id == targetRowTrackId }) ?? destinationIndex
     }
 
@@ -224,6 +229,13 @@ struct PlaylistTable: View {
         }
 
         return String(dateString.prefix(10))
+    }
+
+    private func updateCachedRows() {
+        let mapped = viewModel.displayedTracks
+            .enumerated()
+            .compactMap { idx, t in t.id.map { TrackRow(index: idx + 1, id: $0, track: t) } }
+        self.cachedRows = mapped.sorted(using: sortOrder)
     }
 }
 

@@ -21,6 +21,9 @@ final class TranscodeService: Sendable {
     /// Fallback encoder (built-in FFmpeg AAC).
     private static let fallbackEncoder = "aac"
 
+    private static let encoderLock = NSLock()
+    private static var cachedEncoder: String? = nil
+
     private let ffmpegPath: String?
 
     init() {
@@ -41,7 +44,9 @@ final class TranscodeService: Sendable {
         input: URL,
         outputDir: URL,
         outputName: String? = nil,
-        bitrateKbps: Int = 248
+        bitrateKbps: Int = 248,
+        sourceFormat: String? = nil,
+        sourceBitrate: Int? = nil
     ) async throws -> TranscodeResult {
         guard let ffmpeg = ffmpegPath else {
             AppLogger.shared.error(
@@ -64,7 +69,18 @@ final class TranscodeService: Sendable {
         }
 
         // Detect format to decide transcode vs skip
-        let formatInfo = await detectFormat(input: input, ffmpeg: ffmpeg)
+        let formatInfo: FormatInfo
+        if let sFormat = sourceFormat, let sBitrate = sourceBitrate {
+            let losslessCodecs = Set(["flac", "alac", "wavpack", "pcm_s16le", "pcm_s24le", "pcm_s32le"])
+            let isLossy = !losslessCodecs.contains(sFormat.lowercased())
+            formatInfo = FormatInfo(isLossy: isLossy, bitrate: sBitrate * 1000, codec: sFormat.lowercased())
+            AppLogger.shared.debug(
+                "transcode: Using pre-loaded database metadata for \(input.lastPathComponent) (codec: \(sFormat), bitrate: \(sBitrate)kbps) - bypassed ffprobe!",
+                source: "Transcode"
+            )
+        } else {
+            formatInfo = await detectFormat(input: input, ffmpeg: ffmpeg)
+        }
 
         if formatInfo.isLossy && formatInfo.bitrate > 0 && formatInfo.bitrate < bitrateKbps * 1000 {
             // Only skip transcode if the source format is ALREADY an AAC file!
@@ -190,16 +206,25 @@ final class TranscodeService: Sendable {
 
     /// Check if libfdk_aac encoder is available.
     private func detectEncoder(ffmpeg: String) async -> String {
+        if let cached = Self.encoderLock.withLock({ Self.cachedEncoder }) {
+            return cached
+        }
+
         do {
             let result = try await ProcessRunner.run(
                 ffmpeg,
                 arguments: ["-encoders"]
             )
-            if result.stdout.contains("libfdk_aac") {
-                return Self.preferredEncoder
+            let encoder = result.stdout.contains("libfdk_aac") ? Self.preferredEncoder : Self.fallbackEncoder
+            
+            Self.encoderLock.withLock {
+                Self.cachedEncoder = encoder
             }
-        } catch {}
-        return Self.fallbackEncoder
+            
+            return encoder
+        } catch {
+            return Self.fallbackEncoder
+        }
     }
 
     /// Run ffmpeg transcode.

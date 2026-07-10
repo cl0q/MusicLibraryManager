@@ -40,6 +40,11 @@ final class DependencyContainer {
     /// Observes `.libraryDidImport`; runs background TaskGroup(maxConcurrentTasks: 4)
     /// to extract embedded artwork for all tracks without an artwork DB row.
     private(set) var artworkBackfillService: ArtworkBackfillService?
+    private(set) var audioEmbeddingService: AudioEmbeddingService?
+    private(set) var grooveBatchAnalyzer: GrooveBatchAnalyzer?
+    private(set) var swarmRecommendationService: SwarmRecommendationService?
+    private(set) var transcodeCache: TranscodeCache?
+    private(set) var unifiedSearchService: UnifiedSearchService?
 
     // MARK: - ViewModels (shared singletons)
 
@@ -97,6 +102,9 @@ final class DependencyContainer {
 
         let player = AudioPlayer()
         self.audioPlayer = player
+        self.audioEmbeddingService = AudioEmbeddingService()
+        self.grooveBatchAnalyzer = GrooveBatchAnalyzer(embeddingService: self.audioEmbeddingService!)
+        self.swarmRecommendationService = SwarmRecommendationService()
 
         // Auth services (shared by all source integrations)
         let tokens = TokenStorage()
@@ -105,6 +113,26 @@ final class DependencyContainer {
         self.oauthManager = oauth
         let tokenRefresh = TokenRefreshService(tokenStorage: tokens, oauthManager: oauth)
         self.tokenRefreshService = tokenRefresh
+
+        // Unified Search Service
+        let scClient = SoundCloudClient(
+            tokenStorage: tokens,
+            oauthManager: oauth,
+            trackRepository: self.trackRepository!,
+            sourceRepository: self.sourceRepository!,
+            playlistRepository: self.playlistRepository
+        )
+        let dab = DABClient(tokenStorage: tokens)
+        let squid = SquidWtfClient()
+        let ytDownloader = YouTubeDownloader()
+        let searchService = UnifiedSearchService(
+            dabClient: dab,
+            squidClient: squid,
+            soundCloudClient: scClient,
+            youtubeDownloader: ytDownloader
+        )
+        self.unifiedSearchService = searchService
+        UnifiedSearchService.shared = searchService
 
         // Shared ViewModels
         self.playbackViewModel = PlaybackViewModel(
@@ -157,10 +185,17 @@ final class DependencyContainer {
         if let trackRepo = self.trackRepository,
            let syncRepo = self.syncRepository,
            let configRepo = self.configRepository {
-            let cacheDir = FileManager.default
-                .urls(for: .cachesDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("com.mlm.transcode_cache")
+            let customPath = try? await configRepo.getTranscodeCachePath()
+            let cacheDir: URL
+            if let customPath = customPath, !customPath.isEmpty {
+                cacheDir = URL(fileURLWithPath: customPath)
+            } else {
+                cacheDir = FileManager.default
+                    .urls(for: .cachesDirectory, in: .userDomainMask)[0]
+                    .appendingPathComponent("com.mlm.transcode_cache")
+            }
             let cache = TranscodeCache(cacheDir: cacheDir)
+            self.transcodeCache = cache
             let syncSvc = SyncService(
                 trackRepository: trackRepo,
                 syncRepository: syncRepo,
@@ -217,6 +252,92 @@ final class DependencyContainer {
             "App initialized — DB at \(dbManager.databasePath.path)",
             source: "boot"
         )
+    }
+
+    /// Relocates the transcode cache folder to a new path in the background.
+    ///
+    /// Copies all existing cached .m4a files to the new folder, validates them,
+    /// deletes the originals to save space, and updates the dynamic path in TranscodeCache & Database.
+    func relocateTranscodeCache(to newPath: String) {
+        guard let transcodeCache = self.transcodeCache, let configRepo = self.configRepository else { return }
+        
+        let oldDir = transcodeCache.cacheDir.standardizedFileURL
+        let newDir = URL(fileURLWithPath: newPath).standardizedFileURL
+        
+        if oldDir == newDir {
+            AppLogger.shared.info("Cache-Migration: Neuer Pfad entspricht dem aktuellen Pfad. Keine Aktion erforderlich.", source: "Sync")
+            return
+        }
+        
+        let activityVM = self.activityViewModel
+        
+        Task.detached {
+            let opId = activityVM?.startOperation(
+                type: .sync,
+                title: "Cache-Migration: \(newDir.lastPathComponent)",
+                detail: "Scanne alten Cache..."
+            )
+            AppLogger.shared.info("Cache-Migration: Starte Umzug des Transcode-Caches von \(oldDir.path) nach \(newDir.path)", source: "Sync")
+            
+            do {
+                // Ensure new directory exists
+                try FileManager.default.createDirectory(at: newDir, withIntermediateDirectories: true)
+                
+                // Get all cache files
+                let files = try FileManager.default.contentsOfDirectory(at: oldDir, includingPropertiesForKeys: nil)
+                let m4aFiles = files.filter { $0.pathExtension.lowercased() == "m4a" }
+                let total = m4aFiles.count
+                
+                AppLogger.shared.info("Cache-Migration: \(total) Dateien zum Verschieben gefunden.", source: "Sync")
+                
+                var completed = 0
+                for fileURL in m4aFiles {
+                    let targetURL = newDir.appendingPathComponent(fileURL.lastPathComponent)
+                    
+                    // Copy item
+                    try? FileManager.default.removeItem(at: targetURL)
+                    try FileManager.default.copyItem(at: fileURL, to: targetURL)
+                    
+                    // Delete original
+                    try FileManager.default.removeItem(at: fileURL)
+                    
+                    completed += 1
+                    let progress = Double(completed) / Double(max(total, 1))
+                    
+                    // Update progress in Operations tab
+                    if let opId = opId {
+                        activityVM?.updateProgress(
+                            id: opId,
+                            progress: progress,
+                            detail: "[\(completed)/\(total)] verschoben..."
+                        )
+                    }
+                    
+                    // Periodically print progress in logs
+                    if completed % 20 == 0 || completed == total {
+                        AppLogger.shared.info("Cache-Migration: [\(completed)/\(total)] Dateien verschoben.", source: "Sync")
+                    }
+                }
+                
+                // Update active cache directory thread-safely
+                transcodeCache.updateCacheDir(to: newDir)
+                
+                // Persist new cache path in the GRDB database
+                try await configRepo.setTranscodeCachePath(newPath)
+                
+                // Complete background operation
+                if let opId = opId {
+                    activityVM?.completeOperation(id: opId, detail: "Erfolgreich! \(total) Cache-Dateien umgezogen.")
+                }
+                AppLogger.shared.info("Cache-Migration: Erfolgreich abgeschlossen. \(total) Dateien umgezogen, alter Cache gelöscht.", source: "Sync")
+                
+            } catch {
+                AppLogger.shared.error("Cache-Migration: Fehler beim Umzug: \(error.localizedDescription)", source: "Sync")
+                if let opId = opId {
+                    activityVM?.failOperation(id: opId, error: error.localizedDescription)
+                }
+            }
+        }
     }
 }
 

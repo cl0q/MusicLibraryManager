@@ -15,6 +15,9 @@ struct WaveformView: View {
     /// Whether waveform data is still loading.
     let isLoading: Bool
 
+    /// Whether the waveform is scrollable (e.g. for long tracks/mixes)
+    let isScrollable: Bool
+
     /// User interactive visualization settings (persisted in parent)
     @Binding var zoomLevel: CGFloat
     @Binding var exponent: Float
@@ -33,11 +36,30 @@ struct WaveformView: View {
     /// Stride per bar at 1.0x zoom: barWidth + barGap.
     private let barStride: CGFloat = 3
 
-    /// State for settings popover visibility.
-    @State private var showSettingsPopover = false
-
     /// State to track active trackpad magnification progress.
     @State private var lastMagnification: CGFloat = 1.0
+
+    init(
+        data: [Float],
+        progress: Double,
+        isLoading: Bool,
+        isScrollable: Bool = false,
+        zoomLevel: Binding<CGFloat>,
+        exponent: Binding<Float>,
+        gain: Binding<Float>,
+        waveformHeight: Binding<CGFloat>,
+        onSeek: ((Double) -> Void)? = nil
+    ) {
+        self.data = data
+        self.progress = progress
+        self.isLoading = isLoading
+        self.isScrollable = isScrollable
+        self._zoomLevel = zoomLevel
+        self._exponent = exponent
+        self._gain = gain
+        self._waveformHeight = waveformHeight
+        self.onSeek = onSeek
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -47,146 +69,84 @@ struct WaveformView: View {
                 } else if data.isEmpty {
                     emptyPlaceholder
                 } else {
-                    let currentBarStride = barStride * zoomLevel
-                    let currentBarWidth = barWidth * zoomLevel
-                    let totalContentWidth = max(
-                        CGFloat(data.count) * currentBarStride,
-                        geometry.size.width
-                    )
-
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        waveformCanvas(
-                            in: CGSize(width: totalContentWidth, height: geometry.size.height),
-                            currentBarStride: currentBarStride,
-                            currentBarWidth: currentBarWidth
+                    if isScrollable {
+                        let currentBarStride = barStride * zoomLevel
+                        let currentBarWidth = barWidth * zoomLevel
+                        let totalContentWidth = max(
+                            CGFloat(data.count) * currentBarStride,
+                            geometry.size.width
                         )
-                        .frame(width: totalContentWidth, height: geometry.size.height)
+
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            waveformCanvas(
+                                in: CGSize(width: totalContentWidth, height: geometry.size.height),
+                                currentBarStride: currentBarStride,
+                                currentBarWidth: currentBarWidth
+                            )
+                            .frame(width: totalContentWidth, height: geometry.size.height)
+                            .contentShape(Rectangle())
+                            .simultaneousGesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { value in
+                                        let fraction = WaveformHelpers.seekFraction(
+                                            tapX: value.location.x,
+                                            totalContentWidth: totalContentWidth
+                                        )
+                                        onSeek?(fraction)
+                                    }
+                                    .onEnded { value in
+                                        let fraction = WaveformHelpers.seekFraction(
+                                            tapX: value.location.x,
+                                            totalContentWidth: totalContentWidth
+                                        )
+                                        onSeek?(fraction)
+                                    }
+                            )
+                        }
+                        .gesture(
+                            MagnificationGesture()
+                                .onChanged { value in
+                                    let delta = value / lastMagnification
+                                    lastMagnification = value
+                                    let targetZoom = zoomLevel * delta
+                                    zoomLevel = min(max(targetZoom, 0.5), 8.0)
+                                }
+                                .onEnded { _ in
+                                    lastMagnification = 1.0
+                                }
+                        )
+                    } else {
+                        // Fit to width: Stride is equal to container width divided by data count
+                        let stride = max(geometry.size.width / CGFloat(max(data.count, 1)), 0.5)
+                        let width = max(stride * 0.7, 0.5)
+
+                        waveformCanvas(
+                            in: geometry.size,
+                            currentBarStride: stride,
+                            currentBarWidth: width
+                        )
                         .contentShape(Rectangle())
                         .simultaneousGesture(
                             DragGesture(minimumDistance: 0)
                                 .onChanged { value in
                                     let fraction = WaveformHelpers.seekFraction(
                                         tapX: value.location.x,
-                                        totalContentWidth: totalContentWidth
+                                        totalContentWidth: geometry.size.width
                                     )
                                     onSeek?(fraction)
                                 }
                                 .onEnded { value in
                                     let fraction = WaveformHelpers.seekFraction(
                                         tapX: value.location.x,
-                                        totalContentWidth: totalContentWidth
+                                        totalContentWidth: geometry.size.width
                                     )
                                     onSeek?(fraction)
                                 }
                         )
                     }
-                    .gesture(
-                        MagnificationGesture()
-                            .onChanged { value in
-                                let delta = value / lastMagnification
-                                lastMagnification = value
-                                let targetZoom = zoomLevel * delta
-                                zoomLevel = min(max(targetZoom, 0.5), 8.0)
-                            }
-                            .onEnded { _ in
-                                lastMagnification = 1.0
-                            }
-                    )
-
-                    // Professional HUD Overlay for Zoom & Settings
-                    hudControlsOverlay
-                        .padding(8)
                 }
             }
         }
-    }
-
-    // MARK: - HUD Controls Overlay
-
-    private var hudControlsOverlay: some View {
-        Button {
-            showSettingsPopover.toggle()
-        } label: {
-            Image(systemName: "slider.horizontal.3")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(showSettingsPopover ? .mlmAccent : .mlmInk)
-                .frame(width: 24, height: 24)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.mlmBase.opacity(0.90))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(Color.mlmEdge, lineWidth: 1)
-                        )
-                        .shadow(color: Color.black.opacity(0.10), radius: 2, x: 0, y: 1)
-                )
-        }
-        .buttonStyle(.plain)
-        .help("Waveform-Einstellungen")
-        .popover(isPresented: $showSettingsPopover, arrowEdge: .bottom) {
-            settingsView
-        }
-    }
-
-    // MARK: - Settings Popover Content
-
-    private var settingsView: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Waveform-Optionen")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundColor(.mlmInk)
-
-            Divider()
-                .background(Color.mlmEdge)
-
-            // Contrast Slider
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Empfindlichkeit")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(.mlmInkSecondary)
-
-                Slider(value: $exponent, in: 0.5...3.0, step: 0.1)
-                    .controlSize(.small)
-            }
-
-            // Gain Slider
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Verstärkung")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(.mlmInkSecondary)
-
-                Slider(value: $gain, in: 0.5...2.5, step: 0.1)
-                    .controlSize(.small)
-            }
-
-            // Height Slider
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Bereichs-Höhe")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(.mlmInkSecondary)
-
-                Slider(value: $waveformHeight, in: 60...250, step: 5)
-                    .controlSize(.small)
-            }
-
-            Divider()
-                .background(Color.mlmEdge)
-
-            Button("Zurücksetzen") {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    zoomLevel = 1.0
-                    exponent = 1.5
-                    gain = 1.0
-                    waveformHeight = 80.0
-                }
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .frame(maxWidth: .infinity, alignment: .trailing)
-        }
-        .padding(12)
-        .frame(width: 200)
-        .background(Color.mlmSurface)
     }
 
     // MARK: - Canvas Rendering
@@ -246,6 +206,18 @@ struct WaveformView: View {
                 context.fill(
                     Path(roundedRect: bottomRect, cornerRadius: max(currentBarWidth * 0.25, 0.5)),
                     with: .color(barColor.opacity(0.6))
+                )
+            }
+
+            // Draw Premium playhead line
+            if progress > 0 && progress < 1.0 {
+                var playheadPath = Path()
+                playheadPath.move(to: CGPoint(x: progressX, y: 0))
+                playheadPath.addLine(to: CGPoint(x: progressX, y: height))
+                context.stroke(
+                    playheadPath,
+                    with: .color(.mlmAccent),
+                    lineWidth: 1.5
                 )
             }
         }

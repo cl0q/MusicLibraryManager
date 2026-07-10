@@ -152,6 +152,7 @@ final class ProcessRunner {
         process.standardError = stderrPipe
 
         let stdoutBuffer = OutputBuffer()
+        let stderrBuffer = OutputBuffer()
 
         stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
@@ -160,9 +161,12 @@ final class ProcessRunner {
             }
         }
 
-        // Drain stderr to prevent blocking/deadlocks when the OS buffer fills up (finite capacity)
+        // Drain/collect stderr to prevent blocking/deadlocks when the OS buffer fills up (finite capacity)
         stderrPipe.fileHandleForReading.readabilityHandler = { handle in
-            _ = handle.availableData
+            let data = handle.availableData
+            if !data.isEmpty {
+                stderrBuffer.append(data)
+            }
         }
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -185,6 +189,25 @@ final class ProcessRunner {
         let remainingStdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
         if !remainingStdout.isEmpty {
             stdoutBuffer.append(remainingStdout)
+        }
+
+        let remainingStderr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        if !remainingStderr.isEmpty {
+            stderrBuffer.append(remainingStderr)
+        }
+
+        let exitCode = process.terminationStatus
+        if exitCode != 0 {
+            let stderrString = String(data: stderrBuffer.data, encoding: .utf8) ?? ""
+            AppLogger.shared.log("Binary '\(executable)' failed with exit code \(exitCode). stderr: \(stderrString)", level: .error, source: "ProcessRunner")
+            throw NSError(
+                domain: "ProcessRunner",
+                code: Int(exitCode),
+                userInfo: [
+                    NSLocalizedDescriptionKey: "Binary '\(URL(fileURLWithPath: executable).lastPathComponent)' failed with exit code \(exitCode): \(stderrString.trimmingCharacters(in: .whitespacesAndNewlines))",
+                    "stderr": stderrString
+                ]
+            )
         }
 
         return stdoutBuffer.data

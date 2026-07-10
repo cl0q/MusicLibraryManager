@@ -25,6 +25,7 @@ final class ActivityViewModel {
             case analysis = "Analysis"
             case fingerprint = "Fingerprint"
             case artwork = "Artwork"
+            case createMLExport = "CreateML Export"
         }
 
         enum OperationStatus: String {

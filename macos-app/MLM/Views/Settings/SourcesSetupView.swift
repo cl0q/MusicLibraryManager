@@ -27,6 +27,25 @@ struct SourcesSetupView: View {
                         .font(MLMFont.muted)
                         .foregroundColor(.mlmInkMuted)
                         .fixedSize(horizontal: false, vertical: true)
+                    
+                    // Cookie Status Indicator
+                    HStack(spacing: 6) {
+                        if SquidWtfClient.captchaCookie == nil {
+                            Label("Kein Cookie konfiguriert", systemImage: "xmark.circle.fill")
+                                .font(MLMFont.muted)
+                                .foregroundColor(.red)
+                        } else if SquidWtfClient.isCookieExpired {
+                            Label("Cookie abgelaufen! Bitte erneuern.", systemImage: "exclamationmark.triangle.fill")
+                                .font(MLMFont.muted)
+                                .foregroundColor(.orange)
+                        } else {
+                            Label("Aktiv und gültig", systemImage: "checkmark.circle.fill")
+                                .font(MLMFont.muted)
+                                .foregroundColor(.green)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                    
                     HStack(spacing: 8) {
                         Button("Speichern") { save() }
                             .disabled(squidCookie.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -49,14 +68,19 @@ struct SourcesSetupView: View {
         .onAppear {
             squidCookie = UserDefaults.standard.string(forKey: SquidWtfClient.userDefaultsKey) ?? ""
         }
+        .onReceive(NotificationCenter.default.publisher(for: .qobuzCookieStatusDidChange)) { _ in
+            squidCookie = UserDefaults.standard.string(forKey: SquidWtfClient.userDefaultsKey) ?? ""
+        }
     }
 
     private func save() {
         let trimmed = squidCookie.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty {
             UserDefaults.standard.removeObject(forKey: SquidWtfClient.userDefaultsKey)
+            SquidWtfClient.isCookieExpired = false
         } else {
             UserDefaults.standard.set(trimmed, forKey: SquidWtfClient.userDefaultsKey)
+            SquidWtfClient.isCookieExpired = false // Clear expired status
         }
         savedAt = Date()
         AppLogger.shared.info(

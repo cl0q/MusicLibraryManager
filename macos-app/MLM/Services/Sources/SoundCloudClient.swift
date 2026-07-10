@@ -19,7 +19,7 @@ import Foundation
 /// - Auth: Bearer token in `Authorization` header
 /// - Pagination: `linked_partitioning=1` returns `next_href` for cursor-based paging
 /// - Date format (non-standard): `"2026/01/03 09:39:42 +0000"`
-final class SoundCloudClient {
+final class SoundCloudClient: Sendable {
 
     // MARK: - Configuration
 
@@ -235,6 +235,28 @@ final class SoundCloudClient {
     /// Fetch the authenticated user's profile.
     func fetchProfile() async throws -> SoundCloudUser {
         try await apiRequest(endpoint: "me", type: SoundCloudUser.self)
+    }
+
+    // MARK: - Search
+
+    /// Search SoundCloud tracks using the `/tracks` API endpoint.
+    ///
+    /// - Parameters:
+    ///   - query: Free-text search query
+    ///   - limit: Maximum number of tracks to return (default is 3)
+    /// - Returns: List of tracks from SoundCloud matching the query
+    func searchTracks(query: String, limit: Int = 3) async throws -> [SoundCloudTrack] {
+        let items = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "linked_partitioning", value: "1")
+        ]
+        let collection: SoundCloudCollection<SoundCloudTrack> = try await apiRequest(
+            endpoint: "tracks",
+            queryItems: items,
+            type: SoundCloudCollection<SoundCloudTrack>.self
+        )
+        return Array(collection.collection.prefix(limit))
     }
 
     // MARK: - Sync Likes
@@ -563,7 +585,7 @@ final class SoundCloudClient {
 // MARK: - SoundCloud API Models
 
 /// SoundCloud paginated collection response.
-struct SoundCloudCollection<T: Codable>: Codable {
+struct SoundCloudCollection<T: Codable & Sendable>: Codable, Sendable {
     let collection: [T]
     let nextHref: String?
 
@@ -574,7 +596,7 @@ struct SoundCloudCollection<T: Codable>: Codable {
 }
 
 /// SoundCloud user profile.
-struct SoundCloudUser: Codable {
+struct SoundCloudUser: Codable, Sendable {
     let id: Int
     let username: String
     let avatarUrl: String?
@@ -595,7 +617,7 @@ struct SoundCloudUser: Codable {
 }
 
 /// SoundCloud track from the API.
-struct SoundCloudTrack: Codable {
+struct SoundCloudTrack: Codable, Sendable {
     let id: Int
     let title: String
     let duration: Int?        // milliseconds
@@ -616,7 +638,7 @@ struct SoundCloudTrack: Codable {
 }
 
 /// SoundCloud playlist from the API.
-struct SoundCloudPlaylist: Codable {
+struct SoundCloudPlaylist: Codable, Sendable {
     let id: Int
     let title: String
     let trackCount: Int?

@@ -8,7 +8,7 @@ import Foundation
 /// - Current track being processed
 /// - Database save confirmation
 /// - Cancellation support
-final class MaintenanceProgressTracker: Sendable {
+final class MaintenanceProgressTracker: @unchecked Sendable {
     
     /// Progress state for a maintenance operation
     struct ProgressState {

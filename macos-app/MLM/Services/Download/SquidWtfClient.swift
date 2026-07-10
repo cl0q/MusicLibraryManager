@@ -48,9 +48,8 @@ final class SquidWtfClient: Sendable {
     ///
     /// `nil` if none of the above is set.
     static var captchaCookie: String? {
-        let env = ProcessInfo.processInfo.environment
         for key in ["MLM_SQUID_CAPTCHA", "MLM_SQUID_CF_COOKIE"] {
-            if let raw = env[key], !raw.isEmpty { return raw }
+            if let raw = CredentialsLoader.credential(key: key), !raw.isEmpty { return raw }
         }
         if let stored = UserDefaults.standard.string(forKey: "squid.captcha_cookie"),
            !stored.isEmpty {
@@ -62,6 +61,17 @@ final class SquidWtfClient: Sendable {
     /// Where the persistent cookie lives. Exposed so the Settings UI
     /// can write to it without duplicating the magic string.
     static let userDefaultsKey = "squid.captcha_cookie"
+    
+    /// Tracks if the cookie has been flagged as expired by the download pipeline.
+    static var isCookieExpired: Bool {
+        get {
+            UserDefaults.standard.bool(forKey: "squid.captcha_cookie_expired")
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "squid.captcha_cookie_expired")
+            NotificationCenter.default.post(name: .qobuzCookieStatusDidChange, object: nil)
+        }
+    }
 
     /// Back-compat alias used by the orchestrator's boot-time
     /// healthcheck. Returns the same value as `captchaCookie`.
@@ -80,7 +90,7 @@ final class SquidWtfClient: Sendable {
 
     // MARK: - Public types
 
-    struct SquidTrack {
+    struct SquidTrack: Sendable {
         let id: String
         let title: String
         let artist: String
@@ -151,6 +161,64 @@ final class SquidWtfClient: Sendable {
             }
         }
         return nil
+    }
+
+    /// Search Qobuz mirror for multiple tracks, up to limit.
+    func searchTracks(query: String, limit: Int = 3) async throws -> [SquidTrack] {
+        let base = Self.baseURL
+        guard !base.isEmpty else { return [] }
+        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        guard let url = URL(string: "\(base)/api/get-music?q=\(encoded)&offset=0") else {
+            return []
+        }
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: URLRequest(url: url))
+        } catch let err as URLError where Self.isUnreachable(err) {
+            AppLogger.shared.warn(
+                "Squid: search endpoint unreachable (\(err.code.rawValue)) — set MLM_SQUID_API_BASE to override",
+                source: "Download"
+            )
+            return []
+        }
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { return [] }
+
+        let decoded: SearchResponse
+        do {
+            decoded = try JSONDecoder().decode(SearchResponse.self, from: data)
+        } catch {
+            AppLogger.shared.warn(
+                "Squid: search response could not be decoded: \(error.localizedDescription)",
+                source: "Download"
+            )
+            return []
+        }
+
+        let candidates = decoded.data?.tracks?.items ?? []
+        return candidates.prefix(limit).map { item in
+            let itemArtist = item.performer?.name ?? item.album?.artist?.name ?? ""
+            return SquidTrack(
+                id: String(item.id),
+                title: item.title,
+                artist: itemArtist,
+                durationSec: item.duration
+            )
+        }
+    }
+
+    /// Get stream URL for unified search preview (prefer MP3 or FLAC quality)
+    func getStreamURL(trackId: String, quality: Int = 5) async throws -> URL? {
+        let base = Self.baseURL
+        guard !base.isEmpty else { return nil }
+        let result = try await fetchDownloadURL(trackId: trackId, quality: quality, base: base)
+        switch result {
+        case .url(let streamURL, _):
+            return streamURL
+        default:
+            return nil
+        }
     }
 
     // MARK: - Download
@@ -226,10 +294,12 @@ final class SquidWtfClient: Sendable {
             }
             if decoded.success == false, let err = decoded.error,
                err.localizedLowercase.contains("captcha") {
+                Self.isCookieExpired = true
                 return .captchaRequired
             }
         }
         if code == 403 {
+            Self.isCookieExpired = true
             return .captchaRequired
         }
         return .notFound
@@ -239,10 +309,9 @@ final class SquidWtfClient: Sendable {
 
     private func attachCloudflareCookie(to request: inout URLRequest) {
         guard let value = Self.captchaCookie else { return }
-        // Site sets `captcha_verified_at=<unix-ms>` after the user
-        // solves the in-page captcha. Forwarding this cookie alone is
-        // enough to unlock the download endpoint.
-        request.addValue("captcha_verified_at=\(value)", forHTTPHeaderField: "Cookie")
+        // Site sets `download_captcha_verified_at=<unix-ms>` or `captcha_verified_at`
+        // after the user solves the in-page captcha. Forwarding both ensures compatibility.
+        request.addValue("download_captcha_verified_at=\(value); captcha_verified_at=\(value)", forHTTPHeaderField: "Cookie")
     }
 
     private func inferExtension(from urlString: String, quality: Int) -> String {
@@ -331,3 +400,6 @@ final class SquidWtfClient: Sendable {
 private extension String {
     var localizedLowercase: String { lowercased() }
 }
+
+/// Global typealias to expose SquidTrack to the entire application namespace.
+typealias SquidTrack = SquidWtfClient.SquidTrack

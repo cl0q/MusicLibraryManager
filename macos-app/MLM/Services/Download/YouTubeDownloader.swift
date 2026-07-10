@@ -167,6 +167,57 @@ final class YouTubeDownloader: Sendable {
         return .notFound
     }
 
+    /// Search YouTube for videos using yt-dlp.
+    ///
+    /// - Parameters:
+    ///   - query: Free-text search query
+    ///   - limit: Maximum number of tracks to return (default is 3)
+    /// - Returns: List of matching YouTube tracks
+    func searchTracks(query: String, limit: Int = 3) async throws -> [YouTubeTrack] {
+        guard let ytdlp = ytDlpPath else {
+            return []
+        }
+
+        let normalizedQuery = Self.normalizeQueryForYouTube(query)
+        let ytSearchArg = "ytsearch\(limit):\(normalizedQuery)"
+
+        let arguments = [
+            ytSearchArg,
+            "--flat-playlist",
+            "--dump-json",
+            "--no-playlist"
+        ]
+
+        let result = try await ProcessRunner.run(ytdlp, arguments: arguments)
+        guard result.isSuccess else {
+            AppLogger.shared.warn(
+                "YouTube search failed with exit code \(result.exitCode): \(result.stderr)",
+                source: "Download"
+            )
+            return []
+        }
+
+        let decoder = JSONDecoder()
+        var tracks: [YouTubeTrack] = []
+
+        let lines = result.stdout.split(separator: "\n")
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8) else { continue }
+            do {
+                let track = try decoder.decode(YouTubeTrack.self, from: data)
+                tracks.append(track)
+            } catch {
+                AppLogger.shared.warn(
+                    "Failed to decode YouTube search item: \(error.localizedDescription) - line: \(trimmed)",
+                    source: "Download"
+                )
+            }
+        }
+
+        return Array(tracks.prefix(limit))
+    }
+
     // MARK: - Query Normalisation
 
     /// Strip the parenthetical / bracket noise that turns valid song titles
@@ -230,5 +281,22 @@ final class YouTubeDownloader: Sendable {
                 let dateB = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
                 return dateA < dateB
             }
+    }
+}
+
+// MARK: - Models
+
+struct YouTubeTrack: Codable, Sendable {
+    let id: String
+    let title: String
+    let duration: Double?
+    let url: String?
+    let uploader: String?
+
+    var watchUrl: String {
+        if let url = url, !url.isEmpty {
+            return url
+        }
+        return "https://www.youtube.com/watch?v=\(id)"
     }
 }

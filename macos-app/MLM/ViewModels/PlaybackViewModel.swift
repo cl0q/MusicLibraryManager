@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import AVFoundation
 
 /// ViewModel for audio playback — owns the AudioPlayer and exposes
 /// reactive state for PlayerBar, TrackDetailView, and keyboard shortcuts.
@@ -163,7 +164,7 @@ final class PlaybackViewModel {
             startPositionTimer()
 
             // Extract waveform data in background
-            extractWaveform()
+            extractWaveform(for: url, trackID: track?.id)
         } catch {
             let ext = url.pathExtension.lowercased()
             let unsupportedHint = Self.unsupportedFormatHints[ext]
@@ -306,26 +307,126 @@ final class PlaybackViewModel {
 
     // MARK: - Waveform
 
-    /// Extract waveform data from the current file.
-    private func extractWaveform() {
+    /// Helper to get the local binary cache URL for the track's waveform data.
+    private func getWaveformCacheURL(for trackID: Int64?, or url: URL) -> URL {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        let base = caches.appendingPathComponent("com.musiclibrary.app/waveforms")
+        if let id = trackID {
+            return base.appendingPathComponent("\(id).bin")
+        } else {
+            let hash = abs(url.path.hash)
+            return base.appendingPathComponent("hash_\(hash).bin")
+        }
+    }
+
+    /// Extract waveform data from the current file completely in the background
+    /// using a separate AVAudioFile instance, with local disk caching support.
+    private func extractWaveform(for url: URL, trackID: Int64?) {
         waveformTask?.cancel()
         isLoadingWaveform = true
 
-        // Snapshot AudioPlayer values on the main actor before entering the background task.
-        // AVAudioFile is not thread-safe; reading duration and extracting data off the main
-        // actor would race with loadFile/seek/stop. We capture what we need up front.
         let duration = audioPlayer.duration
         let binCount = WaveformHelpers.adaptiveBinCount(duration: duration)
+        let cacheURL = getWaveformCacheURL(for: trackID, or: url)
 
         waveformTask = Task.detached(priority: .utility) { [weak self] in
             guard let self, !Task.isCancelled else { return }
-            // Route synchronous extraction through the main actor so concurrent tasks
-            // can't call extractWaveformData on the same AVAudioFile simultaneously.
-            let data = (try? await MainActor.run { try self.audioPlayer.extractWaveformData(binCount: binCount) }) ?? []
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                self.waveformData = data
-                self.isLoadingWaveform = false
+
+            // 1. Try disk cache first
+            if FileManager.default.fileExists(atPath: cacheURL.path) {
+                if let data = try? Data(contentsOf: cacheURL) {
+                    let count = data.count / MemoryLayout<Float>.size
+                    if count == binCount {
+                        var loadedPeaks = [Float](repeating: 0, count: count)
+                        _ = loadedPeaks.withUnsafeMutableBytes { bytes in
+                            data.copyBytes(to: bytes)
+                        }
+                        let capturedPeaks = loadedPeaks
+                        guard !Task.isCancelled else { return }
+                        await MainActor.run {
+                            self.waveformData = capturedPeaks
+                            self.isLoadingWaveform = false
+                        }
+                        AppLogger.shared.debug(
+                            "Waveform: Loaded \(count) peaks from binary cache for \(url.lastPathComponent) - bypassed file decoding!",
+                            source: "Playback"
+                        )
+                        return
+                    }
+                }
+            }
+
+            // 2. Not cached: extract in background using a separate AVAudioFile
+            do {
+                let file = try AVAudioFile(forReading: url)
+                let totalFrames = file.length
+                guard totalFrames > 0 else { throw NSError(domain: "Waveform", code: -1) }
+
+                let chunkFrames: AVAudioFrameCount = 65_536
+                guard let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: chunkFrames) else {
+                    throw NSError(domain: "Waveform", code: -1)
+                }
+
+                let framesPerBin = max(Int(totalFrames) / binCount, 1)
+                var peaks = [Float](repeating: 0, count: binCount)
+
+                file.framePosition = 0
+                var sourceFrameIndex = 0
+
+                while sourceFrameIndex < Int(totalFrames) {
+                    guard !Task.isCancelled else { return }
+                    try file.read(into: buffer, frameCount: chunkFrames)
+                    let chunkSampleCount = Int(buffer.frameLength)
+                    if chunkSampleCount == 0 { break }
+
+                    guard let channelData = buffer.floatChannelData else { break }
+                    let samples = channelData[0]
+
+                    for i in 0..<chunkSampleCount {
+                        let bin = min((sourceFrameIndex + i) / framesPerBin, binCount - 1)
+                        let absSample = abs(samples[i])
+                        if absSample > peaks[bin] {
+                            peaks[bin] = absSample
+                        }
+                    }
+                    sourceFrameIndex += chunkSampleCount
+                }
+
+                // Normalize to 0–1
+                let maxPeak = peaks.max() ?? 1.0
+                if maxPeak > 0 {
+                    for i in 0..<peaks.count {
+                        peaks[i] /= maxPeak
+                    }
+                }
+
+                guard !Task.isCancelled else { return }
+
+                // 3. Write cache to disk
+                let cacheDir = cacheURL.deletingLastPathComponent()
+                try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+                let bytesData = peaks.withUnsafeBytes { Data($0) }
+                try? bytesData.write(to: cacheURL)
+                let finalPeaks = peaks
+
+                await MainActor.run {
+                    self.waveformData = finalPeaks
+                    self.isLoadingWaveform = false
+                }
+                AppLogger.shared.debug(
+                    "Waveform: Decoded \(binCount) peaks in background for \(url.lastPathComponent) & cached to disk",
+                    source: "Playback"
+                )
+            } catch {
+                AppLogger.shared.log(
+                    "Waveform extraction failed for \(url.lastPathComponent): \(error.localizedDescription)",
+                    level: .warning,
+                    source: "Playback"
+                )
+                await MainActor.run {
+                    self.waveformData = []
+                    self.isLoadingWaveform = false
+                }
             }
         }
     }

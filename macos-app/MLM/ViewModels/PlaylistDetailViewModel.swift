@@ -464,12 +464,7 @@ final class PlaylistDetailViewModel {
         if searchQuery.isEmpty {
             displayedTracks = tracks
         } else {
-            let query = searchQuery.lowercased()
-            displayedTracks = tracks.filter { track in
-                track.title.lowercased().contains(query) ||
-                track.artist.lowercased().contains(query) ||
-                track.album.lowercased().contains(query)
-            }
+            displayedTracks = tracks.filter { $0.matches(searchQuery: searchQuery) }
         }
     }
 

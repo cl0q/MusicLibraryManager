@@ -5,14 +5,29 @@ import CryptoKit
 ///
 /// Mirrors the Rust `TranscodeCache`. Cache path: `{cache_dir}/{track_id}.m4a`.
 /// Uses hardlinks on the same filesystem, copy fallback for cross-filesystem.
-final class TranscodeCache: Sendable {
-    private let cacheDir: URL
+final class TranscodeCache: @unchecked Sendable {
+    private var _cacheDir: URL
+    private let lock = NSLock()
     private let transcodeService: TranscodeService
 
+    var cacheDir: URL {
+        lock.lock()
+        defer { lock.unlock() }
+        return _cacheDir
+    }
+
     init(cacheDir: URL) {
-        self.cacheDir = cacheDir
+        self._cacheDir = cacheDir
         self.transcodeService = TranscodeService()
         try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+    }
+
+    /// Thread-safely update the active cache directory.
+    func updateCacheDir(to newDir: URL) {
+        lock.lock()
+        self._cacheDir = newDir
+        lock.unlock()
+        try? FileManager.default.createDirectory(at: newDir, withIntermediateDirectories: true)
     }
 
     // MARK: - Cache Path
@@ -112,7 +127,9 @@ final class TranscodeCache: Sendable {
             input: sourceURL,
             outputDir: cacheDir,
             outputName: targetName,
-            bitrateKbps: bitrateKbps
+            bitrateKbps: bitrateKbps,
+            sourceFormat: track.format,
+            sourceBitrate: track.bitrate
         )
 
         switch result {

@@ -1,0 +1,43 @@
+warning: 'macos-app': found 1 file(s) which are unhandled; explicitly declare them as resources or exclude from the target
+    /Users/olli/schenanigans/MusicLibraryManager/macos-app/MLMTests/Fixtures/playlist-cover-fixtures/README.md
+[0/1] Planning build
+Building for debugging...
+[0/3] Write swift-version--58304C5D6DBC2206.txt
+[2/5] Emitting module MLM
+/Users/olli/schenanigans/MusicLibraryManager/macos-app/MLM/Services/Common/MaintenanceProgressTracker.swift:48:17: warning: stored property 'state' of 'Sendable'-conforming class 'MaintenanceProgressTracker' is mutable; this is an error in the Swift 6 language mode
+ 46 |     
+ 47 |     private let lock = NSRecursiveLock()
+ 48 |     private var state: ProgressState = ProgressState()
+    |                 `- warning: stored property 'state' of 'Sendable'-conforming class 'MaintenanceProgressTracker' is mutable; this is an error in the Swift 6 language mode
+ 49 |     private let progressHandler: ProgressHandler?
+ 50 |     private let batchSize: Int
+[3/5] Compiling MLM MetadataPanel.swift
+/Users/olli/schenanigans/MusicLibraryManager/macos-app/MLM/Views/TrackDetail/MetadataPanel.swift:137:10: warning: 'onChange(of:perform:)' was deprecated in macOS 14.0: Use `onChange` with a two or zero parameter action closure instead. [#DeprecatedDeclaration]
+ 135 |             checkEmbeddingStatus()
+ 136 |         }
+ 137 |         .onChange(of: track) { _ in
+     |          `- warning: 'onChange(of:perform:)' was deprecated in macOS 14.0: Use `onChange` with a two or zero parameter action closure instead. [#DeprecatedDeclaration]
+ 138 |             similarTracks = []
+ 139 |             hasEmbedding = false
+
+/Users/olli/schenanigans/MusicLibraryManager/macos-app/MLM/Views/TrackDetail/MetadataPanel.swift:1017:32: error: call can throw but is not marked with 'try'
+1015 |                 let resolvedPath: String
+1016 |                 if let organized = track.organizedPath {
+1017 |                     let root = container.configRepository?.getLibraryRoot() ?? ""
+     |                                |- error: call can throw but is not marked with 'try'
+     |                                |- note: did you mean to use 'try'?
+     |                                |- note: did you mean to handle error as optional value?
+     |                                `- note: did you mean to disable error propagation?
+1018 |                     resolvedPath = root.isEmpty ? organized : URL(fileURLWithPath: root).appendingPathComponent(organized).path
+1019 |                 } else {
+
+/Users/olli/schenanigans/MusicLibraryManager/macos-app/MLM/Views/TrackDetail/MetadataPanel.swift:1017:32: error: expression is 'async' but is not marked with 'await'
+1015 |                 let resolvedPath: String
+1016 |                 if let organized = track.organizedPath {
+1017 |                     let root = container.configRepository?.getLibraryRoot() ?? ""
+     |                                |- error: expression is 'async' but is not marked with 'await'
+     |                                `- note: call is 'async'
+1018 |                     resolvedPath = root.isEmpty ? organized : URL(fileURLWithPath: root).appendingPathComponent(organized).path
+1019 |                 } else {
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>

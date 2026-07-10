@@ -91,22 +91,23 @@ enum MetadataExtractor {
         }
 
         // Load metadata items
-        let metadata = try await asset.load(.commonMetadata)
+        let commonMetadata = try await asset.load(.commonMetadata)
+        let allMetadata = try await asset.load(.metadata)
         let duration = try await asset.load(.duration)
 
         // Extract raw values from common metadata keys
-        let rawArtist = await metadataValue(for: .commonKeyArtist, in: metadata)
-        let albumArtistITunes = await metadataValue(for: .iTunesMetadataKeyAlbumArtist, in: metadata)
-        let albumArtistID3 = await metadataValue(for: .id3MetadataKeyBand, in: metadata)
+        let rawArtist = await metadataValue(for: .commonKeyArtist, in: commonMetadata)
+        let albumArtistITunes = await metadataValue(forCustomKey: AVMetadataKey.iTunesMetadataKeyAlbumArtist.rawValue, alternateIntKey: 1631679060, keySpace: .iTunes, in: allMetadata)
+        let albumArtistID3 = await metadataValue(forCustomKey: AVMetadataKey.id3MetadataKeyBand.rawValue, keySpace: .id3, in: allMetadata)
         let rawAlbumArtist = albumArtistITunes ?? albumArtistID3
-        let rawAlbum = await metadataValue(for: .commonKeyAlbumName, in: metadata)
-        let rawTitle = await metadataValue(for: .commonKeyTitle, in: metadata)
-        let genreType = await metadataValue(for: .commonKeyType, in: metadata)
-        let genreITunes = await metadataValue(for: .iTunesMetadataKeyUserGenre, in: metadata)
+        let rawAlbum = await metadataValue(for: .commonKeyAlbumName, in: commonMetadata)
+        let rawTitle = await metadataValue(for: .commonKeyTitle, in: commonMetadata)
+        let genreType = await metadataValue(for: .commonKeyType, in: commonMetadata)
+        let genreITunes = await metadataValue(forCustomKey: AVMetadataKey.iTunesMetadataKeyUserGenre.rawValue, alternateIntKey: -1452841618, keySpace: .iTunes, in: allMetadata)
         let rawGenre = genreType ?? genreITunes
 
         // Year extraction: try common creation date
-        let rawYear = await extractYear(from: metadata)
+        let rawYear = await extractYear(from: commonMetadata)
 
         // Format from file extension
         let format = url.pathExtension.lowercased()
@@ -171,17 +172,33 @@ enum MetadataExtractor {
 
     // MARK: - Private Helpers
 
-    /// Extract a string value for a given metadata key.
+    /// Extract a string value for a given common metadata key.
     private static func metadataValue(
         for key: AVMetadataKey,
         in items: [AVMetadataItem]
     ) async -> String? {
-        let matching = AVMetadataItem.metadataItems(
-            from: items,
-            withKey: key,
-            keySpace: nil
-        )
-        guard let item = matching.first else { return nil }
+        guard let item = items.first(where: { $0.commonKey == key }) else { return nil }
+        return try? await item.load(.stringValue)
+    }
+
+    /// Extract a string value for a given format-specific metadata key.
+    private static func metadataValue(
+        forCustomKey keyString: String,
+        alternateIntKey: Int? = nil,
+        keySpace: AVMetadataKeySpace,
+        in items: [AVMetadataItem]
+    ) async -> String? {
+        guard let item = items.first(where: { item in
+            guard item.keySpace == keySpace else { return false }
+            if let keyStr = item.key as? String {
+                return keyStr == keyString || keyStr == "©" + String(keyString.dropFirst())
+            } else if let keyNum = item.key as? NSNumber {
+                if let alt = alternateIntKey {
+                    return keyNum.intValue == alt
+                }
+            }
+            return false
+        }) else { return nil }
         return try? await item.load(.stringValue)
     }
 

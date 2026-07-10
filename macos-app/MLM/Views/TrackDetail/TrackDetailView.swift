@@ -3,23 +3,6 @@ import SwiftUI
 /// Track detail view — shows metadata, waveform, and playback controls
 /// for a selected track.
 ///
-/// Layout:
-/// ```
-/// ┌─────────────────────────────────────────────────┐
-/// │  ♫ Track Title                          [▶ Play]│  Header
-/// │  Artist — Album                                 │
-/// ├─────────────────────────────────────────────────┤
-/// │  ▃▅▇▅▃▁▃▅▇▅▃▁▃▅▅▃▁  Waveform  1:42 / 3:24     │  Waveform
-/// ├─────────────────────────────────────────────────┤
-/// │  Tags    │ Title      Track Title               │  Metadata
-/// │          │ Artist     Artist Name               │
-/// │  File    │ Format     FLAC                      │
-/// │          │ Bitrate    1411 kbps                  │
-/// │ Analysis │ LUFS       -14.2 LUFS                │
-/// │          │ Energy     ▃▅▇▅▃ 4/5                 │
-/// └─────────────────────────────────────────────────┘
-/// ```
-///
 /// Phase 5 implementation. Accessible from:
 /// - Double-clicking a track in LibraryTable
 /// - "More Info" in TrackContextMenu
@@ -37,24 +20,31 @@ struct TrackDetailView: View {
     @State private var gain: Float = 1.0
     @State private var waveformHeight: CGFloat = 80.0
 
+    // Hover state for fused play/pause cover art button
+    @State private var isHoveringCover = false
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                // Header
-                headerSection
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            headerSection
 
-                Divider()
-                    .background(Color.mlmEdge)
+            Divider()
+                .background(Color.mlmEdge)
 
-                // Waveform
-                waveformSection
+            // Waveform
+            waveformSection
 
-                Divider()
-                    .background(Color.mlmEdge)
+            Divider()
+                .background(Color.mlmEdge)
 
-                // Metadata
-                MetadataPanel(track: track)
-            }
+            // Metadata
+            MetadataPanel(
+                track: track,
+                zoomLevel: $zoomLevel,
+                exponent: $exponent,
+                gain: $gain,
+                waveformHeight: $waveformHeight
+            )
         }
         .background(Color.mlmSurface)
         .frame(minWidth: 320)
@@ -68,8 +58,8 @@ struct TrackDetailView: View {
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .top) {
-                // UI-SPEC Surface 2: 56pt min (may grow to 128pt), cornerRadius 6
-                ZStack(alignment: .bottomTrailing) {
+                // Fused Play Button & Album Cover
+                ZStack(alignment: .center) {
                     TrackCoverView(
                         trackId: track.id ?? 0,
                         size: .large,
@@ -77,17 +67,50 @@ struct TrackDetailView: View {
                     )
                     .frame(width: 56, height: 56)
 
-                    // Now-playing waveform overlay badge (subtle, preserves playback state visual)
-                    if isCurrentTrackPlaying {
+                    // Hover/Active Play Overlay
+                    Color.black.opacity(isHoveringCover && track.isLocal ? 0.4 : 0.0)
+                        .frame(width: 56, height: 56)
+                        .cornerRadius(6)
+
+                    if isHoveringCover && track.isLocal {
+                        Image(systemName: isCurrentTrackPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(.white)
+                            .transition(.scale.combined(with: .opacity))
+                    } else if isCurrentTrackPlaying {
+                        // Subdued playing indicator waveform badge when not hovering
                         Image(systemName: "waveform")
                             .font(.system(size: 10, weight: .bold))
                             .foregroundColor(.mlmAccent)
                             .padding(3)
                             .background(Color.mlmBase.opacity(0.85))
                             .clipShape(RoundedRectangle(cornerRadius: 3))
-                            .offset(x: 2, y: 2)
+                            .offset(x: 18, y: 18) // position overlay offset
                     }
                 }
+                .frame(width: 56, height: 56)
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+                .onHover { hovering in
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        isHoveringCover = hovering
+                    }
+                    if hovering && track.isLocal {
+                        NSCursor.pointingHand.push()
+                    } else {
+                        NSCursor.pop()
+                    }
+                }
+                .onTapGesture {
+                    Task {
+                        guard let vm = playbackVM else { return }
+                        if isCurrentTrack {
+                            vm.togglePlayPause()
+                        } else if track.isLocal {
+                            await vm.playTrack(track)
+                        }
+                    }
+                }
+                .help(track.isLocal ? (isCurrentTrackPlaying ? "Pause" : "Play") : "")
 
                 VStack(alignment: .leading, spacing: 3) {
                     // Title
@@ -143,10 +166,6 @@ struct TrackDetailView: View {
                         .buttonStyle(.plain)
                         .help("Close detail panel")
                     }
-
-                    if track.isLocal {
-                        playButton
-                    }
                 }
             }
         }
@@ -173,28 +192,6 @@ struct TrackDetailView: View {
         }
     }
 
-    private var playButton: some View {
-        Button {
-            Task {
-                guard let vm = playbackVM else { return }
-                if isCurrentTrack {
-                    vm.togglePlayPause()
-                } else {
-                    await vm.playTrack(track)
-                }
-            }
-        } label: {
-            Image(systemName: isCurrentTrackPlaying ? "pause.fill" : "play.fill")
-                .font(.system(size: 14))
-                .foregroundColor(.mlmBase)
-                .frame(width: 36, height: 36)
-                .background(Color.mlmAccent)
-                .clipShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .help(isCurrentTrackPlaying ? "Pause" : "Play")
-    }
-
     // MARK: - Waveform
 
     private var waveformSection: some View {
@@ -203,6 +200,7 @@ struct TrackDetailView: View {
                 data: playbackVM?.waveformData ?? [],
                 progress: isCurrentTrack ? (playbackVM?.progress ?? 0) : 0,
                 isLoading: playbackVM?.isLoadingWaveform ?? false,
+                isScrollable: (track.duration ?? 0) >= 420,
                 zoomLevel: $zoomLevel,
                 exponent: $exponent,
                 gain: $gain,

@@ -708,6 +708,65 @@ final class DatabaseManager: Sendable {
             }
         }
 
+        migrator.registerMigration("v24_enhanced_search_text") { db in
+            let rows = try Row.fetchAll(db, sql: "SELECT id, artist, album_artist, album, title, genre, format FROM tracks")
+            for row in rows {
+                guard let rowId = row["id"] as? Int64 else { continue }
+                let artist = (row["artist"] as? String) ?? ""
+                let albumArtist = (row["album_artist"] as? String) ?? ""
+                let album = (row["album"] as? String) ?? ""
+                let title = (row["title"] as? String) ?? ""
+                let genre = (row["genre"] as? String) ?? ""
+                let format = (row["format"] as? String) ?? ""
+
+                let combined = "\(artist) \(albumArtist) \(album) \(title) \(genre) \(format)"
+                let normalized = Self.foldedSearchText(combined)
+                try db.execute(
+                    sql: "UPDATE tracks SET search_text = ? WHERE id = ?",
+                    arguments: [normalized, rowId]
+                )
+            }
+        }
+
+        migrator.registerMigration("v25_smart_embeddings") { db in
+            try db.create(table: "track_embeddings") { t in
+                t.column("track_id", .integer).primaryKey().references("tracks", column: "id", onDelete: .cascade)
+                t.column("master_embedding", .blob).notNull()
+                t.column("drop_offset", .double).notNull()
+                t.column("mix_category", .text)
+            }
+            
+            try db.create(table: "track_segment_embeddings") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("track_id", .integer).notNull().references("tracks", column: "id", onDelete: .cascade)
+                t.column("offset_seconds", .double).notNull()
+                t.column("segment_embedding", .blob).notNull()
+            }
+            try db.create(index: "idx_segment_track", on: "track_segment_embeddings", columns: ["track_id"])
+
+            try db.create(table: "track_similarity_feedback") { t in
+                t.column("seed_track_id", .integer).notNull().references("tracks", column: "id", onDelete: .cascade)
+                t.column("target_track_id", .integer).notNull().references("tracks", column: "id", onDelete: .cascade)
+                t.column("feedback_value", .integer).notNull()
+                t.column("date_created", .datetime).notNull().defaults(to: Date())
+                t.primaryKey(["seed_track_id", "target_track_id"])
+            }
+        }
+
+        migrator.registerMigration("v26_track_discovery_log") { db in
+            try db.create(table: "track_discovery_log") { t in
+                t.column("discovered_track_id", .integer).primaryKey().references("tracks", column: "id", onDelete: .cascade)
+                t.column("seed_track_id", .integer).references("tracks", column: "id", onDelete: .setNull)
+                t.column("discovery_source", .text).notNull()
+                t.column("status", .text).notNull().defaults(to: "new")
+                t.column("date_added", .datetime).notNull().defaults(to: Date())
+            }
+        }
+
+        migrator.registerMigration("v27_genre_index") { db in
+            try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_tracks_genre ON tracks(genre)")
+        }
+
         return migrator
     }
 

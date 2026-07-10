@@ -8,6 +8,7 @@
 #   ./scripts/run.sh --clean        # nuke .build/ before building
 #   ./scripts/run.sh --kill         # kill any running MLM before launch
 #   ./scripts/run.sh --install      # install compiled app to /Applications/
+#   ./scripts/run.sh --fast         # use all CPU cores during compile
 #
 # Flags can be combined, e.g. `./scripts/run.sh --release --kill`.
 
@@ -23,6 +24,7 @@ DO_OPEN=1
 DO_CLEAN=0
 DO_KILL=0
 DO_INSTALL=0
+DO_FAST=0
 
 for arg in "$@"; do
   case "${arg}" in
@@ -32,8 +34,9 @@ for arg in "$@"; do
     --clean)    DO_CLEAN=1 ;;
     --kill)     DO_KILL=1 ;;
     --install)  DO_INSTALL=1 ;;
+    --fast)     DO_FAST=1 ;;
     -h|--help)
-      sed -n '2,13p' "${SCRIPT_DIR}/$(basename "$0")" | sed 's/^# \{0,1\}//'
+      sed -n '2,14p' "${SCRIPT_DIR}/$(basename "$0")" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -46,9 +49,12 @@ done
 # Sync credentials from repo root .env → Application Support so the .app can read them.
 REPO_ENV="$(cd "${APP_ROOT}/.." && pwd)/.env"
 APPSUPP_MLM="${HOME}/Library/Application Support/MLM"
+SANDBOX_MLM="${HOME}/Library/Containers/com.ilczuk.mlm/Data/Library/Application Support/MLM"
 if [[ -f "${REPO_ENV}" ]]; then
     mkdir -p "${APPSUPP_MLM}"
     cp "${REPO_ENV}" "${APPSUPP_MLM}/.env"
+    mkdir -p "${SANDBOX_MLM}"
+    cp "${REPO_ENV}" "${SANDBOX_MLM}/.env"
 fi
 
 ARCH="$(uname -m)"   # arm64 or x86_64
@@ -61,10 +67,17 @@ if [[ "${DO_CLEAN}" == "1" ]]; then
 fi
 
 echo "› swift build (${CONFIG})"
+EXTRA_FLAGS=""
+if [[ "${DO_FAST}" == "1" ]]; then
+  CORES="$(sysctl -n hw.ncpu 2>/dev/null || echo 1)"
+  echo "› compiling in fast mode using all ${CORES} cores"
+  EXTRA_FLAGS="-j ${CORES}"
+fi
+
 if [[ "${CONFIG}" == "release" ]]; then
-  swift build -c release
+  swift build -c release ${EXTRA_FLAGS}
 else
-  swift build
+  swift build ${EXTRA_FLAGS}
 fi
 
 if [[ ! -x "${BIN_PATH}" ]]; then
@@ -106,6 +119,21 @@ ICON_SRC="${APP_ROOT}/MLM/Resources/AppIcon.icns"
 if [[ -f "${ICON_SRC}" ]]; then
   cp "${ICON_SRC}" "${APP_BUNDLE}/Contents/Resources/AppIcon.icns"
   echo "› app icon installed"
+fi
+
+# Copy SPM resource bundle and YAMNet model into the app bundle
+SPM_BUNDLE_PATH="${APP_ROOT}/.build/${ARCH}-apple-macosx/${CONFIG}/MLM_MLM.bundle"
+if [[ -d "${SPM_BUNDLE_PATH}" ]]; then
+  echo "› installing SPM resource bundle"
+  rm -rf "${APP_BUNDLE}/Contents/Resources/MLM_MLM.bundle"
+  cp -R "${SPM_BUNDLE_PATH}" "${APP_BUNDLE}/Contents/Resources/MLM_MLM.bundle"
+  
+  # Also copy YAMNet.mlmodelc directly to Resources for Bundle.main access
+  if [[ -d "${SPM_BUNDLE_PATH}/YAMNet.mlmodelc" ]]; then
+    echo "› installing YAMNet.mlmodelc to Resources"
+    rm -rf "${APP_BUNDLE}/Contents/Resources/YAMNet.mlmodelc"
+    cp -R "${SPM_BUNDLE_PATH}/YAMNet.mlmodelc" "${APP_BUNDLE}/Contents/Resources/"
+  fi
 fi
 
 # Ad-hoc sign so macOS picks up Info.plist changes (bundle id, display name, etc.)

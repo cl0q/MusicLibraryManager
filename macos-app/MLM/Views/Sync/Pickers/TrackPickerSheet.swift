@@ -43,11 +43,7 @@ struct TrackPickerSheet: View {
         }
         
         guard !searchQuery.isEmpty else { return tracks }
-        let query = searchQuery.lowercased()
-        return tracks.filter {
-            $0.title.lowercased().contains(query) ||
-            $0.artist.lowercased().contains(query)
-        }
+        return tracks.filter { $0.matches(searchQuery: searchQuery) }
     }
 
     private var resultCountLabel: String {

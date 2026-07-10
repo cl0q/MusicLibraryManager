@@ -59,11 +59,16 @@ final class DABClient: Sendable {
     /// request times out — the orchestrator's fallback chain takes it
     /// from there.
     func searchTrack(query: String) async throws -> DabTrack? {
+        try await searchTracks(query: query, limit: 1).first
+    }
+
+    /// Search DAB for multiple tracks matching the query, up to limit.
+    func searchTracks(query: String, limit: Int = 3) async throws -> [DabTrack] {
         let base = Self.baseURL
-        guard !base.isEmpty else { return nil }
+        guard !base.isEmpty else { return [] }
         let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
         guard let url = URL(string: "\(base)/search?q=\(encoded)") else {
-            return nil
+            return []
         }
 
         var request = URLRequest(url: url)
@@ -78,7 +83,7 @@ final class DABClient: Sendable {
                 "DAB: endpoint unreachable (\(urlError.code.rawValue) \(urlError.localizedDescription)) — set MLM_DAB_API_BASE to override",
                 source: "Download"
             )
-            return nil
+            return []
         }
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
 
@@ -89,15 +94,15 @@ final class DABClient: Sendable {
             do {
                 try await login()
             } catch DABError.noCredentials {
-                return nil
+                return []
             }
-            return try await searchTrack(query: query)
+            return try await searchTracks(query: query, limit: limit)
         }
 
-        guard statusCode == 200 else { return nil }
+        guard statusCode == 200 else { return [] }
 
         let searchResponse = try JSONDecoder().decode(DabSearchResponse.self, from: data)
-        return searchResponse.tracks.first
+        return Array(searchResponse.tracks.prefix(limit))
     }
 
     /// URLError codes we treat as "skip DAB silently, don't raise":
@@ -172,7 +177,7 @@ final class DABClient: Sendable {
 
     // MARK: - Private
 
-    private func getStreamURL(trackId: UInt64) async throws -> String? {
+    func getStreamURL(trackId: UInt64) async throws -> String? {
         let base = Self.baseURL
         guard !base.isEmpty, let url = URL(string: "\(base)/stream?trackId=\(trackId)") else {
             return nil

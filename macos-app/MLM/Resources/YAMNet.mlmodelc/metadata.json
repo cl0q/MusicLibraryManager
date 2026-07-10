@@ -1,0 +1,80 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "outputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "String",
+        "type" : "String",
+        "name" : "target",
+        "shortDescription" : ""
+      },
+      {
+        "isOptional" : "0",
+        "keyType" : "String",
+        "formattedType" : "Dictionary (String → Double)",
+        "type" : "Dictionary",
+        "name" : "targetProbability",
+        "shortDescription" : ""
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "author" : "Oliver Ilczuk",
+    "specificationVersion" : 6,
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "12.0",
+      "tvOS" : "15.0",
+      "visionOS" : "1.0",
+      "watchOS" : "8.0",
+      "iOS" : "15.0",
+      "macCatalyst" : "15.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_pipelineClassifier",
+      "structure" : [
+        {
+          "name" : "MLModelType_audioFeaturePrint"
+        },
+        {
+          "name" : "MLModelType_glmClassifier"
+        }
+      ]
+    },
+    "inputSchema" : [
+      {
+        "dataType" : "Float32",
+        "hasShapeFlexibility" : "1",
+        "isOptional" : "0",
+        "shapeFlexibility" : "8000...240000",
+        "shapeRange" : "[[8000, 240000]]",
+        "formattedType" : "MultiArray (Float32 15600)",
+        "type" : "MultiArray",
+        "shape" : "[15600]",
+        "name" : "audioSamples",
+        "shortDescription" : ""
+      }
+    ],
+    "classLabels" : [
+      "House",
+      "Vixa"
+    ],
+    "generatedClassName" : "YAMNet",
+    "userDefinedMetadata" : {
+      "com.apple.coreml.model.preview.type" : "soundClassifier",
+      "com.apple.createml.training.started" : "2026-05-24T19:19:47Z",
+      "com.apple.createml.version" : "15.7.3",
+      "com.apple.createml.training.finished" : "2026-05-24T19:19:54Z",
+      "com.apple.createml.app.tag" : "175.7",
+      "com.apple.createml.model.created" : "2026-05-24T19:19:54Z",
+      "sampleRate" : "16000",
+      "com.apple.createml.app.version" : "6.2"
+    },
+    "method" : "predict"
+  }
+]

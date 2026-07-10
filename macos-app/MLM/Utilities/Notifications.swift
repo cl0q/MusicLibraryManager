@@ -129,4 +129,9 @@ extension Notification.Name {
 
     /// Posted when the user triggers "Neues Profil erstellen..." with a track selection.
     static let triggerNewSyncProfileFromSelection = Notification.Name("MLMTriggerNewSyncProfileFromSelection")
+    
+    // MARK: - Qobuz / Squid Token Status
+    
+    /// Posted when the Qobuz squid.wtf captcha cookie status changes.
+    static let qobuzCookieStatusDidChange = Notification.Name("MLMQobuzCookieStatusDidChange")
 }

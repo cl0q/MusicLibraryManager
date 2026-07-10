@@ -17,17 +17,20 @@ struct TrackRepositoryTests {
         artist: String,
         album: String,
         title: String,
+        genre: String? = nil,
+        format: String = "mp3",
         organizedPath: String?,
         dateAdded: String? = nil,
         bitrate: Int? = nil
     ) async throws {
         try await db.write { db in
-            var t = Track(artist: artist, album: album, title: title, format: "mp3",
-                          originalPath: "/\(title).mp3")
+            var t = Track(artist: artist, album: album, title: title, format: format,
+                          originalPath: "/\(title).\(format)")
+            t.genre = genre
             t.organizedPath = organizedPath
             t.dateAdded = dateAdded ?? "2024-01-01T00:00:00Z"
             t.bitrate = bitrate
-            t.searchText = DatabaseManager.foldedSearchText(artist + " " + album + " " + title)
+            t.searchText = DatabaseManager.foldedSearchText(t.rawSearchText)
             try t.insert(db)
         }
     }
@@ -107,6 +110,58 @@ struct TrackRepositoryTests {
         let byDiacriticArtist = try await repo.fetchForLibrary(tab: .local, search: "olives", sortBy: .title, ascending: true)
         #expect(byDiacriticArtist.count == 1)
         #expect(byDiacriticArtist[0].artist == "Olivés")
+    }
+
+    // MARK: - fetchForLibrary: multi-term and cross-field search
+    
+    @Test func fetchForLibraryMultiTermCrossFieldSearch() async throws {
+        let (db, repo) = try makeRepo()
+        try await insertTrack(db, artist: "DJ Hazel", album: "Classic", title: "Sunrise", genre: "Vixa", format: "flac", organizedPath: "DJ Hazel/Sunrise.flac")
+        try await insertTrack(db, artist: "DJ Hazel", album: "Classic", title: "Sunset", genre: "House", format: "mp3", organizedPath: "DJ Hazel/Sunset.mp3")
+        try await insertTrack(db, artist: "Armin van Buuren", album: "State of Trance", title: "Shivers", genre: "Trance", format: "flac", organizedPath: "Armin/Shivers.flac")
+        
+        // 1. Matches artist + genre + format
+        let results1 = try await repo.fetchForLibrary(tab: .local, search: "hazel vixa flac", sortBy: .title, ascending: true)
+        #expect(results1.count == 1)
+        #expect(results1.first?.title == "Sunrise")
+        
+        // 2. Term order does not matter
+        let results2 = try await repo.fetchForLibrary(tab: .local, search: "flac vixa hazel", sortBy: .title, ascending: true)
+        #expect(results2.count == 1)
+        #expect(results2.first?.title == "Sunrise")
+        
+        // 3. Multi-word search matching single tracks
+        let results3 = try await repo.fetchForLibrary(tab: .local, search: "armin shivers", sortBy: .title, ascending: true)
+        #expect(results3.count == 1)
+        #expect(results3.first?.title == "Shivers")
+        
+        // 4. All terms must match (AND condition)
+        let results4 = try await repo.fetchForLibrary(tab: .local, search: "hazel vixa mp3", sortBy: .title, ascending: true)
+        #expect(results4.isEmpty)
+    }
+
+    @Test func trackInMemoryMatchesMultiTermQuery() {
+        let track = Track(
+            artist: "DJ Hazel",
+            albumArtist: "DJ Hazel",
+            album: "Classic",
+            title: "Sunrise",
+            format: "flac",
+            originalPath: "/Sunrise.flac"
+        )
+        var mutTrack = track
+        mutTrack.genre = "Vixa"
+        
+        // Exact case match
+        #expect(mutTrack.matches(searchQuery: "hazel vixa flac"))
+        // Multi-term random order
+        #expect(mutTrack.matches(searchQuery: "flac vixa hazel"))
+        // Case / diacritic insensitivity
+        #expect(mutTrack.matches(searchQuery: "HAZEL Vîxâ FLAC"))
+        // Partial matches on terms
+        #expect(mutTrack.matches(searchQuery: "haz vix fla"))
+        // Non-matching term fails
+        #expect(!mutTrack.matches(searchQuery: "hazel vixa mp3"))
     }
 
     // MARK: - fetchForLibrary: sort order

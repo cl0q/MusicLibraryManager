@@ -100,6 +100,15 @@ struct ActivityPanel: View {
                 .foregroundColor(.mlmInkPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
+        } else if let activeDesc = PerformanceQueueService.shared.activeJobDescription {
+            ProgressView()
+                .controlSize(.mini)
+                .padding(.trailing, 4)
+            Text("\(activeDesc) (\(PerformanceQueueService.shared.pendingAnalysesCount) pending)")
+                .font(MLMFont.muted)
+                .foregroundColor(.mlmInkPrimary)
+                .lineLimit(1)
+                .truncationMode(.middle)
         } else if let vm = container.activityViewModel {
             if vm.hasActiveOperations {
                 ProgressView()

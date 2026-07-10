@@ -33,21 +33,25 @@ struct LibraryTable: View {
         KeyPathComparator(\.track.dateAddedSortKey, order: .reverse)
     ]
 
-    /// Already SQL-sorted — just wrap in TrackRow (no in-memory sort).
-    private var rows: [TrackRow] {
-        viewModel.displayedTracks
-            .compactMap { t in t.id.map { TrackRow(id: $0, track: t) } }
-    }
+    @State private var cachedRows: [TrackRow] = []
 
     var body: some View {
-        if viewModel.isLoading {
-            loadingState
-        } else if let error = viewModel.errorMessage {
-            errorState(error)
-        } else if viewModel.displayedTracks.isEmpty {
-            emptyState
-        } else {
-            tableView
+        Group {
+            if viewModel.isLoading {
+                loadingState
+            } else if let error = viewModel.errorMessage {
+                errorState(error)
+            } else if viewModel.displayedTracks.isEmpty {
+                emptyState
+            } else {
+                tableView
+            }
+        }
+        .task {
+            updateCachedRows()
+        }
+        .onChange(of: viewModel.displayedTracks) {
+            updateCachedRows()
         }
     }
 
@@ -138,7 +142,7 @@ struct LibraryTable: View {
                 .width(78)
             }
         } rows: {
-            ForEach(rows) { row in
+            ForEach(cachedRows) { row in
                 TableRow(row)
                     .draggable(TrackDragData(trackId: row.id, sourcePlaylistId: nil))
             }
@@ -222,6 +226,12 @@ struct LibraryTable: View {
     }
 
     // MARK: - Helpers
+
+    private func updateCachedRows() {
+        self.cachedRows = viewModel.displayedTracks.compactMap { t in
+            t.id.map { TrackRow(id: $0, track: t) }
+        }
+    }
 
     /// Whether a track is the currently playing track.
     private func isNowPlaying(_ track: Track) -> Bool {

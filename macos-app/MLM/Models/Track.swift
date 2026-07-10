@@ -96,6 +96,9 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
 
     // MARK: - Computed Properties
 
+    /// Dynamic row identifier for Identifiable SwiftUI collection bindings.
+    var rowID: Int64 { id ?? -1 }
+
     /// Whether this track exists as a local file (not just a remote reference).
     var isLocal: Bool {
         organizedPath != nil
@@ -172,6 +175,34 @@ extension Track {
 
     /// Date added sort key — nil sorts as empty string (sorts first).
     var dateAddedSortKey: String { dateAdded ?? "" }
+
+    // MARK: - Enhanced Search Properties
+
+    /// The raw combined string of all fields used for search indexing.
+    var rawSearchText: String {
+        let genreStr = genre ?? ""
+        return "\(artist) \(albumArtist) \(album) \(title) \(genreStr) \(format)"
+    }
+
+    /// Determine if this track matches the given multi-term whitespace-separated search query.
+    /// Uses Case/Diacritic folded normalization to match the database behavior.
+    func matches(searchQuery: String) -> Bool {
+        let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return true }
+
+        let terms = trimmed.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        guard !terms.isEmpty else { return true }
+
+        let normalizedCombined = DatabaseManager.foldedSearchText(rawSearchText)
+
+        for term in terms {
+            let normalizedTerm = DatabaseManager.foldedSearchText(term)
+            if !normalizedCombined.contains(normalizedTerm) {
+                return false
+            }
+        }
+        return true
+    }
 }
 
 // MARK: - Defaults

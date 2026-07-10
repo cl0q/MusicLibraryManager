@@ -82,15 +82,18 @@ final class AppLogger {
     func log(_ message: String, level: Level = .info, source: String? = nil) {
         let entry = LogEntry(timestamp: Date(), level: level, message: message, source: source)
 
-        // Sink 1: in-memory ring buffer
-        lock.lock()
-        entries.append(entry)
-        if entries.count > Self.maxEntries {
-            entries.removeFirst(entries.count - Self.maxEntries)
+        // Sink 1: in-memory ring buffer (Mutated on Main Thread to avoid SwiftUI observation races)
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.lock.lock()
+            self.entries.append(entry)
+            if self.entries.count > Self.maxEntries {
+                self.entries.removeFirst(self.entries.count - Self.maxEntries)
+            }
+            let sinkCopy = self.sink
+            self.lock.unlock()
+            sinkCopy?(entry)
         }
-        let sinkCopy = sink
-        lock.unlock()
-        sinkCopy?(entry)
 
         // Sink 2: unified logging → Console.app + Xcode console
         osLogger(for: source).log(level: level.osLogType, "\(message, privacy: .public)")
@@ -123,9 +126,12 @@ final class AppLogger {
 
     /// Clear in-memory entries (does NOT delete the on-disk log file).
     func clear() {
-        lock.lock()
-        entries.removeAll()
-        lock.unlock()
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.lock.lock()
+            self.entries.removeAll()
+            self.lock.unlock()
+        }
     }
 
     /// Absolute path to the current log file (for "Reveal in Finder").
