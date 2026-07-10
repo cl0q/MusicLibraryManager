@@ -10,6 +10,17 @@ final class DownloadOrchestrator {
 
     // MARK: - Types
 
+    /// Which source the download should be pinned to.
+    ///
+    /// - `.auto`: run the full fallback chain (SoundCloud → DAB → Squid → YouTube).
+    /// - `.soundcloud`: only attempt scdl with `soundcloudURL`; no cross-source fallback.
+    /// - `.youtube`: download `youtubeURL` directly via yt-dlp; skip SC/DAB/Squid.
+    enum PreferredSource {
+        case auto
+        case soundcloud
+        case youtube
+    }
+
     /// A request to download a single track.
     struct DownloadRequest {
         let trackId: Int64
@@ -18,6 +29,10 @@ final class DownloadOrchestrator {
         let query: String
         let soundcloudURL: String?
         let userId: String?
+        /// Pin the download to a specific source. Defaults to `.auto`.
+        var preferredSource: PreferredSource = .auto
+        /// Direct YouTube video URL, used when `preferredSource == .youtube`.
+        var youtubeURL: String? = nil
     }
 
     /// Aggregate result of a batch download.
@@ -294,6 +309,71 @@ final class DownloadOrchestrator {
         _ request: DownloadRequest,
         onTrackProgress: ((Double) -> Void)? = nil
     ) async throws -> URL? {
+        // Source pinning — when a request is bound to a specific source we
+        // do NOT fall through to other providers (SC playlists stay on SC,
+        // YT playlists stay on YT).
+        switch request.preferredSource {
+        case .soundcloud:
+            guard let scURL = request.soundcloudURL else {
+                AppLogger.shared.log(
+                    "pinned[SC]: no SoundCloud URL for track id=\(request.trackId) — \(request.artist) - \(request.title)",
+                    level: .warning, source: "Download"
+                )
+                return nil
+            }
+            guard soundCloudDownloader.isAvailable else {
+                AppLogger.shared.log(
+                    "pinned[SC]: scdl not installed — install via `pip install scdl`",
+                    level: .warning, source: "Download"
+                )
+                return nil
+            }
+            AppLogger.shared.log("pinned[SC]: trying \(scURL)", level: .info, source: "Download")
+            let scResult = try await soundCloudDownloader.download(
+                trackURL: scURL,
+                outputDir: aacDir,
+                trackId: request.trackId,
+                title: request.title,
+                onProgress: onTrackProgress
+            )
+            if case .success(let path) = scResult {
+                AppLogger.shared.log("pinned[SC]: success → \(path.lastPathComponent)", level: .info, source: "Download")
+                return path
+            }
+            AppLogger.shared.log("pinned[SC]: not found (no cross-source fallback)", level: .warning, source: "Download")
+            return nil
+
+        case .youtube:
+            guard youtubeDownloader.isAvailable else {
+                AppLogger.shared.log(
+                    "pinned[YT]: yt-dlp not installed",
+                    level: .warning, source: "Download"
+                )
+                return nil
+            }
+            let ytResult: YouTubeDownloader.DownloadResult
+            if let ytURL = request.youtubeURL {
+                AppLogger.shared.log("pinned[YT]: downloading \(ytURL)", level: .info, source: "Download")
+                ytResult = try await youtubeDownloader.downloadByURL(ytURL, outputDir: flacDir)
+            } else {
+                AppLogger.shared.log("pinned[YT]: searching \(request.query)", level: .info, source: "Download")
+                ytResult = try await youtubeDownloader.searchAndDownload(
+                    query: request.query,
+                    outputDir: flacDir,
+                    onProgress: onTrackProgress
+                )
+            }
+            if case .success(let path) = ytResult {
+                AppLogger.shared.log("pinned[YT]: success → \(path.lastPathComponent)", level: .info, source: "Download")
+                return path
+            }
+            AppLogger.shared.log("pinned[YT]: not found (no cross-source fallback)", level: .warning, source: "Download")
+            return nil
+
+        case .auto:
+            break  // fall through to the full chain below
+        }
+
         // 1. SoundCloud direct (if URL available and scdl installed)
         if request.soundcloudURL == nil {
             AppLogger.shared.log(

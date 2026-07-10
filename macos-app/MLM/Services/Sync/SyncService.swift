@@ -9,6 +9,13 @@ import AVFoundation
 @Observable
 final class SyncService {
 
+    // MARK: - Constants
+
+    /// Target integrated loudness for the "normalize loudness" export option.
+    /// -14 LUFS matches the reference level used by Spotify/YouTube/Tidal, so
+    /// normalized exports feel as loud as streaming without clipping.
+    static let loudnessTargetLUFS: Double = -14.0
+
     // MARK: - Types
 
     struct SyncPreview {
@@ -248,6 +255,22 @@ final class SyncService {
 
         // Transcode-mode branching (SYNC-v2-19)
         let cachedURL: URL?
+
+        // Loudness normalization gain (v24): when enabled on the profile and
+        // the track has a measured integrated loudness, compute the dB gain
+        // needed to reach the -14 LUFS target. Baked into the AAC on transcode
+        // so phone players without ReplayGain still play at an even level.
+        // Only meaningful for AAC transcode modes (keepOriginals links the raw
+        // file untouched). Clamped to avoid extreme pumping on near-silent or
+        // hot masters.
+        let normalizationGainDB: Double? = {
+            guard profile.normalizeLoudness,
+                  profile.transcodeModeEnum != .keepOriginals,
+                  let lufs = track.lufsI, lufs > -70 else { return nil }
+            let raw = SyncService.loudnessTargetLUFS - lufs
+            return max(-24.0, min(12.0, raw))
+        }()
+
         switch profile.transcodeModeEnum {
         case .keepOriginals:
             // Bypass TranscodeCache — link original file directly (no transcode)
@@ -294,9 +317,9 @@ final class SyncService {
                 return .failed(file.trackId, "No organized path for keepOriginals")
             }
         case .aac248:
-            cachedURL = try await transcodeCache.ensureCached(track: track, bitrateKbps: 248, libraryRoot: libraryRoot)
+            cachedURL = try await transcodeCache.ensureCached(track: track, bitrateKbps: 248, libraryRoot: libraryRoot, normalizationGainDB: normalizationGainDB)
         case .aac320:
-            cachedURL = try await transcodeCache.ensureCached(track: track, bitrateKbps: 320, libraryRoot: libraryRoot)
+            cachedURL = try await transcodeCache.ensureCached(track: track, bitrateKbps: 320, libraryRoot: libraryRoot, normalizationGainDB: normalizationGainDB)
         }
 
         // For aac248/aac320, link cached file to destination
@@ -322,7 +345,8 @@ final class SyncService {
                 try transcodeCache.linkToProfile(
                     trackId: file.trackId,
                     bitrateKbps: bitrate,
-                    destinationPath: destURL
+                    destinationPath: destURL,
+                    normalized: normalizationGainDB != nil
                 )
 
                 // Update sync state

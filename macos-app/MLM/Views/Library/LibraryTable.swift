@@ -130,6 +130,13 @@ struct LibraryTable: View {
                 }
                 .width(56)
 
+                TableColumn("BPM", value: \TrackRow.track.bpmSortKey) { row in
+                    Text(row.track.bpm.map { "\($0)" } ?? "—")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                .width(48)
+
                 TableColumn("Added", value: \TrackRow.track.dateAddedSortKey) { row in
                     Text(formatDateAdded(row.track.dateAdded))
                         .foregroundStyle(.secondary)
@@ -176,6 +183,7 @@ struct LibraryTable: View {
             case \TrackRow.track.yearSortKey:    col = .year
             case \TrackRow.track.energySortKey:  col = .energy
             case \TrackRow.track.danceabilitySortKey: col = .danceability
+            case \TrackRow.track.bpmSortKey:     col = .bpm
             case \TrackRow.track.dateAddedSortKey: col = .dateAdded
             default: return
             }

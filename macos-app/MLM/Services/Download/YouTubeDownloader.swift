@@ -212,6 +212,172 @@ final class YouTubeDownloader: Sendable {
         return s.isEmpty ? raw : s
     }
 
+    // MARK: - Playlist Listing
+
+    /// A single entry from a YouTube playlist (flat listing, no download).
+    struct PlaylistEntry {
+        let id: String
+        let title: String
+        let uploader: String?
+        let url: String
+    }
+
+    /// List a YouTube playlist without downloading, via
+    /// `yt-dlp --flat-playlist -J`. Returns the entries in playlist order.
+    func listPlaylist(url: String) async throws -> [PlaylistEntry] {
+        guard let ytdlp = ytDlpPath else { return [] }
+
+        let result = try await ProcessRunner.run(
+            ytdlp,
+            arguments: [
+                url,
+                "--flat-playlist",
+                "-J",
+                "--no-warnings"
+            ]
+        )
+        guard result.isSuccess else {
+            AppLogger.shared.warn(
+                "YT: flat-playlist listing failed (code=\(result.exitCode))",
+                source: "Download"
+            )
+            return []
+        }
+
+        guard let data = result.stdout.data(using: .utf8) else { return [] }
+        let root = try JSONDecoder().decode(FlatPlaylistRoot.self, from: data)
+        return root.entries.compactMap { entry in
+            guard let id = entry.id else { return nil }
+            let watchURL = entry.url ?? "https://www.youtube.com/watch?v=\(id)"
+            return PlaylistEntry(
+                id: id,
+                title: entry.title ?? "Unknown",
+                uploader: entry.uploader ?? entry.channel,
+                url: watchURL
+            )
+        }
+    }
+
+    private struct FlatPlaylistRoot: Decodable {
+        let entries: [FlatEntry]
+    }
+
+    private struct FlatEntry: Decodable {
+        let id: String?
+        let title: String?
+        let url: String?
+        let uploader: String?
+        let channel: String?
+    }
+
+    /// Search YouTube (no download) via `yt-dlp "ytsearchN:query" --flat-playlist -J`.
+    func search(query: String, limit: Int = 20) async throws -> [FlatPlaylistEntry] {
+        guard let ytdlp = ytDlpPath else { return [] }
+        let result = try await ProcessRunner.run(
+            ytdlp,
+            arguments: [
+                "ytsearch\(limit):\(query)",
+                "--flat-playlist",
+                "-J",
+                "--no-warnings"
+            ]
+        )
+        guard result.isSuccess, let data = result.stdout.data(using: .utf8) else { return [] }
+        let root = try JSONDecoder().decode(FlatPlaylistRoot.self, from: data)
+        return root.entries.compactMap { entry in
+            guard let id = entry.id else { return nil }
+            return FlatPlaylistEntry(
+                id: id,
+                title: entry.title ?? "Unknown",
+                uploader: entry.uploader ?? entry.channel,
+                durationSeconds: nil,
+                url: entry.url ?? "https://www.youtube.com/watch?v=\(id)"
+            )
+        }
+    }
+
+    /// A search/listing entry (used by both playlist listing and search).
+    struct FlatPlaylistEntry {
+        let id: String
+        let title: String
+        let uploader: String?
+        let durationSeconds: Int?
+        let url: String
+    }
+
+    /// Resolve metadata for an arbitrary URL supported by yt-dlp (SoundCloud,
+    /// YouTube, and hundreds of other sites). Returns one entry for a single
+    /// track/video, or all entries when the URL points at a playlist/set.
+    func fetchURLInfo(url: String) async throws -> [FlatPlaylistEntry] {
+        guard let ytdlp = ytDlpPath else { return [] }
+        let result = try await ProcessRunner.run(
+            ytdlp,
+            arguments: [
+                url,
+                "-J",
+                "--flat-playlist",
+                "--no-warnings"
+            ]
+        )
+        guard result.isSuccess, let data = result.stdout.data(using: .utf8) else { return [] }
+
+        let info = try JSONDecoder().decode(URLInfoRoot.self, from: data)
+        if let entries = info.entries, !entries.isEmpty {
+            // Playlist / set.
+            return entries.compactMap { entry in
+                guard let id = entry.id else { return nil }
+                return FlatPlaylistEntry(
+                    id: id,
+                    title: entry.title ?? "Unknown",
+                    uploader: entry.uploader ?? entry.channel,
+                    durationSeconds: entry.duration.map { Int($0) },
+                    url: entry.url ?? entry.webpageUrl ?? url
+                )
+            }
+        }
+        // Single track / video.
+        guard let id = info.id else { return [] }
+        return [
+            FlatPlaylistEntry(
+                id: id,
+                title: info.title ?? "Unknown",
+                uploader: info.uploader ?? info.channel,
+                durationSeconds: info.duration.map { Int($0) },
+                url: info.webpageUrl ?? url
+            )
+        ]
+    }
+
+    private struct URLInfoRoot: Decodable {
+        let id: String?
+        let title: String?
+        let uploader: String?
+        let channel: String?
+        let duration: Double?
+        let webpageUrl: String?
+        let entries: [URLInfoEntry]?
+
+        enum CodingKeys: String, CodingKey {
+            case id, title, uploader, channel, duration, entries
+            case webpageUrl = "webpage_url"
+        }
+    }
+
+    private struct URLInfoEntry: Decodable {
+        let id: String?
+        let title: String?
+        let uploader: String?
+        let channel: String?
+        let duration: Double?
+        let url: String?
+        let webpageUrl: String?
+
+        enum CodingKeys: String, CodingKey {
+            case id, title, uploader, channel, duration, url
+            case webpageUrl = "webpage_url"
+        }
+    }
+
     // MARK: - Private
 
     private func findMostRecentFile(in directory: URL) -> URL? {

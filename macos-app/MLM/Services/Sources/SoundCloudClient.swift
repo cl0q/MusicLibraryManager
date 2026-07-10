@@ -524,9 +524,146 @@ final class SoundCloudClient {
 
     /// Sync a single SoundCloud playlist.
     private func syncSinglePlaylist(_ scPlaylist: SoundCloudPlaylist, sourceId: Int64) async throws {
-        // This will be fully implemented when PlaylistRepository supports
-        // source-linked playlists (it already has the schema support)
-        print("[SoundCloud] Playlist: \(scPlaylist.title) (\(scPlaylist.trackCount ?? 0) tracks)")
+        AppLogger.shared.info(
+            "SoundCloud: syncing playlist '\(scPlaylist.title)' (\(scPlaylist.trackCount ?? 0) tracks)",
+            source: "SoundCloud"
+        )
+
+        guard let playlistRepo = playlistRepository else {
+            AppLogger.shared.warn(
+                "SoundCloud: no playlistRepository wired — playlist '\(scPlaylist.title)' skipped",
+                source: "SoundCloud"
+            )
+            return
+        }
+
+        // 1. Pull the ordered track list (may already be embedded).
+        let scTracks: [SoundCloudTrack]
+        if let embedded = scPlaylist.tracks, !embedded.isEmpty {
+            scTracks = embedded
+        } else {
+            scTracks = try await fetchPlaylistTracks(playlistId: scPlaylist.id)
+        }
+
+        // 2. Upsert every track as a remote track, preserving API order.
+        let baseTime = Date()
+        var orderedTrackIds: [Int64] = []
+        var index = 0
+        _ = try await processLikedTracks(
+            scTracks,
+            sourceId: sourceId,
+            baseTime: baseTime,
+            startIndex: &index,
+            collectedIds: &orderedTrackIds
+        )
+
+        // 3. Create/refresh the local source-linked playlist and mirror order.
+        let playlist = try await playlistRepo.findOrCreateSourcePlaylist(
+            name: scPlaylist.title,
+            sourceId: sourceId,
+            externalId: String(scPlaylist.id)
+        )
+        if let playlistId = playlist.id {
+            try await playlistRepo.replaceTrackList(
+                playlistId: playlistId,
+                trackIds: orderedTrackIds
+            )
+            NotificationCenter.default.post(name: .playlistDidChange, object: nil)
+        }
+
+        AppLogger.shared.info(
+            "SoundCloud: playlist '\(scPlaylist.title)' synced (\(orderedTrackIds.count) tracks)",
+            source: "SoundCloud"
+        )
+    }
+
+    /// Fetch a lightweight list of the user's playlists (no track bodies)
+    /// for browsing. Returns the API playlist objects directly.
+    func fetchPlaylists() async throws -> [SoundCloudPlaylist] {
+        let page: SoundCloudCollection<SoundCloudPlaylist> = try await apiRequest(
+            endpoint: "me/playlists",
+            queryItems: [
+                URLQueryItem(name: "limit", value: "50"),
+                URLQueryItem(name: "linked_partitioning", value: "1"),
+            ],
+            type: SoundCloudCollection<SoundCloudPlaylist>.self
+        )
+        return page.collection
+    }
+
+    /// Fetch the full, ordered track list for a playlist, following
+    /// `next_href` cursor pagination.
+    func fetchPlaylistTracks(playlistId: Int) async throws -> [SoundCloudTrack] {
+        var tracks: [SoundCloudTrack] = []
+
+        let firstPage: SoundCloudCollection<SoundCloudTrack> = try await apiRequest(
+            endpoint: "playlists/\(playlistId)/tracks",
+            queryItems: [
+                URLQueryItem(name: "limit", value: "50"),
+                URLQueryItem(name: "linked_partitioning", value: "1"),
+            ],
+            type: SoundCloudCollection<SoundCloudTrack>.self
+        )
+        tracks.append(contentsOf: firstPage.collection)
+        var nextURL = firstPage.nextHref.flatMap { URL(string: $0) }
+
+        while let url = nextURL {
+            let page: SoundCloudCollection<SoundCloudTrack> = try await apiRequestURL(
+                url: url,
+                type: SoundCloudCollection<SoundCloudTrack>.self
+            )
+            tracks.append(contentsOf: page.collection)
+            nextURL = page.nextHref.flatMap { URL(string: $0) }
+        }
+
+        return tracks
+    }
+
+
+    /// Import a single playlist into the local library (persist tracks +
+    /// create/refresh the source-linked playlist) and return its local
+    /// playlist ID. Used by the remote-playlist browser before download.
+    @discardableResult
+    func importPlaylist(_ scPlaylist: SoundCloudPlaylist) async throws -> Int64? {
+        let user = try await fetchProfile()
+        let source = try await sourceRepository.upsert(name: "soundcloud", userId: String(user.id))
+        guard let sourceId = source.id else {
+            throw SoundCloudError.noSourceId
+        }
+        try await syncSinglePlaylist(scPlaylist, sourceId: sourceId)
+        guard let playlistRepo = playlistRepository else { return nil }
+        let playlist = try await playlistRepo.findOrCreateSourcePlaylist(
+            name: scPlaylist.title,
+            sourceId: sourceId,
+            externalId: String(scPlaylist.id)
+        )
+        return playlist.id
+    }
+
+    // MARK: - Search
+
+    /// Search SoundCloud tracks by free-text query.
+    func search(query: String, limit: Int = 25) async throws -> [RemoteSearchResult] {
+        let page: SoundCloudCollection<SoundCloudTrack> = try await apiRequest(
+            endpoint: "tracks",
+            queryItems: [
+                URLQueryItem(name: "q", value: query),
+                URLQueryItem(name: "limit", value: "\(limit)"),
+                URLQueryItem(name: "linked_partitioning", value: "1"),
+            ],
+            type: SoundCloudCollection<SoundCloudTrack>.self
+        )
+        return page.collection.map { t in
+            RemoteSearchResult(
+                id: "sc-\(t.id)",
+                source: .soundcloud,
+                artist: t.user?.username ?? "Unknown",
+                title: t.title,
+                durationSeconds: t.duration.map { $0 / 1000 },
+                externalId: String(t.id),
+                sourceURL: t.permalinkUrl
+            )
+        }
     }
 
     // MARK: - Errors

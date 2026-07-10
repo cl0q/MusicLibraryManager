@@ -25,9 +25,12 @@ final class TranscodeCache: Sendable {
     /// Deterministic cache path for a track at a specific bitrate.
     /// Bitrate-suffixed so 248k and 320k cached versions coexist.
     /// Examples: `{trackId}_248.m4a`, `{trackId}_320.m4a`
-    func cachePath(trackId: Int64, bitrateKbps: Int) -> URL {
-        // Filename pattern: {trackId}_{bitrateKbps}.m4a  e.g. 42_248.m4a or 42_320.m4a
-        cacheDir.appendingPathComponent("\(trackId)_\(bitrateKbps).m4a")
+    /// When `normalized` is true a `_norm` marker keeps loudness-normalized
+    /// exports from colliding with the plain transcode of the same track.
+    func cachePath(trackId: Int64, bitrateKbps: Int, normalized: Bool = false) -> URL {
+        // Filename pattern: {trackId}_{bitrateKbps}[_norm].m4a  e.g. 42_248.m4a or 42_248_norm.m4a
+        let suffix = normalized ? "_norm" : ""
+        return cacheDir.appendingPathComponent("\(trackId)_\(bitrateKbps)\(suffix).m4a")
     }
 
     /// Whether a valid cache entry exists for a track (legacy, non-bitrate-suffixed).
@@ -46,12 +49,15 @@ final class TranscodeCache: Sendable {
     /// If not cached, transcode the source file.
     ///
     /// - Parameter bitrateKbps: Target AAC bitrate in kbps. Defaults to 248 for back-compat.
-    func ensureCached(track: Track, bitrateKbps: Int = 248, libraryRoot: String? = nil) async throws -> URL? {
+    /// - Parameter normalizationGainDB: When non-nil, a loudness gain (dB) is
+    ///   baked into the exported audio and the cache entry is `_norm`-suffixed.
+    func ensureCached(track: Track, bitrateKbps: Int = 248, libraryRoot: String? = nil, normalizationGainDB: Double? = nil) async throws -> URL? {
         guard let trackId = track.id else {
             AppLogger.shared.warn("ensureCached: track has no id", source: "Sync")
             return nil
         }
-        let cached = cachePath(trackId: trackId, bitrateKbps: bitrateKbps)
+        let normalized = normalizationGainDB != nil
+        let cached = cachePath(trackId: trackId, bitrateKbps: bitrateKbps, normalized: normalized)
 
         // Check bitrate-suffixed cache entry
         if FileManager.default.fileExists(atPath: cached.path) {
@@ -107,12 +113,13 @@ final class TranscodeCache: Sendable {
             return nil
         }
 
-        let targetName = "\(trackId)_\(bitrateKbps).m4a"
+        let targetName = "\(trackId)_\(bitrateKbps)\(normalized ? "_norm" : "").m4a"
         let result = try await transcodeService.transcode(
             input: sourceURL,
             outputDir: cacheDir,
             outputName: targetName,
-            bitrateKbps: bitrateKbps
+            bitrateKbps: bitrateKbps,
+            normalizationGainDB: normalizationGainDB
         )
 
         switch result {
@@ -209,9 +216,9 @@ final class TranscodeCache: Sendable {
     /// Uses hardlink first, falls back to copy for cross-filesystem.
     /// Looks up the bitrate-suffixed cache entry; falls back to the legacy
     /// non-suffixed path for back-compat with pre-Phase-38 cache entries.
-    func linkToProfile(trackId: Int64, bitrateKbps: Int, destinationPath: URL) throws {
+    func linkToProfile(trackId: Int64, bitrateKbps: Int, destinationPath: URL, normalized: Bool = false) throws {
         let cached: URL
-        let suffixed = cachePath(trackId: trackId, bitrateKbps: bitrateKbps)
+        let suffixed = cachePath(trackId: trackId, bitrateKbps: bitrateKbps, normalized: normalized)
         let legacy = cachePath(trackId: trackId)
         if FileManager.default.fileExists(atPath: suffixed.path) {
             cached = suffixed

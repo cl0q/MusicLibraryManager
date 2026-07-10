@@ -708,6 +708,34 @@ final class DatabaseManager: Sendable {
             }
         }
 
+        // ──────────────────────────────────────────────────────────────
+        // Migration v24_normalize_loudness: apply EBU R128 gain on export
+        // Adds normalize_loudness toggle to sync_profiles. When enabled and
+        // transcoding to AAC, the measured per-track LUFS is used to bake a
+        // loudness gain into the exported audio (not just RG tags) so that
+        // phone players without ReplayGain support still play at even volume.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v24_normalize_loudness") { db in
+            if try !db.columns(in: "sync_profiles").contains(where: { $0.name == "normalize_loudness" }) {
+                try db.alter(table: "sync_profiles") { t in
+                    t.add(column: "normalize_loudness", .integer).notNull().defaults(to: 0)
+                }
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        // Migration v25_bpm: estimated tempo per track
+        // Populated by DanceabilityAnalyzer alongside danceability.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v25_bpm") { db in
+            if try !db.columns(in: "tracks").contains(where: { $0.name == "bpm" }) {
+                try db.alter(table: "tracks") { t in
+                    t.add(column: "bpm", .integer)
+                }
+            }
+            try db.create(indexOn: "tracks", columns: ["bpm"], options: .ifNotExists)
+        }
+
         return migrator
     }
 

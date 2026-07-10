@@ -100,6 +100,35 @@ final class DABClient: Sendable {
         return searchResponse.tracks.first
     }
 
+    /// Search DAB and return multiple hits (for the global search UI).
+    func searchTracks(query: String, limit: Int = 20) async throws -> [DabTrack] {
+        let base = Self.baseURL
+        guard !base.isEmpty else { return [] }
+        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        guard let url = URL(string: "\(base)/search?q=\(encoded)") else { return [] }
+
+        var request = URLRequest(url: url)
+        addAuthCookie(to: &request)
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let urlError as URLError where Self.isUnreachable(urlError) {
+            return []
+        }
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if statusCode == 401 {
+            do { try await login() }
+            catch DABError.noCredentials { return [] }
+            return try await searchTracks(query: query, limit: limit)
+        }
+        guard statusCode == 200 else { return [] }
+
+        let searchResponse = try JSONDecoder().decode(DabSearchResponse.self, from: data)
+        return Array(searchResponse.tracks.prefix(limit))
+    }
+
     /// URLError codes we treat as "skip DAB silently, don't raise":
     /// network outright unreachable, DNS resolution failed, timeout.
     private static func isUnreachable(_ err: URLError) -> Bool {

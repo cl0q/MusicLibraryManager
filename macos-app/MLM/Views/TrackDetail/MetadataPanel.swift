@@ -51,6 +51,8 @@ struct MetadataPanel: View {
                                 value: track.lufsRange.map { String(format: "%.1f LU", $0) } ?? "—")
                     metadataRow("True Peak",
                                 value: track.truePeak.map { String(format: "%.1f dBTP", $0) } ?? "—")
+                    metadataRow("BPM",
+                                value: track.bpm.map { "\($0)" } ?? "—")
 
                     HStack {
                         Text("Energy")

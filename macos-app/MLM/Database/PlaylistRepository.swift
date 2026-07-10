@@ -308,6 +308,56 @@ final class PlaylistRepository: Sendable {
         }
     }
 
+    /// Find or create a regular (non-liked) source-linked playlist,
+    /// keyed by `(sourceId, externalId)`. Used to mirror remote playlists
+    /// (SoundCloud/Spotify/YouTube) into the local library while keeping
+    /// them distinct from the special "Liked" playlist.
+    @discardableResult
+    func findOrCreateSourcePlaylist(
+        name: String,
+        sourceId: Int64,
+        externalId: String
+    ) async throws -> Playlist {
+        try await database.write { db in
+            if let existing = try Playlist
+                .filter(Playlist.Columns.sourceId == sourceId)
+                .filter(sql: "external_id = ?", arguments: [externalId])
+                .filter(Playlist.Columns.isLiked == 0)
+                .fetchOne(db)
+            {
+                // Keep the name in sync with upstream.
+                if existing.name != name, let id = existing.id {
+                    try db.execute(
+                        sql: "UPDATE playlists SET name = ? WHERE id = ?",
+                        arguments: [name, id]
+                    )
+                    if let updated = try Playlist.fetchOne(db, id: id) {
+                        return updated
+                    }
+                }
+                return existing
+            }
+
+            var playlist = Playlist(
+                id: nil,
+                name: name,
+                description: nil,
+                category: "synced",
+                isLiked: 0,
+                isSmart: 0,
+                isPinned: 0,
+                coverIsCustom: 0,
+                coverImagePath: nil,
+                coverImageUrl: nil,
+                sourceId: sourceId,
+                externalId: externalId,
+                dateCreated: ISO8601DateFormatter().string(from: Date())
+            )
+            try playlist.insert(db)
+            return playlist
+        }
+    }
+
     /// Replace the entire ordered track list for a playlist atomically.
     ///
     /// Used by source-sync code (SoundCloud Likes, Spotify Liked) to

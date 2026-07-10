@@ -30,6 +30,7 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
     var truePeak: Double?
     var energyBucket: Int?
     var danceability: Double?
+    var bpm: Int?
     var albumId: Int64?
     var searchText: String?
     var playlistPosition: String? = nil
@@ -61,6 +62,7 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
         static let truePeak = Column(CodingKeys.truePeak)
         static let energyBucket = Column(CodingKeys.energyBucket)
         static let danceability = Column(CodingKeys.danceability)
+        static let bpm = Column(CodingKeys.bpm)
         static let albumId = Column(CodingKeys.albumId)
         static let searchText = Column(CodingKeys.searchText)
     }
@@ -89,6 +91,7 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
         case truePeak = "true_peak"
         case energyBucket = "energy_bucket"
         case danceability
+        case bpm
         case albumId = "album_id"
         case searchText = "search_text"
         case playlistPosition = "playlist_position"
@@ -138,6 +141,7 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
         container[Columns.truePeak] = truePeak
         container[Columns.energyBucket] = energyBucket
         container[Columns.danceability] = danceability
+        container[Columns.bpm] = bpm
         container[Columns.albumId] = albumId
         container[Columns.searchText] = searchText
     }
@@ -169,6 +173,9 @@ extension Track {
 
     /// Danceability sort key — nil sorts as 0.0.
     var danceabilitySortKey: Double { danceability ?? 0.0 }
+
+    /// BPM sort key — nil sorts as 0.
+    var bpmSortKey: Int { bpm ?? 0 }
 
     /// Date added sort key — nil sorts as empty string (sorts first).
     var dateAddedSortKey: String { dateAdded ?? "" }
@@ -207,6 +214,7 @@ extension Track {
         self.truePeak = nil
         self.energyBucket = nil
         self.danceability = nil
+        self.bpm = nil
         self.albumId = nil
         self.playlistPosition = nil
     }
