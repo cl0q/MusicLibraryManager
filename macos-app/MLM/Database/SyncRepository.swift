@@ -160,7 +160,8 @@ final class SyncRepository: Sendable {
         transcodeMode: String? = nil,
         fat32SafePaths: Bool? = nil,
         cleanupRemovedFiles: Bool? = nil,
-        playlistFormat: String? = nil
+        playlistFormat: String? = nil,
+        normalizeLoudness: Bool? = nil
     ) async throws {
         try await database.write { db in
             var sets: [String] = []
@@ -197,6 +198,10 @@ final class SyncRepository: Sendable {
             if let playlistFormat {
                 sets.append("playlist_format = ?")
                 args.append(playlistFormat)
+            }
+            if let normalizeLoudness {
+                sets.append("normalize_loudness = ?")
+                args.append(normalizeLoudness ? 1 : 0)
             }
 
             guard !sets.isEmpty else { return }

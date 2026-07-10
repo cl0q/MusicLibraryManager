@@ -5,7 +5,7 @@ import GRDB
 
 /// Whitelist of sortable columns for library queries.
 enum SortColumn: String, CaseIterable {
-    case title, artist, album, dateAdded, duration, bitrate, year, energy, danceability, genre, format
+    case title, artist, album, dateAdded, duration, bitrate, year, energy, danceability, bpm, genre, format
 
     /// Maps to the actual SQLite column name.
     var sqlColumn: String {
@@ -19,6 +19,7 @@ enum SortColumn: String, CaseIterable {
         case .year:      return "year"
         case .energy:    return "energy_bucket"
         case .danceability: return "danceability"
+        case .bpm:       return "bpm"
         case .genre:     return "genre"
         case .format:    return "format"
         }
@@ -544,7 +545,7 @@ final class TrackRepository: Sendable {
         try await database.read { db in
             try Track.fetchAll(db, sql: """
                 SELECT * FROM tracks
-                WHERE danceability IS NULL AND organized_path IS NOT NULL
+                WHERE (danceability IS NULL OR bpm IS NULL) AND organized_path IS NOT NULL
                 ORDER BY id
             """)
         }
@@ -590,16 +591,24 @@ final class TrackRepository: Sendable {
         }
     }
 
-    /// Update danceability for a track.
+    /// Update danceability (and optional BPM) for a track.
     func updateDanceability(
         trackId: Int64,
-        danceability: Double
+        danceability: Double,
+        bpm: Int? = nil
     ) async throws {
         try await database.write { db in
-            try db.execute(
-                sql: "UPDATE tracks SET danceability = ? WHERE id = ?",
-                arguments: [danceability, trackId]
-            )
+            if let bpm {
+                try db.execute(
+                    sql: "UPDATE tracks SET danceability = ?, bpm = ? WHERE id = ?",
+                    arguments: [danceability, bpm, trackId]
+                )
+            } else {
+                try db.execute(
+                    sql: "UPDATE tracks SET danceability = ? WHERE id = ?",
+                    arguments: [danceability, trackId]
+                )
+            }
         }
     }
 

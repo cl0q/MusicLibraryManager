@@ -71,6 +71,9 @@ struct SourcesView: View {
                         source: .appleMusic,
                         viewModel: viewModel
                     )
+
+                    // YouTube (URL-based playlist import — no auth needed)
+                    YouTubePlaylistCard()
                 }
                 .padding(16)
             }
@@ -114,6 +117,8 @@ struct SourcesView: View {
 struct SourceCard: View {
     let source: TokenStorage.Service
     let viewModel: SourcesViewModel
+
+    @State private var showPlaylists = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -219,6 +224,22 @@ struct SourceCard: View {
                     .foregroundColor(.mlmError)
                     .lineLimit(2)
             }
+
+            // Playlist browser (SoundCloud & Spotify, when connected)
+            if isConnected, let remoteSource = remotePlaylistSource {
+                Button {
+                    showPlaylists = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "music.note.list")
+                        Text("Playlists")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .sheet(isPresented: $showPlaylists) {
+                    RemotePlaylistsView(source: remoteSource)
+                }
+            }
         }
         .padding(12)
         .frame(minHeight: 220, alignment: .top)
@@ -231,6 +252,16 @@ struct SourceCard: View {
     }
 
     // MARK: - Helpers
+
+    /// Maps the token-storage service to the remote-playlist browser source.
+    /// Apple Music has no playlist browsing here.
+    private var remotePlaylistSource: RemotePlaylistSource? {
+        switch source {
+        case .soundcloud: return .soundcloud
+        case .spotify: return .spotify
+        case .appleMusic: return nil
+        }
+    }
 
     private var isConnected: Bool {
         viewModel.isConnected(source)
@@ -268,5 +299,63 @@ struct SourceCard: View {
         case .soundcloud: .mlmSoundCloud
         case .appleMusic: .mlmAppleMusic
         }
+    }
+}
+
+// MARK: - YouTube Playlist Card
+
+/// A card for importing a YouTube playlist by URL — no OAuth required.
+struct YouTubePlaylistCard: View {
+    @State private var showPlaylists = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "play.rectangle.fill")
+                    .font(.system(size: 24))
+                    .foregroundColor(.red)
+                    .frame(width: 36, height: 36)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("YouTube")
+                        .font(MLMFont.bodyBold)
+                        .foregroundColor(.mlmInk)
+                    Text("Playlist per URL")
+                        .font(MLMFont.muted)
+                        .foregroundColor(.mlmInkSecondary)
+                }
+                Spacer()
+            }
+
+            Divider()
+                .background(Color.mlmEdge)
+
+            Text("Füge eine YouTube-Playlist-URL ein, um Titel herunterzuladen.")
+                .font(MLMFont.muted)
+                .foregroundColor(.mlmInkSecondary)
+
+            Spacer()
+
+            Button {
+                showPlaylists = true
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "music.note.list")
+                    Text("Playlists")
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .sheet(isPresented: $showPlaylists) {
+                RemotePlaylistsView(source: .youtube)
+            }
+        }
+        .padding(12)
+        .frame(minHeight: 220, alignment: .top)
+        .background(Color.mlmSurface)
+        .cornerRadius(8)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.mlmEdge, lineWidth: 1)
+        )
     }
 }

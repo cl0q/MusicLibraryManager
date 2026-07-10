@@ -46,7 +46,8 @@ final class TranscodeService: Sendable {
         outputName: String? = nil,
         bitrateKbps: Int = 248,
         sourceFormat: String? = nil,
-        sourceBitrate: Int? = nil
+        sourceBitrate: Int? = nil,
+        normalizationGainDB: Double? = nil
     ) async throws -> TranscodeResult {
         guard let ffmpeg = ffmpegPath else {
             AppLogger.shared.error(
@@ -82,7 +83,11 @@ final class TranscodeService: Sendable {
             formatInfo = await detectFormat(input: input, ffmpeg: ffmpeg)
         }
 
-        if formatInfo.isLossy && formatInfo.bitrate > 0 && formatInfo.bitrate < bitrateKbps * 1000 {
+        // When a normalization gain is requested we must always re-encode so
+        // the gain is baked into the samples — never take the "skip / copy
+        // as-is" shortcut, which would leave the file un-normalized.
+        if normalizationGainDB == nil,
+           formatInfo.isLossy, formatInfo.bitrate > 0, formatInfo.bitrate < bitrateKbps * 1000 {
             // Only skip transcode if the source format is ALREADY an AAC file!
             // E.g. codec contains "aac". If it is "mp3", we MUST transcode it so that 
             // the resulting .m4a file is a valid AAC file in an MP4 container, not an MP3 renamed to .m4a!
@@ -103,7 +108,8 @@ final class TranscodeService: Sendable {
             output: tmpOutput,
             encoder: encoder,
             stripVideo: false,
-            bitrateKbps: bitrateKbps
+            bitrateKbps: bitrateKbps,
+            normalizationGainDB: normalizationGainDB
         )
 
         switch result {
@@ -120,7 +126,8 @@ final class TranscodeService: Sendable {
                 output: tmpOutput,
                 encoder: encoder,
                 stripVideo: true,
-                bitrateKbps: bitrateKbps
+                bitrateKbps: bitrateKbps,
+                normalizationGainDB: normalizationGainDB
             )
             switch retry {
             case .success:
@@ -234,7 +241,8 @@ final class TranscodeService: Sendable {
         output: URL,
         encoder: String,
         stripVideo: Bool,
-        bitrateKbps: Int = 248
+        bitrateKbps: Int = 248,
+        normalizationGainDB: Double? = nil
     ) async throws -> FFmpegResult {
         // Explicitly map the audio stream (mandatory) and the video stream
         // when present (optional `?` modifier — ffmpeg won't fail if the
@@ -262,6 +270,21 @@ final class TranscodeService: Sendable {
         args += [
             "-c:a", encoder,
             "-b:a", "\(bitrateKbps)k",
+        ]
+
+        // Loudness normalization: bake a fixed gain into the audio so that
+        // players without ReplayGain support (most phone stock apps) still
+        // play tracks at an even level. A true-peak limiter after the gain
+        // prevents clipping on boosted tracks (ceiling ≈ −1 dBTP).
+        if let gain = normalizationGainDB, abs(gain) > 0.05 {
+            let g = String(format: "%.2f", gain)
+            args += [
+                "-af",
+                "volume=\(g)dB,alimiter=level_in=1:level_out=1:limit=0.891:attack=5:release=50",
+            ]
+        }
+
+        args += [
             "-movflags", "+faststart",
             "-y", output.path,
         ]

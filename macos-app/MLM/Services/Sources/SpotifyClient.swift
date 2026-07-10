@@ -34,6 +34,7 @@ final class SpotifyClient {
     private let oauthManager: OAuthManager
     private let trackRepository: TrackRepository
     private let sourceRepository: SourceRepository
+    private let playlistRepository: PlaylistRepository?
 
     // MARK: - Init
 
@@ -42,6 +43,7 @@ final class SpotifyClient {
         oauthManager: OAuthManager,
         trackRepository: TrackRepository,
         sourceRepository: SourceRepository,
+        playlistRepository: PlaylistRepository? = nil,
         clientId: String? = nil,
         clientSecret: String? = nil
     ) {
@@ -49,6 +51,7 @@ final class SpotifyClient {
         self.oauthManager = oauthManager
         self.trackRepository = trackRepository
         self.sourceRepository = sourceRepository
+        self.playlistRepository = playlistRepository
         self.clientId = clientId ?? CredentialsLoader.credential(key: "SPOTIFY_CLIENT_ID") ?? ""
         self.clientSecret = clientSecret ?? CredentialsLoader.credential(key: "SPOTIFY_CLIENT_SECRET") ?? ""
     }
@@ -318,6 +321,136 @@ final class SpotifyClient {
         return nil
     }
 
+    // MARK: - Playlist Browsing
+
+    /// Fetch the user's playlists for browsing.
+    func fetchPlaylists() async throws -> [SpotifyPlaylistSimple] {
+        var all: [SpotifyPlaylistSimple] = []
+        var offset = 0
+        let pageSize = 50
+        while true {
+            let response: SpotifyPaginatedResponse<SpotifyPlaylistSimple> = try await apiRequest(
+                endpoint: "me/playlists",
+                queryItems: [
+                    URLQueryItem(name: "limit", value: "\(pageSize)"),
+                    URLQueryItem(name: "offset", value: "\(offset)")
+                ]
+            )
+            all.append(contentsOf: response.items)
+            if response.next == nil || response.items.isEmpty { break }
+            offset += pageSize
+        }
+        return all
+    }
+
+    /// Fetch the ordered track list of a playlist (metadata only — Spotify
+    /// provides no downloadable audio).
+    func fetchPlaylistTracks(playlistId: String) async throws -> [SpotifyTrackObject] {
+        var tracks: [SpotifyTrackObject] = []
+        var offset = 0
+        let pageSize = 100
+        while true {
+            let response: SpotifyPaginatedResponse<SpotifyPlaylistTrackItem> = try await apiRequest(
+                endpoint: "playlists/\(playlistId)/tracks",
+                queryItems: [
+                    URLQueryItem(name: "limit", value: "\(pageSize)"),
+                    URLQueryItem(name: "offset", value: "\(offset)")
+                ]
+            )
+            tracks.append(contentsOf: response.items.compactMap { $0.track })
+            if response.next == nil || response.items.isEmpty { break }
+            offset += pageSize
+        }
+        return tracks
+    }
+
+    /// Import a playlist into the local library (tracks as remote metadata +
+    /// a source-linked playlist), returning its local playlist ID.
+    @discardableResult
+    func importPlaylist(_ playlist: SpotifyPlaylistSimple) async throws -> Int64? {
+        let profile = try await fetchProfile()
+        let source = try await sourceRepository.upsert(name: "spotify", userId: profile.id)
+        guard let sourceId = source.id else { return nil }
+        guard let playlistRepo = playlistRepository else { return nil }
+
+        let scTracks = try await fetchPlaylistTracks(playlistId: playlist.id)
+
+        var orderedIds: [Int64] = []
+        for spTrack in scTracks {
+            let artist = spTrack.artists.first?.name ?? "Unknown"
+            let title = spTrack.name
+            let album = spTrack.album?.name ?? "Unknown"
+            let externalId = spTrack.id
+
+            // Reuse an existing track linked by external_id, else insert.
+            if let existing = try? await trackRepository.fetchTrackByExternalId(externalId, sourceName: "spotify"),
+               let id = existing.id {
+                orderedIds.append(id)
+                continue
+            }
+
+            var track = Track(
+                artist: artist,
+                albumArtist: artist,
+                album: album,
+                title: title,
+                format: "spotify",
+                originalPath: "spotify://track/\(externalId)"
+            )
+            track.duration = spTrack.durationMs / 1000
+            if let releaseDate = spTrack.album?.releaseDate,
+               releaseDate.count >= 4,
+               let year = Int(String(releaseDate.prefix(4))) {
+                track.year = year
+            }
+            let inserted = try await trackRepository.insert(track)
+            if let id = inserted.id {
+                try await sourceRepository.linkTrackToSource(
+                    trackId: id,
+                    sourceId: sourceId,
+                    externalId: externalId
+                )
+                orderedIds.append(id)
+            }
+        }
+
+        let dbPlaylist = try await playlistRepo.findOrCreateSourcePlaylist(
+            name: playlist.name,
+            sourceId: sourceId,
+            externalId: playlist.id
+        )
+        if let playlistId = dbPlaylist.id {
+            try await playlistRepo.replaceTrackList(playlistId: playlistId, trackIds: orderedIds)
+            NotificationCenter.default.post(name: .playlistDidChange, object: nil)
+        }
+        return dbPlaylist.id
+    }
+
+    // MARK: - Search
+
+    /// Search Spotify tracks by free-text query.
+    func search(query: String, limit: Int = 25) async throws -> [RemoteSearchResult] {
+        let response: SpotifySearchResponse = try await apiRequest(
+            endpoint: "search",
+            queryItems: [
+                URLQueryItem(name: "q", value: query),
+                URLQueryItem(name: "type", value: "track"),
+                URLQueryItem(name: "limit", value: "\(limit)"),
+            ]
+        )
+        return response.tracks.items.map { t in
+            RemoteSearchResult(
+                id: "sp-\(t.id)",
+                source: .spotify,
+                artist: t.artists.first?.name ?? "Unknown",
+                title: t.name,
+                durationSeconds: t.durationMs / 1000,
+                externalId: t.id,
+                sourceURL: nil
+            )
+        }
+    }
+
     // MARK: - Errors
 
     enum SpotifyError: LocalizedError {
@@ -429,4 +562,19 @@ struct SpotifyPlaylistSimple: Codable {
 struct SpotifyPlaylistTracksRef: Codable {
     let total: Int
     let href: String
+}
+
+/// A single item from `playlists/{id}/tracks` — the wrapped track can be
+/// null (e.g. removed/unavailable tracks), so it's optional.
+struct SpotifyPlaylistTrackItem: Codable {
+    let track: SpotifyTrackObject?
+}
+
+/// Response wrapper for `GET /search?type=track`.
+struct SpotifySearchResponse: Codable {
+    let tracks: SpotifyTracksPage
+
+    struct SpotifyTracksPage: Codable {
+        let items: [SpotifyTrackObject]
+    }
 }

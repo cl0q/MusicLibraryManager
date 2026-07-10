@@ -19,6 +19,8 @@ struct TrackDetailView: View {
     @State private var exponent: Float = 1.5
     @State private var gain: Float = 1.0
     @State private var waveformHeight: CGFloat = 80.0
+    @State private var bpmSegments: [DanceabilityAnalyzer.BpmSegment] = []
+    @State private var isLoadingBpmSegments = false
 
     // Hover state for fused play/pause cover art button
     @State private var isHoveringCover = false
@@ -50,6 +52,7 @@ struct TrackDetailView: View {
         .frame(minWidth: 320)
         .onAppear {
             setupPlaybackVM()
+            Task { await loadBpmSegments() }
         }
     }
 
@@ -218,6 +221,9 @@ struct TrackDetailView: View {
             }
             .frame(height: waveformHeight)
  
+            // Per-segment BPM markers (e.g. "1:00–2:00 · 150 BPM")
+            bpmTimeline
+
             // Time display
             if isCurrentTrack, let vm = playbackVM {
                 HStack {
@@ -260,8 +266,6 @@ struct TrackDetailView: View {
     }
 
     // MARK: - State Helpers
-
-    /// Whether this track is the currently loaded track in the player.
     private var isCurrentTrack: Bool {
         guard let currentTrack = playbackVM?.currentTrack,
               let currentID = currentTrack.id,
@@ -281,6 +285,70 @@ struct TrackDetailView: View {
     private func setupPlaybackVM() {
         if playbackVM == nil {
             playbackVM = container.playbackViewModel
+        }
+    }
+
+    // MARK: - BPM Timeline
+
+    /// A proportional strip of per-segment BPM markers below the waveform.
+    @ViewBuilder
+    private var bpmTimeline: some View {
+        if isLoadingBpmSegments {
+            HStack(spacing: 4) {
+                ProgressView().controlSize(.small)
+                Text("BPM-Verlauf wird berechnet…")
+                    .font(MLMFont.dataSmall)
+                    .foregroundColor(.mlmInkMuted)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else if bpmSegments.count > 1 {
+            let total = bpmSegments.last?.endSeconds ?? 0
+            if total > 0 {
+                GeometryReader { geo in
+                    HStack(spacing: 1) {
+                        ForEach(bpmSegments) { seg in
+                            let fraction = (seg.endSeconds - seg.startSeconds) / total
+                            Text("\(seg.bpm)")
+                                .font(MLMFont.dataSmall)
+                                .monospacedDigit()
+                                .foregroundColor(.mlmInkSecondary)
+                                .frame(width: max(0, geo.size.width * fraction - 1), height: 16)
+                                .background(Color.mlmBase.opacity(0.6))
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                                .help(segmentTooltip(seg))
+                        }
+                    }
+                }
+                .frame(height: 16)
+            }
+        }
+    }
+
+    private func segmentTooltip(_ seg: DanceabilityAnalyzer.BpmSegment) -> String {
+        "\(timecode(seg.startSeconds))–\(timecode(seg.endSeconds)) · \(seg.bpm) BPM"
+    }
+
+    private func timecode(_ seconds: Double) -> String {
+        let s = Int(seconds.rounded())
+        return String(format: "%d:%02d", s / 60, s % 60)
+    }
+
+    /// Compute per-segment BPM for local tracks (best-effort, off the main path).
+    private func loadBpmSegments() async {
+        guard track.isLocal, let organizedPath = track.organizedPath else { return }
+        guard let configRepo = container.configRepository,
+              let libraryRoot = try? await configRepo.getLibraryRoot(),
+              !libraryRoot.isEmpty else { return }
+
+        let fullPath = URL(fileURLWithPath: libraryRoot)
+            .appendingPathComponent(organizedPath).path
+        let analyzer = DanceabilityAnalyzer()
+        guard analyzer.isAvailable else { return }
+
+        isLoadingBpmSegments = true
+        defer { isLoadingBpmSegments = false }
+        if let segments = try? await analyzer.analyzeSegments(path: fullPath) {
+            bpmSegments = segments
         }
     }
 }

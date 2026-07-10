@@ -240,6 +240,8 @@ struct ContentView: View {
             SourcesView()
         case .reelsInbox:
             ReelsInboxView()
+        case .search:
+            GlobalSearchView()
         }
     }
 
@@ -353,6 +355,7 @@ enum SidebarSection: Hashable, Identifiable {
     case sync
     case sources
     case reelsInbox
+    case search
 
     var id: String {
         switch self {
@@ -366,6 +369,7 @@ enum SidebarSection: Hashable, Identifiable {
         case .sync: return "sync"
         case .sources: return "sources"
         case .reelsInbox: return "reelsInbox"
+        case .search: return "search"
         }
     }
 
@@ -373,7 +377,7 @@ enum SidebarSection: Hashable, Identifiable {
     /// Sidebar iterates these for top-level rows; `.playlistDetail` cases are
     /// produced dynamically inside `PinnedPlaylistsDisclosure` (Plan 36-04).
     static let topLevelCases: [SidebarSection] = [
-        .library, .playlists, .folders, .duplicates, .discoveryInbox, .reelsInbox, .grooveStudio, .sync, .sources
+        .library, .playlists, .folders, .duplicates, .discoveryInbox, .reelsInbox, .grooveStudio, .sync, .sources, .search
     ]
 
     var label: String {
@@ -388,6 +392,7 @@ enum SidebarSection: Hashable, Identifiable {
         case .sync: "Sync"
         case .sources: "Sources"
         case .reelsInbox: "Reels Inbox"
+        case .search: "Search"
         }
     }
 
@@ -403,6 +408,7 @@ enum SidebarSection: Hashable, Identifiable {
         case .sync: "arrow.triangle.2.circlepath"
         case .sources: "globe"
         case .reelsInbox: "play.rectangle.on.rectangle"
+        case .search: "magnifyingglass"
         }
     }
 
@@ -419,6 +425,7 @@ enum SidebarSection: Hashable, Identifiable {
         case .sync: "4"
         case .sources: "5"
         case .reelsInbox: "7"
+        case .search: "8"
         }
     }
 }

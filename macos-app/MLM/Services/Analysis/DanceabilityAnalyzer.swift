@@ -20,7 +20,11 @@ final class DanceabilityAnalyzer: Sendable {
     /// Slices audio into 256-sample frames (~23.2ms), extracts energy, finds local onset maxima,
     /// and calculates the standard deviation vs. mean of intervals.
     /// Highly regular intervals (low CV) yield a high danceability score.
-    func analyzeTrack(path: String) async throws -> Double? {
+    ///
+    /// Returns the danceability score together with an estimated tempo (BPM)
+    /// derived from the median onset interval, folded into the 70–180 BPM
+    /// range to resolve octave (half/double-time) ambiguity.
+    func analyzeTrack(path: String) async throws -> (danceability: Double, bpm: Int?)? {
         guard let ffmpeg = ffmpegPath else { return nil }
 
         // Decode audio to 11025Hz, mono, 16-bit signed PCM, streaming raw output to stdout
@@ -49,7 +53,7 @@ final class DanceabilityAnalyzer: Sendable {
         // Step 1: RMS energy per frame of 256 samples (~23.2ms duration)
         let frameSize = 256
         let frameCount = sampleCount / frameSize
-        guard frameCount > 10 else { return 0.0 } // Too short for analysis
+        guard frameCount > 10 else { return (0.0, nil) } // Too short for analysis
 
         var frameEnergies = [Double](repeating: 0.0, count: frameCount)
         for f in 0..<frameCount {
@@ -92,7 +96,7 @@ final class DanceabilityAnalyzer: Sendable {
         }
 
         guard peakIndices.count >= 5 else {
-            return 0.0 // Insufficient beats
+            return (0.0, nil) // Insufficient beats
         }
 
         // Convert frames to seconds
@@ -108,7 +112,7 @@ final class DanceabilityAnalyzer: Sendable {
             }
         }
 
-        guard intervals.count >= 4 else { return 0.0 }
+        guard intervals.count >= 4 else { return (0.0, nil) }
 
         let sumIntervals = intervals.reduce(0.0, +)
         let meanInterval = sumIntervals / Double(intervals.count)
@@ -123,7 +127,159 @@ final class DanceabilityAnalyzer: Sendable {
         // Step 5: Coefficient of Variation -> Danceability mapping
         let cv = stdDev / meanInterval
         let score = 1.0 - (cv / 0.5) // regular beats have extremely low CV (~0.0)
-        return max(0.0, min(1.0, score))
+        let danceability = max(0.0, min(1.0, score))
+
+        // Step 6: Tempo (BPM) from the median onset interval. The median is
+        // robust against outlier intervals from missed/extra onsets. Fold the
+        // raw tempo into a musical 70–180 BPM window so half-/double-time
+        // detections collapse onto the perceived tempo.
+        let sorted = intervals.sorted()
+        let mid = sorted.count / 2
+        let medianInterval = sorted.count % 2 == 0
+            ? (sorted[mid - 1] + sorted[mid]) / 2.0
+            : sorted[mid]
+        var bpm: Int? = nil
+        if medianInterval > 0 {
+            var tempo = 60.0 / medianInterval
+            while tempo < 70 { tempo *= 2 }
+            while tempo > 180 { tempo /= 2 }
+            bpm = Int(tempo.rounded())
+        }
+
+        return (danceability, bpm)
+    }
+
+    /// A time span of a track with an estimated tempo.
+    struct BpmSegment: Identifiable, Hashable {
+        let id = UUID()
+        let startSeconds: Double
+        let endSeconds: Double
+        let bpm: Int
+    }
+
+    /// Estimate BPM per fixed-length time window across the whole track, so
+    /// the UI can show "minute 1–2 ≈ 150 BPM" style markers. Adjacent
+    /// windows with the same rounded tempo are merged into one segment.
+    ///
+    /// Decodes the audio once (same 11025Hz mono PCM pipeline as
+    /// `analyzeTrack`) and reuses the onset-interval math per window.
+    func analyzeSegments(path: String, segmentSeconds: Double = 30.0) async throws -> [BpmSegment] {
+        guard let ffmpeg = ffmpegPath else { return [] }
+
+        let pcmData = try await ProcessRunner.runBinary(
+            ffmpeg,
+            arguments: ["-i", path, "-ar", "11025", "-ac", "1", "-f", "s16le", "-"]
+        )
+        guard !pcmData.isEmpty else { return [] }
+
+        let sampleCount = pcmData.count / 2
+        guard sampleCount > 0 else { return [] }
+        var samples = [Int16](repeating: 0, count: sampleCount)
+        _ = samples.withUnsafeMutableBytes { pcmData.copyBytes(to: $0) }
+
+        let frameSize = 256
+        let frameCount = sampleCount / frameSize
+        guard frameCount > 10 else { return [] }
+
+        var frameEnergies = [Double](repeating: 0.0, count: frameCount)
+        for f in 0..<frameCount {
+            var sumSquare = 0.0
+            let offset = f * frameSize
+            for i in 0..<frameSize {
+                let v = Double(samples[offset + i]) / 32768.0
+                sumSquare += v * v
+            }
+            frameEnergies[f] = sqrt(sumSquare / Double(frameSize))
+        }
+
+        var onsetStrength = [Double](repeating: 0.0, count: frameCount)
+        for f in 1..<frameCount {
+            onsetStrength[f] = max(0.0, frameEnergies[f] - frameEnergies[f - 1])
+        }
+
+        let frameDuration = Double(frameSize) / 11025.0
+        let framesPerSegment = max(1, Int(segmentSeconds / frameDuration))
+        let minFramesBetweenPeaks = Int(0.200 * 11025.0 / Double(frameSize))
+
+        var raw: [(start: Double, end: Double, bpm: Int)] = []
+        var windowStart = 0
+        while windowStart < frameCount {
+            let windowEnd = min(windowStart + framesPerSegment, frameCount)
+            if let bpm = Self.bpm(
+                onsetStrength: onsetStrength,
+                range: windowStart..<windowEnd,
+                frameDuration: frameDuration,
+                minFramesBetweenPeaks: minFramesBetweenPeaks
+            ) {
+                raw.append((
+                    Double(windowStart) * frameDuration,
+                    Double(windowEnd) * frameDuration,
+                    bpm
+                ))
+            }
+            windowStart = windowEnd
+        }
+
+        // Merge adjacent windows sharing the same tempo.
+        var merged: [BpmSegment] = []
+        for r in raw {
+            if var last = merged.last, last.bpm == r.bpm {
+                last = BpmSegment(startSeconds: last.startSeconds, endSeconds: r.end, bpm: r.bpm)
+                merged[merged.count - 1] = last
+            } else {
+                merged.append(BpmSegment(startSeconds: r.start, endSeconds: r.end, bpm: r.bpm))
+            }
+        }
+        return merged
+    }
+
+    /// Compute a folded BPM estimate from a slice of the onset-strength
+    /// envelope, or nil when there aren't enough regular beats.
+    private static func bpm(
+        onsetStrength: [Double],
+        range: Range<Int>,
+        frameDuration: Double,
+        minFramesBetweenPeaks: Int
+    ) -> Int? {
+        guard range.count > 4 else { return nil }
+        var sum = 0.0
+        for f in range { sum += onsetStrength[f] }
+        let mean = sum / Double(range.count)
+        let threshold = mean * 1.5
+        guard threshold > 0 else { return nil }
+
+        var peaks: [Int] = []
+        let lower = max(range.lowerBound, 1)
+        let upper = min(range.upperBound, onsetStrength.count - 1)
+        guard lower < upper else { return nil }
+        for f in lower..<upper {
+            let val = onsetStrength[f]
+            if val > threshold && val > onsetStrength[f - 1] && val > onsetStrength[f + 1] {
+                if let last = peaks.last {
+                    if f - last >= minFramesBetweenPeaks { peaks.append(f) }
+                } else {
+                    peaks.append(f)
+                }
+            }
+        }
+        guard peaks.count >= 5 else { return nil }
+
+        let times = peaks.map { Double($0) * frameDuration }
+        var intervals: [Double] = []
+        for i in 0..<(times.count - 1) {
+            let diff = times[i + 1] - times[i]
+            if diff >= 0.2 && diff <= 1.5 { intervals.append(diff) }
+        }
+        guard intervals.count >= 4 else { return nil }
+
+        let sorted = intervals.sorted()
+        let mid = sorted.count / 2
+        let median = sorted.count % 2 == 0 ? (sorted[mid - 1] + sorted[mid]) / 2.0 : sorted[mid]
+        guard median > 0 else { return nil }
+        var tempo = 60.0 / median
+        while tempo < 70 { tempo *= 2 }
+        while tempo > 180 { tempo /= 2 }
+        return Int(tempo.rounded())
     }
 
     /// Batch-analyze multiple tracks for Danceability with multi-threaded worker limit.
@@ -225,8 +381,8 @@ final class DanceabilityAnalyzer: Sendable {
         }
 
         do {
-            if let danceability = try await analyzeTrack(path: resolvedPath) {
-                try await trackRepository.updateDanceability(trackId: trackId, danceability: danceability)
+            if let result = try await analyzeTrack(path: resolvedPath) {
+                try await trackRepository.updateDanceability(trackId: trackId, danceability: result.danceability, bpm: result.bpm)
 
                 tracker.updateProgress(
                     trackId: trackId,
@@ -236,7 +392,7 @@ final class DanceabilityAnalyzer: Sendable {
                 )
 
                 AppLogger.shared.debug(
-                    "Danceability [\(tracker.currentState.current)/\(tracker.currentState.total)] \(track.artist) - \(track.title) → \(Int(danceability * 100))%, saved to DB",
+                    "Danceability [\(tracker.currentState.current)/\(tracker.currentState.total)] \(track.artist) - \(track.title) → \(Int(result.danceability * 100))%, \(result.bpm.map { "\($0) BPM" } ?? "no BPM"), saved to DB",
                     source: "Danceability"
                 )
                 return .success(())

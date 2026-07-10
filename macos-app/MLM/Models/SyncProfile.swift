@@ -35,6 +35,10 @@ struct SyncProfile: Codable, FetchableRecord, MutablePersistableRecord, Identifi
     var cleanupRemovedFiles: Bool = true
     var playlistFormat: String = "rockbox"
 
+    /// Bake EBU R128 loudness normalization into exported AAC (v24).
+    /// Only applies when transcodeMode != keepOriginals.
+    var normalizeLoudness: Bool = false
+
     /// Type-safe computed accessor. All consumers (SyncService, SyncSettingsForm, tests)
     /// use this for switch statements. DB writes always use `.rawValue` strings.
     var transcodeModeEnum: TranscodeMode {
@@ -59,6 +63,7 @@ struct SyncProfile: Codable, FetchableRecord, MutablePersistableRecord, Identifi
         case fat32SafePaths = "fat32_safe_paths"
         case cleanupRemovedFiles = "cleanup_removed_files"
         case playlistFormat = "playlist_format"
+        case normalizeLoudness = "normalize_loudness"
     }
 
     enum Columns {
@@ -79,7 +84,8 @@ struct SyncProfile: Codable, FetchableRecord, MutablePersistableRecord, Identifi
         transcodeMode: String = "keep_originals",
         fat32SafePaths: Bool = true,
         cleanupRemovedFiles: Bool = true,
-        playlistFormat: String = "rockbox"
+        playlistFormat: String = "rockbox",
+        normalizeLoudness: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -92,6 +98,7 @@ struct SyncProfile: Codable, FetchableRecord, MutablePersistableRecord, Identifi
         self.fat32SafePaths = fat32SafePaths
         self.cleanupRemovedFiles = cleanupRemovedFiles
         self.playlistFormat = playlistFormat
+        self.normalizeLoudness = normalizeLoudness
     }
 
     mutating func didInsert(_ inserted: InsertionSuccess) {

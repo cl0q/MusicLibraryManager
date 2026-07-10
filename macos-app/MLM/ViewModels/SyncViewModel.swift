@@ -224,7 +224,8 @@ final class SyncViewModel {
         fat32SafePaths: Bool? = nil,
         cleanupRemovedFiles: Bool? = nil,
         playlistPathPrefix: String? = nil,
-        playlistFormat: String? = nil
+        playlistFormat: String? = nil,
+        normalizeLoudness: Bool? = nil
     ) async {
         guard let profileId = selectedProfile?.id else { return }
         do {
@@ -237,7 +238,8 @@ final class SyncViewModel {
                 transcodeMode: transcodeMode,
                 fat32SafePaths: fat32SafePaths,
                 cleanupRemovedFiles: cleanupRemovedFiles,
-                playlistFormat: playlistFormat
+                playlistFormat: playlistFormat,
+                normalizeLoudness: normalizeLoudness
             )
             await loadProfiles()
             // Refresh selectedProfile from the reloaded list to reflect updated fields

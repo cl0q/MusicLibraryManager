@@ -73,7 +73,13 @@ final class DownloadViewModel {
     // MARK: - Actions
 
     /// Download remote tracks that don't have local files yet.
-    func downloadTracks(_ tracks: [Track]) async {
+    ///
+    /// - Parameter preferredSource: pin the download to a specific source
+    ///   (e.g. `.soundcloud` for SoundCloud playlists). Defaults to `.auto`.
+    func downloadTracks(
+        _ tracks: [Track],
+        preferredSource: DownloadOrchestrator.PreferredSource = .auto
+    ) async {
         guard let orchestrator else {
             AppLogger.shared.log("Download orchestrator not configured", level: .error, source: "Download")
             return
@@ -102,6 +108,13 @@ final class DownloadViewModel {
         requests.reserveCapacity(remoteTracks.count)
         for track in remoteTracks {
             let (scURL, userId) = await resolveSoundCloudURL(for: track)
+            // When the download is pinned to YouTube, hand the orchestrator
+            // the video URL directly (playlist tracks store it in
+            // original_path) so it downloads the exact video instead of
+            // running a fresh search.
+            let ytURL: String? = preferredSource == .youtube
+                ? youTubeURLFromOriginalPath(track.originalPath)
+                : nil
             requests.append(
                 DownloadOrchestrator.DownloadRequest(
                     trackId: track.id ?? 0,
@@ -109,7 +122,9 @@ final class DownloadViewModel {
                     title: track.title,
                     query: "\(track.artist) - \(track.title)",
                     soundcloudURL: scURL,
-                    userId: userId
+                    userId: userId,
+                    preferredSource: preferredSource,
+                    youtubeURL: ytURL
                 )
             )
         }
@@ -559,5 +574,16 @@ final class DownloadViewModel {
         let id = String(path.dropFirst(prefix.count))
         guard !id.isEmpty, id.allSatisfy(\.isNumber) else { return nil }
         return id
+    }
+
+    /// Return the original_path when it's a URL usable by a YouTube-pinned
+    /// download. yt-dlp's `downloadByURL` supports YouTube *and* hundreds of
+    /// other sites (the link-downloader feeds arbitrary URLs), so any
+    /// http(s) URL is accepted here.
+    private func youTubeURLFromOriginalPath(_ path: String) -> String? {
+        guard path.hasPrefix("https://") || path.hasPrefix("http://") else {
+            return nil
+        }
+        return path
     }
 }

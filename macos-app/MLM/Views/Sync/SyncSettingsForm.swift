@@ -17,6 +17,7 @@ struct SyncSettingsForm: View {
     @State private var localFat32: Bool
     @State private var localCleanup: Bool
     @State private var localPlaylistFormat: String
+    @State private var localNormalizeLoudness: Bool
 
     init(profile: SyncProfile, vm: SyncViewModel) {
         self.profile = profile
@@ -26,6 +27,7 @@ struct SyncSettingsForm: View {
         _localFat32 = State(initialValue: profile.fat32SafePaths)
         _localCleanup = State(initialValue: profile.cleanupRemovedFiles)
         _localPlaylistFormat = State(initialValue: profile.playlistFormat)
+        _localNormalizeLoudness = State(initialValue: profile.normalizeLoudness)
     }
 
     var body: some View {
@@ -121,6 +123,21 @@ struct SyncSettingsForm: View {
                         Divider().background(Color.mlmEdgeSubtle)
 
                         settingRow(
+                            icon: "speaker.wave.2.fill",
+                            title: "Lautstärke angleichen",
+                            description: "Gleicht alle Lieder auf −14 LUFS an (nur bei AAC-Transcode)",
+                            content: Toggle("", isOn: $localNormalizeLoudness)
+                                .toggleStyle(.switch)
+                                .labelsHidden()
+                                .disabled(localTranscodeMode == "keep_originals")
+                        )
+                        .onChange(of: localNormalizeLoudness) { _, newValue in
+                            Task { await vm.updateProfileSettings(normalizeLoudness: newValue) }
+                        }
+
+                        Divider().background(Color.mlmEdgeSubtle)
+
+                        settingRow(
                             icon: "folder.badge.gearshape",
                             title: "Kompatible Pfade",
                             description: "Bereinigt Sonderzeichen im Dateipfad für FAT32/SD-Karten",
@@ -166,6 +183,7 @@ struct SyncSettingsForm: View {
             localFat32 = profile.fat32SafePaths
             localCleanup = profile.cleanupRemovedFiles
             localPlaylistFormat = profile.playlistFormat
+            localNormalizeLoudness = profile.normalizeLoudness
         }
     }
 

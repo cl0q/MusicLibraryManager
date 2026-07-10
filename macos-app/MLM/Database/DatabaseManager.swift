@@ -708,7 +708,35 @@ final class DatabaseManager: Sendable {
             }
         }
 
-        migrator.registerMigration("v24_enhanced_search_text") { db in
+        // ──────────────────────────────────────────────────────────────
+        // Migration v24_normalize_loudness: apply EBU R128 gain on export
+        // Adds normalize_loudness toggle to sync_profiles. When enabled and
+        // transcoding to AAC, the measured per-track LUFS is used to bake a
+        // loudness gain into the exported audio (not just RG tags) so that
+        // phone players without ReplayGain support still play at even volume.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v24_normalize_loudness") { db in
+            if try !db.columns(in: "sync_profiles").contains(where: { $0.name == "normalize_loudness" }) {
+                try db.alter(table: "sync_profiles") { t in
+                    t.add(column: "normalize_loudness", .integer).notNull().defaults(to: 0)
+                }
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        // Migration v25_bpm: estimated tempo per track
+        // Populated by DanceabilityAnalyzer alongside danceability.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v25_bpm") { db in
+            if try !db.columns(in: "tracks").contains(where: { $0.name == "bpm" }) {
+                try db.alter(table: "tracks") { t in
+                    t.add(column: "bpm", .integer)
+                }
+            }
+            try db.create(indexOn: "tracks", columns: ["bpm"], options: .ifNotExists)
+        }
+
+        migrator.registerMigration("v26_enhanced_search_text") { db in
             let rows = try Row.fetchAll(db, sql: "SELECT id, artist, album_artist, album, title, genre, format FROM tracks")
             for row in rows {
                 guard let rowId = row["id"] as? Int64 else { continue }
@@ -728,23 +756,23 @@ final class DatabaseManager: Sendable {
             }
         }
 
-        migrator.registerMigration("v25_smart_embeddings") { db in
-            try db.create(table: "track_embeddings") { t in
+        migrator.registerMigration("v27_smart_embeddings") { db in
+            try db.create(table: "track_embeddings", options: .ifNotExists) { t in
                 t.column("track_id", .integer).primaryKey().references("tracks", column: "id", onDelete: .cascade)
                 t.column("master_embedding", .blob).notNull()
                 t.column("drop_offset", .double).notNull()
                 t.column("mix_category", .text)
             }
             
-            try db.create(table: "track_segment_embeddings") { t in
+            try db.create(table: "track_segment_embeddings", options: .ifNotExists) { t in
                 t.autoIncrementedPrimaryKey("id")
                 t.column("track_id", .integer).notNull().references("tracks", column: "id", onDelete: .cascade)
                 t.column("offset_seconds", .double).notNull()
                 t.column("segment_embedding", .blob).notNull()
             }
-            try db.create(index: "idx_segment_track", on: "track_segment_embeddings", columns: ["track_id"])
+            try db.create(index: "idx_segment_track", on: "track_segment_embeddings", columns: ["track_id"], options: .ifNotExists)
 
-            try db.create(table: "track_similarity_feedback") { t in
+            try db.create(table: "track_similarity_feedback", options: .ifNotExists) { t in
                 t.column("seed_track_id", .integer).notNull().references("tracks", column: "id", onDelete: .cascade)
                 t.column("target_track_id", .integer).notNull().references("tracks", column: "id", onDelete: .cascade)
                 t.column("feedback_value", .integer).notNull()
@@ -753,8 +781,8 @@ final class DatabaseManager: Sendable {
             }
         }
 
-        migrator.registerMigration("v26_track_discovery_log") { db in
-            try db.create(table: "track_discovery_log") { t in
+        migrator.registerMigration("v28_track_discovery_log") { db in
+            try db.create(table: "track_discovery_log", options: .ifNotExists) { t in
                 t.column("discovered_track_id", .integer).primaryKey().references("tracks", column: "id", onDelete: .cascade)
                 t.column("seed_track_id", .integer).references("tracks", column: "id", onDelete: .setNull)
                 t.column("discovery_source", .text).notNull()
@@ -763,8 +791,9 @@ final class DatabaseManager: Sendable {
             }
         }
 
-        migrator.registerMigration("v27_genre_index") { db in
+        migrator.registerMigration("v29_genre_index") { db in
             try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_tracks_genre ON tracks(genre)")
+        }
         }
 
         return migrator

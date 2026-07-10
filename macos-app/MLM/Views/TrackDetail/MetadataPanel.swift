@@ -241,6 +241,7 @@ struct MetadataPanel: View {
                 analysisRow("LUFS (Integrated)", value: track.lufsI.map { String(format: "%.1f LUFS", $0) } ?? "—")
                 analysisRow("Loudness Range", value: track.lufsRange.map { String(format: "%.1f LU", $0) } ?? "—")
                 analysisRow("True Peak", value: track.truePeak.map { String(format: "%.1f dBTP", $0) } ?? "—")
+                analysisRow("Tempo (BPM)", value: track.bpm.map { "\($0) BPM" } ?? "—")
 
                 Divider()
                     .background(Color.mlmEdge.opacity(0.4))
