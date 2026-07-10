@@ -397,6 +397,7 @@ final class FolderViewModel {
             case .year:      result = compare(a.year, b.year)
             case .energy:    result = compare(a.energyBucket, b.energyBucket)
             case .danceability: result = compare(a.danceability, b.danceability)
+            case .bpm:       result = compare(a.bpm, b.bpm)
             case .dateAdded: result = (a.dateAdded ?? "").compare(b.dateAdded ?? "")
             }
             return sortDescriptor.ascending

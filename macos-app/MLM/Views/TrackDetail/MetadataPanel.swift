@@ -654,11 +654,15 @@ struct MetadataPanel: View {
             guard analyzer.isAvailable else { return }
 
             do {
-                if let danceability = try await analyzer.analyzeTrack(path: url.path),
+                if let result = try await analyzer.analyzeTrack(path: url.path),
                    let trackId = track.id,
                    let trackRepo = container.trackRepository {
 
-                    try await trackRepo.updateDanceability(trackId: trackId, danceability: danceability)
+                    try await trackRepo.updateDanceability(
+                        trackId: trackId,
+                        danceability: result.danceability,
+                        bpm: result.bpm
+                    )
                     NotificationCenter.default.post(name: .libraryDidImport, object: nil)
                 }
             } catch {

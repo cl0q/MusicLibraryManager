@@ -794,7 +794,6 @@ final class DatabaseManager: Sendable {
         migrator.registerMigration("v29_genre_index") { db in
             try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_tracks_genre ON tracks(genre)")
         }
-        }
 
         return migrator
     }

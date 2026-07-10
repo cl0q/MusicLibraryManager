@@ -45,7 +45,7 @@ struct RemotePlaylistsView: View {
     @ViewBuilder
     private func content(_ vm: RemotePlaylistsViewModel) -> some View {
         if vm.selectedTitle != nil {
-            PlaylistDetailView(viewModel: vm)
+            RemotePlaylistDetailView(viewModel: vm)
         } else if vm.allowsURLImport {
             urlImport(vm)
         } else {
@@ -122,7 +122,7 @@ struct RemotePlaylistsView: View {
 
 // MARK: - Playlist Detail
 
-private struct PlaylistDetailView: View {
+private struct RemotePlaylistDetailView: View {
     let viewModel: RemotePlaylistsViewModel
 
     @State private var mode: SelectionMode = .all

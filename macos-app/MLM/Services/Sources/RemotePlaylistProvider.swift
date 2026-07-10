@@ -36,6 +36,7 @@ extension RemotePlaylistProvider {
     var allowsURLImport: Bool { false }
     var downloadNote: String? { nil }
     func fetchPlaylists() async throws -> [RemotePlaylistSummary] { [] }
+    func importPlaylist(_ summary: RemotePlaylistSummary) async throws -> Int64? { nil }
     func importPlaylist(fromURL url: String) async throws -> Int64? { nil }
 }
 
