@@ -53,6 +53,13 @@ final class SoundCloudDownloader: Sendable {
         try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
+        // Recorded BEFORE launching scdl. Used as a lower bound when
+        // picking up the produced file: a leftover file from a crashed
+        // prior run (whose `defer { removeItem }` never fired) would
+        // predate this timestamp and must be rejected rather than
+        // silently returned as this invocation's result (T-39-02).
+        let invocationStart = Date()
+
         let sanitizedTitle = PathSanitizer.sanitizeComponent(title)
 
         // Build scdl command. Pass --client-id / --auth-token when we can
@@ -115,13 +122,22 @@ final class SoundCloudDownloader: Sendable {
             return .notFound
         }
 
-        // Find the most recently created audio file in temp dir
-        guard let downloadedFile = findMostRecentAudioFile(in: tmpDir) else {
+        // Find the most recently created audio file in temp dir. This dir
+        // is exclusive to this trackId/invocation, but is still guarded:
+        // reject a candidate older than invocationStart (leftover from a
+        // crashed prior run) and fail rather than guess when more than one
+        // audio candidate is present.
+        guard let downloadedFile = findMostRecentAudioFile(in: tmpDir, notBefore: invocationStart) else {
             return .notFound
         }
 
+        // Collapse a doubled audio-container extension (e.g. .m4a.m4a)
+        // before the move — RESEARCH Pitfall 4 flags scdl's own naming
+        // logic as the [ASSUMED] source; live confirmation is plan 39-07.
+        let collapsedName = Self.collapseDoubledAudioExtension(downloadedFile.lastPathComponent)
+
         // Move to output directory
-        let outputFile = outputDir.appendingPathComponent(downloadedFile.lastPathComponent)
+        let outputFile = outputDir.appendingPathComponent(collapsedName)
         if FileManager.default.fileExists(atPath: outputFile.path) {
             try FileManager.default.removeItem(at: outputFile)
         }
@@ -132,8 +148,17 @@ final class SoundCloudDownloader: Sendable {
 
     // MARK: - Private
 
-    /// Find the most recently modified audio file in a directory.
-    private func findMostRecentAudioFile(in directory: URL) -> URL? {
+    /// Find the audio file produced by THIS invocation in `directory`.
+    ///
+    /// Guards against two failure modes of the plain "most recent file"
+    /// scan (T-39-02):
+    /// 1. Stale pickup — a leftover file from a crashed prior run (whose
+    ///    `defer { removeItem }` never fired) predates `notBefore` and is
+    ///    rejected rather than returned as this invocation's result.
+    /// 2. Ambiguous pickup — more than one audio candidate exists after
+    ///    filtering for freshness; rather than guessing which one belongs
+    ///    to this invocation, this logs a warning and fails closed.
+    private func findMostRecentAudioFile(in directory: URL, notBefore: Date) -> URL? {
         let fm = FileManager.default
         guard let contents = try? fm.contentsOfDirectory(
             at: directory,
@@ -141,13 +166,64 @@ final class SoundCloudDownloader: Sendable {
             options: .skipsHiddenFiles
         ) else { return nil }
 
-        return contents
-            .filter { Self.audioExtensions.contains($0.pathExtension.lowercased()) }
-            .max { a, b in
-                let dateA = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                let dateB = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                return dateA < dateB
+        let candidates = contents.filter { Self.audioExtensions.contains($0.pathExtension.lowercased()) }
+
+        let freshCandidates = candidates.filter { url in
+            let modDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            if modDate < notBefore {
+                AppLogger.shared.warn(
+                    "chain[SC]: rejecting stale candidate '\(url.lastPathComponent)' (modified before invocation start) — not this invocation's output",
+                    source: "Download"
+                )
+                return false
             }
+            return true
+        }
+
+        if freshCandidates.count > 1 {
+            AppLogger.shared.warn(
+                "chain[SC]: \(freshCandidates.count) audio candidates found in temp dir after freshness filtering — refusing to guess, treating as notFound",
+                source: "Download"
+            )
+            return nil
+        }
+
+        return freshCandidates.first
+    }
+
+    /// Collapse a trailing IDENTICAL doubled audio-container extension
+    /// (e.g. `song.m4a.m4a` -> `song.m4a`) to a single extension. Pure,
+    /// no I/O — operates only on the produced filename string. Returns
+    /// `name` unchanged when there is no doubled pair, when the stem
+    /// merely contains an unrelated dot (`my.song.opus`), or when the two
+    /// trailing extensions are DIFFERENT audio formats (`song.mp3.m4a`) —
+    /// guessing a canonical extension in that case would be wrong.
+    static func collapseDoubledAudioExtension(_ name: String) -> String {
+        let audioExtPattern = audioExtensions.joined(separator: "|")
+        guard let regex = try? NSRegularExpression(
+            pattern: "\\.(\(audioExtPattern))\\.(\(audioExtPattern))$",
+            options: .caseInsensitive
+        ) else { return name }
+
+        let range = NSRange(name.startIndex..., in: name)
+        guard let match = regex.firstMatch(in: name, range: range),
+              let firstExtRange = Range(match.range(at: 1), in: name),
+              let secondExtRange = Range(match.range(at: 2), in: name)
+        else {
+            return name
+        }
+
+        let firstExt = name[firstExtRange]
+        let secondExt = name[secondExtRange]
+        guard firstExt.lowercased() == secondExt.lowercased() else {
+            return name
+        }
+
+        // Drop the first extension + its dot, keeping the second
+        // extension's exact characters as produced.
+        guard let fullMatchRange = Range(match.range, in: name) else { return name }
+        let secondExtWithDot = "." + secondExt
+        return name.replacingCharacters(in: fullMatchRange, with: secondExtWithDot)
     }
 }
 
