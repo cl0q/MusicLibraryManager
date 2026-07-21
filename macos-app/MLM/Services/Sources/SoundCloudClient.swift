@@ -1,5 +1,70 @@
 import Foundation
 
+// MARK: - Injectable Seams (SCDL-04)
+//
+// `OAuthManager` is `final class ... @unchecked Sendable` — it cannot be
+// subclassed or faked, so deterministic 401->refresh->retry test coverage
+// requires an explicit seam for the refresh call. Likewise `URLSession`
+// can't be scripted without hitting the network, so requests go through an
+// injectable HTTP seam too. Production defaults preserve existing behavior
+// (forwarding to `URLSession.shared` / `OAuthManager.refreshAccessToken`).
+
+/// Injectable seam for issuing HTTP requests — lets tests script exact
+/// response sequences (e.g. 401 then 200) deterministically.
+protocol SoundCloudHTTPRequesting: Sendable {
+    func data(for request: URLRequest) async throws -> (Data, URLResponse)
+}
+
+/// Production seam — forwards to `URLSession.shared`.
+struct URLSessionHTTPRequesting: SoundCloudHTTPRequesting {
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        try await URLSession.shared.data(for: request)
+    }
+}
+
+/// Injectable seam for refreshing the SoundCloud OAuth token.
+///
+/// `OAuthManager` is final and cannot be faked directly, so tests substitute
+/// a `SoundCloudTokenRefreshing` instead of the concrete manager.
+protocol SoundCloudTokenRefreshing: Sendable {
+    func refresh(refreshToken: String) async throws -> OAuthManager.TokenResponse
+}
+
+/// Production seam — forwards to `OAuthManager.refreshAccessToken`, preserving
+/// SoundCloud's `grant_type=refresh_token` / `client_id` / `client_secret` wire
+/// format (SCDL-04).
+struct ProductionTokenRefreshing: SoundCloudTokenRefreshing {
+    let oauthManager: OAuthManager
+    let clientId: String
+    let clientSecret: String
+    let tokenURL: URL
+
+    func refresh(refreshToken: String) async throws -> OAuthManager.TokenResponse {
+        try await oauthManager.refreshAccessToken(
+            tokenURL: tokenURL,
+            refreshToken: refreshToken,
+            clientId: clientId,
+            clientSecret: clientSecret
+        )
+    }
+}
+
+/// Injectable seam over `TokenStorage`'s SoundCloud-relevant operations.
+///
+/// `TokenStorage` is a concrete Keychain-backed class. This protocol exists
+/// purely so tests can substitute a spy that records calls (e.g. to prove
+/// `deleteCredentials` is never invoked on a transient 401) without touching
+/// the real Keychain. `TokenStorage` already implements every requirement
+/// below, so it conforms with zero changes to its own file.
+protocol SoundCloudTokenStoring: Sendable {
+    func getCredentials(service: TokenStorage.Service) throws -> TokenStorage.Credentials?
+    func saveTokens(service: TokenStorage.Service, accessToken: String, refreshToken: String?, expiresIn: Int?) throws
+    func updateAccessToken(service: TokenStorage.Service, accessToken: String, expiresIn: Int) throws
+    func deleteCredentials(service: TokenStorage.Service) throws
+}
+
+extension TokenStorage: SoundCloudTokenStoring {}
+
 /// SoundCloud API client — OAuth 2.1 PKCE + liked songs/playlist sync.
 ///
 /// Phase 9 — Ports the Tauri app's `src/sources/soundcloud.rs` to Swift.
@@ -28,27 +93,33 @@ final class SoundCloudClient: Sendable {
     private let redirectURI = LoopbackOAuthServer.redirectURI
 
     private static let authURL = URL(string: "https://soundcloud.com/connect")!
-    private static let tokenURL = URL(string: "https://secure.soundcloud.com/oauth/token")!
+    /// Not `private` — `DependencyContainer` needs this to `register()` the
+    /// SoundCloud token refresh service at boot (SCDL-05).
+    static let tokenURL = URL(string: "https://secure.soundcloud.com/oauth/token")!
     private static let apiBase = URL(string: "https://api.soundcloud.com")!
 
     // MARK: - Dependencies
 
-    private let tokenStorage: TokenStorage
+    private let tokenStorage: SoundCloudTokenStoring
     private let oauthManager: OAuthManager
     private let trackRepository: TrackRepository
     private let sourceRepository: SourceRepository
     private let playlistRepository: PlaylistRepository?
+    private let httpRequesting: SoundCloudHTTPRequesting
+    private let tokenRefreshing: SoundCloudTokenRefreshing
 
     // MARK: - Init
 
     init(
-        tokenStorage: TokenStorage,
+        tokenStorage: SoundCloudTokenStoring,
         oauthManager: OAuthManager,
         trackRepository: TrackRepository,
         sourceRepository: SourceRepository,
         playlistRepository: PlaylistRepository? = nil,
         clientId: String? = nil,
-        clientSecret: String? = nil
+        clientSecret: String? = nil,
+        http: SoundCloudHTTPRequesting? = nil,
+        refresher: SoundCloudTokenRefreshing? = nil
     ) {
         self.tokenStorage = tokenStorage
         self.oauthManager = oauthManager
@@ -57,6 +128,16 @@ final class SoundCloudClient: Sendable {
         self.playlistRepository = playlistRepository
         self.clientId = clientId ?? CredentialsLoader.credential(key: "SOUNDCLOUD_CLIENT_ID") ?? ""
         self.clientSecret = clientSecret ?? CredentialsLoader.credential(key: "SOUNDCLOUD_CLIENT_SECRET") ?? ""
+        // Seams default to production adapters. Built here (not as a
+        // self-referencing default parameter value, which Swift disallows)
+        // so the defaults can bind the just-assigned instance state above.
+        self.httpRequesting = http ?? URLSessionHTTPRequesting()
+        self.tokenRefreshing = refresher ?? ProductionTokenRefreshing(
+            oauthManager: oauthManager,
+            clientId: self.clientId,
+            clientSecret: self.clientSecret,
+            tokenURL: Self.tokenURL
+        )
     }
 
     // MARK: - OAuth Flow
@@ -148,10 +229,16 @@ final class SoundCloudClient: Sendable {
     // MARK: - API Requests
 
     /// Make an authenticated API request.
+    ///
+    /// On 401: refresh the access token exactly once via the injected
+    /// tokenRefreshing seam and retry exactly once. Never deletes stored
+    /// credentials automatically -- the only credential deletion is the
+    /// user-initiated disconnect() (SCDL-04).
     private func apiRequest<T: Decodable>(
         endpoint: String,
         queryItems: [URLQueryItem] = [],
-        type: T.Type
+        type: T.Type,
+        didRetryAfterRefresh: Bool = false
     ) async throws -> T {
         guard let credentials = try tokenStorage.getCredentials(service: .soundcloud) else {
             throw SoundCloudError.notAuthenticated
@@ -168,7 +255,7 @@ final class SoundCloudClient: Sendable {
         request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await httpRequesting.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw SoundCloudError.invalidResponse
         }
@@ -178,16 +265,21 @@ final class SoundCloudClient: Sendable {
             let retryAfter = http.value(forHTTPHeaderField: "Retry-After")
                 .flatMap { Double($0) } ?? 5.0
             try await Task.sleep(nanoseconds: UInt64(retryAfter * 1_000_000_000))
-            return try await apiRequest(endpoint: endpoint, queryItems: queryItems, type: type)
+            return try await apiRequest(endpoint: endpoint, queryItems: queryItems, type: type, didRetryAfterRefresh: didRetryAfterRefresh)
         }
 
         if http.statusCode == 401 {
-            AppLogger.shared.error(
-                "SC API: 401 Unauthorized on \(endpoint) — clearing tokens, re-auth required",
-                source: "sc-api"
-            )
-            try? tokenStorage.deleteCredentials(service: .soundcloud)
-            throw SoundCloudError.tokenExpired
+            guard !didRetryAfterRefresh, let refreshToken = credentials.refreshToken else {
+                AppLogger.shared.error(
+                    "SC API: 401 Unauthorized on \(endpoint)" +
+                    (didRetryAfterRefresh ? " after refresh+retry" : " -- no refresh token stored") +
+                    " -- credentials left intact, re-auth required",
+                    source: "sc-api"
+                )
+                throw SoundCloudError.tokenExpired
+            }
+            try await refreshSoundCloudToken(refreshToken: refreshToken, context: endpoint)
+            return try await apiRequest(endpoint: endpoint, queryItems: queryItems, type: type, didRetryAfterRefresh: true)
         }
 
         guard http.statusCode == 200 else {
@@ -201,7 +293,11 @@ final class SoundCloudClient: Sendable {
     }
 
     /// Make an authenticated request to a full URL (for pagination `next_href`).
-    private func apiRequestURL<T: Decodable>(url: URL, type: T.Type) async throws -> T {
+    private func apiRequestURL<T: Decodable>(
+        url: URL,
+        type: T.Type,
+        didRetryAfterRefresh: Bool = false
+    ) async throws -> T {
         guard let credentials = try tokenStorage.getCredentials(service: .soundcloud) else {
             throw SoundCloudError.notAuthenticated
         }
@@ -210,15 +306,20 @@ final class SoundCloudClient: Sendable {
         request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await httpRequesting.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         if status == 401 {
-            AppLogger.shared.error(
-                "SC API (paged): 401 Unauthorized on \(url) — clearing tokens, re-auth required",
-                source: "sc-api"
-            )
-            try? tokenStorage.deleteCredentials(service: .soundcloud)
-            throw SoundCloudError.tokenExpired
+            guard !didRetryAfterRefresh, let refreshToken = credentials.refreshToken else {
+                AppLogger.shared.error(
+                    "SC API (paged): 401 Unauthorized on \(url)" +
+                    (didRetryAfterRefresh ? " after refresh+retry" : " -- no refresh token stored") +
+                    " -- credentials left intact, re-auth required",
+                    source: "sc-api"
+                )
+                throw SoundCloudError.tokenExpired
+            }
+            try await refreshSoundCloudToken(refreshToken: refreshToken, context: url.absoluteString)
+            return try await apiRequestURL(url: url, type: type, didRetryAfterRefresh: true)
         }
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             let body = String(data: data, encoding: .utf8) ?? ""
@@ -228,6 +329,39 @@ final class SoundCloudClient: Sendable {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         return try decoder.decode(type, from: data)
+    }
+
+    /// Refresh the SoundCloud access token via the injected seam (SCDL-04).
+    ///
+    /// Persists the refreshed access token (and new refresh token if one is
+    /// returned) via the existing token-storage path. Throws
+    /// `SoundCloudError.tokenExpired` -- WITHOUT deleting stored credentials --
+    /// if the refresh itself fails. The caller is responsible for retrying
+    /// the original request exactly once afterward.
+    private func refreshSoundCloudToken(refreshToken: String, context: String) async throws {
+        do {
+            let refreshed = try await tokenRefreshing.refresh(refreshToken: refreshToken)
+            try tokenStorage.updateAccessToken(
+                service: .soundcloud,
+                accessToken: refreshed.accessToken,
+                expiresIn: refreshed.expiresIn ?? 3600
+            )
+            if let newRefreshToken = refreshed.refreshToken {
+                try tokenStorage.saveTokens(
+                    service: .soundcloud,
+                    accessToken: refreshed.accessToken,
+                    refreshToken: newRefreshToken,
+                    expiresIn: refreshed.expiresIn
+                )
+            }
+        } catch {
+            AppLogger.shared.error(
+                "SC API: 401 on \(context) -- refresh failed (\(error.localizedDescription)); " +
+                "credentials left intact for manual re-auth",
+                source: "sc-api"
+            )
+            throw SoundCloudError.tokenExpired
+        }
     }
 
     // MARK: - Profile

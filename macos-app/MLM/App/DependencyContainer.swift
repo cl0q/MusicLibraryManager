@@ -69,6 +69,20 @@ final class DependencyContainer {
 
     private init() {}
 
+    static func configureSoundCloudTokenRefresh(
+        _ tokenRefresh: any TokenRefreshConfiguring,
+        clientId: String,
+        clientSecret: String?
+    ) async {
+        await tokenRefresh.register(
+            service: .soundcloud,
+            tokenURL: SoundCloudClient.tokenURL,
+            clientId: clientId,
+            clientSecret: clientSecret
+        )
+        await tokenRefresh.start()
+    }
+
     deinit {
         if let token = libraryRootObserver {
             NotificationCenter.default.removeObserver(token)
@@ -113,6 +127,15 @@ final class DependencyContainer {
         self.oauthManager = oauth
         let tokenRefresh = TokenRefreshService(tokenStorage: tokens, oauthManager: oauth)
         self.tokenRefreshService = tokenRefresh
+
+        // Register + start proactive token refresh for SoundCloud (SCDL-05).
+        // Without this, tokens are never refreshed in the background and
+        // users are forced to reconnect after every restart.
+        await Self.configureSoundCloudTokenRefresh(
+            tokenRefresh,
+            clientId: CredentialsLoader.credential(key: "SOUNDCLOUD_CLIENT_ID") ?? "",
+            clientSecret: CredentialsLoader.credential(key: "SOUNDCLOUD_CLIENT_SECRET")
+        )
 
         // Unified Search Service
         let scClient = SoundCloudClient(

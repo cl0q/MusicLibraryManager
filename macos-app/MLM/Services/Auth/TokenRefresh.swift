@@ -1,5 +1,16 @@
 import Foundation
 
+protocol TokenRefreshConfiguring: Sendable {
+    func register(
+        service: TokenStorage.Service,
+        tokenURL: URL,
+        clientId: String,
+        clientSecret: String?
+    ) async
+
+    func start() async
+}
+
 /// Background token refresh service.
 ///
 /// Monitors stored OAuth tokens and proactively refreshes them
@@ -21,6 +32,8 @@ actor TokenRefreshService {
         let clientSecret: String?
     }
 
+    extension TokenRefreshService: TokenRefreshConfiguring {}
+
     // MARK: - State
 
     private let tokenStorage: TokenStorage
@@ -31,6 +44,23 @@ actor TokenRefreshService {
 
     /// Interval between refresh checks (60 seconds).
     private let checkInterval: TimeInterval = 60
+
+    // MARK: - Observability (SCDL-05)
+    //
+    // Narrow, read-only signals for boot-wiring tests. Deliberately exposes
+    // no internal timers, mutable state, or the OAuthManager — just enough
+    // to prove `register()`/`start()` were called during app initialization
+    // without depending on the live 60s network refresh loop actually firing.
+
+    /// Snapshot of currently registered services.
+    var registeredServices: Set<TokenStorage.Service> {
+        Set(registrations.keys)
+    }
+
+    /// Whether the background refresh loop has been started.
+    var isRefreshLoopRunning: Bool {
+        isRunning
+    }
 
     // MARK: - Init
 
