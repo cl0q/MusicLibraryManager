@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-05-07)
 Phase: 39
 Plan: 07
 Next: Run `swift build`, `swift test`, and the six live SoundCloud checks on macOS 15+
-Status: Implementation complete; macOS verification pending
+Status: Implementation and safe path migration complete; macOS verification pending
 Last activity: 2026-07-21
 
 ## Phase 39 Summary (v2.1)
@@ -42,6 +42,7 @@ Last activity: 2026-07-21
 - SoundCloud credentials survive transient 401s, refresh once, retry once, and are deleted only by explicit disconnect.
 - Operations and batch totals reflect database persistence; successful retries dequeue only after persistence.
 - SoundCloud artwork URLs are retained without clobbering embedded/local covers and are tried before MusicBrainz.
+- Stale `organized_path` values now have a DB-only preview/apply/rollback flow with ambiguity-safe matching, verified SQLite backups, JSON manifests, and no audio-file moves or automatic Remote demotion (`9b68b52`).
 - Windows static gates and three review passes passed. Swift build/tests and live external-tool checks remain blocked until Plan 39-07 runs on macOS.
 
 ## Phase 5 Summary (v2.0)
