@@ -38,6 +38,11 @@ struct OperationsTab: View {
                        downloadHasState(downloadVM) {
                         sectionHeader("Downloads")
                         DownloadStatusRow(vm: downloadVM)
+                        if !downloadVM.queueItems.isEmpty {
+                            ForEach(downloadVM.queueItems) { item in
+                                DownloadItemRow(item: item)
+                            }
+                        }
                         Divider().padding(.leading, 32)
                     }
 
@@ -273,7 +278,17 @@ struct DownloadStatusRow: View {
             return "Downloading \(n) / \(vm.totalCount)"
         }
         if vm.totalCount > 0 {
-            return "\(vm.completedCount) downloaded \u{00B7} \(vm.failedCount) failed"
+            var parts = [
+                "\(vm.completedCount) downloaded",
+                "\(vm.failedCount) failed",
+            ]
+            if let skipped = vm.lastResult?.skipped, skipped > 0 {
+                parts.append("\(skipped) skipped")
+            }
+            if let cancelled = vm.lastResult?.cancelledTrackIds.count, cancelled > 0 {
+                parts.append("\(cancelled) cancelled")
+            }
+            return parts.joined(separator: " \u{00B7} ")
         }
         return "Downloads"
     }
@@ -288,6 +303,73 @@ struct DownloadStatusRow: View {
     private var progressValue: Double {
         guard vm.totalCount > 0 else { return 0 }
         return min(max(vm.progress, 0), 1)
+    }
+}
+
+// MARK: - Download Item Row
+
+/// Per-item row for a single `DownloadItem` in `queueItems`.
+///
+/// SCDL-06: `queueItems` was populated and updated but rendered nowhere —
+/// this row makes every batch item's real, terminal status visible
+/// (queued/downloading/transcoding/completed/failed), plus the failure
+/// reason when one is available, distinguishing a download-stage failure
+/// ("download failed") from a persistence-stage one ("downloaded but not
+/// saved to library").
+struct DownloadItemRow: View {
+    let item: DownloadItem
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "circle.fill")
+                .font(.system(size: 4))
+                .foregroundColor(.mlmInkMuted)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(item.artist) - \(item.title)")
+                    .font(MLMFont.muted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                if let error = item.error, !error.isEmpty {
+                    Text(error)
+                        .font(MLMFont.muted)
+                        .foregroundColor(.red)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+
+            statusBadge
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
+    }
+
+    private var statusColor: Color {
+        switch item.status {
+        case .queued: .mlmInkMuted
+        case .downloading, .transcoding: .accentColor
+        case .completed: .green
+        case .failed: .red
+        case .skipped: .mlmInkMuted
+        case .cancelled: .orange
+        }
+    }
+
+    @ViewBuilder
+    private var statusBadge: some View {
+        Text(item.status.rawValue)
+            .font(.system(size: 10, weight: .medium))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                Capsule()
+                    .fill(statusColor.opacity(0.15))
+            )
+            .foregroundColor(statusColor)
     }
 }
 

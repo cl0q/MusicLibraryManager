@@ -158,4 +158,29 @@ struct DownloadViewModelTests {
         #expect(vm.completedCount == 1)
         #expect(vm.failedCount == 2)
     }
+
+    @Test func skippedAndCancelledItemsKeepDistinctTerminalStates() async throws {
+        let vm = DownloadViewModel(trackPersister: FakeThrowingPersister(failingTrackIds: []))
+        vm.batchRunnerOverride = FakeBatchRunner(
+            result: DownloadOrchestrator.BatchResult(
+                succeeded: 0,
+                failed: 0,
+                skipped: 1,
+                downloadedPaths: [:],
+                failedTrackIds: [],
+                skippedTrackIds: [1],
+                cancelledTrackIds: [2],
+                downloadedMetadata: [:]
+            )
+        )
+
+        await vm.downloadTracks([
+            makeRemoteTrack(id: 1),
+            makeRemoteTrack(id: 2),
+        ])
+
+        #expect(vm.queueItems.first { $0.trackId == 1 }?.status == .skipped)
+        #expect(vm.queueItems.first { $0.trackId == 2 }?.status == .cancelled)
+        #expect(vm.queueItems.first { $0.trackId == 2 }?.error == "download cancelled")
+    }
 }

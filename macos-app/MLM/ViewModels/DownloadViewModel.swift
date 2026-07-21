@@ -215,9 +215,6 @@ final class DownloadViewModel {
 
                 if index < self.queueItems.count {
                     self.queueItems[index].status = .downloading
-                    if index > 0 {
-                        self.queueItems[index - 1].status = .completed
-                    }
                 }
             },
             onTrackProgress: { [weak self] fraction in
@@ -229,19 +226,47 @@ final class DownloadViewModel {
             }
         )
 
-        lastResult = result
-        completedCount = result.succeeded
-        failedCount = result.failed
-        isDownloading = false
-        progress = 1.0
-        currentTrack = ""
-
         // Persist the four download columns together for each succeeded
         // track: organized_path + format + bitrate + download_status.
         // Updating only organized_path leaves the Library showing stale
         // "0 kbps soundcloud" rows, which is one of the documented
         // invariants for this pipeline.
-        await persistDownloadedTracks(remoteTracks: remoteTracks, result: result)
+        let persistenceFailures = await persistDownloadedTracks(
+            remoteTracks: remoteTracks,
+            result: result
+        )
+
+        var finalResult = result
+        finalResult.succeeded = max(0, result.succeeded - persistenceFailures.count)
+        finalResult.failed = result.failed + persistenceFailures.count
+        finalResult.failedTrackIds.formUnion(persistenceFailures)
+
+        for index in queueItems.indices {
+            let trackId = queueItems[index].trackId
+            if persistenceFailures.contains(trackId) {
+                queueItems[index].status = .failed
+                queueItems[index].error = "downloaded but not saved to library"
+            } else if result.downloadedPaths[trackId] != nil {
+                queueItems[index].status = .completed
+                queueItems[index].error = nil
+            } else if result.skippedTrackIds.contains(trackId) {
+                queueItems[index].status = .skipped
+                queueItems[index].error = nil
+            } else if result.cancelledTrackIds.contains(trackId) {
+                queueItems[index].status = .cancelled
+                queueItems[index].error = "download cancelled"
+            } else {
+                queueItems[index].status = .failed
+                queueItems[index].error = "download failed"
+            }
+        }
+
+        lastResult = finalResult
+        completedCount = finalResult.succeeded
+        failedCount = finalResult.failed
+        isDownloading = false
+        progress = 1.0
+        currentTrack = ""
 
         // Notify Library / Folders / Sidebar so the downloaded rows can
         // move from the Remote tab to the Local tab without requiring a
@@ -250,13 +275,13 @@ final class DownloadViewModel {
             name: .downloadDidComplete,
             object: nil,
             userInfo: [
-                "succeeded": result.succeeded,
-                "failed": result.failed
+                "succeeded": finalResult.succeeded,
+                "failed": finalResult.failed
             ]
         )
 
         AppLogger.shared.log(
-            "Download batch complete: \(result.succeeded) succeeded, \(result.failed) failed, \(result.skipped) skipped",
+            "Download batch complete: \(finalResult.succeeded) succeeded, \(finalResult.failed) failed, \(finalResult.skipped) skipped",
             level: .info,
             source: "Download"
         )
@@ -470,11 +495,23 @@ final class DownloadViewModel {
     private func persistDownloadedTracks(
         remoteTracks: [Track],
         result: DownloadOrchestrator.BatchResult
-    ) async {
+    ) async -> Set<Int64> {
+        guard let persister = activeTrackPersister else {
+            let trackIds = Set(result.downloadedPaths.keys)
+            if !trackIds.isEmpty {
+                AppLogger.shared.error(
+                    "Downloaded files could not be saved because the track repository is unavailable",
+                    source: "Download"
+                )
+            }
+            return trackIds
+        }
+
         let trackById = Dictionary(uniqueKeysWithValues: remoteTracks.compactMap { t -> (Int64, Track)? in
             guard let id = t.id else { return nil }
             return (id, t)
         })
+        var failures: Set<Int64> = []
 
         for (trackId, _) in result.downloadedPaths {
             guard let absolutePath = result.downloadedPaths[trackId] else { continue }
@@ -483,26 +520,40 @@ final class DownloadViewModel {
             let bitrate = info?.bitrate ?? trackById[trackId]?.bitrate
             let relative = relativeLibraryPath(for: absolutePath)
             do {
-                try await activeTrackPersister?.markAsDownloaded(
+                try await persister.markAsDownloaded(
                     trackId: trackId,
                     organizedPath: relative,
                     format: format,
                     bitrate: bitrate,
                     downloadStatus: nil
                 )
-
-                // Enqueue downloaded track for auto-analysis
-                if let updatedTrack = try await trackRepository?.fetchTrack(id: trackId) {
-                    await PerformanceQueueService.shared.enqueueAnalysis(track: updatedTrack)
-                }
             } catch {
+                failures.insert(trackId)
                 AppLogger.shared.log(
                     "Failed to update DB for track \(trackId): \(error)",
                     level: .error,
                     source: "Download"
                 )
+                continue
+            }
+
+            // Analysis scheduling is best-effort and must not turn a
+            // successful library DB write into a reported download failure.
+            if let trackRepository {
+                do {
+                    if let updatedTrack = try await trackRepository.fetchTrack(id: trackId) {
+                        await PerformanceQueueService.shared.enqueueAnalysis(track: updatedTrack)
+                    }
+                } catch {
+                    AppLogger.shared.warn(
+                        "Downloaded track \(trackId) was saved, but analysis scheduling failed: \(error.localizedDescription)",
+                        source: "Download"
+                    )
+                }
             }
         }
+
+        return failures
     }
 
     /// Convert an absolute filesystem path to a library-relative path.

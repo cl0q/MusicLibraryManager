@@ -75,6 +75,9 @@ final class DownloadOrchestrator {
         var failed: Int = 0
         var skipped: Int = 0
         var downloadedPaths: [Int64: String] = [:]
+        var failedTrackIds: Set<Int64> = []
+        var skippedTrackIds: Set<Int64> = []
+        var cancelledTrackIds: Set<Int64> = []
         /// Per-track metadata for DB updates — `format` is the container
         /// extension without the dot (e.g. `"m4a"`, `"flac"`) and `bitrate`
         /// is in kbps.
@@ -221,6 +224,7 @@ final class DownloadOrchestrator {
                 source: "Download"
             )
             result.failed = total
+            result.failedTrackIds = Set(requests.map(\.trackId))
             for req in requests {
                 retryQueue.enqueue(
                     trackId: req.trackId,
@@ -239,6 +243,9 @@ final class DownloadOrchestrator {
             // the running track gets to finish but the next one is
             // skipped — keeps the DB consistent with what's on disk.
             if cancelRequested {
+                result.cancelledTrackIds.formUnion(
+                    requests[index...].map(\.trackId)
+                )
                 AppLogger.shared.log(
                     "Download batch cancelled at \(index)/\(total)",
                     level: .info,
@@ -256,6 +263,7 @@ final class DownloadOrchestrator {
             let expectedPath = flacDir.appendingPathComponent(expectedFilename)
             if FileManager.default.fileExists(atPath: expectedPath.path) {
                 result.skipped += 1
+                result.skippedTrackIds.insert(request.trackId)
                 continue
             }
 
@@ -280,6 +288,7 @@ final class DownloadOrchestrator {
                     result.succeeded += 1
                 } else {
                     result.failed += 1
+                    result.failedTrackIds.insert(request.trackId)
                     retryQueue.enqueue(
                         trackId: request.trackId,
                         query: request.query,
@@ -291,6 +300,7 @@ final class DownloadOrchestrator {
                 }
             } catch {
                 result.failed += 1
+                result.failedTrackIds.insert(request.trackId)
                 AppLogger.shared.error(
                     "Download failed for track \(request.trackId) (\(request.artist) - \(request.title)): \(error.localizedDescription) [type=\(String(describing: type(of: error)))]",
                     source: "Download"

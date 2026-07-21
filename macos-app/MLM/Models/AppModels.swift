@@ -17,6 +17,8 @@ struct DownloadItem: Codable, Identifiable, Hashable {
         case transcoding
         case completed
         case failed
+        case skipped
+        case cancelled
     }
 }
 
