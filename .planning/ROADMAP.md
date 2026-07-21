@@ -746,6 +746,50 @@ Plans:
 
 ---
 
+### Phase 39: SoundCloud Download Integrity
+
+**Goal:** Make SoundCloud sessions durable and downloads trustworthy: a requested SoundCloud track must never be silently associated with unrelated fallback audio, every item must expose an honest terminal state, artwork must remain eligible for provider backfill, and new SoundCloud files must use an intentional source directory.
+
+**Driver:** User test and logs from 2026-07-20 confirmed destructive 401 handling, lossy YouTube query normalization, stale-file reuse from a shared output directory, success accounting before DB persistence, hidden per-item operation states, double-counted artwork progress, discarded SoundCloud artwork URLs, and M4A output under `00_FLAC`.
+
+**Depends on:** Phase 37 (artwork pipeline), existing macOS download/source integrations
+**Milestone:** v2.1 Reliability
+**Requirements:** SCDL-01..SCDL-09
+
+**Locked safety decisions:**
+- SoundCloud playlist downloads are strict-source: a failed SoundCloud download remains failed and never silently falls back to another provider.
+- YouTube fallback may remain for explicit `.auto` discovery, but must preserve identity-bearing remix/version text and may only return a file created by that request.
+- New SoundCloud downloads use `01_SoundCloud`; no existing files are moved in this phase.
+- A download is successful only after the expected file is validated and its database update succeeds.
+- A single 401 triggers refresh and one retry; stored credentials are not deleted automatically.
+
+**Success criteria** (what must be TRUE):
+1. No downloader can select a pre-existing file from a shared destination as the result of a different request.
+2. SoundCloud-pinned requests never invoke DAB, Squid, or YouTube.
+3. Identity-bearing remix/version qualifiers survive YouTube query cleanup.
+4. SoundCloud credentials survive app restart and transient 401 responses; refresh is registered and started at boot.
+5. Operations renders every batch item with queued/running/completed/failed status and an actionable failure reason.
+6. Batch success counts include only tracks whose file and DB persistence both succeeded.
+7. Artwork maintenance progress never exceeds its total, and NULL-path sentinel rows remain eligible for provider artwork lookup.
+8. SoundCloud artwork URLs are retained and used before MusicBrainz for downloaded tracks.
+9. New SoundCloud files are written under `01_SoundCloud`; this phase performs no migration of existing files.
+
+**Plans:** 7 plans in 3 waves
+
+Plans:
+- [ ] 39-01-PLAN.md — YouTube/SoundCloud downloader integrity: identity-preserving query normalization + remove shared-dir stale-file reuse (SCDL-02, SCDL-03)
+- [ ] 39-02-PLAN.md — Orchestrator source pinning across retries + 01_SoundCloud directory, no M4A under 00_FLAC (SCDL-01, SCDL-09)
+- [ ] 39-03-PLAN.md — SoundCloud auth resilience: 401 refresh-once-retry-once + boot-time refresh registration (SCDL-04, SCDL-05)
+- [ ] 39-04-PLAN.md — Honest success accounting + per-item Operations rendering (SCDL-06, SCDL-07)
+- [ ] 39-05-PLAN.md — Artwork progress bound + sentinel eligibility query split (SCDL-08)
+- [ ] 39-06-PLAN.md — SoundCloud artwork retention + provider-before-MusicBrainz priority (SCDL-08)
+- [ ] 39-07-PLAN.md — macOS build/test + live symptom verification checkpoint (all SCDL)
+
+Waves: W1 = 39-01, 39-02, 39-03, 39-04, 39-05 (parallel, no file overlap) | W2 = 39-06 (depends on 03, 05) | W3 = 39-07 (verification gate)
+
+---
+
+
 ## v1.4 Progress Table
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -761,3 +805,4 @@ Plans:
 | 36. Playlists (v2.0) | v2.0 | 4/4 | Complete | 2026-05-13 |
 | 37. Album-Art Pipeline | v2.0 | 4/4 | Complete   | 2026-05-16 |
 | 38. Folder & Device Sync | v2.0 | 5/5 | Complete    | 2026-05-18 |
+| 39. SoundCloud Download Integrity | v2.1 | 0/7 | Not started | - |
