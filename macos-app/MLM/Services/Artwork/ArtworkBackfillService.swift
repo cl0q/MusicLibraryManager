@@ -176,14 +176,15 @@ final class ArtworkBackfillService {
             }
 
             // As tasks complete, add next batch to maintain concurrentLimit in flight
+            //
+            // SCDL-08: do NOT call tracker.updateProgress here — extractForTrack
+            // already calls it exactly once per completed track (on every return
+            // path: file-not-found, sentinel-write, save-failure, and success).
+            // Calling it again here double-counted every track, producing the
+            // 84/44 / 100/53 overshoot where `current` outran `total`. Mirror the
+            // tracker's single source of truth instead of maintaining a second counter.
             for await _ in group {
-                progress.current += 1
-                tracker.updateProgress(
-                    trackId: 0,
-                    trackTitle: "",
-                    trackArtist: "",
-                    savedToDb: false
-                )
+                progress.current = tracker.currentState.current
                 if let track = pending.next() {
                     guard let trackId = track.id else { continue }
                     inFlight.insert(trackId)

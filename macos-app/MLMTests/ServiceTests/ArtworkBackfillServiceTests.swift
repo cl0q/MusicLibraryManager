@@ -93,4 +93,39 @@ struct ArtworkBackfillServiceTests {
         let result = await ArtworkService.extractEmbeddedArtwork(from: URL(fileURLWithPath: "/nonexistent/audio.flac"))
         #expect(result == nil, "Should return nil for non-existent file without crashing")
     }
+
+    // MARK: - SCDL-08: progress accounting must never exceed total
+
+    /// Regression test for the 84/44 / 100/53 overshoot: `backfillMissing` used to
+    /// call `tracker.updateProgress` twice per completed track (once inside
+    /// `extractForTrack`, once again in the outer `for await _ in group` loop).
+    /// Every track in this fixture has no organized-path-resolvable audio file, so
+    /// each hits the early "audio file not found" branch inside `extractForTrack` —
+    /// which itself calls `tracker.updateProgress` exactly once. If the outer loop
+    /// still double-counts, `current` will exceed `total` (e.g. 10/5) instead of
+    /// topping out at exactly `total` (5/5).
+    @Test func testProgressNeverExceedsTotalAndEndsExact() async throws {
+        let (db, svc) = try await makeService()
+        let trackCount = 5
+        try await db.write { db in
+            for i in 1...trackCount {
+                var t = Track(artist: "A", album: "X", title: "T\(i)", format: "mp3",
+                               originalPath: "/nonexistent/t\(i).mp3")
+                t.organizedPath = "A/X/T\(i).mp3"
+                t.dateAdded = "2024-01-01T00:00:00Z"
+                try t.insert(db)
+            }
+        }
+
+        var maxObservedCurrent = 0
+        var lastState: MaintenanceProgressTracker.ProgressState?
+        await svc.refreshMissing(progressHandler: { state in
+            maxObservedCurrent = max(maxObservedCurrent, state.current)
+            lastState = state
+        })
+
+        #expect(maxObservedCurrent <= trackCount, "Progress current (\(maxObservedCurrent)) must never exceed total (\(trackCount))")
+        #expect(lastState?.current == trackCount, "Final progress current must equal total exactly (one increment per track)")
+        #expect(lastState?.total == trackCount)
+    }
 }
