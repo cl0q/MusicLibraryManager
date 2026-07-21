@@ -127,14 +127,16 @@ final class YouTubeDownloader: Sendable {
             return .notFound
         }
 
-        // Last-resort: pick up the most recently modified audio file in
-        // outputDir. This catches the case where --print emitted the
-        // pre-move name but the file actually exists under a different
-        // suffix.
-        if let found = findMostRecentFile(in: outputDir) {
-            return .success(found)
-        }
-
+        // No trusted stdout path and no recognized failure signature: do
+        // NOT scan outputDir for a "most recent" file. outputDir (flacDir)
+        // is shared across the entire batch — a scan here would let one
+        // request's result be silently satisfied by another request's
+        // download (T-39-01). Only a path this invocation provably printed
+        // may be returned.
+        AppLogger.shared.warn(
+            "chain[YT]: no trusted output path — treating as notFound (no directory scan)",
+            source: "Download"
+        )
         return .notFound
     }
 
@@ -220,18 +222,34 @@ final class YouTubeDownloader: Sendable {
 
     // MARK: - Query Normalisation
 
+    /// Case-insensitive tokens that identify a DIFFERENT recording of the
+    /// same song (a remix, a live take, a slowed edit, ...). A bracket
+    /// group containing one of these must be preserved rather than
+    /// stripped, or the normalized query silently retargets a different
+    /// recording than the one the user actually requested (SCDL-03).
+    private static let identityTokens: Set<String> = [
+        "remix", "edit", "version", "live", "slowed", "sped up", "reverb",
+        "bootleg", "remaster", "remastered", "vip", "dub", "instrumental",
+        "acoustic"
+    ]
+
     /// Strip the parenthetical / bracket noise that turns valid song titles
     /// into queries no YouTube video matches verbatim. Things like
     /// `(feat. Hittman, Six-Two, Nate Dogg & Kurupt)`,
-    /// `[Official Music Video]`, `(Remastered 2024)` make ytsearch5 return
-    /// zero hits even when the song is on YouTube several times over.
+    /// `[Official Music Video]` make ytsearch5 return zero hits even when
+    /// the song is on YouTube several times over. Groups that carry an
+    /// identity-bearing qualifier (remix, live, slowed, remaster, ...) are
+    /// preserved instead — deleting them would make the query match a
+    /// DIFFERENT recording of the same song, which is the exact
+    /// data-integrity defect this phase closes.
     ///
-    /// We collapse to "Artist - Title" with all `(...)` / `[...]` content
-    /// removed and whitespace squashed. Visible for testability.
+    /// We collapse to "Artist - Title" with non-identity `(...)` / `[...]`
+    /// content removed and whitespace squashed. Visible for testability.
     static func normalizeQueryForYouTube(_ raw: String) -> String {
         var s = raw
         // Repeatedly strip balanced parentheses and brackets — handles
-        // nested groups like "Title (Mix) [Remastered]".
+        // nested groups like "Title (Mix) [Remastered]". A group is only
+        // stripped when it does NOT contain an identity-bearing token.
         let patterns = ["\\([^()]*\\)", "\\[[^\\[\\]]*\\]"]
         var changed = true
         while changed {
@@ -239,11 +257,19 @@ final class YouTubeDownloader: Sendable {
             for pattern in patterns {
                 if let regex = try? NSRegularExpression(pattern: pattern) {
                     let range = NSRange(s.startIndex..., in: s)
-                    let replaced = regex.stringByReplacingMatches(
-                        in: s, range: range, withTemplate: ""
-                    )
-                    if replaced != s {
-                        s = replaced
+                    let matches = regex.matches(in: s, range: range)
+                    // Walk matches in reverse so earlier ranges stay valid
+                    // as we mutate the string.
+                    for match in matches.reversed() {
+                        guard let matchRange = Range(match.range, in: s) else { continue }
+                        let groupText = String(s[matchRange]).lowercased()
+                        let isIdentityGroup = identityTokens.contains { token in
+                            groupText.contains(token)
+                        }
+                        if isIdentityGroup {
+                            continue
+                        }
+                        s.removeSubrange(matchRange)
                         changed = true
                     }
                 }
@@ -443,25 +469,6 @@ final class YouTubeDownloader: Sendable {
         }
     }
 
-    // MARK: - Private
-
-    private func findMostRecentFile(in directory: URL) -> URL? {
-        let audioExts: Set<String> = ["mp3", "m4a", "aac", "flac", "opus", "wav", "webm", "ogg"]
-        let fm = FileManager.default
-        guard let contents = try? fm.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: [.contentModificationDateKey],
-            options: .skipsHiddenFiles
-        ) else { return nil }
-
-        return contents
-            .filter { audioExts.contains($0.pathExtension.lowercased()) }
-            .max { a, b in
-                let dateA = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                let dateB = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                return dateA < dateB
-            }
-    }
 }
 
 // MARK: - Models
