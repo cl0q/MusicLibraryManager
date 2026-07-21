@@ -14,6 +14,15 @@ final class DownloadQueue {
         var attemptCount: Int
         var lastError: String?
         let queuedAt: String
+        /// The `PreferredSource.storageKey` this item was originally pinned
+        /// to (nil for legacy items or unpinned/auto attempts). Carried
+        /// through so `retryFailed()` can rebuild the exact same pin
+        /// instead of silently defaulting to `.auto` — see SCDL-01.
+        let preferredSource: String?
+        /// The SoundCloud permalink URL for pinned SC retries. Optional so
+        /// legacy `.retry_queue.json` files (written before this field
+        /// existed) still decode without throwing.
+        let soundcloudURL: String?
 
         enum CodingKeys: String, CodingKey {
             case trackId = "track_id"
@@ -21,6 +30,8 @@ final class DownloadQueue {
             case attemptCount = "attempt_count"
             case lastError = "last_error"
             case queuedAt = "queued_at"
+            case preferredSource = "preferred_source"
+            case soundcloudURL = "soundcloud_url"
         }
     }
 
@@ -36,7 +47,21 @@ final class DownloadQueue {
     // MARK: - Queue Operations
 
     /// Add a failed download to the retry queue.
-    func enqueue(trackId: Int64, query: String, source: String, error: String) {
+    ///
+    /// - Parameters:
+    ///   - preferredSource: The `PreferredSource.storageKey` this attempt was
+    ///     pinned to (nil for unpinned/auto attempts). Carried through so a
+    ///     later `retryFailed()` can rebuild the exact same pin — see SCDL-01.
+    ///   - soundcloudURL: The SoundCloud permalink URL, when the attempt was
+    ///     pinned to SoundCloud.
+    func enqueue(
+        trackId: Int64,
+        query: String,
+        source: String,
+        error: String,
+        preferredSource: String? = nil,
+        soundcloudURL: String? = nil
+    ) {
         // Check if already queued
         if let idx = items.firstIndex(where: { $0.trackId == trackId && $0.source == source }) {
             items[idx].attemptCount += 1
@@ -48,7 +73,9 @@ final class DownloadQueue {
                 source: source,
                 attemptCount: 1,
                 lastError: error,
-                queuedAt: ISO8601DateFormatter().string(from: Date())
+                queuedAt: ISO8601DateFormatter().string(from: Date()),
+                preferredSource: preferredSource,
+                soundcloudURL: soundcloudURL
             )
             items.append(item)
         }

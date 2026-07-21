@@ -15,10 +15,44 @@ final class DownloadOrchestrator {
     /// - `.auto`: run the full fallback chain (SoundCloud → DAB → Squid → YouTube).
     /// - `.soundcloud`: only attempt scdl with `soundcloudURL`; no cross-source fallback.
     /// - `.youtube`: download `youtubeURL` directly via yt-dlp; skip SC/DAB/Squid.
-    enum PreferredSource {
+    enum PreferredSource: Equatable {
         case auto
         case soundcloud
         case youtube
+
+        /// Stable wire key persisted to `.retry_queue.json`. Pinned so a
+        /// future rename of these cases cannot silently break decoding of
+        /// old queues — see SCDL-01.
+        var storageKey: String {
+            switch self {
+            case .auto: return "auto"
+            case .soundcloud: return "soundcloud"
+            case .youtube: return "youtube"
+            }
+        }
+
+        /// Rebuilds a `PreferredSource` from its persisted storage key.
+        /// Fails safe to `.auto` for `nil` or any unrecognized string —
+        /// never crashes, never silently escalates an unknown key to a
+        /// stronger pin than the caller can prove.
+        init(storageKey: String?) {
+            switch storageKey {
+            case "soundcloud": self = .soundcloud
+            case "youtube": self = .youtube
+            default: self = .auto
+            }
+        }
+    }
+
+    /// Which concrete provider actually produced a successful download.
+    /// Tagged on the `downloadWithFallback` result so `finalize` can route
+    /// the file to the correct final directory (SCDL-09) regardless of
+    /// whether the request was pinned or ran the auto chain.
+    enum DownloadSource {
+        case soundcloud
+        case youtube
+        case dab
+        case squid
     }
 
     /// A request to download a single track.
@@ -68,6 +102,10 @@ final class DownloadOrchestrator {
 
     private let flacDir: URL
     private let aacDir: URL
+    /// Destination for new SoundCloud downloads (kept-as-is OR transcoded —
+    /// the final DB-referenced file always lives here, never in `aacDir`
+    /// or `flacDir`). See SCDL-09.
+    private let soundCloudDir: URL
     let transcodeService: TranscodeService
     private let soundCloudDownloader: SoundCloudDownloader
     private let youtubeDownloader: YouTubeDownloader
@@ -82,6 +120,7 @@ final class DownloadOrchestrator {
         let root = URL(fileURLWithPath: libraryRoot)
         self.flacDir = root.appendingPathComponent("00_FLAC")
         self.aacDir = root.appendingPathComponent("00_Artists")
+        self.soundCloudDir = root.appendingPathComponent("01_SoundCloud")
 
         self.transcodeService = TranscodeService()
         self.soundCloudDownloader = SoundCloudDownloader()
@@ -93,6 +132,7 @@ final class DownloadOrchestrator {
         // Create directories
         try? FileManager.default.createDirectory(at: flacDir, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: aacDir, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: soundCloudDir, withIntermediateDirectories: true)
 
         // Once-at-boot endpoint reachability logs for the optional FLAC
         // stages (DAB + Squid) so the Logs tab tells the user up front
@@ -174,6 +214,7 @@ final class DownloadOrchestrator {
         do {
             try FileManager.default.createDirectory(at: flacDir, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: aacDir, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: soundCloudDir, withIntermediateDirectories: true)
         } catch {
             AppLogger.shared.error(
                 "Download dirs not writable (\(error.localizedDescription)). Library drive offline? aacDir=\(aacDir.path) flacDir=\(flacDir.path)",
@@ -184,8 +225,10 @@ final class DownloadOrchestrator {
                 retryQueue.enqueue(
                     trackId: req.trackId,
                     query: req.query,
-                    source: "youtube",
-                    error: "Library drive not writable: \(error.localizedDescription)"
+                    source: req.preferredSource.storageKey,
+                    error: "Library drive not writable: \(error.localizedDescription)",
+                    preferredSource: req.preferredSource.storageKey,
+                    soundcloudURL: req.soundcloudURL
                 )
             }
             return result
@@ -221,49 +264,29 @@ final class DownloadOrchestrator {
 
             // Try the fallback chain
             do {
-                if let path = try await downloadWithFallback(request, onTrackProgress: onTrackProgress) {
-                    // Transcode to AAC
-                    let transcodeResult = try await transcodeService.transcode(
-                        input: path,
-                        outputDir: aacDir
+                if let (path, source) = try await downloadWithFallback(request, onTrackProgress: onTrackProgress) {
+                    // Route to the source's correct final directory via a
+                    // collision-free temp-transcode + atomic move/replace
+                    // (SCDL-09) — replaces the old inline
+                    // transcodeService.transcode(... outputDir: aacDir) call,
+                    // which mis-routed SoundCloud/YouTube output and could
+                    // false-skip when input==output aliased.
+                    let finalized = try await finalize(sourcePath: path, source: source, request: request)
+                    result.downloadedPaths[request.trackId] = finalized.path.path
+                    result.downloadedMetadata[request.trackId] = DownloadedFileInfo(
+                        format: finalized.format,
+                        bitrate: finalized.bitrate
                     )
-
-                    switch transcodeResult {
-                    case .transcoded(let aacPath):
-                        result.downloadedPaths[request.trackId] = aacPath.path
-                        result.downloadedMetadata[request.trackId] = DownloadedFileInfo(
-                            format: aacPath.pathExtension.lowercased(),
-                            bitrate: TranscodeService.targetBitrate
-                        )
-                        result.succeeded += 1
-                    case .skipped:
-                        // Source was already lossy and below threshold — use as-is.
-                        // Probe the file so the DB row reflects the actual quality.
-                        let kbps = await transcodeService.detectBitrateKbps(path)
-                        result.downloadedPaths[request.trackId] = path.path
-                        result.downloadedMetadata[request.trackId] = DownloadedFileInfo(
-                            format: path.pathExtension.lowercased(),
-                            bitrate: kbps
-                        )
-                        result.succeeded += 1
-                    case .failed(let error):
-                        // Download succeeded but transcode failed — keep the source file.
-                        let kbps = await transcodeService.detectBitrateKbps(path)
-                        result.downloadedPaths[request.trackId] = path.path
-                        result.downloadedMetadata[request.trackId] = DownloadedFileInfo(
-                            format: path.pathExtension.lowercased(),
-                            bitrate: kbps
-                        )
-                        result.succeeded += 1
-                        AppLogger.shared.log("Transcode failed for \(request.title): \(error)", level: .warning)
-                    }
+                    result.succeeded += 1
                 } else {
                     result.failed += 1
                     retryQueue.enqueue(
                         trackId: request.trackId,
                         query: request.query,
-                        source: "youtube",
-                        error: "All sources exhausted"
+                        source: request.preferredSource.storageKey,
+                        error: "All sources exhausted",
+                        preferredSource: request.preferredSource.storageKey,
+                        soundcloudURL: request.soundcloudURL
                     )
                 }
             } catch {
@@ -275,8 +298,10 @@ final class DownloadOrchestrator {
                 retryQueue.enqueue(
                     trackId: request.trackId,
                     query: request.query,
-                    source: "youtube",
-                    error: error.localizedDescription
+                    source: request.preferredSource.storageKey,
+                    error: error.localizedDescription,
+                    preferredSource: request.preferredSource.storageKey,
+                    soundcloudURL: request.soundcloudURL
                 )
             }
         }
@@ -287,6 +312,11 @@ final class DownloadOrchestrator {
     }
 
     /// Retry previously failed downloads.
+    ///
+    /// Rebuilds each request from the QueueItem's stored `preferredSource` +
+    /// `soundcloudURL` so a SoundCloud-pinned failure re-enters the
+    /// fail-closed `pinned[SC]` branch instead of silently defaulting to
+    /// `.auto` and running the full cross-provider chain — see SCDL-01.
     func retryFailed() async -> BatchResult {
         let retryable = retryQueue.retryableItems()
         let requests = retryable.map { item in
@@ -295,8 +325,9 @@ final class DownloadOrchestrator {
                 artist: "",
                 title: "",
                 query: item.query,
-                soundcloudURL: nil,
-                userId: nil
+                soundcloudURL: item.soundcloudURL,
+                userId: nil,
+                preferredSource: PreferredSource(storageKey: item.preferredSource)
             )
         }
         return await downloadBatch(requests)
@@ -413,10 +444,15 @@ final class DownloadOrchestrator {
     // MARK: - Fallback Chain
 
     /// Try downloading via SoundCloud → DAB → YouTube.
+    ///
+    /// Returns the downloaded file's path tagged with the concrete
+    /// `DownloadSource` that produced it, so `finalize` can route the file
+    /// to its correct final directory (SCDL-09) regardless of whether the
+    /// request was pinned or ran the auto chain.
     private func downloadWithFallback(
         _ request: DownloadRequest,
         onTrackProgress: ((Double) -> Void)? = nil
-    ) async throws -> URL? {
+    ) async throws -> (URL, DownloadSource)? {
         // Source pinning — when a request is bound to a specific source we
         // do NOT fall through to other providers (SC playlists stay on SC,
         // YT playlists stay on YT).
@@ -439,14 +475,14 @@ final class DownloadOrchestrator {
             AppLogger.shared.log("pinned[SC]: trying \(scURL)", level: .info, source: "Download")
             let scResult = try await soundCloudDownloader.download(
                 trackURL: scURL,
-                outputDir: aacDir,
+                outputDir: soundCloudDir,
                 trackId: request.trackId,
                 title: request.title,
                 onProgress: onTrackProgress
             )
             if case .success(let path) = scResult {
                 AppLogger.shared.log("pinned[SC]: success → \(path.lastPathComponent)", level: .info, source: "Download")
-                return path
+                return (path, .soundcloud)
             }
             AppLogger.shared.log("pinned[SC]: not found (no cross-source fallback)", level: .warning, source: "Download")
             return nil
@@ -462,18 +498,18 @@ final class DownloadOrchestrator {
             let ytResult: YouTubeDownloader.DownloadResult
             if let ytURL = request.youtubeURL {
                 AppLogger.shared.log("pinned[YT]: downloading \(ytURL)", level: .info, source: "Download")
-                ytResult = try await youtubeDownloader.downloadByURL(ytURL, outputDir: flacDir)
+                ytResult = try await youtubeDownloader.downloadByURL(ytURL, outputDir: aacDir)
             } else {
                 AppLogger.shared.log("pinned[YT]: searching \(request.query)", level: .info, source: "Download")
                 ytResult = try await youtubeDownloader.searchAndDownload(
                     query: request.query,
-                    outputDir: flacDir,
+                    outputDir: aacDir,
                     onProgress: onTrackProgress
                 )
             }
             if case .success(let path) = ytResult {
                 AppLogger.shared.log("pinned[YT]: success → \(path.lastPathComponent)", level: .info, source: "Download")
-                return path
+                return (path, .youtube)
             }
             AppLogger.shared.log("pinned[YT]: not found (no cross-source fallback)", level: .warning, source: "Download")
             return nil
@@ -494,14 +530,14 @@ final class DownloadOrchestrator {
                 AppLogger.shared.log("chain[SC]: trying \(scURL)", level: .info, source: "Download")
                 let scResult = try await soundCloudDownloader.download(
                     trackURL: scURL,
-                    outputDir: aacDir,
+                    outputDir: soundCloudDir,
                     trackId: request.trackId,
                     title: "\(request.artist) - \(request.title)",
                     onProgress: onTrackProgress
                 )
                 if case .success(let path) = scResult {
                     AppLogger.shared.log("chain[SC]: success → \(path.lastPathComponent)", level: .info, source: "Download")
-                    return path
+                    return (path, .soundcloud)
                 }
                 AppLogger.shared.log("chain[SC]: not found, falling through", level: .info, source: "Download")
             } else {
@@ -526,7 +562,7 @@ final class DownloadOrchestrator {
                         )
                         if case .success(let path) = dabResult {
                             AppLogger.shared.log("chain[DAB]: success → \(path.lastPathComponent)", level: .info, source: "Download")
-                            return path
+                            return (path, .dab)
                         }
                     } else {
                         AppLogger.shared.log(
@@ -559,7 +595,7 @@ final class DownloadOrchestrator {
                 switch squidResult {
                 case .success(let path):
                     AppLogger.shared.log("chain[Squid]: success → \(path.lastPathComponent)", level: .info, source: "Download")
-                    return path
+                    return (path, .squid)
                 case .captchaRequired:
                     AppLogger.shared.log(
                         "chain[Squid]: search hit but download needs captcha_verified_at — set MLM_SQUID_CAPTCHA from your browser's cookie for qobuz.squid.wtf (open dev-tools, Storage → Cookies), then retry",
@@ -580,16 +616,120 @@ final class DownloadOrchestrator {
             AppLogger.shared.log("chain[YT]: searching \(request.query)", level: .info, source: "Download")
             let ytResult = try await youtubeDownloader.searchAndDownload(
                 query: request.query,
-                outputDir: flacDir,
+                outputDir: aacDir,
                 onProgress: onTrackProgress
             )
             if case .success(let path) = ytResult {
                 AppLogger.shared.log("chain[YT]: success → \(path.lastPathComponent)", level: .info, source: "Download")
-                return path
+                return (path, .youtube)
             }
             AppLogger.shared.log("chain[YT]: not found", level: .warning, source: "Download")
         }
 
         return nil
+    }
+
+    // MARK: - Finalization (SCDL-09)
+    //
+    // Each provider's final, DB-referenced file must land in a directory
+    // whose name honestly describes its content: true-FLAC (DAB/Squid) in
+    // `00_FLAC`, everything else (SoundCloud/YouTube, both lossy) in their
+    // own final directories. Transcoding a source that already lives in its
+    // own final directory must never self-collide — `finalize` always
+    // transcodes into a per-request temp directory (so input and output can
+    // never alias) and then atomically moves/replaces the result into the
+    // final directory.
+
+    /// Pure mapping from a concrete download source to its final directory:
+    /// `.soundcloud` gets its own directory; `.youtube`/`.dab`/`.squid` all
+    /// transcode/finalize into `aacDir` (the shared AAC library copy). For
+    /// `.dab`/`.squid` the true-FLAC *original* additionally stays behind in
+    /// `flacDir` untouched — see `preservesOriginal(for:)`.
+    func finalDirectory(for source: DownloadSource) -> URL {
+        switch source {
+        case .soundcloud: return soundCloudDir
+        case .youtube, .dab, .squid: return aacDir
+        }
+    }
+
+    /// Whether the original downloaded file for this source must be left
+    /// untouched on disk after finalization (true FLAC originals from
+    /// DAB/Squid), as opposed to being superseded by its own transcode and
+    /// deleted as a now-redundant lossy duplicate (SoundCloud/YouTube).
+    func preservesOriginal(for source: DownloadSource) -> Bool {
+        switch source {
+        case .dab, .squid: return true
+        case .soundcloud, .youtube: return false
+        }
+    }
+
+    /// Moves (or, on a basename collision, atomically replaces) `produced`
+    /// into `finalDir`, returning the resulting path.
+    ///
+    /// Using `replaceItemAt` on collision means finalization always
+    /// succeeds — there is never a stale "output already exists" skip
+    /// caused by a previous partial run leaving a same-named file behind.
+    func placeFinal(_ produced: URL, into finalDir: URL) throws -> URL {
+        let dest = finalDir.appendingPathComponent(produced.lastPathComponent)
+        let fm = FileManager.default
+        if fm.fileExists(atPath: dest.path) {
+            _ = try fm.replaceItemAt(dest, withItemAt: produced)
+        } else {
+            try fm.moveItem(at: produced, to: dest)
+        }
+        return dest
+    }
+
+    /// Finalizes a successful download: transcodes into a per-request temp
+    /// directory (so the transcode output can never alias the source file,
+    /// which would otherwise cause `TranscodeService` to falsely report
+    /// "output already exists"), then atomically places the result into the
+    /// source's correct final directory.
+    func finalize(
+        sourcePath: URL,
+        source: DownloadSource,
+        request: DownloadRequest
+    ) async throws -> (path: URL, format: String, bitrate: Int?) {
+        let fm = FileManager.default
+        // Per-request temp dir on the SAME volume as the library root so
+        // `placeFinal`'s move is an atomic same-filesystem rename, not a
+        // cross-volume copy — the library may live on an external drive.
+        let tempDir = aacDir
+            .deletingLastPathComponent()
+            .appendingPathComponent(".mlm-transcode-tmp")
+            .appendingPathComponent("\(request.trackId)-\(UUID().uuidString)")
+        try fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempDir) }
+
+        let transcodeResult = try await transcodeService.transcode(
+            input: sourcePath,
+            outputDir: tempDir
+        )
+
+        switch transcodeResult {
+        case .transcoded(let produced):
+            let dest = try placeFinal(produced, into: finalDirectory(for: source))
+            if !preservesOriginal(for: source),
+               sourcePath.standardizedFileURL != dest.standardizedFileURL {
+                // The lossy original has been superseded by its own
+                // transcode in the final directory — remove it so no
+                // orphan duplicate remains.
+                try? fm.removeItem(at: sourcePath)
+            }
+            return (dest, dest.pathExtension.lowercased(), TranscodeService.targetBitrate)
+
+        case .skipped:
+            // Source is already the final file: for SC/YT it was downloaded
+            // straight into its final directory; for DAB/Squid it's the
+            // preserved FLAC original in flacDir — matches today's behavior.
+            let kbps = await transcodeService.detectBitrateKbps(sourcePath)
+            return (sourcePath, sourcePath.pathExtension.lowercased(), kbps)
+
+        case .failed(let error):
+            // Transcode failed — keep the source file, same shape as .skipped.
+            AppLogger.shared.log("Transcode failed for \(request.title): \(error)", level: .warning)
+            let kbps = await transcodeService.detectBitrateKbps(sourcePath)
+            return (sourcePath, sourcePath.pathExtension.lowercased(), kbps)
+        }
     }
 }

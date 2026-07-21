@@ -1,5 +1,42 @@
 import SwiftUI
 
+/// Narrow protocol over exactly the batch-download method `DownloadViewModel`
+/// calls on `DownloadOrchestrator`. `DownloadOrchestrator` is a `final class`
+/// (cannot be subclassed), so tests inject a fake conforming to this
+/// protocol to exercise the tally/terminal-state logic in `downloadTracks`
+/// deterministically instead of driving the real scdl/yt-dlp/ffmpeg chain.
+///
+/// Intentionally NOT `Sendable`-constrained: `DownloadOrchestrator` exposes
+/// mutable `@Observable` state (`isRunning`, `currentItem`, `progress`) and
+/// is not itself verified `Sendable`; requiring it here would force an
+/// unchecked conformance on a type this plan does not otherwise touch.
+protocol DownloadBatchRunning {
+    func downloadBatch(
+        _ requests: [DownloadOrchestrator.DownloadRequest],
+        onProgress: ((Int, Int, String) -> Void)?,
+        onTrackProgress: ((Double) -> Void)?
+    ) async -> DownloadOrchestrator.BatchResult
+}
+
+extension DownloadOrchestrator: DownloadBatchRunning {}
+
+/// Narrow protocol over exactly the DB-write method `DownloadViewModel`
+/// calls on `TrackRepository` when persisting a downloaded track.
+/// `TrackRepository` is a `final class`, so tests inject a throwing fake
+/// conforming to this protocol to prove a DB-write failure demotes a track
+/// from succeeded to failed before the UI-facing tally is finalized.
+protocol DownloadTrackPersisting: Sendable {
+    func markAsDownloaded(
+        trackId: Int64,
+        organizedPath: String,
+        format: String,
+        bitrate: Int?,
+        downloadStatus: String?
+    ) async throws
+}
+
+extension TrackRepository: DownloadTrackPersisting {}
+
 /// ViewModel for the download pipeline.
 ///
 /// Wraps `DownloadOrchestrator` and exposes state for the Activity Panel
@@ -49,16 +86,42 @@ final class DownloadViewModel {
     private let trackRepository: TrackRepository?
     private let sourceRepository: SourceRepository?
 
+    /// Test seam: when set, `downloadTracks` runs the batch through this
+    /// instead of the concrete `orchestrator`. Production code leaves this
+    /// `nil` and relies on `configure(libraryRoot:tokenStorage:)` to build
+    /// the real `DownloadOrchestrator`. Settable (not init-only) so a test
+    /// can inject a fake without calling `configure`.
+    var batchRunnerOverride: (any DownloadBatchRunning)?
+
+    /// Test seam: when set, `persistDownloadedTracks` writes through this
+    /// instead of the concrete `trackRepository`. Production code leaves
+    /// this `nil` and relies on the injected `trackRepository`.
+    private let trackPersisterOverride: (any DownloadTrackPersisting)?
+
+    /// The batch runner `downloadTracks` actually uses: the test override
+    /// when present, otherwise the concrete configured orchestrator.
+    private var activeBatchRunner: (any DownloadBatchRunning)? {
+        batchRunnerOverride ?? orchestrator
+    }
+
+    /// The persister `persistDownloadedTracks` actually uses: the test
+    /// override when present, otherwise the concrete injected repository.
+    private var activeTrackPersister: (any DownloadTrackPersisting)? {
+        trackPersisterOverride ?? trackRepository
+    }
+
     /// Absolute path to the library root — used to convert orchestrator
     /// output paths to library-relative paths before storing in the DB.
     private(set) var libraryRoot: String = ""
 
     init(
         trackRepository: TrackRepository? = nil,
-        sourceRepository: SourceRepository? = nil
+        sourceRepository: SourceRepository? = nil,
+        trackPersister: (any DownloadTrackPersisting)? = nil
     ) {
         self.trackRepository = trackRepository
         self.sourceRepository = sourceRepository
+        self.trackPersisterOverride = trackPersister
     }
 
     /// Set up the orchestrator with library root. Called after initialization.
@@ -80,7 +143,7 @@ final class DownloadViewModel {
         _ tracks: [Track],
         preferredSource: DownloadOrchestrator.PreferredSource = .auto
     ) async {
-        guard let orchestrator else {
+        guard let runner = activeBatchRunner else {
             AppLogger.shared.log("Download orchestrator not configured", level: .error, source: "Download")
             return
         }
@@ -141,7 +204,7 @@ final class DownloadViewModel {
             )
         }
 
-        let result = await orchestrator.downloadBatch(
+        let result = await runner.downloadBatch(
             requests,
             onProgress: { [weak self] index, total, current in
                 guard let self else { return }
@@ -420,13 +483,14 @@ final class DownloadViewModel {
             let bitrate = info?.bitrate ?? trackById[trackId]?.bitrate
             let relative = relativeLibraryPath(for: absolutePath)
             do {
-                try await trackRepository?.markAsDownloaded(
+                try await activeTrackPersister?.markAsDownloaded(
                     trackId: trackId,
                     organizedPath: relative,
                     format: format,
-                    bitrate: bitrate
+                    bitrate: bitrate,
+                    downloadStatus: nil
                 )
-                
+
                 // Enqueue downloaded track for auto-analysis
                 if let updatedTrack = try await trackRepository?.fetchTrack(id: trackId) {
                     await PerformanceQueueService.shared.enqueueAnalysis(track: updatedTrack)
