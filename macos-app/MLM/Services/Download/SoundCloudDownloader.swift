@@ -49,7 +49,7 @@ final class SoundCloudDownloader: Sendable {
         }
 
         // Create temp dir to avoid filename collisions
-        let tmpDir = outputDir.appendingPathComponent(".tmp_\(trackId)")
+        let tmpDir = outputDir.appendingPathComponent(".tmp_\(trackId)_\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
@@ -137,16 +137,37 @@ final class SoundCloudDownloader: Sendable {
         let collapsedName = Self.collapseDoubledAudioExtension(downloadedFile.lastPathComponent)
 
         // Move to output directory
-        let outputFile = outputDir.appendingPathComponent(collapsedName)
-        if FileManager.default.fileExists(atPath: outputFile.path) {
-            try FileManager.default.removeItem(at: outputFile)
-        }
+        let outputFile = nextAvailableURL(
+            in: outputDir,
+            preferredName: collapsedName
+        )
         try FileManager.default.moveItem(at: downloadedFile, to: outputFile)
 
         return .success(outputFile)
     }
 
     // MARK: - Private
+
+    private func nextAvailableURL(in directory: URL, preferredName: String) -> URL {
+        let preferred = directory.appendingPathComponent(preferredName)
+        guard FileManager.default.fileExists(atPath: preferred.path) else {
+            return preferred
+        }
+
+        let ext = preferred.pathExtension
+        let stem = preferred.deletingPathExtension().lastPathComponent
+        var suffix = 2
+        while true {
+            let name = ext.isEmpty
+                ? "\(stem) (\(suffix))"
+                : "\(stem) (\(suffix)).\(ext)"
+            let candidate = directory.appendingPathComponent(name)
+            if !FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+            suffix += 1
+        }
+    }
 
     /// Find the audio file produced by THIS invocation in `directory`.
     ///

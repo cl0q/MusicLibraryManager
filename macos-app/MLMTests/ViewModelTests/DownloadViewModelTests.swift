@@ -60,6 +60,42 @@ struct DownloadViewModelTests {
         }
     }
 
+    private final class FakeRetryRunner: DownloadRetryRunning {
+        let requests: [DownloadOrchestrator.DownloadRequest]
+        let result: DownloadOrchestrator.BatchResult
+        private(set) var dequeuedTrackIds: Set<Int64> = []
+
+        init(
+            requests: [DownloadOrchestrator.DownloadRequest],
+            result: DownloadOrchestrator.BatchResult
+        ) {
+            self.requests = requests
+            self.result = result
+        }
+
+        func pendingRetryRequests() -> [DownloadOrchestrator.DownloadRequest] {
+            requests
+        }
+
+        func retryFailed(
+            onProgress: ((Int, Int, String) -> Void)?,
+            onTrackProgress: ((Double) -> Void)?
+        ) async -> DownloadOrchestrator.BatchResult {
+            for (index, request) in requests.enumerated() {
+                onProgress?(
+                    index,
+                    requests.count,
+                    "\(request.artist) - \(request.title)"
+                )
+            }
+            return result
+        }
+
+        func dequeuePersistedRetries(trackIds: Set<Int64>) {
+            dequeuedTrackIds.formUnion(trackIds)
+        }
+    }
+
     // MARK: - Helpers
 
     /// A remote (no local file) track with an explicit, distinct `id` and a
@@ -182,5 +218,71 @@ struct DownloadViewModelTests {
         #expect(vm.queueItems.first { $0.trackId == 1 }?.status == .skipped)
         #expect(vm.queueItems.first { $0.trackId == 2 }?.status == .cancelled)
         #expect(vm.queueItems.first { $0.trackId == 2 }?.error == "download cancelled")
+    }
+
+    @Test func successfulRetryPersistsBeforeDequeuing() async {
+        let vm = DownloadViewModel(
+            trackPersister: FakeThrowingPersister(failingTrackIds: [])
+        )
+        let request = DownloadOrchestrator.DownloadRequest(
+            trackId: 7,
+            artist: "Artist",
+            title: "Retry",
+            query: "Artist - Retry",
+            soundcloudURL: "https://soundcloud.com/artist/retry",
+            userId: nil,
+            preferredSource: .soundcloud
+        )
+        let runner = FakeRetryRunner(
+            requests: [request],
+            result: DownloadOrchestrator.BatchResult(
+                succeeded: 1,
+                downloadedPaths: [7: "/library/retry.m4a"],
+                downloadedMetadata: [:]
+            )
+        )
+        vm.retryRunnerOverride = runner
+
+        await vm.retryFailed()
+
+        #expect(runner.dequeuedTrackIds == [7])
+        #expect(vm.completedCount == 1)
+        #expect(vm.failedCount == 0)
+        #expect(vm.queueItems.first?.status == .completed)
+    }
+
+    @Test func retryPersistenceFailureRemainsQueuedAndReportsFailure() async {
+        let vm = DownloadViewModel(
+            trackPersister: FakeThrowingPersister(failingTrackIds: [8])
+        )
+        let request = DownloadOrchestrator.DownloadRequest(
+            trackId: 8,
+            artist: "Artist",
+            title: "Retry Failure",
+            query: "Artist - Retry Failure",
+            soundcloudURL: "https://soundcloud.com/artist/retry-failure",
+            userId: nil,
+            preferredSource: .soundcloud
+        )
+        let runner = FakeRetryRunner(
+            requests: [request],
+            result: DownloadOrchestrator.BatchResult(
+                succeeded: 1,
+                downloadedPaths: [8: "/library/retry-failure.m4a"],
+                downloadedMetadata: [:]
+            )
+        )
+        vm.retryRunnerOverride = runner
+
+        await vm.retryFailed()
+
+        #expect(runner.dequeuedTrackIds.isEmpty)
+        #expect(vm.completedCount == 0)
+        #expect(vm.failedCount == 1)
+        #expect(vm.queueItems.first?.status == .failed)
+        #expect(
+            vm.queueItems.first?.error
+                == "downloaded but not saved to library"
+        )
     }
 }

@@ -20,6 +20,17 @@ protocol DownloadBatchRunning {
 
 extension DownloadOrchestrator: DownloadBatchRunning {}
 
+protocol DownloadRetryRunning {
+    func pendingRetryRequests() -> [DownloadOrchestrator.DownloadRequest]
+    func retryFailed(
+        onProgress: ((Int, Int, String) -> Void)?,
+        onTrackProgress: ((Double) -> Void)?
+    ) async -> DownloadOrchestrator.BatchResult
+    func dequeuePersistedRetries(trackIds: Set<Int64>)
+}
+
+extension DownloadOrchestrator: DownloadRetryRunning {}
+
 /// Narrow protocol over exactly the DB-write method `DownloadViewModel`
 /// calls on `TrackRepository` when persisting a downloaded track.
 /// `TrackRepository` is a `final class`, so tests inject a throwing fake
@@ -92,6 +103,7 @@ final class DownloadViewModel {
     /// the real `DownloadOrchestrator`. Settable (not init-only) so a test
     /// can inject a fake without calling `configure`.
     var batchRunnerOverride: (any DownloadBatchRunning)?
+    var retryRunnerOverride: (any DownloadRetryRunning)?
 
     /// Test seam: when set, `persistDownloadedTracks` writes through this
     /// instead of the concrete `trackRepository`. Production code leaves
@@ -102,6 +114,10 @@ final class DownloadViewModel {
     /// when present, otherwise the concrete configured orchestrator.
     private var activeBatchRunner: (any DownloadBatchRunning)? {
         batchRunnerOverride ?? orchestrator
+    }
+
+    private var activeRetryRunner: (any DownloadRetryRunning)? {
+        retryRunnerOverride ?? orchestrator
     }
 
     /// The persister `persistDownloadedTracks` actually uses: the test
@@ -235,12 +251,108 @@ final class DownloadViewModel {
             remoteTracks: remoteTracks,
             result: result
         )
+        orchestrator?.enqueuePersistenceFailures(
+            requests: requests,
+            trackIds: persistenceFailures
+        )
 
+        let finalResult = resultAfterPersistence(
+            result,
+            persistenceFailures: persistenceFailures
+        )
+        applyTerminalStates(
+            result: result,
+            persistenceFailures: persistenceFailures
+        )
+        finishBatch(finalResult)
+    }
+
+    /// Retry failed downloads from the queue.
+    func retryFailed() async {
+        guard let retryRunner = activeRetryRunner else { return }
+        let requests = retryRunner.pendingRetryRequests()
+        guard !requests.isEmpty else { return }
+
+        await PerformanceQueueService.shared.setExternalDownloadActive(true)
+        defer {
+            Task {
+                await PerformanceQueueService.shared.setExternalDownloadActive(false)
+            }
+        }
+
+        isDownloading = true
+        totalCount = requests.count
+        completedCount = 0
+        failedCount = 0
+        progress = 0
+        queueItems = requests.map { request in
+            DownloadItem(
+                id: request.trackId,
+                trackId: request.trackId,
+                artist: request.artist,
+                title: request.title,
+                status: .queued,
+                progress: 0
+            )
+        }
+
+        let result = await retryRunner.retryFailed(
+            onProgress: { [weak self] index, total, current in
+                guard let self else { return }
+                self.currentTrack = current
+                self.currentTrackProgress = 0
+                self.progress = Double(index) / Double(max(total, 1))
+                self.completedCount = index
+                if index < self.queueItems.count {
+                    self.queueItems[index].status = .downloading
+                }
+            },
+            onTrackProgress: { [weak self] fraction in
+                guard let self, self.totalCount > 0 else { return }
+                self.currentTrackProgress = fraction
+                self.progress = (
+                    Double(self.completedCount) + fraction
+                ) / Double(self.totalCount)
+            }
+        )
+
+        let persistenceFailures = await persistDownloadedTracks(
+            remoteTracks: [],
+            result: result
+        )
+        let persistedTrackIds = Set(result.downloadedPaths.keys)
+            .subtracting(persistenceFailures)
+        retryRunner.dequeuePersistedRetries(trackIds: persistedTrackIds)
+
+        let finalResult = resultAfterPersistence(
+            result,
+            persistenceFailures: persistenceFailures
+        )
+        applyTerminalStates(
+            result: result,
+            persistenceFailures: persistenceFailures
+        )
+        finishBatch(finalResult)
+    }
+
+    private func resultAfterPersistence(
+        _ result: DownloadOrchestrator.BatchResult,
+        persistenceFailures: Set<Int64>
+    ) -> DownloadOrchestrator.BatchResult {
         var finalResult = result
-        finalResult.succeeded = max(0, result.succeeded - persistenceFailures.count)
+        finalResult.succeeded = max(
+            0,
+            result.succeeded - persistenceFailures.count
+        )
         finalResult.failed = result.failed + persistenceFailures.count
         finalResult.failedTrackIds.formUnion(persistenceFailures)
+        return finalResult
+    }
 
+    private func applyTerminalStates(
+        result: DownloadOrchestrator.BatchResult,
+        persistenceFailures: Set<Int64>
+    ) {
         for index in queueItems.indices {
             let trackId = queueItems[index].trackId
             if persistenceFailures.contains(trackId) {
@@ -260,48 +372,30 @@ final class DownloadViewModel {
                 queueItems[index].error = "download failed"
             }
         }
+    }
 
-        lastResult = finalResult
-        completedCount = finalResult.succeeded
-        failedCount = finalResult.failed
+    private func finishBatch(_ result: DownloadOrchestrator.BatchResult) {
+        lastResult = result
+        completedCount = result.succeeded
+        failedCount = result.failed
         isDownloading = false
         progress = 1.0
         currentTrack = ""
 
-        // Notify Library / Folders / Sidebar so the downloaded rows can
-        // move from the Remote tab to the Local tab without requiring a
-        // manual re-scan.
         NotificationCenter.default.post(
             name: .downloadDidComplete,
             object: nil,
             userInfo: [
-                "succeeded": finalResult.succeeded,
-                "failed": finalResult.failed
+                "succeeded": result.succeeded,
+                "failed": result.failed,
             ]
         )
 
         AppLogger.shared.log(
-            "Download batch complete: \(finalResult.succeeded) succeeded, \(finalResult.failed) failed, \(finalResult.skipped) skipped",
+            "Download batch complete: \(result.succeeded) succeeded, \(result.failed) failed, \(result.skipped) skipped",
             level: .info,
             source: "Download"
         )
-    }
-
-    /// Retry failed downloads from the queue.
-    func retryFailed() async {
-        guard let orchestrator else { return }
-        
-        await PerformanceQueueService.shared.setExternalDownloadActive(true)
-        defer {
-            Task {
-                await PerformanceQueueService.shared.setExternalDownloadActive(false)
-            }
-        }
-        
-        isDownloading = true
-        let result = await orchestrator.retryFailed()
-        lastResult = result
-        isDownloading = false
     }
 
     /// Ask the orchestrator to stop after the current track.

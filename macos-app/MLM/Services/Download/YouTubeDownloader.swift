@@ -128,11 +128,10 @@ final class YouTubeDownloader: Sendable {
         }
 
         // No trusted stdout path and no recognized failure signature: do
-        // NOT scan outputDir for a "most recent" file. outputDir (flacDir)
-        // is shared across the entire batch — a scan here would let one
-        // request's result be silently satisfied by another request's
-        // download (T-39-01). Only a path this invocation provably printed
-        // may be returned.
+        // NOT scan outputDir for a "most recent" file. Even though batch
+        // callers now use request-specific staging directories, discovery
+        // callers may provide a shared target. Only a path this invocation
+        // provably printed may be returned (T-39-01).
         AppLogger.shared.warn(
             "chain[YT]: no trusted output path — treating as notFound (no directory scan)",
             source: "Download"

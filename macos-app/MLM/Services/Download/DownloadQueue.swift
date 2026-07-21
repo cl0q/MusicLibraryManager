@@ -11,6 +11,8 @@ final class DownloadQueue {
         let trackId: Int64
         let query: String
         let source: String  // "dab", "youtube", "soundcloud"
+        var artist: String?
+        var title: String?
         var attemptCount: Int
         var lastError: String?
         let queuedAt: String
@@ -18,20 +20,23 @@ final class DownloadQueue {
         /// to (nil for legacy items or unpinned/auto attempts). Carried
         /// through so `retryFailed()` can rebuild the exact same pin
         /// instead of silently defaulting to `.auto` — see SCDL-01.
-        let preferredSource: String?
+        var preferredSource: String?
         /// The SoundCloud permalink URL for pinned SC retries. Optional so
         /// legacy `.retry_queue.json` files (written before this field
         /// existed) still decode without throwing.
-        let soundcloudURL: String?
+        var soundcloudURL: String?
+        /// Direct YouTube URL for exact-video retries.
+        var youtubeURL: String?
 
         enum CodingKeys: String, CodingKey {
             case trackId = "track_id"
-            case query, source
+            case query, source, artist, title
             case attemptCount = "attempt_count"
             case lastError = "last_error"
             case queuedAt = "queued_at"
             case preferredSource = "preferred_source"
             case soundcloudURL = "soundcloud_url"
+            case youtubeURL = "youtube_url"
         }
     }
 
@@ -59,23 +64,34 @@ final class DownloadQueue {
         query: String,
         source: String,
         error: String,
+        artist: String? = nil,
+        title: String? = nil,
         preferredSource: String? = nil,
-        soundcloudURL: String? = nil
+        soundcloudURL: String? = nil,
+        youtubeURL: String? = nil
     ) {
         // Check if already queued
         if let idx = items.firstIndex(where: { $0.trackId == trackId && $0.source == source }) {
             items[idx].attemptCount += 1
             items[idx].lastError = error
+            items[idx].artist = artist ?? items[idx].artist
+            items[idx].title = title ?? items[idx].title
+            items[idx].preferredSource = preferredSource ?? items[idx].preferredSource
+            items[idx].soundcloudURL = soundcloudURL ?? items[idx].soundcloudURL
+            items[idx].youtubeURL = youtubeURL ?? items[idx].youtubeURL
         } else {
             let item = QueueItem(
                 trackId: trackId,
                 query: query,
                 source: source,
+                artist: artist,
+                title: title,
                 attemptCount: 1,
                 lastError: error,
                 queuedAt: ISO8601DateFormatter().string(from: Date()),
                 preferredSource: preferredSource,
-                soundcloudURL: soundcloudURL
+                soundcloudURL: soundcloudURL,
+                youtubeURL: youtubeURL
             )
             items.append(item)
         }
@@ -88,6 +104,13 @@ final class DownloadQueue {
     /// Remove a successfully retried item.
     func dequeue(trackId: Int64, source: String) {
         items.removeAll { $0.trackId == trackId && $0.source == source }
+        save()
+    }
+
+    /// Remove successfully persisted retries regardless of their source key.
+    func dequeue(trackIds: Set<Int64>) {
+        guard !trackIds.isEmpty else { return }
+        items.removeAll { trackIds.contains($0.trackId) }
         save()
     }
 

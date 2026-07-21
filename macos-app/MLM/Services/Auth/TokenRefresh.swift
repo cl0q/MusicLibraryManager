@@ -32,8 +32,6 @@ actor TokenRefreshService {
         let clientSecret: String?
     }
 
-    extension TokenRefreshService: TokenRefreshConfiguring {}
-
     // MARK: - State
 
     private let tokenStorage: TokenStorage
@@ -114,6 +112,7 @@ actor TokenRefreshService {
                 try? await Task.sleep(nanoseconds: UInt64(60 * 1_000_000_000))
             }
         }
+
     }
 
     /// Stop the background refresh loop.
@@ -192,3 +191,5 @@ actor TokenRefreshService {
         try await performRefresh(registration: registration, refreshToken: refreshToken)
     }
 }
+
+extension TokenRefreshService: TokenRefreshConfiguring {}

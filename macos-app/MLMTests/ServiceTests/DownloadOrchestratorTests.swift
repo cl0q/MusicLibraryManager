@@ -234,14 +234,20 @@ struct DownloadOrchestratorTests {
             query: "Artist - Title",
             source: "soundcloud",
             error: "network hiccup",
+            artist: "Artist",
+            title: "Title",
             preferredSource: DownloadOrchestrator.PreferredSource.soundcloud.storageKey,
-            soundcloudURL: "https://soundcloud.com/artist/title"
+            soundcloudURL: "https://soundcloud.com/artist/title",
+            youtubeURL: "https://youtube.com/watch?v=exact"
         )
 
         let reloaded = DownloadQueue(directory: tmp)
         let item = try #require(reloaded.items.first)
         #expect(DownloadOrchestrator.PreferredSource(storageKey: item.preferredSource) == .soundcloud)
+        #expect(item.artist == "Artist")
+        #expect(item.title == "Title")
         #expect(item.soundcloudURL == "https://soundcloud.com/artist/title")
+        #expect(item.youtubeURL == "https://youtube.com/watch?v=exact")
     }
 
     /// `enqueue` must record the ACTUAL attempted source, not a hardcoded
@@ -291,6 +297,29 @@ struct DownloadOrchestratorTests {
         #expect(item.soundcloudURL == "https://soundcloud.com/artist/pinned-track")
     }
 
+    @Test
+    func legacyRetryQueryRecoversArtistAndFullTitle() {
+        let identity = DownloadOrchestrator.parseIdentity(
+            from: "Artist - Title - Extended Mix"
+        )
+        #expect(identity.artist == "Artist")
+        #expect(identity.title == "Title - Extended Mix")
+    }
+
+    @Test
+    func dequeuePersistedRetriesRemovesOnlySuccessfulTracks() throws {
+        let tmp = try makeTempLibrary()
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let queue = DownloadQueue(directory: tmp)
+        queue.enqueue(trackId: 1, query: "A - One", source: "soundcloud", error: "e")
+        queue.enqueue(trackId: 2, query: "A - Two", source: "soundcloud", error: "e")
+
+        queue.dequeue(trackIds: [1])
+
+        #expect(queue.items.map(\.trackId) == [2])
+    }
+
     // MARK: - Task 4: finalDirectory / preservesOriginal / placeFinal / finalize (SCDL-09)
 
     @Test
@@ -325,6 +354,39 @@ struct DownloadOrchestratorTests {
         #expect(orchestrator.preservesOriginal(for: .squid) == true)
         #expect(orchestrator.preservesOriginal(for: .soundcloud) == false)
         #expect(orchestrator.preservesOriginal(for: .youtube) == false)
+    }
+
+    @Test
+    func finalFileNamesIncludeTrackIdentityToPreventCrossTrackOverwrite() {
+        let first = DownloadOrchestrator.DownloadRequest(
+            trackId: 10,
+            artist: "Artist",
+            title: "Same Title",
+            query: "Artist - Same Title",
+            soundcloudURL: nil,
+            userId: nil
+        )
+        let second = DownloadOrchestrator.DownloadRequest(
+            trackId: 11,
+            artist: "Artist",
+            title: "Same Title",
+            query: "Artist - Same Title",
+            soundcloudURL: nil,
+            userId: nil
+        )
+
+        let firstName = DownloadOrchestrator.finalFileName(
+            for: first,
+            pathExtension: "m4a"
+        )
+        let secondName = DownloadOrchestrator.finalFileName(
+            for: second,
+            pathExtension: "m4a"
+        )
+
+        #expect(firstName != secondName)
+        #expect(firstName.hasSuffix("[10].m4a"))
+        #expect(secondName.hasSuffix("[11].m4a"))
     }
 
     /// MOVE: given a temp file, placeFinal moves it into the final dir and

@@ -433,4 +433,42 @@ struct TrackRepositoryTests {
         #expect(rowCount == 1)
         #expect(remoteURL == "https://i1.sndcdn.com/latest.jpg")
     }
+
+    @Test func savingArtworkWithoutRemoteURLPreservesRetainedProviderURL() async throws {
+        let (db, repo) = try makeRepo()
+        try await insertTrack(
+            db,
+            artist: "A",
+            album: "X",
+            title: "RetainedProviderArt",
+            organizedPath: "A/X/RetainedProviderArt.m4a"
+        )
+        let trackId = try await db.read { db in
+            try Int64.fetchOne(
+                db,
+                sql: "SELECT id FROM tracks WHERE title = 'RetainedProviderArt'"
+            )!
+        }
+        try await repo.setRemoteArtworkURL(
+            trackId: trackId,
+            url: "https://i1.sndcdn.com/retained.jpg"
+        )
+
+        let analysis = AnalysisRepository(database: db)
+        try await analysis.saveArtwork(
+            Artwork(
+                trackId: trackId,
+                artworkPath: "/covers/embedded.jpg",
+                source: "embedded",
+                musicbrainzReleaseGroupId: nil,
+                resolution: "1200",
+                fetchedAt: "2026-07-21T00:00:00Z"
+            )
+        )
+
+        let artwork = try await analysis.fetchArtwork(trackId: trackId)
+        #expect(artwork?.artworkPath == "/covers/embedded.jpg")
+        #expect(artwork?.source == "embedded")
+        #expect(artwork?.remoteUrl == "https://i1.sndcdn.com/retained.jpg")
+    }
 }

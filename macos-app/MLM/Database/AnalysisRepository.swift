@@ -53,8 +53,36 @@ final class AnalysisRepository: Sendable {
     /// Save artwork metadata.
     func saveArtwork(_ artwork: Artwork) async throws {
         try await database.write { db in
-            let art = artwork
-            try art.save(db)
+            try db.execute(
+                sql: """
+                    INSERT INTO artwork (
+                        track_id,
+                        artwork_path,
+                        source,
+                        musicbrainz_release_group_id,
+                        resolution,
+                        fetched_at,
+                        remote_url
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(track_id) DO UPDATE SET
+                        artwork_path = excluded.artwork_path,
+                        source = excluded.source,
+                        musicbrainz_release_group_id = excluded.musicbrainz_release_group_id,
+                        resolution = excluded.resolution,
+                        fetched_at = excluded.fetched_at,
+                        remote_url = COALESCE(excluded.remote_url, artwork.remote_url)
+                    """,
+                arguments: [
+                    artwork.trackId,
+                    artwork.artworkPath,
+                    artwork.source,
+                    artwork.musicbrainzReleaseGroupId,
+                    artwork.resolution,
+                    artwork.fetchedAt,
+                    artwork.remoteUrl,
+                ]
+            )
         }
     }
 
