@@ -614,6 +614,21 @@ final class SoundCloudClient: Sendable {
             }
 
             if let id = resolvedTrackId {
+                if let artworkURL = scTrack.artworkUrl?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                   !artworkURL.isEmpty {
+                    do {
+                        try await trackRepository.setRemoteArtworkURL(
+                            trackId: id,
+                            url: artworkURL
+                        )
+                    } catch {
+                        AppLogger.shared.warn(
+                            "SoundCloud: could not retain artwork URL for track \(id): \(error.localizedDescription)",
+                            source: "SoundCloud"
+                        )
+                    }
+                }
                 collectedIds.append(id)
             }
 

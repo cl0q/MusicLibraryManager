@@ -339,5 +339,98 @@ struct TrackRepositoryTests {
         #expect(withoutArtwork.contains(where: { $0.title == "NoRow" }))
         #expect(eligibleForProvider.contains(where: { $0.title == "NoRow" }))
     }
-}
 
+    // MARK: - Retained provider artwork URL (SCDL-08)
+
+    @Test func artworkRemoteURLMigrationAddsNullableColumn() async throws {
+        let (db, _) = try makeRepo()
+        let columns = try await db.read { db in
+            try db.columns(in: "artwork")
+        }
+
+        let remoteURLColumn = columns.first { $0.name == "remote_url" }
+        #expect(remoteURLColumn != nil)
+    }
+
+    @Test func setRemoteArtworkURLInsertsSentinelWhenArtworkIsAbsent() async throws {
+        let (db, repo) = try makeRepo()
+        try await insertTrack(
+            db,
+            artist: "A",
+            album: "X",
+            title: "RemoteArt",
+            organizedPath: "A/X/RemoteArt.m4a"
+        )
+        let trackId = try await db.read { db in
+            try Int64.fetchOne(db, sql: "SELECT id FROM tracks WHERE title = 'RemoteArt'")!
+        }
+
+        try await repo.setRemoteArtworkURL(
+            trackId: trackId,
+            url: "https://i1.sndcdn.com/art.jpg"
+        )
+
+        let artwork = try await AnalysisRepository(database: db).fetchArtwork(trackId: trackId)
+        #expect(artwork?.source == "soundcloud")
+        #expect(artwork?.artworkPath == nil)
+        #expect(artwork?.remoteUrl == "https://i1.sndcdn.com/art.jpg")
+    }
+
+    @Test func setRemoteArtworkURLNeverClobbersExistingCoverOrSource() async throws {
+        let (db, repo) = try makeRepo()
+        try await insertTrack(
+            db,
+            artist: "A",
+            album: "X",
+            title: "EmbeddedArt",
+            organizedPath: "A/X/EmbeddedArt.m4a"
+        )
+        let trackId = try await db.read { db in
+            try Int64.fetchOne(db, sql: "SELECT id FROM tracks WHERE title = 'EmbeddedArt'")!
+        }
+        try await insertArtwork(
+            db,
+            trackId: trackId,
+            artworkPath: "/covers/existing.jpg",
+            source: "embedded"
+        )
+
+        try await repo.setRemoteArtworkURL(
+            trackId: trackId,
+            url: "https://i1.sndcdn.com/new-art.jpg"
+        )
+
+        let artwork = try await AnalysisRepository(database: db).fetchArtwork(trackId: trackId)
+        #expect(artwork?.artworkPath == "/covers/existing.jpg")
+        #expect(artwork?.source == "embedded")
+        #expect(artwork?.remoteUrl == "https://i1.sndcdn.com/new-art.jpg")
+    }
+
+    @Test func setRemoteArtworkURLMaintainsOneRowAndUsesLatestURL() async throws {
+        let (db, repo) = try makeRepo()
+        try await insertTrack(
+            db,
+            artist: "A",
+            album: "X",
+            title: "OneRow",
+            organizedPath: "A/X/OneRow.m4a"
+        )
+        let trackId = try await db.read { db in
+            try Int64.fetchOne(db, sql: "SELECT id FROM tracks WHERE title = 'OneRow'")!
+        }
+
+        try await repo.setRemoteArtworkURL(trackId: trackId, url: "https://i1.sndcdn.com/old.jpg")
+        try await repo.setRemoteArtworkURL(trackId: trackId, url: "https://i1.sndcdn.com/latest.jpg")
+
+        let rowCount = try await db.read { db in
+            try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM artwork WHERE track_id = ?",
+                arguments: [trackId]
+            )
+        }
+        let remoteURL = try await AnalysisRepository(database: db).remoteArtworkURL(trackId: trackId)
+        #expect(rowCount == 1)
+        #expect(remoteURL == "https://i1.sndcdn.com/latest.jpg")
+    }
+}

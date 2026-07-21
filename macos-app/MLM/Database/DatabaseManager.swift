@@ -819,6 +819,14 @@ final class DatabaseManager: Sendable {
             try db.create(indexOn: "tracks", columns: ["date_added_library"], options: .ifNotExists)
         }
 
+        migrator.registerMigration("v31_artwork_remote_url") { db in
+            if try !db.columns(in: "artwork").contains(where: { $0.name == "remote_url" }) {
+                try db.alter(table: "artwork") { table in
+                    table.add(column: "remote_url", .text)
+                }
+            }
+        }
+
         return migrator
     }
 

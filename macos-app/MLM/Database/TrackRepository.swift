@@ -621,6 +621,26 @@ final class TrackRepository: Sendable {
         }
     }
 
+    /// Retain a provider artwork URL without replacing an existing local cover.
+    func setRemoteArtworkURL(
+        trackId: Int64,
+        url: String,
+        source: String = "soundcloud"
+    ) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO artwork (track_id, source, remote_url)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(track_id) DO UPDATE SET
+                        remote_url = excluded.remote_url,
+                        source = COALESCE(artwork.source, excluded.source)
+                """,
+                arguments: [trackId, source, url]
+            )
+        }
+    }
+
     /// Update energy bucket and loudness info for a track.
     func updateEnergyBucket(
         trackId: Int64,

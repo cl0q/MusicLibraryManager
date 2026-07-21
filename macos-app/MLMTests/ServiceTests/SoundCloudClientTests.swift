@@ -140,6 +140,36 @@ struct SoundCloudClientTests {
         """.utf8
     )
 
+    private static func likesData(artworkURL: String?) -> Data {
+        let artworkValue = artworkURL.map { "\"\($0)\"" } ?? "null"
+        return Data(
+            """
+            {
+              "collection": [
+                {
+                  "id": 9001,
+                  "title": "Cover Test",
+                  "duration": 180000,
+                  "genre": "Electronic",
+                  "permalink_url": "https://soundcloud.com/tester/cover-test",
+                  "stream_url": null,
+                  "artwork_url": \(artworkValue),
+                  "created_at": "2026/07/21 08:00:00 +0000",
+                  "user": {
+                    "id": 42,
+                    "username": "tester",
+                    "avatar_url": null,
+                    "full_name": null,
+                    "permalink": "tester"
+                  }
+                }
+              ],
+              "next_href": null
+            }
+            """.utf8
+        )
+    }
+
     private func makeClient(
         tokenStore: TokenStoreSpy,
         http: ScriptedHTTPClient,
@@ -249,5 +279,62 @@ struct SoundCloudClientTests {
         #expect(await http.requestCount() == 1)
         #expect(await refresher.callCount() == 0)
         #expect(tokenStore.snapshot().deletionCalls == 0)
+    }
+
+    @Test
+    func syncLikesRetainsSoundCloudArtworkURL() async throws {
+        let database = try DatabaseManager.inMemory()
+        let tokenStore = TokenStoreSpy()
+        let expectedURL = "https://i1.sndcdn.com/artworks-cover-large.jpg"
+        let http = ScriptedHTTPClient([
+            .init(statusCode: 200, data: Self.profileData),
+            .init(statusCode: 200, data: Self.likesData(artworkURL: expectedURL)),
+        ])
+        let client = SoundCloudClient(
+            tokenStorage: tokenStore,
+            oauthManager: OAuthManager(),
+            trackRepository: TrackRepository(database: database),
+            sourceRepository: SourceRepository(database: database),
+            clientId: "client-id",
+            clientSecret: "client-secret",
+            http: http,
+            refresher: ScriptedRefresher(error: TestError.refreshFailed)
+        )
+
+        _ = try await client.syncLikes()
+
+        let trackId = try await database.read { db in
+            try Int64.fetchOne(db, sql: "SELECT id FROM tracks WHERE title = 'Cover Test'")!
+        }
+        let retainedURL = try await AnalysisRepository(database: database)
+            .remoteArtworkURL(trackId: trackId)
+        #expect(retainedURL == expectedURL)
+    }
+
+    @Test
+    func syncLikesDoesNotCreateArtworkRowForMissingURL() async throws {
+        let database = try DatabaseManager.inMemory()
+        let tokenStore = TokenStoreSpy()
+        let http = ScriptedHTTPClient([
+            .init(statusCode: 200, data: Self.profileData),
+            .init(statusCode: 200, data: Self.likesData(artworkURL: nil)),
+        ])
+        let client = SoundCloudClient(
+            tokenStorage: tokenStore,
+            oauthManager: OAuthManager(),
+            trackRepository: TrackRepository(database: database),
+            sourceRepository: SourceRepository(database: database),
+            clientId: "client-id",
+            clientSecret: "client-secret",
+            http: http,
+            refresher: ScriptedRefresher(error: TestError.refreshFailed)
+        )
+
+        _ = try await client.syncLikes()
+
+        let artworkRows = try await database.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM artwork")
+        }
+        #expect(artworkRows == 0)
     }
 }

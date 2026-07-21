@@ -184,7 +184,52 @@ actor BatchResultCollector {
             }
         }
 
-        // 2. Try MusicBrainz / Cover Art Archive
+        // 2. Prefer the artwork URL supplied by SoundCloud.
+        let remoteURLString: String?
+        do {
+            remoteURLString = try await repository.remoteArtworkURL(trackId: trackId)
+        } catch {
+            AppLogger.shared.warn(
+                "Could not read retained artwork URL for track \(trackId): \(error.localizedDescription)",
+                source: "Artwork"
+            )
+            remoteURLString = nil
+        }
+
+        if let remoteURLString,
+           let remoteURL = URL(string: remoteURLString),
+           remoteURL.scheme?.lowercased() == "https" {
+            do {
+                let (data, response) = try await session.data(from: remoteURL)
+                guard let http = response as? HTTPURLResponse,
+                      (200..<300).contains(http.statusCode),
+                      !data.isEmpty else {
+                    throw ArtworkFetchError.invalidProviderResponse
+                }
+
+                try saveResized(data: data, trackId: trackId)
+                try await saveArtworkRecord(
+                    trackId: trackId,
+                    source: "soundcloud",
+                    repository: repository
+                )
+                await collector.addFetched()
+                tracker.updateProgress(
+                    trackId: trackId,
+                    trackTitle: track.title,
+                    trackArtist: track.artist,
+                    savedToDb: true
+                )
+                return
+            } catch {
+                AppLogger.shared.warn(
+                    "SoundCloud artwork fetch failed for track \(trackId): \(error.localizedDescription)",
+                    source: "Artwork"
+                )
+            }
+        }
+
+        // 3. Try MusicBrainz / Cover Art Archive
         do {
             if try await fetchFromMusicBrainz(track: track, repository: repository) {
                 await collector.addFetched()
@@ -331,15 +376,25 @@ actor BatchResultCollector {
         releaseGroupId: String? = nil,
         repository: AnalysisRepository
     ) async throws {
+        let retainedRemoteURL = try await repository.remoteArtworkURL(trackId: trackId)
         let artwork = Artwork(
             trackId: trackId,
             artworkPath: cachedPath(trackId: trackId, size: .large).path,
             source: source,
             musicbrainzReleaseGroupId: releaseGroupId,
             resolution: "1200",
-            fetchedAt: ISO8601DateFormatter().string(from: Date())
+            fetchedAt: ISO8601DateFormatter().string(from: Date()),
+            remoteUrl: retainedRemoteURL
         )
         try await repository.saveArtwork(artwork)
+    }
+}
+
+private enum ArtworkFetchError: LocalizedError {
+    case invalidProviderResponse
+
+    var errorDescription: String? {
+        "Provider returned no usable artwork"
     }
 }
 

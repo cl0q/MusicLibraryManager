@@ -38,6 +38,18 @@ final class AnalysisRepository: Sendable {
         }
     }
 
+    /// Fetch a retained provider URL even after the row's source is upgraded
+    /// to embedded or cached SoundCloud artwork.
+    func remoteArtworkURL(trackId: Int64) async throws -> String? {
+        try await database.read { db in
+            try String.fetchOne(
+                db,
+                sql: "SELECT remote_url FROM artwork WHERE track_id = ?",
+                arguments: [trackId]
+            )
+        }
+    }
+
     /// Save artwork metadata.
     func saveArtwork(_ artwork: Artwork) async throws {
         try await database.write { db in

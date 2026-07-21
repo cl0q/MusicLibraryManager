@@ -115,6 +115,7 @@ struct Artwork: Codable, FetchableRecord, PersistableRecord {
     var musicbrainzReleaseGroupId: String?
     var resolution: String?
     var fetchedAt: String?
+    var remoteUrl: String? = nil
 
     static let databaseTableName = "artwork"
 
@@ -125,6 +126,7 @@ struct Artwork: Codable, FetchableRecord, PersistableRecord {
         case musicbrainzReleaseGroupId = "musicbrainz_release_group_id"
         case resolution
         case fetchedAt = "fetched_at"
+        case remoteUrl = "remote_url"
     }
 }
 
