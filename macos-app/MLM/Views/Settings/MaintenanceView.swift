@@ -465,7 +465,11 @@ struct MaintenanceView: View {
             .appendingPathComponent("com.mlm.artwork_cache")
         let service = ArtworkService(cacheDir: cacheDir)
 
-        let tracks = (try? await trackRepo.fetchTracksWithoutArtwork()) ?? []
+        // SCDL-08: use the provider-eligibility query so NULL-path sentinel rows
+        // (written by the embedded auto-backfill when ffmpeg found no art) stay
+        // eligible for MusicBrainz/provider lookup. The embedded auto-backfill
+        // (ArtworkBackfillService) intentionally stays on fetchTracksWithoutArtwork().
+        let tracks = (try? await trackRepo.fetchTracksEligibleForProviderArtwork()) ?? []
         let libraryRoot = try? await container.configRepository?.getLibraryRoot()
         let result = await service.batchFetchArtwork(
             tracks: tracks,
