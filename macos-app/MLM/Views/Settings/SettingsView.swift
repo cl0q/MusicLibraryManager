@@ -6,9 +6,10 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(\.container) private var container
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("settings.selectedTab") private var selectedTab = "library"
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             LibrarySetupView()
                 .tabItem {
                     Label("Library", systemImage: "music.note.house")

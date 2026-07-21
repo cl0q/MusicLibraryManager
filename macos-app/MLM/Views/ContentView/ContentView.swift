@@ -51,7 +51,6 @@ struct ContentView: View {
 
     /// Library repair alert states
     @State private var showingRepairAlert = false
-    @State private var repairRunning = false
     @State private var repairResult: String = ""
 
     /// Selection-based sheet states
@@ -106,7 +105,7 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .triggerLibraryRepair)) { _ in
             runGlobalLibraryRepair()
         }
-        .alert("Stale Pfade reparieren", isPresented: $showingRepairAlert) {
+        .alert("Sichere Pfad-Migration", isPresented: $showingRepairAlert) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(repairResult)
@@ -268,36 +267,12 @@ struct ContentView: View {
         }
     }
 
-    /// Triggered from the main menu CommandMenu to repair database organized_path columns.
+    /// The former one-click repair was unsafe. Route users to the preview/confirm flow.
     private func runGlobalLibraryRepair() {
-        guard let trackRepo = container.trackRepository,
-              let configRepo = container.configRepository else { return }
-        
-        repairRunning = true
-        repairResult = "Die Reparatur verwaister Pfade wurde im Hintergrund gestartet. Bitte warten..."
+        repairResult = "Der automatische Repair wurde durch eine sichere Migration ersetzt. Öffne Einstellungen → Maintenance, erstelle dort zuerst die Vorschau und bestätige anschließend nur die eindeutigen Treffer."
         showingRepairAlert = true
-        
-        Task {
-            let service = LibraryRepairService(
-                trackRepository: trackRepo,
-                configRepository: configRepo
-            )
-            do {
-                let r = try await service.repairStaleOrganizedPaths()
-                repairResult = """
-                    Stale Pfade repariert!
-                    
-                    Geprüft: \(r.inspected)
-                    Intakt: \(r.alreadyValid)
-                    Repariert: \(r.repaired)
-                    Demoted to Remote: \(r.demotedToRemote)
-                    Nicht reparierbar: \(r.unrepairable)
-                    """
-            } catch {
-                repairResult = "Fehler bei der Reparatur: \(error.localizedDescription)"
-            }
-            repairRunning = false
-        }
+        UserDefaults.standard.set("maintenance", forKey: "settings.selectedTab")
+        MLMApp.openSettingsFallback()
     }
 
     // MARK: - Error state

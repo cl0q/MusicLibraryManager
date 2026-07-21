@@ -119,7 +119,7 @@ extension Notification.Name {
     /// ContentView or SyncView observes this to navigate to the create-profile sheet.
     static let navigateToCreateSyncProfile = Notification.Name("MLMNavigateToCreateSyncProfile")
 
-    /// Posted when the user triggers "Stale Pfade reparieren" from the Library menu.
+    /// Posted when the user opens the safe organized-path migration from the Library menu.
     static let triggerLibraryRepair = Notification.Name("MLMTriggerLibraryRepair")
 
     // MARK: - Selection Actions

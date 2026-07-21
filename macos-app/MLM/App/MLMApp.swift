@@ -150,7 +150,7 @@ struct MLMApp: App {
 
                 Divider()
 
-                Button("Stale Pfade reparieren…") {
+                Button("Sichere Pfad-Migration…") {
                     NotificationCenter.default.post(
                         name: .triggerLibraryRepair, object: nil
                     )

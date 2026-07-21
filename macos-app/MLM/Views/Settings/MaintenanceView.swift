@@ -12,6 +12,10 @@ struct MaintenanceView: View {
     @State private var selectedSource = "soundcloud"
     @State private var turboMode: Bool = false
     @State private var progressState: MaintenanceProgressTracker.ProgressState? = nil
+    @State private var pathMigrationReport: OrganizedPathMigrationService.AuditReport? = nil
+    @State private var showPathMigrationReport = false
+    @State private var showPathMigrationConfirmation = false
+    @State private var showPathRollbackConfirmation = false
 
     var body: some View {
         Form {
@@ -154,14 +158,7 @@ struct MaintenanceView: View {
                     await runRescanMetadata()
                 }
 
-                maintenanceRow(
-                    title: "Stale Pfade reparieren",
-                    description: "Findet verwaiste Pfade im organized_path, repariert sie aus original_path oder sucht nach umbenannten Ordnern auf der Festplatte",
-                    icon: "wrench.and.screwdriver",
-                    action: "repair-paths"
-                ) {
-                    await runRepairStalePaths()
-                }
+                pathMigrationControls
             }
 
             Section("Source Playlists") {
@@ -204,6 +201,133 @@ struct MaintenanceView: View {
         }
         .formStyle(.grouped)
         .padding()
+        .confirmationDialog(
+            "Organized paths jetzt aktualisieren?",
+            isPresented: $showPathMigrationConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Bestätigen und anwenden", role: .destructive) {
+                Task { await applyPathMigration() }
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: {
+            Text("Beende vorher alle Downloads und schließe die ältere Tauri-App. Nur die in der Vorschau eindeutig bestätigten organized_path-Werte werden geändert. Vorher werden SQLite-Backup und JSON-Manifest außerhalb der Audio-Library erstellt.")
+        }
+        .confirmationDialog(
+            "Letzte Pfad-Migration zurückrollen?",
+            isPresented: $showPathRollbackConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Rollback bestätigen", role: .destructive) {
+                Task { await rollbackPathMigration() }
+            }
+            Button("Abbrechen", role: .cancel) {}
+        } message: {
+            Text("Die organized_path-Werte aus dem neuesten angewendeten Manifest werden wiederhergestellt. Vor dem Rollback wird ein weiteres SQLite-Backup erstellt.")
+        }
+    }
+
+    @ViewBuilder
+    private var pathMigrationControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Organized-Path-Migration")
+                            .font(MLMFont.body)
+                        Text("Nur lesen → Vorschau → Backup/Manifest → bestätigte DB-Transaktion")
+                            .font(MLMFont.muted)
+                            .foregroundColor(.mlmInkMuted)
+                    }
+                } icon: {
+                    Image(systemName: "point.3.connected.trianglepath.dotted")
+                        .frame(width: 20)
+                }
+
+                Spacer()
+
+                if isRunning == "path-audit" {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button("Vorschau erstellen") {
+                        Task { await runPathMigrationAudit() }
+                    }
+                    .disabled(isRunning != nil)
+                }
+            }
+
+            if let report = pathMigrationReport {
+                Text(
+                    "\(report.inspectedCount) geprüft · \(report.alreadyValidCount) intakt · " +
+                    "\(report.eligibleCount) eindeutig · \(report.unresolvedCount) ungeklärt · " +
+                    "\(report.diskFileCount) Audiodateien inventarisiert"
+                )
+                .font(MLMFont.muted)
+                .foregroundColor(.mlmInkSecondary)
+
+                DisclosureGroup("Kandidatenbericht", isExpanded: $showPathMigrationReport) {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 10) {
+                            ForEach(report.rows.filter { $0.status != .alreadyValid }) { row in
+                                VStack(alignment: .leading, spacing: 3) {
+                                    HStack {
+                                        Text("#\(row.trackID) · \(row.artist) — \(row.title)")
+                                            .font(MLMFont.muted)
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Text(row.status == .eligible ? "EINDEUTIG" : "OFFEN")
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundColor(row.status == .eligible ? .green : .orange)
+                                    }
+                                    Text("Vorher: \(row.beforeOrganizedPath)")
+                                        .font(MLMFont.mono)
+                                        .foregroundColor(.mlmInkMuted)
+                                        .textSelection(.enabled)
+                                    if let selected = row.selectedRelativePath {
+                                        Text("Danach: \(selected)")
+                                            .font(MLMFont.mono)
+                                            .foregroundColor(.mlmInkSecondary)
+                                            .textSelection(.enabled)
+                                    }
+                                    Text(row.note)
+                                        .font(.caption)
+                                        .foregroundColor(.mlmInkMuted)
+                                    ForEach(row.candidates) { candidate in
+                                        Text(
+                                            "• \(candidate.relativePath) " +
+                                            "[\(candidate.reasons.map(\.rawValue).joined(separator: ", "))]"
+                                        )
+                                        .font(.caption.monospaced())
+                                        .foregroundColor(.mlmInkMuted)
+                                        .textSelection(.enabled)
+                                    }
+                                }
+                                Divider()
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 360)
+                }
+
+                HStack {
+                    Button("\(report.eligibleCount) eindeutige Änderungen anwenden") {
+                        showPathMigrationConfirmation = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(report.eligibleCount == 0 || isRunning != nil)
+
+                    if isRunning == "path-apply" {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+            }
+
+            Button("Letzte Migration zurückrollen…") {
+                showPathRollbackConfirmation = true
+            }
+            .disabled(isRunning != nil)
+        }
+        .padding(.vertical, 4)
     }
 
     @ViewBuilder
@@ -490,28 +614,72 @@ struct MaintenanceView: View {
         NotificationCenter.default.post(name: .libraryDidImport, object: nil)
     }
 
-    /// Repair tracks whose organized_path no longer resolves to a file
-    /// on disk (Task 4 — stale path remediation).
-    private func runRepairStalePaths() async {
-        guard let trackRepo = container.trackRepository,
-              let configRepo = container.configRepository else { return }
-
-        isRunning = "repair-paths"
-        resultMessage = nil
-
-        let service = LibraryRepairService(
-            trackRepository: trackRepo,
-            configRepository: configRepo
+    private func makePathMigrationService() async throws -> OrganizedPathMigrationService {
+        guard let databaseManager = container.databaseManager,
+              let configRepository = container.configRepository,
+              let root = try await configRepository.getLibraryRoot(),
+              !root.isEmpty else {
+            throw OrganizedPathMigrationService.MigrationError.libraryRootMissing
+        }
+        return OrganizedPathMigrationService(
+            database: databaseManager.pool,
+            databasePath: databaseManager.databasePath,
+            libraryRoot: URL(fileURLWithPath: root, isDirectory: true)
         )
+    }
 
+    private func runPathMigrationAudit() async {
+        isRunning = "path-audit"
+        resultMessage = nil
         do {
-            let r = try await service.repairStaleOrganizedPaths()
-            resultMessage = "Stale Pfade: \(r.inspected) geprüft · \(r.alreadyValid) intakt · \(r.repaired) repariert · \(r.demotedToRemote) → remote · \(r.unrepairable) nicht reparierbar"
+            let service = try await makePathMigrationService()
+            let report = try await service.audit()
+            pathMigrationReport = report
+            showPathMigrationReport = report.unresolvedCount > 0
+            resultMessage = "Pfad-Audit: \(report.eligibleCount) eindeutige Änderungen bereit; \(report.unresolvedCount) bleiben unangetastet."
+        } catch {
+            pathMigrationReport = nil
+            resultMessage = "Pfad-Audit fehlgeschlagen: \(error.localizedDescription)"
+        }
+        isRunning = nil
+    }
+
+    private func applyPathMigration() async {
+        guard let report = pathMigrationReport else { return }
+        guard container.downloadViewModel?.isDownloading != true,
+              !PerformanceQueueService.shared.isDownloadActive else {
+            resultMessage = "Pfad-Migration nicht gestartet: Bitte zuerst alle Downloads beenden."
+            return
+        }
+        isRunning = "path-apply"
+        resultMessage = nil
+        do {
+            let service = try await makePathMigrationService()
+            let result = try await service.apply(report)
+            pathMigrationReport = nil
+            showPathMigrationReport = false
+            resultMessage = "Pfad-Migration: \(result.updatedCount) organized_path-Werte aktualisiert. Manifest: \(result.manifestURL.path) · Backup: \(result.backupURL.path)"
             NotificationCenter.default.post(name: .libraryDidImport, object: nil)
         } catch {
-            resultMessage = "Repair fehlgeschlagen: \(error.localizedDescription)"
+            resultMessage = "Pfad-Migration abgebrochen: \(error.localizedDescription)"
         }
+        isRunning = nil
+    }
 
+    private func rollbackPathMigration() async {
+        isRunning = "path-rollback"
+        resultMessage = nil
+        do {
+            let service = try await makePathMigrationService()
+            let result = try await service.rollbackMostRecent()
+            pathMigrationReport = nil
+            showPathMigrationReport = false
+            let warning = result.manifestFinalizationWarning.map { " Warnung: \($0)" } ?? ""
+            resultMessage = "Rollback: \(result.restoredCount) organized_path-Werte wiederhergestellt. Manifest: \(result.manifestURL.path) · Backup: \(result.rollbackBackupURL.path)\(warning)"
+            NotificationCenter.default.post(name: .libraryDidImport, object: nil)
+        } catch {
+            resultMessage = "Rollback abgebrochen: \(error.localizedDescription)"
+        }
         isRunning = nil
     }
 
