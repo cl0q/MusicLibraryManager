@@ -781,7 +781,7 @@ Plans:
 - [ ] 39-02-PLAN.md — Orchestrator source pinning across retries + 01_SoundCloud directory, no M4A under 00_FLAC (SCDL-01, SCDL-09)
 - [ ] 39-03-PLAN.md — SoundCloud auth resilience: 401 refresh-once-retry-once + boot-time refresh registration (SCDL-04, SCDL-05)
 - [ ] 39-04-PLAN.md — Honest success accounting + per-item Operations rendering (SCDL-06, SCDL-07)
-- [ ] 39-05-PLAN.md — Artwork progress bound + sentinel eligibility query split (SCDL-08)
+- [x] 39-05-PLAN.md — Artwork progress bound + sentinel eligibility query split (SCDL-08)
 - [ ] 39-06-PLAN.md — SoundCloud artwork retention + provider-before-MusicBrainz priority (SCDL-08)
 - [ ] 39-07-PLAN.md — macOS build/test + live symptom verification checkpoint (all SCDL)
 

@@ -236,6 +236,9 @@ Recent decisions affecting current work:
 - [Phase ?]: Phase 36-03: URL(dataRepresentation:relativeTo:isAbsolute:) needs explicit `relativeTo: nil` on Swift 5.10 / macOS 15 SDK — no default parameter; deviation Rule 1 fixed during Task 2 build
 - [Phase 38]: allPlaylistsReturnedOnEmptyQuery testet Playlist.fetchAll direkt — PlaylistPickerSheet nutzt container.playlistRepository, nicht SyncViewModel — SyncViewModel.allAvailablePlaylists existiert nicht; Picker geht direkt zum Repository
 - [Phase 38]: UAT auto-approved im Auto-Mode; Orchestrator persistiert als 38-HUMAN-UAT.md fuer spaeter /gsd-verify-work — Hardware-Checkpoint (iPod-Anschluss) blockiert Auto-Mode-Chain nicht
+- [Phase 39-05]: fetchTracksEligibleForProviderArtwork() added as a NEW TrackRepository method rather than widening fetchTracksWithoutArtwork() in place — the embedded auto-backfill caller must keep excluding NULL-path sentinel rows to avoid re-running ffmpeg on every import (RESEARCH Pitfall 1)
+- [Phase 39-05]: ArtworkBackfillService.backfillMissing progress.current now mirrors tracker.currentState.current (single source of truth) instead of being incremented a second time in the outer TaskGroup completion loop — fixes 84/44-style progress overshoot
+- [Phase 39-05]: No Swift toolchain available on the Windows executor for this plan — swift test/swift build verification is static-only (grep counts + brace balance + manual call-site trace); macOS dynamic test run is a pending follow-up before SCDL-08's accounting/eligibility halves are considered fully verified
 
 ### v1.3 Scope Decisions (locked, paused state)
 
