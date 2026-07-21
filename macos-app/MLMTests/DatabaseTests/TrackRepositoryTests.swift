@@ -269,5 +269,75 @@ struct TrackRepositoryTests {
         let titles = result.map(\.title).sorted()
         #expect(titles == ["T1", "T3"])
     }
+
+    // MARK: - fetchTracksWithoutArtwork vs fetchTracksEligibleForProviderArtwork (SCDL-08)
+
+    /// Insert an artwork row directly (bypassing AnalysisRepository — this test
+    /// only needs the raw row shape, not save-side business logic).
+    private func insertArtwork(_ db: DatabaseQueue, trackId: Int64, artworkPath: String?, source: String?) async throws {
+        try await db.write { db in
+            let artwork = Artwork(
+                trackId: trackId,
+                artworkPath: artworkPath,
+                source: source,
+                musicbrainzReleaseGroupId: nil,
+                resolution: nil,
+                fetchedAt: "2024-01-01T00:00:00Z"
+            )
+            try artwork.insert(db)
+        }
+    }
+
+    @Test func fetchTracksWithoutArtworkExcludesSentinelRows() async throws {
+        let (db, repo) = try makeRepo()
+        try await insertTrack(db, artist: "A", album: "X", title: "Sentinel", organizedPath: "A/X/Sentinel.mp3")
+        let trackId = try await db.read { db in
+            try Int64.fetchOne(db, sql: "SELECT id FROM tracks WHERE title = 'Sentinel'")!
+        }
+        // Sentinel row: NULL artwork_path, source "none" — written when embedded
+        // extraction found no art. Embedded pass must NOT see this track again
+        // (otherwise ffmpeg re-runs over it on every import).
+        try await insertArtwork(db, trackId: trackId, artworkPath: nil, source: "none")
+
+        let results = try await repo.fetchTracksWithoutArtwork()
+        #expect(!results.contains(where: { $0.title == "Sentinel" }), "Embedded pass must stay exclusive of sentinel rows")
+    }
+
+    @Test func fetchTracksEligibleForProviderArtworkIncludesSentinelRows() async throws {
+        let (db, repo) = try makeRepo()
+        try await insertTrack(db, artist: "A", album: "X", title: "Sentinel", organizedPath: "A/X/Sentinel.mp3")
+        let trackId = try await db.read { db in
+            try Int64.fetchOne(db, sql: "SELECT id FROM tracks WHERE title = 'Sentinel'")!
+        }
+        try await insertArtwork(db, trackId: trackId, artworkPath: nil, source: "none")
+
+        let results = try await repo.fetchTracksEligibleForProviderArtwork()
+        #expect(results.contains(where: { $0.title == "Sentinel" }), "Provider/MusicBrainz pass must still see sentinel rows")
+    }
+
+    @Test func neitherQueryReturnsTrackWithRealArtwork() async throws {
+        let (db, repo) = try makeRepo()
+        try await insertTrack(db, artist: "A", album: "X", title: "HasArt", organizedPath: "A/X/HasArt.mp3")
+        let trackId = try await db.read { db in
+            try Int64.fetchOne(db, sql: "SELECT id FROM tracks WHERE title = 'HasArt'")!
+        }
+        try await insertArtwork(db, trackId: trackId, artworkPath: "/cache/HasArt_1200.jpg", source: "embedded")
+
+        let withoutArtwork = try await repo.fetchTracksWithoutArtwork()
+        let eligibleForProvider = try await repo.fetchTracksEligibleForProviderArtwork()
+        #expect(!withoutArtwork.contains(where: { $0.title == "HasArt" }))
+        #expect(!eligibleForProvider.contains(where: { $0.title == "HasArt" }))
+    }
+
+    @Test func bothQueriesReturnTrackWithNoArtworkRowAtAll() async throws {
+        let (db, repo) = try makeRepo()
+        try await insertTrack(db, artist: "A", album: "X", title: "NoRow", organizedPath: "A/X/NoRow.mp3")
+        // No artwork row inserted at all.
+
+        let withoutArtwork = try await repo.fetchTracksWithoutArtwork()
+        let eligibleForProvider = try await repo.fetchTracksEligibleForProviderArtwork()
+        #expect(withoutArtwork.contains(where: { $0.title == "NoRow" }))
+        #expect(eligibleForProvider.contains(where: { $0.title == "NoRow" }))
+    }
 }
 

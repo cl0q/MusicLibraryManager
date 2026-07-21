@@ -580,12 +580,42 @@ final class TrackRepository: Sendable {
     }
 
     /// Fetch tracks that lack artwork.
+    ///
+    /// SCDL-08: this predicate is intentionally narrower than
+    /// `fetchTracksEligibleForProviderArtwork()` below — it excludes tracks that
+    /// already have a sentinel artwork row (NULL `artwork_path`, e.g. `source =
+    /// "none"`). That sentinel exists so the embedded auto-backfill
+    /// (`ArtworkBackfillService`) does NOT re-run ffmpeg over the same art-less
+    /// tracks on every import. Do NOT widen this query to include sentinel rows —
+    /// doing so reintroduces the ffmpeg-storm regression (RESEARCH Pitfall 1).
+    /// Provider/MusicBrainz callers that need sentinel rows to stay eligible must
+    /// use `fetchTracksEligibleForProviderArtwork()` instead of modifying this one.
     func fetchTracksWithoutArtwork() async throws -> [Track] {
         try await database.read { db in
             try Track.fetchAll(db, sql: """
                 SELECT t.* FROM tracks t
                 LEFT JOIN artwork a ON a.track_id = t.id
                 WHERE a.track_id IS NULL AND t.organized_path IS NOT NULL
+                ORDER BY t.id
+            """)
+        }
+    }
+
+    /// Fetch tracks eligible for provider/MusicBrainz artwork lookup (SCDL-08).
+    ///
+    /// Unlike `fetchTracksWithoutArtwork()`, this INCLUDES tracks that already
+    /// have a sentinel artwork row (NULL `artwork_path`) written by the embedded
+    /// auto-backfill when ffmpeg found no embedded art — those tracks still need
+    /// a chance at provider-sourced artwork (MusicBrainz, SoundCloud), they just
+    /// shouldn't trigger another ffmpeg pass. A track with a real (non-NULL)
+    /// `artwork_path` is excluded from both queries.
+    func fetchTracksEligibleForProviderArtwork() async throws -> [Track] {
+        try await database.read { db in
+            try Track.fetchAll(db, sql: """
+                SELECT t.* FROM tracks t
+                LEFT JOIN artwork a ON a.track_id = t.id
+                WHERE (a.track_id IS NULL OR a.artwork_path IS NULL)
+                  AND t.organized_path IS NOT NULL
                 ORDER BY t.id
             """)
         }
