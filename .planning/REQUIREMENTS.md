@@ -255,6 +255,20 @@ Deferred to future milestones (renamed from prior "v1.4+ Deferred").
 - **IMP-03**: Import preview shows matched/unmatched track counts — shipped in Phase 12
 - **IMP-04**: Import creates playlist with matched tracks in original order — shipped in Phase 12
 
+## v2.1 Reliability Requirements
+
+### SoundCloud Download Integrity
+
+- [ ] **SCDL-01**: SoundCloud-pinned downloads fail closed without automatic cross-provider fallback
+- [ ] **SCDL-02**: A download result can only reference a file created by that specific request
+- [ ] **SCDL-03**: YouTube query normalization preserves remix, edit, version, live, slowed, and remaster identity
+- [ ] **SCDL-04**: A transient SoundCloud 401 refreshes and retries once without deleting stored credentials
+- [ ] **SCDL-05**: SoundCloud token refresh is registered and started during app initialization
+- [ ] **SCDL-06**: Operations shows every download item and its truthful terminal status or failure reason
+- [ ] **SCDL-07**: Batch success requires validated file output and successful database persistence
+- [ ] **SCDL-08**: SoundCloud artwork is retained and artwork maintenance progress is bounded by its total
+- [ ] **SCDL-09**: New SoundCloud downloads use `01_SoundCloud`; existing files are not migrated automatically
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -388,6 +402,15 @@ Which phases cover which requirements. Updated during roadmap creation.
 | POLISH-02 | Phase 33 | Pending |
 | POLISH-03 | Phase 33 | Pending |
 | POLISH-04 | Phase 33 | Pending |
+| SCDL-01 | Phase 39 | Verification pending |
+| SCDL-02 | Phase 39 | Verification pending |
+| SCDL-03 | Phase 39 | Verification pending |
+| SCDL-04 | Phase 39 | Verification pending |
+| SCDL-05 | Phase 39 | Verification pending |
+| SCDL-06 | Phase 39 | Verification pending |
+| SCDL-07 | Phase 39 | Verification pending |
+| SCDL-08 | Phase 39 | Verification pending |
+| SCDL-09 | Phase 39 | Verification pending |
 
 **Coverage:**
 - v1.1 requirements: 19 total
@@ -395,9 +418,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 - v1.2 Solar Design & Loudness: 27 total (THEME/SHELL/TBL/SCRN/SYNCUI/LOUD/MINFO/BATCH)
 - v1.3 Yeat Expansion: 24 total (TAG/VAR/ART/MIG/ERA/TOOL/DASH) — phases 22–27 PAUSED 2026-05-04 mid-flight; spec retained
 - v1.4 Daily Driver: 35 total (INFRA/PLAY/BROWSE/PLAYLIST/BULK/POLISH)
-- Mapped to phases: 109
+- v2.1 Reliability: 9 total (SCDL)
+- Mapped to phases: 118
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-05*
-*Last updated: 2026-05-05 — added 35 v1.4 Daily Driver requirements for Phases 28-33; renamed v1.4 BATCH→BULK to avoid v1.2 ID collision*
+*Last updated: 2026-07-21 — added SoundCloud Download Integrity requirements for Phase 39*

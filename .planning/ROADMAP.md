@@ -777,12 +777,12 @@ Plans:
 **Plans:** 7 plans in 3 waves
 
 Plans:
-- [ ] 39-01-PLAN.md — YouTube/SoundCloud downloader integrity: identity-preserving query normalization + remove shared-dir stale-file reuse (SCDL-02, SCDL-03)
-- [ ] 39-02-PLAN.md — Orchestrator source pinning across retries + 01_SoundCloud directory, no M4A under 00_FLAC (SCDL-01, SCDL-09)
-- [ ] 39-03-PLAN.md — SoundCloud auth resilience: 401 refresh-once-retry-once + boot-time refresh registration (SCDL-04, SCDL-05)
-- [ ] 39-04-PLAN.md — Honest success accounting + per-item Operations rendering (SCDL-06, SCDL-07)
+- [x] 39-01-PLAN.md — YouTube/SoundCloud downloader integrity: identity-preserving query normalization + remove shared-dir stale-file reuse (SCDL-02, SCDL-03)
+- [x] 39-02-PLAN.md — Orchestrator source pinning across retries + 01_SoundCloud directory, no M4A under 00_FLAC (SCDL-01, SCDL-09)
+- [x] 39-03-PLAN.md — SoundCloud auth resilience: 401 refresh-once-retry-once + boot-time refresh registration (SCDL-04, SCDL-05)
+- [x] 39-04-PLAN.md — Honest success accounting + per-item Operations rendering (SCDL-06, SCDL-07)
 - [x] 39-05-PLAN.md — Artwork progress bound + sentinel eligibility query split (SCDL-08)
-- [ ] 39-06-PLAN.md — SoundCloud artwork retention + provider-before-MusicBrainz priority (SCDL-08)
+- [x] 39-06-PLAN.md — SoundCloud artwork retention + provider-before-MusicBrainz priority (SCDL-08)
 - [ ] 39-07-PLAN.md — macOS build/test + live symptom verification checkpoint (all SCDL)
 
 Waves: W1 = 39-01, 39-02, 39-03, 39-04, 39-05 (parallel, no file overlap) | W2 = 39-06 (depends on 03, 05) | W3 = 39-07 (verification gate)
@@ -805,4 +805,4 @@ Waves: W1 = 39-01, 39-02, 39-03, 39-04, 39-05 (parallel, no file overlap) | W2 =
 | 36. Playlists (v2.0) | v2.0 | 4/4 | Complete | 2026-05-13 |
 | 37. Album-Art Pipeline | v2.0 | 4/4 | Complete   | 2026-05-16 |
 | 38. Folder & Device Sync | v2.0 | 5/5 | Complete    | 2026-05-18 |
-| 39. SoundCloud Download Integrity | v2.1 | 0/7 | Not started | - |
+| 39. SoundCloud Download Integrity | v2.1 | 6/7 | Awaiting macOS verification | - |

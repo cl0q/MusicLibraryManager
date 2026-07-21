@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.0
-milestone_name: macOS Native
-status: milestone_complete
-stopped_at: Phase 38 UI-SPEC approved
-last_updated: "2026-05-18T07:45:16.716Z"
-last_activity: 2026-05-18
+milestone: v2.1
+milestone_name: Reliability
+status: in_progress
+stopped_at: "Phase 39 Plan 07: macOS verification pending"
+last_updated: "2026-07-21T12:00:00Z"
+last_activity: 2026-07-21
 progress:
-  total_phases: 3
-  completed_phases: 4
-  total_plans: 13
-  completed_plans: 13
-  percent: 133
+  total_phases: 1
+  completed_phases: 0
+  total_plans: 7
+  completed_plans: 6
+  percent: 86
 ---
 
 # Project State
@@ -21,18 +21,28 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-07)
 
 **Core value:** Like a song anywhere and it reliably ends up in your owned library and on your devices in high quality — native macOS experience
-**Current focus:** Phase 38 — folder-device-sync-v2-0-macos-playlists-library-auswahlen-au
+**Current focus:** Phase 39 — SoundCloud Download Integrity
 **Source of truth:** `macos-app/PLAN.md` + `.planning/ROADMAP.md` v2.0 section
 **v1.4 source of truth (paused):** `.planning/REQUIREMENTS.md` v1.4 section + `.planning/ROADMAP.md` v1.4 section
 **v1.3 source of truth (paused):** `.planning/REQUIREMENTS.md` v1.3 section + `.planning/ROADMAP.md` v1.3 section
 
 ## Current Position
 
-Phase: 38
-Plan: Not started
-Next: Phase 37 kickoff (TBD) — or roadmap review against v2.0 milestone goals
-Status: Milestone complete
-Last activity: 2026-05-18
+Phase: 39
+Plan: 07
+Next: Run `swift build`, `swift test`, and the six live SoundCloud checks on macOS 15+
+Status: Implementation complete; macOS verification pending
+Last activity: 2026-07-21
+
+## Phase 39 Summary (v2.1)
+
+- Plans 39-01 through 39-06 are implemented and committed.
+- SoundCloud requests fail closed, retries retain source and identity, and every provider downloads through a request-specific staging directory.
+- Final files use deterministic track-ID filenames; SoundCloud lands in `01_SoundCloud`, YouTube in `00_Artists`, and DAB/Squid originals remain in `00_FLAC`.
+- SoundCloud credentials survive transient 401s, refresh once, retry once, and are deleted only by explicit disconnect.
+- Operations and batch totals reflect database persistence; successful retries dequeue only after persistence.
+- SoundCloud artwork URLs are retained without clobbering embedded/local covers and are tried before MusicBrainz.
+- Windows static gates and three review passes passed. Swift build/tests and live external-tool checks remain blocked until Plan 39-07 runs on macOS.
 
 ## Phase 5 Summary (v2.0)
 
