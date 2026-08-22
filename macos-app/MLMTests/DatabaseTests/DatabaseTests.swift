@@ -187,25 +187,11 @@ struct DatabaseTests {
         }
     }
 
-    @Test func foreignKeysCascadeDelete() async throws {
+    @Test func foreignKeysRemainDisabledForSharedSchemaCompatibility() async throws {
         let db = try DatabaseManager.inMemory()
-        try await db.write { db in
-            // Create track
-            var track = Track(artist: "A", album: "A", title: "T", format: "mp3", originalPath: "/t.mp3")
-            try track.insert(db)
-            let trackId = track.id!
-
-            // Create playlist and add track
-            var playlist = Playlist.createNative(name: "PL")
-            try playlist.insert(db)
-            var pt = PlaylistTrack(id: nil, playlistId: playlist.id!, trackId: trackId, position: "a0", addedAt: nil)
-            try pt.insert(db)
-
-            // Delete track — should cascade to playlist_tracks
-            try Track.deleteOne(db, id: trackId)
-
-            let count = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM playlist_tracks WHERE track_id = ?", arguments: [trackId])
-            #expect(count == 0)
+        try await db.read { db in
+            let foreignKeys = try Int.fetchOne(db, sql: "PRAGMA foreign_keys")
+            #expect(foreignKeys == 0)
         }
     }
 

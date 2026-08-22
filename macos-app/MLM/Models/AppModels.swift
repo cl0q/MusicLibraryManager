@@ -28,6 +28,7 @@ struct DownloadItem: Codable, Identifiable, Hashable {
 struct ReviewItem: Codable, FetchableRecord, MutablePersistableRecord, Identifiable {
     var id: Int64?
     var actionType: String
+    var groupKey: String? = nil
     var trackId: Int64
     var relatedTrackId: Int64?
     var details: String
@@ -41,6 +42,7 @@ struct ReviewItem: Codable, FetchableRecord, MutablePersistableRecord, Identifia
     enum CodingKeys: String, CodingKey {
         case id
         case actionType = "action_type"
+        case groupKey = "group_key"
         case trackId = "track_id"
         case relatedTrackId = "related_track_id"
         case details
@@ -54,10 +56,36 @@ struct ReviewItem: Codable, FetchableRecord, MutablePersistableRecord, Identifia
         static let id = Column(CodingKeys.id)
         static let status = Column(CodingKeys.status)
         static let actionType = Column(CodingKeys.actionType)
+        static let groupKey = Column(CodingKeys.groupKey)
+    }
+
+    /// Decodes the typed review payload while tolerating older pair-only rows.
+    var reviewDetails: ReviewDetails? {
+        try? ReviewDetails.decodeJSON(details)
+    }
+
+    mutating func setReviewDetails(_ reviewDetails: ReviewDetails) throws {
+        details = try reviewDetails.encodedJSON()
+        groupKey = reviewDetails.groupKey
     }
 
     mutating func didInsert(_ inserted: InsertionSuccess) {
         id = inserted.rowID
+    }
+}
+
+/// One pending review group, including the number of queue rows it contains.
+struct ReviewQueueGroup: Codable, FetchableRecord, Equatable {
+    var groupKey: String
+    var actionType: String
+    var itemCount: Int
+    var latestCreatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case groupKey = "group_key"
+        case actionType = "action_type"
+        case itemCount = "item_count"
+        case latestCreatedAt = "latest_created_at"
     }
 }
 

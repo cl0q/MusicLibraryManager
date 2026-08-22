@@ -57,7 +57,7 @@ struct SyncContentSections: View {
                             .padding(.horizontal, 8)
                     }
                     .buttonStyle(.plain)
-                    .help("Playlists hinzufügen…")
+                    .help("Add playlists…")
 
                     // Expand Chevron
                     Button {
@@ -84,7 +84,7 @@ struct SyncContentSections: View {
                             .padding(.bottom, 6)
                         
                         if vm.profilePlaylists.isEmpty {
-                            Text("Keine Playlists — Klicke das Plus-Symbol oben rechts zum Hinzufügen")
+                            Text("No playlists — select the plus button to add playlists")
                                 .font(MLMFont.muted)
                                 .foregroundColor(.mlmInkMuted)
                                 .padding(.horizontal, 16)
@@ -147,7 +147,7 @@ struct SyncContentSections: View {
                             .padding(.horizontal, 8)
                     }
                     .buttonStyle(.plain)
-                    .help("Tracks hinzufügen…")
+                    .help("Add tracks…")
 
                     // Expand Chevron
                     Button {
@@ -174,7 +174,7 @@ struct SyncContentSections: View {
                             .padding(.bottom, 6)
                         
                         if vm.profileTracks.isEmpty {
-                            Text("Keine Tracks — Klicke das Plus-Symbol oben rechts zum Hinzufügen")
+                            Text("No tracks — select the plus button to add tracks")
                                 .font(MLMFont.muted)
                                 .foregroundColor(.mlmInkMuted)
                                 .padding(.horizontal, 16)
@@ -258,7 +258,7 @@ struct SyncContentSections: View {
             Button(role: .destructive) {
                 Task { await vm.removePlaylists([playlist.id ?? -1]) }
             } label: {
-                Label("Aus Profil entfernen", systemImage: "minus.circle")
+                Label("Remove from profile", systemImage: "minus.circle")
             }
         }
     }
@@ -313,7 +313,7 @@ struct SyncContentSections: View {
             Button(role: .destructive) {
                 Task { await vm.removeTracks([track.id ?? -1]) }
             } label: {
-                Label("Aus Profil entfernen", systemImage: "minus.circle")
+                Label("Remove from profile", systemImage: "minus.circle")
             }
         }
     }

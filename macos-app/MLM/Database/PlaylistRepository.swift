@@ -140,6 +140,55 @@ final class PlaylistRepository: Sendable {
         }
     }
 
+    /// Returns download health for every playlist in one query so card grids
+    /// never perform a track query per visible playlist.
+    func fetchDownloadStatuses() async throws -> [PlaylistDownloadStatus] {
+        try await database.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                WITH playlist_track_states AS (
+                    SELECT
+                        pt.playlist_id,
+                        CASE
+                            -- SQL deliberately identifies only a persisted local path.
+                            -- File existence is verified by the detail availability snapshot.
+                            WHEN TRIM(COALESCE(t.organized_path, '')) != '' THEN 'local_path'
+                            WHEN LOWER(COALESCE(t.download_status, ''))
+                                IN ('downloading', 'queued', 'in_progress', 'in-progress')
+                                THEN 'downloading'
+                            WHEN (t.download_failure IS NOT NULL
+                                  AND TRIM(t.download_failure) != '')
+                                OR LOWER(COALESCE(t.download_status, '')) IN ('failed', 'error')
+                                THEN 'failed'
+                            ELSE 'not_downloaded'
+                        END AS availability_bucket
+                    FROM playlist_tracks pt
+                    INNER JOIN tracks t ON t.id = pt.track_id
+                )
+                SELECT
+                    playlist_id,
+                    COUNT(*) AS total_tracks,
+                    SUM(CASE WHEN availability_bucket = 'local_path' THEN 1 ELSE 0 END) AS local_tracks,
+                    SUM(CASE WHEN availability_bucket = 'downloading' THEN 1 ELSE 0 END) AS downloading_tracks,
+                    SUM(CASE WHEN availability_bucket = 'failed' THEN 1 ELSE 0 END) AS failed_tracks,
+                    SUM(CASE WHEN availability_bucket = 'not_downloaded' THEN 1 ELSE 0 END) AS not_downloaded_tracks
+                FROM playlist_track_states
+                GROUP BY playlist_id
+            """)
+
+            return rows.compactMap { row in
+                guard let playlistID: Int64 = row["playlist_id"] else { return nil }
+                return PlaylistDownloadStatus(
+                    playlistID: playlistID,
+                    totalTracks: (row["total_tracks"] as Int?) ?? 0,
+                    localTracks: (row["local_tracks"] as Int?) ?? 0,
+                    downloadingTracks: (row["downloading_tracks"] as Int?) ?? 0,
+                    failedTracks: (row["failed_tracks"] as Int?) ?? 0,
+                    notDownloadedTracks: (row["not_downloaded_tracks"] as Int?) ?? 0
+                )
+            }
+        }
+    }
+
     /// Add a track to a playlist with a position.
     func addTrack(playlistId: Int64, trackId: Int64, position: String) async throws {
         try await database.write { db in

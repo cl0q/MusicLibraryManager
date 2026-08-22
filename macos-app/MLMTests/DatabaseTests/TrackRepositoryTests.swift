@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import GRDB
 @testable import MLM
@@ -33,6 +34,172 @@ struct TrackRepositoryTests {
             t.searchText = DatabaseManager.foldedSearchText(t.rawSearchText)
             try t.insert(db)
         }
+    }
+
+    private func trackID(_ db: DatabaseQueue, title: String) async throws -> Int64 {
+        try await db.read { db in
+            try Int64.fetchOne(
+                db,
+                sql: "SELECT id FROM tracks WHERE title = ?",
+                arguments: [title]
+            )!
+        }
+    }
+
+    // MARK: - Download failure persistence
+
+    @Test func downloadFailureJSONRoundTripsAndReconcilesLegacyRetryAttempts() async throws {
+        let (db, repo) = try makeRepo()
+        try await insertTrack(
+            db,
+            artist: "Artist",
+            album: "Remote",
+            title: "Failed Download",
+            format: "youtube",
+            organizedPath: nil
+        )
+        let id = try await trackID(db, title: "Failed Download")
+        let firstDate = Date(timeIntervalSince1970: 1_720_000_000)
+        let secondDate = Date(timeIntervalSince1970: 1_720_000_001)
+
+        let first = try await repo.persistDownloadFailure(
+            trackId: id,
+            reason: "Video unavailable",
+            date: firstDate
+        )
+        let reconciled = try await repo.persistDownloadFailure(
+            trackId: id,
+            reason: "Network error",
+            date: secondDate,
+            minimumAttempts: 4
+        )
+        let fetched = try await repo.fetchTrack(id: id)
+
+        #expect(first == TrackDownloadFailure(
+            reason: "Video unavailable",
+            date: firstDate,
+            attempts: 1
+        ))
+        #expect(reconciled == TrackDownloadFailure(
+            reason: "Network error",
+            date: secondDate,
+            attempts: 4
+        ))
+        #expect(fetched?.downloadFailureRecord == reconciled)
+        #expect(fetched?.downloadStatus == "failed")
+    }
+
+    @Test func downloadingStateTransitionsThroughCancelFailureAndSuccess() async throws {
+        let (db, repo) = try makeRepo()
+        try await insertTrack(
+            db,
+            artist: "Artist",
+            album: "Remote",
+            title: "Lifecycle",
+            format: "youtube",
+            organizedPath: nil
+        )
+        let id = try await trackID(db, title: "Lifecycle")
+
+        try await repo.markDownloadsInProgress(trackIds: [id])
+        var fetched = try await repo.fetchTrack(id: id)
+        #expect(fetched?.downloadStatus == "downloading")
+        #expect(fetched?.availability() == .downloading)
+
+        try await repo.clearDownloadsInProgress(trackIds: [id])
+        fetched = try await repo.fetchTrack(id: id)
+        #expect(fetched?.downloadStatus == nil)
+        #expect(fetched?.availability() == .notDownloaded)
+
+        try await repo.markDownloadsInProgress(trackIds: [id])
+        _ = try await repo.persistDownloadFailure(
+            trackId: id,
+            reason: "Video unavailable"
+        )
+        fetched = try await repo.fetchTrack(id: id)
+        #expect(fetched?.downloadStatus == "failed")
+        #expect(fetched?.availability() != .downloading)
+
+        // A retry keeps the durable history but exposes its truthful active
+        // state until it terminates.
+        try await repo.markDownloadsInProgress(trackIds: [id])
+        fetched = try await repo.fetchTrack(id: id)
+        #expect(fetched?.availability() == .downloading)
+        try await repo.clearDownloadsInProgress(trackIds: [id])
+        fetched = try await repo.fetchTrack(id: id)
+        #expect(fetched?.downloadStatus == "failed")
+
+        try await repo.markDownloadsInProgress(trackIds: [id])
+        try await repo.markAsDownloaded(
+            trackId: id,
+            organizedPath: "00_Artists/Lifecycle.m4a",
+            format: "m4a",
+            bitrate: 248,
+            downloadStatus: "2026-08-06T12:00:00Z"
+        )
+        fetched = try await repo.fetchTrack(id: id)
+        #expect(fetched?.downloadStatus == "2026-08-06T12:00:00Z")
+        #expect(fetched?.downloadFailure == nil)
+        #expect(fetched?.organizedPath == "00_Artists/Lifecycle.m4a")
+    }
+
+    @Test func failureQueryIncludesLegacyDownloadStatusRows() async throws {
+        let (db, repo) = try makeRepo()
+        try await insertTrack(
+            db,
+            artist: "Artist",
+            album: "Remote",
+            title: "Legacy Failure",
+            format: "youtube",
+            organizedPath: nil
+        )
+        let id = try await trackID(db, title: "Legacy Failure")
+        try await db.write { db in
+            try db.execute(
+                sql: "UPDATE tracks SET download_status = 'failed' WHERE id = ?",
+                arguments: [id]
+            )
+        }
+
+        let failures = try await repo.fetchTracksWithDownloadFailures()
+
+        #expect(failures.map(\.id) == [id])
+        #expect(failures.first?.downloadFailureRecord == nil)
+        #expect(failures.first?.availability() == .failed(
+            reason: "Download failed",
+            date: .distantPast,
+            attempts: 1
+        ))
+    }
+
+    @Test func successfulDownloadAtomicallyClearsPersistedFailure() async throws {
+        let (db, repo) = try makeRepo()
+        try await insertTrack(
+            db,
+            artist: "Artist",
+            album: "Remote",
+            title: "Recovered Download",
+            format: "youtube",
+            organizedPath: nil
+        )
+        let id = try await trackID(db, title: "Recovered Download")
+        _ = try await repo.persistDownloadFailure(
+            trackId: id,
+            reason: "Video unavailable"
+        )
+
+        try await repo.markAsDownloaded(
+            trackId: id,
+            organizedPath: "00_Artists/Recovered Download.m4a",
+            format: "m4a",
+            bitrate: 248,
+            downloadStatus: "2026-08-06T12:00:00Z"
+        )
+        let fetched = try await repo.fetchTrack(id: id)
+
+        #expect(fetched?.downloadFailure == nil)
+        #expect(fetched?.downloadFailureRecord == nil)
+        #expect(fetched?.organizedPath == "00_Artists/Recovered Download.m4a")
     }
 
     // MARK: - fetchForLibrary: tab filter

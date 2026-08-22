@@ -49,6 +49,83 @@ final class SyncRepository: Sendable {
         }
     }
 
+    /// Duplicate a profile and its selected content atomically. A unique
+    /// display name is generated so this remains useful without a modal name
+    /// prompt.
+    @discardableResult
+    func duplicate(id: Int64) async throws -> SyncProfile {
+        try await database.write { db in
+            guard let original = try SyncProfile.fetchOne(db, id: id) else {
+                throw SyncError.profileNotFound(id)
+            }
+
+            var copyName = "\(original.name) copy"
+            var suffix = 2
+            while try String.fetchOne(
+                db,
+                sql: "SELECT name FROM sync_profiles WHERE name = ?",
+                arguments: [copyName]
+            ) != nil {
+                copyName = "\(original.name) copy \(suffix)"
+                suffix += 1
+            }
+
+            var copy = SyncProfile(
+                name: copyName,
+                outputFolder: original.outputFolder,
+                playlistPathPrefix: original.playlistPathPrefix,
+                generateM3U8: original.generateM3U8,
+                transcodeMode: original.transcodeMode,
+                fat32SafePaths: original.fat32SafePaths,
+                cleanupRemovedFiles: original.cleanupRemovedFiles,
+                playlistFormat: original.playlistFormat,
+                normalizeLoudness: original.normalizeLoudness
+            )
+            try copy.insert(db)
+            guard let copyID = copy.id else { return copy }
+
+            try db.execute(
+                sql: """
+                    INSERT INTO sync_profile_tracks (profile_id, track_id)
+                    SELECT ?, track_id FROM sync_profile_tracks WHERE profile_id = ?
+                    """,
+                arguments: [copyID, id]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO sync_profile_playlists (profile_id, playlist_id)
+                    SELECT ?, playlist_id FROM sync_profile_playlists WHERE profile_id = ?
+                    """,
+                arguments: [copyID, id]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO sync_profile_rules (profile_id, field, operator, value)
+                    SELECT ?, field, operator, value FROM sync_profile_rules WHERE profile_id = ?
+                    """,
+                arguments: [copyID, id]
+            )
+            return copy
+        }
+    }
+
+    /// Last successful sync timestamp for every profile, fetched in one query
+    /// for the profile-list status lines.
+    func fetchLastSyncTimestamps() async throws -> [Int64: String] {
+        try await database.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT profile_id, MAX(synced_timestamp) AS last_sync
+                FROM sync_state
+                GROUP BY profile_id
+                """)
+            return Dictionary(uniqueKeysWithValues: rows.compactMap { row in
+                guard let profileID: Int64 = row["profile_id"],
+                      let timestamp: String = row["last_sync"] else { return nil }
+                return (profileID, timestamp)
+            })
+        }
+    }
+
     // MARK: - Profile Content
 
     /// Fetch tracks directly added to a profile.

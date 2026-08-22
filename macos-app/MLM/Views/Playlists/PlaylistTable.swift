@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -22,6 +23,7 @@ struct PlaylistTable: View {
         let index: Int
         let id: Int64
         let track: Track
+        let isFailed: Bool
     }
 
     /// Sort order — default is by the natural playlist index (custom order)
@@ -43,58 +45,75 @@ struct PlaylistTable: View {
                 Group {
                     TableColumn("#", value: \TrackRow.index) { row in
                         PlaylistTableIndexCell(index: row.index)
+                            .opacity(row.isFailed ? 0.6 : 1)
                     }
                     .width(28)
 
                     TableColumn("Title", value: \TrackRow.track.title) { row in
                         PlaylistTableTitleCell(track: row.track, isPlaying: isNowPlaying(row.track))
+                            .opacity(row.isFailed ? 0.6 : 1)
                     }
                     .width(min: 160, ideal: 280)
 
                     TableColumn("Artist", value: \TrackRow.track.artist) { row in
                         PlaylistTableArtistCell(artist: row.track.artist)
+                            .opacity(row.isFailed ? 0.6 : 1)
                     }
                     .width(min: 100, ideal: 180)
 
                     TableColumn("Album", value: \TrackRow.track.album) { row in
                         PlaylistTableAlbumCell(album: row.track.album)
+                            .opacity(row.isFailed ? 0.6 : 1)
                     }
                     .width(min: 100, ideal: 180)
 
                     TableColumn("Time", value: \TrackRow.track.durationSortKey) { row in
                         PlaylistTableTimeCell(formattedDuration: row.track.formattedDuration)
+                            .opacity(row.isFailed ? 0.6 : 1)
                     }
                     .width(54)
 
                     TableColumn("Format", value: \TrackRow.track.format) { row in
                         PlaylistTableFormatCell(track: row.track, formatColor: formatColor)
+                            .opacity(row.isFailed ? 0.6 : 1)
                     }
                     .width(60)
+
+                    TableColumn("Status") { row in
+                        PlaylistTableStatusCell(availability: availability(for: row.track))
+                            .opacity(row.isFailed ? 0.6 : 1)
+                    }
+                    .width(90)
                 }
 
                 Group {
                     TableColumn("Genre", value: \TrackRow.track.genreSortKey) { row in
                         PlaylistTableGenreCell(genre: row.track.genre)
+                            .opacity(row.isFailed ? 0.6 : 1)
                     }
                     .width(min: 70, ideal: 110)
 
                     TableColumn("Year", value: \TrackRow.track.yearSortKey) { row in
                         PlaylistTableYearCell(year: row.track.year)
+                            .opacity(row.isFailed ? 0.6 : 1)
                     }
                     .width(48)
 
                     TableColumn("Energy", value: \TrackRow.track.energySortKey) { row in
                         PlaylistTableEnergyCell(level: row.track.energyBucket)
+                            .opacity(row.isFailed ? 0.6 : 1)
                     }
                     .width(56)
 
                     TableColumn("Dance", value: \TrackRow.track.danceabilitySortKey) { row in
                         DanceabilitySteps(score: row.track.danceability)
+                            .opacity(row.isFailed ? 0.6 : 1)
                     }
                     .width(56)
 
                     TableColumn("Added", value: \TrackRow.track.dateAddedSortKey) { row in
                         PlaylistTableAddedCell(dateAdded: row.track.dateAdded, formatDate: formatDateAdded)
+                            .opacity(row.isFailed ? 0.6 : 1)
                     }
                     .width(78)
                 }
@@ -124,9 +143,10 @@ struct PlaylistTable: View {
                         Task { await onRemoveTracks(selectedIDs) }
                     }
                 )
-            } primaryAction: { selectedIDs in
+                } primaryAction: { selectedIDs in
                 if let trackID = selectedIDs.first,
-                   let track = viewModel.displayedTracks.first(where: { $0.id == trackID }) {
+                   let track = viewModel.displayedTracks.first(where: { $0.id == trackID }),
+                   availability(for: track) == .local {
                     onTrackDoubleClick?(track)
                 }
             }
@@ -135,6 +155,9 @@ struct PlaylistTable: View {
             updateCachedRows()
         }
         .onChange(of: viewModel.displayedTracks) {
+            updateCachedRows()
+        }
+        .onChange(of: viewModel.availabilityByTrackID) {
             updateCachedRows()
         }
         .onChange(of: sortOrder) {
@@ -215,6 +238,15 @@ struct PlaylistTable: View {
         }
     }
 
+    private func availability(for track: Track) -> TrackAvailability {
+        viewModel.availability(for: track)
+    }
+
+    private func isFailed(_ track: Track) -> Bool {
+        if case .failed = availability(for: track) { return true }
+        return false
+    }
+
     /// Format date_added for display (e.g., "2026-05-07" → "May 7").
     private func formatDateAdded(_ dateString: String?) -> String {
         guard let dateString else { return "—" }
@@ -234,7 +266,16 @@ struct PlaylistTable: View {
     private func updateCachedRows() {
         let mapped = viewModel.displayedTracks
             .enumerated()
-            .compactMap { idx, t in t.id.map { TrackRow(index: idx + 1, id: $0, track: t) } }
+            .compactMap { idx, track in
+                track.id.map {
+                    TrackRow(
+                        index: idx + 1,
+                        id: $0,
+                        track: track,
+                        isFailed: isFailed(track)
+                    )
+                }
+            }
         self.cachedRows = mapped.sorted(using: sortOrder)
     }
 }
@@ -276,19 +317,14 @@ private struct PlaylistTableTitleCell: View {
 private struct PlaylistTableArtistCell: View {
     let artist: String
     var body: some View {
-        Text(artist)
-            .font(MLMFont.tableCell)
-            .lineLimit(1)
+        TrackMetadataText(artist, font: MLMFont.tableCell)
     }
 }
 
 private struct PlaylistTableAlbumCell: View {
     let album: String
     var body: some View {
-        Text(album)
-            .font(MLMFont.tableCell)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
+        TrackMetadataText(album, font: MLMFont.tableCell, secondary: true)
     }
 }
 
@@ -306,13 +342,29 @@ private struct PlaylistTableFormatCell: View {
     let track: Track
     let formatColor: (String) -> Color
     var body: some View {
-        Text(track.isRemote ? "Stream" : track.format.uppercased())
+        let format = track.format.trimmingCharacters(in: .whitespacesAndNewlines)
+        Text(format.isEmpty ? "—" : format.uppercased())
             .font(MLMFont.badge)
             .foregroundColor(formatColor(track.format))
             .padding(.horizontal, 5)
             .padding(.vertical, 1)
             .background(formatColor(track.format).opacity(0.15))
             .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+}
+
+private struct PlaylistTableStatusCell: View {
+    let availability: TrackAvailability
+
+    var body: some View {
+        Group {
+            if let statusChip = StatusChip(availability: availability) {
+                statusChip
+            } else {
+                EmptyView()
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

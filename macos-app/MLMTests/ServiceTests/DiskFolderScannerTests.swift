@@ -4,6 +4,14 @@ import Foundation
 
 struct DiskFolderScannerTests {
 
+    @Test func managedLayoutUsesOnlyUserFacingFolderNames() {
+        #expect(ManagedLibraryLayout.folderNames == [
+            "Downloads (SoundCloud)",
+            "Downloads (YouTube)",
+            "Transcode originals",
+        ])
+    }
+
     // MARK: - Helpers
 
     private func makeTempDir() throws -> URL {

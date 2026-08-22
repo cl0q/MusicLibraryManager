@@ -87,6 +87,22 @@ final class TrackRepository: Sendable {
         }
     }
 
+    /// Fetch remote tracks with either a structured or legacy persisted
+    /// download failure. Invalid legacy JSON is returned as-is so callers can
+    /// surface it rather than silently deleting recoverable user history.
+    func fetchTracksWithDownloadFailures() async throws -> [Track] {
+        try await database.read { db in
+            try Track.fetchAll(db, sql: """
+                SELECT * FROM tracks
+                WHERE organized_path IS NULL
+                  AND (
+                    download_failure IS NOT NULL
+                    OR LOWER(COALESCE(download_status, '')) IN ('failed', 'error')
+                  )
+                """)
+        }
+    }
+
     /// Fetch tracks by album ID.
     func fetchTracks(albumId: Int64) async throws -> [Track] {
         try await database.read { db in
@@ -263,6 +279,40 @@ final class TrackRepository: Sendable {
         let args = StatementArguments(normalized.map { $0 as DatabaseValueConvertible }) ?? StatementArguments()
         return try await database.read { db in
             try Track.fetchAll(db, sql: sql, arguments: args)
+        }
+    }
+
+    /// Resolve folder-browser files against both original and library-relative
+    /// paths. Downloaded tracks retain their remote original path.
+    func fetchTracksByFilesystemPaths(
+        _ paths: [String],
+        libraryRoot: URL?
+    ) async throws -> [Track] {
+        guard !paths.isEmpty else { return [] }
+        let absolutePaths = paths.map { URL(fileURLWithPath: $0).standardizedFileURL.path }
+        let relativePaths = absolutePaths.compactMap { path -> String? in
+            guard let libraryRoot else { return nil }
+            let root = libraryRoot.standardizedFileURL.path + "/"
+            guard path.hasPrefix(root) else { return nil }
+            return String(path.dropFirst(root.count))
+        }
+        let originalPlaceholders = Array(repeating: "?", count: absolutePaths.count).joined(separator: ", ")
+        let organizedPredicate: String
+        let values: [String]
+        if relativePaths.isEmpty {
+            organizedPredicate = ""
+            values = absolutePaths
+        } else {
+            let placeholders = Array(repeating: "?", count: relativePaths.count).joined(separator: ", ")
+            organizedPredicate = " OR organized_path IN (\(placeholders))"
+            values = absolutePaths + relativePaths
+        }
+        return try await database.read { db in
+            try Track.fetchAll(
+                db,
+                sql: "SELECT DISTINCT * FROM tracks WHERE original_path IN (\(originalPlaceholders))\(organizedPredicate) ORDER BY title COLLATE NOCASE",
+                arguments: StatementArguments(values)
+            )
         }
     }
 
@@ -445,6 +495,71 @@ final class TrackRepository: Sendable {
         }
     }
 
+    /// Mark selected remote tracks as actively downloading before their batch
+    /// starts. Legacy failed rows are materialized into structured failures so
+    /// cancelling a retry cannot erase their only actionable failure record.
+    func markDownloadsInProgress(trackIds: [Int64]) async throws {
+        let uniqueTrackIds = Array(Set(trackIds))
+        guard !uniqueTrackIds.isEmpty else { return }
+
+        let placeholders = Array(repeating: "?", count: uniqueTrackIds.count).joined(separator: ", ")
+        let arguments = StatementArguments(uniqueTrackIds)
+        let legacyFailure = try TrackDownloadFailure(
+            reason: "Download failed",
+            date: Date(),
+            attempts: 1
+        ).encodedJSON()
+
+        try await database.write { db in
+            // Preserve the otherwise detail-less legacy failure before the
+            // single status column is switched to `downloading`.
+            try db.execute(
+                sql: """
+                    UPDATE tracks
+                    SET download_failure = ?
+                    WHERE id IN (\(placeholders))
+                      AND download_failure IS NULL
+                      AND LOWER(COALESCE(download_status, '')) IN ('failed', 'error')
+                    """,
+                arguments: StatementArguments([legacyFailure] + uniqueTrackIds)
+            )
+            try db.execute(
+                sql: """
+                    UPDATE tracks
+                    SET download_status = 'downloading'
+                    WHERE id IN (\(placeholders))
+                      AND organized_path IS NULL
+                    """,
+                arguments: arguments
+            )
+        }
+    }
+
+    /// Clear the transient downloading state for tracks that did not reach a
+    /// successful or failed terminal state, such as user-cancelled work.
+    /// Existing failures remain failed and actionable; never-attempted tracks
+    /// return to their normal remote state.
+    func clearDownloadsInProgress(trackIds: [Int64]) async throws {
+        let uniqueTrackIds = Array(Set(trackIds))
+        guard !uniqueTrackIds.isEmpty else { return }
+
+        let placeholders = Array(repeating: "?", count: uniqueTrackIds.count).joined(separator: ", ")
+        try await database.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE tracks
+                    SET download_status = CASE
+                        WHEN download_failure IS NULL THEN NULL
+                        ELSE 'failed'
+                    END
+                    WHERE id IN (\(placeholders))
+                      AND download_status = 'downloading'
+                    """,
+                arguments: StatementArguments(uniqueTrackIds)
+            )
+        }
+    }
+
     /// Update just the organized_path for a track (after download).
     func updateOrganizedPath(trackId: Int64, organizedPath: String) async throws {
         try await database.write { db in
@@ -524,10 +639,58 @@ final class TrackRepository: Sendable {
                         format = ?,
                         bitrate = ?,
                         download_status = ?,
+                        download_failure = NULL,
                         date_added_library = COALESCE(date_added_library, ?)
                     WHERE id = ?
                 """,
                 arguments: [organizedPath, format, bitrate, timestamp, timestamp, trackId]
+            )
+        }
+    }
+
+    /// Persist a download failure and increment its durable attempt count in
+    /// the same GRDB write transaction.
+    ///
+    /// `minimumAttempts` reconciles a retry reconstructed from the legacy
+    /// file queue: a queue item already records prior attempts before this
+    /// terminal attempt is written to the database.
+    func persistDownloadFailure(
+        trackId: Int64,
+        reason: String,
+        date: Date = Date(),
+        minimumAttempts: Int = 1
+    ) async throws -> TrackDownloadFailure {
+        try await database.write { db in
+            let existingJSON = try String.fetchOne(
+                db,
+                sql: "SELECT download_failure FROM tracks WHERE id = ?",
+                arguments: [trackId]
+            )
+            let existing = existingJSON.flatMap { try? TrackDownloadFailure.decodeJSON($0) }
+            let attempts = max(existing.map { $0.attempts + 1 } ?? 1, minimumAttempts, 1)
+            let failure = TrackDownloadFailure(reason: reason, date: date, attempts: attempts)
+
+            try db.execute(
+                sql: """
+                    UPDATE tracks
+                    SET download_failure = ?,
+                        download_status = 'failed'
+                    WHERE id = ?
+                """,
+                arguments: [try failure.encodedJSON(), trackId]
+            )
+            return failure
+        }
+    }
+
+    /// Clear a persisted download failure without changing the track's other
+    /// download fields. Successful finalization uses this atomically through
+    /// `markAsDownloaded` above.
+    func clearDownloadFailure(trackId: Int64) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE tracks SET download_failure = NULL WHERE id = ?",
+                arguments: [trackId]
             )
         }
     }
@@ -688,13 +851,24 @@ final class TrackRepository: Sendable {
         }
     }
 
-    /// Fetch all non-duplicate tracks that have fingerprints.
+    /// Clear a duplicate relationship when a review resolution is undone or
+    /// when the user elects to keep both tracks.
+    func unmarkDuplicate(trackId: Int64) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE tracks SET is_duplicate = 0, variant_of = NULL WHERE id = ?",
+                arguments: [trackId]
+            )
+        }
+    }
+
+    /// Fetch all tracks that have fingerprints, including tracks marked by
+    /// earlier versions of the scanner. Scans propose review items only.
     func fetchFingerprintedTracks() async throws -> [Track] {
         try await database.read { db in
             try Track.fetchAll(db, sql: """
                 SELECT t.* FROM tracks t
                 INNER JOIN fingerprints f ON f.track_id = t.id
-                WHERE t.is_duplicate = 0
                 ORDER BY t.id
             """)
         }
@@ -729,6 +903,26 @@ final class TrackRepository: Sendable {
             }
 
             return trackIds
+        }
+    }
+
+    /// Fetches a sync profile's tracks in bounded batches rather than issuing
+    /// one query per track while building a preview.
+    func fetchTracks(ids: Set<Int64>) async throws -> [Track] {
+        guard !ids.isEmpty else { return [] }
+
+        let batches = Array(ids).chunked(into: 500)
+        return try await database.read { db in
+            var tracks: [Track] = []
+            tracks.reserveCapacity(ids.count)
+
+            for batch in batches {
+                let placeholders = Array(repeating: "?", count: batch.count).joined(separator: ", ")
+                let sql = "SELECT * FROM tracks WHERE id IN (\(placeholders))"
+                tracks += try Track.fetchAll(db, sql: sql, arguments: StatementArguments(batch))
+            }
+
+            return tracks
         }
     }
 
@@ -1160,7 +1354,7 @@ final class TrackRepository: Sendable {
                 return
             }
             
-            // Apply Vector Gravity:
+            // Apply the stored similarity adjustment.
             // E_seed = E_seed + pullRate * (E_target - E_seed)
             // E_target = E_target + pullRate * (E_seed - E_target)
             for i in 0..<seedEmbedding.count {

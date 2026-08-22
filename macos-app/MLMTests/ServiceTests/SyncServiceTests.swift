@@ -310,21 +310,238 @@ struct SyncServiceTests {
     @Test func testSyncTurboLevelDefaultsAndSetting() throws {
         let (_, service) = try makeService()
         
-        // Default should be medium
-        #expect(service.syncTurboLevel == .medium)
+        // Default should be Standard.
+        #expect(service.syncTurboLevel == .standard)
         
         // Setting it should persist and update the property
-        service.setSyncTurboLevel(.full)
-        #expect(service.syncTurboLevel == .full)
+        service.setSyncTurboLevel(.fast)
+        #expect(service.syncTurboLevel == .fast)
         #expect(UserDefaults.standard.string(forKey: "sync_turbo_level") == "100%")
         
-        service.setSyncTurboLevel(.low)
-        #expect(service.syncTurboLevel == .low)
+        service.setSyncTurboLevel(.conservative)
+        #expect(service.syncTurboLevel == .conservative)
         #expect(UserDefaults.standard.string(forKey: "sync_turbo_level") == "60%")
         
         // Clean up
         UserDefaults.standard.removeObject(forKey: "sync_turbo_level")
     }
+
+    @Test func previewCachesUntilExplicitlyInvalidated() async throws {
+        let (db, service) = try makeService()
+        let output = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sync-preview-cache-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: output) }
+
+        try await db.write { db in
+            try db.execute(sql: """
+                INSERT INTO sync_profiles
+                    (id, name, output_folder, playlist_path_prefix, generate_m3u8, transcode_mode, fat32_safe_paths, cleanup_removed_files)
+                VALUES (71, 'Cache', ?, '', 0, 'keep_originals', 1, 0)
+                """, arguments: [output.path])
+        }
+
+        _ = try await service.previewSync(profileId: 71)
+        #expect(service.cachedPreview(profileId: 71) != nil)
+
+        service.invalidatePreview(profileId: 71)
+        #expect(service.cachedPreview(profileId: 71) == nil)
+    }
+
+    @Test func previewCacheInvalidatesWhenProfileInputsChange() async throws {
+        let (db, service) = try makeService()
+        let output = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sync-preview-input-hash-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: output) }
+
+        try await db.write { db in
+            try db.execute(sql: """
+                INSERT INTO sync_profiles
+                    (id, name, output_folder, playlist_path_prefix, generate_m3u8, transcode_mode, fat32_safe_paths, cleanup_removed_files)
+                VALUES (75, 'Input hash', ?, '', 0, 'aac_248', 1, 0)
+                """, arguments: [output.path])
+            try db.execute(sql: """
+                INSERT INTO tracks (id, artist, album_artist, album, title, format, duration, original_path, is_duplicate)
+                VALUES (750, 'Artist', 'Artist', 'Album', 'Title', 'flac', 100, '/missing.flac', 0)
+                """)
+            try db.execute(
+                sql: "INSERT INTO sync_profile_tracks (profile_id, track_id) VALUES (75, 750)"
+            )
+        }
+
+        let first = try await service.previewSync(profileId: 75)
+        let firstHash = try #require(service.cachedPreview(profileId: 75)?.inputHash)
+        #expect(first.totalNewSize == 3_100_000)
+
+        try await db.write { db in
+            try db.execute(
+                sql: "UPDATE sync_profiles SET transcode_mode = 'aac_320' WHERE id = 75"
+            )
+        }
+
+        let second = try await service.previewSync(profileId: 75)
+        let secondHash = try #require(service.cachedPreview(profileId: 75)?.inputHash)
+        #expect(secondHash != firstHash)
+        #expect(second.totalNewSize == 4_000_000)
+
+        try await db.write { db in
+            try db.execute(sql: """
+                INSERT INTO sync_state (profile_id, track_id, synced_checksum, synced_size, synced_timestamp)
+                VALUES (75, 750, 'checksum', 4000000, datetime('now'))
+                """)
+        }
+
+        _ = try await service.previewSync(profileId: 75)
+        let thirdHash = try #require(service.cachedPreview(profileId: 75)?.inputHash)
+        #expect(thirdHash != secondHash)
+    }
+
+    @Test func previewUsesOriginalFileSizeForKeepOriginals() async throws {
+        let (db, service) = try makeService()
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sync-size-\(UUID().uuidString)")
+        let output = root.appendingPathComponent("device")
+        let source = root.appendingPathComponent("source.mp3")
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        try Data(repeating: 0, count: 4_096).write(to: source)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try await db.write { db in
+            try db.execute(sql: """
+                INSERT INTO sync_profiles
+                    (id, name, output_folder, playlist_path_prefix, generate_m3u8, transcode_mode, fat32_safe_paths, cleanup_removed_files)
+                VALUES (72, 'Originals', ?, '', 0, 'keep_originals', 1, 0)
+                """, arguments: [output.path])
+            try db.execute(sql: """
+                INSERT INTO tracks (id, artist, album_artist, album, title, format, duration, original_path, is_duplicate)
+                VALUES (720, 'Artist', 'Artist', 'Album', 'Title', 'mp3', 180, ?, 0)
+                """, arguments: [source.path])
+            try db.execute(
+                sql: "INSERT INTO sync_profile_tracks (profile_id, track_id) VALUES (72, 720)"
+            )
+        }
+
+        let preview = try await service.previewSync(profileId: 72)
+        #expect(preview.filesToAdd.count == 1)
+        #expect(preview.totalNewSize == 4_096)
+    }
+
+    @Test func previewUsesSelectedAACBitrateForEstimate() async throws {
+        let (db, service) = try makeService()
+        let output = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sync-aac-size-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: output) }
+
+        try await db.write { db in
+            try db.execute(sql: """
+                INSERT INTO sync_profiles
+                    (id, name, output_folder, playlist_path_prefix, generate_m3u8, transcode_mode, fat32_safe_paths, cleanup_removed_files)
+                VALUES (73, 'AAC', ?, '', 0, 'aac_320', 1, 0)
+                """, arguments: [output.path])
+            try db.execute(sql: """
+                INSERT INTO tracks (id, artist, album_artist, album, title, format, duration, original_path, is_duplicate)
+                VALUES (730, 'Artist', 'Artist', 'Album', 'Title', 'flac', 100, '/missing.flac', 0)
+                """)
+            try db.execute(
+                sql: "INSERT INTO sync_profile_tracks (profile_id, track_id) VALUES (73, 730)"
+            )
+        }
+
+        let preview = try await service.previewSync(profileId: 73)
+        #expect(preview.totalNewSize == 4_000_000)
+    }
+
+    @Test func previewUses248KbpsForEstimate() async throws {
+        let (db, service) = try makeService()
+        let output = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sync-aac-248-size-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: output) }
+
+        try await db.write { db in
+            try db.execute(sql: """
+                INSERT INTO sync_profiles
+                    (id, name, output_folder, playlist_path_prefix, generate_m3u8, transcode_mode, fat32_safe_paths, cleanup_removed_files)
+                VALUES (76, 'AAC 248', ?, '', 0, 'aac_248', 1, 0)
+                """, arguments: [output.path])
+            try db.execute(sql: """
+                INSERT INTO tracks (id, artist, album_artist, album, title, format, duration, original_path, is_duplicate)
+                VALUES (760, 'Artist', 'Artist', 'Album', 'Title', 'flac', 100, '/missing.flac', 0)
+                """)
+            try db.execute(
+                sql: "INSERT INTO sync_profile_tracks (profile_id, track_id) VALUES (76, 760)"
+            )
+        }
+
+        let preview = try await service.previewSync(profileId: 76)
+        #expect(preview.totalNewSize == 3_100_000)
+    }
+
+    @Test func cancelledPreviewDoesNotPopulateCache() async throws {
+        let (db, service) = try makeService()
+        let output = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sync-cancelled-preview-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: output) }
+
+        try await db.write { db in
+            try db.execute(sql: """
+                INSERT INTO sync_profiles
+                    (id, name, output_folder, playlist_path_prefix, generate_m3u8, transcode_mode, fat32_safe_paths, cleanup_removed_files)
+                VALUES (77, 'Cancelled preview', ?, '', 0, 'keep_originals', 1, 0)
+                """, arguments: [output.path])
+        }
+
+        let task = Task {
+            try await service.previewSync(profileId: 77)
+        }
+        task.cancel()
+
+        var wasCancelled = false
+        do {
+            _ = try await task.value
+        } catch is CancellationError {
+            wasCancelled = true
+        }
+
+        #expect(wasCancelled)
+        #expect(service.cachedPreview(profileId: 77) == nil)
+    }
+
+    @Test func previewReportsProgressForBatchedTracks() async throws {
+        let (db, service) = try makeService()
+        let output = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sync-batch-preview-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: output) }
+
+        try await db.write { db in
+            try db.execute(sql: """
+                INSERT INTO sync_profiles
+                    (id, name, output_folder, playlist_path_prefix, generate_m3u8, transcode_mode, fat32_safe_paths, cleanup_removed_files)
+                VALUES (74, 'Batch', ?, '', 0, 'aac_248', 1, 0)
+                """, arguments: [output.path])
+            for id in 741...743 {
+                try db.execute(sql: """
+                    INSERT INTO tracks (id, artist, album_artist, album, title, format, duration, original_path, is_duplicate)
+                    VALUES (?, 'Artist', 'Artist', 'Album', 'Title', 'flac', 10, '/missing-\(id).flac', 0)
+                    """, arguments: [id])
+                try db.execute(
+                    sql: "INSERT INTO sync_profile_tracks (profile_id, track_id) VALUES (74, ?)",
+                    arguments: [id]
+                )
+            }
+        }
+
+        var reportedProgress: [(Int, Int)] = []
+        let preview = try await service.previewSync(profileId: 74) { completed, total in
+            reportedProgress.append((completed, total))
+        }
+
+        #expect(preview.filesToAdd.count == 3)
+        #expect(reportedProgress.last?.0 == 3)
+        #expect(reportedProgress.last?.1 == 3)
+    }
 }
-
-

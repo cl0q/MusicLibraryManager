@@ -2,7 +2,7 @@ import Foundation
 import CoreML
 
 /// Service that coordinates loading the YAMNet CoreML model, extracting
-/// optimal audio segments (Drop-Fokus Heuristic), and generating dense embeddings.
+/// representative audio segments, and generating dense embeddings.
 final class AudioEmbeddingService: @unchecked Sendable {
     private var model: MLModel?
     private let preprocessor = AudioPreprocessor()
@@ -144,7 +144,7 @@ final class AudioEmbeddingService: @unchecked Sendable {
         return embedding
     }
 
-    /// Analyze a track using the Drop-Fokus Heuristic.
+    /// Analyze a track using its representative audio segment.
     /// Finds the loudest 30-second window, segments it, and generates a averaged master embedding.
     ///
     /// - Parameters:

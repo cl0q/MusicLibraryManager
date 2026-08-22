@@ -23,7 +23,7 @@ struct MetadataPanel: View {
         case general = "General"
         case audio = "Audio"
         case file = "File"
-        case similar = "Groove"
+        case similar = "Similar"
 
         var id: String { self.rawValue }
 
@@ -59,7 +59,10 @@ struct MetadataPanel: View {
     @State private var hasEmbedding = false
     @State private var isAnalyzing = false
     @State private var isLoadingSimilar = false
-    @State private var showingGroove = false
+    @State private var showingSimilarSheet = false
+    @State private var duplicateReference: Track?
+    @State private var saveError: String?
+    @State private var availability: TrackAvailability = .notDownloaded
 
     var body: some View {
         VStack(spacing: 0) {
@@ -125,6 +128,8 @@ struct MetadataPanel: View {
         }
         .task {
             await loadActionsData()
+            await loadDuplicateReference()
+            await loadAvailability()
         }
         .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { _ in
             Task { await loadActionsData() }
@@ -139,16 +144,24 @@ struct MetadataPanel: View {
             similarTracks = []
             hasEmbedding = false
             checkEmbeddingStatus()
+            Task { await loadDuplicateReference() }
         }
         .onChange(of: selectedTab) { _, newTab in
             if newTab == .similar {
-                showingGroove = true
+                Task { await loadSimilarTracks() }
             }
         }
-        .onChange(of: showingGroove) { _, isPresented in
-            if !isPresented && selectedTab == .similar {
-                selectedTab = .general
-            }
+        .sheet(isPresented: $showingSimilarSheet) {
+            GrooveView(seedTrack: track)
+                .environment(\.container, container)
+        }
+        .alert("Could not save metadata", isPresented: Binding(
+            get: { saveError != nil },
+            set: { if !$0 { saveError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(saveError ?? "Please try again.")
         }
     }
 
@@ -156,12 +169,12 @@ struct MetadataPanel: View {
 
     private var generalTabContent: some View {
         VStack(spacing: 10) {
-            editableRow(label: "Titel", value: track.title, field: .title)
-            editableRow(label: "Interpret", value: track.artist, field: .artist)
-            editableRow(label: "Album-Interpret", value: track.albumArtist, field: .albumArtist)
+            editableRow(label: "Title", value: track.title, field: .title)
+            editableRow(label: "Artist", value: track.artist, field: .artist)
+            editableRow(label: "Album Artist", value: track.albumArtist, field: .albumArtist)
             editableRow(label: "Album", value: track.album, field: .album)
-            editableRow(label: "Genre", value: track.genre ?? "", field: .genre, placeholder: "Kein Genre")
-            editableRow(label: "Jahr", value: track.year.map { "\($0)" } ?? "", field: .year, placeholder: "Kein Jahr")
+            editableRow(label: "Genre", value: track.genre ?? "", field: .genre, placeholder: "No genre")
+            editableRow(label: "Year", value: track.year.map { "\($0)" } ?? "", field: .year, placeholder: "No year")
         }
     }
 
@@ -228,7 +241,7 @@ struct MetadataPanel: View {
                 }
             }
         } catch {
-            print("Failed to save track metadata: \(error)")
+            saveError = "Your changes were not saved."
         }
     }
 
@@ -289,7 +302,7 @@ struct MetadataPanel: View {
 
             // Manual Analysis Trigger Card
             VStack(alignment: .leading, spacing: 10) {
-                Label("Analyse manuell starten", systemImage: "bolt.fill")
+                Label("Run analysis", systemImage: "bolt.fill")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundColor(.mlmInk)
 
@@ -314,7 +327,7 @@ struct MetadataPanel: View {
                     }
                     .buttonStyle(.bordered)
                     .disabled(isAnalyzingReplayGain || isAnalyzingDanceability || track.isRemote)
-                    .help("ReplayGain Lautstärkeanalyse für diesen Song ausführen")
+                    .help("Run loudness analysis for this track")
 
                     // Danceability Trigger
                     Button {
@@ -333,7 +346,7 @@ struct MetadataPanel: View {
                     }
                     .buttonStyle(.bordered)
                     .disabled(isAnalyzingReplayGain || isAnalyzingDanceability || track.isRemote)
-                    .help("Rhythmische Tanzbarkeit für diesen Song berechnen")
+                    .help("Analyze this track's danceability")
                 }
             }
             .padding(12)
@@ -348,7 +361,7 @@ struct MetadataPanel: View {
 
             // Waveform Options Card
             VStack(alignment: .leading, spacing: 12) {
-                Label("Waveform-Optionen", systemImage: "slider.horizontal.3")
+                Label("Waveform options", systemImage: "slider.horizontal.3")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundColor(.mlmInk)
 
@@ -358,7 +371,7 @@ struct MetadataPanel: View {
                 // Contrast / Sensitivity Slider
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("Empfindlichkeit (Kontrast)")
+                        Text("Sensitivity")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundColor(.mlmInkSecondary)
                         Spacer()
@@ -373,7 +386,7 @@ struct MetadataPanel: View {
                 // Gain Slider
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("Verstärkung (Gain)")
+                        Text("Gain")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundColor(.mlmInkSecondary)
                         Spacer()
@@ -388,7 +401,7 @@ struct MetadataPanel: View {
                 // Height Slider
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("Bereichs-Höhe")
+                        Text("Height")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundColor(.mlmInkSecondary)
                         Spacer()
@@ -403,7 +416,7 @@ struct MetadataPanel: View {
                 Divider()
                     .background(Color.mlmEdge.opacity(0.4))
 
-                Button("Zurücksetzen") {
+                Button("Reset") {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         zoomLevel = 1.0
                         exponent = 1.5
@@ -445,34 +458,26 @@ struct MetadataPanel: View {
     private var fileTabContent: some View {
         VStack(spacing: 12) {
             // Path card: Original Path
-            pathCard(label: "Original-Pfad", path: track.originalPath)
+            pathCard(label: "Original path", path: track.originalPath)
 
             // Path card: Organized Path (if exists)
             if let organized = track.organizedPath, !organized.isEmpty {
-                pathCard(label: "Organisierter Pfad", path: organized)
+                pathCard(label: "Library path", path: organized)
             }
 
             // General File Info Card
             VStack(spacing: 8) {
                 fileRow("Format", value: track.format.uppercased())
                 fileRow("Bitrate", value: track.bitrate.map { "\($0) kbps" } ?? "—")
-                fileRow("Dauer", value: track.formattedDuration)
-                fileRow("Hinzugefügt am", value: Self.formatLocalDateTime(track.dateAdded))
-                fileRow("Status", value: track.isLocal ? "Lokal" : "Remote")
+                fileRow("Duration", value: track.formattedDuration)
+                fileRow("Added", value: Self.formatLocalDateTime(track.dateAdded))
+                fileRow("Status", value: availabilityLabel)
+                fileRow("Source", value: TrackMetadataPresentation.sourceName(for: track))
 
                 if let status = track.downloadStatus {
-                    fileRow("Download am", value: Self.formatLocalDateTime(status))
+                    fileRow("Downloaded", value: Self.formatLocalDateTime(status))
                 }
 
-                fileRow("Duplikat", value: track.isDuplicate == 1 ? "Ja" : "Nein")
-
-                if let albumId = track.albumId {
-                    fileRow("Album ID", value: "\(albumId)")
-                }
-
-                if let variantOf = track.variantOf {
-                    fileRow("Variante von", value: "Track #\(variantOf)")
-                }
             }
             .padding(12)
             .background(
@@ -483,6 +488,30 @@ struct MetadataPanel: View {
                             .stroke(Color.mlmEdge.opacity(0.15), lineWidth: 1)
                     )
             )
+
+            if track.isDuplicate == 1 || track.variantOf != nil {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(duplicateReference.map { "Possible duplicate of \"\($0.artist) — \($0.title)\"" } ?? "Possible duplicate")
+                            .font(MLMFont.body)
+                        Text("Review decides whether to keep one version or keep both.")
+                            .font(MLMFont.muted)
+                            .foregroundColor(.mlmInkSecondary)
+                    }
+                    Spacer()
+                    Button("Show in Review") {
+                        guard let trackID = track.id else { return }
+                        NotificationCenter.default.post(
+                            name: .showReview,
+                            object: nil,
+                            userInfo: ["trackId": trackID]
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding(12)
+                .background(Color.mlmAttention.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+            }
         }
     }
 
@@ -497,6 +526,15 @@ struct MetadataPanel: View {
                 .foregroundColor(.mlmInk)
             Spacer()
         }
+    }
+
+    private func loadDuplicateReference() async {
+        guard let referenceID = track.variantOf,
+              let trackRepository = container.trackRepository else {
+            duplicateReference = nil
+            return
+        }
+        duplicateReference = try? await trackRepository.fetchTrack(id: referenceID)
     }
 
     private func pathCard(label: String, path: String) -> some View {
@@ -514,24 +552,24 @@ struct MetadataPanel: View {
                     Button {
                         copyPath(for: path)
                     } label: {
-                        Label("Kopieren", systemImage: "doc.on.doc")
+                        Label("Copy", systemImage: "doc.on.doc")
                             .font(.system(size: 10, weight: .medium))
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .help("Pfad in die Zwischenablage kopieren")
+                    .help("Copy path")
 
                     // Reveal in Finder (Only available if track is local)
                     if track.isLocal {
                         Button {
                             revealInFinder(for: track)
                         } label: {
-                            Label("Zeigen", systemImage: "macwindow.and.cursorarrow")
+                            Label("Show in Finder", systemImage: "macwindow.and.cursorarrow")
                                 .font(.system(size: 10, weight: .medium))
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                        .help("Datei im Finder anzeigen")
+                        .help("Show file in Finder")
                     }
                 }
             }
@@ -679,7 +717,7 @@ struct MetadataPanel: View {
                 // Playlist Menu Button
                 Menu {
                     if playlists.isEmpty {
-                        Text("Keine Playlists gefunden")
+                        Text("No playlists found")
                     } else {
                         ForEach(playlists) { playlist in
                             Button(playlist.name) {
@@ -692,7 +730,7 @@ struct MetadataPanel: View {
                         Spacer()
                         Image(systemName: "plus.rectangle.on.folder")
                             .font(.system(size: 11, weight: .bold))
-                        Text("Zu Playlist...")
+                        Text("Add to Playlist...")
                             .font(.system(size: 11, weight: .bold))
                         Spacer()
                     }
@@ -702,12 +740,12 @@ struct MetadataPanel: View {
                     .cornerRadius(6)
                 }
                 .menuStyle(.button)
-                .help("Diesen Song zu einer Playlist hinzufügen")
+                .help("Add this track to a playlist")
 
                 // Sync Profile Menu Button
                 Menu {
                     if syncProfiles.isEmpty {
-                        Text("Keine Profile gefunden")
+                        Text("No profiles found")
                     } else {
                         ForEach(syncProfiles) { profile in
                             Button(profile.name) {
@@ -720,7 +758,7 @@ struct MetadataPanel: View {
                         Spacer()
                         Image(systemName: "arrow.triangle.2.circlepath")
                             .font(.system(size: 11, weight: .bold))
-                        Text("Zu Sync...")
+                        Text("Add to Sync Profile...")
                             .font(.system(size: 11, weight: .bold))
                         Spacer()
                     }
@@ -730,7 +768,7 @@ struct MetadataPanel: View {
                     .cornerRadius(6)
                 }
                 .menuStyle(.button)
-                .help("Diesen Song zu einem Sync-Profil hinzufügen")
+                .help("Add this track to a sync profile")
             }
         }
     }
@@ -804,21 +842,21 @@ struct MetadataPanel: View {
         return f
     }()
 
-    // MARK: - Groove Similarity Tab Content
+    // MARK: - Similarity Tab Content
 
     private var similarTabContent: some View {
-        VStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
             if isAnalyzing {
                 VStack(spacing: 16) {
                     ProgressView()
                         .progressViewStyle(.circular)
                         .controlSize(.large)
                     
-                    Text("Analysiere Audio-Drop-Struktur...")
+                    Text("Analyzing this track…")
                         .font(MLMFont.body)
                         .foregroundColor(.mlmInkSecondary)
                     
-                    Text("ffmpeg decodiert Audio bei 16kHz mono, und CoreML YAMNet extrahiert dichte rhythmische Feature-Vektoren.")
+                    Text("This creates the local audio analysis used to find similar tracks.")
                         .font(MLMFont.dataSmall)
                         .foregroundColor(.mlmInkMuted)
                         .multilineTextAlignment(.center)
@@ -832,11 +870,11 @@ struct MetadataPanel: View {
                         .font(.system(size: 32))
                         .foregroundColor(.mlmAccent)
                     
-                    Text("Keine Groove-Analyse vorhanden")
+                    Text("No analysis yet")
                         .font(MLMFont.sectionHeader)
                         .foregroundColor(.mlmInk)
                     
-                    Text("Analysiere diesen Track, um klanglich und rhythmisch ähnliche Grooves aus deiner Library zu finden.")
+                    Text("Analyze this track to find similar music in your library.")
                         .font(MLMFont.body)
                         .foregroundColor(.mlmInkSecondary)
                         .multilineTextAlignment(.center)
@@ -847,7 +885,7 @@ struct MetadataPanel: View {
                     } label: {
                         HStack {
                             Image(systemName: "wand.and.stars")
-                            Text("Groove-Analyse starten")
+                            Text("Analyze this track")
                         }
                         .font(.system(size: 11, weight: .bold))
                         .foregroundColor(.white)
@@ -865,75 +903,85 @@ struct MetadataPanel: View {
                         .fill(Color.mlmSurface)
                 )
             } else {
-                VStack(spacing: 16) {
-                    Image(systemName: "sparkles.rectangle.stack.fill")
-                        .font(.system(size: 40))
-                        .foregroundColor(.mlmAccent)
-                        .padding(.top, 12)
-                    
-                    Text("Groove Studio 🚀")
-                        .font(MLMFont.sectionHeader)
-                        .foregroundColor(.mlmInk)
-                    
-                    Text("Dieses Lied hat eine aktive Groove-Analyse. Öffne Groove, um:")
+                Text("Local matches")
+                    .font(MLMFont.sectionHeader)
+                    .foregroundColor(.mlmInk)
+
+                if isLoadingSimilar {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Finding similar tracks…")
+                            .font(MLMFont.muted)
+                            .foregroundColor(.mlmInkMuted)
+                    }
+                } else if similarTracks.isEmpty {
+                    Text("No local matches yet. Analyze more tracks to improve results.")
                         .font(MLMFont.body)
                         .foregroundColor(.mlmInkSecondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 16)
-                    
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Klanglich & rhythmisch ähnliche Tracks finden", systemImage: "music.note.list")
-                        Label("SoundCloud & Last.fm Swarm-Empfehlungen laden", systemImage: "globe")
-                        Label("Preview-Deck mit eigener Timeline nutzen", systemImage: "play.circle")
-                        Label("Tracks downloaden & Vector Gravity trainieren", systemImage: "arrow.down.circle")
-                    }
-                    .font(MLMFont.body)
-                    .foregroundColor(.mlmInkSecondary)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(Color.mlmRaised)
-                    .cornerRadius(8)
-                    
-                    Button {
-                        showingGroove = true
-                    } label: {
-                        HStack {
-                            Image(systemName: "sparkles")
-                            Text("Groove öffnen")
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(similarTracks.prefix(5).enumerated()), id: \.element.track.id) { _, match in
+                            HStack(spacing: 8) {
+                                Text("\(Int(match.score * 100))%")
+                                    .font(MLMFont.badge)
+                                    .foregroundColor(.mlmAccent)
+                                    .frame(width: 34, alignment: .leading)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(match.track.title)
+                                        .font(MLMFont.bodyBold)
+                                        .lineLimit(1)
+                                    Text(match.track.artist)
+                                        .font(MLMFont.muted)
+                                        .foregroundColor(.mlmInkSecondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                            }
+                            .padding(.vertical, 7)
+                            if match.track.id != similarTracks.prefix(5).last?.track.id {
+                                Divider()
+                            }
                         }
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 10)
-                        .background(Color.mlmAccent)
-                        .cornerRadius(6)
                     }
-                    .buttonStyle(.plain)
-                    .padding(.bottom, 12)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 24)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.mlmSurface)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(
-                                    LinearGradient(
-                                        colors: [Color.mlmAccent.opacity(0.6), Color.mlmActive.opacity(0.3)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 1.5
-                                )
-                        )
-                )
-                .sheet(isPresented: $showingGroove) {
-                    GrooveView(seedTrack: track)
-                        .environment(\.container, container)
+                    .padding(.horizontal, 10)
+                    .background(Color.mlmRaised, in: RoundedRectangle(cornerRadius: 8))
+
+                    Button("Show all") {
+                        showingSimilarSheet = true
+                    }
+                    .buttonStyle(.bordered)
                 }
             }
         }
+    }
+
+    private var availabilityLabel: String {
+        switch availability {
+        case .local: "Local"
+        case .downloading: "Downloading"
+        case .notDownloaded: "Not downloaded"
+        case .failed: "Download failed"
+        case .fileMissing: "File missing"
+        }
+    }
+
+    private func loadAvailability() async {
+        let root = try? await container.configRepository?.getLibraryRoot()
+        if root == nil,
+           let organizedPath = track.organizedPath,
+           !organizedPath.isEmpty,
+           !(organizedPath as NSString).isAbsolutePath {
+            availability = .local
+        } else {
+            availability = track.availability(libraryRoot: root.map(URL.init(fileURLWithPath:)))
+        }
+    }
+
+    private func loadSimilarTracks() async {
+        guard let trackID = track.id, let repository = container.trackRepository else { return }
+        isLoadingSimilar = true
+        defer { isLoadingSimilar = false }
+        similarTracks = (try? await repository.fetchSimilarTracks(seedTrackId: trackID, limit: 5)) ?? []
     }
 
     private func checkEmbeddingStatus() {
@@ -988,6 +1036,7 @@ struct MetadataPanel: View {
                     self.hasEmbedding = true
                     self.isAnalyzing = false
                 }
+                await loadSimilarTracks()
             } catch {
                 AppLogger.shared.log("Groove analysis failed: \(error)", level: .error, source: "Suggestions")
                 await MainActor.run {

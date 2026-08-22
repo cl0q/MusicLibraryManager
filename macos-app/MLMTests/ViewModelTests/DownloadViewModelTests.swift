@@ -47,6 +47,10 @@ struct DownloadViewModelTests {
     private struct FakeThrowingPersister: DownloadTrackPersisting {
         let failingTrackIds: Set<Int64>
 
+        func markDownloadsInProgress(trackIds: [Int64]) async throws {}
+
+        func clearDownloadsInProgress(trackIds: [Int64]) async throws {}
+
         func markAsDownloaded(
             trackId: Int64,
             organizedPath: String,
@@ -58,23 +62,71 @@ struct DownloadViewModelTests {
                 throw PersistFailure()
             }
         }
+
+        func persistDownloadFailure(
+            trackId: Int64,
+            reason: String,
+            date: Date,
+            minimumAttempts: Int
+        ) async throws -> TrackDownloadFailure {
+            TrackDownloadFailure(reason: reason, date: date, attempts: minimumAttempts)
+        }
+    }
+
+    private final class RecordingPersister: DownloadTrackPersisting, @unchecked Sendable {
+        private(set) var failureWrites: [(trackId: Int64, reason: String, minimumAttempts: Int)] = []
+        private(set) var startedTrackIds: [Int64] = []
+        private(set) var clearedTrackIds: [Int64] = []
+
+        func markDownloadsInProgress(trackIds: [Int64]) async throws {
+            startedTrackIds.append(contentsOf: trackIds)
+        }
+
+        func clearDownloadsInProgress(trackIds: [Int64]) async throws {
+            clearedTrackIds.append(contentsOf: trackIds)
+        }
+
+        func markAsDownloaded(
+            trackId: Int64,
+            organizedPath: String,
+            format: String,
+            bitrate: Int?,
+            downloadStatus: String?
+        ) async throws {}
+
+        func persistDownloadFailure(
+            trackId: Int64,
+            reason: String,
+            date: Date,
+            minimumAttempts: Int
+        ) async throws -> TrackDownloadFailure {
+            failureWrites.append((trackId, reason, minimumAttempts))
+            return TrackDownloadFailure(reason: reason, date: date, attempts: minimumAttempts)
+        }
     }
 
     private final class FakeRetryRunner: DownloadRetryRunning {
         let requests: [DownloadOrchestrator.DownloadRequest]
         let result: DownloadOrchestrator.BatchResult
+        let persistedItems: [DownloadQueue.QueueItem]
         private(set) var dequeuedTrackIds: Set<Int64> = []
 
         init(
             requests: [DownloadOrchestrator.DownloadRequest],
-            result: DownloadOrchestrator.BatchResult
+            result: DownloadOrchestrator.BatchResult,
+            persistedItems: [DownloadQueue.QueueItem] = []
         ) {
             self.requests = requests
             self.result = result
+            self.persistedItems = persistedItems
         }
 
         func pendingRetryRequests() -> [DownloadOrchestrator.DownloadRequest] {
             requests
+        }
+
+        func persistedRetryItems() -> [DownloadQueue.QueueItem] {
+            persistedItems
         }
 
         func retryFailed(
@@ -189,10 +241,49 @@ struct DownloadViewModelTests {
 
         let downloadFailedItem = vm.queueItems.first { $0.trackId == 3 }
         #expect(downloadFailedItem?.status == .failed)
-        #expect(downloadFailedItem?.error == "download failed")
+        #expect(downloadFailedItem?.error == "Video unavailable")
 
         #expect(vm.completedCount == 1)
         #expect(vm.failedCount == 2)
+    }
+
+    @Test func terminalFailurePersistsTheOrchestratorReasonAndRetryContext() async {
+        let persister = RecordingPersister()
+        let vm = DownloadViewModel(trackPersister: persister)
+        vm.batchRunnerOverride = FakeBatchRunner(
+            result: DownloadOrchestrator.BatchResult(
+                succeeded: 0,
+                failed: 1,
+                failedTrackIds: [1],
+                failureReasons: [1: "Network error"]
+            )
+        )
+
+        await vm.downloadTracks([makeRemoteTrack(id: 1)])
+
+        #expect(persister.failureWrites.count == 1)
+        #expect(persister.failureWrites[0].trackId == 1)
+        #expect(persister.failureWrites[0].reason == "Network error")
+        #expect(persister.failureWrites[0].minimumAttempts == 1)
+        #expect(vm.queueItems.first?.error == "Network error")
+    }
+
+    @Test func batchMarksRowsDownloadingThenClearsCancelledState() async {
+        let persister = RecordingPersister()
+        let vm = DownloadViewModel(trackPersister: persister)
+        vm.batchRunnerOverride = FakeBatchRunner(
+            result: DownloadOrchestrator.BatchResult(
+                succeeded: 0,
+                failed: 0,
+                cancelledTrackIds: [1]
+            )
+        )
+
+        await vm.downloadTracks([makeRemoteTrack(id: 1)])
+
+        #expect(persister.startedTrackIds == [1])
+        #expect(persister.clearedTrackIds == [1])
+        #expect(vm.queueItems.first?.status == .cancelled)
     }
 
     @Test func skippedAndCancelledItemsKeepDistinctTerminalStates() async throws {
@@ -249,6 +340,50 @@ struct DownloadViewModelTests {
         #expect(vm.completedCount == 1)
         #expect(vm.failedCount == 0)
         #expect(vm.queueItems.first?.status == .completed)
+    }
+
+    @Test func successfulDirectRetryDequeuesMatchingLegacyQueueEntry() async {
+        let vm = DownloadViewModel(
+            trackPersister: FakeThrowingPersister(failingTrackIds: [])
+        )
+        vm.batchRunnerOverride = FakeBatchRunner(
+            result: DownloadOrchestrator.BatchResult(
+                succeeded: 1,
+                downloadedPaths: [9: "/library/direct-retry.m4a"]
+            )
+        )
+        let retryRunner = FakeRetryRunner(
+            requests: [],
+            result: DownloadOrchestrator.BatchResult()
+        )
+        vm.retryRunnerOverride = retryRunner
+
+        await vm.downloadTracks([makeRemoteTrack(id: 9, title: "Direct Retry")])
+
+        #expect(retryRunner.dequeuedTrackIds == [9])
+        #expect(vm.completedCount == 1)
+        #expect(vm.failedCount == 0)
+    }
+
+    @Test func globalRetryIsHiddenWhenNoRetryablePersistedQueueItemsRemain() async {
+        let vm = DownloadViewModel(trackPersister: RecordingPersister())
+        vm.batchRunnerOverride = FakeBatchRunner(
+            result: DownloadOrchestrator.BatchResult(
+                succeeded: 0,
+                failed: 1,
+                failedTrackIds: [10],
+                failureReasons: [10: "Video unavailable"]
+            )
+        )
+        vm.retryRunnerOverride = FakeRetryRunner(
+            requests: [],
+            result: DownloadOrchestrator.BatchResult()
+        )
+
+        await vm.downloadTracks([makeRemoteTrack(id: 10, title: "Capped Failure")])
+
+        #expect(vm.failedCount == 1)
+        #expect(!vm.hasActionableRetryFailures)
     }
 
     @Test func retryPersistenceFailureRemainsQueuedAndReportsFailure() async {

@@ -24,6 +24,7 @@ final class DependencyContainer {
     private(set) var sourceRepository: SourceRepository?
     private(set) var analysisRepository: AnalysisRepository?
     private(set) var configRepository: ConfigRepository?
+    private(set) var reelRepository: ReelRepository?
 
     // MARK: - Services
 
@@ -43,6 +44,7 @@ final class DependencyContainer {
     private(set) var audioEmbeddingService: AudioEmbeddingService?
     private(set) var grooveBatchAnalyzer: GrooveBatchAnalyzer?
     private(set) var swarmRecommendationService: SwarmRecommendationService?
+    private(set) var discoveryReviewService: DiscoveryReviewService?
     private(set) var transcodeCache: TranscodeCache?
     private(set) var unifiedSearchService: UnifiedSearchService?
 
@@ -107,6 +109,7 @@ final class DependencyContainer {
         self.sourceRepository = SourceRepository(database: dbPool)
         self.analysisRepository = AnalysisRepository(database: dbPool)
         self.configRepository = ConfigRepository(database: dbPool)
+        self.reelRepository = ReelRepository(database: dbPool)
 
         // Services
         self.importService = ImportService(
@@ -119,6 +122,10 @@ final class DependencyContainer {
         self.audioEmbeddingService = AudioEmbeddingService()
         self.grooveBatchAnalyzer = GrooveBatchAnalyzer(embeddingService: self.audioEmbeddingService!)
         self.swarmRecommendationService = SwarmRecommendationService()
+        self.discoveryReviewService = DiscoveryReviewService(
+            trackRepository: self.trackRepository!,
+            configRepository: self.configRepository!
+        )
 
         // Auth services (shared by all source integrations)
         let tokens = TokenStorage()
@@ -288,7 +295,7 @@ final class DependencyContainer {
         let newDir = URL(fileURLWithPath: newPath).standardizedFileURL
         
         if oldDir == newDir {
-            AppLogger.shared.info("Cache-Migration: Neuer Pfad entspricht dem aktuellen Pfad. Keine Aktion erforderlich.", source: "Sync")
+            AppLogger.shared.info("Cache migration: The new path is already in use. No action is required.", source: "Sync")
             return
         }
         
@@ -297,10 +304,10 @@ final class DependencyContainer {
         Task.detached {
             let opId = activityVM?.startOperation(
                 type: .sync,
-                title: "Cache-Migration: \(newDir.lastPathComponent)",
-                detail: "Scanne alten Cache..."
+                title: "Cache migration: \(newDir.lastPathComponent)",
+                detail: "Scanning existing cache..."
             )
-            AppLogger.shared.info("Cache-Migration: Starte Umzug des Transcode-Caches von \(oldDir.path) nach \(newDir.path)", source: "Sync")
+            AppLogger.shared.info("Cache migration: Moving transcode cache from \(oldDir.path) to \(newDir.path)", source: "Sync")
             
             do {
                 // Ensure new directory exists
@@ -311,7 +318,7 @@ final class DependencyContainer {
                 let m4aFiles = files.filter { $0.pathExtension.lowercased() == "m4a" }
                 let total = m4aFiles.count
                 
-                AppLogger.shared.info("Cache-Migration: \(total) Dateien zum Verschieben gefunden.", source: "Sync")
+                AppLogger.shared.info("Cache migration: Found \(total) files to move.", source: "Sync")
                 
                 var completed = 0
                 for fileURL in m4aFiles {
@@ -332,13 +339,13 @@ final class DependencyContainer {
                         activityVM?.updateProgress(
                             id: opId,
                             progress: progress,
-                            detail: "[\(completed)/\(total)] verschoben..."
+                            detail: "[\(completed)/\(total)] moved..."
                         )
                     }
                     
                     // Periodically print progress in logs
                     if completed % 20 == 0 || completed == total {
-                        AppLogger.shared.info("Cache-Migration: [\(completed)/\(total)] Dateien verschoben.", source: "Sync")
+                        AppLogger.shared.info("Cache migration: [\(completed)/\(total)] files moved.", source: "Sync")
                     }
                 }
                 
@@ -350,12 +357,12 @@ final class DependencyContainer {
                 
                 // Complete background operation
                 if let opId = opId {
-                    activityVM?.completeOperation(id: opId, detail: "Erfolgreich! \(total) Cache-Dateien umgezogen.")
+                    activityVM?.completeOperation(id: opId, detail: "Moved \(total) cache files.")
                 }
-                AppLogger.shared.info("Cache-Migration: Erfolgreich abgeschlossen. \(total) Dateien umgezogen, alter Cache gelöscht.", source: "Sync")
+                AppLogger.shared.info("Cache migration complete. Moved \(total) files and removed the old cache.", source: "Sync")
                 
             } catch {
-                AppLogger.shared.error("Cache-Migration: Fehler beim Umzug: \(error.localizedDescription)", source: "Sync")
+                AppLogger.shared.error("Cache migration failed: \(error.localizedDescription)", source: "Sync")
                 if let opId = opId {
                     activityVM?.failOperation(id: opId, error: error.localizedDescription)
                 }

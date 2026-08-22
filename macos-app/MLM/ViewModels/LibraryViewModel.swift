@@ -47,6 +47,7 @@ final class LibraryViewModel {
     private(set) var displayedTracks: [Track] = []
     private(set) var localCount: Int = 0
     private(set) var remoteCount: Int = 0
+    private(set) var availabilityByTrackID: [Int64: TrackAvailability] = [:]
 
     var selectedTab: LibraryTab = .local {
         didSet {
@@ -82,13 +83,16 @@ final class LibraryViewModel {
     // MARK: - Dependencies
 
     private let trackRepository: TrackRepository
+    private let configRepository: ConfigRepository
     private let debouncer = Debouncer(delay: .milliseconds(200))
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    private var libraryRootSnapshot: URL?
 
     // MARK: - Init
 
-    init(trackRepository: TrackRepository) {
+    init(trackRepository: TrackRepository, configRepository: ConfigRepository) {
         self.trackRepository = trackRepository
+        self.configRepository = configRepository
     }
 
     // MARK: - Data loading
@@ -102,6 +106,7 @@ final class LibraryViewModel {
         let tab    = selectedTab
         let search = searchQuery
         let sort   = sortDescriptor
+        let libraryRoot = libraryRootSnapshot
 
         refreshTask = Task { [weak self] in
             guard let self else { return }
@@ -120,9 +125,16 @@ final class LibraryViewModel {
                 let remote = (try? await trackRepository.countRemoteTracks()) ?? remoteCount
                 guard !Task.isCancelled else { return }
 
+                let availability = TrackPresentationAvailability.map(
+                    tracks: result,
+                    libraryRoot: libraryRoot,
+                    fileExists: { FileManager.default.fileExists(atPath: $0.path) }
+                )
+
                 await MainActor.run { [weak self] in
                     guard let self else { return }
                     displayedTracks = result
+                    availabilityByTrackID = availability
                     localCount      = local
                     remoteCount     = remote
                     isLoading       = false
@@ -139,6 +151,7 @@ final class LibraryViewModel {
                     guard let self else { return }
                     errorMessage    = error.localizedDescription
                     displayedTracks = []
+                    availabilityByTrackID = [:]
                     isLoading       = false
                 }
             }
@@ -148,6 +161,7 @@ final class LibraryViewModel {
     /// Await the current refresh to completion (used by `.task` in views).
     @MainActor
     func loadTracks() async {
+        await refreshLibraryRootSnapshot()
         scheduleRefresh()
         await refreshTask?.value
     }
@@ -174,5 +188,17 @@ final class LibraryViewModel {
             guard let id = track.id else { return false }
             return selectedTrackIDs.contains(id)
         }
+    }
+
+    // MARK: - Availability
+
+    private func refreshLibraryRootSnapshot() async {
+        guard let rootPath = (try? await configRepository.getLibraryRoot()) ?? nil,
+              !rootPath.isEmpty else {
+            libraryRootSnapshot = nil
+            return
+        }
+
+        libraryRootSnapshot = URL(fileURLWithPath: rootPath)
     }
 }

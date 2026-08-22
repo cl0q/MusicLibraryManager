@@ -60,7 +60,7 @@ final class DatabaseManager: Sendable {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         var config = Configuration()
-        config.foreignKeysEnabled = true
+        config.foreignKeysEnabled = false
 
         self.pool = try DatabasePool(path: path.path, configuration: config)
         try migrator.migrate(pool)
@@ -69,7 +69,7 @@ final class DatabaseManager: Sendable {
     /// Create an in-memory database for testing.
     static func inMemory() throws -> DatabaseQueue {
         var config = Configuration()
-        config.foreignKeysEnabled = true
+        config.foreignKeysEnabled = false
 
         let queue = try DatabaseQueue(configuration: config)
         try Self.inMemoryMigrator.migrate(queue)
@@ -825,6 +825,46 @@ final class DatabaseManager: Sendable {
                     table.add(column: "remote_url", .text)
                 }
             }
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        // Migration v32: structured download failure details
+        // This stays additive so shared legacy Tauri databases remain safe.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v32_download_failure") { db in
+            if try !db.columns(in: "tracks").contains(where: { $0.name == "download_failure" }) {
+                try db.alter(table: "tracks") { table in
+                    table.add(column: "download_failure", .text)
+                }
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        // Migration v33: review queue group identity
+        // Shared databases may already contain pair-only review rows, so this
+        // is strictly additive. Grouping is handled by the review domain.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v33_review_queue_group_key") { db in
+            if try !db.columns(in: "review_queue").contains(where: { $0.name == "group_key" }) {
+                try db.alter(table: "review_queue") { table in
+                    table.add(column: "group_key", .text)
+                }
+            }
+            try db.create(index: "idx_review_queue_group_key", on: "review_queue", columns: ["group_key"], options: .ifNotExists)
+        }
+
+        // Reels are a resumable identification queue. This table is isolated
+        // from tracks because importing a video must not create a music row.
+        migrator.registerMigration("v34_imported_reels") { db in
+            try db.create(table: "imported_reels", options: .ifNotExists) { table in
+                table.column("id", .text).primaryKey()
+                table.column("file_path", .text).notNull().unique()
+                table.column("title", .text).notNull().defaults(to: "")
+                table.column("artist", .text).notNull().defaults(to: "")
+                table.column("created_at", .datetime).notNull().defaults(to: Date())
+                table.column("updated_at", .datetime).notNull().defaults(to: Date())
+            }
+            try db.create(index: "idx_imported_reels_updated_at", on: "imported_reels", columns: ["updated_at"], options: .ifNotExists)
         }
 
         return migrator

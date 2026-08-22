@@ -270,7 +270,7 @@ struct OrganizedPathMigrationServiceTests {
         #expect(!result.backupURL.path.hasPrefix(fixture.library.path + "/"))
         #expect(!result.manifestURL.path.hasPrefix(fixture.library.path + "/"))
         let backupDatabase = try DatabaseQueue(path: result.backupURL.path)
-        let firstBackupPath = try backupDatabase.read { db in
+        let firstBackupPath = try await backupDatabase.read { db in
             try String.fetchOne(
                 db,
                 sql: "SELECT organized_path FROM tracks WHERE id = ?",
@@ -348,9 +348,11 @@ struct OrganizedPathMigrationServiceTests {
         #expect(rollback.manifestFinalizationWarning == nil)
         let firstRestored = try await fetchTrack(fixture, id: firstID)
         let secondRestored = try await fetchTrack(fixture, id: secondID)
+        #expect(firstRestored?.organizedPath == "old/one.m4a")
+        #expect(secondRestored?.organizedPath == "old/two.m4a")
         #expect(FileManager.default.fileExists(atPath: rollback.rollbackBackupURL.path))
         let rollbackBackupDatabase = try DatabaseQueue(path: rollback.rollbackBackupURL.path)
-        let firstPreRollbackPath = try rollbackBackupDatabase.read { db in
+        let firstPreRollbackPath = try await rollbackBackupDatabase.read { db in
             try String.fetchOne(
                 db,
                 sql: "SELECT organized_path FROM tracks WHERE id = ?",

@@ -30,7 +30,82 @@ struct Source: Codable, FetchableRecord, MutablePersistableRecord, Identifiable,
 
     /// Source type derived from name.
     var sourceType: SourceType {
-        SourceType(rawValue: name) ?? .unknown
+        switch playlistSourceIdentity {
+        case .spotify:
+            .spotify
+        case .soundcloud:
+            .soundcloud
+        case .appleMusic:
+            .appleMusic
+        case .youtube, .other:
+            .unknown
+        }
+    }
+
+    /// Human-readable identity for a playlist linked to this source.
+    ///
+    /// Unlike `SourceType`, this includes YouTube, which is a playlist import
+    /// source rather than an OAuth-connected source service.
+    var playlistSourceIdentity: PlaylistSourceIdentity {
+        PlaylistSourceIdentity(sourceName: name)
+    }
+}
+
+/// A source identity that can be presented on a linked playlist.
+enum PlaylistSourceIdentity: Equatable, Hashable, Sendable {
+    case spotify
+    case soundcloud
+    case youtube
+    case appleMusic
+    case other(String)
+
+    init(sourceName: String) {
+        let normalized = sourceName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "_")
+            .replacingOccurrences(of: " ", with: "_")
+
+        switch normalized {
+        case "spotify":
+            self = .spotify
+        case "soundcloud", "sound_cloud":
+            self = .soundcloud
+        case "youtube", "you_tube":
+            self = .youtube
+        case "apple_music", "applemusic":
+            self = .appleMusic
+        default:
+            self = .other(sourceName)
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .spotify:
+            "Spotify"
+        case .soundcloud:
+            "SoundCloud"
+        case .youtube:
+            "YouTube"
+        case .appleMusic:
+            "Apple Music"
+        case let .other(name):
+            name
+        }
+    }
+
+    /// Pins playlist-initiated downloads to the service that supplied them.
+    /// Sources without a direct downloader retain the normal fallback chain.
+    var downloadPin: DownloadOrchestrator.PreferredSource {
+        switch self {
+        case .soundcloud:
+            .soundcloud
+        case .youtube:
+            .youtube
+        case .spotify, .appleMusic, .other:
+            .auto
+        }
     }
 }
 

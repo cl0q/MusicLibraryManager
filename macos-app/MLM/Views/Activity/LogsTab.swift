@@ -127,9 +127,9 @@ struct LogsTab: View {
                 LogSourceChip(label: "boot", tag: "boot")
             ]
 
-            // Quick-Filter-Chips für Log-Quellen
+            // Quick source-filter chips.
             HStack(spacing: 8) {
-                Text("Quellen:")
+                Text("Sources:")
                     .font(MLMFont.muted)
                     .foregroundColor(.mlmInkMuted)
                 
@@ -156,7 +156,7 @@ struct LogsTab: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 11))
                     .foregroundColor(.mlmInkMuted)
-                TextField("Logs durchsuchen (Nachricht oder Source)…", text: $searchQuery)
+                TextField("Search logs (message or source)...", text: $searchQuery)
                     .textFieldStyle(.plain)
                     .font(MLMFont.body)
                 if !searchQuery.isEmpty {
@@ -185,7 +185,7 @@ struct LogsTab: View {
             } label: {
                 HStack {
                     if sourceFilter == nil { Image(systemName: "checkmark") }
-                    Text("Alle Sources")
+                    Text("All sources")
                 }
             }
             Divider()
@@ -206,7 +206,7 @@ struct LogsTab: View {
                 } label: {
                     HStack {
                         if sourceFilter == "" { Image(systemName: "checkmark") }
-                        Text("(ohne Source)")
+                        Text("(no source)")
                     }
                 }
             }
@@ -225,8 +225,8 @@ struct LogsTab: View {
 
     private var sourceMenuLabel: String {
         switch sourceFilter {
-        case .none:       return "Alle Sources"
-        case .some(""):   return "(ohne Source)"
+        case .none:       return "All sources"
+        case .some(""):   return "(no source)"
         case .some(let s): return s
         }
     }

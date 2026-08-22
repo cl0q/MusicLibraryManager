@@ -127,6 +127,7 @@ final class ImportService: Sendable {
         // Phase 1: Scan for audio files
         onProgress?(ImportProgress(total: 0, processed: 0, phase: "Scanning...", currentFile: nil))
         let audioFiles = try Self.scanDirectory(directory)
+        try Task.checkCancellation()
 
         guard !audioFiles.isEmpty else {
             return ImportResult(succeeded: 0, failed: 0, skipped: 0, failures: [], totalScanned: 0)
@@ -148,6 +149,7 @@ final class ImportService: Sendable {
         var processed = 0
 
         for chunk in audioFiles.chunked(into: chunkSize) {
+            try Task.checkCancellation()
             let chunkResults = await withTaskGroup(
                 of: (URL, Result<TrackMetadata, Error>).self,
                 returning: [(URL, Result<TrackMetadata, Error>)].self
@@ -171,6 +173,7 @@ final class ImportService: Sendable {
             }
 
             extractionResults.append(contentsOf: chunkResults)
+            try Task.checkCancellation()
             processed += chunk.count
 
             onProgress?(ImportProgress(
@@ -202,6 +205,7 @@ final class ImportService: Sendable {
         ))
 
         // Phase 3: Batch insert into database
+        try Task.checkCancellation()
         let (succeeded, skipped, dbFailures, insertedTracks) = await saveBatches(successfulMetadata)
         failures.append(contentsOf: dbFailures)
 

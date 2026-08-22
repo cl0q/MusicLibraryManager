@@ -9,44 +9,31 @@ struct FolderTreeView: View {
     @Bindable var viewModel: FolderViewModel
     @State private var outlineView: NSOutlineView?
 
-    var body: some View {
-        List(viewModel.rootNodes, children: \.childrenOptional, selection: $viewModel.selectedFolderPath) { node in
-            if node.name.isEmpty && node.id.hasSuffix("/__placeholder__") {
-                HStack {
-                    Spacer()
-                    ProgressView()
-                        .controlSize(.small)
-                    Spacer()
-                }
-                .onAppear {
-                    let parentPath = String(node.id.dropLast("/__placeholder__".count))
-                    viewModel.loadChildren(for: parentPath)
-                }
-            } else {
-                HStack(spacing: 6) {
-                    Image(systemName: "folder")
-                        .foregroundStyle(Color.secondary)
-                        .imageScale(.medium)
+    private var managedNodes: [DiskFolderNode] {
+        viewModel.rootNodes.filter {
+            ManagedLibraryLayout.isManagedFolder(URL(fileURLWithPath: $0.id), libraryRoot: viewModel.libraryRootURL)
+        }
+    }
 
-                    Text(node.name)
-                        .lineLimit(1)
-                }
-                .contentShape(Rectangle())
-                .onTapGesture(count: 2) {
-                    if let outlineView = outlineView {
-                        let clickedRow = outlineView.selectedRow
-                        if clickedRow != -1, let item = outlineView.item(atRow: clickedRow) {
-                            if outlineView.isItemExpanded(item) {
-                                outlineView.collapseItem(item)
-                            } else {
-                                outlineView.expandItem(item)
-                            }
-                        }
+    private var personalNodes: [DiskFolderNode] {
+        viewModel.rootNodes.filter {
+            !ManagedLibraryLayout.isManagedFolder(URL(fileURLWithPath: $0.id), libraryRoot: viewModel.libraryRootURL)
+        }
+    }
+
+    var body: some View {
+        List(selection: $viewModel.selectedFolderPath) {
+            if !managedNodes.isEmpty {
+                Section("MANAGED BY MLM") {
+                    OutlineGroup(managedNodes, children: \.childrenOptional) { node in
+                        folderRow(node)
                     }
                 }
-                .contextMenu {
-                    Button("In Finder anzeigen") {
-                        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: node.id)
+            }
+            if !personalNodes.isEmpty {
+                Section {
+                    OutlineGroup(personalNodes, children: \.childrenOptional) { node in
+                        folderRow(node)
                     }
                 }
             }
@@ -55,12 +42,51 @@ struct FolderTreeView: View {
         .background(OutlineViewIntrospector(outlineView: $outlineView))
         .onChange(of: viewModel.selectedFolderPath) { _, newPath in
             guard newPath != nil, let outlineView = outlineView else { return }
-            // Let SwiftUI and NSOutlineView update selection first, then expand the selected row
             DispatchQueue.main.async {
                 let selectedRow = outlineView.selectedRow
                 if selectedRow != -1, let item = outlineView.item(atRow: selectedRow) {
                     expandParents(of: item, in: outlineView)
                     outlineView.expandItem(item)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func folderRow(_ node: DiskFolderNode) -> some View {
+        if node.name.isEmpty && node.id.hasSuffix("/__placeholder__") {
+            HStack {
+                Spacer()
+                ProgressView().controlSize(.small)
+                Spacer()
+            }
+            .onAppear {
+                viewModel.loadChildren(for: String(node.id.dropLast("/__placeholder__".count)))
+            }
+        } else {
+            let isManaged = ManagedLibraryLayout.isManagedFolder(
+                URL(fileURLWithPath: node.id),
+                libraryRoot: viewModel.libraryRootURL
+            )
+            HStack(spacing: 6) {
+                Image(systemName: isManaged ? "arrow.down.circle" : "folder")
+                    .foregroundStyle(isManaged ? Color.mlmAccent : Color.secondary)
+                    .imageScale(.medium)
+                Text(node.name).lineLimit(1)
+            }
+            .tag(node.id)
+            .help(isManaged ? "Created and maintained by MLM" : "")
+            .contentShape(Rectangle())
+            .onTapGesture { viewModel.selectedFolderPath = node.id }
+            .onTapGesture(count: 2) {
+                guard let outlineView else { return }
+                let clickedRow = outlineView.selectedRow
+                guard clickedRow != -1, let item = outlineView.item(atRow: clickedRow) else { return }
+                outlineView.isItemExpanded(item) ? outlineView.collapseItem(item) : outlineView.expandItem(item)
+            }
+            .contextMenu {
+                Button("Show in Finder") {
+                    NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: node.id)
                 }
             }
         }
@@ -97,4 +123,3 @@ struct OutlineViewIntrospector: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {}
 }
-

@@ -296,7 +296,7 @@ struct TrackDetailView: View {
         if isLoadingBpmSegments {
             HStack(spacing: 4) {
                 ProgressView().controlSize(.small)
-                Text("BPM-Verlauf wird berechnet…")
+                Text("Calculating BPM timeline...")
                     .font(MLMFont.dataSmall)
                     .foregroundColor(.mlmInkMuted)
             }

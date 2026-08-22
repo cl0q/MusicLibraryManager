@@ -26,6 +26,13 @@ final class PlaylistViewModel {
     /// Track counts per playlist, keyed by playlist ID.
     private(set) var trackCounts: [Int64: Int] = [:]
 
+    /// Download health indexed by playlist ID for the card grid.
+    private(set) var downloadStatusesByID: [Int64: PlaylistDownloadStatus] = [:]
+
+    /// Sources indexed by their database identity for linked playlist labels.
+    /// Loaded once per playlist snapshot to avoid one query per card.
+    private(set) var sourcesByID: [Int64: Source] = [:]
+
     /// Whether data is loading.
     private(set) var isLoading = false
 
@@ -60,11 +67,16 @@ final class PlaylistViewModel {
     // MARK: - Dependencies
 
     private let playlistRepository: PlaylistRepository
+    private let sourceRepository: SourceRepository
 
     // MARK: - Init
 
-    init(playlistRepository: PlaylistRepository) {
+    init(
+        playlistRepository: PlaylistRepository,
+        sourceRepository: SourceRepository
+    ) {
         self.playlistRepository = playlistRepository
+        self.sourceRepository = sourceRepository
     }
 
     // MARK: - Load
@@ -78,6 +90,14 @@ final class PlaylistViewModel {
         do {
             playlists = try await playlistRepository.fetchAll()
 
+            // Resolve every card's source from one authoritative sources-table snapshot.
+            let sources = try await sourceRepository.fetchAll()
+            sourcesByID = Dictionary(
+                uniqueKeysWithValues: sources.compactMap { source in
+                    source.id.map { ($0, source) }
+                }
+            )
+
             // Fetch track counts for each playlist
             var counts: [Int64: Int] = [:]
             for playlist in playlists {
@@ -86,6 +106,11 @@ final class PlaylistViewModel {
                 }
             }
             trackCounts = counts
+
+            let statuses = try await playlistRepository.fetchDownloadStatuses()
+            downloadStatusesByID = Dictionary(
+                uniqueKeysWithValues: statuses.map { ($0.playlistID, $0) }
+            )
 
             applyFilter()
         } catch {
@@ -99,6 +124,26 @@ final class PlaylistViewModel {
     @MainActor
     func refresh() async {
         await loadPlaylists()
+    }
+
+    /// Refreshes only persisted download health for an active batch. The grid
+    /// uses this to publish a concrete change notification after the database
+    /// transition is observable, rather than predicting a new aggregate when
+    /// a download is merely requested.
+    @MainActor
+    func refreshDownloadHealth() async {
+        do {
+            let statuses = try await playlistRepository.fetchDownloadStatuses()
+            let updatedStatuses = Dictionary(
+                uniqueKeysWithValues: statuses.map { ($0.playlistID, $0) }
+            )
+            guard updatedStatuses != downloadStatusesByID else { return }
+            downloadStatusesByID = updatedStatuses
+            NotificationCenter.default.post(name: .downloadStateDidChange, object: nil)
+        } catch {
+            // The next full refresh will surface a database error. Avoid
+            // replacing otherwise usable card health with a polling failure.
+        }
     }
 
     // MARK: - Create
@@ -256,6 +301,19 @@ final class PlaylistViewModel {
             try? await Task.sleep(for: .seconds(4))
             self?.coverDropErrorMessage = nil
         }
+    }
+
+    /// Returns the authoritative source record for a linked playlist.
+    /// A missing record intentionally produces no label rather than guessing
+    /// the source from playlist metadata such as its title.
+    func source(for playlist: Playlist) -> Source? {
+        guard let sourceID = playlist.sourceId else { return nil }
+        return sourcesByID[sourceID]
+    }
+
+    func downloadStatus(for playlist: Playlist) -> PlaylistDownloadStatus? {
+        guard let playlistID = playlist.id else { return nil }
+        return downloadStatusesByID[playlistID]
     }
 
     // MARK: - Filtering

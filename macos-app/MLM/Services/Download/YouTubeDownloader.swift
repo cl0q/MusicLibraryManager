@@ -96,8 +96,14 @@ final class YouTubeDownloader: Sendable {
         // file was successfully downloaded and printed via
         // `--print after_move:filepath`. Treating that as failure
         // (the old behaviour) was throwing away valid downloads.
-        let outputPath = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !outputPath.isEmpty && FileManager.default.fileExists(atPath: outputPath) {
+        //
+        // Note: `--newline --progress` makes yt-dlp emit progress lines
+        // to stdout alongside the final filepath, so we must walk lines
+        // from the end rather than trimming the whole blob.
+        if let outputPath = Self.parseDownloadedFilePath(
+            stdout: result.stdout,
+            outputDir: outputDir
+        ) {
             return .success(URL(fileURLWithPath: outputPath))
         }
 
@@ -220,6 +226,29 @@ final class YouTubeDownloader: Sendable {
     }
 
     // MARK: - Query Normalisation
+
+    /// Extract the downloaded file path from yt-dlp's stdout.
+    ///
+    /// `--newline --progress` causes yt-dlp to emit progress lines to
+    /// stdout alongside the final filepath printed by `--print after_move:filepath`.
+    /// Walking lines from the end and requiring the line to start with
+    /// `outputDir` preserves the T-39-01 invariant: only a path this
+    /// invocation provably printed (and that exists on disk) is returned.
+    ///
+    /// Visible + static for testability without spawning yt-dlp.
+    static func parseDownloadedFilePath(stdout: String, outputDir: URL) -> String? {
+        let prefix = outputDir.path
+        let lines = stdout.split(whereSeparator: \.isNewline)
+        for line in lines.reversed() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+            guard trimmed.hasPrefix(prefix) else { continue }
+            if FileManager.default.fileExists(atPath: trimmed) {
+                return trimmed
+            }
+        }
+        return nil
+    }
 
     /// Case-insensitive tokens that identify a DIFFERENT recording of the
     /// same song (a remix, a live take, a slowed edit, ...). A bracket

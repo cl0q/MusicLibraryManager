@@ -60,6 +60,83 @@ struct Playlist: Codable, FetchableRecord, MutablePersistableRecord, Identifiabl
     }
 }
 
+/// Read-only download health aggregate for a playlist.
+struct PlaylistDownloadStatus: Equatable, Sendable {
+    let playlistID: Int64
+    let totalTracks: Int
+    let localTracks: Int
+    let downloadingTracks: Int
+    let failedTracks: Int
+    let notDownloadedTracks: Int
+
+    init(
+        playlistID: Int64,
+        totalTracks: Int,
+        localTracks: Int,
+        downloadingTracks: Int,
+        failedTracks: Int,
+        notDownloadedTracks: Int
+    ) {
+        self.playlistID = playlistID
+        self.totalTracks = totalTracks
+        self.localTracks = localTracks
+        self.downloadingTracks = downloadingTracks
+        self.failedTracks = failedTracks
+        self.notDownloadedTracks = notDownloadedTracks
+    }
+
+    /// Builds exclusive health buckets from a presentation availability snapshot.
+    /// A file that has lost its local path remains in the local-path bucket so
+    /// it cannot become a download-missing candidate.
+    init(
+        playlistID: Int64,
+        tracks: [Track],
+        availabilityByTrackID: [Int64: TrackAvailability] = [:]
+    ) {
+        var localTracks = 0
+        var downloadingTracks = 0
+        var failedTracks = 0
+        var notDownloadedTracks = 0
+
+        for track in tracks {
+            let availability = track.id.flatMap { availabilityByTrackID[$0] }
+                ?? track.availability()
+
+            switch availability {
+            case .local, .fileMissing:
+                localTracks += 1
+            case .downloading:
+                downloadingTracks += 1
+            case .failed:
+                failedTracks += 1
+            case .notDownloaded:
+                notDownloadedTracks += 1
+            }
+        }
+
+        self.init(
+            playlistID: playlistID,
+            totalTracks: tracks.count,
+            localTracks: localTracks,
+            downloadingTracks: downloadingTracks,
+            failedTracks: failedTracks,
+            notDownloadedTracks: notDownloadedTracks
+        )
+    }
+
+    var missingTracks: Int {
+        notDownloadedTracks
+    }
+
+    var isImporting: Bool {
+        downloadingTracks > 0
+    }
+
+    var isIncomplete: Bool {
+        failedTracks > 0
+    }
+}
+
 /// A track's membership in a playlist with fractional position.
 struct PlaylistTrack: Codable, FetchableRecord, MutablePersistableRecord, Identifiable {
     var id: Int64?

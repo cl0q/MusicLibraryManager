@@ -7,9 +7,8 @@ enum RemotePlaylistSource {
     case youtube
 }
 
-/// Remote-playlist browser for SoundCloud / Spotify / YouTube — lists the
-/// user's playlists (or accepts a URL for YouTube), previews a playlist's
-/// tracks, and downloads a chosen slice (all / first N / random N).
+/// Remote-playlist browser for SoundCloud, Spotify, and YouTube. Playlist
+/// metadata stays staged until the review screen's Save or Download action.
 struct RemotePlaylistsView: View {
     let source: RemotePlaylistSource
 
@@ -17,6 +16,7 @@ struct RemotePlaylistsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: RemotePlaylistsViewModel?
     @State private var urlInput = ""
+    @State private var showsPersistedPlaylist = false
 
     var body: some View {
         NavigationStack {
@@ -24,17 +24,17 @@ struct RemotePlaylistsView: View {
                 if let viewModel {
                     content(viewModel)
                 } else {
-                    ProgressView("Lade…")
+                    ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             .frame(minWidth: 520, minHeight: 460)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Schließen") { dismiss() }
+                    Button("Done") { dismiss() }
                 }
             }
-            .navigationTitle("\(viewModel?.displayName ?? "") Playlists")
+            .navigationTitle(navigationTitle)
         }
         .task {
             initialize()
@@ -42,10 +42,24 @@ struct RemotePlaylistsView: View {
         }
     }
 
+    private var navigationTitle: String {
+        source == .youtube ? "Import YouTube Playlist" : "Playlists"
+    }
+
     @ViewBuilder
     private func content(_ vm: RemotePlaylistsViewModel) -> some View {
-        if vm.selectedTitle != nil {
-            RemotePlaylistDetailView(viewModel: vm)
+        if showsPersistedPlaylist, let playlistID = vm.importResult?.playlistID {
+            PlaylistDetailViewLoader(
+                playlistId: playlistID,
+                onBack: { showsPersistedPlaylist = false },
+                onTrackDoubleClick: { _ in }
+            )
+        } else if vm.preview != nil {
+            RemotePlaylistDetailView(
+                viewModel: vm,
+                onOpenPlaylist: { showsPersistedPlaylist = true },
+                onDone: { dismiss() }
+            )
         } else if vm.allowsURLImport {
             urlImport(vm)
         } else {
@@ -56,22 +70,21 @@ struct RemotePlaylistsView: View {
     @ViewBuilder
     private func urlImport(_ vm: RemotePlaylistsViewModel) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Playlist-URL einfügen")
-                .font(.headline)
             HStack {
                 TextField("https://www.youtube.com/playlist?list=…", text: $urlInput)
                     .textFieldStyle(.roundedBorder)
-                Button("Laden") {
+                Button("Load") {
                     Task { await vm.importFromURL(urlInput) }
                 }
-                .disabled(urlInput.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(
+                    vm.isPreviewLoading ||
+                        urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
             }
-            if vm.isImporting {
-                ProgressView("Playlist wird geladen…")
+            if vm.isPreviewLoading {
+                ProgressView("Loading playlist…")
             }
-            if let error = vm.errorMessage {
-                Text(error).font(.caption).foregroundColor(.red)
-            }
+            errorMessage(vm)
             Spacer()
         }
         .padding(16)
@@ -79,20 +92,21 @@ struct RemotePlaylistsView: View {
 
     @ViewBuilder
     private func playlistList(_ vm: RemotePlaylistsViewModel) -> some View {
-        if vm.isLoading {
-            ProgressView("Playlists werden geladen…")
+        if vm.isLoading || vm.isPreviewLoading {
+            ProgressView("Loading playlist…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let error = vm.errorMessage {
             VStack(spacing: 8) {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.largeTitle)
                 Text(error).multilineTextAlignment(.center)
-                Button("Erneut versuchen") { Task { await vm.loadPlaylists() } }
+                settingsAction(vm)
+                Button("Retry") { Task { await vm.loadPlaylists() } }
             }
             .padding()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if vm.playlists.isEmpty {
-            Text("Keine Playlists gefunden.")
+            Text("No playlists found")
                 .foregroundColor(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -104,7 +118,7 @@ struct RemotePlaylistsView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(playlist.title)
                                 .font(.body)
-                            Text("\(playlist.trackCount) Titel")
+                            Text("\(playlist.trackCount) tracks")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -118,37 +132,50 @@ struct RemotePlaylistsView: View {
             }
         }
     }
+
+    @ViewBuilder
+    private func errorMessage(_ vm: RemotePlaylistsViewModel) -> some View {
+        if let error = vm.errorMessage {
+            Text(error)
+                .font(.caption)
+                .foregroundColor(.red)
+            settingsAction(vm)
+        }
+    }
+
+    @ViewBuilder
+    private func settingsAction(_ vm: RemotePlaylistsViewModel) -> some View {
+        if vm.shouldOfferSettings {
+            Button("Open Settings") {
+                AppDelegate.shared?.showSettingsWindow()
+            }
+        }
+    }
 }
 
 // MARK: - Playlist Detail
 
 private struct RemotePlaylistDetailView: View {
     let viewModel: RemotePlaylistsViewModel
+    let onOpenPlaylist: () -> Void
+    let onDone: () -> Void
 
     @State private var mode: SelectionMode = .all
     @State private var count: Int = 50
     @State private var countText: String = "50"
-    /// The exact tracks that will be downloaded — what the list shows.
-    @State private var previewTracks: [Track] = []
+    @State private var previewTracks: [RemotePlaylistTrack] = []
+    @State private var showsFailedTracks = false
 
     private enum SelectionMode: String, CaseIterable, Identifiable {
-        case all = "Alle"
-        case firstN = "Erste N"
-        case randomN = "N zufällig"
+        case all = "All"
+        case firstN = "First N"
+        case randomN = "Random N"
         var id: String { rawValue }
     }
 
-    private var selection: RemotePlaylistSelection {
-        switch mode {
-        case .all: return .all
-        case .firstN: return .firstN(count)
-        case .randomN: return .randomN(count)
-        }
-    }
-
-    /// Recompute the preview list from the current mode + count. Random is
-    /// shuffled once here (not per render) so the preview stays stable and
-    /// matches exactly what gets downloaded.
+    /// Recompute the preview list from the current selection. Random is
+    /// shuffled once here rather than per render, so this exact list is what
+    /// both commit actions receive.
     private func recomputePreview() {
         let all = viewModel.selectedTracks
         switch mode {
@@ -161,80 +188,145 @@ private struct RemotePlaylistDetailView: View {
         }
     }
 
-    private var previewDurationSeconds: Int {
-        previewTracks.reduce(0) { $0 + ($1.duration ?? 0) }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if viewModel.isPersisting {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if viewModel.isDownloading {
+                downloadProgress
+            } else if let result = viewModel.importResult {
+                resultView(result)
+            } else {
+                review
+            }
+        }
+        .padding(16)
+        .onAppear { recomputePreview() }
+        .onChange(of: mode) { recomputePreview() }
+        .onChange(of: count) { recomputePreview() }
+        .onChange(of: viewModel.selectedTracks.count) {
+            let maxN = max(1, viewModel.selectedTracks.count)
+            if count > maxN {
+                count = maxN
+                countText = "\(maxN)"
+            }
+            recomputePreview()
+        }
     }
 
-    var body: some View {
+    private var review: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Button {
                     viewModel.closePlaylist()
                 } label: {
-                    Label("Zurück", systemImage: "chevron.left")
+                    Label("Back", systemImage: "chevron.left")
                 }
                 .buttonStyle(.plain)
                 Spacer()
             }
 
-            Text(viewModel.selectedTitle ?? "")
-                .font(.title2).bold()
+            Text("\"\(viewModel.selectedTitle ?? "")\" · \(viewModel.selectedTracks.count) tracks · from \(viewModel.displayName)")
+                .font(.title2.bold())
 
-            if viewModel.isImporting {
-                ProgressView("Playlist wird geladen…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                Text("\(previewTracks.count) von \(viewModel.selectedTracks.count) Titeln · \(durationText)")
+            Text("Metadata completes after download")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            if let note = viewModel.downloadNote {
+                Text(note)
                     .font(.caption)
                     .foregroundColor(.secondary)
+            }
 
-                if let note = viewModel.downloadNote {
-                    Text(note)
-                        .font(.caption)
-                        .foregroundColor(.orange)
-                }
+            selectionControls
 
-                selectionControls
+            List(Array(previewTracks.enumerated()), id: \.element.id) { index, track in
+                Text("\(index + 1)  \(track.title)")
+            }
+            .frame(minHeight: 160)
 
-                List(previewTracks, id: \.id) { track in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(track.title).font(.body)
-                        Text(track.artist).font(.caption).foregroundColor(.secondary)
-                    }
-                }
-                .frame(minHeight: 160)
+            if let error = viewModel.errorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
 
-                if let error = viewModel.errorMessage {
-                    Text(error).font(.caption).foregroundColor(.red)
-                }
-
-                Button {
+            HStack {
+                Button("Download \(previewTracks.count) tracks") {
                     Task { await viewModel.download(tracks: previewTracks) }
-                } label: {
-                    Label("\(previewTracks.count) herunterladen", systemImage: "arrow.down.circle")
-                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(previewTracks.isEmpty)
+
+                Button("Save without downloading") {
+                    Task { await viewModel.save(tracks: previewTracks) }
+                }
+                .disabled(previewTracks.isEmpty)
             }
         }
-        .padding(16)
-        .onAppear { recomputePreview() }
-        .onChange(of: mode) { _ in recomputePreview() }
-        .onChange(of: count) { _ in recomputePreview() }
-        .onChange(of: viewModel.selectedTracks.count) { _ in
-            // Clamp N to the newly loaded track count and refresh.
-            let maxN = max(1, viewModel.selectedTracks.count)
-            if count > maxN { count = maxN; countText = "\(maxN)" }
-            recomputePreview()
+    }
+
+    private var downloadProgress: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Downloading… \(viewModel.downloadCompletedCount) of \(viewModel.downloadTotalCount)")
+                .font(.headline)
+            ProgressView(value: viewModel.downloadProgress)
+            Button("Cancel") {
+                viewModel.cancelDownload()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func resultView(_ result: RemotePlaylistImportResult) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if result.didDownload {
+                Text("\(result.downloadedCount) downloaded · \(result.failedCount) failed")
+                    .font(.headline)
+                if result.failedCount > 0 {
+                    Button("Show failed") {
+                        showsFailedTracks.toggle()
+                    }
+                    if showsFailedTracks {
+                        failedTracks
+                    }
+                }
+            } else {
+                Text("Nothing downloaded yet")
+                    .font(.headline)
+            }
+
+            HStack {
+                Button("Open playlist") {
+                    onOpenPlaylist()
+                }
+                Button("Done") {
+                    onDone()
+                }
+            }
+        }
+    }
+
+    private var failedTracks: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(viewModel.failedDownloadItems) { item in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.title)
+                    Text(viewModel.userFacingDownloadFailure(for: item))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
         }
     }
 
     private var selectionControls: some View {
         HStack(spacing: 12) {
-            Picker("Auswahl", selection: $mode) {
-                ForEach(SelectionMode.allCases) { m in
-                    Text(m.rawValue).tag(m)
+            Picker("Select:", selection: $mode) {
+                ForEach(SelectionMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
                 }
             }
             .pickerStyle(.segmented)
@@ -248,7 +340,7 @@ private struct RemotePlaylistDetailView: View {
                         .multilineTextAlignment(.trailing)
                         .monospacedDigit()
                         .onSubmit { commitCountText() }
-                        .onChange(of: countText) { _ in commitCountText() }
+                        .onChange(of: countText) { commitCountText() }
 
                     Stepper("") {
                         setCount(count + 1)
@@ -262,11 +354,9 @@ private struct RemotePlaylistDetailView: View {
         }
     }
 
-    /// Parse and clamp the typed N, then refresh the preview.
     private func commitCountText() {
         let digits = countText.filter(\.isNumber)
-        let parsed = Int(digits) ?? 0
-        setCount(parsed)
+        setCount(Int(digits) ?? 0)
     }
 
     private func setCount(_ value: Int) {
@@ -275,14 +365,6 @@ private struct RemotePlaylistDetailView: View {
         if clamped != count { count = clamped }
         let text = "\(clamped)"
         if countText != text { countText = text }
-    }
-
-    private var durationText: String {
-        let total = viewModel.selectedTotalDurationSeconds
-        let hours = total / 3600
-        let minutes = (total % 3600) / 60
-        if hours > 0 { return "\(hours) Std \(minutes) Min" }
-        return "\(minutes) Min"
     }
 }
 
@@ -308,7 +390,12 @@ extension RemotePlaylistsView {
                 sourceRepository: sourceRepo,
                 playlistRepository: playlistRepo
             )
-            provider = SoundCloudPlaylistProvider(client: client)
+            provider = SoundCloudPlaylistProvider(
+                client: client,
+                trackRepository: trackRepo,
+                sourceRepository: sourceRepo,
+                playlistRepository: playlistRepo
+            )
         case .spotify:
             let client = SpotifyClient(
                 tokenStorage: tokenStorage,
@@ -317,7 +404,12 @@ extension RemotePlaylistsView {
                 sourceRepository: sourceRepo,
                 playlistRepository: playlistRepo
             )
-            provider = SpotifyPlaylistProvider(client: client)
+            provider = SpotifyPlaylistProvider(
+                client: client,
+                trackRepository: trackRepo,
+                sourceRepository: sourceRepo,
+                playlistRepository: playlistRepo
+            )
         case .youtube:
             provider = YouTubePlaylistProvider(
                 downloader: YouTubeDownloader(),
@@ -329,7 +421,6 @@ extension RemotePlaylistsView {
 
         viewModel = RemotePlaylistsViewModel(
             provider: provider,
-            playlistRepository: playlistRepo,
             downloadViewModel: downloadVM
         )
     }

@@ -1,13 +1,7 @@
 import Foundation
 
-/// ViewModel backing the remote-playlist browser (SoundCloud / Spotify / YouTube).
-///
-/// Flow:
-/// 1. `loadPlaylists()` — fetch the user's playlists for browsing.
-/// 2. `openPlaylist(_:)` / `importFromURL(_:)` — import into the DB and load
-///    the ordered tracks for preview + selection.
-/// 3. `download(selection:)` — apply the selection and hand the tracks to
-///    `DownloadViewModel`, pinned to the provider's source.
+/// ViewModel for browsing a remote source, staging a playlist preview, and
+/// committing only the references the user explicitly selected.
 @Observable
 @MainActor
 final class RemotePlaylistsViewModel {
@@ -16,29 +10,24 @@ final class RemotePlaylistsViewModel {
 
     private(set) var playlists: [RemotePlaylistSummary] = []
     private(set) var isLoading = false
-    private(set) var isImporting = false
+    private(set) var isPreviewLoading = false
+    private(set) var isPersisting = false
     private(set) var errorMessage: String?
-
-    /// The playlist currently opened for preview.
-    private(set) var selectedTitle: String?
-    /// Ordered tracks of the opened playlist.
-    private(set) var selectedTracks: [Track] = []
+    private(set) var preview: RemotePlaylistPreview?
+    private(set) var importResult: RemotePlaylistImportResult?
 
     // MARK: - Dependencies
 
     private let provider: RemotePlaylistProvider
-    private let playlistRepository: PlaylistRepository
     private let downloadViewModel: DownloadViewModel
 
     // MARK: - Init
 
     init(
         provider: RemotePlaylistProvider,
-        playlistRepository: PlaylistRepository,
         downloadViewModel: DownloadViewModel
     ) {
         self.provider = provider
-        self.playlistRepository = playlistRepository
         self.downloadViewModel = downloadViewModel
     }
 
@@ -47,10 +36,17 @@ final class RemotePlaylistsViewModel {
     var displayName: String { provider.displayName }
     var allowsURLImport: Bool { provider.allowsURLImport }
     var downloadNote: String? { provider.downloadNote }
-
-    /// Total duration (seconds) of the opened playlist's tracks.
-    var selectedTotalDurationSeconds: Int {
-        selectedTracks.reduce(0) { $0 + ($1.duration ?? 0) }
+    var selectedTitle: String? { preview?.title }
+    var selectedTracks: [RemotePlaylistTrack] { preview?.tracks ?? [] }
+    var isDownloading: Bool { downloadViewModel.isDownloading }
+    var downloadCompletedCount: Int { downloadViewModel.completedCount }
+    var downloadTotalCount: Int { downloadViewModel.totalCount }
+    var downloadProgress: Double { downloadViewModel.progress }
+    var failedDownloadItems: [DownloadItem] {
+        downloadViewModel.queueItems.filter { $0.status == .failed }
+    }
+    var shouldOfferSettings: Bool {
+        errorMessage == "yt-dlp not installed — open Settings"
     }
 
     // MARK: - Actions
@@ -63,64 +59,118 @@ final class RemotePlaylistsViewModel {
         do {
             playlists = try await provider.fetchPlaylists()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = userFacingMessage(for: error)
         }
     }
 
     func openPlaylist(_ summary: RemotePlaylistSummary) async {
-        await loadTracks(title: summary.title) {
-            try await self.provider.importPlaylist(summary)
+        await loadPreview {
+            try await self.provider.fetchPreview(for: summary)
         }
     }
 
     func importFromURL(_ url: String) async {
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        await loadTracks(title: "YouTube Playlist") {
-            try await self.provider.importPlaylist(fromURL: trimmed)
+        await loadPreview {
+            try await self.provider.fetchPreview(fromURL: trimmed)
         }
     }
 
     func closePlaylist() {
-        selectedTitle = nil
-        selectedTracks = []
+        preview = nil
+        importResult = nil
+        errorMessage = nil
     }
 
-    func download(selection: RemotePlaylistSelection) async {
-        let chosen = selection.apply(to: selectedTracks)
-        guard !chosen.isEmpty else { return }
-        await downloadViewModel.downloadTracks(chosen, preferredSource: provider.preferredSource)
+    /// Save only the exact rows currently shown in the review list.
+    func save(tracks: [RemotePlaylistTrack]) async {
+        guard let persistence = await persist(tracks: tracks) else { return }
+        importResult = RemotePlaylistImportResult(
+            playlistID: persistence.playlistID,
+            selectedTrackCount: tracks.count,
+            downloadedCount: 0,
+            failedCount: 0,
+            didDownload: false
+        )
     }
 
-    /// Download an explicit set of tracks (the exact list previewed in the UI),
-    /// pinned to the provider's source.
-    func download(tracks: [Track]) async {
-        guard !tracks.isEmpty else { return }
-        await downloadViewModel.downloadTracks(tracks, preferredSource: provider.preferredSource)
+    /// Persist the exact reviewed rows before handing those durable records to
+    /// the existing download pipeline.
+    func download(tracks: [RemotePlaylistTrack]) async {
+        guard let persistence = await persist(tracks: tracks) else { return }
+        await downloadViewModel.downloadTracks(
+            persistence.tracks,
+            preferredSource: provider.preferredSource
+        )
+        let result = downloadViewModel.lastResult
+        importResult = RemotePlaylistImportResult(
+            playlistID: persistence.playlistID,
+            selectedTrackCount: tracks.count,
+            downloadedCount: result?.succeeded ?? 0,
+            failedCount: result?.failed ?? 0,
+            didDownload: true
+        )
+    }
+
+    func cancelDownload() {
+        downloadViewModel.cancel()
+    }
+
+    func userFacingDownloadFailure(for item: DownloadItem) -> String {
+        let error = NSError(
+            domain: "RemotePlaylistImport",
+            code: 0,
+            userInfo: [NSLocalizedDescriptionKey: item.error ?? "Video unavailable"]
+        )
+        return DownloadOrchestrator.DownloadFailureReason
+            .failureReason(for: error)
+            .userFacingText
     }
 
     // MARK: - Helpers
 
-    private func loadTracks(title: String, importer: @escaping () async throws -> Int64?) async {
-        isImporting = true
+    private func loadPreview(
+        fetcher: @escaping () async throws -> RemotePlaylistPreview
+    ) async {
+        isPreviewLoading = true
         errorMessage = nil
-        selectedTitle = title
-        selectedTracks = []
-        defer { isImporting = false }
+        preview = nil
+        importResult = nil
+        defer { isPreviewLoading = false }
         do {
-            guard let localId = try await importer() else {
-                errorMessage = "Playlist konnte nicht importiert werden."
-                return
-            }
-            // Adopt the real playlist name from the DB (e.g. the actual
-            // YouTube playlist title resolved during import).
-            if let playlist = try? await playlistRepository.fetch(id: localId),
-               !playlist.name.isEmpty {
-                selectedTitle = playlist.name
-            }
-            selectedTracks = try await playlistRepository.fetchTracks(playlistId: localId)
+            preview = try await fetcher()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = userFacingMessage(for: error)
         }
+    }
+
+    private func persist(
+        tracks: [RemotePlaylistTrack]
+    ) async -> RemotePlaylistPersistence? {
+        guard let preview,
+              !tracks.isEmpty,
+              Set(tracks).isSubset(of: Set(preview.tracks)) else {
+            return nil
+        }
+        isPersisting = true
+        errorMessage = nil
+        defer { isPersisting = false }
+        do {
+            return try await provider.persist(preview: preview, selectedTracks: tracks)
+        } catch {
+            errorMessage = userFacingMessage(for: error)
+            return nil
+        }
+    }
+
+    private func userFacingMessage(for error: Error) -> String {
+        if let providerError = error as? RemotePlaylistProviderError,
+           let message = providerError.errorDescription {
+            return message
+        }
+        return DownloadOrchestrator.DownloadFailureReason
+            .failureReason(for: error)
+            .userFacingText
     }
 }

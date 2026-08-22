@@ -192,6 +192,8 @@ struct GrooveView: View {
     @State private var localStatusCache: [String: Track] = [:]
     @State private var discoveryLogStatus: [Int64: String] = [:] // trackId -> status
     @State private var localFeedbackMap: [Int64: Int] = [:] // trackId -> feedbackValue
+    @State private var trackPendingDeletion: Track?
+    @State private var showingDeleteConfirmation = false
     
     // Independent preview player manager instance
     @State private var previewPlayer = PreviewPlayerManager()
@@ -246,6 +248,18 @@ struct GrooveView: View {
                 await refreshLocalStatuses()
             }
         }
+        .alert("Delete file?", isPresented: $showingDeleteConfirmation) {
+            Button("Cancel", role: .cancel) {
+                trackPendingDeletion = nil
+            }
+            Button("Delete", role: .destructive) {
+                guard let track = trackPendingDeletion else { return }
+                trackPendingDeletion = nil
+                Task { await handleRejectDiscovery(track: track) }
+            }
+        } message: {
+            Text("Delete this file from disk?")
+        }
     }
 
     // MARK: - Subviews
@@ -257,14 +271,14 @@ struct GrooveView: View {
                     Image(systemName: "sparkles")
                         .foregroundColor(.mlmAccent)
                         .font(.title3)
-                    Text("Groove Studio")
+                    Text("Similar tracks")
                         .font(MLMFont.title3)
                         .foregroundColor(.mlmInk)
                 }
                 
                 // Seed info subtitle
                 HStack(spacing: 6) {
-                    Text("Seed Track:")
+                    Text("Similar to")
                         .font(MLMFont.muted)
                         .foregroundColor(.mlmInkMuted)
                     Text("'\(seedTrack.title)'")
@@ -290,7 +304,7 @@ struct GrooveView: View {
                     .foregroundColor(.mlmInkSecondary.opacity(0.8))
             }
             .buttonStyle(.plain)
-            .help("Groove Studio schließen")
+            .help("Close similar tracks")
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
@@ -393,14 +407,15 @@ struct GrooveView: View {
                         .foregroundColor(isApproved ? Color.green : Color.mlmInkSecondary)
                 }
                 .buttonStyle(.plain)
-                .help(isSwarmSuggestion ? "Empfehlung annehmen & Vector Gravity trainieren" : "Empfehlung positiv bewerten")
+                .help(isSwarmSuggestion ? "Add to library" : "Mark as a good match")
                 
                 // Thumbs Down (Reject / Purge / Hide feedback loop)
                 Button {
-                    Task {
-                        if isSwarmSuggestion {
-                            await handleRejectDiscovery(track: track)
-                        } else {
+                    if isSwarmSuggestion {
+                        trackPendingDeletion = track
+                        showingDeleteConfirmation = true
+                    } else {
+                        Task {
                             await handleLocalThumbsDown(targetId: track.id!)
                         }
                     }
@@ -409,7 +424,7 @@ struct GrooveView: View {
                         .foregroundColor(.mlmError.opacity(0.8))
                 }
                 .buttonStyle(.plain)
-                .help(isSwarmSuggestion ? "Empfehlung verwerfen und Datei von Disk löschen" : "Als unpassend markieren und ausblenden")
+                .help(isSwarmSuggestion ? "Delete" : "Mark as a poor match and hide")
             }
             .contentShape(Rectangle())
             .onTapGesture(count: 2) {
@@ -436,7 +451,7 @@ struct GrooveView: View {
     private var localGroovesSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Label("Lokale Übereinstimmungen", systemImage: "music.note.house")
+                Label("Local matches", systemImage: "music.note.house")
                     .font(MLMFont.sectionHeader)
                     .foregroundColor(.mlmInk)
                 
@@ -466,10 +481,10 @@ struct GrooveView: View {
                     Image(systemName: "music.note.list")
                         .font(.system(size: 40))
                         .foregroundColor(.mlmInkMuted)
-                    Text("Keine ähnlichen lokalen Tracks")
+                    Text("No local matches yet")
                         .font(MLMFont.bodyBold)
                         .foregroundColor(.mlmInkSecondary)
-                    Text("Analysiere mehr Tracks in deiner Mediathek, um rhythmische und klangliche Übereinstimmungen zu finden.")
+                    Text("Analyze more tracks in your library to find similar music.")
                         .font(MLMFont.muted)
                         .foregroundColor(.mlmInkMuted)
                         .multilineTextAlignment(.center)
@@ -495,15 +510,15 @@ struct GrooveView: View {
     private var swarmDiscoverySection: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 16) {
-                Label("Globale Swarm-Empfehlungen", systemImage: "globe.europe.africa.fill")
+                Label("Recommendations", systemImage: "globe.europe.africa.fill")
                     .font(MLMFont.sectionHeader)
                     .foregroundColor(.mlmInk)
                 
                 Spacer()
                 
-                Picker("Swarm Source", selection: $selectedSwarmSource) {
-                    Text("SoundCloud ☁️").tag(SwarmRecommendationService.SwarmSource.soundcloud)
-                    Text("Last.fm 📊").tag(SwarmRecommendationService.SwarmSource.lastfm)
+                Picker("Recommendation source", selection: $selectedSwarmSource) {
+                    Text("SoundCloud").tag(SwarmRecommendationService.SwarmSource.soundcloud)
+                    Text("Last.fm").tag(SwarmRecommendationService.SwarmSource.lastfm)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -537,7 +552,7 @@ struct GrooveView: View {
                     Image(systemName: "exclamationmark.triangle")
                         .font(.system(size: 40))
                         .foregroundColor(.mlmError)
-                    Text("Ladefehler")
+                    Text("Could not load recommendations")
                         .font(MLMFont.bodyBold)
                         .foregroundColor(.mlmInk)
                     Text(errorMsg)
@@ -552,7 +567,7 @@ struct GrooveView: View {
                     Image(systemName: "sparkles")
                         .font(.system(size: 40))
                         .foregroundColor(.mlmInkMuted)
-                    Text(isLoadingSwarm ? "Durchsuche globalen Swarm..." : "Keine Swarm-Empfehlungen gefunden")
+                    Text(isLoadingSwarm ? "Searching recommendations…" : "No recommendations found")
                         .font(MLMFont.bodyBold)
                         .foregroundColor(.mlmInkSecondary)
                 }
@@ -616,7 +631,7 @@ struct GrooveView: View {
                                             // Downloading status badges
                                             switch dlStatus {
                                             case .queued:
-                                                Text("In Warteschlange...")
+                                                Text("Queued…")
                                                     .font(MLMFont.muted)
                                                     .foregroundColor(.mlmInkSecondary)
                                                     .padding(.horizontal, 8)
@@ -627,7 +642,7 @@ struct GrooveView: View {
                                                 HStack(spacing: 6) {
                                                     ProgressView()
                                                         .controlSize(.small)
-                                                    Text("Download...")
+                                                    Text("Downloading…")
                                                         .font(MLMFont.muted)
                                                         .foregroundColor(.mlmAccent)
                                                 }
@@ -636,14 +651,14 @@ struct GrooveView: View {
                                                 .background(Color.mlmRaised)
                                                 .cornerRadius(4)
                                             case .downloaded:
-                                                Text("Geladen!")
+                                                Text("Downloaded")
                                                     .font(MLMFont.muted)
                                                     .foregroundColor(.mlmSuccess)
                                             case .failed:
                                                 Button {
                                                     triggerDownload(rec)
                                                 } label: {
-                                                    Label("Erneut versuchen", systemImage: "arrow.clockwise")
+                                                    Label("Retry", systemImage: "arrow.clockwise")
                                                         .font(.system(size: 10, weight: .bold))
                                                         .foregroundColor(.white)
                                                         .padding(.horizontal, 8)
@@ -760,7 +775,7 @@ struct GrooveView: View {
     private func playlistMenu(for track: Track) -> some View {
         Menu {
             if playlists.isEmpty {
-                Text("Keine Playlists gefunden")
+                Text("No playlists found")
             } else {
                 ForEach(playlists) { pl in
                     Button(pl.name) {
@@ -774,13 +789,13 @@ struct GrooveView: View {
                 .foregroundColor(.mlmAccent)
         }
         .menuStyle(.button)
-        .help("Zu Playlist hinzufügen")
+        .help("Add to playlist")
     }
 
     private func syncProfileMenu(for track: Track) -> some View {
         Menu {
             if syncProfiles.isEmpty {
-                Text("Keine Sync-Profile gefunden")
+                Text("No sync profiles found")
             } else {
                 ForEach(syncProfiles) { sp in
                     Button(sp.name) {
@@ -794,7 +809,7 @@ struct GrooveView: View {
                 .foregroundColor(.mlmActive)
         }
         .menuStyle(.button)
-        .help("Zu Sync-Profil hinzufügen")
+        .help("Add to sync profile")
     }
 
     private var loadMoreButton: some View {
@@ -803,7 +818,7 @@ struct GrooveView: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "arrow.down.circle")
-                Text("Mehr Empfehlungen laden")
+                Text("Load more")
             }
             .font(.system(size: 11, weight: .bold))
             .foregroundColor(.white)
@@ -1015,27 +1030,9 @@ struct GrooveView: View {
     // MARK: - Thumbs Up & Thumbs Down Review Loop Triggers
     
     private func handleApproveDiscovery(track: Track, source: String) async {
-        guard let trackRepo = container.trackRepository,
-              let seedId = seedTrack.id,
-              let trackId = track.id else { return }
-        
+        guard let reviewService = container.discoveryReviewService else { return }
         do {
-            // 1. Update discovery status to approved
-            try await trackRepo.updateDiscoveryStatus(discoveredTrackId: trackId, status: "approved")
-            
-            // 2. Thumbs Up Similarity Boost (+1)
-            try await trackRepo.saveSimilarityFeedback(seedTrackId: seedId, targetTrackId: trackId, feedbackValue: 1)
-            
-            // 3. Local embedding gravity warping pull rate based on swarm source
-            // SoundCloud: 5% gravitational pull, Last.fm: 1% gravitational pull
-            let pullRate: Float = (source.lowercased() == "soundcloud") ? 0.05 : 0.01
-            try await trackRepo.applyVectorGravity(seedTrackId: seedId, targetTrackId: trackId, pullRate: pullRate)
-            
-            AppLogger.shared.info("GrooveStudio: Approved swarm recommendation '\(track.title)' by \(track.artist). Vector Gravity pull rate \(pullRate) applied.", source: "GrooveStudio")
-            
-            // Post update notifications
-            NotificationCenter.default.post(name: .libraryDidImport, object: nil)
-            
+            try await reviewService.accept(track: track, seedTrackID: seedTrack.id, source: source)
             await refreshLocalStatuses()
             await loadLocalGrooves()
         } catch {
@@ -1044,7 +1041,7 @@ struct GrooveView: View {
     }
     
     private func handleRejectDiscovery(track: Track) async {
-        guard let trackRepo = container.trackRepository,
+        guard let reviewService = container.discoveryReviewService,
               let trackId = track.id else { return }
         
         do {
@@ -1053,23 +1050,7 @@ struct GrooveView: View {
                 previewPlayer.stop()
             }
             
-            // 1. Delete physical file
-            let rawPath = track.originalPath
-            if !rawPath.isEmpty {
-                let fileURL = URL(fileURLWithPath: rawPath)
-                if FileManager.default.fileExists(atPath: fileURL.path) {
-                    try FileManager.default.removeItem(at: fileURL)
-                }
-            }
-            
-            // 2. Cascade DB deletes (Track log and track details)
-            try await trackRepo.delete(id: trackId)
-            
-            AppLogger.shared.info("GrooveStudio: Rejected swarm recommendation '\(track.title)' by \(track.artist). Track purged.", source: "GrooveStudio")
-            
-            // Post update notifications
-            NotificationCenter.default.post(name: .libraryDidImport, object: nil)
-            
+            try await reviewService.delete(track: track)
             await refreshLocalStatuses()
             await loadLocalGrooves()
         } catch {
@@ -1085,10 +1066,10 @@ struct GrooveView: View {
             // Give local track +1 feedback to improve compose similarity score weight
             try await trackRepo.saveSimilarityFeedback(seedTrackId: seedId, targetTrackId: targetId, feedbackValue: 1)
             
-            // Warp embeddings via Vector Gravity pull rate (5%)
+            // Apply the existing similarity feedback adjustment.
             try await trackRepo.applyVectorGravity(seedTrackId: seedId, targetTrackId: targetId, pullRate: 0.05)
             
-            AppLogger.shared.info("GrooveStudio: Applied thumbs up feedback and Vector Gravity to local track \(targetId).", source: "GrooveStudio")
+            AppLogger.shared.info("Similar: Applied positive feedback to local track \(targetId).", source: "Similar")
             
             await loadLocalGrooves()
         } catch {

@@ -59,6 +59,9 @@ final class PlaybackViewModel {
     /// Error message from the last failed operation.
     private(set) var errorMessage: String?
 
+    /// Track that can be retried after playback could not resolve its file.
+    private(set) var unavailableTrack: Track?
+
     /// Waveform peak data for the current track (0.0–1.0 per bin).
     private(set) var waveformData: [Float] = []
 
@@ -98,6 +101,7 @@ final class PlaybackViewModel {
     @MainActor
     func playTrack(_ track: Track) async {
         errorMessage = nil
+        unavailableTrack = nil
 
         let root = (try? await configRepository?.getLibraryRoot()) ?? nil
 
@@ -123,7 +127,8 @@ final class PlaybackViewModel {
             }
         }
 
-        errorMessage = "Audio-Datei nicht gefunden — weder organized_path noch original_path existieren auf der Disk."
+        errorMessage = "File missing. The audio file could not be found on disk."
+        unavailableTrack = track
         AppLogger.shared.log(
             "Playback failed: no resolvable file for track id=\(track.id ?? -1) — organized='\(track.organizedPath ?? "")' original='\(track.originalPath)'",
             level: .warning,
@@ -139,6 +144,7 @@ final class PlaybackViewModel {
     @MainActor
     func playFile(at url: URL, track: Track? = nil) async {
         errorMessage = nil
+        unavailableTrack = nil
 
         do {
             // Load the file
@@ -168,7 +174,8 @@ final class PlaybackViewModel {
         } catch {
             let ext = url.pathExtension.lowercased()
             let unsupportedHint = Self.unsupportedFormatHints[ext]
-            errorMessage = unsupportedHint ?? "Wiedergabe fehlgeschlagen: \(error.localizedDescription)"
+            errorMessage = unsupportedHint ?? "Playback failed: \(error.localizedDescription)"
+            unavailableTrack = track
             playbackState = .stopped
             AppLogger.shared.log(
                 "Playback failed for \(url.lastPathComponent) (.\(ext)): \(error.localizedDescription)",
@@ -179,15 +186,21 @@ final class PlaybackViewModel {
         }
     }
 
+    @MainActor
+    func retryUnavailableTrack() async {
+        guard let unavailableTrack else { return }
+        await playTrack(unavailableTrack)
+    }
+
     /// Format-specific error blurbs when AVAudioFile rejects a file.
     /// AVAudioEngine talks to Apple Core Audio, which cannot decode opus,
     /// webm, or some exotic mp3 frame setups even though ffmpeg / yt-dlp
     /// can produce them. Surface that explicitly so the user knows it's
     /// not a missing file, it's a codec mismatch.
     private static let unsupportedFormatHints: [String: String] = [
-        "opus": "Opus-Format wird vom macOS-Audio-Engine nicht unterstützt — neu downloaden mit AAC oder per Hand zu m4a transkodieren.",
-        "ogg": "Vorbis/Ogg wird vom macOS-Audio-Engine nicht unterstützt — bitte zu m4a transkodieren.",
-        "webm": "WebM-Container wird vom macOS-Audio-Engine nicht unterstützt — bitte zu m4a transkodieren."
+        "opus": "Opus is not supported by macOS audio. Download an AAC version or transcode it to M4A.",
+        "ogg": "Vorbis/Ogg is not supported by macOS audio. Transcode it to M4A.",
+        "webm": "WebM is not supported by macOS audio. Transcode it to M4A."
     ]
 
     // MARK: - Playback Controls

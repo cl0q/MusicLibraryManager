@@ -6,12 +6,10 @@ import Testing
 ///
 /// The internal chain (SoundCloud -> DAB -> YouTube -> Transcode) calls
 /// real network/CLI binaries, so these tests focus on:
-/// - Initialization creates the expected on-disk directories.
+/// - Initialization leaves managed directories absent until a download needs one.
 /// - Empty batches return a clean BatchResult.
 /// - cancel() stops a batch before the first request starts.
-/// - The "file already exists" short-circuit produces a .skipped count
-///   without invoking any downloader (proven by running with a request
-///   that targets a pre-staged file in flacDir).
+/// - Legacy staging files never masquerade as completed downloads.
 struct DownloadOrchestratorTests {
 
     private func makeTempLibrary() throws -> URL {
@@ -22,18 +20,15 @@ struct DownloadOrchestratorTests {
     }
 
     @Test
-    func initCreatesExpectedDirectories() throws {
+    func initLeavesManagedDirectoriesUncreated() throws {
         let root = try makeTempLibrary()
         defer { try? FileManager.default.removeItem(at: root) }
 
         _ = DownloadOrchestrator(libraryRoot: root.path, tokenStorage: TokenStorage())
 
-        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("00_FLAC").path))
-        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("00_Artists").path))
-        // SCDL-09: new SoundCloud downloads get their own directory so the
-        // final DB-referenced file never has to share a name/collide with
-        // AAC-library or true-FLAC content.
-        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("01_SoundCloud").path))
+        for name in ManagedLibraryLayout.folderNames {
+            #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(name).path))
+        }
     }
 
     @Test
@@ -54,13 +49,11 @@ struct DownloadOrchestratorTests {
         #expect(result.downloadedMetadata.isEmpty)
     }
 
-    /// When a request matches a file already on disk in flacDir, the
-    /// orchestrator should report `.skipped` without attempting any
-    /// download. We verify by pre-creating the expected filename and
-    /// observing that `result.skipped` increments and no transcode runs
-    /// (the output dir stays empty).
+    /// A legacy file in the staging directory is not a completed download.
+    /// Final output is source-routed and includes the track ID, so it cannot
+    /// silently reuse the ambiguous pre-SCDL-09 filename.
     @Test
-    func skipsRequestWhenFlacAlreadyExists() async throws {
+    func legacyFlacStagingDoesNotMasqueradeAsCompletedDownload() throws {
         let root = try makeTempLibrary()
         defer { try? FileManager.default.removeItem(at: root) }
 
@@ -69,10 +62,8 @@ struct DownloadOrchestratorTests {
             tokenStorage: TokenStorage()
         )
 
-        // Pre-stage the exact filename the orchestrator would look for
-        // when given this request — that matches the existence check in
-        // DownloadOrchestrator.downloadBatch.
-        let flacDir = root.appendingPathComponent("00_FLAC")
+        let flacDir = root.appendingPathComponent(ManagedLibraryLayout.transcodeOriginals)
+        try FileManager.default.createDirectory(at: flacDir, withIntermediateDirectories: true)
         let preExisting = flacDir.appendingPathComponent("Yeat - Mr. Lordbow.flac")
         FileManager.default.createFile(atPath: preExisting.path, contents: Data("fake".utf8))
 
@@ -85,12 +76,12 @@ struct DownloadOrchestratorTests {
             userId: nil
         )
 
-        let result = await orchestrator.downloadBatch([request])
-
-        #expect(result.skipped == 1)
-        #expect(result.succeeded == 0)
-        #expect(result.failed == 0)
-        #expect(result.downloadedPaths.isEmpty)
+        #expect(FileManager.default.fileExists(atPath: preExisting.path))
+        #expect(orchestrator.finalDirectory(for: .youtube).standardizedFileURL != flacDir.standardizedFileURL)
+        #expect(
+            DownloadOrchestrator.finalFileName(for: request, pathExtension: "flac")
+                != preExisting.lastPathComponent
+        )
     }
 
     /// `cancel()` should be a no-op when called on an idle orchestrator
@@ -130,6 +121,49 @@ struct DownloadOrchestratorTests {
         let infoNoBitrate = DownloadOrchestrator.DownloadedFileInfo(format: "mp3", bitrate: nil)
         #expect(infoNoBitrate.format == "mp3")
         #expect(infoNoBitrate.bitrate == nil)
+    }
+
+    // MARK: - Download failure reason classification
+
+    @Test
+    func failureReasonsUseBoundedPlainLanguageVocabulary() {
+        let ytDlpUnavailable = NSError(
+            domain: "Download",
+            code: 0,
+            userInfo: [NSLocalizedDescriptionKey: "yt-dlp not installed"]
+        )
+        let unavailableVideo = NSError(
+            domain: "Download",
+            code: 0,
+            userInfo: [NSLocalizedDescriptionKey: "Video unavailable"]
+        )
+
+        #expect(
+            DownloadOrchestrator.DownloadFailureReason.failureReason(for: ytDlpUnavailable)
+                == .ytDlpUnavailable
+        )
+        #expect(
+            DownloadOrchestrator.DownloadFailureReason.failureReason(for: unavailableVideo)
+                == .videoUnavailable
+        )
+        #expect(
+            DownloadOrchestrator.DownloadFailureReason.failureReason(
+                for: URLError(.notConnectedToInternet)
+            ) == .network
+        )
+        #expect(DownloadOrchestrator.DownloadFailureReason.network.userFacingText == "Network error")
+        #expect(
+            DownloadOrchestrator.failureReasonForExhaustedSources(
+                preferredSource: .youtube,
+                youtubeAvailable: true
+            ) == .sourcesExhausted
+        )
+        #expect(
+            DownloadOrchestrator.failureReasonForExhaustedSources(
+                preferredSource: .youtube,
+                youtubeAvailable: false
+            ) == .ytDlpUnavailable
+        )
     }
 
     // MARK: - Task 1: PreferredSource storageKey round-trip (SCDL-01)
@@ -320,6 +354,40 @@ struct DownloadOrchestratorTests {
         #expect(queue.items.map(\.trackId) == [2])
     }
 
+    @Test
+    func cappedLegacyRetryRemainsAvailableToActivityAfterReload() throws {
+        let root = try makeTempLibrary()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let queueDirectory = root.appendingPathComponent(ManagedLibraryLayout.transcodeOriginals)
+        try FileManager.default.createDirectory(at: queueDirectory, withIntermediateDirectories: true)
+        let queue = DownloadQueue(directory: queueDirectory)
+        for _ in 0..<3 {
+            queue.enqueue(
+                trackId: 88,
+                query: "Artist - Capped Failure",
+                source: "youtube",
+                error: "Video unavailable",
+                artist: "Artist",
+                title: "Capped Failure"
+            )
+        }
+
+        let reloadedQueue = DownloadQueue(directory: queueDirectory)
+        #expect(reloadedQueue.items.count == 1)
+        #expect(reloadedQueue.items.first?.attemptCount == 3)
+        #expect(reloadedQueue.retryableItems().isEmpty)
+
+        let reloadedOrchestrator = DownloadOrchestrator(
+            libraryRoot: root.path,
+            tokenStorage: TokenStorage()
+        )
+        let activityItems = reloadedOrchestrator.persistedRetryItems()
+        #expect(activityItems.count == 1)
+        #expect(activityItems.first?.trackId == 88)
+        #expect(activityItems.first?.lastError == "Video unavailable")
+    }
+
     // MARK: - Task 4: finalDirectory / preservesOriginal / placeFinal / finalize (SCDL-09)
 
     @Test
@@ -328,14 +396,14 @@ struct DownloadOrchestratorTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let orchestrator = DownloadOrchestrator(libraryRoot: root.path, tokenStorage: TokenStorage())
-        let soundCloudDir = root.appendingPathComponent("01_SoundCloud")
-        let aacDir = root.appendingPathComponent("00_Artists")
-        let flacDir = root.appendingPathComponent("00_FLAC")
+        let soundCloudDir = root.appendingPathComponent(ManagedLibraryLayout.soundCloudDownloads)
+        let aacDir = root.appendingPathComponent(ManagedLibraryLayout.youtubeDownloads)
+        let flacDir = root.appendingPathComponent(ManagedLibraryLayout.transcodeOriginals)
 
-        #expect(orchestrator.finalDirectory(for: .soundcloud) == soundCloudDir)
-        #expect(orchestrator.finalDirectory(for: .youtube) == aacDir)
-        #expect(orchestrator.finalDirectory(for: .dab) == aacDir)
-        #expect(orchestrator.finalDirectory(for: .squid) == aacDir)
+        #expect(orchestrator.finalDirectory(for: .soundcloud).standardizedFileURL == soundCloudDir.standardizedFileURL)
+        #expect(orchestrator.finalDirectory(for: .youtube).standardizedFileURL == aacDir.standardizedFileURL)
+        #expect(orchestrator.finalDirectory(for: .dab).standardizedFileURL == aacDir.standardizedFileURL)
+        #expect(orchestrator.finalDirectory(for: .squid).standardizedFileURL == aacDir.standardizedFileURL)
 
         let allSources: [DownloadOrchestrator.DownloadSource] = [.soundcloud, .youtube, .dab, .squid]
         for source in allSources {
@@ -397,7 +465,7 @@ struct DownloadOrchestratorTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let orchestrator = DownloadOrchestrator(libraryRoot: root.path, tokenStorage: TokenStorage())
-        let finalDir = root.appendingPathComponent("01_SoundCloud")
+        let finalDir = root.appendingPathComponent(ManagedLibraryLayout.soundCloudDownloads)
 
         let tempFile = root.appendingPathComponent("scratch-temp.m4a")
         try Data("new bytes".utf8).write(to: tempFile)
@@ -418,7 +486,8 @@ struct DownloadOrchestratorTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let orchestrator = DownloadOrchestrator(libraryRoot: root.path, tokenStorage: TokenStorage())
-        let finalDir = root.appendingPathComponent("01_SoundCloud")
+        let finalDir = root.appendingPathComponent(ManagedLibraryLayout.soundCloudDownloads)
+        try FileManager.default.createDirectory(at: finalDir, withIntermediateDirectories: true)
 
         let existing = finalDir.appendingPathComponent("collide.m4a")
         try Data("old bytes".utf8).write(to: existing)
@@ -447,7 +516,8 @@ struct DownloadOrchestratorTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let orchestrator = DownloadOrchestrator(libraryRoot: root.path, tokenStorage: TokenStorage())
-        let soundCloudDir = root.appendingPathComponent("01_SoundCloud")
+        let soundCloudDir = root.appendingPathComponent(ManagedLibraryLayout.soundCloudDownloads)
+        try FileManager.default.createDirectory(at: soundCloudDir, withIntermediateDirectories: true)
         let fakeFile = soundCloudDir.appendingPathComponent("fake-track.m4a")
         try Data("not real audio".utf8).write(to: fakeFile)
 
@@ -466,15 +536,16 @@ struct DownloadOrchestratorTests {
     }
 
     /// Same FINAL-PATH-PARENT proof for `.youtube`: parent must be `aacDir`
-    /// and must NOT be `flacDir` (00_FLAC) — the checker-blocker guarantee.
+    /// and must NOT be `flacDir` (Transcode originals).
     @Test
     func finalizeKeepsYouTubeSourceParentOutOfFlacDir() async throws {
         let root = try makeTempLibrary()
         defer { try? FileManager.default.removeItem(at: root) }
 
         let orchestrator = DownloadOrchestrator(libraryRoot: root.path, tokenStorage: TokenStorage())
-        let aacDir = root.appendingPathComponent("00_Artists")
-        let flacDir = root.appendingPathComponent("00_FLAC")
+        let aacDir = root.appendingPathComponent(ManagedLibraryLayout.youtubeDownloads)
+        let flacDir = root.appendingPathComponent(ManagedLibraryLayout.transcodeOriginals)
+        try FileManager.default.createDirectory(at: aacDir, withIntermediateDirectories: true)
         let fakeFile = aacDir.appendingPathComponent("fake-track.m4a")
         try Data("not real audio".utf8).write(to: fakeFile)
 

@@ -3,7 +3,7 @@ import Foundation
 /// Persistent retry queue for failed downloads.
 ///
 /// Mirrors the Rust `RetryQueue`. Stores failed download attempts as
-/// JSON at `{flacDir}/.retry_queue.json` with atomic writes.
+/// JSON in the managed `Transcode originals` folder with atomic writes.
 final class DownloadQueue {
 
     struct QueueItem: Codable, Identifiable {
@@ -96,8 +96,9 @@ final class DownloadQueue {
             items.append(item)
         }
 
-        // Remove items exceeding max attempts
-        items.removeAll { $0.attemptCount >= maxAttempts }
+        // Keep capped items on disk. The global batch retry deliberately
+        // skips them, but Activity still exposes each one for an explicit
+        // retry instead of silently discarding a durable failure.
         save()
     }
 
@@ -114,7 +115,8 @@ final class DownloadQueue {
         save()
     }
 
-    /// Get items eligible for retry (below max attempts).
+    /// Get items eligible for the legacy global retry control. Capped items
+    /// remain available through Activity's per-row Retry action.
     func retryableItems() -> [QueueItem] {
         items.filter { $0.attemptCount < maxAttempts }
     }
@@ -138,6 +140,10 @@ final class DownloadQueue {
 
     private func save() {
         guard let data = try? JSONEncoder().encode(items) else { return }
+        try? FileManager.default.createDirectory(
+            at: queuePath.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
         // Atomic write: temp + rename
         let tmpPath = queuePath.appendingPathExtension("tmp")
         do {

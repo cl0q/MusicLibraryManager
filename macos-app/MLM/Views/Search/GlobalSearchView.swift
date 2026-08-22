@@ -9,7 +9,7 @@ struct GlobalSearchView: View {
     @State private var linkInput = ""
 
     private enum Mode: String, CaseIterable, Identifiable {
-        case search = "Suche"
+        case search = "Search"
         case link = "Link"
         var id: String { rawValue }
     }
@@ -19,7 +19,7 @@ struct GlobalSearchView: View {
             if let viewModel {
                 content(viewModel)
             } else {
-                ProgressView("Lade…")
+                ProgressView("Loading...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.mlmBase)
             }
@@ -30,7 +30,7 @@ struct GlobalSearchView: View {
     @ViewBuilder
     private func content(_ vm: GlobalSearchViewModel) -> some View {
         VStack(spacing: 0) {
-            Picker("Modus", selection: $mode) {
+            Picker("Mode", selection: $mode) {
                 ForEach(Mode.allCases) { m in Text(m.rawValue).tag(m) }
             }
             .pickerStyle(.segmented)
@@ -47,7 +47,7 @@ struct GlobalSearchView: View {
             Divider().background(Color.mlmEdge)
 
             if vm.isSearching {
-                ProgressView(mode == .search ? "Suche über alle Quellen…" : "Link wird analysiert…")
+                ProgressView(mode == .search ? "Searching all sources..." : "Resolving link...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let error = vm.errorMessage, vm.results.isEmpty {
                 Text(error)
@@ -55,8 +55,8 @@ struct GlobalSearchView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if vm.results.isEmpty {
                 Text(mode == .search
-                     ? "Suche ein Lied über alle Quellen hinweg."
-                     : "Füge einen Link ein (SoundCloud, YouTube …) für Download-Optionen.")
+                     ? "Search across your connected sources."
+                     : "Paste a SoundCloud or YouTube link to see download options.")
                     .foregroundColor(.mlmInkSecondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -71,13 +71,13 @@ struct GlobalSearchView: View {
             Image(systemName: "link")
                 .foregroundColor(.mlmInkMuted)
             TextField(
-                "URL einfügen (z. B. SoundCloud- oder YouTube-Link)…",
+                "Paste URL (for example, a SoundCloud or YouTube link)...",
                 text: $linkInput
             )
             .textFieldStyle(.plain)
             .onSubmit { Task { await vm.resolveLink(linkInput) } }
 
-            Button("Analysieren") { Task { await vm.resolveLink(linkInput) } }
+            Button("Resolve") { Task { await vm.resolveLink(linkInput) } }
                 .disabled(linkInput.trimmingCharacters(in: .whitespaces).isEmpty)
         }
         .padding(.horizontal, 16)
@@ -89,13 +89,13 @@ struct GlobalSearchView: View {
             Image(systemName: "magnifyingglass")
                 .foregroundColor(.mlmInkMuted)
             TextField(
-                "Künstler oder Titel suchen…",
+                "Search artist or title...",
                 text: Binding(get: { vm.query }, set: { vm.query = $0 })
             )
             .textFieldStyle(.plain)
             .onSubmit { Task { await vm.search() } }
 
-            Button("Suchen") { Task { await vm.search() } }
+            Button("Search") { Task { await vm.search() } }
                 .disabled(vm.query.trimmingCharacters(in: .whitespaces).isEmpty)
         }
         .padding(.horizontal, 16)
@@ -137,7 +137,7 @@ struct GlobalSearchView: View {
                         Image(systemName: "arrow.down.circle")
                     }
                     .buttonStyle(.plain)
-                    .help("Herunterladen über \(result.source.rawValue)")
+                    .help("Download from \(result.source.rawValue)")
                 }
             }
             .padding(.vertical, 2)

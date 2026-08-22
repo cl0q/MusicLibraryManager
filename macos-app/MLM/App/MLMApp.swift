@@ -27,29 +27,17 @@ struct MLMApp: App {
         .windowToolbarStyle(.unified)
         .defaultSize(width: 1200, height: 800)
         .commands {
-            // Remove default New Document item
+            // Remove default New Document item — single-window app
             CommandGroup(replacing: .newItem) {}
 
-            // Settings command. Every SwiftUI-native approach failed
-            // before this one — see AppDelegate.showSettingsWindow().
-            // We add a diagnostic log line so when the click *still*
-            // does nothing we know whether the button itself is firing
-            // or the delegate lookup is the failure point.
+            // Settings via AppDelegate. Only one code path now.
             CommandGroup(replacing: .appSettings) {
-                Button("Einstellungen…") {
-                    AppLogger.shared.info(
-                        "Settings menu clicked. NSApp.delegate=\(String(describing: NSApp.delegate)) class=\(NSApp.delegate.map { String(describing: type(of: $0)) } ?? "nil")",
-                        source: "menu"
-                    )
-                    if let delegate = AppDelegate.shared {
-                        Task { @MainActor in delegate.showSettingsWindow() }
-                    } else if let delegate = NSApp.delegate as? AppDelegate {
-                        Task { @MainActor in delegate.showSettingsWindow() }
-                    } else {
-                        // Fallback: build the window inline so the user
-                        // is never stuck with a dead menu item.
-                        Task { @MainActor in Self.openSettingsFallback() }
+                Button("Settings\u{2026}") {
+                    guard let delegate = AppDelegate.shared else {
+                        AppLogger.shared.error("AppDelegate.shared is nil — Settings window cannot open", source: "menu")
+                        return
                     }
+                    delegate.showSettingsWindow()
                 }
                 .keyboardShortcut(",", modifiers: .command)
             }
@@ -62,7 +50,7 @@ struct MLMApp: App {
                 .keyboardShortcut("n")
             }
 
-            // MARK: - View menu — Navigate (⌘1–6)
+            // MARK: - Navigate menu (⌘1–⌘7)
             CommandMenu("Navigate") {
                 ForEach(SidebarSection.topLevelCases) { section in
                     if let shortcut = section.keyboardShortcut {
@@ -107,19 +95,6 @@ struct MLMApp: App {
                 .keyboardShortcut(.rightArrow, modifiers: .command)
                 .disabled(playbackVM?.hasTrack != true)
 
-                Divider()
-
-                Button("Volume Up") {
-                    // Reserved for Phase 5 enhancement
-                }
-                .keyboardShortcut(.upArrow, modifiers: .command)
-                .disabled(true)
-
-                Button("Volume Down") {
-                    // Reserved for Phase 5 enhancement
-                }
-                .keyboardShortcut(.downArrow, modifiers: .command)
-                .disabled(true)
             }
 
             CommandMenu("Library") {
@@ -148,53 +123,12 @@ struct MLMApp: App {
                 }
                 .keyboardShortcut("i")
 
-                Divider()
-
-                Button("Sichere Pfad-Migration…") {
-                    NotificationCenter.default.post(
-                        name: .triggerLibraryRepair, object: nil
-                    )
-                }
             }
         }
 
     }
 
     // MARK: - Menu Actions
-
-    /// Fallback NSWindow opener used if the AppDelegate cast above
-    /// fails (e.g. NSApplicationDelegateAdaptor handed SwiftUI its own
-    /// wrapper instead of our subclass). Uses a singleton window
-    /// controller so a second ⌘, just focuses the existing window.
-    @MainActor
-    static func openSettingsFallback() {
-        FallbackSettings.shared.show()
-    }
-
-    @MainActor
-    private final class FallbackSettings {
-        static let shared = FallbackSettings()
-        private var controller: NSWindowController?
-
-        func show() {
-            if controller == nil {
-                let hosting = NSHostingController(
-                    rootView: SettingsView()
-                        .environment(\.container, DependencyContainer.shared)
-                        .frame(minWidth: 600, minHeight: 500)
-                )
-                let window = NSWindow(contentViewController: hosting)
-                window.title = "MLM Einstellungen"
-                window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-                window.setContentSize(NSSize(width: 720, height: 560))
-                window.isReleasedWhenClosed = false
-                window.center()
-                controller = NSWindowController(window: window)
-            }
-            NSApp.activate(ignoringOtherApps: true)
-            controller?.showWindow(nil)
-        }
-    }
 
     /// Create a new unnamed playlist via the PlaylistRepository.
     private func createNewPlaylist() {

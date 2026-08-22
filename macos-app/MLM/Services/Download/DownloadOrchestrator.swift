@@ -55,6 +55,95 @@ final class DownloadOrchestrator {
         case squid
     }
 
+    /// The bounded, user-facing explanation for a terminal download failure.
+    /// Keep raw provider/process messages in the Logs tab; persisted records
+    /// and Activity use only the binding plain-language copy.
+    enum DownloadFailureReason: Equatable, Sendable {
+        case videoUnavailable
+        case videoUnavailableInRegion
+        case privateVideo
+        case ytDlpUnavailable
+        case network
+        case sourcesExhausted
+
+        var userFacingText: String {
+            switch self {
+            case .videoUnavailable, .sourcesExhausted:
+                return "Video unavailable"
+            case .videoUnavailableInRegion:
+                return "Video unavailable in your region"
+            case .privateVideo:
+                return "Private video"
+            case .ytDlpUnavailable:
+                return "yt-dlp not installed — open Settings"
+            case .network:
+                return "Network error"
+            }
+        }
+
+        /// Classifies existing provider and transport errors without exposing
+        /// implementation details, status codes, or raw command output in UI.
+        static func failureReason(for error: Error?) -> DownloadFailureReason {
+            guard let error else { return .sourcesExhausted }
+
+            if let urlError = error as? URLError, isNetworkError(urlError) {
+                return .network
+            }
+
+            let message = error.localizedDescription.lowercased()
+            if message.contains("private video") {
+                return .privateVideo
+            }
+            if message.contains("not available in your region") ||
+                message.contains("not available in your country") ||
+                message.contains("geographic restriction") {
+                return .videoUnavailableInRegion
+            }
+            if message.contains("yt-dlp") &&
+                (message.contains("not installed") ||
+                 message.contains("not found") ||
+                 message.contains("no such file")) {
+                return .ytDlpUnavailable
+            }
+            if message.contains("network") ||
+                message.contains("timed out") ||
+                message.contains("connection") ||
+                message.contains("dns") ||
+                message.contains("offline") ||
+                message.contains("cannot connect") {
+                return .network
+            }
+            if message.contains("video unavailable") ||
+                message.contains("video is unavailable") ||
+                message.contains("no video results") ||
+                message.contains("private") ||
+                message.contains("not available") ||
+                message.contains("not found") ||
+                message.contains("404") {
+                return .videoUnavailable
+            }
+
+            // An unrecognized provider error has no truthful technical copy
+            // in the UI vocabulary. It is presented as an unavailable result
+            // while its original detail remains available in Logs.
+            return .sourcesExhausted
+        }
+
+        private static func isNetworkError(_ error: URLError) -> Bool {
+            switch error.code {
+            case .cannotFindHost,
+                 .cannotConnectToHost,
+                 .networkConnectionLost,
+                 .dnsLookupFailed,
+                 .notConnectedToInternet,
+                 .timedOut:
+                return true
+            default:
+                return false
+            }
+        }
+    }
+
     /// A request to download a single track.
     struct DownloadRequest {
         let trackId: Int64
@@ -67,6 +156,10 @@ final class DownloadOrchestrator {
         var preferredSource: PreferredSource = .auto
         /// Direct YouTube video URL, used when `preferredSource == .youtube`.
         var youtubeURL: String? = nil
+        /// Attempts already recorded by a legacy retry-queue item before this
+        /// request starts. Fresh requests use zero and derive their count from
+        /// the database record instead.
+        var previousAttemptCount: Int = 0
     }
 
     /// Aggregate result of a batch download.
@@ -76,6 +169,9 @@ final class DownloadOrchestrator {
         var skipped: Int = 0
         var downloadedPaths: [Int64: String] = [:]
         var failedTrackIds: Set<Int64> = []
+        /// User-facing terminal reason for each failed track. This is the
+        /// handoff from provider-level outcomes to durable DB persistence.
+        var failureReasons: [Int64: String] = [:]
         var skippedTrackIds: Set<Int64> = []
         var cancelledTrackIds: Set<Int64> = []
         /// Per-track metadata for DB updates — `format` is the container
@@ -121,9 +217,9 @@ final class DownloadOrchestrator {
         tokenStorage: TokenStorage
     ) {
         let root = URL(fileURLWithPath: libraryRoot)
-        self.flacDir = root.appendingPathComponent("00_FLAC")
-        self.aacDir = root.appendingPathComponent("00_Artists")
-        self.soundCloudDir = root.appendingPathComponent("01_SoundCloud")
+        self.flacDir = root.appendingPathComponent(ManagedLibraryLayout.transcodeOriginals)
+        self.aacDir = root.appendingPathComponent(ManagedLibraryLayout.youtubeDownloads)
+        self.soundCloudDir = root.appendingPathComponent(ManagedLibraryLayout.soundCloudDownloads)
 
         self.transcodeService = TranscodeService()
         self.soundCloudDownloader = SoundCloudDownloader()
@@ -131,11 +227,6 @@ final class DownloadOrchestrator {
         self.retryQueue = DownloadQueue(directory: flacDir)
         self.dabClient = DABClient(tokenStorage: tokenStorage)
         self.squidClient = SquidWtfClient()
-
-        // Create directories
-        try? FileManager.default.createDirectory(at: flacDir, withIntermediateDirectories: true)
-        try? FileManager.default.createDirectory(at: aacDir, withIntermediateDirectories: true)
-        try? FileManager.default.createDirectory(at: soundCloudDir, withIntermediateDirectories: true)
 
         // Once-at-boot endpoint reachability logs for the optional FLAC
         // stages (DAB + Squid) so the Logs tab tells the user up front
@@ -209,28 +300,33 @@ final class DownloadOrchestrator {
         var result = BatchResult()
         let total = requests.count
 
-        // Bail out loudly if the download directories can't be created
-        // (most likely the library drive isn't mounted right now). The
-        // previous behaviour was to swallow the createDirectory throw
-        // inside each per-track call, which made every track fail in
-        // ~0.3 ms with no log lines other than "chain[SC]: trying".
+        guard !requests.isEmpty else {
+            progress = 1.0
+            return result
+        }
+
+        // The staging directory is intentionally hidden and is not part of
+        // the managed layout. Source folders are created only in finalization.
         do {
-            try FileManager.default.createDirectory(at: flacDir, withIntermediateDirectories: true)
-            try FileManager.default.createDirectory(at: aacDir, withIntermediateDirectories: true)
-            try FileManager.default.createDirectory(at: soundCloudDir, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: aacDir.deletingLastPathComponent().appendingPathComponent(".mlm-download-tmp"),
+                withIntermediateDirectories: true
+            )
         } catch {
+            let failureReason = DownloadFailureReason.failureReason(for: error)
             AppLogger.shared.error(
-                "Download dirs not writable (\(error.localizedDescription)). Library drive offline? aacDir=\(aacDir.path) flacDir=\(flacDir.path)",
+                "Download staging directory is not writable (\(error.localizedDescription)). Library drive offline? root=\(aacDir.deletingLastPathComponent().path)",
                 source: "Download"
             )
             result.failed = total
             result.failedTrackIds = Set(requests.map(\.trackId))
             for req in requests {
+                result.failureReasons[req.trackId] = failureReason.userFacingText
                 retryQueue.enqueue(
                     trackId: req.trackId,
                     query: req.query,
                     source: req.preferredSource.storageKey,
-                    error: "Library drive not writable: \(error.localizedDescription)",
+                    error: failureReason.userFacingText,
                     artist: req.artist,
                     title: req.title,
                     preferredSource: req.preferredSource.storageKey,
@@ -292,13 +388,18 @@ final class DownloadOrchestrator {
                     )
                     result.succeeded += 1
                 } else {
+                    let failureReason = Self.failureReasonForExhaustedSources(
+                        preferredSource: request.preferredSource,
+                        youtubeAvailable: youtubeDownloader.isAvailable
+                    )
                     result.failed += 1
                     result.failedTrackIds.insert(request.trackId)
+                    result.failureReasons[request.trackId] = failureReason.userFacingText
                     retryQueue.enqueue(
                         trackId: request.trackId,
                         query: request.query,
                         source: request.preferredSource.storageKey,
-                        error: "All sources exhausted",
+                        error: failureReason.userFacingText,
                         artist: request.artist,
                         title: request.title,
                         preferredSource: request.preferredSource.storageKey,
@@ -309,6 +410,8 @@ final class DownloadOrchestrator {
             } catch {
                 result.failed += 1
                 result.failedTrackIds.insert(request.trackId)
+                let failureReason = DownloadFailureReason.failureReason(for: error)
+                result.failureReasons[request.trackId] = failureReason.userFacingText
                 AppLogger.shared.error(
                     "Download failed for track \(request.trackId) (\(request.artist) - \(request.title)): \(error.localizedDescription) [type=\(String(describing: type(of: error)))]",
                     source: "Download"
@@ -317,7 +420,7 @@ final class DownloadOrchestrator {
                     trackId: request.trackId,
                     query: request.query,
                     source: request.preferredSource.storageKey,
-                    error: error.localizedDescription,
+                    error: failureReason.userFacingText,
                     artist: request.artist,
                     title: request.title,
                     preferredSource: request.preferredSource.storageKey,
@@ -349,9 +452,29 @@ final class DownloadOrchestrator {
                 soundcloudURL: item.soundcloudURL,
                 userId: nil,
                 preferredSource: PreferredSource(storageKey: item.preferredSource),
-                youtubeURL: item.youtubeURL
+                youtubeURL: item.youtubeURL,
+                previousAttemptCount: item.attemptCount
             )
         }
+    }
+
+    /// All persisted legacy queue entries, including entries that reached the
+    /// global retry cap. Activity uses this to keep every recoverable failure
+    /// visible and offer an explicit per-row retry.
+    func persistedRetryItems() -> [DownloadQueue.QueueItem] {
+        retryQueue.items
+    }
+
+    /// Distinguish a missing yt-dlp binary from an ordinary exhausted search
+    /// before the nil provider result is flattened into a terminal failure.
+    static func failureReasonForExhaustedSources(
+        preferredSource: PreferredSource,
+        youtubeAvailable: Bool
+    ) -> DownloadFailureReason {
+        if preferredSource != .soundcloud && !youtubeAvailable {
+            return .ytDlpUnavailable
+        }
+        return .sourcesExhausted
     }
 
     func retryFailed(
@@ -379,7 +502,7 @@ final class DownloadOrchestrator {
                 trackId: request.trackId,
                 query: request.query,
                 source: request.preferredSource.storageKey,
-                error: "Downloaded file was not persisted to the library",
+                error: "Downloaded file could not be saved to library",
                 artist: request.artist,
                 title: request.title,
                 preferredSource: request.preferredSource.storageKey,
@@ -739,6 +862,7 @@ final class DownloadOrchestrator {
         into finalDir: URL,
         fileName: String? = nil
     ) throws -> URL {
+        try FileManager.default.createDirectory(at: finalDir, withIntermediateDirectories: true)
         let dest = finalDir.appendingPathComponent(fileName ?? produced.lastPathComponent)
         let fm = FileManager.default
         if fm.fileExists(atPath: dest.path) {

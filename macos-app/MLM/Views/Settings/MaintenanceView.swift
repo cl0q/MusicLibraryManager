@@ -10,43 +10,50 @@ struct MaintenanceView: View {
     @State private var isRunning: String? = nil
     @State private var resultMessage: String? = nil
     @State private var selectedSource = "soundcloud"
-    @State private var turboMode: Bool = false
     @State private var progressState: MaintenanceProgressTracker.ProgressState? = nil
     @State private var pathMigrationReport: OrganizedPathMigrationService.AuditReport? = nil
     @State private var showPathMigrationReport = false
     @State private var showPathMigrationConfirmation = false
     @State private var showPathRollbackConfirmation = false
+    @State private var backgroundProcessing: SyncTurboLevel = .standard
+    @State private var runningTask: Task<Void, Never>?
+
+    /// Legacy maintenance workers accept a Boolean. Derive it from the shared
+    /// persisted sync preference rather than maintaining a second setting.
+    private var usesAcceleratedProcessing: Bool {
+        let level = container.syncViewModel?.syncService.syncTurboLevel
+            ?? UserDefaults.standard.string(forKey: "sync_turbo_level")
+                .flatMap(SyncTurboLevel.init(rawValue:))
+            ?? .standard
+        return level != .conservative
+    }
 
     var body: some View {
         Form {
-            Section("Performance") {
-                HStack {
-                    Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Turbo Mode")
-                                .font(MLMFont.body)
-                            Text("Use 80% of available cores for faster processing")
-                                .font(MLMFont.muted)
-                                .foregroundColor(.mlmInkMuted)
-                        }
-                    } icon: {
-                        Image(systemName: "bolt.fill")
-                            .frame(width: 20)
+            Section("Background processing") {
+                Picker("Background processing", selection: $backgroundProcessing) {
+                    ForEach(SyncTurboLevel.allCases) { level in
+                        Text(level.detail.isEmpty ? level.displayName : "\(level.displayName) — \(level.detail)")
+                            .tag(level)
                     }
-                    
-                    Spacer()
-                    
-                    Toggle("Turbo", isOn: $turboMode)
-                        .toggleStyle(.switch)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .onChange(of: backgroundProcessing) { _, level in
+                    if let syncViewModel = container.syncViewModel {
+                        syncViewModel.setBackgroundProcessing(level)
+                    } else {
+                        UserDefaults.standard.set(level.rawValue, forKey: "sync_turbo_level")
+                    }
                 }
             }
-            
+
             Section("Transcode Cache") {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
                         Label {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Speicherort für transkodierte Audiodateien")
+                                Text("Location for transcoded audio files")
                                     .font(MLMFont.body)
                                 if let path = container.transcodeCache?.cacheDir.path {
                                     Text(path)
@@ -56,7 +63,7 @@ struct MaintenanceView: View {
                                         .lineLimit(1)
                                         .truncationMode(.middle)
                                 } else {
-                                    Text("Standard-Pfad (intern)")
+                                    Text("Default location (internal)")
                                         .font(MLMFont.muted)
                                         .foregroundColor(.mlmInkMuted)
                                 }
@@ -68,13 +75,13 @@ struct MaintenanceView: View {
                         
                         Spacer()
                         
-                        Button("Speicherort ändern...") {
+                        Button("Change…") {
                             chooseNewCacheFolder()
                         }
                         .disabled(isRunning != nil)
                     }
                     
-                    Text("Hinweis: Wenn du einen neuen Pfad auswählst, verschiebt MLM all deine existierenden Cache-Dateien automatisch im Hintergrund dorthin und löscht die alten Dateien, um sofort Speicherplatz auf deiner internen SSD freizugeben.")
+                    Text("Changing the location moves existing cache files in the background and removes the old copies to free storage space.")
                         .font(MLMFont.muted)
                         .foregroundColor(.mlmInkMuted)
                 }
@@ -83,7 +90,7 @@ struct MaintenanceView: View {
             
             Section("Analysis") {
                 maintenanceRow(
-                    title: "Fingerprint All Tracks",
+                    title: "Fingerprint all tracks",
                     description: "Generate audio fingerprints for tracks missing them",
                     icon: "hand.point.up.braille",
                     action: "fingerprint"
@@ -92,7 +99,7 @@ struct MaintenanceView: View {
                 }
 
                 maintenanceRow(
-                    title: "ReplayGain Analysis",
+                    title: "ReplayGain analysis",
                     description: "Analyze loudness (LUFS) and compute energy buckets",
                     icon: "waveform",
                     action: "replaygain"
@@ -101,7 +108,7 @@ struct MaintenanceView: View {
                 }
 
                 maintenanceRow(
-                    title: "Danceability Analysis",
+                    title: "Danceability analysis",
                     description: "Analyze rhythmic beat regularity and compute danceability scores",
                     icon: "sparkles",
                     action: "danceability"
@@ -110,8 +117,8 @@ struct MaintenanceView: View {
                 }
 
                 maintenanceRow(
-                    title: "Groove Analysis (Smart Suggestions)",
-                    description: "Generate CoreML acoustic embeddings for smart song suggestions",
+                    title: "Similarity analysis (embeddings)",
+                    description: "Generate on-device embeddings for similar-track suggestions",
                     icon: "music.note.list",
                     action: "groove"
                 ) {
@@ -137,20 +144,29 @@ struct MaintenanceView: View {
                 }
             }
 
-            Section("Duplicates") {
-                maintenanceRow(
-                    title: "Deep Scan",
-                    description: "Compare all fingerprints to find duplicate tracks",
-                    icon: "doc.on.doc",
-                    action: "deepscan"
-                ) {
-                    await runDeepScan()
+            Section("Review") {
+                HStack {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Duplicates and metadata conflicts")
+                                .font(MLMFont.body)
+                            Text("Run and manage review scans from Review so progress, decisions, and undo stay together.")
+                                .font(MLMFont.muted)
+                                .foregroundColor(.mlmInkMuted)
+                        }
+                    } icon: {
+                        Image(systemName: "doc.on.doc")
+                    }
+                    Spacer()
+                    Button("Open Review") {
+                        NotificationCenter.default.post(name: .showReview, object: nil)
+                    }
                 }
             }
 
             Section("Library") {
                 maintenanceRow(
-                    title: "Rescan Metadata",
+                    title: "Rescan metadata",
                     description: "Re-read audio tags from all local files",
                     icon: "arrow.clockwise",
                     action: "rescan"
@@ -163,7 +179,7 @@ struct MaintenanceView: View {
 
             Section("Source Playlists") {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Recreate or link a synchronized liked playlist for a specific source.")
+                    Text("Recreate or link a liked playlist for a source.")
                         .font(MLMFont.muted)
                         .foregroundColor(.mlmInkMuted)
 
@@ -180,7 +196,7 @@ struct MaintenanceView: View {
                             ProgressView()
                                 .controlSize(.small)
                         } else {
-                            Button("Create / Link Playlist") {
+                            Button("Create or link playlist") {
                                 Task {
                                     await runCreateLikedPlaylist()
                                 }
@@ -201,29 +217,35 @@ struct MaintenanceView: View {
         }
         .formStyle(.grouped)
         .padding()
+        .onAppear {
+            backgroundProcessing = container.syncViewModel?.syncService.syncTurboLevel
+                ?? UserDefaults.standard.string(forKey: "sync_turbo_level")
+                    .flatMap(SyncTurboLevel.init(rawValue:))
+                ?? .standard
+        }
         .confirmationDialog(
-            "Organized paths jetzt aktualisieren?",
+            "Update organized paths?",
             isPresented: $showPathMigrationConfirmation,
             titleVisibility: .visible
         ) {
-            Button("Bestätigen und anwenden", role: .destructive) {
+            Button("Confirm and apply", role: .destructive) {
                 Task { await applyPathMigration() }
             }
-            Button("Abbrechen", role: .cancel) {}
+            Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Beende vorher alle Downloads und schließe die ältere Tauri-App. Nur die in der Vorschau eindeutig bestätigten organized_path-Werte werden geändert. Vorher werden SQLite-Backup und JSON-Manifest außerhalb der Audio-Library erstellt.")
+            Text("Finish all downloads and close the legacy Tauri app first. Only organized paths confirmed unambiguously in the preview will be changed. An SQLite backup and JSON manifest are created outside the audio library first.")
         }
         .confirmationDialog(
-            "Letzte Pfad-Migration zurückrollen?",
+            "Roll back last path migration?",
             isPresented: $showPathRollbackConfirmation,
             titleVisibility: .visible
         ) {
-            Button("Rollback bestätigen", role: .destructive) {
+            Button("Confirm rollback", role: .destructive) {
                 Task { await rollbackPathMigration() }
             }
-            Button("Abbrechen", role: .cancel) {}
+            Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Die organized_path-Werte aus dem neuesten angewendeten Manifest werden wiederhergestellt. Vor dem Rollback wird ein weiteres SQLite-Backup erstellt.")
+            Text("The organized paths in the most recently applied manifest will be restored. Another SQLite backup is created before the rollback.")
         }
     }
 
@@ -233,9 +255,9 @@ struct MaintenanceView: View {
             HStack {
                 Label {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Organized-Path-Migration")
+                        Text("Organized-path migration")
                             .font(MLMFont.body)
-                        Text("Nur lesen → Vorschau → Backup/Manifest → bestätigte DB-Transaktion")
+                        Text("Read only → Preview → Backup/manifest → confirmed database transaction")
                             .font(MLMFont.muted)
                             .foregroundColor(.mlmInkMuted)
                     }
@@ -249,7 +271,7 @@ struct MaintenanceView: View {
                 if isRunning == "path-audit" {
                     ProgressView().controlSize(.small)
                 } else {
-                    Button("Vorschau erstellen") {
+                    Button("Preview changes") {
                         Task { await runPathMigrationAudit() }
                     }
                     .disabled(isRunning != nil)
@@ -258,14 +280,14 @@ struct MaintenanceView: View {
 
             if let report = pathMigrationReport {
                 Text(
-                    "\(report.inspectedCount) geprüft · \(report.alreadyValidCount) intakt · " +
-                    "\(report.eligibleCount) eindeutig · \(report.unresolvedCount) ungeklärt · " +
-                    "\(report.diskFileCount) Audiodateien inventarisiert"
+                    "\(report.inspectedCount) reviewed · \(report.alreadyValidCount) already valid · " +
+                    "\(report.eligibleCount) unambiguous · \(report.unresolvedCount) ambiguous · " +
+                    "\(report.diskFileCount) audio files inventoried"
                 )
                 .font(MLMFont.muted)
                 .foregroundColor(.mlmInkSecondary)
 
-                DisclosureGroup("Kandidatenbericht", isExpanded: $showPathMigrationReport) {
+                DisclosureGroup("Candidate report", isExpanded: $showPathMigrationReport) {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 10) {
                             ForEach(report.rows.filter { $0.status != .alreadyValid }) { row in
@@ -275,16 +297,16 @@ struct MaintenanceView: View {
                                             .font(MLMFont.muted)
                                             .lineLimit(1)
                                         Spacer()
-                                        Text(row.status == .eligible ? "EINDEUTIG" : "OFFEN")
+                                        Text(row.status == .eligible ? "UNAMBIGUOUS" : "AMBIGUOUS")
                                             .font(.caption2.weight(.semibold))
                                             .foregroundColor(row.status == .eligible ? .green : .orange)
                                     }
-                                    Text("Vorher: \(row.beforeOrganizedPath)")
+                                    Text("Before: \(row.beforeOrganizedPath)")
                                         .font(MLMFont.mono)
                                         .foregroundColor(.mlmInkMuted)
                                         .textSelection(.enabled)
                                     if let selected = row.selectedRelativePath {
-                                        Text("Danach: \(selected)")
+                                        Text("After: \(selected)")
                                             .font(MLMFont.mono)
                                             .foregroundColor(.mlmInkSecondary)
                                             .textSelection(.enabled)
@@ -310,7 +332,7 @@ struct MaintenanceView: View {
                 }
 
                 HStack {
-                    Button("\(report.eligibleCount) eindeutige Änderungen anwenden") {
+                    Button("Apply \(report.eligibleCount) unambiguous changes") {
                         showPathMigrationConfirmation = true
                     }
                     .buttonStyle(.borderedProminent)
@@ -322,7 +344,7 @@ struct MaintenanceView: View {
                 }
             }
 
-            Button("Letzte Migration zurückrollen…") {
+            Button("Roll back last migration…") {
                 showPathRollbackConfirmation = true
             }
             .disabled(isRunning != nil)
@@ -361,7 +383,7 @@ struct MaintenanceView: View {
                 } else {
                     Button("Run") {
                         progressState = nil
-                        Task { await task() }
+                        runningTask = Task { await task() }
                     }
                     .disabled(isRunning != nil)
                 }
@@ -398,6 +420,14 @@ struct MaintenanceView: View {
                 .padding(.top, 4)
                 .transition(.opacity.combined(with: .slide))
             }
+
+            if isRunning == action {
+                Button("Cancel", role: .cancel) {
+                    runningTask?.cancel()
+                    resultMessage = "\(title): cancellation requested"
+                }
+                .buttonStyle(.bordered)
+            }
         }
     }
 
@@ -424,7 +454,7 @@ struct MaintenanceView: View {
             tracks: tracks,
             repository: analysisRepo,
             libraryRoot: libraryRoot,
-            turboMode: turboMode
+            turboMode: usesAcceleratedProcessing
         ) { state in
             Task { @MainActor in
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
@@ -433,7 +463,7 @@ struct MaintenanceView: View {
             }
         }
 
-        resultMessage = "Fingerprint: \(processed) processed, \(failed) failed (Turbo: \(turboMode ? "ON" : "OFF"))"
+        resultMessage = "Fingerprint: \(processed) processed, \(failed) failed"
         progressState = nil
         isRunning = nil
         NotificationCenter.default.post(name: .libraryDidImport, object: nil)
@@ -461,7 +491,7 @@ struct MaintenanceView: View {
             repository: analysisRepo,
             trackRepository: trackRepo,
             libraryRoot: libraryRoot,
-            turboMode: turboMode
+            turboMode: usesAcceleratedProcessing
         ) { state in
             Task { @MainActor in
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
@@ -470,7 +500,7 @@ struct MaintenanceView: View {
             }
         }
 
-        resultMessage = "ReplayGain: \(analyzed) analyzed, \(failed) failed (Turbo: \(turboMode ? "ON" : "OFF"))"
+        resultMessage = "ReplayGain: \(analyzed) analyzed, \(failed) failed"
         progressState = nil
         isRunning = nil
         NotificationCenter.default.post(name: .libraryDidImport, object: nil)
@@ -496,7 +526,7 @@ struct MaintenanceView: View {
             tracks: tracks,
             trackRepository: trackRepo,
             libraryRoot: libraryRoot,
-            turboMode: turboMode
+            turboMode: usesAcceleratedProcessing
         ) { state in
             Task { @MainActor in
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
@@ -505,7 +535,7 @@ struct MaintenanceView: View {
             }
         }
 
-        resultMessage = "Danceability: \(analyzed) analyzed, \(failed) failed (Turbo: \(turboMode ? "ON" : "OFF"))"
+        resultMessage = "Danceability: \(analyzed) analyzed, \(failed) failed"
         progressState = nil
         isRunning = nil
         NotificationCenter.default.post(name: .libraryDidImport, object: nil)
@@ -531,7 +561,7 @@ struct MaintenanceView: View {
             tracks: tracks,
             trackRepository: trackRepo,
             libraryRoot: libraryRoot,
-            turboMode: turboMode
+            turboMode: usesAcceleratedProcessing
         ) { state in
             Task { @MainActor in
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
@@ -540,7 +570,7 @@ struct MaintenanceView: View {
             }
         }
 
-        resultMessage = "Groove embeddings: \(analyzed) analyzed, \(failed) failed (Turbo: \(turboMode ? "ON" : "OFF"))"
+        resultMessage = "Similarity analysis: \(analyzed) analyzed, \(failed) failed"
         progressState = nil
         isRunning = nil
         NotificationCenter.default.post(name: .libraryDidImport, object: nil)
@@ -559,7 +589,7 @@ struct MaintenanceView: View {
         resultMessage = nil
         progressState = nil
 
-        await service.refreshMissing(turboMode: turboMode) { state in
+        await service.refreshMissing(turboMode: usesAcceleratedProcessing) { state in
             Task { @MainActor in
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     self.progressState = state
@@ -599,7 +629,7 @@ struct MaintenanceView: View {
             tracks: tracks,
             repository: analysisRepo,
             libraryRoot: libraryRoot,
-            turboMode: turboMode
+            turboMode: usesAcceleratedProcessing
         ) { state in
             Task { @MainActor in
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
@@ -608,7 +638,7 @@ struct MaintenanceView: View {
             }
         }
 
-        resultMessage = "Artwork: \(result.fetched) fetched, \(result.alreadyCached) cached, \(result.notFound) not found (Turbo: \(turboMode ? "ON" : "OFF"))"
+        resultMessage = "Artwork: \(result.fetched) fetched, \(result.alreadyCached) cached, \(result.notFound) not found"
         progressState = nil
         isRunning = nil
         NotificationCenter.default.post(name: .libraryDidImport, object: nil)
@@ -636,10 +666,10 @@ struct MaintenanceView: View {
             let report = try await service.audit()
             pathMigrationReport = report
             showPathMigrationReport = report.unresolvedCount > 0
-            resultMessage = "Pfad-Audit: \(report.eligibleCount) eindeutige Änderungen bereit; \(report.unresolvedCount) bleiben unangetastet."
+            resultMessage = "Path audit: \(report.eligibleCount) unambiguous changes ready; \(report.unresolvedCount) ambiguous entries unchanged."
         } catch {
             pathMigrationReport = nil
-            resultMessage = "Pfad-Audit fehlgeschlagen: \(error.localizedDescription)"
+            resultMessage = "Path audit failed: \(error.localizedDescription)"
         }
         isRunning = nil
     }
@@ -648,7 +678,7 @@ struct MaintenanceView: View {
         guard let report = pathMigrationReport else { return }
         guard container.downloadViewModel?.isDownloading != true,
               !PerformanceQueueService.shared.isDownloadActive else {
-            resultMessage = "Pfad-Migration nicht gestartet: Bitte zuerst alle Downloads beenden."
+            resultMessage = "Path migration did not start: finish all downloads first."
             return
         }
         isRunning = "path-apply"
@@ -658,10 +688,10 @@ struct MaintenanceView: View {
             let result = try await service.apply(report)
             pathMigrationReport = nil
             showPathMigrationReport = false
-            resultMessage = "Pfad-Migration: \(result.updatedCount) organized_path-Werte aktualisiert. Manifest: \(result.manifestURL.path) · Backup: \(result.backupURL.path)"
+            resultMessage = "Path migration: \(result.updatedCount) organized paths updated. Manifest: \(result.manifestURL.path) · Backup: \(result.backupURL.path)"
             NotificationCenter.default.post(name: .libraryDidImport, object: nil)
         } catch {
-            resultMessage = "Pfad-Migration abgebrochen: \(error.localizedDescription)"
+            resultMessage = "Path migration cancelled: \(error.localizedDescription)"
         }
         isRunning = nil
     }
@@ -674,11 +704,11 @@ struct MaintenanceView: View {
             let result = try await service.rollbackMostRecent()
             pathMigrationReport = nil
             showPathMigrationReport = false
-            let warning = result.manifestFinalizationWarning.map { " Warnung: \($0)" } ?? ""
-            resultMessage = "Rollback: \(result.restoredCount) organized_path-Werte wiederhergestellt. Manifest: \(result.manifestURL.path) · Backup: \(result.rollbackBackupURL.path)\(warning)"
+            let warning = result.manifestFinalizationWarning.map { " Warning: \($0)" } ?? ""
+            resultMessage = "Rollback: \(result.restoredCount) organized paths restored. Manifest: \(result.manifestURL.path) · Backup: \(result.rollbackBackupURL.path)\(warning)"
             NotificationCenter.default.post(name: .libraryDidImport, object: nil)
         } catch {
-            resultMessage = "Rollback abgebrochen: \(error.localizedDescription)"
+            resultMessage = "Rollback cancelled: \(error.localizedDescription)"
         }
         isRunning = nil
     }
@@ -698,7 +728,7 @@ struct MaintenanceView: View {
 
         do {
             let (succeeded, failed) = try await service.rescanMetadata(
-                turboMode: turboMode
+                turboMode: usesAcceleratedProcessing
             ) { state in
                 Task { @MainActor in
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
@@ -706,42 +736,10 @@ struct MaintenanceView: View {
                     }
                 }
             }
-            resultMessage = "Metadata Rescan abgeschlossen: \(succeeded) aktualisiert · \(failed) fehlgeschlagen"
+            resultMessage = "Metadata rescan: \(succeeded) updated · \(failed) failed"
             NotificationCenter.default.post(name: .libraryDidImport, object: nil)
         } catch {
-            resultMessage = "Metadata Rescan fehlgeschlagen: \(error.localizedDescription)"
-        }
-
-        progressState = nil
-        isRunning = nil
-    }
-
-    private func runDeepScan() async {
-        guard let trackRepo = container.trackRepository,
-              let analysisRepo = container.analysisRepository else { return }
-
-        isRunning = "deepscan"
-        resultMessage = nil
-        progressState = nil
-
-        let service = DeepScanService(
-            trackRepository: trackRepo,
-            analysisRepository: analysisRepo
-        )
-
-        do {
-            let result = try await service.deepScan(turboMode: turboMode) { state in
-                Task { @MainActor in
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                        self.progressState = state
-                    }
-                }
-            }
-            resultMessage = "Deep scan: \(result.pairsCompared) compared, \(result.duplicatesFound) dups, \(result.conflictsFlagged) conflicts (Turbo: \(turboMode ? "ON" : "OFF"))"
-            NotificationCenter.default.post(name: .libraryDidImport, object: nil)
-            NotificationCenter.default.post(name: .reviewQueueDidChange, object: nil)
-        } catch {
-            resultMessage = "Deep scan failed: \(error.localizedDescription)"
+            resultMessage = "Metadata rescan failed: \(error.localizedDescription)"
         }
 
         progressState = nil
@@ -795,8 +793,8 @@ struct MaintenanceView: View {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.title = "Speicherort für Transcode-Cache wählen"
-        panel.prompt = "Ordner wählen"
+        panel.title = "Choose transcode cache location"
+        panel.prompt = "Choose folder"
         
         if panel.runModal() == .OK, let url = panel.url {
             container.relocateTranscodeCache(to: url.path)

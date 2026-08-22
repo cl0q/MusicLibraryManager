@@ -71,9 +71,6 @@ struct ReelsInboxView: View {
     // Drag and drop state
     @State private var isDraggingOver = false
     
-    // Reactive trigger for Qobuz status updates
-    @State private var qobuzCookieStatusTrigger = false
-    
     // Active search task to support cancellation and prevent overlapping/rate-limits
     @State private var searchTask: Task<Void, Never>? = nil
     
@@ -101,10 +98,8 @@ struct ReelsInboxView: View {
             handleDrop(providers: providers)
         }
         .task {
+            await loadImportedReels()
             await loadPlaylists()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .qobuzCookieStatusDidChange)) { _ in
-            qobuzCookieStatusTrigger.toggle()
         }
         .sheet(item: $expandedKeyframe) { kf in
             ExpandedKeyframeView(
@@ -143,53 +138,6 @@ struct ReelsInboxView: View {
             .padding()
             
             Divider()
-            
-            // Qobuz Cookie Warning Banner
-            if SquidWtfClient.captchaCookie == nil || SquidWtfClient.isCookieExpired {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(.orange)
-                        Text(SquidWtfClient.captchaCookie == nil ? "Qobuz Cookie fehlt" : "Qobuz Cookie abgelaufen")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(.mlmInk)
-                        Spacer()
-                        
-                        Text("↩ Enter")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(.mlmInkMuted)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(Color.mlmRaised)
-                            .cornerRadius(3)
-                    }
-                    
-                    Text("Klicken oder Enter drücken, um 'metallica - one' zu kopieren & qobuz.squid.wtf zu öffnen.")
-                        .font(.system(size: 10))
-                        .foregroundColor(.mlmInkSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(10)
-                .background(Color.orange.opacity(0.1))
-                .cornerRadius(8)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.orange.opacity(0.3), lineWidth: 1)
-                )
-                .padding([.horizontal, .top], 10)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    triggerQobuzTokenRefresh()
-                }
-                
-                // Hidden button to catch the Enter key press globally in this view when active
-                Button(action: triggerQobuzTokenRefresh) {
-                    EmptyView()
-                }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.plain)
-                .frame(width: 0, height: 0)
-            }
             
             if importedReels.isEmpty {
                 VStack(spacing: 16) {
@@ -302,12 +250,12 @@ struct ReelsInboxView: View {
                                 .foregroundColor(.mlmInkMuted)
                             
                             VStack(alignment: .leading, spacing: 6) {
-                                Text("Unified Search Query (Direktsuche)")
+                                Text("Search and download")
                                     .font(MLMFont.bodyBold)
                                     .foregroundColor(.mlmInk)
                                 
                                 HStack {
-                                    TextField("Gib einen beliebigen Suchbegriff ein (z.B. Fred again Jungle)", text: $customSearchQuery, onCommit: triggerSearch)
+                                    TextField("Artist, title, or another search term", text: $customSearchQuery, onCommit: triggerSearch)
                                         .textFieldStyle(.roundedBorder)
                                         .font(MLMFont.body)
                                     
@@ -355,7 +303,7 @@ struct ReelsInboxView: View {
                                     } else {
                                         Image(systemName: "magnifyingglass.circle.fill")
                                     }
-                                    Text("Search in MLM")
+                                    Text("Search & download")
                                         .font(MLMFont.bodyBold)
                                 }
                                 .padding(.horizontal, 16)
@@ -487,7 +435,7 @@ struct ReelsInboxView: View {
                         sourceSection(
                             title: "SoundCloud",
                             icon: "cloud.fill",
-                            color: Color.mlmSoundCloud,
+                            color: Color.mlmBrandSoundCloud,
                             tracks: scTracks,
                             rowView: { track in
                                 searchResultRow(
@@ -508,7 +456,7 @@ struct ReelsInboxView: View {
                         sourceSection(
                             title: "YouTube",
                             icon: "play.rectangle.fill",
-                            color: .red,
+                            color: .mlmBrandYouTube,
                             tracks: ytTracks,
                             rowView: { track in
                                 searchResultRow(
@@ -673,7 +621,9 @@ struct ReelsInboxView: View {
                 if !importedReels.contains(where: { $0.fileURL == file }) {
                     let filename = file.deletingPathExtension().lastPathComponent
                     let parsed = parseArtistTitle(from: filename)
-                    importedReels.append(ImportedReel(id: UUID(), fileURL: file, title: parsed.title, artist: parsed.artist))
+                    let reel = ImportedReel(id: UUID(), fileURL: file, title: parsed.title, artist: parsed.artist)
+                    importedReels.append(reel)
+                    Task { await saveReel(reel) }
                 }
             }
         } catch {
@@ -694,7 +644,9 @@ struct ReelsInboxView: View {
                         if !importedReels.contains(where: { $0.fileURL == url }) {
                             let filename = url.deletingPathExtension().lastPathComponent
                             let parsed = parseArtistTitle(from: filename)
-                            importedReels.append(ImportedReel(id: UUID(), fileURL: url, title: parsed.title, artist: parsed.artist))
+                            let reel = ImportedReel(id: UUID(), fileURL: url, title: parsed.title, artist: parsed.artist)
+                            importedReels.append(reel)
+                            Task { await saveReel(reel) }
                         }
                     } else {
                         var isDir: ObjCBool = false
@@ -739,15 +691,23 @@ struct ReelsInboxView: View {
         importedReels[index].title = titleInput
         
         selectedReel = importedReels[index]
+        let reel = importedReels[index]
+        Task { await saveReel(reel) }
         
         customSearchQuery = "\(artistInput) \(titleInput)".trimmingCharacters(in: .whitespacesAndNewlines)
     }
     
     private func deleteReels(at offsets: IndexSet) {
+        let reels = offsets.map { importedReels[$0] }
         importedReels.remove(atOffsets: offsets)
         selectedReel = nil
         avPlayer.pause()
         avPlayer.replaceCurrentItem(with: nil)
+        Task {
+            for reel in reels {
+                try? await container.reelRepository?.delete(id: reel.id.uuidString)
+            }
+        }
     }
     
     private func triggerSearch() {
@@ -938,7 +898,7 @@ struct ReelsInboxView: View {
             id: nil,
             artist: artist,
             albumArtist: artist,
-            album: "Reels Inbox Imports",
+            album: "Reels",
             title: title,
             genre: nil,
             year: nil,
@@ -949,7 +909,7 @@ struct ReelsInboxView: View {
             organizedPath: nil,
             isDuplicate: 0,
             dateAdded: ISO8601DateFormatter().string(from: Date()),
-            downloadStatus: "remote"
+            downloadStatus: nil
         )
         
         return try? await trackRepo.insert(newTrack)
@@ -1131,10 +1091,10 @@ struct ReelsInboxView: View {
             // Header Row with title & Shazam button side-by-side
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Video-Analyse & Text-Erkennung (OCR)")
+                    Text("Video analysis and text recognition (OCR)")
                         .font(MLMFont.sectionHeader)
                         .foregroundColor(.mlmInk)
-                    Text("Klicke auf Keyframes zum Springen oder wähle erkannten Text für die Suche.")
+                    Text("Select a keyframe to seek, or use recognized text to search.")
                         .font(MLMFont.muted)
                         .foregroundColor(.mlmInkSecondary)
                 }
@@ -1146,7 +1106,7 @@ struct ReelsInboxView: View {
                     HStack(spacing: 6) {
                         ProgressView()
                             .controlSize(.small)
-                        Text("Shazam sucht...")
+                        Text("Identifying with Shazam…")
                             .font(MLMFont.muted)
                             .foregroundColor(.mlmInkSecondary)
                     }
@@ -1175,7 +1135,7 @@ struct ReelsInboxView: View {
                         .font(.title2)
                     
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Shazam Treffer")
+                        Text("Shazam match")
                             .font(MLMFont.muted)
                             .foregroundColor(.mlmInkSecondary)
                         Text("\(matchedArtist) - \(matchedTitle)")
@@ -1185,7 +1145,7 @@ struct ReelsInboxView: View {
                     
                     Spacer()
                     
-                    Button("Metadaten übernehmen") {
+                    Button("Use match") {
                         applyMatchedMetadata(reel)
                     }
                     .buttonStyle(.borderedProminent)
@@ -1203,7 +1163,7 @@ struct ReelsInboxView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundColor(.orange)
-                    Text("Shazam-Erkennung fehlgeschlagen. Versuche es mit dem Video-Text.")
+                    Text("Shazam could not identify this track. Try the on-screen text instead.")
                         .font(MLMFont.muted)
                         .foregroundColor(.mlmInkSecondary)
                 }
@@ -1215,7 +1175,7 @@ struct ReelsInboxView: View {
             
             // 2. Keyframe Carousel / Grid
             VStack(alignment: .leading, spacing: 8) {
-                Text("Video-Keyframes (Vorschau)")
+                Text("Video keyframes")
                     .font(MLMFont.sectionLabel)
                     .foregroundColor(.mlmInkMuted)
                 
@@ -1223,7 +1183,7 @@ struct ReelsInboxView: View {
                     HStack(spacing: 12) {
                         ProgressView()
                             .controlSize(.small)
-                        Text("Lade Keyframes & analysiere Video-Text (OCR)...")
+                        Text("Loading keyframes and reading on-screen text…")
                             .font(MLMFont.body)
                             .foregroundColor(.mlmInkSecondary)
                     }
@@ -1251,7 +1211,7 @@ struct ReelsInboxView: View {
                     Button(action: {
                         runOcrTextExtraction(for: reel)
                     }) {
-                        Label("Keyframes laden & OCR ausführen", systemImage: "sparkles")
+                        Label("Load keyframes and run OCR", systemImage: "sparkles")
                             .font(MLMFont.bodyBold)
                     }
                     .buttonStyle(.bordered)
@@ -1261,7 +1221,7 @@ struct ReelsInboxView: View {
             // 3. OCR Text Pills / Suggestions
             if let recognizedTexts = reel.recognizedTexts, !recognizedTexts.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Erkannter Text")
+                    Text("Recognized text")
                         .font(MLMFont.sectionLabel)
                         .foregroundColor(.mlmInkMuted)
                     
@@ -1269,7 +1229,7 @@ struct ReelsInboxView: View {
                     let candidates = findAllOcrCandidates(in: recognizedTexts)
                     if !candidates.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Erkannte Songs & Musiktitel (OCR)")
+                            Text("Recognized songs and titles")
                                 .font(.system(size: 11, weight: .bold))
                                 .foregroundColor(.mlmInkMuted)
                             
@@ -1286,7 +1246,7 @@ struct ReelsInboxView: View {
                                             Text("\(candidate.artist) - \(candidate.title)")
                                                 .font(.system(size: 11, weight: .bold))
                                                 .foregroundColor(.mlmInk)
-                                            Text("Klicken, um Song zu übernehmen & suchen")
+                                            Text("Select to use this song and search")
                                                 .font(.system(size: 9))
                                                 .foregroundColor(.mlmInkSecondary)
                                                 .opacity(0.8)
@@ -1311,7 +1271,7 @@ struct ReelsInboxView: View {
                         .padding(.bottom, 6)
                     }
                     
-                    Text("Erkannte Textfragmente")
+                    Text("Recognized text fragments")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundColor(.mlmInkMuted)
                         .padding(.top, 4)
@@ -1330,13 +1290,13 @@ struct ReelsInboxView: View {
                                 Spacer(minLength: 4)
                                 
                                 Menu {
-                                    Button("Interpret") {
+                                    Button("Artist") {
                                         setArtist(text, for: reel)
                                     }
-                                    Button("Songtitel") {
+                                    Button("Title") {
                                         setTitle(text, for: reel)
                                     }
-                                    Button("Beides (als 'Interpret - Titel')") {
+                                    Button("Use both as \"Artist - Title\"") {
                                         applySmartMetadata(text, for: reel)
                                     }
                                     Button("Kopieren") {
@@ -1382,6 +1342,8 @@ struct ReelsInboxView: View {
     private func setArtist(_ text: String, for reel: ImportedReel) {
         guard let index = importedReels.firstIndex(where: { $0.id == reel.id }) else { return }
         importedReels[index].artist = text
+        let updated = importedReels[index]
+        Task { await saveReel(updated) }
         if selectedReel?.id == reel.id {
             artistInput = text
             selectedReel = importedReels[index]
@@ -1391,6 +1353,8 @@ struct ReelsInboxView: View {
     private func setTitle(_ text: String, for reel: ImportedReel) {
         guard let index = importedReels.firstIndex(where: { $0.id == reel.id }) else { return }
         importedReels[index].title = text
+        let updated = importedReels[index]
+        Task { await saveReel(updated) }
         if selectedReel?.id == reel.id {
             titleInput = text
             selectedReel = importedReels[index]
@@ -1412,7 +1376,6 @@ struct ReelsInboxView: View {
             guard cleanedText.count >= 4 else { continue }
             if Self.isInstagramUiNoise(cleanedText) { continue }
             
-            var foundDelimiter = false
             for delimiter in delimiters {
                 let parts = cleanedText.components(separatedBy: delimiter)
                 if parts.count >= 2 {
@@ -1425,7 +1388,6 @@ struct ReelsInboxView: View {
                             score -= 20
                         }
                         candidates.append((artist: artist, title: title, score: score))
-                        foundDelimiter = true
                         break
                     }
                 }
@@ -1445,7 +1407,7 @@ struct ReelsInboxView: View {
         return nil
     }
     
-    private static func cleanOcrText(_ text: String) -> String {
+    private nonisolated static func cleanOcrText(_ text: String) -> String {
         var cleaned = text
         cleaned = cleaned.replacingOccurrences(of: "🎵", with: "")
         cleaned = cleaned.replacingOccurrences(of: "🎶", with: "")
@@ -1467,7 +1429,7 @@ struct ReelsInboxView: View {
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
     
-    private static func isInstagramUiNoise(_ text: String) -> Bool {
+    private nonisolated static func isInstagramUiNoise(_ text: String) -> Bool {
         let lower = text.lowercased()
         let noiseKeywords = [
             "gefällt mir", "kommentieren", "teilen", "beitrag", "instagram", "reels", 
@@ -1564,6 +1526,8 @@ struct ReelsInboxView: View {
         
         importedReels[index].artist = artist
         importedReels[index].title = title
+        let updated = importedReels[index]
+        Task { await saveReel(updated) }
         
         if selectedReel?.id == reel.id {
             artistInput = artist
@@ -1914,16 +1878,33 @@ struct ReelsInboxView: View {
         return buffer
     }
     
-    private func triggerQobuzTokenRefresh() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString("metallica - one", forType: .string)
-        
-        if let url = URL(string: "https://qobuz.squid.wtf") {
-            NSWorkspace.shared.open(url)
+    private func loadImportedReels() async {
+        guard let repository = container.reelRepository else { return }
+        let records = (try? await repository.fetchAll()) ?? []
+        importedReels = records.compactMap { record in
+            guard let id = UUID(uuidString: record.id) else { return nil }
+            return ImportedReel(
+                id: id,
+                fileURL: URL(fileURLWithPath: record.filePath),
+                title: record.title,
+                artist: record.artist
+            )
         }
-        
-        AppLogger.shared.info("Qobuz token refresh triggered: 'metallica - one' copied to clipboard", source: "Search")
+    }
+
+    private func saveReel(_ reel: ImportedReel) async {
+        guard let repository = container.reelRepository else { return }
+        let now = Date()
+        let existing = (try? await repository.fetchAll())?.first { $0.id == reel.id.uuidString }
+        let record = ImportedReelRecord(
+            id: reel.id.uuidString,
+            filePath: reel.fileURL.path,
+            title: reel.title,
+            artist: reel.artist,
+            createdAt: existing?.createdAt ?? now,
+            updatedAt: now
+        )
+        try? await repository.save(record)
     }
 }
 
@@ -1986,7 +1967,7 @@ struct ReelFramePreviewView: View {
                     .frame(height: 120)
                     .cornerRadius(6)
                     .overlay(
-                        Label("Kein Bild", systemImage: "photo")
+                        Label("No preview", systemImage: "photo")
                             .font(.system(size: 10))
                             .foregroundColor(.mlmInkMuted)
                     )
@@ -2057,7 +2038,7 @@ struct OCRKeyframeThumbnailView: View {
                         .padding(4)
                 }
                 .buttonStyle(.plain)
-                .help("An diese Stelle springen")
+                .help("Seek to this point")
             }
             
             Text(String(format: "%.1fs", keyframe.offset))
@@ -2068,7 +2049,7 @@ struct OCRKeyframeThumbnailView: View {
         .onTapGesture {
             onExpand()
         }
-        .help("Klicken, um diesen Frame zu vergrößern & Text auszuwählen")
+        .help("Click to enlarge this frame and select text")
     }
 }
 
@@ -2085,11 +2066,11 @@ struct ExpandedKeyframeView: View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Text(String(format: "Keyframe-Detail (Offset: %.1fs)", keyframe.offset))
+                Text(String(format: "Keyframe detail (offset: %.1fs)", keyframe.offset))
                     .font(.headline)
                     .foregroundColor(.mlmInk)
                 Spacer()
-                Button("Schließen") {
+                Button("Close") {
                     dismiss()
                 }
                 .keyboardShortcut(.cancelAction)
@@ -2116,7 +2097,7 @@ struct ExpandedKeyframeView: View {
                 
                 // Right side: OCR text options
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("Erkannter Text in diesem Frame")
+                    Text("Text recognized in this frame")
                         .font(MLMFont.sectionLabel)
                         .foregroundColor(.mlmInk)
                     
@@ -2126,7 +2107,7 @@ struct ExpandedKeyframeView: View {
                             Image(systemName: "text.badge.xmark")
                                 .font(.system(size: 24))
                                 .foregroundColor(.mlmInkMuted)
-                            Text("Kein Text in diesem Frame erkannt.")
+                            Text("No text was recognized in this frame.")
                                 .font(MLMFont.muted)
                                 .foregroundColor(.mlmInkSecondary)
                         }
@@ -2155,7 +2136,7 @@ struct ExpandedKeyframeView: View {
                                                 onApplyArtist(text)
                                                 dismiss()
                                             }) {
-                                                Label("Interpret", systemImage: "person.fill")
+                                                Label("Artist", systemImage: "person.fill")
                                                     .font(.system(size: 10))
                                             }
                                             .buttonStyle(.bordered)
@@ -2165,7 +2146,7 @@ struct ExpandedKeyframeView: View {
                                                 onApplyTitle(text)
                                                 dismiss()
                                             }) {
-                                                Label("Songtitel", systemImage: "music.note")
+                                                Label("Title", systemImage: "music.note")
                                                     .font(.system(size: 10))
                                             }
                                             .buttonStyle(.bordered)
@@ -2175,7 +2156,7 @@ struct ExpandedKeyframeView: View {
                                                 onApplyBoth(text)
                                                 dismiss()
                                             }) {
-                                                Label("Beides", systemImage: "sparkles")
+                                                Label("Use both", systemImage: "sparkles")
                                                     .font(.system(size: 10, weight: .bold))
                                             }
                                             .buttonStyle(.borderedProminent)

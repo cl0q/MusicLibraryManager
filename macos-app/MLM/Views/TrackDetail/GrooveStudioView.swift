@@ -161,10 +161,10 @@ struct GrooveStudioView: View {
             // Header
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Groove Studio")
+                    Text("Genre Workshop")
                         .font(MLMFont.heroTitle)
                         .foregroundColor(.mlmInk)
-                    Text("Wähle ein Genre aus deiner Bibliothek, um das lokale Modell zu trainieren und Lieder zu labeln.")
+                    Text("Pick a genre to review suggestions and clean up your tags.")
                         .font(MLMFont.body)
                         .foregroundColor(.mlmInkSecondary)
                 }
@@ -183,7 +183,7 @@ struct GrooveStudioView: View {
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "circle.grid.3x3.fill")
-                            Text("Genres aufräumen")
+                            Text("Consolidate genres")
                         }
                         .font(.system(size: 11, weight: .bold))
                         .foregroundColor(.mlmAccent)
@@ -197,7 +197,7 @@ struct GrooveStudioView: View {
                         )
                     }
                     .buttonStyle(.plain)
-                    .help("Konsolidiere inkonsistente Genres in deiner Bibliothek")
+                    .help("Consolidate inconsistent genres in your library")
                     
                     Button {
                         exportFolderURL = nil
@@ -211,7 +211,7 @@ struct GrooveStudioView: View {
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "cpu")
-                            Text("CreateML Export")
+                            Text("Export training set (CreateML)")
                         }
                         .font(.system(size: 11, weight: .bold))
                         .foregroundColor(.white)
@@ -221,7 +221,7 @@ struct GrooveStudioView: View {
                         .cornerRadius(6)
                     }
                     .buttonStyle(.plain)
-                    .help("Exportiere ein flach strukturiertes Trainingsset für CreateML")
+                    .help("Export a flat training set for CreateML")
                 }
             }
             .padding(.horizontal, 24)
@@ -233,7 +233,7 @@ struct GrooveStudioView: View {
             if isLoadingGenres {
                 VStack {
                     Spacer()
-                    ProgressView("Genres werden geladen...")
+                    ProgressView("Loading genres...")
                         .controlSize(.large)
                     Spacer()
                 }
@@ -244,10 +244,10 @@ struct GrooveStudioView: View {
                     Image(systemName: "waveform.badge.exclamationmark")
                         .font(.system(size: 48))
                         .foregroundColor(.mlmInkMuted)
-                    Text("Keine Genres in deiner Bibliothek gefunden")
+                    Text("No genres in your library yet")
                         .font(MLMFont.sectionHeader)
                         .foregroundColor(.mlmInkSecondary)
-                    Text("Füge Lieder mit Genre-Tags hinzu, um Groove Studio zu nutzen.")
+                    Text("Tag some tracks to use the workshop.")
                         .font(MLMFont.body)
                         .foregroundColor(.mlmInkMuted)
                     Spacer()
@@ -372,7 +372,7 @@ struct GrooveStudioView: View {
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "checkmark.circle.fill")
-                            Text("Speichern (\(pendingEdits.count))")
+                            Text("Save (\(pendingEdits.count))")
                         }
                         .font(.system(size: 11, weight: .bold))
                         .foregroundColor(.white)
@@ -429,7 +429,7 @@ struct GrooveStudioView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Label(
-                        leftPlayer.currentTrack != nil ? "Linker Player (Vorschlag)" : "Linker Player",
+                        leftPlayer.currentTrack != nil ? "Suggestion player" : "Preview player",
                         systemImage: "waveform.circle.fill"
                     )
                     .font(MLMFont.sectionLabel)
@@ -443,7 +443,7 @@ struct GrooveStudioView: View {
                             .foregroundColor(.mlmInkSecondary)
                             .lineLimit(1)
                     } else {
-                        Text("Bereit für Vorschau...")
+                        Text("Ready for preview…")
                             .font(MLMFont.muted)
                             .foregroundColor(.mlmInkMuted)
                     }
@@ -494,7 +494,7 @@ struct GrooveStudioView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Label(
-                        rightPlayer.currentTrack?.id == referenceTrack?.id && referenceTrack != nil ? "Rechter Player (Referenz)" : "Rechter Player (Vorschau)",
+                        rightPlayer.currentTrack?.id == referenceTrack?.id && referenceTrack != nil ? "Reference player" : "Preview player",
                         systemImage: "waveform.circle.fill"
                     )
                     .font(MLMFont.sectionLabel)
@@ -508,7 +508,7 @@ struct GrooveStudioView: View {
                             .foregroundColor(.mlmInkSecondary)
                             .lineLimit(1)
                     } else {
-                        Text("Bereit für Vorschau...")
+                        Text("Ready for preview…")
                             .font(MLMFont.muted)
                             .foregroundColor(.mlmInkMuted)
                     }
@@ -566,7 +566,7 @@ struct GrooveStudioView: View {
             // Column Title & Settings
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Label("Vorschläge (Lokales Modell)", systemImage: "sparkles")
+                    Label("Suggestions", systemImage: "sparkles")
                         .font(MLMFont.sectionHeader)
                         .foregroundColor(.mlmInk)
                     Spacer()
@@ -576,7 +576,7 @@ struct GrooveStudioView: View {
                     // Temperature, Count & Untagged Options
                     VStack(spacing: 8) {
                         HStack(spacing: 12) {
-                            Text("Temperatur:")
+                            Text("Temperature:")
                                 .font(MLMFont.muted)
                                 .foregroundColor(.mlmInkSecondary)
                                 .frame(width: 76, alignment: .leading)
@@ -595,14 +595,14 @@ struct GrooveStudioView: View {
                         }
                         
                         HStack {
-                            Text("Vorschläge:")
+                            Text("Suggestions:")
                                 .font(MLMFont.muted)
                                 .foregroundColor(.mlmInkSecondary)
                                 .frame(width: 76, alignment: .leading)
                             
                             Picker("Limit", selection: $suggestionLimit) {
-                                Text("10 Lieder").tag(10)
-                                Text("20 Lieder").tag(20)
+                                Text("10 tracks").tag(10)
+                                Text("20 tracks").tag(20)
                             }
                             .pickerStyle(.segmented)
                             .labelsHidden()
@@ -611,7 +611,7 @@ struct GrooveStudioView: View {
                             }
                         }
                         
-                        Toggle("Nur Lieder ohne Genre vorschlagen", isOn: $onlyUntaggedSuggestions)
+                        Toggle("Suggest untagged tracks only", isOn: $onlyUntaggedSuggestions)
                             .font(MLMFont.muted)
                             .toggleStyle(.checkbox)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -636,10 +636,10 @@ struct GrooveStudioView: View {
                     Image(systemName: "arrow.right.circle")
                         .font(.system(size: 36))
                         .foregroundColor(.mlmInkMuted)
-                    Text("Wähle einen Referenz-Song")
+                    Text("Choose a reference track")
                         .font(MLMFont.sectionHeader)
                         .foregroundColor(.mlmInkSecondary)
-                    Text("Doppelklicke einen Song auf der rechten Seite, um Vorschläge von der Engine zu laden.")
+                    Text("Double-click a track on the right to load suggestions.")
                         .font(MLMFont.body)
                         .foregroundColor(.mlmInkMuted)
                         .multilineTextAlignment(.center)
@@ -650,7 +650,7 @@ struct GrooveStudioView: View {
             } else if isLoadingSuggestions {
                 VStack {
                     Spacer()
-                    ProgressView("Lokales Modell berechnet Vorschläge...")
+                    ProgressView("Finding suggestions…")
                     Spacer()
                 }
                 .frame(maxHeight: .infinity)
@@ -660,10 +660,10 @@ struct GrooveStudioView: View {
                     Image(systemName: "sparkles")
                         .font(.system(size: 32))
                         .foregroundColor(.mlmInkMuted)
-                    Text("Keine Vorschläge gefunden")
+                    Text("No suggestions found")
                         .font(MLMFont.sectionHeader)
                         .foregroundColor(.mlmInkSecondary)
-                    Text("Passe die Temperatur an oder deaktiviere Filter.")
+                    Text("Adjust the temperature or remove filters.")
                         .font(MLMFont.body)
                         .foregroundColor(.mlmInkMuted)
                     Spacer()
@@ -726,15 +726,6 @@ struct GrooveStudioView: View {
                                                         .stroke(Color.purple, lineWidth: 1)
                                                 )
                                             
-                                            Text("Vixa Club")
-                                                .font(.system(size: 9, weight: .semibold))
-                                                .foregroundColor(.purple)
-                                                .padding(.horizontal, 5)
-                                                .padding(.vertical, 2)
-                                                .background(
-                                                    RoundedRectangle(cornerRadius: 4)
-                                                        .stroke(Color.purple, lineWidth: 1)
-                                                )
                                         }
                                     } else {
                                         // Score % badge
@@ -757,7 +748,7 @@ struct GrooveStudioView: View {
                                                 .foregroundColor(pendingEdits[track.id!] != nil ? .purple : .mlmInkSecondary)
                                         }
                                         .buttonStyle(.plain)
-                                        .help("Genre-Tag & Vixa vormerken (Lila)")
+                                        .help("Mark this genre for saving")
                                         
                                         Button {
                                             registerThumbsDown(track: track)
@@ -766,7 +757,7 @@ struct GrooveStudioView: View {
                                                 .foregroundColor(feedbackMap[track.id!] == -1 ? .mlmError : .mlmInkSecondary)
                                         }
                                         .buttonStyle(.plain)
-                                        .help("Lied für diesen Groove ausschließen (Ausblenden)")
+                                        .help("Exclude this track from suggestions")
                                     }
                                     .font(.system(size: 13))
                                     .padding(.leading, 8)
@@ -813,7 +804,7 @@ struct GrooveStudioView: View {
         VStack(spacing: 0) {
             // Column Title
             HStack {
-                Label("Bekannte Lieder in \(selectedGenre ?? "")", systemImage: "music.note.list")
+                Label("Tracks in \(selectedGenre ?? "")", systemImage: "music.note.list")
                     .font(MLMFont.sectionHeader)
                     .foregroundColor(.mlmInk)
                 Spacer()
@@ -831,7 +822,7 @@ struct GrooveStudioView: View {
                             .frame(width: 32, height: 32)
                         
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Referenz-Song")
+                            Text("Reference track")
                                 .font(MLMFont.sectionLabel)
                                 .foregroundColor(.purple)
                             
@@ -856,7 +847,7 @@ struct GrooveStudioView: View {
                                 .foregroundColor(.mlmInkSecondary)
                         }
                         .buttonStyle(.plain)
-                        .help("Referenz-Song auswerfen")
+                        .help("Remove reference track")
                         .springLoadableHover {}
                     }
                     .padding(12)
@@ -880,10 +871,10 @@ struct GrooveStudioView: View {
                             Image(systemName: "waveform.circle")
                                 .font(.title2)
                                 .foregroundColor(.mlmInkMuted)
-                            Text("Keine Referenz aktiv")
+                            Text("No reference selected")
                                 .font(MLMFont.sectionLabel)
                                 .foregroundColor(.mlmInkSecondary)
-                            Text("Doppelklicke unten ein Lied, um Vorschläge zu generieren")
+                            Text("Double-click a track below to generate suggestions")
                                 .font(.system(size: 10))
                                 .foregroundColor(.mlmInkMuted)
                         }
@@ -908,7 +899,7 @@ struct GrooveStudioView: View {
             if isLoadingTracks {
                 VStack {
                     Spacer()
-                    ProgressView("Lieder des Genres werden geladen...")
+                    ProgressView("Loading genre tracks...")
                     Spacer()
                 }
                 .frame(maxHeight: .infinity)
@@ -918,7 +909,7 @@ struct GrooveStudioView: View {
                     Image(systemName: "music.note")
                         .font(.system(size: 32))
                         .foregroundColor(.mlmInkMuted)
-                    Text("Keine bekannten Lieder vorhanden")
+                    Text("No known tracks available")
                         .font(MLMFont.sectionHeader)
                         .foregroundColor(.mlmInkSecondary)
                     Spacer()
@@ -1030,7 +1021,7 @@ struct GrooveStudioView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "chevron.left")
-                        Text("Zurück")
+                    Text("Back")
                     }
                     .font(MLMFont.bodyBold)
                     .foregroundColor(.mlmAccent)
@@ -1041,7 +1032,7 @@ struct GrooveStudioView: View {
                 }
                 .buttonStyle(.plain)
                 
-                Text("Genres konsolidieren & aufräumen")
+                Text("Consolidate genres")
                     .font(MLMFont.pageTitle)
                     .foregroundColor(.mlmInk)
                 
@@ -1057,7 +1048,7 @@ struct GrooveStudioView: View {
             VStack(alignment: .leading, spacing: 0) {
                 // Top controls section (Intro text, Selection columns)
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("Wähle die verschiedenen Schreibweisen oder doppelten Genres aus der Liste unten aus, um sie in ein einziges kanonisches Genre zusammenzuführen. Alle Lieder werden in der Datenbank sofort aktualisiert.")
+                    Text("Select alternate spellings or duplicate genres and merge them into one canonical genre. Tracks update immediately in the database.")
                         .font(MLMFont.body)
                         .foregroundColor(.mlmInkSecondary)
                         .padding(.horizontal, 4)
@@ -1089,7 +1080,7 @@ struct GrooveStudioView: View {
                     HStack(spacing: 24) {
                         // Left: Genre List Checklist
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("AUSWÄHLEN (\(selectedForMerge.count) markiert)")
+                            Text("SELECT (\(selectedForMerge.count) selected)")
                                 .font(MLMFont.sectionLabel)
                                 .foregroundColor(.mlmInkSecondary)
                             
@@ -1162,7 +1153,7 @@ struct GrooveStudioView: View {
                         
                         // Right: Target Input & Action
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("ZUSAMMENFÜHREN")
+                            Text("MERGE")
                                 .font(MLMFont.sectionLabel)
                                 .foregroundColor(.mlmInkSecondary)
                             
@@ -1189,7 +1180,7 @@ struct GrooveStudioView: View {
                             } label: {
                                 HStack {
                                     Image(systemName: "circle.grid.3x3.fill")
-                                    Text("Ausgewählte Genres verschmelzen")
+                                    Text("Merge selected genres")
                                 }
                                 .font(.system(size: 13, weight: .bold))
                                 .foregroundColor(.white)
@@ -1214,13 +1205,13 @@ struct GrooveStudioView: View {
                 VStack(spacing: 0) {
                     if let genre = selectedPreviewGenre {
                         HStack {
-                            Text("Lieder in \"\(genre)\" (\(mergerPreviewTracks.count) von max 50 angezeigt)")
+                            Text("Tracks in \"\(genre)\" (showing \(mergerPreviewTracks.count) of 50)")
                                 .font(MLMFont.sectionHeader)
                                 .foregroundColor(.mlmInk)
                             
                             Spacer()
                             
-                            Text("Doppelklick zum Anhören")
+                            Text("Double-click to preview")
                                 .font(MLMFont.muted)
                                 .foregroundColor(.mlmInkSecondary)
                         }
@@ -1234,7 +1225,7 @@ struct GrooveStudioView: View {
                         if isLoadingPreviewTracks {
                             VStack {
                                 Spacer()
-                                ProgressView("Lade Lieder...")
+                                ProgressView("Loading tracks…")
                                 Spacer()
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1242,7 +1233,7 @@ struct GrooveStudioView: View {
                         } else if mergerPreviewTracks.isEmpty {
                             VStack {
                                 Spacer()
-                                Text("Keine Lieder in diesem Genre gefunden.")
+                                Text("No tracks found in this genre.")
                                     .font(MLMFont.body)
                                     .foregroundColor(.mlmInkMuted)
                                 Spacer()
@@ -1327,10 +1318,10 @@ struct GrooveStudioView: View {
                             Image(systemName: "music.note.list")
                                 .font(.system(size: 40))
                                 .foregroundColor(.mlmInkMuted)
-                            Text("Wähle ein Genre aus der Liste")
+                            Text("Choose a genre from the list")
                                 .font(MLMFont.sectionHeader)
                                 .foregroundColor(.mlmInkSecondary)
-                            Text("Klicke auf den Namen eines Genres oben, um bis zu 50 Lieder anzuzeigen und anzuhören, bevor du sie zusammenführst.")
+                            Text("Select a genre above to review up to 50 tracks before merging.")
                                 .font(MLMFont.muted)
                                 .foregroundColor(.mlmInkMuted)
                                 .multilineTextAlignment(.center)
@@ -1360,7 +1351,7 @@ struct GrooveStudioView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "chevron.left")
-                        Text("Zurück")
+                        Text("Back")
                     }
                     .font(MLMFont.bodyBold)
                     .foregroundColor(.mlmAccent)
@@ -1372,7 +1363,7 @@ struct GrooveStudioView: View {
                 .buttonStyle(.plain)
                 .disabled(isExporting)
                 
-                Text("CreateML Trainings-Set exportieren")
+                Text("Export CreateML training set")
                     .font(MLMFont.pageTitle)
                     .foregroundColor(.mlmInk)
                 
@@ -1387,7 +1378,7 @@ struct GrooveStudioView: View {
             
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("Dieses Werkzeug exportiert alle Lieder, die ein zugewiesenes Genre haben, in eine flache Ordnerstruktur. FFmpeg konvertiert jedes Lied in eine **248kbps AAC (.m4a) Datei**. Der erstellte Ordner ist perfekt strukturiert, um direkt in **Apples Create ML** geladen zu werden, um ein eigenes SoundClassifier-Modell anzulernen.")
+                    Text("Export tracks with genres into a flat folder structure. FFmpeg converts each track to **AAC 248 kbps (.m4a)**, ready to load into **Apple Create ML** for training a SoundClassifier model.")
                         .font(MLMFont.body)
                         .foregroundColor(.mlmInkSecondary)
                         .padding(.horizontal, 4)
@@ -1406,14 +1397,14 @@ struct GrooveStudioView: View {
                                     Image(systemName: "checkmark.circle.fill")
                                         .foregroundColor(.green)
                                         .font(.system(size: 14, weight: .bold))
-                                    Text("FÜR EXPORT BEREIT (≥ 50 Lieder)")
+                                    Text("READY FOR EXPORT (≥ 50 tracks)")
                                         .font(MLMFont.sectionLabel)
                                         .foregroundColor(.mlmInkSecondary)
                                 }
                                 
                                 HStack(spacing: 24) {
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text("Lieder:")
+                                        Text("Tracks:")
                                             .font(MLMFont.muted)
                                             .foregroundColor(.mlmInkSecondary)
                                         Text("\(eligibleTracksCount)")
@@ -1446,14 +1437,14 @@ struct GrooveStudioView: View {
                                     Image(systemName: "exclamationmark.triangle.fill")
                                         .foregroundColor(.orange)
                                         .font(.system(size: 14, weight: .bold))
-                                    Text("AUSGESCHLOSSEN (< 50 Lieder)")
+                                    Text("EXCLUDED (< 50 tracks)")
                                         .font(MLMFont.sectionLabel)
                                         .foregroundColor(.mlmInkSecondary)
                                 }
                                 
                                 HStack(spacing: 24) {
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text("Lieder:")
+                                        Text("Tracks:")
                                             .font(MLMFont.muted)
                                             .foregroundColor(.mlmInkSecondary)
                                         Text("\(excludedTracksCount)")
@@ -1483,7 +1474,7 @@ struct GrooveStudioView: View {
                         
                         // Format Badge
                         HStack(spacing: 12) {
-                            Text("Zielformat:")
+                            Text("Target format:")
                                 .font(MLMFont.muted)
                                 .foregroundColor(.mlmInkSecondary)
                             Text("AAC 248kbps (.m4a)")
@@ -1509,7 +1500,7 @@ struct GrooveStudioView: View {
                                     HStack {
                                         Image(systemName: showExcludedGenres ? "chevron.down" : "chevron.right")
                                             .font(.system(size: 10, weight: .bold))
-                                        Text("Ausgeschlossene Genres anzeigen (\(excludedGenres.count))")
+                                        Text("Show excluded genres (\(excludedGenres.count))")
                                             .font(MLMFont.bodyBold)
                                         Spacer()
                                     }
@@ -1519,7 +1510,7 @@ struct GrooveStudioView: View {
                                 .buttonStyle(.plain)
                                 
                                 if showExcludedGenres {
-                                    Text("Diese Genres haben weniger als 50 Lieder und sind für das Training eines Modells ungeeignet. Nutze das 'Genres aufräumen'-Werkzeug, um sie zusammenzuführen.")
+                                    Text("These genres have fewer than 50 tracks and are excluded from training. Use Consolidate genres to merge them.")
                                         .font(MLMFont.muted)
                                         .foregroundColor(.mlmInkSecondary)
                                         .padding(.bottom, 4)
@@ -1564,7 +1555,7 @@ struct GrooveStudioView: View {
                         
                         // Select folder card
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("ZIELORDNER FÜR DAS TRAININGSET:")
+                            Text("TRAINING SET DESTINATION:")
                                 .font(MLMFont.sectionLabel)
                                 .foregroundColor(.mlmInkSecondary)
                             
@@ -1574,7 +1565,7 @@ struct GrooveStudioView: View {
                                 } label: {
                                     HStack {
                                         Image(systemName: "folder.badge.plus")
-                                        Text("Zielordner wählen...")
+                                        Text("Choose destination…")
                                     }
                                     .font(MLMFont.bodyBold)
                                     .foregroundColor(.mlmAccent)
@@ -1598,7 +1589,7 @@ struct GrooveStudioView: View {
                                         .lineLimit(1)
                                         .truncationMode(.middle)
                                 } else {
-                                    Text("Kein Ordner ausgewählt")
+                                    Text("No folder selected")
                                         .font(MLMFont.body)
                                         .foregroundColor(.mlmInkMuted)
                                 }
@@ -1627,7 +1618,7 @@ struct GrooveStudioView: View {
                                 } label: {
                                     HStack {
                                         Image(systemName: "xmark.circle")
-                                        Text("Export abbrechen")
+                                        Text("Cancel export")
                                     }
                                     .font(MLMFont.bodyBold)
                                     .foregroundColor(.white)
@@ -1651,7 +1642,7 @@ struct GrooveStudioView: View {
                             } label: {
                                 HStack {
                                     Image(systemName: "play.fill")
-                                    Text("Exportieren starten")
+                                    Text("Start export")
                                 }
                                 .font(.system(size: 13, weight: .bold))
                                 .foregroundColor(.white)
@@ -1826,7 +1817,7 @@ struct GrooveStudioView: View {
                 title: track.title,
                 artist: track.artist,
                 genre: genre,
-                mixCategory: "Vixa Club" // Automatically mark Wixxer Tag
+                mixCategory: nil
             )
         }
     }
@@ -1891,7 +1882,7 @@ struct GrooveStudioView: View {
             
             await MainActor.run {
                 pendingEdits = [:]
-                saveMessage = "\(count) Lieder erfolgreich markiert und gespeichert!"
+                saveMessage = "\(count) track\(count == 1 ? "" : "s") tagged and saved."
                 
                 // Reset save success message after 4 seconds
                 saveMessageTimer?.invalidate()
@@ -1911,7 +1902,7 @@ struct GrooveStudioView: View {
         } catch {
             print("Failed to save pending edits: \(error)")
             await MainActor.run {
-                saveMessage = "Fehler beim Speichern!"
+                saveMessage = "Could not save changes."
             }
         }
     }
@@ -1922,7 +1913,7 @@ struct GrooveStudioView: View {
         guard let trackRepo = container.trackRepository, !selectedForMerge.isEmpty else { return }
         let targetClean = targetGenreName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !targetClean.isEmpty else {
-            mergerError = "Zielname darf nicht leer sein!"
+            mergerError = "The target genre name cannot be empty."
             return
         }
         
@@ -1945,13 +1936,13 @@ struct GrooveStudioView: View {
                 self.selectedForMerge = []
                 self.targetGenreName = ""
                 self.isLoadingGenres = false
-                self.mergerMessage = "Genres erfolgreich in '\(targetClean)' verschmolzen!"
+                self.mergerMessage = "Genres merged into '\(targetClean)'."
             }
         } catch {
             print("Failed to merge genres: \(error)")
             await MainActor.run {
                 self.isLoadingGenres = false
-                self.mergerError = "Fehler beim Zusammenführen: \(error.localizedDescription)"
+                self.mergerError = "Could not merge genres: \(error.localizedDescription)"
             }
         }
     }
@@ -1963,8 +1954,8 @@ struct GrooveStudioView: View {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.title = "Zielordner für CreateML Trainingsset wählen"
-        panel.prompt = "Ordner wählen"
+        panel.title = "Choose a destination folder for the CreateML training set"
+        panel.prompt = "Choose folder"
         if panel.runModal() == .OK, let url = panel.url {
             self.exportFolderURL = url
         }
@@ -1976,14 +1967,14 @@ struct GrooveStudioView: View {
         
         let transcodeCache = container.transcodeCache
         let configRepository = container.configRepository
-        let turboLevel = container.syncViewModel?.syncService.syncTurboLevel ?? .medium
+        let backgroundProcessing = container.syncViewModel?.syncService.syncTurboLevel ?? .standard
         
         isExporting = true
         exportProgress = 0.0
-        exportProgressText = "Lese Lieder aus der Bibliothek..."
+        exportProgressText = "Loading tracks from the library..."
         exportCancelRequested = false
         
-        exportTask = Task { [transcodeCache, configRepository, turboLevel] in
+        exportTask = Task { [transcodeCache, configRepository, backgroundProcessing] in
             let activityVM = container.activityViewModel
             var operationId: UUID? = nil
             
@@ -2011,7 +2002,7 @@ struct GrooveStudioView: View {
                 if total == 0 {
                     await MainActor.run {
                         self.isExporting = false
-                        self.exportProgressText = "Keine Lieder mit Genres gefunden (mindestens 50 Lieder pro Genre benötigt)!"
+                        self.exportProgressText = "No tracks with genres found. At least 50 tracks per genre are required."
                     }
                     return
                 }
@@ -2020,12 +2011,12 @@ struct GrooveStudioView: View {
                 operationId = activityVM?.startOperation(
                     type: .createMLExport,
                     title: "CreateML Export: \(destURL.lastPathComponent)",
-                    detail: "Starte Export von \(total) Liedern..."
+                    detail: "Starting export of \(total) tracks..."
                 )
-                AppLogger.shared.info("CreateML: Starte Export von \(total) Liedern in Ordner \(destURL.lastPathComponent)", source: "CreateML")
+                AppLogger.shared.info("CreateML: Starting export of \(total) tracks to \(destURL.lastPathComponent)", source: "CreateML")
                 
                 // 2. Loop and transcode/copy concurrently
-                let workerCount = turboLevel.workerCount()
+                let workerCount = backgroundProcessing.workerCount()
                 let limiter = ConcurrencyLimiter(maxConcurrency: workerCount)
                 
                 await withTaskGroup(of: Void.self) { group in
@@ -2047,13 +2038,13 @@ struct GrooveStudioView: View {
                                 do {
                                     try FileManager.default.createDirectory(at: genreDir, withIntermediateDirectories: true)
                                 } catch {
-                                    AppLogger.shared.error("CreateML: Fehler beim Erstellen des Genre-Ordners '\(cleanGenre)': \(error.localizedDescription)", source: "CreateML")
+                                    AppLogger.shared.error("CreateML: Could not create genre folder '\(cleanGenre)': \(error.localizedDescription)", source: "CreateML")
                                     return
                                 }
                                 
                                 // Resolve source path on disk
                                 guard let sourceURL = await self.resolveLocalURL(for: track) else {
-                                    AppLogger.shared.warn("CreateML: Quelldatei auf der Festplatte nicht gefunden für Lied: \(track.artist) - \(track.title)", source: "CreateML")
+                                    AppLogger.shared.warn("CreateML: Source file missing for track: \(track.artist) - \(track.title)", source: "CreateML")
                                     return
                                 }
                                 
@@ -2074,15 +2065,15 @@ struct GrooveStudioView: View {
                                             do {
                                                 try FileManager.default.linkItem(at: cachedURL, to: targetFile)
                                                 transcodeSuccess = true
-                                                AppLogger.shared.debug("CreateML: Hardlink aus Transkodier-Cache erstellt: \(track.artist) - \(track.title)", source: "CreateML")
+                                                AppLogger.shared.debug("CreateML: Created hard link from transcode cache: \(track.artist) - \(track.title)", source: "CreateML")
                                             } catch {
                                                 try FileManager.default.copyItem(at: cachedURL, to: targetFile)
                                                 transcodeSuccess = true
-                                                AppLogger.shared.debug("CreateML: Lied aus Transkodier-Cache kopiert (Fallback): \(track.artist) - \(track.title)", source: "CreateML")
+                                                AppLogger.shared.debug("CreateML: Copied track from transcode cache: \(track.artist) - \(track.title)", source: "CreateML")
                                             }
                                         }
                                     } catch {
-                                        AppLogger.shared.warn("CreateML: Cache-Fehler oder Kopierfehler für \(track.artist) - \(track.title): \(error.localizedDescription)", source: "CreateML")
+                                        AppLogger.shared.warn("CreateML: Cache or copy error for \(track.artist) - \(track.title): \(error.localizedDescription)", source: "CreateML")
                                     }
                                 }
                                 
@@ -2098,24 +2089,24 @@ struct GrooveStudioView: View {
                                         
                                         switch result {
                                         case .transcoded:
-                                            AppLogger.shared.debug("CreateML: Lied direkt transkodiert: \(track.artist) - \(track.title)", source: "CreateML")
+                                            AppLogger.shared.debug("CreateML: Transcoded track directly: \(track.artist) - \(track.title)", source: "CreateML")
                                             break
                                         case .skipped:
                                             if !FileManager.default.fileExists(atPath: targetFile.path) {
                                                 try? FileManager.default.copyItem(at: sourceURL, to: targetFile)
-                                                AppLogger.shared.debug("CreateML: Lied direkt kopiert (Fallback): \(track.artist) - \(track.title)", source: "CreateML")
+                                                AppLogger.shared.debug("CreateML: Copied track directly: \(track.artist) - \(track.title)", source: "CreateML")
                                             }
                                         case .failed:
                                             if !FileManager.default.fileExists(atPath: targetFile.path) {
                                                 try? FileManager.default.copyItem(at: sourceURL, to: targetFile)
-                                                AppLogger.shared.warn("CreateML: Transkodierungsfehler, Fallback-Kopie durchgeführt für: \(track.artist) - \(track.title)", source: "CreateML")
+                                                AppLogger.shared.warn("CreateML: Transcode failed; copied fallback for: \(track.artist) - \(track.title)", source: "CreateML")
                                             }
                                         }
                                     } catch {
                                         // Fallback copy on any error
                                         if !FileManager.default.fileExists(atPath: targetFile.path) {
                                             try? FileManager.default.copyItem(at: sourceURL, to: targetFile)
-                                            AppLogger.shared.warn("CreateML: Transkodierung fehlgeschlagen, Fallback-Kopie für: \(track.artist) - \(track.title): \(error.localizedDescription)", source: "CreateML")
+                                            AppLogger.shared.warn("CreateML: Transcode failed; copied fallback for: \(track.artist) - \(track.title): \(error.localizedDescription)", source: "CreateML")
                                         }
                                     }
                                 }
@@ -2127,7 +2118,7 @@ struct GrooveStudioView: View {
                     for await _ in group {
                         completedCount += 1
                         let currentProgress = Double(completedCount) / Double(total)
-                        let text = "[\(completedCount)/\(total)] Exportiere Lieder (\(Int(currentProgress * 100))%)..."
+                        let text = "[\(completedCount)/\(total)] Exporting tracks (\(Int(currentProgress * 100))%)..."
                         
                         await MainActor.run {
                             self.exportProgress = currentProgress
@@ -2136,7 +2127,7 @@ struct GrooveStudioView: View {
                         
                         // Update background operation
                         if let opId = operationId {
-                            activityVM?.updateProgress(id: opId, progress: currentProgress, detail: "[\(completedCount)/\(total)] Lieder exportiert...")
+                            activityVM?.updateProgress(id: opId, progress: currentProgress, detail: "[\(completedCount)/\(total)] tracks exported...")
                         }
                     }
                 }
@@ -2144,30 +2135,30 @@ struct GrooveStudioView: View {
                 await MainActor.run {
                     self.isExporting = false
                     if exportCancelRequested {
-                        self.exportProgressText = "Export abgebrochen!"
+                        self.exportProgressText = "Export cancelled."
                         self.exportProgress = 0.0
                         if let opId = operationId {
-                            activityVM?.failOperation(id: opId, error: "Abgebrochen durch den Benutzer")
+                            activityVM?.failOperation(id: opId, error: "Cancelled by user")
                         }
-                        AppLogger.shared.info("CreateML: Export abgebrochen.", source: "CreateML")
+                        AppLogger.shared.info("CreateML: Export cancelled.", source: "CreateML")
                     } else {
-                        self.exportProgressText = "Erfolgreich! \(total) Lieder flat in Ordner nach Genres exportiert."
+                        self.exportProgressText = "Exported \(total) tracks into genre folders."
                         self.exportProgress = 1.0
                         if let opId = operationId {
-                            activityVM?.completeOperation(id: opId, detail: "\(total) Lieder erfolgreich exportiert")
+                            activityVM?.completeOperation(id: opId, detail: "\(total) tracks exported")
                         }
-                        AppLogger.shared.info("CreateML: Export erfolgreich abgeschlossen. \(total) Lieder in Ordner '\(destURL.lastPathComponent)' exportiert.", source: "CreateML")
+                        AppLogger.shared.info("CreateML: Export complete. \(total) tracks exported to '\(destURL.lastPathComponent)'.", source: "CreateML")
                     }
                 }
                 
             } catch {
-                AppLogger.shared.error("CreateML: Export fehlgeschlagen mit Fehler: \(error.localizedDescription)", source: "CreateML")
+                AppLogger.shared.error("CreateML: Export failed: \(error.localizedDescription)", source: "CreateML")
                 if let opId = operationId {
                     activityVM?.failOperation(id: opId, error: error.localizedDescription)
                 }
                 await MainActor.run {
                     self.isExporting = false
-                    self.exportProgressText = "Fehler beim Export: \(error.localizedDescription)"
+                    self.exportProgressText = "Export failed: \(error.localizedDescription)"
                 }
             }
         }

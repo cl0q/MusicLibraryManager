@@ -22,6 +22,7 @@ extension DownloadOrchestrator: DownloadBatchRunning {}
 
 protocol DownloadRetryRunning {
     func pendingRetryRequests() -> [DownloadOrchestrator.DownloadRequest]
+    func persistedRetryItems() -> [DownloadQueue.QueueItem]
     func retryFailed(
         onProgress: ((Int, Int, String) -> Void)?,
         onTrackProgress: ((Double) -> Void)?
@@ -37,6 +38,8 @@ extension DownloadOrchestrator: DownloadRetryRunning {}
 /// conforming to this protocol to prove a DB-write failure demotes a track
 /// from succeeded to failed before the UI-facing tally is finalized.
 protocol DownloadTrackPersisting: Sendable {
+    func markDownloadsInProgress(trackIds: [Int64]) async throws
+    func clearDownloadsInProgress(trackIds: [Int64]) async throws
     func markAsDownloaded(
         trackId: Int64,
         organizedPath: String,
@@ -44,6 +47,19 @@ protocol DownloadTrackPersisting: Sendable {
         bitrate: Int?,
         downloadStatus: String?
     ) async throws
+    func persistDownloadFailure(
+        trackId: Int64,
+        reason: String,
+        date: Date,
+        minimumAttempts: Int
+    ) async throws -> TrackDownloadFailure
+}
+
+/// Lifecycle writes are no-ops for narrow test persisters that only model
+/// final DB persistence. The concrete `TrackRepository` supplies both writes.
+extension DownloadTrackPersisting {
+    func markDownloadsInProgress(trackIds: [Int64]) async throws {}
+    func clearDownloadsInProgress(trackIds: [Int64]) async throws {}
 }
 
 extension TrackRepository: DownloadTrackPersisting {}
@@ -124,6 +140,13 @@ final class DownloadViewModel {
     /// override when present, otherwise the concrete injected repository.
     private var activeTrackPersister: (any DownloadTrackPersisting)? {
         trackPersisterOverride ?? trackRepository
+    }
+
+    /// The global retry action only handles legacy queue entries that are
+    /// below its retry cap. Other durable failures remain available through
+    /// Activity's per-row Retry action.
+    var hasActionableRetryFailures: Bool {
+        !(activeRetryRunner?.pendingRetryRequests().isEmpty ?? true)
     }
 
     /// Absolute path to the library root — used to convert orchestrator
@@ -208,6 +231,8 @@ final class DownloadViewModel {
             )
         }
 
+        await markDownloadsInProgress(trackIds: requests.map(\.trackId))
+
         // Build queue items for UI
         queueItems = remoteTracks.map { track in
             DownloadItem(
@@ -220,26 +245,29 @@ final class DownloadViewModel {
             )
         }
 
-        let result = await runner.downloadBatch(
-            requests,
-            onProgress: { [weak self] index, total, current in
-                guard let self else { return }
-                self.currentTrack = current
-                self.currentTrackProgress = 0
-                self.progress = Double(index) / Double(max(total, 1))
-                self.completedCount = index
+        let result = terminalResult(
+            await runner.downloadBatch(
+                requests,
+                onProgress: { [weak self] index, total, current in
+                    guard let self else { return }
+                    self.currentTrack = current
+                    self.currentTrackProgress = 0
+                    self.progress = Double(index) / Double(max(total, 1))
+                    self.completedCount = index
 
-                if index < self.queueItems.count {
-                    self.queueItems[index].status = .downloading
+                    if index < self.queueItems.count {
+                        self.queueItems[index].status = .downloading
+                    }
+                },
+                onTrackProgress: { [weak self] fraction in
+                    guard let self, self.totalCount > 0 else { return }
+                    self.currentTrackProgress = fraction
+                    // Combined: completed tracks plus the running fraction of
+                    // the in-flight track, normalized by total batch size.
+                    self.progress = (Double(self.completedCount) + fraction) / Double(self.totalCount)
                 }
-            },
-            onTrackProgress: { [weak self] fraction in
-                guard let self, self.totalCount > 0 else { return }
-                self.currentTrackProgress = fraction
-                // Combined: completed tracks plus the running fraction of
-                // the in-flight track, normalized by total batch size.
-                self.progress = (Double(self.completedCount) + fraction) / Double(self.totalCount)
-            }
+            ),
+            requests: requests
         )
 
         // Persist the four download columns together for each succeeded
@@ -251,9 +279,20 @@ final class DownloadViewModel {
             remoteTracks: remoteTracks,
             result: result
         )
+        await persistTerminalFailures(result: result, requests: requests)
+        await persistPersistenceFailures(trackIds: persistenceFailures)
         orchestrator?.enqueuePersistenceFailures(
             requests: requests,
             trackIds: persistenceFailures
+        )
+        let persistedTrackIds = Set(result.downloadedPaths.keys)
+            .subtracting(persistenceFailures)
+        activeRetryRunner?.dequeuePersistedRetries(trackIds: persistedTrackIds)
+        await clearDownloadsInProgress(
+            trackIds: result.failedTrackIds
+                .union(result.skippedTrackIds)
+                .union(result.cancelledTrackIds)
+                .union(persistenceFailures)
         )
 
         let finalResult = resultAfterPersistence(
@@ -296,33 +335,50 @@ final class DownloadViewModel {
             )
         }
 
-        let result = await retryRunner.retryFailed(
-            onProgress: { [weak self] index, total, current in
-                guard let self else { return }
-                self.currentTrack = current
-                self.currentTrackProgress = 0
-                self.progress = Double(index) / Double(max(total, 1))
-                self.completedCount = index
-                if index < self.queueItems.count {
-                    self.queueItems[index].status = .downloading
+        await markDownloadsInProgress(trackIds: requests.map(\.trackId))
+
+        let result = terminalResult(
+            await retryRunner.retryFailed(
+                onProgress: { [weak self] index, total, current in
+                    guard let self else { return }
+                    self.currentTrack = current
+                    self.currentTrackProgress = 0
+                    self.progress = Double(index) / Double(max(total, 1))
+                    self.completedCount = index
+                    if index < self.queueItems.count {
+                        self.queueItems[index].status = .downloading
+                    }
+                },
+                onTrackProgress: { [weak self] fraction in
+                    guard let self, self.totalCount > 0 else { return }
+                    self.currentTrackProgress = fraction
+                    self.progress = (
+                        Double(self.completedCount) + fraction
+                    ) / Double(self.totalCount)
                 }
-            },
-            onTrackProgress: { [weak self] fraction in
-                guard let self, self.totalCount > 0 else { return }
-                self.currentTrackProgress = fraction
-                self.progress = (
-                    Double(self.completedCount) + fraction
-                ) / Double(self.totalCount)
-            }
+            ),
+            requests: requests
         )
 
         let persistenceFailures = await persistDownloadedTracks(
             remoteTracks: [],
             result: result
         )
+        await persistTerminalFailures(result: result, requests: requests)
+        await persistPersistenceFailures(trackIds: persistenceFailures)
+        orchestrator?.enqueuePersistenceFailures(
+            requests: requests,
+            trackIds: persistenceFailures
+        )
         let persistedTrackIds = Set(result.downloadedPaths.keys)
             .subtracting(persistenceFailures)
         retryRunner.dequeuePersistedRetries(trackIds: persistedTrackIds)
+        await clearDownloadsInProgress(
+            trackIds: result.failedTrackIds
+                .union(result.skippedTrackIds)
+                .union(result.cancelledTrackIds)
+                .union(persistenceFailures)
+        )
 
         let finalResult = resultAfterPersistence(
             result,
@@ -346,7 +402,121 @@ final class DownloadViewModel {
         )
         finalResult.failed = result.failed + persistenceFailures.count
         finalResult.failedTrackIds.formUnion(persistenceFailures)
+        for trackId in persistenceFailures {
+            finalResult.failureReasons[trackId] = persistenceFailureReason
+        }
         return finalResult
+    }
+
+    /// Make every request terminal even when an upstream runner fails to
+    /// identify a failed track explicitly. This prevents a persisted
+    /// `downloading` state from surviving a completed batch.
+    private func terminalResult(
+        _ result: DownloadOrchestrator.BatchResult,
+        requests: [DownloadOrchestrator.DownloadRequest]
+    ) -> DownloadOrchestrator.BatchResult {
+        var terminal = result
+        let requestIDs = Set(requests.map(\.trackId))
+        let accountedFor = Set(result.downloadedPaths.keys)
+            .union(result.failedTrackIds)
+            .union(result.skippedTrackIds)
+            .union(result.cancelledTrackIds)
+        let implicitFailures = requestIDs.subtracting(accountedFor)
+        terminal.failedTrackIds.formUnion(implicitFailures)
+        for trackId in implicitFailures where terminal.failureReasons[trackId] == nil {
+            terminal.failureReasons[trackId] = DownloadOrchestrator.DownloadFailureReason
+                .sourcesExhausted
+                .userFacingText
+        }
+        terminal.failed = max(terminal.failed, terminal.failedTrackIds.count)
+        return terminal
+    }
+
+    /// Persist every provider-level terminal failure after the orchestrator
+    /// returns its per-track outcome. The DB record, not the capped legacy
+    /// retry queue, is the durable history shown after relaunch.
+    private func persistTerminalFailures(
+        result: DownloadOrchestrator.BatchResult,
+        requests: [DownloadOrchestrator.DownloadRequest]
+    ) async {
+        guard let persister = activeTrackPersister else { return }
+        let requestByTrackID = Dictionary(
+            uniqueKeysWithValues: requests.map { ($0.trackId, $0) }
+        )
+
+        for trackId in result.failedTrackIds {
+            let reason = result.failureReasons[trackId]
+                ?? DownloadOrchestrator.DownloadFailureReason.sourcesExhausted.userFacingText
+            let priorQueueAttempts = requestByTrackID[trackId]?.previousAttemptCount ?? 0
+            do {
+                _ = try await persister.persistDownloadFailure(
+                    trackId: trackId,
+                    reason: reason,
+                    date: Date(),
+                    minimumAttempts: priorQueueAttempts + 1
+                )
+            } catch {
+                // Do not mask the original terminal download outcome. The
+                // legacy retry queue remains available as a fallback when a
+                // database write itself fails.
+                AppLogger.shared.error(
+                    "Failed to persist download failure for track \(trackId): \(error.localizedDescription)",
+                    source: "Download"
+                )
+            }
+        }
+    }
+
+    /// A file that downloaded but could not be finalized in GRDB is still a
+    /// durable, user-actionable download failure whenever the database write
+    /// remains available. The legacy queue is only the fallback for a truly
+    /// unavailable database.
+    private func persistPersistenceFailures(trackIds: Set<Int64>) async {
+        guard !trackIds.isEmpty, let persister = activeTrackPersister else { return }
+
+        for trackId in trackIds {
+            do {
+                _ = try await persister.persistDownloadFailure(
+                    trackId: trackId,
+                    reason: persistenceFailureReason,
+                    date: Date(),
+                    minimumAttempts: 1
+                )
+            } catch {
+                AppLogger.shared.error(
+                    "Failed to persist finalization failure for track \(trackId): \(error.localizedDescription)",
+                    source: "Download"
+                )
+            }
+        }
+    }
+
+    private func markDownloadsInProgress(trackIds: [Int64]) async {
+        guard let persister = activeTrackPersister else { return }
+        do {
+            try await persister.markDownloadsInProgress(trackIds: trackIds)
+        } catch {
+            AppLogger.shared.error(
+                "Failed to mark downloads in progress: \(error.localizedDescription)",
+                source: "Download"
+            )
+        }
+    }
+
+    private func clearDownloadsInProgress(trackIds: Set<Int64>) async {
+        guard !trackIds.isEmpty, let persister = activeTrackPersister else { return }
+        do {
+            try await persister.clearDownloadsInProgress(trackIds: Array(trackIds))
+        } catch {
+            AppLogger.shared.error(
+                "Failed to clear download activity state: \(error.localizedDescription)",
+                source: "Download"
+            )
+        }
+    }
+
+    func persistedRetryItems() -> [DownloadQueue.QueueItem] {
+        activeRetryRunner?.persistedRetryItems() ?? []
     }
 
     private func applyTerminalStates(
@@ -369,7 +539,8 @@ final class DownloadViewModel {
                 queueItems[index].error = "download cancelled"
             } else {
                 queueItems[index].status = .failed
-                queueItems[index].error = "download failed"
+                queueItems[index].error = result.failureReasons[trackId]
+                    ?? DownloadOrchestrator.DownloadFailureReason.sourcesExhausted.userFacingText
             }
         }
     }
@@ -410,6 +581,53 @@ final class DownloadViewModel {
             level: .info,
             source: "Download"
         )
+    }
+
+    /// Retry one persisted Activity failure through the normal per-track
+    /// download path. This does not pretend that the legacy queue's global
+    /// retry operation can safely target a single row.
+    func retryDownload(trackId: Int64) async {
+        guard let trackRepository else {
+            AppLogger.shared.error(
+                "Cannot retry download because the track repository is unavailable",
+                source: "Download"
+            )
+            return
+        }
+
+        do {
+            guard let track = try await trackRepository.fetchTrack(id: trackId), track.isRemote else {
+                return
+            }
+            await downloadTracks([track], preferredSource: preferredSource(for: track))
+        } catch {
+            AppLogger.shared.error(
+                "Could not load track \(trackId) for retry: \(error.localizedDescription)",
+                source: "Download"
+            )
+        }
+    }
+
+    /// Retry every persisted Activity failure in a single batch.
+    /// Fetches each track and hands them to the normal download path so
+    /// the orchestrator re-runs its source chain per track.
+    func retryAllFailed(trackIds: [Int64]) async {
+        guard let trackRepository else {
+            AppLogger.shared.error(
+                "Cannot retry downloads because the track repository is unavailable",
+                source: "Download"
+            )
+            return
+        }
+
+        var tracks: [Track] = []
+        for trackId in trackIds {
+            if let track = try? await trackRepository.fetchTrack(id: trackId), track.isRemote {
+                tracks.append(track)
+            }
+        }
+        guard !tracks.isEmpty else { return }
+        await downloadTracks(tracks)
     }
 
     /// Download a recommended swarm track, extract its metadata, insert it in the DB, and register in track_discovery_log as 'new'.
@@ -560,7 +778,7 @@ final class DownloadViewModel {
                     ]
                 )
             } catch {
-                AppLogger.shared.log("Discovery queue download failed for \(request.title): \(error)", level: .error, source: "Download")
+                AppLogger.shared.log("Discovery download error for \(request.title): \(error)", level: .error, source: "Download")
                 await MainActor.run {
                     self.discoveryStatuses[key] = .failed
                 }
@@ -687,6 +905,23 @@ final class DownloadViewModel {
         var trimmed = normalizedPath
         while trimmed.hasPrefix("/") { trimmed.removeFirst() }
         return trimmed
+    }
+
+    private var persistenceFailureReason: String {
+        "Downloaded file could not be saved to library"
+    }
+
+    /// Preserve an explicit source link when the track itself provides one;
+    /// otherwise let the fallback chain use all available providers.
+    private func preferredSource(for track: Track) -> DownloadOrchestrator.PreferredSource {
+        let path = track.originalPath.lowercased()
+        if path.contains("youtube.com/") || path.contains("youtu.be/") {
+            return .youtube
+        }
+        if path.contains("soundcloud.com/") {
+            return .soundcloud
+        }
+        return .auto
     }
 
     // MARK: - Helpers

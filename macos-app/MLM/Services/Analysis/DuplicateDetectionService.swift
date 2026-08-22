@@ -198,6 +198,28 @@ final class DeepScanService {
         var conflictsFlagged: Int = 0
     }
 
+    private struct ScoredMatch {
+        var match: DuplicateReviewMatch
+        var fingerprintSimilarity: Double
+        var titleSimilarity: Double
+        var artistSimilarity: Double
+        var fieldScores: [String: Double]
+        var conflictingFields: [String]
+        var isVariant: Bool
+
+        var evidence: ReviewPairEvidence {
+            ReviewPairEvidence(
+                trackAId: match.trackAId,
+                trackBId: match.trackBId,
+                fingerprintSimilarity: fingerprintSimilarity,
+                titleSimilarity: titleSimilarity,
+                artistSimilarity: artistSimilarity,
+                conflictingFields: conflictingFields,
+                isVariant: isVariant
+            )
+        }
+    }
+
     /// Match threshold for fingerprint comparison.
     ///
     /// With correct Chromaprint int32 XOR comparison, random pairs score ~0.50.
@@ -305,15 +327,18 @@ final class DeepScanService {
         tracker.reset(total: totalPairs)
 
         var pairIndex = 0
+        var matches: [ScoredMatch] = []
         for (i, j) in candidatePairs {
             pairIndex += 1
 
-            if tracker.isCancelled {
+            if tracker.isCancelled || Task.isCancelled {
                 AppLogger.shared.info("Deep scan cancelled at \(result.pairsCompared) pairs", source: "Dedup")
                 return result
             }
 
-            if pairIndex % BatchControl.batchSize(turboMode: turboMode) == 0 {
+            if pairIndex == 1 ||
+                pairIndex == totalPairs ||
+                pairIndex % BatchControl.batchSize(turboMode: turboMode) == 0 {
                 tracker.updateProgress(
                     current: pairIndex,
                     trackId: 0,
@@ -346,29 +371,42 @@ final class DeepScanService {
                 DeduplicationNormalizer.normalizeArtist(trackB.artist)
             )
 
-            if titleSim < Self.metadataAgreementThreshold || artistSim < Self.metadataAgreementThreshold {
-                // Metadata conflict — flag for review
-                try await flagForReview(
-                    trackA: trackA, trackB: trackB,
-                    score: score,
-                    actionType: "metadata_conflict"
-                )
-                result.conflictsFlagged += 1
-            } else {
-                // Auto-keep better quality
-                let (keepTrack, dupTrack) = isBetterQuality(trackA, trackB) ? (trackA, trackB) : (trackB, trackA)
-                try await trackRepository.markDuplicate(
-                    trackId: dupTrack.id!,
-                    variantOf: keepTrack.id!
-                )
-                try await flagForReview(
-                    trackA: keepTrack, trackB: dupTrack,
-                    score: score,
-                    actionType: "fingerprint_dedup",
-                    autoAction: "kept_higher_quality"
-                )
-                result.duplicatesFound += 1
-            }
+            let fieldScores = Self.metadataScores(trackA: trackA, trackB: trackB, title: titleSim, artist: artistSim)
+            let conflictingFields = fieldScores.compactMap { field, score in
+                score < Self.metadataAgreementThreshold ? field : nil
+            }.sorted()
+            let isVariant = DuplicateMatcher.isVariant(
+                title1: trackA.title,
+                artist1: trackA.artist,
+                title2: trackB.title,
+                artist2: trackB.artist
+            )
+            matches.append(ScoredMatch(
+                match: DuplicateReviewMatch(trackAId: idA, trackBId: idB),
+                fingerprintSimilarity: score,
+                titleSimilarity: titleSim,
+                artistSimilarity: artistSim,
+                fieldScores: fieldScores,
+                conflictingFields: conflictingFields,
+                isVariant: isVariant
+            ))
+        }
+
+        guard !tracker.isCancelled, !Task.isCancelled else {
+            AppLogger.shared.info("Deep scan cancelled before persisting proposals", source: "Dedup")
+            return result
+        }
+
+        let reviewItems = reviewItems(from: matches, tracks: trackList)
+        result.duplicatesFound = reviewItems.filter { $0.actionType == "fingerprint_dedup" }.count
+        result.conflictsFlagged = reviewItems.filter { $0.actionType == "metadata_conflict" }.count
+
+        // A scan only proposes complete groups. Replacing the previous pending
+        // proposals prevents duplicate cards after a re-scan; resolved history
+        // remains untouched. The repository rolls back the replacement if
+        // cancellation races the final write.
+        try await analysisRepository.replacePendingScanReviewItems(reviewItems) {
+            tracker.isCancelled || Task.isCancelled
         }
 
         AppLogger.shared.log(
@@ -378,49 +416,116 @@ final class DeepScanService {
         return result
     }
 
-    // MARK: - Quality Comparison
-
-    /// Determine if trackA has better quality than trackB.
-    ///
-    /// Lossless beats lossy. Same type → higher bitrate wins.
-    private func isBetterQuality(_ a: Track, _ b: Track) -> Bool {
-        let losslessFormats: Set<String> = ["flac", "alac", "wav", "aiff"]
-        let aLossless = losslessFormats.contains(a.format.lowercased())
-        let bLossless = losslessFormats.contains(b.format.lowercased())
-
-        if aLossless && !bLossless { return true }
-        if !aLossless && bLossless { return false }
-
-        return (a.bitrate ?? 0) >= (b.bitrate ?? 0)
-    }
-
     // MARK: - Review Queue
 
-    private func flagForReview(
-        trackA: Track, trackB: Track,
-        score: Double,
-        actionType: String,
-        autoAction: String? = "flagged"
-    ) async throws {
-        let details: [String: Any] = [
-            "similarity_score": score,
-            "track_a": ["id": trackA.id ?? 0, "title": trackA.title, "artist": trackA.artist],
-            "track_b": ["id": trackB.id ?? 0, "title": trackB.title, "artist": trackB.artist]
+    private func reviewItems(from matches: [ScoredMatch], tracks: [Track]) -> [ReviewItem] {
+        let tracksByID = Dictionary(uniqueKeysWithValues: tracks.compactMap { track in
+            track.id.map { ($0, track) }
+        })
+
+        return DuplicateReviewGrouping.groups(matches: matches.map(\.match)).compactMap { group in
+            let memberIDs = Set(group.memberTrackIds)
+            let groupMatches = matches
+                .filter { memberIDs.contains($0.match.trackAId) && memberIDs.contains($0.match.trackBId) }
+                .sorted(by: scoredMatchOrder)
+            let groupTracks = group.memberTrackIds.compactMap { tracksByID[$0] }
+            guard let primaryEvidence = groupMatches.first, groupTracks.count > 1 else { return nil }
+
+            let isVariant = groupMatches.contains(where: \.isVariant)
+            let conflictingFields = Array(Set(groupMatches.flatMap(\.conflictingFields))).sorted()
+            let recommendation = DuplicateReviewRecommendation.recommendation(
+                for: groupTracks,
+                keepBoth: isVariant
+            )
+            let primaryTrackID = recommendation?.trackId ?? group.memberTrackIds[0]
+            let relatedTrackID = group.memberTrackIds.first { $0 != primaryTrackID }
+            let trackA = tracksByID[primaryEvidence.match.trackAId].map(ReviewTrackSnapshot.init(track:))
+            let trackB = tracksByID[primaryEvidence.match.trackBId].map(ReviewTrackSnapshot.init(track:))
+            let details = ReviewDetails(
+                groupKey: group.key,
+                evidence: ReviewEvidence(
+                    fingerprintSimilarity: primaryEvidence.fingerprintSimilarity,
+                    pairs: groupMatches.map(\.evidence)
+                ),
+                fieldScores: ReviewFieldScores(
+                    titleSimilarity: groupMatches.map(\.titleSimilarity).min(),
+                    artistSimilarity: groupMatches.map(\.artistSimilarity).min(),
+                    scores: Self.groupFieldScores(groupMatches)
+                ),
+                conflictingFields: conflictingFields,
+                variant: ReviewVariant(
+                    isVariant: isVariant,
+                    explanation: isVariant ? "Same recording, different version" : nil
+                ),
+                recommendation: recommendation,
+                tracks: groupTracks.map(ReviewTrackSnapshot.init(track:)),
+                similarityScore: primaryEvidence.fingerprintSimilarity,
+                trackA: trackA,
+                trackB: trackB
+            )
+
+            let actionType = !isVariant && !conflictingFields.isEmpty
+                ? "metadata_conflict"
+                : "fingerprint_dedup"
+            return ReviewItem(
+                id: nil,
+                actionType: actionType,
+                groupKey: group.key,
+                trackId: primaryTrackID,
+                relatedTrackId: relatedTrackID,
+                details: (try? details.encodedJSON()) ?? "{}",
+                autoAction: nil,
+                status: "pending",
+                createdAt: nil,
+                resolvedAt: nil
+            )
+        }
+    }
+
+    private func scoredMatchOrder(_ lhs: ScoredMatch, _ rhs: ScoredMatch) -> Bool {
+        if lhs.fingerprintSimilarity != rhs.fingerprintSimilarity {
+            return lhs.fingerprintSimilarity > rhs.fingerprintSimilarity
+        }
+        if lhs.match.trackAId != rhs.match.trackAId { return lhs.match.trackAId < rhs.match.trackAId }
+        return lhs.match.trackBId < rhs.match.trackBId
+    }
+
+    private static func metadataScores(
+        trackA: Track,
+        trackB: Track,
+        title: Double,
+        artist: Double
+    ) -> [String: Double] {
+        [
+            ReviewMetadataField.title.rawValue: title,
+            ReviewMetadataField.artist.rawValue: artist,
+            ReviewMetadataField.albumArtist.rawValue: stringSimilarity(trackA.albumArtist, trackB.albumArtist),
+            ReviewMetadataField.album.rawValue: stringSimilarity(trackA.album, trackB.album),
+            ReviewMetadataField.genre.rawValue: optionalStringSimilarity(trackA.genre, trackB.genre),
+            ReviewMetadataField.year.rawValue: trackA.year == trackB.year ? 1 : 0,
         ]
-        let detailsJSON = String(data: try JSONSerialization.data(withJSONObject: details), encoding: .utf8) ?? "{}"
+    }
 
-        let item = ReviewItem(
-            id: nil,
-            actionType: actionType,
-            trackId: trackA.id ?? 0,
-            relatedTrackId: trackB.id,
-            details: detailsJSON,
-            autoAction: autoAction,
-            status: "pending",
-            createdAt: nil,
-            resolvedAt: nil
-        )
+    private static func groupFieldScores(_ matches: [ScoredMatch]) -> [String: Double] {
+        var grouped: [String: [Double]] = [:]
+        for match in matches {
+            for (field, score) in match.fieldScores {
+                grouped[field, default: []].append(score)
+            }
+        }
+        return grouped.reduce(into: [:]) { result, entry in
+            result[entry.key] = entry.value.min() ?? 1
+        }
+    }
 
-        try await analysisRepository.saveReviewItem(item)
+    private static func stringSimilarity(_ lhs: String, _ rhs: String) -> Double {
+        let normalizedLHS = DeduplicationNormalizer.normalize(lhs)
+        let normalizedRHS = DeduplicationNormalizer.normalize(rhs)
+        if normalizedLHS.isEmpty && normalizedRHS.isEmpty { return 1 }
+        return DuplicateMatcher.jaroWinkler(normalizedLHS, normalizedRHS)
+    }
+
+    private static func optionalStringSimilarity(_ lhs: String?, _ rhs: String?) -> Double {
+        stringSimilarity(lhs ?? "", rhs ?? "")
     }
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Detail view for a sync profile.
 ///
@@ -9,7 +10,7 @@ import SwiftUI
 ///   1. Header — name, outputFolder, Refresh + Sync Now buttons
 ///   2. Divider
 ///   3. SyncSettingsForm (collapsed by default)
-///   4. Content header — "Playlists hinzufügen…" + "Tracks hinzufügen…"
+///   4. Content header with playlist and track add actions.
 ///   5. SyncContentSections — Playlists (N) + Tracks (N) DisclosureGroups
 ///   6. Divider
 ///   7. Progress OR Preview stats (D-12: swapped while isSyncing)
@@ -20,19 +21,21 @@ struct SyncProfileDetailView: View {
     @Environment(\.container) private var container
 
     private var vm: SyncViewModel? { container.syncViewModel }
+    @State private var showFilesToAdd = false
+    @State private var showFilesToRemove = false
 
     // MARK: - Human-readable sync-button disable reason
 
     private func disabledReason(_ vm: SyncViewModel) -> String? {
-        if vm.isSyncing { return "Sync läuft bereits…" }
-        if vm.isLoading { return "Vorschau wird berechnet…" }
-        guard let preview = vm.preview else { return "Vorschau noch nicht geladen — Refresh klicken" }
+        if vm.isSyncing { return "Sync is already running" }
+        if vm.isPreviewUpdating && vm.preview == nil { return "Preview is updating…" }
+        guard let preview = vm.preview else { return "Preview has not been loaded. Select Refresh to try again." }
         if !FileManager.default.fileExists(atPath: profile.outputFolder) {
-            return "Output-Ordner nicht erreichbar: \(profile.outputFolder)"
+            return "Device not connected — preview unchecked"
         }
-        if !preview.hasSufficientSpace { return "Nicht genug Speicherplatz auf dem Zielordner" }
+        if !preview.hasSufficientSpace { return "Not enough space on device" }
         if preview.filesToAdd.isEmpty && preview.filesToRemove.isEmpty {
-            return "Keine Änderungen — alles bereits synchronisiert"
+            return "No changes — everything is already synced"
         }
         return nil
     }
@@ -62,26 +65,15 @@ struct SyncProfileDetailView: View {
 
                 Divider().background(Color.mlmEdgeSubtle)
 
-                // 4. Preview stats — Live-Progress läuft jetzt im Operations-Tab
+                // 4. Cached preview and its background refresh state.
                 if let v = vm {
-                    if v.isLoading {
-                        HStack {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Vorschau wird berechnet…")
-                                .font(MLMFont.body)
-                                .foregroundColor(.mlmInkMuted)
-                        }
-                        .padding(.vertical, 8)
-                    } else if let preview = v.preview {
+                    previewStatusRow(v)
+                    if let preview = v.preview, preview.isDeviceConnected {
                         previewStatsSection(preview)
                     }
 
                     if v.isSyncing {
-                        Label("Sync läuft — Details im Operations-Tab", systemImage: "arrow.triangle.2.circlepath")
-                            .font(MLMFont.muted)
-                            .foregroundColor(.mlmInkSecondary)
-                            .padding(.top, 4)
+                        syncProgressSection(v)
                     }
 
                     // Error
@@ -112,14 +104,11 @@ struct SyncProfileDetailView: View {
             .padding(16)
         }
         .background(Color.mlmBase)
-        // VIEW observes .syncProfileDidChange — VM only posts (confirmed in 38-02)
-        .onReceive(NotificationCenter.default.publisher(for: .syncProfileDidChange)) { notification in
-            guard let profileId = notification.userInfo?["profileId"] as? Int64,
-                  profileId == profile.id else { return }
-            Task { await vm?.loadPreview(for: profile) }
+        .onReceive(NotificationCenter.default.publisher(for: NSWorkspace.didMountNotification)) { _ in
+            vm?.deviceAvailabilityDidChange(for: profile)
         }
-        .task(id: profile.id) {
-            await vm?.loadPreview(for: profile)
+        .onReceive(NotificationCenter.default.publisher(for: NSWorkspace.didUnmountNotification)) { _ in
+            vm?.deviceAvailabilityDidChange(for: profile)
         }
     }
 
@@ -132,7 +121,7 @@ struct SyncProfileDetailView: View {
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(profile.name)
-                        .font(MLMFont.title2)
+                        .font(MLMFont.pageTitle)
                         .foregroundColor(.mlmInk)
                     Text(profile.outputFolder)
                         .font(MLMFont.muted)
@@ -141,27 +130,27 @@ struct SyncProfileDetailView: View {
                         .truncationMode(.middle)
                 }
                 Spacer()
-                if v.isLoading {
+                if v.isPreviewUpdating {
                     ProgressView()
                         .controlSize(.small)
                         .padding(.trailing, 4)
                 }
                 Button {
-                    Task { await v.loadPreview(for: profile) }
+                    Task { await v.refreshPreviewNow(for: profile) }
                 } label: {
-                    Label("Aktualisieren", systemImage: "arrow.clockwise")
+                    Label("Refresh", systemImage: "arrow.clockwise")
                 }
-                .disabled(v.isLoading)
+                .disabled(v.isPreviewUpdating)
                 .keyboardShortcut("r", modifiers: .command)
-                .help("Vorschau und Profil-Inhalt neu laden (⌘R)")
+                .help("Refresh the preview and profile content (Command-R)")
 
-                Button("Sync starten") {
+                Button("Sync now") {
                     Task { await v.executeSync() }
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.mlmAccent)
-                .disabled(v.isSyncing || !(v.preview?.hasSufficientSpace ?? false))
-                .help(reason ?? "Profil-Inhalt mit dem Zielordner synchronisieren")
+                .disabled(reason != nil)
+                .help(reason ?? "Sync this profile to its destination")
             }
 
             if let reason {
@@ -187,9 +176,42 @@ struct SyncProfileDetailView: View {
     // MARK: - Preview Stats
 
     @ViewBuilder
+    private func previewStatusRow(_ vm: SyncViewModel) -> some View {
+        HStack(spacing: 8) {
+            if vm.isPreviewUpdating {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Preview: updating… \(vm.previewProcessed)/\(vm.previewTotal)")
+            } else if let preview = vm.preview, !preview.isDeviceConnected {
+                Image(systemName: "externaldrive.badge.xmark")
+                    .foregroundColor(.mlmAttention)
+                Text("Device not connected — preview unchecked")
+            } else if vm.isPreviewStale {
+                Image(systemName: "arrow.clockwise")
+                    .foregroundColor(.mlmAttention)
+                Text("Preview: outdated — updating in background")
+            } else {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(.mlmSuccess)
+                Text("Preview: up to date\(previewAgeSuffix(vm.previewComputedAt))")
+            }
+
+            Spacer()
+            if vm.isPreviewUpdating {
+                Button("Cancel") {
+                    vm.cancelPreviewRefresh()
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .font(MLMFont.muted)
+        .foregroundColor(.mlmInkSecondary)
+    }
+
+    @ViewBuilder
     private func previewStatsSection(_ preview: SyncService.SyncPreview) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Sync-Vorschau")
+            Text("Preview")
                 .font(MLMFont.sectionLabel)
                 .foregroundColor(.mlmInkMuted)
 
@@ -199,37 +221,54 @@ struct SyncProfileDetailView: View {
                 GridItem(.flexible(), spacing: 12),
                 GridItem(.flexible(), spacing: 12)
             ], spacing: 12) {
+                Button {
+                    withAnimation { showFilesToAdd.toggle() }
+                } label: {
+                    statCard(
+                        value: "\(preview.filesToAdd.count)",
+                        label: "Add",
+                        systemImage: "plus.circle.fill",
+                        color: .mlmSuccess
+                    )
+                }
+                .buttonStyle(.plain)
+                Button {
+                    withAnimation { showFilesToRemove.toggle() }
+                } label: {
+                    statCard(
+                        value: "\(preview.filesToRemove.count)",
+                        label: "Remove",
+                        systemImage: "minus.circle.fill",
+                        color: .mlmError
+                    )
+                }
+                .buttonStyle(.plain)
                 statCard(
-                    value: "\(preview.filesToAdd.count)",
-                    label: "Hinzufügen",
-                    systemImage: "plus.circle.fill",
-                    color: .green
-                )
-                statCard(
-                    value: "\(preview.filesToRemove.count)",
-                    label: "Entfernen",
-                    systemImage: "minus.circle.fill",
-                    color: .mlmError
-                )
-                statCard(
-                    value: formatBytes(preview.totalNewSize),
-                    label: "Neue Größe",
+                    value: "≈ \(formatBytes(preview.totalNewSize))",
+                    label: "New size",
                     systemImage: "arrow.triangle.2.circlepath",
                     color: .mlmAccent
                 )
                 statCard(
                     value: formatBytes(preview.deviceAvailableSpace),
-                    label: "Verfügbar",
-                    systemImage: "sdcard.fill",
-                    color: preview.hasSufficientSpace ? .green : .mlmError
+                    label: "Available",
+                    systemImage: "externaldrive.fill",
+                    color: preview.hasSufficientSpace ? .mlmSuccess : .mlmError
                 )
+            }
+
+            if showFilesToAdd {
+                previewFileList(title: "Files to add", files: preview.filesToAdd)
+            }
+            if showFilesToRemove {
+                previewFileList(title: "Files to remove", files: preview.filesToRemove)
             }
 
             if !preview.hasSufficientSpace {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundColor(.mlmError)
-                    Text("Nicht genug Speicherplatz auf dem Zielgerät")
+                    Text("Not enough space on device — need ≈\(formatBytes(preview.totalNewSize)), \(formatBytes(preview.deviceAvailableSpace)) available")
                         .font(MLMFont.muted)
                         .foregroundColor(.mlmError)
                 }
@@ -267,11 +306,97 @@ struct SyncProfileDetailView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(Color.mlmSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .stroke(Color.mlmEdgeSubtle, lineWidth: 1)
         )
+    }
+
+    @ViewBuilder
+    private func previewFileList(title: String, files: [SyncService.FilePreview]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title)
+                .font(MLMFont.sectionLabel)
+                .foregroundColor(.mlmInkMuted)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+
+            ForEach(files) { file in
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(file.artist) – \(file.title)")
+                            .font(MLMFont.body)
+                            .foregroundColor(.mlmInk)
+                            .lineLimit(1)
+                        Text(file.destinationPath)
+                            .font(MLMFont.dataSmall)
+                            .foregroundColor(.mlmInkMuted)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    Spacer()
+                    Text(formatBytes(file.size))
+                        .font(MLMFont.dataSmall)
+                        .foregroundColor(.mlmInkSecondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .contextMenu {
+                    Button("Reveal in destination") {
+                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.destinationPath)])
+                    }
+                }
+                Divider().padding(.leading, 12)
+            }
+        }
+        .background(Color.mlmSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.mlmEdgeSubtle, lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private func syncProgressSection(_ vm: SyncViewModel) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                ProgressView(value: vm.syncProgress, total: 1)
+                    .progressViewStyle(.linear)
+                Text("\(vm.isSyncPaused ? "Paused" : "Syncing…") \(vm.syncProcessed) of \(vm.syncTotal)")
+                    .font(MLMFont.bodyBold)
+                    .foregroundColor(.mlmInk)
+            }
+
+            if !vm.syncCurrentFile.isEmpty {
+                Text(vm.syncCurrentFile)
+                    .font(MLMFont.muted)
+                    .foregroundColor(.mlmInkSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            HStack {
+                Button(vm.isSyncPaused ? "Resume" : "Pause") {
+                    vm.toggleSyncPause()
+                }
+                .buttonStyle(.bordered)
+                Button("Cancel", role: .cancel) {
+                    vm.cancelSync()
+                }
+                .buttonStyle(.bordered)
+            }
+
+            if vm.syncSettingsApplyNextRun {
+                Text("Settings changes apply to the next sync.")
+                    .font(MLMFont.muted)
+                    .foregroundColor(.mlmInkSecondary)
+            }
+        }
+        .padding(12)
+        .background(Color.mlmActive.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     // MARK: - Result Section
@@ -283,8 +408,8 @@ struct SyncProfileDetailView: View {
 
             HStack(spacing: 8) {
                 Image(systemName: "checkmark.circle.fill")
-                    .foregroundColor(.green)
-                Text("\(result.syncedCount) synchronisiert")
+                    .foregroundColor(.mlmSuccess)
+                Text("\(result.syncedCount) synced")
                     .font(MLMFont.body)
                     .foregroundColor(.mlmInk)
                 if result.failedCount > 0 {
@@ -293,7 +418,7 @@ struct SyncProfileDetailView: View {
                         .foregroundColor(.mlmInkMuted)
                     Image(systemName: "xmark.circle.fill")
                         .foregroundColor(.mlmError)
-                    Text("\(result.failedCount) fehlgeschlagen")
+                    Text("\(result.failedCount) failed")
                         .font(MLMFont.body)
                         .foregroundColor(.mlmError)
                 }
@@ -315,5 +440,13 @@ struct SyncProfileDetailView: View {
         } else {
             return String(format: "%.0f KB", Double(bytes) / 1_000)
         }
+    }
+
+    private func previewAgeSuffix(_ date: Date?) -> String {
+        guard let date else { return "" }
+        let seconds = max(0, Int(Date().timeIntervalSince(date)))
+        if seconds < 60 { return " · computed just now" }
+        if seconds < 3_600 { return " · computed \(seconds / 60)m ago" }
+        return " · computed \(seconds / 3_600)h ago"
     }
 }

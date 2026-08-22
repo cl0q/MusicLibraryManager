@@ -13,6 +13,11 @@ struct SyncView: View {
     @State private var shouldApplyDeviceDefaults = false
     @State private var showRockboxToast = false
     @State private var isCreating = false
+    @State private var profilePendingDeletion: SyncProfile?
+    @State private var showingDeleteConfirmation = false
+    @State private var profilePendingRename: SyncProfile?
+    @State private var renameDraft = ""
+    @State private var showingRenameSheet = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -39,10 +44,27 @@ struct SyncView: View {
             .sheet(isPresented: $showCreateSheet) {
                 createProfileSheet
             }
+            .alert("Delete sync profile?", isPresented: $showingDeleteConfirmation) {
+                Button("Cancel", role: .cancel) {
+                    profilePendingDeletion = nil
+                }
+                Button("Delete", role: .destructive) {
+                    guard let profile = profilePendingDeletion,
+                          let vm = container.syncViewModel else { return }
+                    profilePendingDeletion = nil
+                    Task { await vm.deleteProfile(profile) }
+                }
+            } message: {
+                if let profile = profilePendingDeletion {
+                    Text("Delete \"\(profile.name)\"? This removes the sync profile but does not delete any music files.")
+                }
+            }
+            .sheet(isPresented: $showingRenameSheet) {
+                renameProfileSheet
+            }
 
-            // Phase 38: Rockbox smart-defaults toast (D-03)
             SyncToast(
-                message: "Rockbox iPod erkannt — Device-Defaults aktiviert",
+                message: "Rockbox device detected — device defaults applied",
                 isShowing: showRockboxToast
             )
         }
@@ -94,11 +116,20 @@ struct SyncView: View {
                     get: { vm.selectedProfile },
                     set: { vm.selectedProfile = $0 }
                 )) { profile in
-                    SyncProfileRow(profile: profile)
+                    SyncProfileRow(profile: profile, status: vm.profileStatus(for: profile))
                         .tag(profile)
                         .contextMenu {
-                            Button("Delete", role: .destructive) {
-                                Task { await vm.deleteProfile(profile) }
+                            Button("Rename…") {
+                                profilePendingRename = profile
+                                renameDraft = profile.name
+                                showingRenameSheet = true
+                            }
+                            Button("Duplicate") {
+                                Task { await vm.duplicateProfile(profile) }
+                            }
+                            Button("Delete…", role: .destructive) {
+                                profilePendingDeletion = profile
+                                showingDeleteConfirmation = true
                             }
                         }
                 }
@@ -123,7 +154,7 @@ struct SyncView: View {
                 Image(systemName: "arrow.triangle.2.circlepath")
                     .font(.system(size: 32))
                     .foregroundColor(.mlmInkMuted)
-                Text("Profil aus der Liste auswählen")
+                Text("Select a profile from the list")
                     .font(MLMFont.body)
                     .foregroundColor(.mlmInkMuted)
             }
@@ -135,22 +166,22 @@ struct SyncView: View {
 
     private var createProfileSheet: some View {
         VStack(spacing: 16) {
-            Text("Neues Sync-Profil")
+            Text("New Sync Profile")
                 .font(MLMFont.title3)
 
-            TextField("Profilname", text: $newProfileName)
+            TextField("Name", text: $newProfileName)
                 .textFieldStyle(.roundedBorder)
 
             HStack {
-                TextField("Ausgabe-Ordner", text: $newProfileOutput)
+                TextField("Output folder", text: $newProfileOutput)
                     .textFieldStyle(.roundedBorder)
-                Button("Durchsuchen…") {
+                Button("Browse…") {
                     let panel = NSOpenPanel()
                     panel.canChooseDirectories = true
                     panel.canChooseFiles = false
                     panel.canCreateDirectories = true
                     panel.allowsMultipleSelection = false
-                    panel.prompt = "Auswählen"
+                    panel.prompt = "Choose"
                     if panel.runModal() == .OK, let url = panel.url {
                         newProfileOutput = url.path
                     }
@@ -159,7 +190,7 @@ struct SyncView: View {
 
             // Phase 38 D-09: On-demand device detection
             VStack(alignment: .leading, spacing: 8) {
-                Button("Gerät erkennen…") {
+                Button("Detect device…") {
                     detectedDevices = DeviceDetector.detectRockboxDevices()
                     hasRunDetection = true
                 }
@@ -169,7 +200,7 @@ struct SyncView: View {
                 if hasRunDetection {
                     if detectedDevices.isEmpty {
                         // D-10: Empty state copy
-                        Text("Keine Geräte gefunden — angeschlossen?")
+                        Text("No devices found — is it connected?")
                             .font(MLMFont.muted)
                             .foregroundColor(.mlmInkMuted)
                     } else {
@@ -219,7 +250,7 @@ struct SyncView: View {
             }
 
             HStack {
-                Button("Abbrechen") {
+                Button("Cancel") {
                     showCreateSheet = false
                     detectedDevices = []
                     hasRunDetection = false
@@ -230,7 +261,7 @@ struct SyncView: View {
 
                 Spacer()
 
-                Button("Erstellen") {
+                Button("Create") {
                     guard let vm = container.syncViewModel, !newProfileName.isEmpty else { return }
                     let applyDefaults = shouldApplyDeviceDefaults
                     isCreating = true
@@ -261,12 +292,56 @@ struct SyncView: View {
         .padding(24)
         .frame(width: 420)
     }
+
+    private var renameProfileSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Rename sync profile")
+                .font(MLMFont.sectionHeader)
+            TextField("Name", text: $renameDraft)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Button("Cancel") {
+                    profilePendingRename = nil
+                    showingRenameSheet = false
+                }
+                .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Rename") {
+                    guard let profile = profilePendingRename,
+                          let vm = container.syncViewModel else { return }
+                    Task { await vm.renameProfile(profile, name: renameDraft) }
+                    profilePendingRename = nil
+                    showingRenameSheet = false
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(width: 360)
+    }
 }
 
 // MARK: - Profile Row
 
 struct SyncProfileRow: View {
     let profile: SyncProfile
+    let status: String
+
+    private var statusSymbol: String {
+        if status.hasPrefix("Syncing") { return "arrow.triangle.2.circlepath" }
+        if status == "Device not connected" { return "externaldrive.badge.xmark" }
+        if status.contains("pending") { return "circle.fill" }
+        if status.hasPrefix("Synced") { return "checkmark.circle" }
+        return "circle"
+    }
+
+    private var statusColor: Color {
+        if status.hasPrefix("Syncing") || status.contains("pending") { return .mlmActive }
+        if status == "Device not connected" { return .mlmAttention }
+        if status.hasPrefix("Synced") { return .mlmSuccess }
+        return .mlmInkSecondary
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -277,8 +352,10 @@ struct SyncProfileRow: View {
                 .foregroundColor(.mlmInkMuted)
                 .lineLimit(1)
                 .truncationMode(.middle)
+            Label(status, systemImage: statusSymbol)
+                .font(MLMFont.muted)
+                .foregroundColor(statusColor)
         }
         .padding(.vertical, 4)
     }
 }
-

@@ -63,6 +63,10 @@ extension Notification.Name {
     /// SidebarView observes this to refresh its pending-count badge on the Duplicates row.
     static let reviewQueueDidChange = Notification.Name("MLMReviewQueueDidChange")
 
+    /// Opens Review, optionally expanding the pending group containing the
+    /// supplied `trackId`. Used by Maintenance and the track inspector.
+    static let showReview = Notification.Name("MLMShowReview")
+
     // MARK: - Sync
 
     /// Posted when a sync operation completes.
@@ -87,6 +91,11 @@ extension Notification.Name {
     /// - `userInfo["succeeded"]`: `Int` — number of tracks downloaded
     /// - `userInfo["failed"]`: `Int` — number of tracks that failed
     static let downloadDidComplete = Notification.Name("MLMDownloadDidComplete")
+
+    /// Posted after an observer detects that a persisted playlist download
+    /// aggregate changed. Unlike the completion tally, this also covers active
+    /// downloading and queued states.
+    static let downloadStateDidChange = Notification.Name("MLMDownloadStateDidChange")
 
     // MARK: UI Actions (Phase 19 — menu bar integration)
 
@@ -114,7 +123,7 @@ extension Notification.Name {
 
     // MARK: - Sync UI (Phase 38)
 
-    /// Posted when user selects "Neues Profil erstellen…" from a Sync to submenu
+    /// Posted when the user creates a profile from the sync-profile submenu.
     /// in TrackContextMenu or PlaylistCard.contextMenu.
     /// ContentView or SyncView observes this to navigate to the create-profile sheet.
     static let navigateToCreateSyncProfile = Notification.Name("MLMNavigateToCreateSyncProfile")
@@ -127,7 +136,7 @@ extension Notification.Name {
     /// Posted when the user triggers "New Playlist..." with a track selection.
     static let triggerNewPlaylistFromSelection = Notification.Name("MLMTriggerNewPlaylistFromSelection")
 
-    /// Posted when the user triggers "Neues Profil erstellen..." with a track selection.
+    /// Posted when the user creates a profile with a track selection.
     static let triggerNewSyncProfileFromSelection = Notification.Name("MLMTriggerNewSyncProfileFromSelection")
     
     // MARK: - Qobuz / Squid Token Status

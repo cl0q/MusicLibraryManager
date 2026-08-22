@@ -127,6 +127,14 @@ if [[ -d "${SPM_BUNDLE_PATH}" ]]; then
   echo "› installing SPM resource bundle"
   rm -rf "${APP_BUNDLE}/Contents/Resources/MLM_MLM.bundle"
   cp -R "${SPM_BUNDLE_PATH}" "${APP_BUNDLE}/Contents/Resources/MLM_MLM.bundle"
+
+  # The Bundle.module accessor SwiftPM generates for executable targets resolves
+  # the bundle at Bundle.main.bundleURL (the .app top level) and only otherwise
+  # via the absolute .build path baked in at compile time — it never looks in
+  # Contents/Resources. Without this copy an installed app fatalErrors at launch
+  # as soon as the .build directory from build time disappears.
+  rm -rf "${APP_BUNDLE}/MLM_MLM.bundle"
+  cp -R "${SPM_BUNDLE_PATH}" "${APP_BUNDLE}/MLM_MLM.bundle"
   
   # Also copy YAMNet.mlmodelc directly to Resources for Bundle.main access
   if [[ -d "${SPM_BUNDLE_PATH}/YAMNet.mlmodelc" ]]; then

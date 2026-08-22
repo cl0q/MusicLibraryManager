@@ -4,8 +4,10 @@ import SwiftUI
 ///
 /// Shows active and recently completed operations (downloads, syncs,
 /// imports, analysis runs).
+@MainActor
 struct OperationsTab: View {
     @Environment(\.container) private var container
+    @State private var persistedDownloadFailures: [PersistedDownloadFailure] = []
 
     var body: some View {
         Group {
@@ -18,11 +20,20 @@ struct OperationsTab: View {
             }
         }
         .background(Color.mlmBase)
+        .task {
+            await loadPersistedDownloadFailures()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .downloadDidComplete)) { _ in
+            Task {
+                await loadPersistedDownloadFailures()
+            }
+        }
     }
 
     @ViewBuilder
     private func operationsContent(vm: ActivityViewModel?) -> some View {
         let hasOps = (vm?.operations.isEmpty == false) || (vm?.recentOperations.isEmpty == false)
+            || !persistedDownloadFailures.isEmpty
         let hasDownloads = container.downloadViewModel.map { downloadHasState($0) } ?? false
         let hasSync = container.syncViewModel.map { syncHasState($0) } ?? false
         let hasQueueState = PerformanceQueueService.shared.pendingAnalysesCount > 0 || PerformanceQueueService.shared.pendingDownloadsCount > 0 || PerformanceQueueService.shared.activeJobDescription != nil
@@ -74,21 +85,43 @@ struct OperationsTab: View {
                         }
                     }
 
-                    // Recent operations
-                    if let vm, !vm.recentOperations.isEmpty {
+                    // Recent operations and durable download failures. Unlike
+                    // transient operation history, persisted failures are not
+                    // clearable here because they remain actionable after a
+                    // relaunch until a successful download clears the record.
+                    if !persistedDownloadFailures.isEmpty || (vm?.recentOperations.isEmpty == false) {
                         HStack {
                             sectionHeader("Recent")
                             Spacer()
-                            Button("Clear") {
-                                vm.clearRecent()
+                            if !persistedDownloadFailures.isEmpty {
+                                Button("Retry All") {
+                                    Task {
+                                        await container.downloadViewModel?.retryAllFailed(
+                                            trackIds: persistedDownloadFailures.map(\.trackID)
+                                        )
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                                .padding(.trailing, 12)
                             }
-                            .font(MLMFont.muted)
-                            .buttonStyle(.plain)
-                            .padding(.trailing, 16)
+                            if let vm, !vm.recentOperations.isEmpty {
+                                Button("Clear") {
+                                    vm.clearRecent()
+                                }
+                                .font(MLMFont.muted)
+                                .buttonStyle(.plain)
+                                .padding(.trailing, 16)
+                            }
                         }
-                        ForEach(vm.recentOperations) { op in
-                            OperationRow(operation: op)
+                        ForEach(persistedDownloadFailures) { failure in
+                            PersistedDownloadFailureRow(failure: failure)
                             Divider().padding(.leading, 32)
+                        }
+                        if let vm {
+                            ForEach(vm.recentOperations) { op in
+                                OperationRow(operation: op)
+                                Divider().padding(.leading, 32)
+                            }
                         }
                     }
                 }
@@ -129,6 +162,145 @@ struct OperationsTab: View {
             .foregroundColor(.mlmInkMuted)
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
+    }
+
+    private func loadPersistedDownloadFailures() async {
+        guard let repository = container.trackRepository else {
+            persistedDownloadFailures = []
+            return
+        }
+
+        do {
+            let tracks = try await repository.fetchTracksWithDownloadFailures()
+            var failures = Dictionary(uniqueKeysWithValues: tracks.compactMap { track -> (Int64, PersistedDownloadFailure)? in
+                guard let trackID = track.id,
+                      let failure = downloadFailure(for: track) else {
+                    return nil
+                }
+                return (
+                    trackID,
+                    PersistedDownloadFailure(
+                        trackID: trackID,
+                        artist: track.artist,
+                        title: track.title,
+                        failure: failure
+                    )
+                )
+            })
+
+            // The legacy queue remains the fallback when finalization itself
+            // could not write to GRDB. Include it after DB failures and key by
+            // track ID so one failure never appears twice in Recent.
+            for item in container.downloadViewModel?.persistedRetryItems() ?? [] {
+                guard failures[item.trackId] == nil,
+                      let track = try await repository.fetchTrack(id: item.trackId) else {
+                    continue
+                }
+                failures[item.trackId] = PersistedDownloadFailure(
+                    trackID: item.trackId,
+                    artist: track.artist,
+                    title: track.title,
+                    failure: TrackDownloadFailure(
+                        reason: item.lastError ?? "Download failed",
+                        date: date(from: item.queuedAt),
+                        attempts: item.attemptCount
+                    )
+                )
+            }
+
+            persistedDownloadFailures = failures.values.sorted {
+                $0.failure.date > $1.failure.date
+            }
+        } catch {
+            AppLogger.shared.error(
+                "Could not load persisted download failures: \(error.localizedDescription)",
+                source: "Activity"
+            )
+        }
+    }
+
+    private func downloadFailure(for track: Track) -> TrackDownloadFailure? {
+        if let structured = track.downloadFailureRecord {
+            return structured
+        }
+        switch track.downloadStatus?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "failed", "error":
+            return TrackDownloadFailure(
+                reason: "Download failed",
+                date: .distantPast,
+                attempts: 1
+            )
+        default:
+            return nil
+        }
+    }
+
+    private func date(from text: String) -> Date {
+        ISO8601DateFormatter().date(from: text) ?? .distantPast
+    }
+}
+
+// MARK: - Persisted Download Failure
+
+private struct PersistedDownloadFailure: Identifiable {
+    let trackID: Int64
+    let artist: String
+    let title: String
+    let failure: TrackDownloadFailure
+
+    var id: Int64 { trackID }
+}
+
+private struct PersistedDownloadFailureRow: View {
+    let failure: PersistedDownloadFailure
+    @Environment(\.container) private var container
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.arrow.circlepath")
+                .font(.system(size: 14))
+                .foregroundColor(.mlmAttention)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(failure.artist) - \(failure.title)")
+                    .font(MLMFont.body)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Text(detailText)
+                    .font(MLMFont.muted)
+                    .foregroundColor(.mlmInkMuted)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            Button("Retry") {
+                Task {
+                    await container.downloadViewModel?.retryDownload(trackId: failure.trackID)
+                }
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+    }
+
+    private var attemptText: String {
+        let attempts = failure.failure.attempts
+        if attempts < 3 {
+            let remaining = 3 - attempts
+            return remaining == 1 ? "1 attempt left" : "\(remaining) attempts left"
+        }
+        return attempts == 1 ? "1 attempt" : "\(attempts) attempts"
+    }
+
+    private var detailText: String {
+        let dateText = failure.failure.date == .distantPast
+            ? ""
+            : " · \(failure.failure.date.formatted(date: .abbreviated, time: .shortened))"
+        return "\(failure.failure.reason)\(dateText) · \(attemptText)"
     }
 }
 
@@ -261,8 +433,8 @@ struct DownloadStatusRow: View {
                     vm.cancel()
                 }
                 .buttonStyle(.bordered)
-            } else if vm.failedCount > 0 {
-                Button("Retry failed") {
+            } else if vm.hasActionableRetryFailures {
+                Button("Retry all") {
                     Task { await vm.retryFailed() }
                 }
                 .buttonStyle(.bordered)
@@ -314,7 +486,7 @@ struct DownloadStatusRow: View {
 /// this row makes every batch item's real, terminal status visible
 /// (queued/downloading/transcoding/completed/failed), plus the failure
 /// reason when one is available, distinguishing a download-stage failure
-/// ("download failed") from a persistence-stage one ("downloaded but not
+/// ("download error") from a persistence-stage one ("downloaded but not
 /// saved to library").
 struct DownloadItemRow: View {
     let item: DownloadItem
@@ -417,7 +589,11 @@ struct SyncStatusRow: View {
             Spacer()
 
             if vm.isSyncing {
-                Button("Abbrechen") {
+                Button(vm.isSyncPaused ? "Resume" : "Pause") {
+                    vm.toggleSyncPause()
+                }
+                .buttonStyle(.bordered)
+                Button("Cancel", role: .cancel) {
                     vm.cancelSync()
                 }
                 .buttonStyle(.bordered)
@@ -430,10 +606,10 @@ struct SyncStatusRow: View {
     private var titleText: String {
         if vm.isSyncing {
             let n = min(vm.syncProcessed + 1, max(vm.syncTotal, 1))
-            return "Syncing \(n) / \(vm.syncTotal)"
+            return "Syncing… \(n) of \(vm.syncTotal)"
         }
         if let result = vm.lastResult {
-            return "\(result.syncedCount) synchronisiert \u{00B7} \(result.failedCount) fehlgeschlagen"
+            return "\(result.syncedCount) synced \u{00B7} \(result.failedCount) failed"
         }
         return "Sync"
     }

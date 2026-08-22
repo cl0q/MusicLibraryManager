@@ -26,6 +26,7 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
     var dateAddedLibrary: String?
     var variantOf: Int64?
     var downloadStatus: String?
+    var downloadFailure: String? = nil
     var lufsI: Double?
     var lufsRange: Double?
     var truePeak: Double?
@@ -59,6 +60,7 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
         static let dateAddedLibrary = Column(CodingKeys.dateAddedLibrary)
         static let variantOf = Column(CodingKeys.variantOf)
         static let downloadStatus = Column(CodingKeys.downloadStatus)
+        static let downloadFailure = Column(CodingKeys.downloadFailure)
         static let lufsI = Column(CodingKeys.lufsI)
         static let lufsRange = Column(CodingKeys.lufsRange)
         static let truePeak = Column(CodingKeys.truePeak)
@@ -89,6 +91,7 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
         case dateAddedLibrary = "date_added_library"
         case variantOf = "variant_of"
         case downloadStatus = "download_status"
+        case downloadFailure = "download_failure"
         case lufsI = "lufs_i"
         case lufsRange = "lufs_range"
         case truePeak = "true_peak"
@@ -105,14 +108,69 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
     /// Dynamic row identifier for Identifiable SwiftUI collection bindings.
     var rowID: Int64 { id ?? -1 }
 
-    /// Whether this track exists as a local file (not just a remote reference).
+    /// Whether this track has a stored local path (without verifying the file on disk).
     var isLocal: Bool {
         organizedPath != nil
     }
 
-    /// Whether this track is a remote-only reference (from streaming source).
+    /// Whether this track has no stored local path.
     var isRemote: Bool {
         organizedPath == nil
+    }
+
+    /// The decoded persisted failure details, if a download previously failed.
+    var downloadFailureRecord: TrackDownloadFailure? {
+        guard let downloadFailure, !downloadFailure.isEmpty else { return nil }
+        return try? TrackDownloadFailure.decodeJSON(downloadFailure)
+    }
+
+    /// Stores failure details as stable JSON in the additive `download_failure` column.
+    mutating func setDownloadFailureRecord(_ failure: TrackDownloadFailure?) throws {
+        downloadFailure = try failure?.encodedJSON()
+    }
+
+    /// Derives availability from the current persisted path, download state, and failure data.
+    /// Supply `libraryRoot` for the library-relative paths stored in `organized_path`.
+    func availability(
+        libraryRoot: URL? = nil,
+        fileExists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
+    ) -> TrackAvailability {
+        if let organizedPath, !organizedPath.isEmpty {
+            let organizedURL: URL?
+            if (organizedPath as NSString).isAbsolutePath {
+                organizedURL = URL(fileURLWithPath: organizedPath)
+            } else {
+                organizedURL = libraryRoot?.appendingPathComponent(organizedPath)
+            }
+
+            if let organizedURL, fileExists(organizedURL) {
+                return .local
+            }
+            return .fileMissing
+        }
+
+        switch downloadStatus?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "downloading", "queued", "in_progress", "in-progress":
+            // A retry keeps the prior failure record until it succeeds or
+            // fails again, but the active operation is the truthful state.
+            return .downloading
+        default:
+            break
+        }
+
+        if let failure = downloadFailureRecord {
+            return .failed(reason: failure.reason, date: failure.date, attempts: failure.attempts)
+        }
+
+        switch downloadStatus?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "failed", "error":
+            // Legacy status values did not include structured failure data.
+            return .failed(reason: "Download failed", date: .distantPast, attempts: 1)
+        default:
+            // Current rows use nil or "remote" before download, and a timestamp
+            // or "completed" after it. A path is the source of truth for locality.
+            return .notDownloaded
+        }
     }
 
     /// Formatted duration string (e.g., "3:24")
@@ -143,6 +201,7 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
         container[Columns.dateAddedLibrary] = dateAddedLibrary
         container[Columns.variantOf] = variantOf
         container[Columns.downloadStatus] = downloadStatus
+        container[Columns.downloadFailure] = downloadFailure
         container[Columns.lufsI] = lufsI
         container[Columns.lufsRange] = lufsRange
         container[Columns.truePeak] = truePeak
@@ -249,6 +308,7 @@ extension Track {
         self.dateAddedLibrary = nil
         self.variantOf = nil
         self.downloadStatus = nil
+        self.downloadFailure = nil
         self.lufsI = nil
         self.lufsRange = nil
         self.truePeak = nil
@@ -277,4 +337,3 @@ extension UTType {
         UTType("com.musiclibrary.trackdrag") ?? .data
     }
 }
-

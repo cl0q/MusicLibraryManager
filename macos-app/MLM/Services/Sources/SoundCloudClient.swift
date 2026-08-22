@@ -288,7 +288,6 @@ final class SoundCloudClient: Sendable {
         }
 
         let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
         return try decoder.decode(type, from: data)
     }
 
@@ -327,7 +326,6 @@ final class SoundCloudClient: Sendable {
         }
 
         let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
         return try decoder.decode(type, from: data)
     }
 

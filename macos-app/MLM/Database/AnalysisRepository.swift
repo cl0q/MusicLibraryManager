@@ -124,9 +124,24 @@ final class AnalysisRepository: Sendable {
 
     /// Fetch pending review items.
     func fetchPendingReviews() async throws -> [ReviewItem] {
+        try await fetchReviews(status: "pending")
+    }
+
+    /// Fetch completed review decisions. Legacy status-only dismissals remain
+    /// visible as history, while current resolved rows retain an undo snapshot.
+    func fetchResolvedReviews() async throws -> [ReviewItem] {
+        try await database.read { db in
+            try ReviewItem.fetchAll(
+                db,
+                sql: "SELECT * FROM review_queue WHERE status IN ('resolved', 'dismissed') ORDER BY id DESC"
+            )
+        }
+    }
+
+    private func fetchReviews(status: String) async throws -> [ReviewItem] {
         try await database.read { db in
             try ReviewItem
-                .filter(ReviewItem.Columns.status == "pending")
+                .filter(ReviewItem.Columns.status == status)
                 .order(ReviewItem.Columns.id.desc)
                 .fetchAll(db)
         }
@@ -141,24 +156,58 @@ final class AnalysisRepository: Sendable {
         }
     }
 
-    /// Resolve a review item.
-    func resolveReview(id: Int64) async throws {
-        try await database.write { db in
-            try db.execute(
-                sql: "UPDATE review_queue SET status = 'resolved', resolved_at = datetime('now') WHERE id = ?",
-                arguments: [id]
-            )
+    /// Fetch pending groups. Legacy pair-only rows remain individual groups,
+    /// identified by their stable queue row ID.
+    func fetchPendingReviewGroups() async throws -> [ReviewQueueGroup] {
+        try await database.read { db in
+            try ReviewQueueGroup.fetchAll(db, sql: """
+                SELECT
+                    COALESCE(group_key, 'legacy:' || id) AS group_key,
+                    MIN(action_type) AS action_type,
+                    COUNT(*) AS item_count,
+                    MAX(created_at) AS latest_created_at
+                FROM review_queue
+                WHERE status = 'pending'
+                GROUP BY COALESCE(group_key, 'legacy:' || id)
+                ORDER BY MAX(id) DESC
+            """)
         }
     }
 
-    /// Dismiss a review item.
-    func dismissReview(id: Int64) async throws {
-        try await database.write { db in
-            try db.execute(
-                sql: "UPDATE review_queue SET status = 'dismissed', resolved_at = datetime('now') WHERE id = ?",
-                arguments: [id]
-            )
+    /// Fetch all pending queue rows belonging to one review group.
+    func fetchPendingReviews(groupKey: String) async throws -> [ReviewItem] {
+        try await database.read { db in
+            try ReviewItem.fetchAll(db, sql: """
+                SELECT * FROM review_queue
+                WHERE status = 'pending' AND group_key = ?
+                ORDER BY id DESC
+            """, arguments: [groupKey])
         }
+    }
+
+    /// Count pending review groups, optionally restricted to one action type.
+    func countPendingReviewGroups(actionType: String? = nil) async throws -> Int {
+        try await database.read { db in
+            let actionFilter = actionType.map { _ in " AND action_type = ?" } ?? ""
+            let arguments = actionType.map { StatementArguments([$0]) } ?? StatementArguments()
+            return try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM (
+                    SELECT COALESCE(group_key, 'legacy:' || id)
+                    FROM review_queue
+                    WHERE status = 'pending'
+                    \(actionFilter)
+                    GROUP BY COALESCE(group_key, 'legacy:' || id)
+                )
+            """, arguments: arguments) ?? 0
+        }
+    }
+
+    /// Counts use groups instead of pair rows so the sidebar reports the same
+    /// units that the Review screen presents to the user.
+    func pendingReviewCounts() async throws -> (duplicates: Int, conflicts: Int) {
+        async let duplicates = countPendingReviewGroups(actionType: "fingerprint_dedup")
+        async let conflicts = countPendingReviewGroups(actionType: "metadata_conflict")
+        return try await (duplicates, conflicts)
     }
 
     // MARK: - Track Tags
@@ -202,6 +251,255 @@ final class AnalysisRepository: Sendable {
         }
     }
 
+    /// Persist a complete scan atomically. Cancellation is checked inside the
+    /// transaction so a cancelled scan cannot leave a subset of its groups.
+    func saveReviewItems(
+        _ items: [ReviewItem],
+        shouldCancel: @escaping @Sendable () -> Bool = { Task.isCancelled }
+    ) async throws {
+        guard !items.isEmpty else { return }
+        try await database.write { db in
+            // `DatabaseWriter.write` already executes in a transaction. A
+            // thrown cancellation rolls back every insert in this batch.
+            for item in items {
+                guard !shouldCancel() else { throw CancellationError() }
+                var review = item
+                try review.insert(db)
+            }
+        }
+    }
+
+    /// Replace only pending scan proposals in one transaction. Historical
+    /// resolutions are intentionally retained, and cancellation rolls back the
+    /// delete as well as every new proposal.
+    func replacePendingScanReviewItems(
+        _ items: [ReviewItem],
+        shouldCancel: @escaping @Sendable () -> Bool = { Task.isCancelled }
+    ) async throws {
+        try await database.write { db in
+            guard !shouldCancel() else { throw CancellationError() }
+            try db.execute(
+                sql: """
+                    DELETE FROM review_queue
+                    WHERE status = 'pending'
+                      AND action_type IN ('fingerprint_dedup', 'metadata_conflict')
+                    """
+            )
+            for item in items {
+                guard !shouldCancel() else { throw CancellationError() }
+                var review = item
+                try review.insert(db)
+            }
+        }
+    }
+
+    // MARK: - Review Resolution
+
+    /// Applies a review decision and its undo snapshot in the same database
+    /// transaction. Resolution changes database metadata only; it never moves,
+    /// renames, deletes, or trashes a media file.
+    func applyReviewResolution(
+        groupKey: String,
+        action: ReviewResolutionAction,
+        keptTrackIds: [Int64] = [],
+        metadataMerge: ReviewMetadataMerge? = nil
+    ) async throws {
+        try await database.write { db in
+            let items = try Self.reviewItems(db: db, groupKey: groupKey, status: "pending")
+            guard !items.isEmpty else { throw ReviewResolutionError.missingPendingGroup }
+
+            let trackIDs = Self.trackIDs(for: items)
+            let tracks = try Track.filter(trackIDs.contains(Track.Columns.id)).fetchAll(db)
+            let tracksByID = Dictionary(uniqueKeysWithValues: tracks.compactMap { track in
+                track.id.map { ($0, track) }
+            })
+            let orderedTrackIDs = trackIDs.sorted()
+            let availableTrackIDs = orderedTrackIDs.filter { tracksByID[$0] != nil }
+
+            let kept = Array(Set(keptTrackIds)).sorted()
+            if action == .keepRecommended || action == .keepManual {
+                guard kept.count == 1, availableTrackIDs.contains(kept[0]) else {
+                    throw ReviewResolutionError.invalidKeepSelection
+                }
+            }
+
+            let duplicateStates = availableTrackIDs.compactMap { id in
+                tracksByID[id].map {
+                    ReviewDuplicateState(trackId: id, isDuplicate: $0.isDuplicate, variantOf: $0.variantOf)
+                }
+            }
+            let metadataStates = availableTrackIDs.compactMap { id in
+                tracksByID[id].map(ReviewTrackMetadataSnapshot.init(track:))
+            }
+            let unkept = availableTrackIDs.filter { !kept.contains($0) }
+            let snapshot = ReviewResolutionSnapshot(
+                action: action.rawValue,
+                keptTrackIds: kept,
+                unkeptTrackIds: unkept,
+                duplicateStates: duplicateStates,
+                metadataStates: metadataStates
+            )
+
+            switch action {
+            case .keepRecommended, .keepManual:
+                let keptID = kept[0]
+                for trackID in availableTrackIDs {
+                    if trackID == keptID {
+                        try db.execute(
+                            sql: "UPDATE tracks SET is_duplicate = 0, variant_of = NULL WHERE id = ?",
+                            arguments: [trackID]
+                        )
+                    } else {
+                        try db.execute(
+                            sql: "UPDATE tracks SET is_duplicate = 1, variant_of = ? WHERE id = ?",
+                            arguments: [keptID, trackID]
+                        )
+                    }
+                }
+
+            case .keepAll, .mergeMetadata:
+                for trackID in availableTrackIDs {
+                    try db.execute(
+                        sql: "UPDATE tracks SET is_duplicate = 0, variant_of = NULL WHERE id = ?",
+                        arguments: [trackID]
+                    )
+                }
+
+            case .dismiss:
+                break
+            }
+
+            if action == .mergeMetadata, let metadataMerge {
+                for trackID in availableTrackIDs {
+                    guard var track = tracksByID[trackID] else { continue }
+                    Self.apply(metadataMerge, to: &track)
+                    track.searchText = DatabaseManager.foldedSearchText(track.rawSearchText)
+                    try track.update(db)
+                }
+            }
+
+            for index in items.indices {
+                var item = items[index]
+                var details = item.reviewDetails ?? ReviewDetails(
+                    groupKey: groupKey,
+                    tracks: availableTrackIDs.compactMap { tracksByID[$0].map(ReviewTrackSnapshot.init(track:)) }
+                )
+                details.resolutionSnapshot = snapshot
+                item.details = try details.encodedJSON()
+                item.status = "resolved"
+                try item.update(db)
+            }
+            try Self.updateReviewStatus(db: db, groupKey: groupKey, status: "resolved", resolvedAt: true)
+        }
+    }
+
+    /// Restores duplicate markers and metadata from the resolution snapshot,
+    /// then returns the group to the pending queue in one transaction.
+    func undoReviewResolution(groupKey: String) async throws {
+        try await database.write { db in
+            let items = try Self.reviewItems(db: db, groupKey: groupKey, status: "resolved")
+            guard let snapshot = items.compactMap(\.reviewDetails?.resolutionSnapshot).first else {
+                throw ReviewResolutionError.missingSnapshot
+            }
+
+            for state in snapshot.duplicateStates ?? [] {
+                try db.execute(
+                    sql: "UPDATE tracks SET is_duplicate = ?, variant_of = ? WHERE id = ?",
+                    arguments: [state.isDuplicate, state.variantOf, state.trackId]
+                )
+            }
+
+            for state in snapshot.metadataStates ?? [] {
+                guard var track = try Track.fetchOne(db, id: state.trackId) else { continue }
+                track.title = state.title
+                track.artist = state.artist
+                track.albumArtist = state.albumArtist
+                track.album = state.album
+                track.genre = state.genre
+                track.year = state.year
+                track.searchText = DatabaseManager.foldedSearchText(track.rawSearchText)
+                try track.update(db)
+            }
+
+            for index in items.indices {
+                var item = items[index]
+                guard var details = item.reviewDetails else { continue }
+                details.resolutionSnapshot = nil
+                item.details = try details.encodedJSON()
+                item.status = "pending"
+                try item.update(db)
+            }
+            try Self.updateReviewStatus(db: db, groupKey: groupKey, status: "pending", resolvedAt: false)
+        }
+    }
+
+    private static func reviewItems(
+        db: Database,
+        groupKey: String,
+        status: String
+    ) throws -> [ReviewItem] {
+        if let legacyID = legacyReviewID(from: groupKey) {
+            return try ReviewItem.fetchAll(
+                db,
+                sql: "SELECT * FROM review_queue WHERE id = ? AND status = ?",
+                arguments: [legacyID, status]
+            )
+        }
+        return try ReviewItem.fetchAll(
+            db,
+            sql: "SELECT * FROM review_queue WHERE group_key = ? AND status = ? ORDER BY id DESC",
+            arguments: [groupKey, status]
+        )
+    }
+
+    private static func updateReviewStatus(
+        db: Database,
+        groupKey: String,
+        status: String,
+        resolvedAt: Bool
+    ) throws {
+        let timeSQL = resolvedAt ? "datetime('now')" : "NULL"
+        if let legacyID = legacyReviewID(from: groupKey) {
+            try db.execute(
+                sql: "UPDATE review_queue SET status = ?, resolved_at = \(timeSQL) WHERE id = ?",
+                arguments: [status, legacyID]
+            )
+        } else {
+            try db.execute(
+                sql: "UPDATE review_queue SET status = ?, resolved_at = \(timeSQL) WHERE group_key = ?",
+                arguments: [status, groupKey]
+            )
+        }
+    }
+
+    private static func legacyReviewID(from groupKey: String) -> Int64? {
+        guard groupKey.hasPrefix("legacy:") else { return nil }
+        return Int64(groupKey.dropFirst("legacy:".count))
+    }
+
+    private static func trackIDs(for items: [ReviewItem]) -> Set<Int64> {
+        var ids = Set(items.flatMap { item in
+            [item.trackId, item.relatedTrackId].compactMap { $0 }
+        })
+        for item in items {
+            ids.formUnion(item.reviewDetails?.tracks.map(\.id) ?? [])
+        }
+        return ids
+    }
+
+    private static func apply(_ merge: ReviewMetadataMerge, to track: inout Track) {
+        for field in merge.fields {
+            switch field {
+            case .title: track.title = merge.title
+            case .artist: track.artist = merge.artist
+            case .albumArtist: track.albumArtist = merge.albumArtist
+            case .album: track.album = merge.album
+            case .genre: track.genre = merge.genre
+            case .year: track.year = merge.year
+            }
+        }
+    }
+
     // MARK: - Batch Queries
 
     /// Fetch all tracks missing fingerprints.
@@ -225,6 +523,23 @@ final class AnalysisRepository: Sendable {
                 WHERE r.track_id IS NULL AND t.organized_path IS NOT NULL
             """)
             return rows.compactMap { $0["id"] as? Int64 }
+        }
+    }
+}
+
+enum ReviewResolutionError: LocalizedError {
+    case invalidKeepSelection
+    case missingPendingGroup
+    case missingSnapshot
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidKeepSelection:
+            "Choose one version to keep before resolving this group."
+        case .missingPendingGroup:
+            "This review is no longer pending. Refresh Review and try again."
+        case .missingSnapshot:
+            "This review cannot be restored because its undo data is unavailable."
         }
     }
 }

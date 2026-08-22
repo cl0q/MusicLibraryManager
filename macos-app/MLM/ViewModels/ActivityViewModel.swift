@@ -133,6 +133,20 @@ final class ActivityViewModel {
         }
     }
 
+    /// Mark an operation as cancelled without presenting cancellation as a
+    /// failure in Activity → Recent.
+    func cancelOperation(id: UUID, detail: String? = nil) {
+        guard let idx = operations.firstIndex(where: { $0.id == id }) else { return }
+        operations[idx].status = .cancelled
+        operations[idx].completedAt = Date()
+        if let detail { operations[idx].detail = detail }
+
+        recentOperations.insert(operations.remove(at: idx), at: 0)
+        if recentOperations.count > 20 {
+            recentOperations = Array(recentOperations.prefix(20))
+        }
+    }
+
     /// Clear completed operations from recent list.
     func clearRecent() {
         recentOperations.removeAll()

@@ -122,7 +122,11 @@ final class ImportViewModel {
                 ]
             )
         } catch {
-            errorMessage = error.localizedDescription
+            if error is CancellationError {
+                errorMessage = nil
+            } else {
+                errorMessage = error.localizedDescription
+            }
         }
 
         isImporting = false
@@ -163,7 +167,11 @@ final class ImportViewModel {
                 ]
             )
         } catch {
-            errorMessage = error.localizedDescription
+            if error is CancellationError {
+                errorMessage = nil
+            } else {
+                errorMessage = error.localizedDescription
+            }
         }
 
         isImporting = false

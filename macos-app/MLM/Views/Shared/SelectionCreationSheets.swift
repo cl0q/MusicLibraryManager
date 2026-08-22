@@ -17,7 +17,7 @@ struct NewPlaylistFromSelectionSheet: View {
     
     var body: some View {
         VStack(spacing: 16) {
-            Text("New Playlist")
+            Text("New playlist")
                 .font(MLMFont.pageTitle)
                 .foregroundColor(.mlmInk)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -28,7 +28,7 @@ struct NewPlaylistFromSelectionSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .lineLimit(nil)
             
-            TextField("Playlist Name", text: $playlistName)
+            TextField("Playlist name", text: $playlistName)
                 .textFieldStyle(.roundedBorder)
                 .font(MLMFont.body)
                 .focused($isNameFocused)
@@ -60,7 +60,7 @@ struct NewPlaylistFromSelectionSheet: View {
                         ProgressView()
                             .controlSize(.small)
                     } else {
-                        Text(trackIds.count == 1 ? "Add 1 Song" : "Add \(trackIds.count) Songs")
+                        Text(trackIds.count == 1 ? "Add 1 track" : "Add \(trackIds.count) tracks")
                     }
                 }
                 .disabled(playlistName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSubmitting)
@@ -140,40 +140,40 @@ struct NewSyncProfileFromSelectionSheet: View {
     
     var body: some View {
         VStack(spacing: 16) {
-            Text("Neues Profil erstellen")
+            Text("New Sync Profile")
                 .font(MLMFont.pageTitle)
                 .foregroundColor(.mlmInk)
                 .frame(maxWidth: .infinity, alignment: .leading)
             
-            Text("Erstelle ein neues Sync-Profil. Die \(trackIds.count) ausgewählten Lieder werden direkt hinzugefügt.")
+            Text("Create a new sync profile. The \(trackIds.count) selected track\(trackIds.count == 1 ? "" : "s") will be added directly.")
                 .font(MLMFont.body)
                 .foregroundColor(.mlmInkSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .lineLimit(nil)
             
             VStack(alignment: .leading, spacing: 6) {
-                Text("Profilname")
+                Text("Name")
                     .font(MLMFont.sectionLabel)
                     .foregroundColor(.mlmInkSecondary)
                 
-                TextField("z.B. Walkman, USB-Drive", text: $profileName)
+                TextField("For example, Walkman or USB drive", text: $profileName)
                     .textFieldStyle(.roundedBorder)
                     .font(MLMFont.body)
                     .focused($isNameFocused)
             }
             
             VStack(alignment: .leading, spacing: 6) {
-                Text("Zielordner")
+                Text("Output folder")
                     .font(MLMFont.sectionLabel)
                     .foregroundColor(.mlmInkSecondary)
                 
                 HStack {
-                    TextField("Kein Ordner ausgewählt", text: $outputFolder)
+                    TextField("No folder selected", text: $outputFolder)
                         .textFieldStyle(.roundedBorder)
                         .font(MLMFont.body)
                         .disabled(true)
                     
-                    Button("Auswählen...") {
+                    Button("Browse...") {
                         selectFolder()
                     }
                 }
@@ -201,7 +201,7 @@ struct NewSyncProfileFromSelectionSheet: View {
                         ProgressView()
                             .controlSize(.small)
                     } else {
-                        Text(trackIds.count == 1 ? "Add 1 Song" : "Add \(trackIds.count) Songs")
+                        Text(trackIds.count == 1 ? "Add 1 track" : "Add \(trackIds.count) tracks")
                     }
                 }
                 .disabled(profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || outputFolder.isEmpty || isSubmitting)
@@ -222,7 +222,7 @@ struct NewSyncProfileFromSelectionSheet: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.prompt = "Ordner wählen"
+        panel.prompt = "Choose folder"
         
         if panel.runModal() == .OK {
             if let path = panel.url?.path {
@@ -233,7 +233,7 @@ struct NewSyncProfileFromSelectionSheet: View {
     
     private func createSyncProfile() {
         guard let syncVM = container.syncViewModel else {
-            errorMessage = "SyncViewModel is not available."
+            errorMessage = "Sync is unavailable."
             return
         }
         

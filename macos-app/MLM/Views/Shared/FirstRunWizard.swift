@@ -17,6 +17,7 @@ struct FirstRunWizard: View {
     @State private var step: WizardStep = .welcome
     @State private var selectedPath: String?
     @State private var isSelectingFolder = false
+    @State private var importTask: Task<Void, Never>?
 
     /// Callback when the wizard completes (library root is set).
     var onComplete: () -> Void
@@ -118,7 +119,7 @@ struct FirstRunWizard: View {
                     .font(MLMFont.sectionHeader)
                     .foregroundColor(.mlmInk)
 
-                Text("Choose the folder that contains your music files.\nMLM supports MP3, FLAC, AAC, M4A, OGG, WAV, and AIFF.")
+                Text("Choose the folder that contains your music files.\nMLM supports MP3, FLAC, AAC, M4A, OGG, WAV, AIFF, and ALAC.")
                     .font(MLMFont.body)
                     .foregroundColor(.mlmInkSecondary)
                     .multilineTextAlignment(.center)
@@ -219,6 +220,16 @@ struct FirstRunWizard: View {
             }
 
             Spacer()
+
+            Button("Cancel") {
+                importTask?.cancel()
+                importTask = nil
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    step = .selectFolder
+                }
+            }
+            .buttonStyle(.bordered)
+            .padding(.bottom, 32)
         }
     }
 
@@ -272,6 +283,12 @@ struct FirstRunWizard: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
             }
+
+            Text("MLM will create folders like \"Downloads (SoundCloud)\" inside your library when you import from sources — see Settings → Library for details.")
+                .font(MLMFont.muted)
+                .foregroundColor(.mlmInkMuted)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 44)
 
             Spacer()
 
@@ -337,13 +354,16 @@ struct FirstRunWizard: View {
             step = .scanning
         }
 
-        Task {
+        importTask?.cancel()
+        importTask = Task {
             await viewModel?.setLibraryRoot(path)
             await viewModel?.importLibrary()
+            guard !Task.isCancelled else { return }
 
             withAnimation(.easeInOut(duration: 0.3)) {
                 step = .done
             }
+            importTask = nil
         }
     }
 }

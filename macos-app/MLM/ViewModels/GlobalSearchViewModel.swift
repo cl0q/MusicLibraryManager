@@ -107,7 +107,7 @@ final class GlobalSearchViewModel {
         }
 
         if results.isEmpty {
-            errorMessage = "Keine Treffer gefunden."
+            errorMessage = "No results found."
         }
     }
 
@@ -118,7 +118,7 @@ final class GlobalSearchViewModel {
     func resolveLink(_ url: String) async {
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.lowercased().hasPrefix("http") else {
-            errorMessage = "Bitte eine gültige URL einfügen (beginnt mit http)."
+            errorMessage = "Paste a valid URL that starts with http."
             return
         }
         isSearching = true
@@ -145,7 +145,7 @@ final class GlobalSearchViewModel {
         }
 
         if results.isEmpty && errorMessage == nil {
-            errorMessage = "Keine herunterladbaren Inhalte an dieser URL gefunden."
+            errorMessage = "No downloadable content was found at this URL."
         }
     }
 

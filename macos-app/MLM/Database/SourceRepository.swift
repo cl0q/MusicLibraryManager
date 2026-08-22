@@ -3,9 +3,9 @@ import GRDB
 
 /// Repository for music sources and track-source relationships.
 final class SourceRepository: Sendable {
-    private let database: DatabasePool
+    private let database: any DatabaseWriter
 
-    init(database: DatabasePool) {
+    init(database: any DatabaseWriter) {
         self.database = database
     }
 
@@ -149,6 +149,6 @@ final class SourceRepository: Sendable {
         )
     }
 
-    /// Expose the database pool for repositories that need cross-repo access.
-    var databasePool: DatabasePool { database }
+    /// Exposes the shared writer for repositories that need cross-repo access.
+    var databaseWriter: any DatabaseWriter { database }
 }

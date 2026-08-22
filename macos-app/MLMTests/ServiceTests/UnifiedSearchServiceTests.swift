@@ -39,7 +39,7 @@ struct UnifiedSearchServiceTests {
     @Test func testSoundCloudClientSearchTracks() async throws {
         let tokenStorage = TokenStorage()
         let oauthManager = OAuthManager()
-        let dbPool = try DatabaseManager().pool
+        let dbPool = try DatabaseManager.inMemory()
         let trackRepo = TrackRepository(database: dbPool)
         let sourceRepo = SourceRepository(database: dbPool)
         
@@ -85,7 +85,7 @@ struct UnifiedSearchServiceTests {
     @Test func testUnifiedSearchServiceSearch() async throws {
         let tokenStorage = TokenStorage()
         let oauthManager = OAuthManager()
-        let dbPool = try DatabaseManager().pool
+        let dbPool = try DatabaseManager.inMemory()
         let trackRepo = TrackRepository(database: dbPool)
         let sourceRepo = SourceRepository(database: dbPool)
         

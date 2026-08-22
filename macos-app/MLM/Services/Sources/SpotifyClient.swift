@@ -307,7 +307,7 @@ final class SpotifyClient {
         sourceId: Int64
     ) async throws -> Playlist? {
         // Create the playlist if it doesn't exist
-        let existingPlaylists = try await PlaylistRepository(database: sourceRepository.databasePool)
+        let existingPlaylists = try await PlaylistRepository(database: sourceRepository.databaseWriter)
             .fetchAll()
         let existing = existingPlaylists.first { $0.name == spotifyPlaylist.name }
 

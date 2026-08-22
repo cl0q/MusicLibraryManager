@@ -15,6 +15,8 @@ final class FolderViewModel {
     private(set) var rootNodes: [DiskFolderNode] = []
     private(set) var allRootNodes: [DiskFolderNode] = []
     private(set) var tracksInFolder: [Track] = []
+    private(set) var availabilityByTrackID: [Int64: TrackAvailability] = [:]
+    private(set) var unindexedAudioFileCount = 0
     private(set) var libraryRootURL: URL?
     private(set) var isDriveNotMounted = false
 
@@ -85,10 +87,12 @@ final class FolderViewModel {
         isLoading = true
         errorMessage = nil
         isDriveNotMounted = false
+        availabilityByTrackID = [:]
 
         do {
             guard let rootPath = try await configRepository.getLibraryRoot(), !rootPath.isEmpty else {
                 allRootNodes = []
+                libraryRootURL = nil
                 applyFilter()
                 isLoading = false
                 return
@@ -99,6 +103,7 @@ final class FolderViewModel {
             guard FileManager.default.fileExists(atPath: rootURL.path) else {
                 isDriveNotMounted = true
                 allRootNodes = []
+                libraryRootURL = nil
                 applyFilter()
                 isLoading = false
                 return
@@ -122,6 +127,8 @@ final class FolderViewModel {
     private func loadTracksForSelectedFolder() async {
         guard let path = selectedFolderPath else {
             tracksInFolder = []
+            availabilityByTrackID = [:]
+            unindexedAudioFileCount = 0
             return
         }
 
@@ -130,9 +137,35 @@ final class FolderViewModel {
             let dirURL = URL(fileURLWithPath: path)
             let fileURLs = try await diskScanner.filesInDirectory(dirURL)
             let paths = fileURLs.map { $0.standardizedFileURL.path }
-            let result = try await trackRepository.fetchTracksByOriginalPaths(paths)
+            let result = try await trackRepository.fetchTracksByFilesystemPaths(
+                paths,
+                libraryRoot: libraryRootURL
+            )
+            let availability = TrackPresentationAvailability.map(
+                tracks: result,
+                libraryRoot: libraryRootURL,
+                fileExists: { FileManager.default.fileExists(atPath: $0.path) }
+            )
             let ms = Int(Date().timeIntervalSince(start) * 1000)
             tracksInFolder = result
+            availabilityByTrackID = availability
+            let indexedPaths = Set(result.compactMap { track -> String? in
+                guard let organizedPath = track.organizedPath, !organizedPath.isEmpty else { return nil }
+                if (organizedPath as NSString).isAbsolutePath {
+                    return URL(fileURLWithPath: organizedPath).standardizedFileURL.path
+                }
+                return libraryRootURL?.appendingPathComponent(organizedPath).standardizedFileURL.path
+            })
+            let originalPaths = Set(result.compactMap { track -> String? in
+                guard (track.originalPath as NSString).isAbsolutePath else { return nil }
+                return URL(fileURLWithPath: track.originalPath).standardizedFileURL.path
+            })
+            unindexedAudioFileCount = fileURLs.reduce(into: 0) { count, fileURL in
+                let path = fileURL.standardizedFileURL.path
+                if !indexedPaths.contains(path) && !originalPaths.contains(path) {
+                    count += 1
+                }
+            }
             AppLogger.shared.info(
                 "folder tracks load: \(result.count) tracks in \(ms)ms",
                 source: "perf"
@@ -140,6 +173,8 @@ final class FolderViewModel {
             applyTrackSort()
         } catch {
             tracksInFolder = []
+            availabilityByTrackID = [:]
+            unindexedAudioFileCount = 0
             errorMessage = error.localizedDescription
         }
     }

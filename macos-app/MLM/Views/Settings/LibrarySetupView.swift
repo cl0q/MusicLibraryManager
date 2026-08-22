@@ -39,6 +39,12 @@ struct LibrarySetupView: View {
                 }
             }
 
+            Section {
+                storageLayoutView
+            } header: {
+                Label("Storage layout", systemImage: "folder.badge.gearshape")
+            }
+
             // MARK: - Import Section
             if libraryRoot != nil {
                 Section {
@@ -102,6 +108,24 @@ struct LibrarySetupView: View {
     }
 
     // MARK: - Statistics
+
+    private var storageLayoutView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("MLM creates these folders inside your library when they are needed:")
+                .font(MLMFont.body)
+                .foregroundColor(.mlmInkSecondary)
+            storageLayoutRow(ManagedLibraryLayout.soundCloudDownloads, "Music downloaded from SoundCloud.")
+            storageLayoutRow(ManagedLibraryLayout.youtubeDownloads, "Music downloaded from YouTube and fallback sources.")
+            storageLayoutRow(ManagedLibraryLayout.transcodeOriginals, "Original files retained while MLM creates a transcode.")
+        }
+    }
+
+    private func storageLayoutRow(_ name: String, _ purpose: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(name).font(MLMFont.mono)
+            Text(purpose).font(MLMFont.muted).foregroundColor(.mlmInkMuted)
+        }
+    }
 
     private var statisticsView: some View {
         VStack(alignment: .leading, spacing: 6) {

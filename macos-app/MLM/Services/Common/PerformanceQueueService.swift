@@ -46,6 +46,11 @@ final class PerformanceQueueService: Sendable {
     
     /// Whether any download (internal or external) is currently active.
     private(set) var isDownloadActive: Bool = false
+
+    /// Whether an external sync-preview computation is currently active.
+    /// Analysis yields while previews are being prepared, while downloads
+    /// retain the queue's highest priority.
+    private(set) var isSyncPreviewActive: Bool = false
     
     // MARK: - Core Execution Actor
     
@@ -119,6 +124,14 @@ final class PerformanceQueueService: Sendable {
             await actor.setExternalDownloadActive(active)
         }
     }
+
+    /// Report externally-run sync preview work to the priority queue.
+    /// Preview work sits below downloads and above analysis.
+    func setExternalSyncPreviewActive(_ active: Bool) {
+        Task {
+            await actor.setExternalSyncPreviewActive(active)
+        }
+    }
     
     /// Clear the entire pending queue.
     func clearQueue() {
@@ -134,12 +147,14 @@ final class PerformanceQueueService: Sendable {
         pendingDownloads: Int,
         pendingAnalyses: Int,
         activeJobDesc: String?,
-        downloadActive: Bool
+        downloadActive: Bool,
+        syncPreviewActive: Bool
     ) {
         self.pendingDownloadsCount = pendingDownloads
         self.pendingAnalysesCount = pendingAnalyses
         self.activeJobDescription = activeJobDesc
         self.isDownloadActive = downloadActive
+        self.isSyncPreviewActive = syncPreviewActive
     }
 }
 
@@ -152,6 +167,7 @@ actor PerformanceQueueActor {
     private var queue: [PerformanceJob] = []
     private var activeJob: PerformanceJob? = nil
     private var isExternalDownloadActive = false
+    private var isExternalSyncPreviewActive = false
     private var activeDownloadsCount = 0
     private var isWorkerRunning = false
     
@@ -165,6 +181,14 @@ actor PerformanceQueueActor {
     
     func setExternalDownloadActive(_ active: Bool) async {
         self.isExternalDownloadActive = active
+        await updateServiceState()
+        if !active {
+            triggerWorker()
+        }
+    }
+
+    func setExternalSyncPreviewActive(_ active: Bool) async {
+        isExternalSyncPreviewActive = active
         await updateServiceState()
         if !active {
             triggerWorker()
@@ -249,6 +273,13 @@ actor PerformanceQueueActor {
                 return queue.remove(at: index)
             }
             return nil
+        } else if isExternalSyncPreviewActive {
+            // Sync previews are external, user-visible work. They pause
+            // analysis but never block a waiting download.
+            if let index = queue.firstIndex(where: { $0.type == .download }) {
+                return queue.remove(at: index)
+            }
+            return nil
         } else {
             // Otherwise, pull from the front of the queue
             if !queue.isEmpty {
@@ -270,6 +301,8 @@ actor PerformanceQueueActor {
         if let activeJob = activeJob {
             let typeStr = activeJob.type == .download ? "Downloading" : "Analyzing"
             activeDesc = "\(typeStr): \(activeJob.track.artist) - \(activeJob.track.title)"
+        } else if isExternalSyncPreviewActive {
+            activeDesc = "Preparing sync preview"
         } else {
             activeDesc = nil
         }
@@ -280,7 +313,8 @@ actor PerformanceQueueActor {
             pendingDownloads: downloads,
             pendingAnalyses: analyses,
             activeJobDesc: activeDesc,
-            downloadActive: dlActive
+            downloadActive: dlActive,
+            syncPreviewActive: isExternalSyncPreviewActive
         )
     }
     
@@ -432,8 +466,8 @@ actor PerformanceQueueActor {
     /// Cooperative suspension point.
     /// Sleeps and yields execution to give full network and CPU bandwidth to high-priority downloads.
     private func checkSuspensionPoints() async throws {
-        while isDownloadActive {
-            // Cooperative yield and wait 500ms before checking again
+        while isDownloadActive || isExternalSyncPreviewActive {
+            // Cooperative yield while user-visible download or preview work has priority.
             try await Task.sleep(nanoseconds: 500_000_000)
             if Task.isCancelled {
                 throw CancellationError()

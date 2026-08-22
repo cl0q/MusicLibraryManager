@@ -73,7 +73,9 @@ final class MaintenanceProgressTracker: @unchecked Sendable {
     func reset(total: Int) {
         lock.lock()
         state.update(current: 0, total: total)
+        let currentStateSnapshot = state
         lock.unlock()
+        progressHandler?(currentStateSnapshot)
     }
 
     /// Update progress with current item info

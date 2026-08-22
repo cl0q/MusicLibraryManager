@@ -5,26 +5,25 @@ import SwiftUI
 /// GREENFIELD — no direct analog in MLM (closest shape: PinnedPlaylistsDisclosure).
 /// Defaults to collapsed to avoid visual clutter when syncs partially fail.
 ///
-/// `failedTracks` matches SyncService.SyncResult.failedTracks: [(Int64, String)]
-/// where the tuple is (trackId, errorMessage).
+/// `failedTracks` carries display metadata so the UI never exposes raw track
+/// IDs as the only explanation of a failed sync item.
 struct SyncFailedDisclosure: View {
-    let failedTracks: [(Int64, String)]
+    let failedTracks: [SyncService.SyncFailure]
     let vm: SyncViewModel
 
     @State private var isExpanded: Bool = false
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
-            ForEach(Array(failedTracks.enumerated()), id: \.element.0) { _, entry in
-                let (trackId, errorMessage) = entry
-                failedTrackRow(trackId: trackId, errorMessage: errorMessage)
+            ForEach(failedTracks) { failure in
+                failedTrackRow(failure)
             }
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundColor(.mlmError)
                     .font(.system(size: 12))
-                Text("Fehlgeschlagene Tracks (\(failedTracks.count))")
+                Text("Failed tracks (\(failedTracks.count))")
                     .font(MLMFont.bodyBold)
                     .foregroundColor(.mlmInk)
             }
@@ -34,18 +33,18 @@ struct SyncFailedDisclosure: View {
     }
 
     @ViewBuilder
-    private func failedTrackRow(trackId: Int64, errorMessage: String) -> some View {
+    private func failedTrackRow(_ failure: SyncService.SyncFailure) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Track #\(trackId)")
-                .font(MLMFont.body)
+            Text("\(failure.artist) – \(failure.title)")
+                .font(MLMFont.bodyBold)
                 .foregroundColor(.mlmInk)
                 .lineLimit(1)
-            Text(errorMessage)
+            Text(failure.reason)
                 .font(MLMFont.muted)
                 .foregroundColor(.mlmError)
                 .lineLimit(2)
-            Button("Wiederholen") {
-                Task { await vm.retryFailedTrack(trackId) }
+            Button("Retry") {
+                Task { await vm.retryFailedTrack(failure.trackId) }
             }
             .buttonStyle(.borderless)
             .tint(.mlmAccent)

@@ -7,16 +7,18 @@ struct DiscoveryInboxView: View {
     @State private var isLoading = false
     @State private var alertMessage: String?
     @State private var showingAlert = false
+    @State private var trackPendingDeletion: Track?
+    @State private var showingDeleteConfirmation = false
 
     var body: some View {
         VStack(spacing: 0) {
             // Header
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Discovery Inbox")
+                    Text("Recommendations")
                         .font(MLMFont.title3)
                         .foregroundColor(.mlmInk)
-                    Text("\(inboxItems.count) recommended neighbors waiting for review")
+                    Text("\(inboxItems.count) recommendations waiting for review")
                         .font(MLMFont.muted)
                         .foregroundColor(.mlmInkMuted)
                 }
@@ -35,7 +37,7 @@ struct DiscoveryInboxView: View {
 
             if isLoading {
                 VStack {
-                    ProgressView("Loading discovery inbox...")
+                    ProgressView("Loading recommendations…")
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if inboxItems.isEmpty {
@@ -43,10 +45,10 @@ struct DiscoveryInboxView: View {
                     Image(systemName: "sparkles")
                         .font(.system(size: 48))
                         .foregroundColor(.mlmInkMuted)
-                    Text("Your Discovery Inbox is empty")
+                    Text("No recommendations yet")
                         .font(MLMFont.body)
                         .foregroundColor(.mlmInkMuted)
-                    Text("Find recommendations for local tracks using Swarm Intelligence and download them to list them here.")
+                    Text("Open a track's Similar tab to find and download recommendations.")
                         .font(MLMFont.muted)
                         .foregroundColor(.mlmInkMuted)
                         .multilineTextAlignment(.center)
@@ -64,7 +66,8 @@ struct DiscoveryInboxView: View {
                                 Task { await approveTrack(item) }
                             },
                             onReject: {
-                                Task { await rejectTrack(item) }
+                                trackPendingDeletion = item.track
+                                showingDeleteConfirmation = true
                             },
                             onPreview: {
                                 playDropPreview(item.track)
@@ -76,12 +79,24 @@ struct DiscoveryInboxView: View {
             }
         }
         .background(Color.mlmBase)
-        .alert("Discovery Inbox", isPresented: $showingAlert) {
+        .alert("Recommendations", isPresented: $showingAlert) {
             Button("OK", role: .cancel) {}
         } message: {
             if let msg = alertMessage {
                 Text(msg)
             }
+        }
+        .alert("Delete file?", isPresented: $showingDeleteConfirmation) {
+            Button("Cancel", role: .cancel) {
+                trackPendingDeletion = nil
+            }
+            Button("Delete", role: .destructive) {
+                guard let track = trackPendingDeletion else { return }
+                trackPendingDeletion = nil
+                Task { await rejectTrack(track) }
+            }
+        } message: {
+            Text("Delete this file from disk?")
         }
         .task {
             await loadInboxItems()
@@ -109,73 +124,28 @@ struct DiscoveryInboxView: View {
     }
 
     private func approveTrack(_ item: (track: Track, log: TrackDiscoveryLog, seedTrack: Track?)) async {
-        guard let trackRepo = container.trackRepository else { return }
-        guard let trackId = item.track.id else { return }
-        
+        guard let reviewService = container.discoveryReviewService else { return }
         do {
-            // 1. Update discovery status to 'approved'
-            try await trackRepo.updateDiscoveryStatus(discoveredTrackId: trackId, status: "approved")
-            
-            // 2. Direct Similarity Feedback Boost (feedbackValue = 1)
-            if let seedId = item.log.seedTrackId {
-                try await trackRepo.saveSimilarityFeedback(
-                    seedTrackId: seedId,
-                    targetTrackId: trackId,
-                    feedbackValue: 1
-                )
-                
-                // 3. Vector Gravity (pullRate = 0.05) to warp local embedding space
-                try await trackRepo.applyVectorGravity(
-                    seedTrackId: seedId,
-                    targetTrackId: trackId,
-                    pullRate: 0.05
-                )
-                
-                AppLogger.shared.info(
-                    "Approved suggested track '\(item.track.title)' by \(item.track.artist). Local Vector Gravity learning applied.",
-                    source: "Discovery"
-                )
-            }
-
-            // Post notification to reload views
-            NotificationCenter.default.post(name: .libraryDidImport, object: nil)
-            
+            try await reviewService.accept(
+                track: item.track,
+                seedTrackID: item.log.seedTrackId,
+                source: item.log.discoverySource
+            )
             await loadInboxItems()
         } catch {
-            alertMessage = "Failed to approve track: \(error.localizedDescription)"
+            alertMessage = "Could not add this recommendation to your library."
             showingAlert = true
         }
     }
 
-    private func rejectTrack(_ item: (track: Track, log: TrackDiscoveryLog, seedTrack: Track?)) async {
-        guard let trackRepo = container.trackRepository else { return }
-        guard let trackId = item.track.id else { return }
+    private func rejectTrack(_ track: Track) async {
+        guard let reviewService = container.discoveryReviewService else { return }
 
         do {
-            // 1. Delete physical file from disk if it exists
-            let rawPath = item.track.originalPath
-            if !rawPath.isEmpty {
-                let fileURL = URL(fileURLWithPath: rawPath)
-                if FileManager.default.fileExists(atPath: fileURL.path) {
-                    try FileManager.default.removeItem(at: fileURL)
-                    AppLogger.shared.info("Deleted rejected discovery physical file: \(fileURL.lastPathComponent)", source: "Discovery")
-                }
-            }
-
-            // 2. Delete track from database (cascades automatically to track_discovery_log)
-            try await trackRepo.delete(id: trackId)
-            
-            AppLogger.shared.info(
-                "Rejected suggested track '\(item.track.title)' by \(item.track.artist). Track fully purged.",
-                source: "Discovery"
-            )
-
-            // Post notification to reload views
-            NotificationCenter.default.post(name: .libraryDidImport, object: nil)
-            
+            try await reviewService.delete(track: track)
             await loadInboxItems()
         } catch {
-            alertMessage = "Failed to reject track: \(error.localizedDescription)"
+            alertMessage = "Could not delete this recommendation."
             showingAlert = true
         }
     }
@@ -192,7 +162,7 @@ struct DiscoveryInboxView: View {
                embedding.dropOffset > 0 {
                 // Seek straight to the Drop
                 playbackVM.seek(to: embedding.dropOffset)
-                AppLogger.shared.debug("Drop-Fokus: Seeking straight to drop at \(Int(embedding.dropOffset))s", source: "Discovery")
+                AppLogger.shared.debug("Previewing from detected audio point at \(Int(embedding.dropOffset))s", source: "Discovery")
             }
         }
     }
@@ -233,7 +203,7 @@ struct DiscoveryInboxRow: View {
                             .font(MLMFont.muted)
                             .foregroundColor(.mlmInkMuted)
                         
-                        Text("🔗 Neighbor of \(seed.title)")
+                        Text("Recommended because you liked \"\(seed.title)\"")
                             .font(MLMFont.muted)
                             .foregroundColor(.mlmAccent)
                             .lineLimit(1)
@@ -257,26 +227,12 @@ struct DiscoveryInboxRow: View {
             
             // Action Buttons
             HStack(spacing: 8) {
-                Button(action: onPreview) {
-                    Image(systemName: "headphones")
-                        .foregroundColor(.mlmAccent)
-                }
-                .buttonStyle(.plain)
-                .help("Play Drop-Fokus Preview")
-                
-                Button(action: onApprove) {
-                    Image(systemName: "hand.thumbsup.fill")
-                        .foregroundColor(.green)
-                }
-                .buttonStyle(.plain)
-                .help("Approve & Warp Embeddings")
-                
-                Button(action: onReject) {
-                    Image(systemName: "hand.thumbsdown.fill")
-                        .foregroundColor(.mlmError)
-                }
-                .buttonStyle(.plain)
-                .help("Reject & Purge File")
+                Button("Preview", action: onPreview)
+                    .buttonStyle(.bordered)
+                Button("Add to library", action: onApprove)
+                    .buttonStyle(.bordered)
+                Button("Delete…", role: .destructive, action: onReject)
+                    .buttonStyle(.bordered)
             }
             .padding(.leading, 8)
         }

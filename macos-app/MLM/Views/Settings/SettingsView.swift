@@ -27,6 +27,12 @@ struct SettingsView: View {
                     Label("Maintenance", systemImage: "wrench.and.screwdriver")
                 }
                 .tag("maintenance")
+
+            GrooveStudioView()
+                .tabItem {
+                    Label("Advanced", systemImage: "slider.horizontal.3")
+                }
+                .tag("advanced")
         }
         .frame(minWidth: 500, minHeight: 400)
     }

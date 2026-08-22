@@ -26,8 +26,8 @@ struct TrackContextMenu: View {
         selectedTracks.contains { $0.isLocal }
     }
 
-    private var allRemote: Bool {
-        selectedTracks.allSatisfy { $0.isRemote }
+    private var missingTracks: [Track] {
+        selectedTracks.filter(\.isRemote)
     }
 
     private var countSuffix: String {
@@ -36,17 +36,14 @@ struct TrackContextMenu: View {
 
     /// Label for the Download item — shows track count when batching.
     private var downloadButtonLabel: String {
-        let count = selectedTracks.count
-        if count <= 1 {
-            return "Download"
-        }
-        return "Download \(count) tracks"
+        let count = missingTracks.count
+        return "Download \(count) missing track\(count == 1 ? "" : "s")"
     }
 
     /// Greys out Download when there's nothing to do or a batch is already
     /// in flight.
     private var downloadDisabled: Bool {
-        selectedTracks.isEmpty ||
+        missingTracks.isEmpty ||
         (container.downloadViewModel?.isDownloading ?? false)
     }
 
@@ -117,13 +114,13 @@ struct TrackContextMenu: View {
                         userInfo: ["trackIds": Array(selectedTrackIDs)]
                     )
                 } label: {
-                    Label("Neues Profil erstellen…", systemImage: "plus.circle")
+                    Label("Create new profile…", systemImage: "plus.circle")
                 }
 
                 Divider()
 
                 if availableSyncProfiles.isEmpty {
-                    Text("Keine Profile — erstelle zuerst eines")
+                    Text("No sync profiles — create one first")
                 } else {
                     ForEach(availableSyncProfiles) { profile in
                         Button {
@@ -137,10 +134,10 @@ struct TrackContextMenu: View {
                 Button {
                     NotificationCenter.default.post(name: .navigateToCreateSyncProfile, object: nil)
                 } label: {
-                    Label("Neues Profil erstellen… (Settings)", systemImage: "plus.circle")
+                    Label("Create new profile… (Settings)", systemImage: "plus.circle")
                 }
             } label: {
-                Label("Sync zu \u{25B8}", systemImage: "arrow.triangle.2.circlepath")
+                Label("Sync to \u{25B8}", systemImage: "arrow.triangle.2.circlepath")
             }
             .disabled(selectedTracks.isEmpty)
         }
@@ -160,7 +157,7 @@ struct TrackContextMenu: View {
             Divider()
         }
 
-        if allRemote {
+        if !missingTracks.isEmpty {
             Section {
                 Button {
                     downloadSelectedTracks()
@@ -212,13 +209,13 @@ struct TrackContextMenu: View {
     private func confirmRemovalAlert(count: Int) -> Bool {
         let alert = NSAlert()
         alert.messageText = count > 1
-            ? "\(count) Tracks aus der Library entfernen?"
-            : "Track aus der Library entfernen?"
-        alert.informativeText = "Lokale Dateien werden in den Papierkorb verschoben. Remote-Verlinkungen werden gelöscht. Diese Aktion lässt sich über den Papierkorb wiederherstellen."
+            ? "Remove \(count) tracks from Library?"
+            : "Remove track from Library?"
+        alert.informativeText = "This moves local files to the Trash. You can restore them from there. Remote links are removed from the Library."
         alert.alertStyle = .warning
-        let trash = alert.addButton(withTitle: "In Papierkorb verschieben")
+        let trash = alert.addButton(withTitle: "Move to Trash")
         trash.hasDestructiveAction = true
-        alert.addButton(withTitle: "Abbrechen")
+        alert.addButton(withTitle: "Cancel")
         return alert.runModal() == .alertFirstButtonReturn
     }
 
@@ -281,7 +278,7 @@ struct TrackContextMenu: View {
     /// batch completes (via the `.downloadDidComplete` notification).
     private func downloadSelectedTracks() {
         guard let downloadVM = container.downloadViewModel else { return }
-        let tracksCopy = selectedTracks
+        let tracksCopy = missingTracks
         Task {
             await downloadVM.downloadTracks(tracksCopy)
         }

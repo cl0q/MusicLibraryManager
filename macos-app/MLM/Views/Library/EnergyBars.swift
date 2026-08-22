@@ -2,14 +2,10 @@ import SwiftUI
 
 /// 5-bar energy visualization for the library table.
 ///
-/// Renders the LUFS-derived `energyBucket` (1–5) as colored bars,
-/// matching the Tauri app's `EnergyBars` component.
+/// Renders the LUFS-derived `energyBucket` (1–5) as accent-color bars.
 ///
-/// - Level 1: ▃ (1 bar, cyan)
-/// - Level 2: ▃▅ (2 bars, emerald)
-/// - Level 3: ▃▅▇ (3 bars, amber)
-/// - Level 4: ▃▅▇▅ (4 bars, orange)
-/// - Level 5: ▃▅▇▅▃ (5 bars, rose)
+/// - Level 1: accent at 25% opacity
+/// - Level 5: accent at 100% opacity
 ///
 /// Nil energy shows "—" placeholder.
 struct EnergyBars: View {
@@ -39,16 +35,9 @@ struct EnergyBars: View {
         }
     }
 
-    /// Color for the entire bar group based on energy level — uses system semantic colors.
+    /// Color for the entire bar group based on its energy level.
     private func colorForLevel(_ level: Int) -> Color {
-        switch level {
-        case 1: .cyan
-        case 2: .green
-        case 3: .yellow
-        case 4: .orange
-        case 5: .red
-        default: .secondary
-        }
+        .mlmAccent.opacity(Color.mlmEnergyOpacity(for: level))
     }
 }
 

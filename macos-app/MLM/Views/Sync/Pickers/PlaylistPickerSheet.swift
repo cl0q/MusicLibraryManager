@@ -16,6 +16,8 @@ struct PlaylistPickerSheet: View {
     @State private var allPlaylists: [Playlist] = []
     @State private var selectedIds: Set<Int64> = []
     @State private var searchQuery: String = ""
+    @State private var isLoading = true
+    @State private var loadingError: String?
     @FocusState private var searchFocused: Bool
 
     private var filtered: [Playlist] {
@@ -30,7 +32,7 @@ struct PlaylistPickerSheet: View {
 
             // Sheet title bar
             HStack {
-                Text("Playlists zum Profil hinzufügen")
+                Text("Add playlists to profile")
                     .font(MLMFont.bodyBold)
                     .foregroundColor(.mlmInk)
                 Spacer()
@@ -45,7 +47,7 @@ struct PlaylistPickerSheet: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 11))
                     .foregroundColor(.mlmInkMuted)
-                TextField("Playlist-Namen durchsuchen…", text: $searchQuery)
+                TextField("Search playlist names...", text: $searchQuery)
                     .textFieldStyle(.plain)
                     .font(MLMFont.body)
                     .foregroundColor(.mlmInk)
@@ -66,8 +68,62 @@ struct PlaylistPickerSheet: View {
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .padding(16)
 
-            // Playlist list — checkbox-style toggle per row.
-            // Plain click toggles selection (no Cmd/Shift needed).
+            playlistsContent
+
+            Divider().background(Color.mlmEdge)
+
+            // Action buttons
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .buttonStyle(.borderless)
+                    .foregroundColor(.mlmInkSecondary)
+                Spacer()
+                Button(
+                    selectedIds.isEmpty
+                        ? "Add"
+                        : "Add (\(selectedIds.count))"
+                ) {
+                    Task {
+                        await vm.addPlaylists(Array(selectedIds))
+                        dismiss()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(selectedIds.isEmpty)
+            }
+            .padding(16)
+        }
+        .frame(width: 400, height: 500)
+        .background(Color.mlmBase)
+        .task { await loadPlaylists() }
+    }
+
+    @ViewBuilder
+    private var playlistsContent: some View {
+        if isLoading {
+            ProgressView("Loading playlists...")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let loadingError {
+            ContentUnavailableView {
+                Label("Could not load playlists", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(loadingError)
+            } actions: {
+                Button("Retry") { Task { await loadPlaylists() } }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if allPlaylists.isEmpty {
+            ContentUnavailableView {
+                Label("No playlists", systemImage: "music.note.list")
+            } description: {
+                Text("Create one first, then add it to this sync profile.")
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if filtered.isEmpty {
+            ContentUnavailableView.search(text: searchQuery)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
             List(filtered, id: \.id) { playlist in
                 let pid = playlist.id ?? -1
                 let isSelected = selectedIds.contains(pid)
@@ -93,38 +149,27 @@ struct PlaylistPickerSheet: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .background(Color.mlmBase)
-
-            Divider().background(Color.mlmEdge)
-
-            // Action buttons
-            HStack {
-                Button("Abbrechen") { dismiss() }
-                    .buttonStyle(.borderless)
-                    .foregroundColor(.mlmInkSecondary)
-                Spacer()
-                Button(
-                    selectedIds.isEmpty
-                        ? "Hinzufügen"
-                        : "Hinzufügen (\(selectedIds.count))"
-                ) {
-                    Task {
-                        await vm.addPlaylists(Array(selectedIds))
-                        dismiss()
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-                .disabled(selectedIds.isEmpty)
-            }
-            .padding(16)
         }
-        .frame(width: 400, height: 500)
-        .background(Color.mlmBase)
-        .task {
-            if let repo = container.playlistRepository {
-                allPlaylists = (try? await repo.fetchAll()) ?? []
-            }
+    }
+
+    private func loadPlaylists() async {
+        isLoading = true
+        loadingError = nil
+        defer {
+            isLoading = false
             searchFocused = true
+        }
+
+        guard let repo = container.playlistRepository else {
+            loadingError = "Playlists are unavailable. Try again after the library finishes loading."
+            return
+        }
+
+        do {
+            allPlaylists = try await repo.fetchAll()
+        } catch {
+            allPlaylists = []
+            loadingError = "Playlists could not be loaded. Try again."
         }
     }
 }

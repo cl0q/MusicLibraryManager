@@ -18,6 +18,13 @@ final class PlaylistDetailViewModel {
     /// Tracks in the playlist, ordered by position.
     private(set) var tracks: [Track] = []
 
+    /// One root-backed availability snapshot shared by every detail action
+    /// and the playlist table. It is rebuilt only after a complete track load.
+    private(set) var availabilityByTrackID: [Int64: TrackAvailability] = [:]
+
+    /// The authoritative external source for a linked playlist.
+    private(set) var source: Source?
+
     /// Whether tracks are loading.
     private(set) var isLoading = false
 
@@ -32,6 +39,38 @@ final class PlaylistDetailViewModel {
     /// Filtered tracks based on search query.
     private(set) var displayedTracks: [Track] = []
 
+    var downloadStatus: PlaylistDownloadStatus {
+        PlaylistDownloadStatus(
+            playlistID: playlist.id ?? -1,
+            tracks: tracks,
+            availabilityByTrackID: availabilityByTrackID
+        )
+    }
+
+    var failedTracks: [Track] {
+        tracks.filter {
+            if case .failed = availability(for: $0) { return true }
+            return false
+        }
+    }
+
+    var notDownloadedTracks: [Track] {
+        tracks.filter { availability(for: $0) == .notDownloaded }
+    }
+
+    var playableTracks: [Track] {
+        tracks.filter { availability(for: $0) == .local }
+    }
+
+    var downloadPin: DownloadOrchestrator.PreferredSource {
+        source?.playlistSourceIdentity.downloadPin ?? .auto
+    }
+
+    func availability(for track: Track) -> TrackAvailability {
+        guard let trackID = track.id else { return track.availability() }
+        return availabilityByTrackID[trackID] ?? track.availability()
+    }
+
     /// Selected track IDs for multi-select operations.
     var selectedTrackIDs: Set<Int64> = []
 
@@ -39,13 +78,23 @@ final class PlaylistDetailViewModel {
 
     private let playlistRepository: PlaylistRepository
     private let trackRepository: TrackRepository
+    private let sourceRepository: SourceRepository
+    private let configRepository: ConfigRepository?
 
     // MARK: - Init
 
-    init(playlist: Playlist, playlistRepository: PlaylistRepository, trackRepository: TrackRepository) {
+    init(
+        playlist: Playlist,
+        playlistRepository: PlaylistRepository,
+        trackRepository: TrackRepository,
+        sourceRepository: SourceRepository,
+        configRepository: ConfigRepository? = nil
+    ) {
         self.playlist = playlist
         self.playlistRepository = playlistRepository
         self.trackRepository = trackRepository
+        self.sourceRepository = sourceRepository
+        self.configRepository = configRepository
     }
 
     // MARK: - Load
@@ -64,7 +113,22 @@ final class PlaylistDetailViewModel {
                 self.playlist = freshPlaylist
             }
 
-            tracks = try await playlistRepository.fetchTracks(playlistId: playlistId)
+            if let sourceID = playlist.sourceId {
+                source = try await sourceRepository.fetch(id: sourceID)
+            } else {
+                source = nil
+            }
+
+            let libraryRoot = await libraryRootSnapshot()
+            let loadedTracks = try await playlistRepository.fetchTracks(playlistId: playlistId)
+            let availability = TrackPresentationAvailability.map(
+                tracks: loadedTracks,
+                libraryRoot: libraryRoot,
+                fileExists: { FileManager.default.fileExists(atPath: $0.path) }
+            )
+
+            tracks = loadedTracks
+            availabilityByTrackID = availability
             applyFilter()
         } catch {
             errorMessage = "Failed to load tracks: \(error.localizedDescription)"
@@ -77,6 +141,18 @@ final class PlaylistDetailViewModel {
     @MainActor
     func refresh() async {
         await loadTracks()
+    }
+
+    /// Revalidates the existing rows after the configured library root changes
+    /// without issuing another playlist-track query.
+    @MainActor
+    func refreshAvailabilitySnapshot() async {
+        let libraryRoot = await libraryRootSnapshot()
+        availabilityByTrackID = TrackPresentationAvailability.map(
+            tracks: tracks,
+            libraryRoot: libraryRoot,
+            fileExists: { FileManager.default.fileExists(atPath: $0.path) }
+        )
     }
 
     // MARK: - Source Synchronization
@@ -351,6 +427,14 @@ final class PlaylistDetailViewModel {
         }
     }
 
+    /// Removes several tracks from this playlist without deleting library files.
+    @MainActor
+    func removeTracks(_ trackIDs: Set<Int64>) async {
+        guard !trackIDs.isEmpty else { return }
+        selectedTrackIDs = trackIDs
+        await removeSelectedTracks()
+    }
+
     // MARK: - Reorder (Drag & Drop)
 
     /// Move a track to a new position via drag-and-drop.
@@ -459,6 +543,16 @@ final class PlaylistDetailViewModel {
     }
 
     // MARK: - Filtering
+
+    private func libraryRootSnapshot() async -> URL? {
+        guard let configRepository else {
+            return nil
+        }
+
+        guard let path = try? await configRepository.getLibraryRoot(),
+              !path.isEmpty else { return nil }
+        return URL(fileURLWithPath: path)
+    }
 
     private func applyFilter() {
         if searchQuery.isEmpty {

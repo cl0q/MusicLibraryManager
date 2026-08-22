@@ -18,6 +18,7 @@ struct SyncSettingsForm: View {
     @State private var localCleanup: Bool
     @State private var localPlaylistFormat: String
     @State private var localNormalizeLoudness: Bool
+    @State private var localBackgroundProcessing: SyncTurboLevel
 
     init(profile: SyncProfile, vm: SyncViewModel) {
         self.profile = profile
@@ -28,6 +29,7 @@ struct SyncSettingsForm: View {
         _localCleanup = State(initialValue: profile.cleanupRemovedFiles)
         _localPlaylistFormat = State(initialValue: profile.playlistFormat)
         _localNormalizeLoudness = State(initialValue: profile.normalizeLoudness)
+        _localBackgroundProcessing = State(initialValue: vm.syncService.syncTurboLevel)
     }
 
     var body: some View {
@@ -46,7 +48,7 @@ struct SyncSettingsForm: View {
                         .background(Color.mlmAccent.opacity(0.1))
                         .cornerRadius(6)
                     
-                    Text("Einstellungen")
+                    Text("Settings")
                         .font(MLMFont.bodyBold)
                         .foregroundColor(.mlmInk)
                     
@@ -72,8 +74,8 @@ struct SyncSettingsForm: View {
                     VStack(spacing: 16) {
                         settingRow(
                             icon: "music.note.list",
-                            title: "Wiedergabelisten",
-                            description: "Erstellt Wiedergabelistendateien für Rockbox oder Doppi",
+                            title: "Playlists",
+                            description: "Create .m3u8 files for Rockbox or Doppi",
                             content: Toggle("", isOn: $localM3U8)
                                 .toggleStyle(.switch)
                                 .labelsHidden()
@@ -85,8 +87,8 @@ struct SyncSettingsForm: View {
                         if localM3U8 {
                             settingRow(
                                 icon: "doc.plaintext",
-                                title: "Format & App",
-                                description: "Wähle das passende App-Profil (.m3u/.m3u8) als Ziel",
+                                title: "Format & app",
+                                description: "Choose the playlist format for the target app",
                                 content: Picker("", selection: $localPlaylistFormat) {
                                     Text("Rockbox").tag("rockbox")
                                     Text("Doppi").tag("doppi")
@@ -105,12 +107,12 @@ struct SyncSettingsForm: View {
 
                         settingRow(
                             icon: "arrow.triangle.2.circlepath",
-                            title: "Transcode-Modus",
-                            description: "Lieder beim Kopieren konvertieren (AAC)",
+                            title: "Transcode mode",
+                            description: "Originals, AAC 248k, or AAC 320k",
                             content: Picker("", selection: $localTranscodeMode) {
                                 Text("Originals").tag("keep_originals")
-                                Text("248k AAC").tag("aac_248")
-                                Text("320k AAC").tag("aac_320")
+                                Text("AAC 248k").tag("aac_248")
+                                Text("AAC 320k").tag("aac_320")
                             }
                             .pickerStyle(.segmented)
                             .frame(width: 220)
@@ -124,8 +126,8 @@ struct SyncSettingsForm: View {
 
                         settingRow(
                             icon: "speaker.wave.2.fill",
-                            title: "Lautstärke angleichen",
-                            description: "Gleicht alle Lieder auf −14 LUFS an (nur bei AAC-Transcode)",
+                            title: "Normalize volume",
+                            description: "−14 LUFS, AAC modes only",
                             content: Toggle("", isOn: $localNormalizeLoudness)
                                 .toggleStyle(.switch)
                                 .labelsHidden()
@@ -139,8 +141,8 @@ struct SyncSettingsForm: View {
 
                         settingRow(
                             icon: "folder.badge.gearshape",
-                            title: "Kompatible Pfade",
-                            description: "Bereinigt Sonderzeichen im Dateipfad für FAT32/SD-Karten",
+                            title: "Compatible paths",
+                            description: "Use FAT32-safe file paths",
                             content: Toggle("", isOn: $localFat32)
                                 .toggleStyle(.switch)
                                 .labelsHidden()
@@ -153,14 +155,33 @@ struct SyncSettingsForm: View {
 
                         settingRow(
                             icon: "trash",
-                            title: "Aufräumen",
-                            description: "Entfernt gelöschte Lieder automatisch vom Zielordner",
+                            title: "Clean up",
+                            description: "Remove deleted tracks from the destination",
                             content: Toggle("", isOn: $localCleanup)
                                 .toggleStyle(.switch)
                                 .labelsHidden()
                         )
                         .onChange(of: localCleanup) { _, newValue in
                             Task { await vm.updateProfileSettings(cleanupRemovedFiles: newValue) }
+                        }
+
+                        Divider().background(Color.mlmEdgeSubtle)
+
+                        settingRow(
+                            icon: "gauge.with.dots.needle.50percent",
+                            title: "Background processing",
+                            description: localBackgroundProcessing.detail,
+                            content: Picker("", selection: $localBackgroundProcessing) {
+                                ForEach(SyncTurboLevel.allCases) { level in
+                                    Text(level.displayName).tag(level)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .frame(width: 260)
+                            .labelsHidden()
+                        )
+                        .onChange(of: localBackgroundProcessing) { _, newValue in
+                            vm.setBackgroundProcessing(newValue)
                         }
                     }
                     .padding(.horizontal, 16)
@@ -184,6 +205,7 @@ struct SyncSettingsForm: View {
             localCleanup = profile.cleanupRemovedFiles
             localPlaylistFormat = profile.playlistFormat
             localNormalizeLoudness = profile.normalizeLoudness
+            localBackgroundProcessing = vm.syncService.syncTurboLevel
         }
     }
 

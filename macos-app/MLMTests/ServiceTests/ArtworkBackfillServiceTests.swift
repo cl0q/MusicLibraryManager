@@ -31,18 +31,38 @@ struct ArtworkBackfillServiceTests {
         return (db, svc)
     }
 
+    private func waitUntil(
+        timeout: Duration = .seconds(2),
+        condition: @escaping () -> Bool
+    ) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now + timeout
+        while !condition() {
+            guard clock.now < deadline else { return false }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return true
+    }
+
     @Test func testObservesLibraryDidImport() async throws {
-        let (_, svc) = try await makeService()
+        let (db, svc) = try await makeService()
+        try await db.write { db in
+            var track = Track(
+                artist: "Artist",
+                album: "Album",
+                title: "Track",
+                format: "m4a",
+                originalPath: "/nonexistent/track.m4a"
+            )
+            track.organizedPath = "Artist/Album/Track.m4a"
+            try track.insert(db)
+        }
         // Initially not backfilling
         #expect(svc.isBackfilling == false)
-        // Posting libraryDidImport should trigger observation (service enqueues work)
+        // Posting libraryDidImport starts and completes a background backfill.
         NotificationCenter.default.post(name: .libraryDidImport, object: nil)
-        // Wait long enough for the async Task chain to spin up and complete on an empty DB.
-        // 500ms is sufficient even under heavy CI load; backfillMissing on an empty library
-        // is nearly instant (no tracks to process), just the Task scheduler overhead.
-        try await Task.sleep(for: .milliseconds(500))
-        // For an empty library, backfillMissing completes instantly — just verify no crash
-        #expect(svc.isBackfilling == false, "Should not be stuck in backfilling state")
+        #expect(await waitUntil { svc.progress.total == 1 })
+        #expect(await waitUntil { !svc.isBackfilling }, "Backfill should return to idle")
     }
 
     @Test func testConcurrencyLimit() async throws {

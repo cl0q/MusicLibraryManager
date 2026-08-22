@@ -1,6 +1,6 @@
 import Foundation
 
-/// Custom errors thrown by the Hybrid Swarm Intelligence Suggestions Engine.
+/// Custom errors thrown while loading recommendations.
 enum SwarmError: LocalizedError {
     case lastFmApiKeyMissing
     case lastFmHttpError(statusCode: Int, message: String)
@@ -16,29 +16,29 @@ enum SwarmError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .lastFmApiKeyMissing:
-            return "Last.fm-Fehler: LASTFM_API_KEY fehlt in deiner .env Datei."
-        case .lastFmHttpError(let statusCode, let message):
-            return "Last.fm-Fehler (HTTP \(statusCode)): \(message)"
-        case .lastFmNetworkError(let underlying):
-            return "Last.fm-Netzwerkfehler: \(underlying.localizedDescription)"
-        case .lastFmDecodingError(let underlying):
-            return "Last.fm-Antwort konnte nicht verarbeitet werden: \(underlying.localizedDescription)"
+            return "Last.fm not configured — add an API key in Settings."
+        case .lastFmHttpError(let statusCode, _):
+            return "Last.fm could not load recommendations (HTTP \(statusCode))."
+        case .lastFmNetworkError:
+            return "Last.fm network error."
+        case .lastFmDecodingError:
+            return "Last.fm returned an invalid response."
             
         case .soundCloudClientIdMissing:
-            return "SoundCloud-Fehler: client_id konnte nicht aus ~/.config/scdl/scdl.cfg geladen werden."
+            return "SoundCloud is not configured. Add a client ID in Settings."
         case .soundCloudResolveError(let statusCode):
-            return "SoundCloud-Fehler beim Auflösen des Tracks (HTTP \(statusCode))."
+            return "SoundCloud could not resolve this track (HTTP \(statusCode))."
         case .soundCloudRelatedError(let statusCode):
-            return "SoundCloud-Fehler beim Laden ähnlicher Tracks (HTTP \(statusCode))."
-        case .soundCloudNetworkError(let underlying):
-            return "SoundCloud-Netzwerkfehler: \(underlying.localizedDescription)"
+            return "SoundCloud could not load recommendations (HTTP \(statusCode))."
+        case .soundCloudNetworkError:
+            return "SoundCloud network error."
         case .soundCloudSearchEmpty(let query):
-            return "SoundCloud-Suche ergab keine Ergebnisse für: \"\(query)\""
+            return "No SoundCloud results found for \"\(query)\"."
         }
     }
 }
 
-/// Structured recommendation returned by the hybrid Swarm Intelligence engine.
+/// Structured recommendation returned by the recommendation service.
 struct SwarmRecommendation: Codable, Sendable, Hashable {
     var artist: String
     var title: String
