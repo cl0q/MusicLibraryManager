@@ -1,17 +1,12 @@
 # Secrets
 .env
-src-tauri/.tokens/
 
 # Databases
 *.db
 
-# Caches
-src-tauri/artwork_cache/
-src-tauri/transcode_cache/
-
-# Local data
-src-tauri/00_Artists/
-src-tauri/00_Artists_staging/
+# Local data (music library — keep out of git; tracked files inside stay tracked)
+00_Artists/
+00_Artists_staging/
 
 # OS / editor junk
 .DS_Store
@@ -22,7 +17,6 @@ __pycache__/
 
 # Shotty automation artifacts
 .shotty/
-macos-app/.shotty/
 
 # Archived / scratch
 _archive/
@@ -30,24 +24,11 @@ code_map.md
 HANDOFF_PROMPT.md
 mlm_gaps.md
 
-# Rust build output
-/target/
-src-tauri/target/
-src-tauri/gen/
-
 # Swift / SPM build output
-macos-app/.build/
-macos-app/Package.resolved
-macos-app/.swiftpm/
-macos-app/DerivedData/
-
-# Node/build output
-ui/node_modules/
-ui/dist/
-
-# Test artifacts
-ui/e2e/results/
-ui/e2e/screenshots/
+.build/
+Package.resolved
+.swiftpm/
+DerivedData/
 
 # Unrelated
 streaming2ipod/
