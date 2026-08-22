@@ -20,6 +20,10 @@ __pycache__/
 # GSD internal
 .planning/
 
+# Shotty automation artifacts
+.shotty/
+macos-app/.shotty/
+
 # Archived / scratch
 _archive/
 code_map.md

@@ -1,5 +1,7 @@
 import SwiftUI
 
+// MARK: Accessibility labels for shotty UI automation (snake_case literals)
+
 /// Library browser container — toolbar with Local/Remote picker, search,
 /// re-scan button, and the sortable `LibraryTable` for the actual rows.
 struct LibraryView: View {
@@ -83,6 +85,8 @@ struct LibraryView: View {
                 .help("Re-scan the library folder for changes")
                 .keyboardShortcut("r", modifiers: .command)
                 .disabled(isRescanning)
+                .accessibilityIdentifier("rescan_button")
+                .accessibilityLabel("rescan_button")
             }
 
             ToolbarItem(placement: .automatic) {
@@ -111,6 +115,8 @@ struct LibraryView: View {
             .pickerStyle(.segmented)
             .frame(maxWidth: 280)
             .labelsHidden()
+            .accessibilityIdentifier("library_source_picker")
+            .accessibilityLabel("library_source_picker")
 
             Spacer()
         }
@@ -156,8 +162,12 @@ struct LibraryView: View {
 
     private func initializeViewModel() {
         guard viewModel == nil,
-              let trackRepo = container.trackRepository else { return }
-        viewModel = LibraryViewModel(trackRepository: trackRepo)
+              let trackRepo = container.trackRepository,
+              let configRepo = container.configRepository else { return }
+        viewModel = LibraryViewModel(
+            trackRepository: trackRepo,
+            configRepository: configRepo
+        )
     }
 
     private func ensureImportViewModel() {

@@ -1,5 +1,7 @@
 import SwiftUI
 
+// MARK: Accessibility labels for shotty UI automation (snake_case literals)
+
 /// Sidebar nested-disclosure subcomponent listing pinned playlists
 /// (Plan 36-04, decisions D-07/D-08/D-09/D-11).
 ///
@@ -12,7 +14,7 @@ import SwiftUI
 /// `case .playlistDetail(let id)` route — direct to `PlaylistDetailView`
 /// with no grid intermediary (D-09 Apple-Music sidebar behaviour).
 ///
-/// **Inline rename (D-11)** — "Funktional vollständig, keine künstliche Minimal-Variante":
+/// Inline rename keeps the full playlist-management flow in the sidebar.
 /// selecting *Rename…* from the per-row context menu flips that row into a
 /// focused `TextField`. `.onSubmit` (Enter) commits via
 /// `playlistRepository.rename(id:name:)` and posts `.playlistDidChange`,
@@ -67,6 +69,8 @@ struct PinnedPlaylistsDisclosure: View {
                 .springLoadableHover {
                     onSelectSection(topLevelSection)
                 }
+                .accessibilityIdentifier("sidebar_playlists_disclosure")
+                .accessibilityLabel("sidebar_playlists_disclosure")
         }
         .task { await loadPinned() }
         .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { _ in

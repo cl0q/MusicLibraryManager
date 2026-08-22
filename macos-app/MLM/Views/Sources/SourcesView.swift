@@ -139,6 +139,8 @@ struct SourceCard: View {
                 Spacer()
 
                 statusDot
+                    .accessibilityIdentifier("source_card")
+                    .accessibilityLabel("\(source.displayName): \(statusText)")
             }
 
             Divider()
@@ -295,9 +297,9 @@ struct SourceCard: View {
 
     private var brandColor: Color {
         switch source {
-        case .spotify: .mlmSpotify
-        case .soundcloud: .mlmSoundCloud
-        case .appleMusic: .mlmAppleMusic
+        case .spotify: .mlmBrandSpotify
+        case .soundcloud: .mlmBrandSoundCloud
+        case .appleMusic: .mlmBrandAppleMusic
         }
     }
 }
@@ -320,7 +322,7 @@ struct YouTubePlaylistCard: View {
                     Text("YouTube")
                         .font(MLMFont.bodyBold)
                         .foregroundColor(.mlmInk)
-                    Text("Playlist per URL")
+                    Text("Import a playlist")
                         .font(MLMFont.muted)
                         .foregroundColor(.mlmInkSecondary)
                 }
@@ -330,7 +332,7 @@ struct YouTubePlaylistCard: View {
             Divider()
                 .background(Color.mlmEdge)
 
-            Text("Füge eine YouTube-Playlist-URL ein, um Titel herunterzuladen.")
+            Text("Paste a playlist URL to download tracks.")
                 .font(MLMFont.muted)
                 .foregroundColor(.mlmInkSecondary)
 
@@ -341,7 +343,7 @@ struct YouTubePlaylistCard: View {
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "music.note.list")
-                    Text("Playlists")
+                    Text("Import playlist...")
                 }
                 .frame(maxWidth: .infinity)
             }

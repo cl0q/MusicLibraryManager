@@ -1,5 +1,7 @@
 import SwiftUI
 
+// MARK: Accessibility labels for shotty UI automation (snake_case literals)
+
 /// Folder browser — split pane with disk tree (left) and tracks (right).
 struct FoldersView: View {
     @Environment(\.container) private var container
@@ -15,7 +17,7 @@ struct FoldersView: View {
             if let viewModel {
                 foldersContent(viewModel)
             } else {
-                ProgressView("Ordner werden geladen…")
+                ProgressView("Loading folders…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.mlmBase)
             }
@@ -65,7 +67,7 @@ struct FoldersView: View {
         .background(Color.mlmBase)
         .toolbar {
             ToolbarItem(placement: .automatic) {
-                Text("\(viewModel.folderCount) Ordner")
+                Text("\(viewModel.folderCount) folders")
                     .font(MLMFont.muted)
                     .foregroundColor(.mlmInkMuted)
             }
@@ -76,7 +78,7 @@ struct FoldersView: View {
 
     private func headerBar(_ viewModel: FolderViewModel) -> some View {
         HStack(spacing: 8) {
-            Text("Ordner")
+            Text("Folders")
                 .font(MLMFont.pageTitle)
                 .foregroundColor(.mlmInk)
 
@@ -95,7 +97,7 @@ struct FoldersView: View {
                     .font(.system(size: 12))
                     .foregroundColor(.mlmInkMuted)
 
-                TextField("Ordner filtern…", text: Binding(
+                TextField("Filter folders…", text: Binding(
                     get: { viewModel.searchQuery },
                     set: { viewModel.searchQuery = $0 }
                 ))
@@ -103,6 +105,8 @@ struct FoldersView: View {
                 .font(MLMFont.body)
                 .frame(width: 180)
                 .focused($isSearchFocused)
+                .accessibilityIdentifier("folder_filter_field")
+                .accessibilityLabel("folder_filter_field")
 
                 if !viewModel.searchQuery.isEmpty {
                     Button {
@@ -113,6 +117,8 @@ struct FoldersView: View {
                             .foregroundColor(.mlmInkMuted)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("folder_filter_clear_button")
+                    .accessibilityLabel("folder_filter_clear_button")
                 }
             }
             .padding(.horizontal, 8)
@@ -147,7 +153,7 @@ struct FoldersView: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 12))
                         .foregroundColor(.accentColor)
-                    Text("Suchergebnisse für \"\(viewModel.searchQuery)\"")
+                    Text("Search results for \"\(viewModel.searchQuery)\"")
                         .font(MLMFont.sectionHeader)
                         .foregroundColor(.mlmInk)
                     
@@ -158,7 +164,7 @@ struct FoldersView: View {
                     }
                     
                     Spacer()
-                    Text("\(results.count) Ordner gefunden")
+                    Text("\(results.count) folders found")
                         .font(MLMFont.muted)
                         .foregroundColor(.mlmInkMuted)
                 }
@@ -179,7 +185,7 @@ struct FoldersView: View {
                 } else if results.isEmpty && viewModel.isSearching {
                     VStack {
                         Spacer()
-                        ProgressView("Suche läuft…")
+                        ProgressView("Searching…")
                         Spacer()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -208,13 +214,33 @@ struct FoldersView: View {
                 Divider()
                     .background(Color.mlmEdge)
 
+                if viewModel.unindexedAudioFileCount > 0 {
+                    HStack(spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(Color.mlmAttention)
+                        Text("\(viewModel.unindexedAudioFileCount) files in this folder are not in the library")
+                            .font(MLMFont.muted)
+                            .foregroundStyle(Color.mlmInkSecondary)
+                        Spacer()
+                        Button("Import") {
+                            Task { await importUnindexedFiles(from: selectedPath, viewModel: viewModel) }
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("folder_import_banner_button")
+                        .accessibilityLabel("folder_import_banner_button")
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.mlmAttention.opacity(0.1))
+                }
+
                 if !hasSubfolders && tracks.isEmpty {
                     VStack {
                         Spacer()
                         ContentUnavailableView {
-                            Label("Ordner ist leer", systemImage: "folder")
+                            Label("Folder is empty", systemImage: "folder")
                         } description: {
-                            Text("Dieser Ordner enthält keine Musiktracks oder Unterordner.")
+                            Text("This folder contains no music tracks or subfolders.")
                         }
                         Spacer()
                     }
@@ -223,7 +249,7 @@ struct FoldersView: View {
                     VSplitView {
                         VStack(alignment: .leading, spacing: 0) {
                             HStack(spacing: 8) {
-                                Text("Unterordner")
+                                Text("Subfolders")
                                     .font(MLMFont.sectionHeader)
                                     .foregroundColor(.mlmInk)
                                 Text("\(subfolders.count)")
@@ -276,6 +302,7 @@ struct FoldersView: View {
 
                             FolderTracksTable(
                                 tracks: tracks,
+                                availabilityByTrackID: viewModel.availabilityByTrackID,
                                 selectedTrackIDs: $viewModel.selectedTrackIDs,
                                 availablePlaylists: availablePlaylists,
                                 availableSyncProfiles: availableSyncProfiles,
@@ -287,7 +314,7 @@ struct FoldersView: View {
                 } else if hasSubfolders {
                     VStack(alignment: .leading, spacing: 0) {
                         HStack(spacing: 8) {
-                            Text("Unterordner")
+                            Text("Subfolders")
                                 .font(MLMFont.sectionHeader)
                                 .foregroundColor(.mlmInk)
                             Text("\(subfolders.count)")
@@ -340,6 +367,7 @@ struct FoldersView: View {
 
                         FolderTracksTable(
                             tracks: tracks,
+                            availabilityByTrackID: viewModel.availabilityByTrackID,
                             selectedTrackIDs: $viewModel.selectedTrackIDs,
                             availablePlaylists: availablePlaylists,
                             availableSyncProfiles: availableSyncProfiles,
@@ -356,10 +384,10 @@ struct FoldersView: View {
                 Image(systemName: "folder")
                     .font(.system(size: 36))
                     .foregroundColor(.mlmInkMuted)
-                Text("Ordner auswählen")
+                Text("Select a folder")
                     .font(MLMFont.body)
                     .foregroundColor(.mlmInkSecondary)
-                Text("Wähle einen Ordner aus dem Baum links, um die enthaltenen Tracks zu sehen.")
+                Text("Select a folder from the tree on the left to view its tracks.")
                     .font(MLMFont.muted)
                     .foregroundColor(.mlmInkMuted)
                     .multilineTextAlignment(.center)
@@ -419,7 +447,7 @@ struct FoldersView: View {
                     .foregroundColor(.mlmInkSecondary)
             }
             .buttonStyle(.plain)
-            .help("In Finder anzeigen")
+            .help("Show in Finder")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -430,9 +458,9 @@ struct FoldersView: View {
 
     private var driveNotMountedState: some View {
         ContentUnavailableView {
-            Label("Laufwerk nicht verbunden", systemImage: "externaldrive.badge.xmark")
+            Label("Drive not connected", systemImage: "externaldrive.badge.xmark")
         } description: {
-            Text("Die externe Festplatte mit der Musikbibliothek ist nicht eingehängt.")
+            Text("The external drive containing the music library is not connected.")
         }
     }
 
@@ -440,7 +468,7 @@ struct FoldersView: View {
         VStack(spacing: 12) {
             ProgressView()
                 .controlSize(.large)
-            Text("Ordnerstruktur wird geladen…")
+            Text("Loading folder structure…")
                 .font(MLMFont.body)
                 .foregroundColor(.mlmInkSecondary)
         }
@@ -451,9 +479,9 @@ struct FoldersView: View {
         Group {
             if viewModel.searchQuery.isEmpty {
                 ContentUnavailableView {
-                    Label("Keine Ordner", systemImage: "folder")
+                    Label("No folders", systemImage: "folder")
                 } description: {
-                    Text("Musik importieren, um die Ordnerstruktur zu sehen.")
+                    Text("Import music to view the folder structure.")
                 }
             } else {
                 ContentUnavailableView.search(text: viewModel.searchQuery)
@@ -483,12 +511,20 @@ struct FoldersView: View {
             availableSyncProfiles = syncVM.profiles
         }
     }
+
+    private func importUnindexedFiles(from path: String, viewModel: FolderViewModel) async {
+        guard let importService = container.importService else { return }
+        _ = try? await importService.importDirectory(URL(fileURLWithPath: path))
+        NotificationCenter.default.post(name: .libraryDidImport, object: nil)
+        await viewModel.refresh()
+    }
 }
 
 // MARK: - Folder Tracks Table
 
 struct FolderTracksTable: View {
     let tracks: [Track]
+    let availabilityByTrackID: [Int64: TrackAvailability]
     @Binding var selectedTrackIDs: Set<Int64>
     var availablePlaylists: [Playlist]
     var availableSyncProfiles: [SyncProfile]
@@ -526,8 +562,13 @@ struct FolderTracksTable: View {
             }
             .width(min: 140, ideal: 260)
 
+            TableColumn("Artist", value: \.track.artist) { row in
+                TrackMetadataText(row.track.artist, secondary: true)
+            }
+            .width(min: 100, ideal: 180)
+
             TableColumn("Album", value: \.track.album) { row in
-                Text(row.track.album).foregroundStyle(.secondary).lineLimit(1)
+                TrackMetadataText(row.track.album, secondary: true)
             }
             .width(min: 100, ideal: 180)
 
@@ -539,10 +580,26 @@ struct FolderTracksTable: View {
             .width(54)
 
             TableColumn("Format", value: \.track.format) { row in
-                Text(row.track.format.uppercased())
+                Text(displayFormat(for: row.track))
                     .foregroundStyle(.secondary)
             }
             .width(60)
+
+            TableColumn("Source") { row in
+                Text(TrackMetadataPresentation.sourceName(for: row.track))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .width(100)
+
+            TableColumn("Status") { row in
+                if let trackID = row.track.id,
+                   let availability = availabilityByTrackID[trackID],
+                   let statusChip = StatusChip(availability: availability) {
+                    statusChip
+                }
+            }
+            .width(90)
 
             TableColumn("kbps", value: \.track.bitrateSortKey) { row in
                 Text(row.track.bitrate.map { "\($0)" } ?? "—")
@@ -585,6 +642,8 @@ struct FolderTracksTable: View {
                 onDoubleClick?(track)
             }
         }
+        .accessibilityIdentifier("folders_tracks_table")
+        .accessibilityLabel("folders_tracks_table")
     }
 
     private func isNowPlaying(_ track: Track) -> Bool {
@@ -595,6 +654,11 @@ struct FolderTracksTable: View {
             return false
         }
         return currentID == trackID && playbackVM.isPlaying
+    }
+
+    private func displayFormat(for track: Track) -> String {
+        let format = track.format.trimmingCharacters(in: .whitespacesAndNewlines)
+        return format.isEmpty ? "—" : format.uppercased()
     }
 }
 
@@ -634,13 +698,13 @@ struct FolderSubfoldersTable: View {
             }
             .width(min: 150, ideal: 300)
 
-            TableColumn("Unterordner", value: \.node.children.count.description) { row in
+            TableColumn("Subfolders", value: \.node.children.count.description) { row in
                 Text(row.node.children.isEmpty ? "—" : "\(row.node.children.count)")
                     .foregroundColor(.secondary)
             }
             .width(100)
 
-            TableColumn("Pfad", value: \.node.id) { row in
+            TableColumn("Path", value: \.node.id) { row in
                 Text(viewModel.relativePath(for: row.node.id))
                     .foregroundColor(.secondary)
                     .lineLimit(1)
@@ -653,7 +717,7 @@ struct FolderSubfoldersTable: View {
         }
         .contextMenu(forSelectionType: String.self) { selectedIDs in
             if let firstID = selectedIDs.first {
-                Button("In Finder anzeigen") {
+                Button("Show in Finder") {
                     NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: firstID)
                 }
             }
@@ -663,6 +727,8 @@ struct FolderSubfoldersTable: View {
                 onDoubleClick(node)
             }
         }
+        .accessibilityIdentifier("folders_subfolders_table")
+        .accessibilityLabel("folders_subfolders_table")
     }
 }
 
@@ -702,13 +768,13 @@ struct FolderSearchResultsTable: View {
             }
             .width(min: 150, ideal: 300)
 
-            TableColumn("Unterordner", value: \.node.children.count.description) { row in
+            TableColumn("Subfolders", value: \.node.children.count.description) { row in
                 Text(row.node.children.isEmpty ? "—" : "\(row.node.children.count)")
                     .foregroundColor(.secondary)
             }
             .width(100)
 
-            TableColumn("Pfad", value: \.node.id) { row in
+            TableColumn("Path", value: \.node.id) { row in
                 Text(viewModel.relativePath(for: row.node.id))
                     .foregroundColor(.secondary)
                     .lineLimit(1)
@@ -721,7 +787,7 @@ struct FolderSearchResultsTable: View {
         }
         .contextMenu(forSelectionType: String.self) { selectedIDs in
             if let firstID = selectedIDs.first {
-                Button("In Finder anzeigen") {
+                Button("Show in Finder") {
                     NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: firstID)
                 }
             }

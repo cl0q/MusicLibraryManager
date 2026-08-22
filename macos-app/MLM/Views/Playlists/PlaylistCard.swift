@@ -2,6 +2,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 import AppKit
 
+// MARK: Accessibility labels for shotty UI automation (snake_case literals)
+
 /// A single playlist card in the Playlists grid.
 ///
 /// Shows playlist name, track count, pin indicator, and either the cached
@@ -20,7 +22,9 @@ import AppKit
 /// ```
 struct PlaylistCard: View {
     let playlist: Playlist
+    let source: Source?
     let trackCount: Int
+    let downloadStatus: PlaylistDownloadStatus?
     let isRenaming: Bool
     @Binding var renameText: String
 
@@ -45,15 +49,17 @@ struct PlaylistCard: View {
     /// can show the UI-SPEC line 174 banner.
     var onCoverDropRejected: () -> Void = {}
 
-    /// Sync profiles available for the "Sync zu" submenu (Phase 38 D-05).
+    /// Sync profiles available for the "Sync to" submenu (Phase 38 D-05).
     var availableSyncProfiles: [SyncProfile] = []
 
-    /// Called when user picks a profile from the "Sync zu" submenu.
+    /// Called when user picks a profile from the "Sync to" submenu.
     /// Provides the chosen profile and the playlist's DB id.
     var onAddToSyncProfile: ((SyncProfile, Int64) -> Void)?
 
     /// Called when tracks are dropped directly onto the card.
     var onTracksDropped: (([Int64]) async -> Void)? = nil
+    var onDownloadMissing: (() async -> Void)? = nil
+    var onShowFailedTracks: (() -> Void)? = nil
 
     @State private var isHovered = false
 
@@ -66,6 +72,17 @@ struct PlaylistCard: View {
         VStack(alignment: .leading, spacing: 0) {
             // Icon area
             iconArea
+
+            if let downloadStatus, downloadStatus.isImporting {
+                ProgressView(
+                    value: Double(downloadStatus.localTracks),
+                    total: Double(max(downloadStatus.totalTracks, 1))
+                )
+                .progressViewStyle(.linear)
+                .tint(.mlmActive)
+                .frame(maxWidth: .infinity)
+                .frame(height: 2)
+            }
 
             // Info area
             infoArea
@@ -108,6 +125,8 @@ struct PlaylistCard: View {
                 timer = nil
             }
         }
+        .accessibilityIdentifier("playlist_card")
+        .accessibilityLabel("playlist_card_\(playlist.id ?? -1)")
     }
 
     // MARK: - Icon Area
@@ -145,17 +164,6 @@ struct PlaylistCard: View {
                 }
             }
 
-            // Source badge (if from external source)
-            if playlist.sourceId != nil {
-                VStack {
-                    HStack {
-                        sourceBadge
-                            .padding(8)
-                        Spacer()
-                    }
-                    Spacer()
-                }
-            }
         }
         .aspectRatio(1, contentMode: .fit)
         .clipped()
@@ -185,6 +193,32 @@ struct PlaylistCard: View {
                     .truncationMode(.tail)
             }
 
+            if let source {
+                Text(source.playlistSourceIdentity.displayName)
+                    .font(MLMFont.muted)
+                    .foregroundColor(sourceBrandColor(source.playlistSourceIdentity))
+                    .lineLimit(1)
+                    .help("Linked to \(source.playlistSourceIdentity.displayName)")
+                    .accessibilityIdentifier("playlist_card_source_link")
+                    .accessibilityLabel("Linked to \(source.playlistSourceIdentity.displayName)")
+            }
+
+            if let downloadStatus {
+                if downloadStatus.isImporting {
+                    StatusChip(
+                        text: "Importing · \(downloadStatus.localTracks) of \(downloadStatus.totalTracks)",
+                        systemImage: "arrow.down.circle",
+                        tint: .mlmActive
+                    )
+                } else if downloadStatus.isIncomplete {
+                    StatusChip(
+                        text: "Incomplete · \(downloadStatus.failedTracks) failed",
+                        systemImage: "exclamationmark.triangle",
+                        tint: .mlmAttention
+                    )
+                }
+            }
+
             // Track count
             HStack(spacing: 4) {
                 Text("\(trackCount) track\(trackCount == 1 ? "" : "s")")
@@ -192,9 +226,11 @@ struct PlaylistCard: View {
                     .foregroundColor(.mlmInkMuted)
 
                 if playlist.isLiked == 1 {
-                    Image(systemName: "heart.fill")
-                        .font(.system(size: 9))
+                    Label("Liked", systemImage: "heart.fill")
+                        .font(MLMFont.muted)
                         .foregroundColor(.mlmError)
+                        .accessibilityIdentifier("playlist_card_liked")
+                        .accessibilityLabel("Liked playlist")
                 }
             }
         }
@@ -238,13 +274,34 @@ struct PlaylistCard: View {
             }
         }
 
+        if let downloadStatus, downloadStatus.missingTracks > 0,
+           let onDownloadMissing {
+            Button {
+                Task { await onDownloadMissing() }
+            } label: {
+                Label(
+                    "Download missing (\(downloadStatus.missingTracks))",
+                    systemImage: "arrow.down.circle"
+                )
+            }
+        }
+
+        if let downloadStatus, downloadStatus.isIncomplete,
+           let onShowFailedTracks {
+            Button {
+                onShowFailedTracks()
+            } label: {
+                Label("Show failed tracks", systemImage: "exclamationmark.triangle")
+            }
+        }
+
         Divider()
 
-        // Phase 38 D-05: "Sync zu" submenu
+        // Phase 38 D-05: sync submenu
         Section {
             Menu {
                 if availableSyncProfiles.isEmpty {
-                    Text("Keine Profile — erstelle zuerst eines")
+                    Text("No sync profiles. Create one first.")
                 } else {
                     ForEach(availableSyncProfiles) { profile in
                         Button {
@@ -258,10 +315,10 @@ struct PlaylistCard: View {
                 Button {
                     NotificationCenter.default.post(name: .navigateToCreateSyncProfile, object: nil)
                 } label: {
-                    Label("Neues Profil erstellen…", systemImage: "plus.circle")
+                    Label("Create New Profile…", systemImage: "plus.circle")
                 }
             } label: {
-                Label("Sync zu \u{25B8}", systemImage: "arrow.triangle.2.circlepath")
+                Label("Sync to \u{25B8}", systemImage: "arrow.triangle.2.circlepath")
             }
         }
 
@@ -419,22 +476,21 @@ struct PlaylistCard: View {
         if playlist.isSmart == 1 {
             return [Color.mlmActive.opacity(0.6), Color.mlmActive.opacity(0.3)]
         }
-        if playlist.sourceId != nil {
-            return [Color.mlmAccent.opacity(0.4), Color.mlmAccent.opacity(0.2)]
-        }
         return [Color.mlmRaised, Color.mlmSurface]
     }
 
-    private var sourceBadge: some View {
-        Group {
-            if let _ = playlist.sourceId {
-                Image(systemName: "cloud.fill")
-                    .font(.system(size: 10))
-                    .foregroundColor(.white.opacity(0.8))
-                    .padding(4)
-                    .background(Color.black.opacity(0.3))
-                    .clipShape(Circle())
-            }
+    private func sourceBrandColor(_ identity: PlaylistSourceIdentity) -> Color {
+        switch identity {
+        case .soundcloud:
+            .mlmBrandSoundCloud
+        case .spotify:
+            .mlmBrandSpotify
+        case .youtube:
+            .mlmBrandYouTube
+        case .appleMusic:
+            .mlmBrandAppleMusic
+        case .other:
+            .mlmInkMuted
         }
     }
 }

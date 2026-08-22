@@ -1,8 +1,10 @@
 import SwiftUI
 
+// MARK: Accessibility labels for shotty UI automation (snake_case literals)
+
 /// Toolbar-mounted player widget — centered via `.principal` placement.
 ///
-/// Shows transport controls, album art fallback, track info, scrubber, and volume.
+/// Shows playback control, album art fallback, track info, scrubber, and volume.
 struct PlayerBar: View {
     let viewModel: PlaybackViewModel
 
@@ -35,15 +37,6 @@ struct PlayerBar: View {
 
     private var transportCluster: some View {
         HStack(spacing: 6) {
-            // TODO: wire to queue when PlaybackViewModel gains a queue
-            Button {} label: {
-                Image(systemName: "backward.fill")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.primary)
-            }
-            .buttonStyle(.plain)
-            .disabled(true)
-
             Button { viewModel.togglePlayPause() } label: {
                 Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 18))
@@ -52,15 +45,8 @@ struct PlayerBar: View {
             }
             .buttonStyle(.plain)
             .disabled(!viewModel.hasTrack)
-
-            // TODO: wire to queue when PlaybackViewModel gains a queue
-            Button {} label: {
-                Image(systemName: "forward.fill")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.primary)
-            }
-            .buttonStyle(.plain)
-            .disabled(true)
+            .accessibilityIdentifier("play_pause_button")
+            .accessibilityLabel("play_pause_button")
         }
     }
 
@@ -91,6 +77,15 @@ struct PlayerBar: View {
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.red)
                         .lineLimit(1)
+                    if viewModel.unavailableTrack != nil {
+                        Button("Retry") {
+                            Task { await viewModel.retryUnavailableTrack() }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .accessibilityIdentifier("retry_button")
+                        .accessibilityLabel("retry_button")
+                    }
                 }
             } else if let track = viewModel.currentTrack {
                 HStack(spacing: 4) {
@@ -131,6 +126,8 @@ struct PlayerBar: View {
                 }
             }
             .disabled(!viewModel.hasTrack)
+            .accessibilityIdentifier("position_slider")
+            .accessibilityLabel("position_slider")
 
             Text(viewModel.hasTrack ? viewModel.formattedDuration : "—:——")
                 .font(.system(size: 10).monospacedDigit())
@@ -154,6 +151,8 @@ struct PlayerBar: View {
                 .onChange(of: volume) { _, newValue in
                     viewModel.setVolume(newValue)
                 }
+                .accessibilityIdentifier("volume_slider")
+                .accessibilityLabel("volume_slider")
         }
     }
 

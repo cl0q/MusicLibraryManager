@@ -1,5 +1,7 @@
 import SwiftUI
 
+// MARK: Accessibility labels for shotty UI automation (snake_case literals)
+
 /// Playlists grid view — shows all playlists as cards with create/search.
 ///
 /// Layout:
@@ -20,6 +22,7 @@ struct PlaylistsView: View {
     @Environment(\.container) private var container
     @State private var viewModel: PlaylistViewModel?
     @State private var selectedPlaylist: Playlist?
+    @State private var showFailedTracksWhenOpened = false
     @State private var showNewPlaylistPopover = false
     @State private var availableSyncProfiles: [SyncProfile] = []
 
@@ -35,7 +38,11 @@ struct PlaylistsView: View {
             if let selectedPlaylist, viewModel != nil {
                 PlaylistDetailView(
                     playlist: selectedPlaylist,
-                    onBack: { self.selectedPlaylist = nil },
+                    initiallyShowFailedTracks: showFailedTracksWhenOpened,
+                    onBack: {
+                        self.selectedPlaylist = nil
+                        self.showFailedTracksWhenOpened = false
+                    },
                     onTrackDoubleClick: onTrackDoubleClick
                 )
             } else if let viewModel {
@@ -53,6 +60,17 @@ struct PlaylistsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { _ in
             Task { await viewModel?.refresh() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .downloadStateDidChange)) { _ in
+            Task { await viewModel?.refresh() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .downloadDidComplete)) { _ in
+            Task { await viewModel?.refresh() }
+        }
+        .background {
+            if let viewModel {
+                PlaylistDownloadHealthObserver(viewModel: viewModel)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .syncProfileDidChange)) { _ in
             Task { await reloadSyncProfiles() }
@@ -143,6 +161,8 @@ struct PlaylistsView: View {
                 .font(MLMFont.body)
                 .foregroundColor(.mlmInk)
                 .frame(width: 160)
+                .accessibilityIdentifier("playlist_search_field")
+                .accessibilityLabel("playlist_search_field")
 
                 if !viewModel.searchQuery.isEmpty {
                     Button {
@@ -153,6 +173,8 @@ struct PlaylistsView: View {
                             .foregroundColor(.mlmInkMuted)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("playlist_search_clear_button")
+                    .accessibilityLabel("playlist_search_clear_button")
                 }
             }
             .padding(.horizontal, 8)
@@ -175,6 +197,8 @@ struct PlaylistsView: View {
             }
             .buttonStyle(.plain)
             .keyboardShortcut("n", modifiers: .command)
+            .accessibilityIdentifier("new_playlist_button")
+            .accessibilityLabel("new_playlist_button")
             .popover(isPresented: $showNewPlaylistPopover, arrowEdge: .bottom) {
                 newPlaylistPopover(viewModel)
             }
@@ -203,12 +227,16 @@ struct PlaylistsView: View {
                     showNewPlaylistPopover = false
                 }
             }
+            .accessibilityIdentifier("new_playlist_name_field")
+            .accessibilityLabel("new_playlist_name_field")
 
             HStack {
                 Button("Cancel") {
                     showNewPlaylistPopover = false
                 }
                 .keyboardShortcut(.cancelAction)
+                .accessibilityIdentifier("new_playlist_cancel_button")
+                .accessibilityLabel("new_playlist_cancel_button")
 
                 Spacer()
 
@@ -220,6 +248,8 @@ struct PlaylistsView: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(viewModel.newPlaylistName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityIdentifier("new_playlist_create_button")
+                .accessibilityLabel("new_playlist_create_button")
             }
         }
         .padding(12)
@@ -236,7 +266,8 @@ struct PlaylistsView: View {
                         playlist: playlist,
                         viewModel: viewModel,
                         availableSyncProfiles: availableSyncProfiles,
-                        selectedPlaylist: $selectedPlaylist
+                        selectedPlaylist: $selectedPlaylist,
+                        showFailedTracksWhenOpened: $showFailedTracksWhenOpened
                     )
                 }
             }
@@ -312,6 +343,7 @@ struct PlaylistsView: View {
         .padding(.vertical, 8)
         .background(Color.mlmRaised)
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("pin_limit_banner")
         .accessibilityLabel("Pin limit reached. Maximum eight pinned playlists. Unpin one to free a slot.")
     }
 
@@ -340,6 +372,7 @@ struct PlaylistsView: View {
         .padding(.vertical, 8)
         .background(Color.mlmRaised)
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("cover_drop_banner")
         .accessibilityLabel("Cover drop rejected. \(message)")
     }
 
@@ -347,8 +380,12 @@ struct PlaylistsView: View {
 
     private func initializeViewModel() {
         guard viewModel == nil,
-              let playlistRepo = container.playlistRepository else { return }
-        viewModel = PlaylistViewModel(playlistRepository: playlistRepo)
+              let playlistRepo = container.playlistRepository,
+              let sourceRepo = container.sourceRepository else { return }
+        viewModel = PlaylistViewModel(
+            playlistRepository: playlistRepo,
+            sourceRepository: sourceRepo
+        )
     }
 
     private func reloadSyncProfiles() async {
@@ -359,6 +396,51 @@ struct PlaylistsView: View {
             availableSyncProfiles = syncVM.profiles
         }
     }
+
+}
+
+/// Observes live download activity separately from the grid's large routed
+/// view expression, then refreshes only persisted playlist health while a
+/// batch is active.
+private struct PlaylistDownloadHealthObserver: View {
+    let viewModel: PlaylistViewModel
+
+    @Environment(\.container) private var container
+    @State private var observationTask: Task<Void, Never>?
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .task {
+                startObservation(isDownloading: container.downloadViewModel?.isDownloading == true)
+            }
+            .onChange(of: container.downloadViewModel?.isDownloading) { _, isDownloading in
+                startObservation(isDownloading: isDownloading == true)
+            }
+            .onDisappear {
+                observationTask?.cancel()
+                observationTask = nil
+            }
+    }
+
+    private func startObservation(isDownloading: Bool) {
+        observationTask?.cancel()
+        guard isDownloading else {
+            observationTask = Task {
+                await viewModel.refreshDownloadHealth()
+            }
+            return
+        }
+
+        let downloadViewModel = container.downloadViewModel
+        observationTask = Task {
+            repeat {
+                await viewModel.refreshDownloadHealth()
+                guard !Task.isCancelled, downloadViewModel?.isDownloading == true else { break }
+                try? await Task.sleep(for: .milliseconds(250))
+            } while !Task.isCancelled
+        }
+    }
 }
 
 /// Helper view to avoid Swift compiler timeout by breaking up complex nested grid card layout.
@@ -367,19 +449,23 @@ private struct PlaylistsGridCard: View {
     @Bindable var viewModel: PlaylistViewModel
     let availableSyncProfiles: [SyncProfile]
     @Binding var selectedPlaylist: Playlist?
+    @Binding var showFailedTracksWhenOpened: Bool
 
     @Environment(\.container) private var container
 
     var body: some View {
         PlaylistCard(
             playlist: playlist,
+            source: viewModel.source(for: playlist),
             trackCount: viewModel.trackCounts[playlist.id ?? 0] ?? 0,
+            downloadStatus: viewModel.downloadStatus(for: playlist),
             isRenaming: viewModel.renamingPlaylistID == playlist.id,
             renameText: Binding(
                 get: { viewModel.renameText },
                 set: { viewModel.renameText = $0 }
             ),
             onTap: {
+                showFailedTracksWhenOpened = false
                 selectedPlaylist = playlist
             },
             onRename: {
@@ -398,6 +484,7 @@ private struct PlaylistsGridCard: View {
                 Task { await viewModel.deletePlaylist(id: playlist.id!) }
             },
             onSpringLoad: {
+                showFailedTracksWhenOpened = false
                 selectedPlaylist = playlist
             },
             onCoverDropped: { url in
@@ -447,7 +534,23 @@ private struct PlaylistsGridCard: View {
                 } catch {
                     AppLogger.shared.error("Failed to add dropped tracks: \(error.localizedDescription)", source: "PlaylistsView")
                 }
+            },
+            onDownloadMissing: {
+                guard let playlistID = playlist.id,
+                      let playlistRepository = container.playlistRepository,
+                      let downloadViewModel = container.downloadViewModel else { return }
+                let tracks = (try? await playlistRepository.fetchTracks(playlistId: playlistID)) ?? []
+                let missingTracks = tracks.filter { $0.availability() == .notDownloaded }
+                await downloadViewModel.downloadTracks(
+                    missingTracks,
+                    preferredSource: viewModel.source(for: playlist)?.playlistSourceIdentity.downloadPin ?? .auto
+                )
+            },
+            onShowFailedTracks: {
+                showFailedTracksWhenOpened = true
+                selectedPlaylist = playlist
             }
         )
     }
+
 }

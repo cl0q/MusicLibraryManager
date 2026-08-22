@@ -1,6 +1,8 @@
 import SwiftUI
 
-// MARK: - FocusedValues for ⌘1–5 navigation shortcuts
+// MARK: Accessibility labels for shotty UI automation (snake_case literals)
+
+// MARK: - FocusedValues for ⌘1–7 navigation shortcuts
 
 /// Allows CommandMenu in MLMApp to write the sidebar selection.
 struct SelectedSectionKey: FocusedValueKey {
@@ -31,7 +33,7 @@ extension FocusedValues {
 /// Layout (top → bottom):
 /// ```
 /// ┌─────────────────────────────────────────────────┐
-/// │ 🔴🟡🟢  [prev] [play] [next]  ♪ Title · Artist  │  Toolbar (PlayerBar)
+/// │ 🔴🟡🟢  [play]  ♪ Title · Artist  │  Toolbar (PlayerBar)
 /// ├────────┬────────────────────────────────────────┤
 /// │Sidebar │  Detail content                        │  NavigationSplitView
 /// │        │                                        │
@@ -45,13 +47,13 @@ struct ContentView: View {
     @State private var selectedSection: SidebarSection = .library
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var showFirstRunWizard = false
+    @State private var globalSearchQuery = ""
+    @State private var isGlobalSearchPresented = false
+    @FocusState private var isGlobalSearchFocused: Bool
 
     /// Track selected for detail panel (via double-click or "More Info").
     @State private var selectedTrackForDetail: Track?
-
-    /// Library repair alert states
-    @State private var showingRepairAlert = false
-    @State private var repairResult: String = ""
+    @State private var reviewFocusTrackID: Int64?
 
     /// Selection-based sheet states
     @State private var playlistSelectionContainer: TrackSelectionContainer? = nil
@@ -101,15 +103,6 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .libraryDriveDidMount)) { _ in
             container.isLibraryDriveMounted = true
         }
-        // Handle library repair trigger from main menu
-        .onReceive(NotificationCenter.default.publisher(for: .triggerLibraryRepair)) { _ in
-            runGlobalLibraryRepair()
-        }
-        .alert("Sichere Pfad-Migration", isPresented: $showingRepairAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(repairResult)
-        }
         .onReceive(NotificationCenter.default.publisher(for: .triggerNewPlaylistFromSelection)) { notification in
             if let trackIds = extractTrackIds(from: notification.userInfo) {
                 playlistSelectionContainer = TrackSelectionContainer(trackIds: Set(trackIds))
@@ -132,18 +125,28 @@ struct ContentView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .searchCommandTriggered)) { _ in
-            if selectedSection == .folders {
-                NotificationCenter.default.post(name: .focusFolderSearchField, object: nil)
+            isGlobalSearchPresented = true
+            isGlobalSearchFocused = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showReview)) { notification in
+            if let trackID = notification.userInfo?["trackId"] as? Int64 {
+                reviewFocusTrackID = trackID
+            } else if let trackID = notification.userInfo?["trackId"] as? NSNumber {
+                reviewFocusTrackID = trackID.int64Value
             } else {
-                selectedSection = .library
-                NotificationCenter.default.post(name: .focusSearchField, object: nil)
+                reviewFocusTrackID = nil
             }
+            selectedSection = .review
         }
         .sheet(item: $playlistSelectionContainer) { selection in
             NewPlaylistFromSelectionSheet(trackIds: selection.trackIds)
         }
         .sheet(item: $syncProfileSelectionContainer) { selection in
             NewSyncProfileFromSelectionSheet(trackIds: selection.trackIds)
+        }
+        .onChange(of: selectedSection) { _, _ in
+            isGlobalSearchPresented = false
+            isGlobalSearchFocused = false
         }
     }
 
@@ -187,7 +190,33 @@ struct ContentView: View {
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    SyncTurboToggle()
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(.secondary)
+                        TextField("Search library…", text: $globalSearchQuery)
+                            .textFieldStyle(.plain)
+                            .focused($isGlobalSearchFocused)
+                            .onChange(of: isGlobalSearchFocused) { _, isFocused in
+                                if isFocused {
+                                    isGlobalSearchPresented = true
+                                }
+                            }
+                            .onChange(of: globalSearchQuery) { _, query in
+                                let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                                if !trimmed.isEmpty {
+                                    isGlobalSearchPresented = true
+                                    isGlobalSearchFocused = true
+                                } else if !isGlobalSearchFocused {
+                                    isGlobalSearchPresented = false
+                                }
+                            }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .frame(width: 240)
+                    .background(Color.mlmSurface, in: RoundedRectangle(cornerRadius: 6))
+                    .accessibilityIdentifier("search_field")
+                    .accessibilityLabel("Search library")
                 }
             }
 
@@ -206,41 +235,43 @@ struct ContentView: View {
 
     @ViewBuilder
     private var detailView: some View {
-        switch selectedSection {
-        case .library:
-            LibraryView(onTrackDoubleClick: { track in
-                handleTrackDoubleClick(track)
-            })
-        case .playlists:
-            PlaylistsView(onTrackDoubleClick: { track in
-                handleTrackDoubleClick(track)
-            })
-        case .playlistDetail(let id):
-            PlaylistDetailViewLoader(
-                playlistId: id,
-                onBack: { selectedSection = .playlists },
-                onTrackDoubleClick: { track in
+        if isGlobalSearchPresented {
+            GlobalSearchPresentationView(query: $globalSearchQuery) {
+                isGlobalSearchPresented = false
+                isGlobalSearchFocused = false
+                globalSearchQuery = ""
+            }
+        } else {
+            switch selectedSection {
+            case .library:
+                LibraryView(onTrackDoubleClick: { track in
                     handleTrackDoubleClick(track)
-                }
-            )
-        case .folders:
-            FoldersView(onTrackDoubleClick: { track in
-                handleTrackDoubleClick(track)
-            })
-        case .duplicates:
-            ReviewQueueView()
-        case .discoveryInbox:
-            DiscoveryInboxView()
-        case .grooveStudio:
-            GrooveStudioView()
-        case .sync:
-            SyncView()
-        case .sources:
-            SourcesView()
-        case .reelsInbox:
-            ReelsInboxView()
-        case .search:
-            GlobalSearchView()
+                })
+            case .playlists:
+                PlaylistsView(onTrackDoubleClick: { track in
+                    handleTrackDoubleClick(track)
+                })
+            case .playlistDetail(let id):
+                PlaylistDetailViewLoader(
+                    playlistId: id,
+                    onBack: { selectedSection = .playlists },
+                    onTrackDoubleClick: { track in
+                        handleTrackDoubleClick(track)
+                    }
+                )
+            case .folders:
+                FoldersView(onTrackDoubleClick: { track in
+                    handleTrackDoubleClick(track)
+                })
+            case .sync:
+                SyncView()
+            case .sources:
+                SourcesView()
+            case .review:
+                ReviewQueueView(focusTrackID: reviewFocusTrackID)
+            case .discover:
+                DiscoverView()
+            }
         }
     }
 
@@ -265,14 +296,6 @@ struct ContentView: View {
                 await playbackVM.playTrack(track)
             }
         }
-    }
-
-    /// The former one-click repair was unsafe. Route users to the preview/confirm flow.
-    private func runGlobalLibraryRepair() {
-        repairResult = "Der automatische Repair wurde durch eine sichere Migration ersetzt. Öffne Einstellungen → Maintenance, erstelle dort zuerst die Vorschau und bestätige anschließend nur die eindeutigen Treffer."
-        showingRepairAlert = true
-        UserDefaults.standard.set("maintenance", forKey: "settings.selectedTab")
-        MLMApp.openSettingsFallback()
     }
 
     // MARK: - Error state
@@ -312,7 +335,7 @@ struct ContentView: View {
 
 // MARK: - Navigation sections
 
-/// Navigation sections matching the Tauri app sidebar.
+/// Navigation sections in the native macOS sidebar.
 ///
 /// The `.playlistDetail(Int64)` associated-value case is produced dynamically
 /// inside the pinned-playlists DisclosureGroup (see `PinnedPlaylistsDisclosure`)
@@ -324,13 +347,10 @@ enum SidebarSection: Hashable, Identifiable {
     case playlists
     case playlistDetail(Int64)
     case folders
-    case duplicates
-    case discoveryInbox
-    case grooveStudio
     case sync
     case sources
-    case reelsInbox
-    case search
+    case review
+    case discover
 
     var id: String {
         switch self {
@@ -338,22 +358,27 @@ enum SidebarSection: Hashable, Identifiable {
         case .playlists: return "playlists"
         case .playlistDetail(let pid): return "playlistDetail-\(pid)"
         case .folders: return "folders"
-        case .duplicates: return "duplicates"
-        case .discoveryInbox: return "discoveryInbox"
-        case .grooveStudio: return "grooveStudio"
         case .sync: return "sync"
         case .sources: return "sources"
-        case .reelsInbox: return "reelsInbox"
-        case .search: return "search"
+        case .review: return "review"
+        case .discover: return "discover"
         }
     }
 
-    /// Manual replacement for synthesised `CaseIterable.allCases`.
-    /// Sidebar iterates these for top-level rows; `.playlistDetail` cases are
-    /// produced dynamically inside `PinnedPlaylistsDisclosure` (Plan 36-04).
-    static let topLevelCases: [SidebarSection] = [
-        .library, .playlists, .folders, .duplicates, .discoveryInbox, .reelsInbox, .grooveStudio, .sync, .sources, .search
+    /// Top-level rows in the LIBRARY sidebar group.
+    static let libraryCases: [SidebarSection] = [
+        .library, .playlists, .folders, .sync, .sources
     ]
+
+    /// Top-level rows in the WORK sidebar group.
+    static let workCases: [SidebarSection] = [
+        .review, .discover
+    ]
+
+    /// Manual replacement for synthesised `CaseIterable.allCases`.
+    /// `.playlistDetail` cases are produced dynamically inside
+    /// `PinnedPlaylistsDisclosure`.
+    static let topLevelCases: [SidebarSection] = libraryCases + workCases
 
     var label: String {
         switch self {
@@ -361,13 +386,10 @@ enum SidebarSection: Hashable, Identifiable {
         case .playlists: "Playlists"
         case .playlistDetail: ""   // never displayed at top-level; disclosure children render the playlist name directly
         case .folders: "Folders"
-        case .duplicates: "Duplicates"
-        case .discoveryInbox: "Discovery Inbox"
-        case .grooveStudio: "Groove Studio"
         case .sync: "Sync"
         case .sources: "Sources"
-        case .reelsInbox: "Reels Inbox"
-        case .search: "Search"
+        case .review: "Review"
+        case .discover: "Discover"
         }
     }
 
@@ -377,30 +399,24 @@ enum SidebarSection: Hashable, Identifiable {
         case .playlists: "list.bullet"
         case .playlistDetail: "music.note.list"
         case .folders: "folder"
-        case .duplicates: "doc.on.doc"
-        case .discoveryInbox: "sparkles"
-        case .grooveStudio: "waveform"
         case .sync: "arrow.triangle.2.circlepath"
         case .sources: "globe"
-        case .reelsInbox: "play.rectangle.on.rectangle"
-        case .search: "magnifyingglass"
+        case .review: "doc.on.doc"
+        case .discover: "sparkles"
         }
     }
 
-    /// `nil` for `.playlistDetail` — those rows are not bound to a global ⌘1–5 shortcut.
+    /// `nil` for `.playlistDetail` — those rows are not bound to a global shortcut.
     var keyboardShortcut: KeyEquivalent? {
         switch self {
         case .library: "1"
         case .playlists: "2"
         case .playlistDetail: nil
         case .folders: "3"
-        case .duplicates: "6"
-        case .discoveryInbox: nil
-        case .grooveStudio: nil
         case .sync: "4"
         case .sources: "5"
-        case .reelsInbox: "7"
-        case .search: "8"
+        case .review: "6"
+        case .discover: "7"
         }
     }
 }

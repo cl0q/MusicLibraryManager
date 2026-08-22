@@ -1,5 +1,7 @@
 import SwiftUI
 
+// MARK: Accessibility labels for shotty UI automation (snake_case literals)
+
 /// The library track table with sortable columns.
 ///
 /// Native SwiftUI `Table` (macOS 13+). All columns are clickable headers
@@ -17,7 +19,7 @@ struct LibraryTable: View {
     /// async fetch (which is unreliable inside `Menu`-in-`contextMenu`).
     var availablePlaylists: [Playlist] = []
 
-    /// Sync profiles available for the "Sync zu" submenu — loaded by LibraryView.
+    /// Sync profiles available for the sync-profile submenu — loaded by LibraryView.
     var availableSyncProfiles: [SyncProfile] = []
 
     /// Identifiable wrapper so `Table` selection can use `Set<Int64>`
@@ -79,12 +81,12 @@ struct LibraryTable: View {
                 .width(min: 160, ideal: 280)
 
                 TableColumn("Artist", value: \TrackRow.track.artist) { row in
-                    Text(row.track.artist).lineLimit(1)
+                    TrackMetadataText(row.track.artist)
                 }
                 .width(min: 100, ideal: 180)
 
                 TableColumn("Album", value: \TrackRow.track.album) { row in
-                    Text(row.track.album).foregroundStyle(.secondary).lineLimit(1)
+                    TrackMetadataText(row.track.album, secondary: true)
                 }
                 .width(min: 100, ideal: 180)
 
@@ -96,10 +98,19 @@ struct LibraryTable: View {
                 .width(54)
 
                 TableColumn("Format", value: \TrackRow.track.format) { row in
-                    Text(row.track.isRemote ? "Stream" : row.track.format.uppercased())
+                    Text(displayFormat(for: row.track))
                         .foregroundStyle(.secondary)
                 }
                 .width(60)
+
+                TableColumn("Status") { row in
+                    if let trackID = row.track.id,
+                       let availability = viewModel.availabilityByTrackID[trackID],
+                       let statusChip = StatusChip(availability: availability) {
+                        statusChip
+                    }
+                }
+                .width(90)
             }
 
             Group {
@@ -194,6 +205,8 @@ struct LibraryTable: View {
             let asc = first.order == .forward
             viewModel.sortDescriptor = TrackSortDescriptor(column: col, ascending: asc)
         }
+        .accessibilityIdentifier("library_table")
+        .accessibilityLabel("library_table")
     }
 
     // MARK: - States
@@ -250,6 +263,11 @@ struct LibraryTable: View {
             return false
         }
         return currentID == trackID && playbackVM.isPlaying
+    }
+
+    private func displayFormat(for track: Track) -> String {
+        let format = track.format.trimmingCharacters(in: .whitespacesAndNewlines)
+        return format.isEmpty ? "—" : format.uppercased()
     }
 
     /// Format date_added for display (e.g., "2026-05-07" → "May 7").

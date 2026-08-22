@@ -18,12 +18,14 @@ struct TrackPickerSheet: View {
     @State private var allTracks: [Track] = []
     @State private var selectedIds: Set<Int64> = []
     @State private var searchQuery: String = ""
+    @State private var isLoading = true
+    @State private var loadingError: String?
     @FocusState private var searchFocused: Bool
 
     enum FilterChip: String, CaseIterable {
-        case all = "Alle Tracks"
-        case local = "Nur lokal"
-        case artwork = "Mit Artwork"
+        case all = "All tracks"
+        case local = "Local only"
+        case artwork = "With artwork"
     }
 
     @State private var activeFilter: FilterChip = .all
@@ -52,12 +54,12 @@ struct TrackPickerSheet: View {
         let selected = selectedIds.count
         let countPart: String
         if searchQuery.isEmpty {
-            countPart = "\(total) Tracks"
+            countPart = "\(total) tracks"
         } else {
-            countPart = "\(shown) von \(total) Tracks"
+            countPart = "\(shown) of \(total) tracks"
         }
         if selected > 0 {
-            return "\(countPart) · \(selected) ausgewählt"
+            return "\(countPart) · \(selected) selected"
         }
         return countPart
     }
@@ -67,7 +69,7 @@ struct TrackPickerSheet: View {
 
             // Sheet title bar
             HStack {
-                Text("Tracks zum Profil hinzufügen")
+                Text("Add tracks to profile")
                     .font(MLMFont.bodyBold)
                     .foregroundColor(.mlmInk)
                 Spacer()
@@ -82,7 +84,7 @@ struct TrackPickerSheet: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 14))
                     .foregroundColor(.mlmInkMuted)
-                TextField("Nach Künstler oder Titel suchen…", text: $searchQuery)
+                TextField("Search artist or title...", text: $searchQuery)
                     .textFieldStyle(.plain)
                     .font(.system(size: 15))
                     .foregroundColor(.mlmInk)
@@ -126,6 +128,9 @@ struct TrackPickerSheet: View {
                                 .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("track_picker_filter_chip")
+                        .accessibilityLabel(chip.rawValue)
+                        .accessibilityValue(activeFilter == chip ? "Selected" : "Not selected")
                     }
                 }
                 .padding(.horizontal, 16)
@@ -139,7 +144,7 @@ struct TrackPickerSheet: View {
                     .foregroundColor(.mlmInkMuted)
                 Spacer()
                 if !selectedIds.isEmpty {
-                    Button("Auswahl zurücksetzen") { selectedIds.removeAll() }
+                    Button("Clear selection") { selectedIds.removeAll() }
                         .buttonStyle(.borderless)
                         .font(MLMFont.muted)
                         .foregroundColor(.mlmInkSecondary)
@@ -148,8 +153,62 @@ struct TrackPickerSheet: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 6)
 
-            // Track list — checkbox-style toggle per row, plain click toggles.
-            // SwiftUI List virtualises for 10k+ rows (T-38-04 mitigation).
+            tracksContent
+
+            Divider().background(Color.mlmEdge)
+
+            // Action buttons
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .buttonStyle(.borderless)
+                    .foregroundColor(.mlmInkSecondary)
+                Spacer()
+                Button(
+                    selectedIds.isEmpty
+                        ? "Add"
+                        : "Add (\(selectedIds.count))"
+                ) {
+                    Task {
+                        await vm.addTracks(Array(selectedIds))
+                        dismiss()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(selectedIds.isEmpty)
+            }
+            .padding(16)
+        }
+        .frame(width: 500, height: 600)
+        .background(Color.mlmBase)
+        .task { await loadTracks() }
+    }
+
+    @ViewBuilder
+    private var tracksContent: some View {
+        if isLoading {
+            ProgressView("Loading tracks...")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let loadingError {
+            ContentUnavailableView {
+                Label("Could not load tracks", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(loadingError)
+            } actions: {
+                Button("Retry") { Task { await loadTracks() } }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if allTracks.isEmpty {
+            ContentUnavailableView {
+                Label("No tracks", systemImage: "music.note")
+            } description: {
+                Text("Import music into your library before adding tracks to a sync profile.")
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if filtered.isEmpty {
+            ContentUnavailableView.search(text: searchQuery)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
             List(filtered, id: \.id) { track in
                 let tid = track.id ?? -1
                 let isSelected = selectedIds.contains(tid)
@@ -189,39 +248,31 @@ struct TrackPickerSheet: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .background(Color.mlmBase)
-
-            Divider().background(Color.mlmEdge)
-
-            // Action buttons
-            HStack {
-                Button("Abbrechen") { dismiss() }
-                    .buttonStyle(.borderless)
-                    .foregroundColor(.mlmInkSecondary)
-                Spacer()
-                Button(
-                    selectedIds.isEmpty
-                        ? "Hinzufügen"
-                        : "Hinzufügen (\(selectedIds.count))"
-                ) {
-                    Task {
-                        await vm.addTracks(Array(selectedIds))
-                        dismiss()
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-                .disabled(selectedIds.isEmpty)
-            }
-            .padding(16)
         }
-        .frame(width: 500, height: 600)
-        .background(Color.mlmBase)
-        .task {
-            if let repo = container.trackRepository {
-                allTracks = (try? await repo.fetchAllTracks()) ?? []
-                artworkTrackIds = (try? await repo.fetchTrackIdsWithArtwork()) ?? []
-            }
+    }
+
+    private func loadTracks() async {
+        isLoading = true
+        loadingError = nil
+        defer {
+            isLoading = false
             searchFocused = true
+        }
+
+        guard let repo = container.trackRepository else {
+            loadingError = "Tracks are unavailable. Try again after the library finishes loading."
+            return
+        }
+
+        do {
+            async let tracks = repo.fetchAllTracks()
+            async let artworkIDs = repo.fetchTrackIdsWithArtwork()
+            allTracks = try await tracks
+            artworkTrackIds = try await artworkIDs
+        } catch {
+            allTracks = []
+            artworkTrackIds = []
+            loadingError = "Tracks could not be loaded. Try again."
         }
     }
 }

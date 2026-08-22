@@ -1,82 +1,52 @@
 import SwiftUI
 
-/// Sidebar navigation matching the Tauri app's 5-section layout.
+// MARK: Accessibility labels for shotty UI automation (snake_case literals)
+
+/// Sidebar navigation for the native macOS app shell.
 ///
-/// Provides navigation items with ⌘1–⌘5 keyboard shortcuts
+/// Provides navigation items with ⌘1–⌘7 keyboard shortcuts
 /// (wired via CommandMenu in MLMApp) and a Settings footer.
 struct SidebarView: View {
     @Binding var selectedSection: SidebarSection
     @Environment(\.container) private var container
     @State private var pendingDuplicatesCount: Int = 0
+    @State private var pendingConflictsCount: Int = 0
+    @State private var pendingRecommendationsCount: Int = 0
+    @State private var hasExpiredSource = false
 
     var body: some View {
         List(selection: $selectedSection) {
             Section {
-                // Phase 36 Plan 04: `.allCases` was removed when SidebarSection
-                // gained the `.playlistDetail(Int64)` associated-value case.
-                // Top-level rows iterate the explicit `topLevelCases` array;
-                // the `.playlists` row is replaced by `PinnedPlaylistsDisclosure`
-                // which nests pinned-playlist children under a DisclosureGroup
-                // (D-07/D-08) and routes their clicks via `.playlistDetail` (D-09).
-                ForEach(SidebarSection.topLevelCases) { section in
-                    if section == .playlists {
-                        PinnedPlaylistsDisclosure(
-                            topLevelLabel: section.label,
-                            topLevelIcon: section.icon,
-                            topLevelSection: section,
-                            onUnpin: { pid in
-                                Task {
-                                    try? await container.playlistRepository?.togglePin(id: pid)
-                                    // togglePin does not post .playlistDidChange itself —
-                                    // fire here so the disclosure refreshes after unpin.
-                                    NotificationCenter.default.post(name: .playlistDidChange, object: nil)
-                                }
-                            },
-                            onDelete: { pid in
-                                Task {
-                                    try? await container.playlistRepository?.delete(id: pid)
-                                    NotificationCenter.default.post(name: .playlistDidChange, object: nil)
-                                }
-                            },
-                            onSelectSection: { targetSection in
-                                selectedSection = targetSection
-                            }
-                        )
-                    } else {
-                        HStack {
-                            Label(section.label, systemImage: section.icon)
-
-                            // Show disconnected indicator for Library when drive is unmounted
-                            if section == .library && !container.isLibraryDriveMounted {
-                                Spacer()
-                                Circle()
-                                    .fill(Color.mlmError)
-                                    .frame(width: 7, height: 7)
-                                    .help("Library drive disconnected")
-                            }
-
-                            // Show pending duplicates badge count
-                            if section == .duplicates && pendingDuplicatesCount > 0 {
-                                Spacer()
-                                Text("\(pendingDuplicatesCount)")
-                                    .font(MLMFont.mono)
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(
-                                        Capsule()
-                                            .fill(Color.orange)
-                                    )
-                            }
-                        }
-                        .tag(section)
-                        .springLoadableHover {
-                            selectedSection = section
-                        }
-                    }
-                }
+                sidebarRow(.library)
+                    .accessibilityIdentifier("sidebar_library_row")
+                    .accessibilityLabel("sidebar_library_row")
+                pinnedPlaylistsRow
+                    .accessibilityIdentifier("sidebar_playlists_row")
+                    .accessibilityLabel("sidebar_playlists_row")
+                sidebarRow(.folders)
+                    .accessibilityIdentifier("sidebar_folders_row")
+                    .accessibilityLabel("sidebar_folders_row")
+                sidebarRow(.sync)
+                    .accessibilityIdentifier("sidebar_sync_row")
+                    .accessibilityLabel("sidebar_sync_row")
+                sidebarRow(.sources)
+                    .accessibilityIdentifier("sidebar_sources_row")
+                    .accessibilityLabel("sidebar_sources_row")
             } header: {
-                Text("NAVIGATION")
+                Text("LIBRARY")
+                    .font(MLMFont.sectionLabel)
+                    .foregroundColor(.mlmInkMuted)
+            }
+
+            Section {
+                sidebarRow(.review)
+                    .accessibilityIdentifier("sidebar_review_row")
+                    .accessibilityLabel("sidebar_review_row")
+                sidebarRow(.discover)
+                    .accessibilityIdentifier("sidebar_discover_row")
+                    .accessibilityLabel("sidebar_discover_row")
+            } header: {
+                Text("WORK")
                     .font(MLMFont.sectionLabel)
                     .foregroundColor(.mlmInkMuted)
             }
@@ -88,24 +58,119 @@ struct SidebarView: View {
         .background(Color.mlmSurface)
         .task {
             updatePendingDuplicatesCount()
+            updatePendingRecommendationsCount()
+            updateSourceStatus()
         }
         .onReceive(NotificationCenter.default.publisher(for: .reviewQueueDidChange)) { _ in
             updatePendingDuplicatesCount()
         }
         .onReceive(NotificationCenter.default.publisher(for: .libraryDidImport)) { _ in
             updatePendingDuplicatesCount()
+            updatePendingRecommendationsCount()
+            updateSourceStatus()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .downloadDidComplete)) { _ in
+            updatePendingRecommendationsCount()
+        }
+    }
+
+    @ViewBuilder
+    private var pinnedPlaylistsRow: some View {
+        PinnedPlaylistsDisclosure(
+            topLevelLabel: SidebarSection.playlists.label,
+            topLevelIcon: SidebarSection.playlists.icon,
+            topLevelSection: .playlists,
+            onUnpin: { pid in
+                Task {
+                    try? await container.playlistRepository?.togglePin(id: pid)
+                    NotificationCenter.default.post(name: .playlistDidChange, object: nil)
+                }
+            },
+            onDelete: { pid in
+                Task {
+                    try? await container.playlistRepository?.delete(id: pid)
+                    NotificationCenter.default.post(name: .playlistDidChange, object: nil)
+                }
+            },
+            onSelectSection: { targetSection in
+                selectedSection = targetSection
+            }
+        )
+    }
+
+    private func sidebarRow(_ section: SidebarSection) -> some View {
+        Button {
+            selectedSection = section
+        } label: {
+            HStack {
+                Label(section.label, systemImage: section.icon)
+
+            if section == .library && !container.isLibraryDriveMounted {
+                Spacer()
+                Circle()
+                    .fill(Color.mlmError)
+                    .frame(width: 7, height: 7)
+                    .help("Library drive disconnected")
+                    .accessibilityIdentifier("sidebar_library_drive_disconnected")
+                    .accessibilityLabel("Library drive disconnected")
+            }
+
+            if section == .sync, container.syncViewModel?.isSyncing == true {
+                Spacer()
+                ProgressView()
+                    .controlSize(.mini)
+                    .tint(.mlmActive)
+                    .help("Sync in progress")
+                    .accessibilityIdentifier("sidebar_sync_in_progress")
+                    .accessibilityLabel("Sync in progress")
+            }
+
+            if section == .sources && hasExpiredSource {
+                Spacer()
+                Circle()
+                    .fill(Color.mlmAttention)
+                    .frame(width: 7, height: 7)
+                    .help("A source sign-in has expired")
+                    .accessibilityIdentifier("sidebar_source_expired")
+                    .accessibilityLabel("A source sign-in has expired")
+            }
+
+            if section == .review && (pendingDuplicatesCount > 0 || pendingConflictsCount > 0) {
+                Spacer()
+                Text("\(pendingDuplicatesCount) dup · \(pendingConflictsCount) conf")
+                    .font(MLMFont.badge)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.mlmAttention))
+                    .help("\(pendingDuplicatesCount) duplicate groups and \(pendingConflictsCount) metadata conflicts need review")
+                    .accessibilityIdentifier("sidebar_review_pending_counts")
+                    .accessibilityLabel("\(pendingDuplicatesCount) duplicate groups and \(pendingConflictsCount) metadata conflicts need review")
+            }
+
+            if section == .discover && pendingRecommendationsCount > 0 {
+                Spacer()
+                Text("\(pendingRecommendationsCount)")
+                    .font(MLMFont.badge)
+                    .foregroundColor(.mlmInkMuted)
+                    .help("\(pendingRecommendationsCount) recommendations pending")
+                    .accessibilityIdentifier("sidebar_discover_pending_count")
+                    .accessibilityLabel("\(pendingRecommendationsCount) recommendations pending")
+            }
+        }
+            .springLoadableHover {
+                selectedSection = section
+            }
+        }
+        .buttonStyle(.plain)
+        .tag(section)
     }
 
     // MARK: - Settings footer
 
     private var settingsFooter: some View {
         Button {
-            if let delegate = AppDelegate.shared {
-                delegate.showSettingsWindow()
-            } else {
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-            }
+            AppDelegate.shared?.showSettingsWindow()
         } label: {
             Label("Settings", systemImage: "gearshape")
                 .font(MLMFont.body)
@@ -117,16 +182,37 @@ struct SidebarView: View {
         .buttonStyle(.plain)
         .padding(.horizontal, 8)
         .padding(.bottom, 8)
+        .accessibilityIdentifier("settings_button")
+        .accessibilityLabel("settings_button")
     }
 
     private func updatePendingDuplicatesCount() {
         guard let analysisRepo = container.analysisRepository else { return }
         Task {
-            if let count = try? await analysisRepo.countPendingReviews() {
+            if let counts = try? await analysisRepo.pendingReviewCounts() {
                 await MainActor.run {
-                    self.pendingDuplicatesCount = count
+                    self.pendingDuplicatesCount = counts.duplicates
+                    self.pendingConflictsCount = counts.conflicts
                 }
             }
+        }
+    }
+
+    private func updatePendingRecommendationsCount() {
+        guard let trackRepo = container.trackRepository else { return }
+        Task {
+            let count = (try? await trackRepo.fetchDiscoveryInboxTracks().count) ?? 0
+            await MainActor.run {
+                pendingRecommendationsCount = count
+            }
+        }
+    }
+
+    private func updateSourceStatus() {
+        guard let tokenStorage = container.tokenStorage else { return }
+        hasExpiredSource = TokenStorage.Service.allCases.contains { service in
+            let credentials = try? tokenStorage.getCredentials(service: service)
+            return credentials?.isExpired ?? false
         }
     }
 }
