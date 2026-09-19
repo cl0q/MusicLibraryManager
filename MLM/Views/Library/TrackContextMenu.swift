@@ -12,6 +12,7 @@ struct TrackContextMenu: View {
     let addToSyncProfile: (SyncProfile) -> Void
     var playlist: Playlist? = nil
     var onRemoveFromPlaylist: (() -> Void)? = nil
+    var allowsLibraryActions: Bool = true
     @Environment(\.container) private var container
 
     /// Resolved selected tracks.
@@ -48,12 +49,19 @@ struct TrackContextMenu: View {
     }
 
     var body: some View {
+        let selected = selectedTracks
+        let missing = selected.filter(\.isRemote)
+        let suffix = selected.count > 1 ? " (\(selected.count) tracks)" : ""
+        let hasLocal = selected.contains { $0.isLocal }
+        let dlLabel = "Download \(missing.count) missing track\(missing.count == 1 ? "" : "s")"
+        let dlDisabled = missing.isEmpty || (container.downloadViewModel?.isDownloading ?? false)
+
         if playlist != nil {
             Section {
                 Button(role: .destructive) {
                     onRemoveFromPlaylist?()
                 } label: {
-                    Label("Remove from Playlist\(countSuffix)", systemImage: "minus.circle")
+                    Label("Remove from Playlist\(suffix)", systemImage: "minus.circle")
                 }
             }
             Divider()
@@ -63,119 +71,126 @@ struct TrackContextMenu: View {
             Button { playSelectedTrack() } label: {
                 Label("Play", systemImage: "play.fill")
             }
-            .disabled(selectedTracks.isEmpty || selectedTracks.first?.isRemote == true)
+            .disabled(selected.isEmpty || selected.first?.isRemote == true)
+
+            Button { playNextSelectedTracks() } label: {
+                Label("Play Next", systemImage: "forward.end.fill")
+            }
+            .disabled(selected.isEmpty)
         }
 
 
-        Divider()
+        if allowsLibraryActions {
+            Divider()
 
-        Section {
-            Menu {
-                Button {
-                    NotificationCenter.default.post(
-                        name: .triggerNewPlaylistFromSelection,
-                        object: nil,
-                        userInfo: ["trackIds": Array(selectedTrackIDs)]
-                    )
-                } label: {
-                    Label("New Playlist…", systemImage: "plus.square.on.square")
-                }
+            Section {
+                Menu {
+                    Button {
+                        NotificationCenter.default.post(
+                            name: .triggerNewPlaylistFromSelection,
+                            object: nil,
+                            userInfo: ["trackIds": Array(selectedTrackIDs)]
+                        )
+                    } label: {
+                        Label("New Playlist…", systemImage: "plus.square.on.square")
+                    }
 
-                Divider()
+                    Divider()
 
-                if availablePlaylists.isEmpty {
-                    Text("No playlists")
-                } else {
-                    ForEach(availablePlaylists) { playlist in
-                        Button {
-                            addToPlaylist(playlist)
-                        } label: {
-                            HStack {
-                                if playlist.isPinned == 1 {
-                                    Image(systemName: "pin.fill")
+                    if availablePlaylists.isEmpty {
+                        Text("No playlists")
+                    } else {
+                        ForEach(availablePlaylists) { playlist in
+                            Button {
+                                addToPlaylist(playlist)
+                            } label: {
+                                HStack {
+                                    if playlist.isPinned == 1 {
+                                        Image(systemName: "pin.fill")
+                                    }
+                                    Text(playlist.name)
                                 }
-                                Text(playlist.name)
                             }
                         }
                     }
-                }
-            } label: {
-                Label("Add to Playlist\(countSuffix)", systemImage: "text.badge.plus")
-            }
-            .disabled(selectedTracks.isEmpty)
-        }
-
-        Section {
-            Menu {
-                Button {
-                    NotificationCenter.default.post(
-                        name: .triggerNewSyncProfileFromSelection,
-                        object: nil,
-                        userInfo: ["trackIds": Array(selectedTrackIDs)]
-                    )
                 } label: {
-                    Label("Create new profile…", systemImage: "plus.circle")
+                    Label("Add to Playlist\(suffix)", systemImage: "text.badge.plus")
                 }
+                .disabled(selected.isEmpty)
+            }
 
-                Divider()
-
-                if availableSyncProfiles.isEmpty {
-                    Text("No sync profiles — create one first")
-                } else {
-                    ForEach(availableSyncProfiles) { profile in
-                        Button {
-                            addToSyncProfile(profile)
-                        } label: {
-                            Text(profile.name)
-                        }
+            Section {
+                Menu {
+                    Button {
+                        NotificationCenter.default.post(
+                            name: .triggerNewSyncProfileFromSelection,
+                            object: nil,
+                            userInfo: ["trackIds": Array(selectedTrackIDs)]
+                        )
+                    } label: {
+                        Label("Create new profile…", systemImage: "plus.circle")
                     }
+
                     Divider()
-                }
-                Button {
-                    NotificationCenter.default.post(name: .navigateToCreateSyncProfile, object: nil)
+
+                    if availableSyncProfiles.isEmpty {
+                        Text("No sync profiles — create one first")
+                    } else {
+                        ForEach(availableSyncProfiles) { profile in
+                            Button {
+                                addToSyncProfile(profile)
+                            } label: {
+                                Text(profile.name)
+                            }
+                        }
+                        Divider()
+                    }
+                    Button {
+                        NotificationCenter.default.post(name: .navigateToCreateSyncProfile, object: nil)
+                    } label: {
+                        Label("Create new profile… (Settings)", systemImage: "plus.circle")
+                    }
                 } label: {
-                    Label("Create new profile… (Settings)", systemImage: "plus.circle")
+                    Label("Sync to \u{25B8}", systemImage: "arrow.triangle.2.circlepath")
                 }
-            } label: {
-                Label("Sync to \u{25B8}", systemImage: "arrow.triangle.2.circlepath")
+                .disabled(selected.isEmpty)
             }
-            .disabled(selectedTracks.isEmpty)
-        }
 
-        Divider()
-
-        if hasLocalTracks {
-            Section {
-                Button { revealInFinder() } label: {
-                    Label("Reveal in Finder", systemImage: "folder")
-                }
-
-                Button { copyPath() } label: {
-                    Label("Copy File Path", systemImage: "doc.on.doc")
-                }
-            }
             Divider()
-        }
 
-        if !missingTracks.isEmpty {
+            if hasLocal {
+                Section {
+                    Button { revealInFinder() } label: {
+                        Label("Reveal in Finder", systemImage: "folder")
+                    }
+
+                    Button { copyPath() } label: {
+                        Label("Copy File Path", systemImage: "doc.on.doc")
+                    }
+                }
+                Divider()
+            }
+
+            if !missing.isEmpty {
+                Section {
+                    Button {
+                        downloadSelectedTracks()
+                    } label: {
+                        Label(dlLabel, systemImage: "arrow.down.circle")
+                    }
+                    .disabled(dlDisabled)
+                }
+                Divider()
+            }
+
             Section {
-                Button {
-                    downloadSelectedTracks()
+                Button(role: .destructive) {
+                    handleRemoveTapped()
                 } label: {
-                    Label(downloadButtonLabel, systemImage: "arrow.down.circle")
+                    Label("Remove from Library\(suffix)", systemImage: "trash")
                 }
-                .disabled(downloadDisabled)
+                .disabled(selected.isEmpty)
             }
-            Divider()
-        }
-
-        Section {
-            Button(role: .destructive) {
-                handleRemoveTapped()
-            } label: {
-                Label("Remove from Library\(countSuffix)", systemImage: "trash")
-            }
-            .disabled(selectedTracks.isEmpty)
         }
     }
 
@@ -267,7 +282,16 @@ struct TrackContextMenu: View {
     private func playSelectedTrack() {
         guard let track = selectedTracks.first(where: { $0.isLocal }),
               let playbackVM = container.playbackViewModel else { return }
-        Task { await playbackVM.playTrack(track) }
+        Task { await playbackVM.playTrack(track, queue: selectedTracks) }
+    }
+
+    /// Insert the selected tracks (in displayed order) directly after the
+    /// current track in the playback queue.
+    private func playNextSelectedTracks() {
+        guard let playbackVM = container.playbackViewModel else { return }
+        let ordered = selectedTracks
+        guard !ordered.isEmpty else { return }
+        playbackVM.insertPlayNext(ordered)
     }
 
     /// Hand the current selection to the DownloadViewModel.

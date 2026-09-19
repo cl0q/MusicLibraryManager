@@ -22,6 +22,8 @@ struct ReviewQueueView: View {
     var focusTrackID: Int64?
 
     var body: some View {
+        // [navperf] temporary instrumentation — remove after measurement
+        let _ = print("[navperf] section-body review \(Date().timeIntervalSince1970)")
         Group {
             if let viewModel {
                 reviewContent(viewModel)
@@ -30,6 +32,8 @@ struct ReviewQueueView: View {
             }
         }
         .task {
+            // [navperf] temporary instrumentation — remove after measurement
+            print("[navperf] section-task-start review \(Date().timeIntervalSince1970)")
             guard viewModel == nil,
                   let analysisRepository = container.analysisRepository,
                   let trackRepository = container.trackRepository else { return }
@@ -39,6 +43,8 @@ struct ReviewQueueView: View {
             )
             viewModel = model
             await model.loadReviews()
+            // [navperf] temporary instrumentation — remove after measurement
+            print("[navperf] section-task-after-first-await review \(Date().timeIntervalSince1970)")
             focus(on: focusTrackID, in: model)
         }
         .onChange(of: focusTrackID) { _, trackID in
@@ -730,4 +736,5 @@ struct ReviewQueueView: View {
     private func formatDuration(_ duration: Int) -> String {
         String(format: "%d:%02d", duration / 60, duration % 60)
     }
+
 }

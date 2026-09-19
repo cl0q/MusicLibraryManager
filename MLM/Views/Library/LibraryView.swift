@@ -8,16 +8,17 @@ struct LibraryView: View {
     @Environment(\.container) private var container
 
     /// Callback when a track is double-clicked.
-    var onTrackDoubleClick: ((Track) -> Void)?
+    var onTrackDoubleClick: ((Track, [Track]) -> Void)?
 
     @State private var viewModel: LibraryViewModel?
     @State private var importViewModel: ImportViewModel?
     @State private var availablePlaylists: [Playlist] = []
     @State private var availableSyncProfiles: [SyncProfile] = []
     @State private var isRescanning = false
-    @FocusState private var isSearchFocused: Bool
 
     var body: some View {
+        // [navperf] temporary instrumentation — remove after measurement
+        let _ = { print("[navperf] libraryview-body \(Date().timeIntervalSince1970)") }()
         Group {
             if let viewModel {
                 libraryContent(viewModel)
@@ -27,16 +28,25 @@ struct LibraryView: View {
             }
         }
         .task {
+            // [navperf] temporary instrumentation — remove after measurement
+            print("[navperf] libraryview-task-start \(Date().timeIntervalSince1970)")
             initializeViewModel()
-            await viewModel?.loadTracks()
-            await reloadPlaylists()
-            await reloadSyncProfiles()
+            viewModel?.searchQuery = container.searchCoordinator.query
+            // Run track loading and sidebar data fetches concurrently —
+            // the table doesn't depend on playlists/profiles, so loading
+            // them sequentially added ~100-200ms of fixed latency.
+            async let loadTracks: () = viewModel?.loadTracks() ?? ()
+            async let loadPlaylists: () = reloadPlaylists()
+            async let loadProfiles: () = reloadSyncProfiles()
+            _ = await (loadTracks, loadPlaylists, loadProfiles)
         }
         .onReceive(NotificationCenter.default.publisher(for: .libraryDidImport)) { _ in
             Task { await viewModel?.refresh() }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .libraryDidDeleteTracks)) { _ in
-            Task { await viewModel?.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: .libraryDidDeleteTracks)) { note in
+            if let ids = note.userInfo?["removedIds"] as? [Int64] {
+                viewModel?.removeTracks(ids: Set(ids))
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .downloadDidComplete)) { _ in
             Task { await viewModel?.refresh() }
@@ -46,9 +56,6 @@ struct LibraryView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .syncProfileDidChange)) { _ in
             Task { await reloadSyncProfiles() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .focusSearchField)) { _ in
-            isSearchFocused = true
         }
     }
 
@@ -65,13 +72,27 @@ struct LibraryView: View {
                 availableSyncProfiles: availableSyncProfiles
             )
         }
-        .searchable(
-            text: Bindable(viewModel).searchQuery,
-            placement: .toolbar,
-            prompt: "Search library"
-        )
-        .searchFocused($isSearchFocused)
+        .onChange(of: container.searchCoordinator.query) { _, q in
+            // [navperf] temporary instrumentation — remove after measurement
+            print("[navperf] libraryview-onchange-search \(q.count) \(Date().timeIntervalSince1970)")
+            guard q != viewModel.searchQuery else { return }
+            viewModel.searchQuery = q
+        }
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    Task {
+                        if let pvm = container.playbackViewModel {
+                            await pvm.playShuffled(viewModel.displayedTracks)
+                        }
+                    }
+                } label: {
+                    Label("Shuffle", systemImage: "shuffle")
+                }
+                .help("Shuffle play library")
+                .disabled(viewModel.displayedTracks.isEmpty)
+                .accessibilityIdentifier("library_shuffle_button")
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     Task { await rescan() }
@@ -87,11 +108,6 @@ struct LibraryView: View {
                 .disabled(isRescanning)
                 .accessibilityIdentifier("rescan_button")
                 .accessibilityLabel("rescan_button")
-            }
-
-            ToolbarItem(placement: .automatic) {
-                Text("\(viewModel.displayedTracks.count) tracks")
-                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -161,13 +177,8 @@ struct LibraryView: View {
     // MARK: - Initialization
 
     private func initializeViewModel() {
-        guard viewModel == nil,
-              let trackRepo = container.trackRepository,
-              let configRepo = container.configRepository else { return }
-        viewModel = LibraryViewModel(
-            trackRepository: trackRepo,
-            configRepository: configRepo
-        )
+        guard viewModel == nil else { return }
+        viewModel = container.libraryViewModel
     }
 
     private func ensureImportViewModel() {
@@ -179,4 +190,5 @@ struct LibraryView: View {
             configRepository: configRepo
         )
     }
+
 }

@@ -27,13 +27,15 @@ struct PlaylistsView: View {
     @State private var availableSyncProfiles: [SyncProfile] = []
 
     /// Callback when a track is double-clicked in the detail view.
-    var onTrackDoubleClick: ((Track) -> Void)?
+    var onTrackDoubleClick: ((Track, [Track]) -> Void)?
 
     private let columns = [
         GridItem(.adaptive(minimum: 200, maximum: 260), spacing: 12)
     ]
 
     var body: some View {
+        // [navperf] temporary instrumentation — remove after measurement
+        let _ = print("[navperf] section-body playlists \(Date().timeIntervalSince1970)")
         Group {
             if let selectedPlaylist, viewModel != nil {
                 PlaylistDetailView(
@@ -54,8 +56,12 @@ struct PlaylistsView: View {
             }
         }
         .task {
+            // [navperf] temporary instrumentation — remove after measurement
+            print("[navperf] section-task-start playlists \(Date().timeIntervalSince1970)")
             initializeViewModel()
             await viewModel?.loadPlaylists()
+            // [navperf] temporary instrumentation — remove after measurement
+            print("[navperf] section-task-after-first-await playlists \(Date().timeIntervalSince1970)")
             await reloadSyncProfiles()
         }
         .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { _ in
@@ -80,14 +86,15 @@ struct PlaylistsView: View {
             // This catches the case where artwork backfill ran while the view was not shown
             // (e.g., user was in LibraryView during Maintenance → Refresh embedded artwork).
             // Post one notification per displayed playlist so PlaylistCoverService can
-            // coalesce via inFlight. No origin tag — these are explicit user-triggered events.
+            // coalesce via inFlight. Tagged coverRevalidation so PlaylistDetailView's
+            // track-refresh receiver skips these noise posts.
             guard let vm = viewModel else { return }
             for playlist in vm.displayedPlaylists {
                 guard let pid = playlist.id else { continue }
                 NotificationCenter.default.post(
                     name: .playlistDidChange,
                     object: nil,
-                    userInfo: ["playlistId": pid]
+                    userInfo: ["playlistId": pid, "coverRevalidation": pid]
                 )
             }
         }

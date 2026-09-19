@@ -18,13 +18,15 @@ import SwiftUI
 struct PlaylistDetailViewLoader: View {
     let playlistId: Int64
     let onBack: () -> Void
-    let onTrackDoubleClick: ((Track) -> Void)?
+    let onTrackDoubleClick: ((Track, [Track]) -> Void)?
 
     @Environment(\.container) private var container
     @State private var playlist: Playlist?
     @State private var loadFailed = false
 
     var body: some View {
+        // [navperf] temporary instrumentation — remove after measurement
+        let _ = print("[navperf] section-body playlistDetailLoader \(Date().timeIntervalSince1970)")
         Group {
             if let pl = playlist {
                 PlaylistDetailView(
@@ -51,6 +53,8 @@ struct PlaylistDetailViewLoader: View {
             }
         }
         .task(id: playlistId) {
+            // [navperf] temporary instrumentation — remove after measurement
+            print("[navperf] section-task-start playlistDetailLoader \(Date().timeIntervalSince1970)")
             loadFailed = false
             playlist = nil
             guard let repo = container.playlistRepository else {
@@ -59,6 +63,8 @@ struct PlaylistDetailViewLoader: View {
             }
             do {
                 let fetched = try await repo.fetch(id: playlistId)
+                // [navperf] temporary instrumentation — remove after measurement
+                print("[navperf] section-task-after-first-await playlistDetailLoader \(Date().timeIntervalSince1970)")
                 if let fetched {
                     playlist = fetched
                 } else {
@@ -69,4 +75,5 @@ struct PlaylistDetailViewLoader: View {
             }
         }
     }
+
 }

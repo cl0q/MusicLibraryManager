@@ -47,8 +47,7 @@ struct ContentView: View {
     @State private var selectedSection: SidebarSection = .library
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var showFirstRunWizard = false
-    @State private var globalSearchQuery = ""
-    @State private var isGlobalSearchPresented = false
+    @State private var showUniversalSearch = false
     @FocusState private var isGlobalSearchFocused: Bool
 
     /// Track selected for detail panel (via double-click or "More Info").
@@ -125,7 +124,6 @@ struct ContentView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .searchCommandTriggered)) { _ in
-            isGlobalSearchPresented = true
             isGlobalSearchFocused = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .showReview)) { notification in
@@ -138,15 +136,49 @@ struct ContentView: View {
             }
             selectedSection = .review
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openTrackDetailForTrack)) { notification in
+            let trackId: Int64?
+            if let raw = notification.userInfo?["trackId"] as? Int64 {
+                trackId = raw
+            } else if let ns = notification.userInfo?["trackId"] as? NSNumber {
+                trackId = ns.int64Value
+            } else {
+                trackId = nil
+            }
+            let play = notification.userInfo?["play"] as? Bool ?? false
+            guard let trackId else { return }
+            Task {
+                guard let track = try? await container.trackRepository?.fetchTrack(id: trackId) else { return }
+                await MainActor.run {
+                    selectedTrackForDetail = track
+                }
+                if play, track.isLocal, let playbackVM = container.playbackViewModel {
+                    Task { await playbackVM.playTrack(track) }
+                }
+            }
+        }
         .sheet(item: $playlistSelectionContainer) { selection in
             NewPlaylistFromSelectionSheet(trackIds: selection.trackIds)
         }
         .sheet(item: $syncProfileSelectionContainer) { selection in
             NewSyncProfileFromSelectionSheet(trackIds: selection.trackIds)
         }
-        .onChange(of: selectedSection) { _, _ in
-            isGlobalSearchPresented = false
+        .onChange(of: selectedSection) { _, newSection in
+            // [navperf] temporary instrumentation — remove after measurement
+            print("[navperf] onchange-section-start \(newSection) \(Date().timeIntervalSince1970)")
+            container.searchCoordinator.dismiss()
+            container.searchCoordinator.query = ""
             isGlobalSearchFocused = false
+            switch newSection {
+            case .library:
+                container.searchCoordinator.context = .library
+            case .playlistDetail(let id):
+                container.searchCoordinator.context = .playlist(id)
+            default:
+                container.searchCoordinator.context = .other
+            }
+            // [navperf] temporary instrumentation — remove after measurement
+            print("[navperf] onchange-section-end \(newSection) \(Date().timeIntervalSince1970)")
         }
     }
 
@@ -169,18 +201,25 @@ struct ContentView: View {
     private var initializedView: some View {
         VStack(spacing: 0) {
             // Main content — NavigationSplitView fills available space
-            NavigationSplitView(columnVisibility: $columnVisibility) {
-                SidebarView(selectedSection: $selectedSection)
-                    .frame(minWidth: 192)
-            } detail: {
-                detailView
-            }
-            .inspector(isPresented: showDetailInspector) {
+            HSplitView {
+                NavigationSplitView(columnVisibility: $columnVisibility) {
+                    SidebarView(selectedSection: $selectedSection)
+                        .frame(minWidth: 192)
+                } detail: {
+                    detailView
+                }
+                .onChange(of: container.playbackViewModel?.currentTrack) { _, newTrack in
+                    // Follow the now-playing track only when the detail pane is already open.
+                    // Never force-open the inspector on a track change, and never clear it on stop.
+                    guard newTrack != nil, selectedTrackForDetail != nil else { return }
+                    selectedTrackForDetail = newTrack
+                }
+
                 if let track = selectedTrackForDetail {
                     TrackDetailView(track: track, onClose: {
                         selectedTrackForDetail = nil
                     })
-                    .inspectorColumnWidth(min: 320, ideal: 360, max: 480)
+                    .frame(minWidth: 320, idealWidth: 360, maxWidth: 480)
                 }
             }
             .toolbar {
@@ -190,34 +229,27 @@ struct ContentView: View {
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(.secondary)
-                        TextField("Search library…", text: $globalSearchQuery)
-                            .textFieldStyle(.plain)
-                            .focused($isGlobalSearchFocused)
-                            .onChange(of: isGlobalSearchFocused) { _, isFocused in
-                                if isFocused {
-                                    isGlobalSearchPresented = true
-                                }
+                    GlobalSearchField(
+                        isFocused: $isGlobalSearchFocused,
+                        hasLocalTable: {
+                            switch selectedSection {
+                            case .library, .playlistDetail: return true
+                            default: return false
                             }
-                            .onChange(of: globalSearchQuery) { _, query in
-                                let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-                                if !trimmed.isEmpty {
-                                    isGlobalSearchPresented = true
-                                    isGlobalSearchFocused = true
-                                } else if !isGlobalSearchFocused {
-                                    isGlobalSearchPresented = false
-                                }
-                            }
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .frame(width: 240)
-                    .background(Color.mlmSurface, in: RoundedRectangle(cornerRadius: 6))
-                    .accessibilityIdentifier("search_field")
-                    .accessibilityLabel("Search library")
+                        }
+                    )
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showUniversalSearch = true
+                    } label: {
+                        Image(systemName: "globe")
+                    }
+                    .help("Universal Search — paste a URL to download")
+                }
+            }
+            .sheet(isPresented: $showUniversalSearch) {
+                UniversalSearchView(onDismiss: { showUniversalSearch = false })
             }
 
             // Separator
@@ -229,71 +261,130 @@ struct ContentView: View {
             ActivityPanel()
         }
         .background(Color.mlmBase)
+        .onAppear { installCmdFMonitor() }
+        .onDisappear { removeCmdFMonitor() }
+    }
+
+    // MARK: - Cmd+F via NSEvent local monitor
+
+    @State private var cmdFMonitor: Any?
+
+    private func installCmdFMonitor() {
+        cmdFMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let isCmdF = event.modifierFlags.contains(.command) &&
+                !event.modifierFlags.contains(.option) &&
+                !event.modifierFlags.contains(.control) &&
+                !event.modifierFlags.contains(.shift) &&
+                event.charactersIgnoringModifiers == "f"
+            if isCmdF {
+                isGlobalSearchFocused = true
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func removeCmdFMonitor() {
+        if let monitor = cmdFMonitor {
+            NSEvent.removeMonitor(monitor)
+            cmdFMonitor = nil
+        }
     }
 
     // MARK: - Detail view router
 
+    /// Maps the coordinator's search context onto the merger context so the
+    /// pane ranks the current section's tracks first.
+    private var searchMergerContext: SearchResultsMerger.Context {
+        switch container.searchCoordinator.context {
+        case .library: .library
+        case .playlist: .playlist
+        case .other: .other
+        }
+    }
+
     @ViewBuilder
     private var detailView: some View {
-        if isGlobalSearchPresented {
-            GlobalSearchPresentationView(query: $globalSearchQuery) {
-                isGlobalSearchPresented = false
-                isGlobalSearchFocused = false
-                globalSearchQuery = ""
-            }
+        // [navperf] temporary instrumentation — remove after measurement
+        let _ = print("[navperf] detailview-body isPresented=\(container.searchCoordinator.isPresented) \(Date().timeIntervalSince1970)")
+        if container.searchCoordinator.isPresented {
+            GlobalSearchPresentationView(
+                query: Bindable(container.searchCoordinator).query,
+                onExit: {
+                    container.searchCoordinator.dismiss()
+                    container.searchCoordinator.query = ""
+                    isGlobalSearchFocused = false
+                },
+                context: searchMergerContext,
+                onTrackDoubleClick: { track, queue in
+                    handleTrackDoubleClick(track, queue: queue)
+                }
+            )
         } else {
-            switch selectedSection {
-            case .library:
-                LibraryView(onTrackDoubleClick: { track in
-                    handleTrackDoubleClick(track)
+            // LibraryView is kept alive across section switches to avoid the ~0.5 s
+            // teardown/rebuild cost of its ~12 000-row Table ↔ NSTableView bridge.
+            // It is hidden via opacity + allowsHitTesting when another section is active.
+            // LibraryHost's Equatable conformance is only honoured when the call site
+            // applies `.equatable()`; without it SwiftUI ignores `==` and re-evaluates
+            // the body on every parent re-render.
+            ZStack {
+                LibraryHost(onTrackDoubleClick: { track, queue in
+                    handleTrackDoubleClick(track, queue: queue)
                 })
-            case .playlists:
-                PlaylistsView(onTrackDoubleClick: { track in
-                    handleTrackDoubleClick(track)
-                })
-            case .playlistDetail(let id):
-                PlaylistDetailViewLoader(
-                    playlistId: id,
-                    onBack: { selectedSection = .playlists },
-                    onTrackDoubleClick: { track in
-                        handleTrackDoubleClick(track)
-                    }
-                )
-            case .folders:
-                FoldersView(onTrackDoubleClick: { track in
-                    handleTrackDoubleClick(track)
-                })
-            case .sync:
-                SyncView()
-            case .sources:
-                SourcesView()
-            case .review:
-                ReviewQueueView(focusTrackID: reviewFocusTrackID)
-            case .discover:
-                DiscoverView()
+                .equatable()
+                .opacity(selectedSection == .library ? 1 : 0)
+                .allowsHitTesting(selectedSection == .library)
+
+                // [navperf] temporary instrumentation — remove after measurement
+                let _ = print("[navperf] zstack-switch \(selectedSection) \(Date().timeIntervalSince1970)")
+                switch selectedSection {
+                case .library:
+                    Color.clear
+                case .playlists:
+                    PlaylistsView(onTrackDoubleClick: { track, queue in
+                        handleTrackDoubleClick(track, queue: queue)
+                    })
+                case .playlistDetail(let id):
+                    PlaylistDetailViewLoader(
+                        playlistId: id,
+                        onBack: { selectedSection = .playlists },
+                        onTrackDoubleClick: { track, queue in
+                            handleTrackDoubleClick(track, queue: queue)
+                        }
+                    )
+                case .folders:
+                    FoldersView(onTrackDoubleClick: { track, queue in
+                        handleTrackDoubleClick(track, queue: queue)
+                    })
+                case .sync:
+                    SyncView()
+                case .sources:
+                    SourcesView()
+                case .review:
+                    ReviewQueueView(focusTrackID: reviewFocusTrackID)
+                case .discover:
+                    DiscoverView()
+                case .queue:
+                    PlaybackQueueView()
+                }
             }
         }
     }
 
-    // MARK: - Track Detail Inspector
-
-    /// Whether the detail inspector should be shown.
-    private var showDetailInspector: Binding<Bool> {
-        Binding(
-            get: { selectedTrackForDetail != nil },
-            set: { if !$0 { selectedTrackForDetail = nil } }
-        )
-    }
+    // MARK: - Track Detail
 
     /// Handle double-click on a track — play it and show the detail panel.
-    private func handleTrackDoubleClick(_ track: Track) {
+    ///
+    /// `queue` is the visible table order at the click site; WP1 wires it
+    /// into the playback queue so track-end advances to the row below.
+    private func handleTrackDoubleClick(_ track: Track, queue: [Track]) {
         // Show detail inspector
         selectedTrackForDetail = track
 
         // Play the track
         if track.isLocal, let playbackVM = container.playbackViewModel {
             Task {
-                await playbackVM.playTrack(track)
+                await playbackVM.playTrack(track, queue: queue)
             }
         }
     }
@@ -333,6 +424,37 @@ struct ContentView: View {
     }
 }
 
+// MARK: - Library host (prevents hidden LibraryView re-evaluation)
+
+/// Wraps `LibraryView` and freezes the double-click callback after the first
+/// render.  `Equatable` conformance always returns `true` so SwiftUI skips
+/// re-evaluating the body on subsequent parent re-renders — the expensive
+/// `LibraryView` (≈12 000-row Table ↔ NSTableView bridge) is therefore never
+/// re-evaluated when the user switches to another sidebar section.
+///
+/// The frozen callback remains valid because `DependencyContainer` is a
+/// `final class` singleton (reference type) and `@State` mutations use
+/// reference-based storage.
+private struct LibraryHost: View, Equatable {
+    let initialCallback: ((Track, [Track]) -> Void)?
+    @State private var stored: ((Track, [Track]) -> Void)?
+
+    init(onTrackDoubleClick: ((Track, [Track]) -> Void)?) {
+        self.initialCallback = onTrackDoubleClick
+    }
+
+    var body: some View {
+        // [navperf] temporary instrumentation — remove after measurement
+        let _ = print("[navperf] libraryhost-body \(Date().timeIntervalSince1970)")
+        LibraryView(onTrackDoubleClick: stored)
+            .onAppear {
+                if stored == nil { stored = initialCallback }
+            }
+    }
+
+    static func == (_: LibraryHost, _: LibraryHost) -> Bool { true }
+}
+
 // MARK: - Navigation sections
 
 /// Navigation sections in the native macOS sidebar.
@@ -351,6 +473,7 @@ enum SidebarSection: Hashable, Identifiable {
     case sources
     case review
     case discover
+    case queue
 
     var id: String {
         switch self {
@@ -362,6 +485,7 @@ enum SidebarSection: Hashable, Identifiable {
         case .sources: return "sources"
         case .review: return "review"
         case .discover: return "discover"
+        case .queue: return "queue"
         }
     }
 
@@ -378,7 +502,7 @@ enum SidebarSection: Hashable, Identifiable {
     /// Manual replacement for synthesised `CaseIterable.allCases`.
     /// `.playlistDetail` cases are produced dynamically inside
     /// `PinnedPlaylistsDisclosure`.
-    static let topLevelCases: [SidebarSection] = libraryCases + workCases
+    static let topLevelCases: [SidebarSection] = libraryCases + workCases + [.queue]
 
     var label: String {
         switch self {
@@ -390,6 +514,7 @@ enum SidebarSection: Hashable, Identifiable {
         case .sources: "Sources"
         case .review: "Review"
         case .discover: "Discover"
+        case .queue: "Queue"
         }
     }
 
@@ -403,6 +528,7 @@ enum SidebarSection: Hashable, Identifiable {
         case .sources: "globe"
         case .review: "doc.on.doc"
         case .discover: "sparkles"
+        case .queue: "list.number"
         }
     }
 
@@ -417,6 +543,7 @@ enum SidebarSection: Hashable, Identifiable {
         case .sources: "5"
         case .review: "6"
         case .discover: "7"
+        case .queue: "8"
         }
     }
 }
@@ -443,5 +570,74 @@ struct PlaceholderView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.mlmBase)
+    }
+}
+
+// MARK: - Debounced global search leaf view
+
+/// Isolates per-keystroke observation: the TextField binds to local `text`,
+/// so typing only re-renders this tiny leaf. The shared `SearchCoordinator.query`
+/// is updated only after a 100 ms debounce (or immediately on Enter/clear),
+/// preventing per-keystroke fan-out to LibraryView, PlaylistDetailView, and
+/// the global search presentation.
+private struct GlobalSearchField: View {
+    @Environment(\.container) private var container
+    @State private var text = ""
+    @FocusState.Binding var isFocused: Bool
+    let hasLocalTable: () -> Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Search…", text: $text)
+                .textFieldStyle(.plain)
+                .focused($isFocused)
+                .onSubmit {
+                    if text != container.searchCoordinator.query {
+                        commit()
+                    }
+                    container.searchCoordinator.submit()
+                }
+                .onChange(of: container.searchCoordinator.query) { _, newQuery in
+                    if text != newQuery {
+                        text = newQuery
+                    }
+                }
+                .task(id: text) {
+                    guard !text.isEmpty else { return }
+                    try? await Task.sleep(for: .milliseconds(100))
+                    guard !Task.isCancelled else { return }
+                    guard text != container.searchCoordinator.query else { return }
+                    commit()
+                }
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                    container.searchCoordinator.dismiss()
+                    container.searchCoordinator.query = ""
+                    isFocused = false
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.mlmInkMuted)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("search_clear_button")
+                .accessibilityLabel("search_clear_button")
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .frame(width: 240)
+        .background(Color.mlmSurface, in: RoundedRectangle(cornerRadius: 6))
+        .accessibilityIdentifier("search_field")
+        .accessibilityLabel("Search library")
+    }
+
+    private func commit() {
+        container.searchCoordinator.query = text
+        let hasLocal = hasLocalTable()
+        container.searchCoordinator.queryChanged(hasLocalTable: hasLocal)
     }
 }

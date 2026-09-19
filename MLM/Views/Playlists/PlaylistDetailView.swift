@@ -22,7 +22,7 @@ struct PlaylistDetailView: View {
     let playlist: Playlist
     var initiallyShowFailedTracks = false
     var onBack: () -> Void
-    var onTrackDoubleClick: ((Track) -> Void)?
+    var onTrackDoubleClick: ((Track, [Track]) -> Void)?
 
     @Environment(\.container) private var container
     @State private var viewModel: PlaylistDetailViewModel?
@@ -34,6 +34,13 @@ struct PlaylistDetailView: View {
 
     @State private var availablePlaylists: [Playlist] = []
     @State private var availableSyncProfiles: [SyncProfile] = []
+
+    // WP4 — Ingest preview sheet state
+    @State private var ingestVM: PlaylistIngestViewModel?
+    @State private var pendingIngestURL: URL?
+    @State private var showIngestPreview = false
+    @State private var ingestSuccessMessage: String?
+    @State private var coverImage: NSImage?
 
     var body: some View {
         Group {
@@ -59,12 +66,42 @@ struct PlaylistDetailView: View {
         }
         .task {
             initializeViewModel()
+            viewModel?.searchQuery = container.searchCoordinator.query
             failureDisclosureExpanded = initiallyShowFailedTracks
-            await viewModel?.loadTracks()
-            await loadPlaylistsAndProfiles()
+            // Run track loading and sidebar data fetches concurrently —
+            // the table doesn't depend on playlists/profiles, so loading
+            // them sequentially added ~100-200ms of fixed latency.
+            async let loadTracks: () = viewModel?.loadTracks() ?? ()
+            async let loadPlaylists: () = loadPlaylistsAndProfiles()
+            _ = await (loadTracks, loadPlaylists)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { _ in
-            Task { await viewModel?.refresh() }
+        .onChange(of: container.searchCoordinator.query) { _, q in
+            guard q != viewModel?.searchQuery else { return }
+            viewModel?.searchQuery = q
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { note in
+            // Cover-revalidation noise (tagged by PlaylistDetailView.onAppear /
+            // PlaylistsView.onAppear / PlaylistCoverService) must NOT trigger a
+            // track refetch. Only real mutations (untagged or with a playlistId
+            // matching this playlist) invalidate the cache and refresh.
+            if let userInfo = note.userInfo {
+                if userInfo["coverRevalidation"] != nil { return }
+                if (userInfo["origin"] as? String) == "coverService" { return }
+            }
+            if let userInfo = note.userInfo,
+               let notifiedId = userInfo["playlistId"] as? Int64,
+               let selfId = playlist.id,
+               notifiedId != selfId {
+                return
+            }
+            Task {
+                if let selfId = playlist.id {
+                    container.playlistTableCache?.invalidate(playlistId: selfId)
+                } else {
+                    container.playlistTableCache?.invalidateAll()
+                }
+                await viewModel?.refresh()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .downloadDidComplete)) { _ in
             Task { await viewModel?.refresh() }
@@ -78,11 +115,13 @@ struct PlaylistDetailView: View {
         .onAppear {
             // Revalidate the detail playlist's cover when the view becomes visible.
             // Handles the case where backfill ran while navigated away.
+            // Tagged coverRevalidation so PlaylistDetailView's own track-refresh
+            // receiver (and other detail views) skip this noise.
             guard let pid = playlist.id else { return }
             NotificationCenter.default.post(
                 name: .playlistDidChange,
                 object: nil,
-                userInfo: ["playlistId": pid]
+                userInfo: ["playlistId": pid, "coverRevalidation": pid]
             )
         }
         .fileImporter(
@@ -94,7 +133,39 @@ struct PlaylistDetailView: View {
             allowsMultipleSelection: false
         ) { result in
             if case .success(let urls) = result, let url = urls.first {
-                Task { await viewModel?.importM3U(url) }
+                // WP4: Route through the ingest engine for diff preview
+                Task { await startIngestPreview(for: url) }
+            }
+        }
+        .sheet(isPresented: $showIngestPreview) {
+            if let ingestVM, let preview = ingestVM.preview, let url = pendingIngestURL {
+                IngestPreviewView(
+                    preview: preview,
+                    sourceFileName: url.lastPathComponent,
+                    onApply: {
+                        Task {
+                            // Use sentinel profileId -1 for standalone imports (no profile context)
+                            // The engine treats this as "diff against empty snapshot" → append behavior
+                            let playlistId = await ingestVM.apply(url: url, profileId: -1)
+                            if playlistId != nil {
+                                showIngestPreview = false
+                                ingestSuccessMessage = "Imported \(preview.added.count) track\(preview.added.count == 1 ? "" : "s")"
+                                await viewModel?.refresh()
+                                NotificationCenter.default.post(
+                                    name: .playlistDidChange,
+                                    object: nil,
+                                    userInfo: ["playlistId": playlistId!]
+                                )
+                            }
+                        }
+                    },
+                    onCancel: {
+                        ingestVM.cancel()
+                        showIngestPreview = false
+                    },
+                    isApplying: ingestVM.isApplying,
+                    applyError: ingestVM.errorMessage
+                )
             }
         }
         .alert("Remove tracks", isPresented: $showingRemoveTracksConfirmation) {
@@ -106,6 +177,31 @@ struct PlaylistDetailView: View {
             }
         } message: {
             Text("Remove \(tracksPendingRemoval.count) tracks from this playlist? This does not delete any files.")
+        }
+        .alert("Import Complete", isPresented: Binding(
+            get: { ingestSuccessMessage != nil },
+            set: { if !$0 { ingestSuccessMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {
+                ingestSuccessMessage = nil
+            }
+        } message: {
+            Text(ingestSuccessMessage ?? "")
+        }
+        .task(id: playlist.id) {
+            coverImage = nil
+        }
+        .task(id: playlist.coverImagePath) {
+            let path = playlist.coverImagePath
+            let coversDir = PlaylistCard.coversDirectory
+            let cgImage: CGImage? = try? await Task.detached(priority: .userInitiated) {
+                PlaylistCard.loadCoverCGImage(coverImagePath: path, coversDir: coversDir)
+            }.value
+            guard !Task.isCancelled, let cgImage else {
+                coverImage = nil
+                return
+            }
+            coverImage = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
         }
     }
 
@@ -134,7 +230,7 @@ struct PlaylistDetailView: View {
             HStack(alignment: .bottom, spacing: 12) {
                 // Playlist cover / icon
                 ZStack {
-                    if let coverImage = loadCoverImage() {
+                    if let coverImage {
                         Image(nsImage: coverImage)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
@@ -207,11 +303,25 @@ struct PlaylistDetailView: View {
         HStack(spacing: 8) {
             if let firstLocalTrack = viewModel.playableTracks.first {
                 Button {
-                    onTrackDoubleClick?(firstLocalTrack)
+                    onTrackDoubleClick?(firstLocalTrack, viewModel.displayedTracks)
                 } label: {
                     Label("Play", systemImage: "play.fill")
                 }
                 .buttonStyle(.borderedProminent)
+
+                Button {
+                    Task {
+                        if let pvm = container.playbackViewModel {
+                            await pvm.playShuffled(viewModel.displayedTracks)
+                        }
+                    }
+                } label: {
+                    Label("Shuffle", systemImage: "shuffle")
+                }
+                .buttonStyle(.borderedProminent)
+                .help("Shuffle play playlist")
+                .disabled(viewModel.displayedTracks.isEmpty)
+                .accessibilityIdentifier("playlist_shuffle_button")
             }
 
             if viewModel.downloadStatus.missingTracks > 0 {
@@ -242,25 +352,6 @@ struct PlaylistDetailView: View {
                 .buttonStyle(.bordered)
                 .disabled(viewModel.isSyncingSource)
             }
-
-            // Search
-            HStack(spacing: 4) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11))
-                    .foregroundColor(.mlmInkMuted)
-                TextField("Search tracks…", text: Binding(
-                    get: { viewModel.searchQuery },
-                    set: { viewModel.searchQuery = $0 }
-                ))
-                .textFieldStyle(.plain)
-                .font(MLMFont.body)
-                .foregroundColor(.mlmInk)
-                .frame(width: 140)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(Color.mlmRaised)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
 
             // Import M3U
             Button {
@@ -428,6 +519,27 @@ struct PlaylistDetailView: View {
 
     // MARK: - Helpers
 
+    // WP4 — Start the ingest preview flow for an m3u8 file
+    private func startIngestPreview(for url: URL) async {
+        guard let ingestService = container.playlistIngestService else {
+            viewModel?.setErrorMessage("Ingest service unavailable — please restart the app")
+            return
+        }
+
+        let vm = PlaylistIngestViewModel(ingestService: ingestService)
+        ingestVM = vm
+        pendingIngestURL = url
+
+        await vm.loadPreview(url: url, profileId: -1)
+
+        if vm.preview != nil {
+            showIngestPreview = true
+        } else if let error = vm.errorMessage {
+            // Preview failed — surface via the existing error mechanism
+            viewModel?.setErrorMessage(error)
+        }
+    }
+
     private func requestTrackRemoval(_ trackIDs: Set<Int64>, using viewModel: PlaylistDetailViewModel) {
         guard !trackIDs.isEmpty else { return }
 
@@ -488,7 +600,8 @@ struct PlaylistDetailView: View {
             playlistRepository: playlistRepo,
             trackRepository: trackRepo,
             sourceRepository: sourceRepo,
-            configRepository: container.configRepository
+            configRepository: container.configRepository,
+            tableCache: container.playlistTableCache
         )
     }
 
@@ -547,21 +660,6 @@ struct PlaylistDetailView: View {
 
     // MARK: - Header Artwork & Fallbacks
 
-    private func loadCoverImage() -> NSImage? {
-        guard let relPath = playlist.coverImagePath else { return nil }
-        let fileName = (relPath as NSString).lastPathComponent
-        let url = coversDir.appendingPathComponent(fileName)
-        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        return NSImage(contentsOf: url)
-    }
-
-    private var coversDir: URL {
-        FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("com.musiclibrary.app")
-            .appendingPathComponent("playlist-covers")
-    }
-
     private var categoryIcon: String {
         if playlist.isLiked == 1 {
             return "heart.fill"
@@ -589,4 +687,5 @@ struct PlaylistDetailView: View {
         }
         return [Color.mlmRaised, Color.mlmSurface]
     }
+
 }

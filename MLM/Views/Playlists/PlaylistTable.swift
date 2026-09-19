@@ -12,7 +12,7 @@ struct PlaylistTable: View {
     @Bindable var viewModel: PlaylistDetailViewModel
     var availablePlaylists: [Playlist] = []
     var availableSyncProfiles: [SyncProfile] = []
-    var onTrackDoubleClick: ((Track) -> Void)?
+    var onTrackDoubleClick: ((Track, [Track]) -> Void)?
     var onRemoveTracks: (Set<Int64>) async -> Void
 
     @Environment(\.container) private var container
@@ -122,10 +122,11 @@ struct PlaylistTable: View {
                     TableRow(row)
                         .draggable(TrackDragData(trackId: row.id, sourcePlaylistId: playlist.id))
                 }
-                .dropDestination(for: TrackDragData.self) { index, items in
-                    _ = handleDrop(items: items, destinationIndex: index)
+                .onInsert(of: [.trackDrag]) { insertionIndex, providers in
+                    handleInsert(at: insertionIndex, providers: providers)
                 }
             }
+            .accessibilityIdentifier("playlist_track_table")
             .contextMenu(forSelectionType: Int64.self) { selectedIDs in
                 TrackContextMenu(
                     selectedTrackIDs: selectedIDs,
@@ -147,7 +148,7 @@ struct PlaylistTable: View {
                 if let trackID = selectedIDs.first,
                    let track = viewModel.displayedTracks.first(where: { $0.id == trackID }),
                    availability(for: track) == .local {
-                    onTrackDoubleClick?(track)
+                    onTrackDoubleClick?(track, viewModel.displayedTracks)
                 }
             }
         }
@@ -165,35 +166,35 @@ struct PlaylistTable: View {
         }
     }
 
-    // MARK: - Drop Handling
+    // MARK: - Insert Handling
 
-    private func handleDrop(items: [TrackDragData], destinationIndex: Int) -> Bool {
-        guard !items.isEmpty else { return false }
-        
-        let trackIds = items.map { $0.trackId }
-        
-        // Target index in the full viewModel.tracks array
-        let targetIndex = getTargetTrackIndex(for: destinationIndex)
-
-        // Check if drag originates from inside the same playlist
-        let isInternalDrag = items.allSatisfy { $0.sourcePlaylistId == playlist.id }
-
-        Task {
-            if isInternalDrag && isDefaultOrder {
-                // Perform track move/reordering
-                for item in items {
-                    if let sourceIndex = viewModel.tracks.firstIndex(where: { $0.id == item.trackId }) {
-                        // Adjust targetIndex dynamically if items move forward/backward
-                        let destination = sourceIndex < targetIndex ? targetIndex : targetIndex
-                        await viewModel.moveTrack(from: sourceIndex, to: destination)
+    private func handleInsert(at insertionIndex: Int, providers: [NSItemProvider]) {
+        Task { @MainActor in
+            var payloads: [TrackDragData] = []
+            for provider in providers {
+                let payload: TrackDragData? = await withCheckedContinuation { (continuation: CheckedContinuation<TrackDragData?, Never>) in
+                    _ = provider.loadTransferable(type: TrackDragData.self) { result in
+                        continuation.resume(returning: try? result.get())
                     }
                 }
-            } else {
-                // Perform insertion of tracks from outside
-                await viewModel.addTracks(trackIds, at: targetIndex)
+                if let payload {
+                    payloads.append(payload)
+                }
             }
+            guard !payloads.isEmpty else { return }
+
+            let draggedIDs = payloads.map(\.trackId)
+            let targetIndex = getTargetTrackIndex(for: insertionIndex)
+            let allMembers = draggedIDs.allSatisfy { id in viewModel.tracks.contains { $0.id == id } }
+
+            // Internal-only drags are suppressed while sorted or filtered —
+            // the custom order is meaningless in those states.
+            if allMembers {
+                guard isDefaultOrder, viewModel.searchQuery.isEmpty else { return }
+            }
+
+            await viewModel.placeTracks(draggedIDs, at: targetIndex)
         }
-        return true
     }
 
     /// Map visual table insertion index to the actual index in the full viewModel.tracks array.
@@ -249,22 +250,51 @@ struct PlaylistTable: View {
 
     /// Format date_added for display (e.g., "2026-05-07" → "May 7").
     private func formatDateAdded(_ dateString: String?) -> String {
+        Self.formatDateAddedShared(dateString)
+    }
+
+    // Shared formatters — DateFormatter init is expensive (~0.03ms each),
+    // so reuse static instances across all rows instead of creating new ones per row.
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withFullDate, .withDashSeparatorInDate]
+        return f
+    }()
+
+    private static let displayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d"
+        return f
+    }()
+
+    private static func formatDateAddedShared(_ dateString: String?) -> String {
         guard let dateString else { return "—" }
-
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate, .withDashSeparatorInDate]
-
-        if let date = formatter.date(from: String(dateString.prefix(10))) {
-            let display = DateFormatter()
-            display.dateFormat = "MMM d"
-            return display.string(from: date)
+        if let date = isoFormatter.date(from: String(dateString.prefix(10))) {
+            return displayFormatter.string(from: date)
         }
-
         return String(dateString.prefix(10))
     }
 
     private func updateCachedRows() {
-        let mapped = viewModel.displayedTracks
+        let displayed = viewModel.displayedTracks
+        let availabilityCount = viewModel.availabilityByTrackID.count
+
+        // Guard: skip rebuild when inputs haven't changed (prevents redundant
+        // work when multiple onChange triggers fire for the same logical update).
+        // Uses a rolling hash over every displayed track id so reorders are
+        // detected — a simple (count, first, last) fingerprint would miss a
+        // middle-row swap.
+        var hash: Int = displayed.count
+        for track in displayed {
+            hash = hash &* 31 &+ Int(truncatingIfNeeded: track.id ?? 0)
+        }
+        hash = hash &* 31 &+ availabilityCount
+        let fingerprint = (hash: hash, availCount: availabilityCount)
+        if let prev = lastRebuildFingerprint, prev == fingerprint {
+            return
+        }
+
+        let mapped = displayed
             .enumerated()
             .compactMap { idx, track in
                 track.id.map {
@@ -277,7 +307,11 @@ struct PlaylistTable: View {
                 }
             }
         self.cachedRows = mapped.sorted(using: sortOrder)
+        self.lastRebuildFingerprint = fingerprint
     }
+
+    // Fingerprint for guarding redundant rebuilds (O(1) comparison).
+    @State private var lastRebuildFingerprint: (hash: Int, availCount: Int)? = nil
 }
 
 // MARK: - Helper Cell Views for Compiler Performance
@@ -286,7 +320,6 @@ private struct PlaylistTableIndexCell: View {
     let index: Int
     var body: some View {
         Text("\(index)")
-            .font(MLMFont.dataSmall)
             .foregroundStyle(.secondary)
             .monospacedDigit()
             .frame(maxWidth: .infinity, alignment: .trailing)
@@ -310,6 +343,7 @@ private struct PlaylistTableTitleCell: View {
             Text(track.title)
                 .font(MLMFont.tableCell)
                 .lineLimit(1)
+                .foregroundStyle(isPlaying ? Color.mlmAccent : Color.mlmInk)
         }
     }
 }
@@ -332,7 +366,6 @@ private struct PlaylistTableTimeCell: View {
     let formattedDuration: String
     var body: some View {
         Text(formattedDuration)
-            .font(MLMFont.dataSmall)
             .foregroundStyle(.secondary)
             .monospacedDigit()
     }
@@ -382,7 +415,6 @@ private struct PlaylistTableYearCell: View {
     let year: Int?
     var body: some View {
         Text(year.map { "\($0)" } ?? "—")
-            .font(MLMFont.dataSmall)
             .foregroundStyle(.secondary)
             .monospacedDigit()
     }

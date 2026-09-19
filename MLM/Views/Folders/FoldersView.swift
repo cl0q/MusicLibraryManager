@@ -10,9 +10,11 @@ struct FoldersView: View {
     @State private var availableSyncProfiles: [SyncProfile] = []
     @FocusState private var isSearchFocused: Bool
 
-    var onTrackDoubleClick: ((Track) -> Void)?
+    var onTrackDoubleClick: ((Track, [Track]) -> Void)?
 
     var body: some View {
+        // [navperf] temporary instrumentation — remove after measurement
+        let _ = print("[navperf] section-body folders \(Date().timeIntervalSince1970)")
         Group {
             if let viewModel {
                 foldersContent(viewModel)
@@ -23,16 +25,22 @@ struct FoldersView: View {
             }
         }
         .task {
+            // [navperf] temporary instrumentation — remove after measurement
+            print("[navperf] section-task-start folders \(Date().timeIntervalSince1970)")
             initializeViewModel()
             await viewModel?.loadRootFolders()
+            // [navperf] temporary instrumentation — remove after measurement
+            print("[navperf] section-task-after-first-await folders \(Date().timeIntervalSince1970)")
             await reloadPlaylists()
             await reloadSyncProfiles()
         }
         .onReceive(NotificationCenter.default.publisher(for: .libraryDidImport)) { _ in
             Task { await viewModel?.refresh() }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .libraryDidDeleteTracks)) { _ in
-            Task { await viewModel?.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: .libraryDidDeleteTracks)) { note in
+            if let ids = note.userInfo?["removedIds"] as? [Int64] {
+                viewModel?.removeTracks(ids: Set(ids))
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { _ in
             Task { await reloadPlaylists() }
@@ -42,6 +50,9 @@ struct FoldersView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .focusFolderSearchField)) { _ in
             isSearchFocused = true
+        }
+        .onChange(of: viewModel?.selectedFolderPath) { _, _ in
+            viewModel?.persistLastSelection()
         }
     }
 
@@ -518,6 +529,7 @@ struct FoldersView: View {
         NotificationCenter.default.post(name: .libraryDidImport, object: nil)
         await viewModel.refresh()
     }
+
 }
 
 // MARK: - Folder Tracks Table
@@ -528,7 +540,7 @@ struct FolderTracksTable: View {
     @Binding var selectedTrackIDs: Set<Int64>
     var availablePlaylists: [Playlist]
     var availableSyncProfiles: [SyncProfile]
-    var onDoubleClick: ((Track) -> Void)?
+    var onDoubleClick: ((Track, [Track]) -> Void)?
 
     @Environment(\.container) private var container
 
@@ -554,10 +566,12 @@ struct FolderTracksTable: View {
                     if isNowPlaying(row.track) {
                         Image(systemName: "speaker.wave.2.fill")
                             .imageScale(.small)
-                            .foregroundStyle(Color.accentColor)
+                            .foregroundStyle(Color.mlmAccent)
                             .symbolEffect(.variableColor, isActive: true)
                     }
-                    Text(row.track.title).lineLimit(1)
+                    Text(row.track.title)
+                        .lineLimit(1)
+                        .foregroundStyle(isNowPlaying(row.track) ? Color.mlmAccent : Color.mlmInk)
                 }
             }
             .width(min: 140, ideal: 260)
@@ -639,7 +653,7 @@ struct FolderTracksTable: View {
         } primaryAction: { selectedIDs in
             if let trackID = selectedIDs.first,
                let track = tracks.first(where: { $0.id == trackID }) {
-                onDoubleClick?(track)
+                onDoubleClick?(track, rows.map(\.track))
             }
         }
         .accessibilityIdentifier("folders_tracks_table")

@@ -9,13 +9,13 @@ struct ShellInformationArchitectureTests {
         ])
         #expect(SidebarSection.workCases.map(\.label) == ["Review", "Discover"])
         #expect(SidebarSection.topLevelCases.map(\.label) == [
-            "Library", "Playlists", "Folders", "Sync", "Sources", "Review", "Discover",
+            "Library", "Playlists", "Folders", "Sync", "Sources", "Review", "Discover", "Queue",
         ])
     }
 
     @Test func navigateShortcutsCoverEveryTopLevelDestination() {
         #expect(SidebarSection.topLevelCases.map(\.keyboardShortcut) == [
-            "1", "2", "3", "4", "5", "6", "7",
+            "1", "2", "3", "4", "5", "6", "7", "8",
         ])
     }
 

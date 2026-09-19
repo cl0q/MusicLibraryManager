@@ -1,6 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import AppKit
+import ImageIO
 
 // MARK: Accessibility labels for shotty UI automation (snake_case literals)
 
@@ -67,6 +68,7 @@ struct PlaylistCard: View {
     /// the accent stroke + thicker line per UI-SPEC §"Cover-Card states".
     @State private var isDropTargeted = false
     @State private var timer: Timer? = nil
+    @State private var coverImage: NSImage?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -127,13 +129,28 @@ struct PlaylistCard: View {
         }
         .accessibilityIdentifier("playlist_card")
         .accessibilityLabel("playlist_card_\(playlist.id ?? -1)")
+        .task(id: playlist.id) {
+            coverImage = nil
+        }
+        .task(id: playlist.coverImagePath) {
+            let path = playlist.coverImagePath
+            let coversDir = Self.coversDirectory
+            let cgImage: CGImage? = try? await Task.detached(priority: .userInitiated) {
+                PlaylistCard.loadCoverCGImage(coverImagePath: path, coversDir: coversDir)
+            }.value
+            guard !Task.isCancelled, let cgImage else {
+                coverImage = nil
+                return
+            }
+            coverImage = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        }
     }
 
     // MARK: - Icon Area
 
     private var iconArea: some View {
         ZStack {
-            if let coverImage = loadCoverImage() {
+            if let coverImage {
                 Image(nsImage: coverImage)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -335,24 +352,40 @@ struct PlaylistCard: View {
 
     // MARK: - Cover Loading (Phase 36 Plan 02 cache)
 
-    /// Loads the cached cover PNG from the playlist-covers directory.
-    /// Returns `nil` if `coverImagePath` is unset or the file is missing,
-    /// triggering the gradient fallback branch in `iconArea`.
-    ///
-    /// Path-traversal safety (T-36-09): the stored relative path is reduced
-    /// to its last component before joining with `coversDir`, so any `../`
-    /// segment cannot escape the playlist-covers directory.
-    private func loadCoverImage() -> NSImage? {
-        guard let relPath = playlist.coverImagePath else { return nil }
+    /// Resolve the safe on-disk URL for a playlist cover. Applies the
+    /// path-traversal guard (lastPathComponent) so any `../` segment cannot
+    /// escape the covers directory (T-36-09). Returns `nil` only when
+    /// `coverImagePath` is `nil`; callers check file existence separately.
+    nonisolated static func safeCoverURL(coverImagePath: String?, coversDir: URL) -> URL? {
+        guard let relPath = coverImagePath else { return nil }
         let fileName = (relPath as NSString).lastPathComponent
-        let url = coversDir.appendingPathComponent(fileName)
+        return coversDir.appendingPathComponent(fileName)
+    }
+
+    /// Full cover-load pipeline: resolve URL, check existence, decode.
+    /// Returns `nil` on any failure so the caller's gradient fallback branch fires.
+    nonisolated static func loadCoverCGImage(coverImagePath: String?, coversDir: URL) -> CGImage? {
+        guard let url = safeCoverURL(coverImagePath: coverImagePath, coversDir: coversDir) else { return nil }
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        return NSImage(contentsOf: url)
+        let options: [CFString: Any] = [kCGImageSourceShouldCache: false]
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, options as CFDictionary) else {
+            return nil
+        }
+        guard let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let w = props[kCGImagePropertyPixelWidth] as? Int,
+              let h = props[kCGImagePropertyPixelHeight] as? Int else { return nil }
+        let thumbOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(w, h)
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, thumbOptions as CFDictionary)
     }
 
     /// Resolved on-disk URL of the playlist-covers cache directory.
     /// Same path as `PlaylistCoverService.ensureCoversDir`.
-    private var coversDir: URL {
+    static var coversDirectory: URL {
         FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("com.musiclibrary.app")
