@@ -1,6 +1,22 @@
 import AVFoundation
 import Foundation
 
+/// Protocol abstraction over AudioPlayer so PlaybackViewModel can be
+/// tested with a fake/stub implementation.
+protocol AudioPlayerControlling: AnyObject {
+    func loadFile(at url: URL) throws
+    func play() throws
+    func pause()
+    func togglePlayPause() throws
+    func stop()
+    func seek(to position: TimeInterval) throws
+    func setVolume(_ volume: Float)
+    func applyLUFSCompensation(lufsI: Double?)
+    var state: AudioPlayer.PlaybackState { get }
+    var duration: TimeInterval { get }
+    var currentPosition: TimeInterval { get }
+}
+
 /// Audio playback engine using AVAudioEngine.
 ///
 /// Provides play, pause, stop, seek, and LUFS-based gain compensation.
@@ -13,7 +29,7 @@ import Foundation
 ///
 /// Phase 5 implementation. Matches the Tauri app's HTML5 `<audio>` element
 /// but with native gain control for ReplayGain/LUFS compensation.
-final class AudioPlayer: @unchecked Sendable {
+final class AudioPlayer: AudioPlayerControlling, @unchecked Sendable {
 
     // MARK: - Playback State
 
@@ -263,8 +279,10 @@ final class AudioPlayer: @unchecked Sendable {
 
         switch state {
         case .paused:
-            // Resume — just start the engine and player
+            // Resume from the captured pause position (seekFrameOffset was
+            // frozen in pause()). Re-schedule from that frame and play.
             try startEngineIfNeeded()
+            scheduleFile(file, from: seekFrameOffset)
             playerNode.play()
             state = .playing
 
@@ -284,7 +302,14 @@ final class AudioPlayer: @unchecked Sendable {
     /// Pause playback. Preserves position for resume.
     func pause() {
         guard state == .playing else { return }
-        playerNode.pause()
+        // Capture the current playback position into seekFrameOffset BEFORE
+        // stopping the node, so currentPosition continues to report the exact
+        // pause point via the fallback path (playerTime is unavailable while paused).
+        if let nodeTime = playerNode.lastRenderTime,
+           let playerTime = playerNode.playerTime(forNodeTime: nodeTime) {
+            seekFrameOffset = seekFrameOffset + playerTime.sampleTime
+        }
+        playerNode.stop()
         state = .paused
     }
 
@@ -386,8 +411,17 @@ final class AudioPlayer: @unchecked Sendable {
     /// Adjusts playback volume so all tracks sound equally loud.
     /// Target: -14 LUFS (matches Spotify/YouTube normalization).
     ///
+    /// Gated by the `playback_lufs_normalization` UserDefaults flag (default off).
+    /// When off, playback uses unity gain (0 dB) matching Finder/QuickTime.
+    ///
     /// - Parameter lufsI: The track's integrated LUFS value (from analysis)
     func applyLUFSCompensation(lufsI: Double?) {
+        let enabled = UserDefaults.standard.bool(forKey: "playback_lufs_normalization")
+        guard enabled else {
+            setGain(dB: 0)
+            return
+        }
+
         guard let lufs = lufsI else {
             // No LUFS data — unity gain
             setGain(dB: 0)

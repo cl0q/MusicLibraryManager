@@ -11,6 +11,7 @@ struct PlayerBar: View {
     @State private var isSeeking = false
     @State private var seekFraction: Double = 0
     @State private var volume: Double = 1.0
+    @State private var showLargeCover = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -37,6 +38,19 @@ struct PlayerBar: View {
 
     private var transportCluster: some View {
         HStack(spacing: 6) {
+            Button {
+                Task { await viewModel.back() }
+            } label: {
+                Image(systemName: "backward.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(viewModel.hasTrack ? .primary : .secondary)
+                    .frame(width: 20)
+            }
+            .buttonStyle(.plain)
+            .disabled(!viewModel.hasTrack)
+            .accessibilityIdentifier("back_button")
+            .accessibilityLabel("back_button")
+
             Button { viewModel.togglePlayPause() } label: {
                 Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 18))
@@ -47,6 +61,19 @@ struct PlayerBar: View {
             .disabled(!viewModel.hasTrack)
             .accessibilityIdentifier("play_pause_button")
             .accessibilityLabel("play_pause_button")
+
+            Button {
+                Task { await viewModel.next() }
+            } label: {
+                Image(systemName: "forward.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(viewModel.hasTrack ? .primary : .secondary)
+                    .frame(width: 20)
+            }
+            .buttonStyle(.plain)
+            .disabled(!viewModel.hasTrack)
+            .accessibilityIdentifier("forward_button")
+            .accessibilityLabel("forward_button")
         }
     }
 
@@ -62,6 +89,33 @@ struct PlayerBar: View {
             cornerRadius: 5
         )
         .frame(width: 40, height: 40)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard viewModel.hasTrack else { return }
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                showLargeCover.toggle()
+            }
+        }
+        .popover(
+            isPresented: $showLargeCover,
+            attachmentAnchor: .point(.bottom),
+            arrowEdge: .top
+        ) {
+            TrackCoverView(
+                trackId: viewModel.currentTrack?.id ?? 0,
+                size: .large,
+                cornerRadius: 12
+            )
+            .frame(width: 320, height: 320)
+            .shadow(color: .black.opacity(0.35), radius: 20, x: 0, y: 8)
+            .padding(20)
+            .presentationBackground(.clear)
+            .onTapGesture {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                    showLargeCover = false
+                }
+            }
+        }
     }
 
     // MARK: - Track Info

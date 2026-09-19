@@ -73,15 +73,24 @@ final class PlaybackViewModel {
 
     // MARK: - Dependencies
 
-    private let audioPlayer: AudioPlayer
+    private let audioPlayer: any AudioPlayerControlling
     private let configRepository: ConfigRepository?
 
     /// Timer for polling playback position.
     private var positionTimer: Timer?
 
+    /// The playback queue — priority lanes (playNext + context).
+    private var queue = PlaybackQueue()
+
+    /// History of played tracks (most recent last). Capped by UserDefaults.
+    private(set) var history: [Track] = []
+
+    /// Upcoming tracks: playNext items first, then context items.
+    var upcoming: [Track] { queue.upcoming }
+
     // MARK: - Init
 
-    init(audioPlayer: AudioPlayer = AudioPlayer(), configRepository: ConfigRepository? = nil) {
+    init(audioPlayer: any AudioPlayerControlling = AudioPlayer(), configRepository: ConfigRepository? = nil) {
         self.audioPlayer = audioPlayer
         self.configRepository = configRepository
     }
@@ -100,8 +109,44 @@ final class PlaybackViewModel {
     /// - Parameter track: The track to play
     @MainActor
     func playTrack(_ track: Track) async {
+        queue.replaceContext([], cap: 0)
+        await loadAndPlay(track)
+    }
+
+    /// Play a track with the visible table order as its queue.
+    ///
+    /// Stores the queue starting at the clicked track so auto-advance,
+    /// back/forward, and play-next all work against the user's context.
+    @MainActor
+    func playTrack(_ track: Track, queue tracks: [Track]) async {
+        let startIndex = tracks.firstIndex(of: track) ?? 0
+        let afterClicked = Array(tracks.dropFirst(startIndex + 1))
+        let cap = Self.contextCap()
+        queue.replaceContext(afterClicked, cap: cap)
+        await loadAndPlay(track)
+    }
+
+    /// Play the given tracks in random order.
+    @MainActor
+    func playShuffled(_ tracks: [Track]) async {
+        guard !tracks.isEmpty else { return }
+        let shuffled = tracks.shuffled()
+        await playTrack(shuffled[0], queue: shuffled)
+    }
+
+    /// Internal: resolve the track's file and start playback without
+    /// touching the queue. Used by playTrack variants and queue navigation.
+    @MainActor
+    private func loadAndPlay(_ track: Track) async {
         errorMessage = nil
         unavailableTrack = nil
+
+        // Record history
+        history.append(track)
+        let historyCap = Self.historySize()
+        if history.count > historyCap {
+            history.removeFirst(history.count - historyCap)
+        }
 
         let root = (try? await configRepository?.getLibraryRoot()) ?? nil
 
@@ -273,6 +318,23 @@ final class PlaybackViewModel {
         }
     }
 
+    /// Seek relative to the current position by `delta` seconds.
+    ///
+    /// Clamps the result to `0...duration`. No-op when no track is loaded
+    /// or the duration is unknown.
+    @MainActor
+    func seekBy(_ delta: TimeInterval) {
+        guard hasTrack, duration > 0 else { return }
+        let target = min(max(0, currentPosition + delta), duration)
+        do {
+            try audioPlayer.seek(to: target)
+            playbackState = audioPlayer.state
+            updatePosition()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     /// Seek to a progress fraction (0.0 – 1.0).
     @MainActor
     func seekToProgress(_ fraction: Double) {
@@ -284,6 +346,96 @@ final class PlaybackViewModel {
     @MainActor
     func setVolume(_ volume: Double) {
         audioPlayer.setVolume(Float(volume))
+    }
+
+    // MARK: - Queue Controls
+
+    /// Called when the current track finishes playing naturally.
+    ///
+    /// Advances the queue and auto-plays the next track. When the queue
+    /// is exhausted, stops playback and clears the current track.
+    @MainActor
+    func trackDidEnd() {
+        guard let nextTrack = queue.advance() else {
+            // Queue exhausted — stop.
+            stop()
+            return
+        }
+        Task { await loadAndPlay(nextTrack) }
+    }
+
+    /// Skip to the next track in the queue.
+    ///
+    /// At the end of the queue, stops playback.
+    @MainActor
+    func next() async {
+        guard let nextTrack = queue.advance() else {
+            stop()
+            return
+        }
+        await loadAndPlay(nextTrack)
+    }
+
+    /// Go back to the previous track, or restart the current one if
+    /// the playback position is past the restart threshold.
+    /// Uses history to find the previous track; pushes the old current
+    /// to the front of the context lane.
+    @MainActor
+    func back() async {
+        let position = audioPlayer.currentPosition
+        if position > PlaybackQueue.backRestartThreshold {
+            do {
+                try audioPlayer.seek(to: 0)
+                currentPosition = 0
+                if playbackState != .playing {
+                    try audioPlayer.play()
+                    playbackState = .playing
+                    startPositionTimer()
+                    postStateDidChange()
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            return
+        }
+
+        // Remove current track from history (it was appended in loadAndPlay)
+        if let current = currentTrack, let idx = history.lastIndex(where: { $0.id == current.id }) {
+            history.remove(at: idx)
+        }
+
+        guard let previousTrack = history.popLast() else {
+            // No previous track — restart current
+            do {
+                try audioPlayer.seek(to: 0)
+                currentPosition = 0
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            return
+        }
+
+        // Push old current to front of context
+        if let current = currentTrack {
+            queue.pushToFront(current)
+        }
+
+        await loadAndPlay(previousTrack)
+    }
+
+    /// Play a specific track from the upcoming queue.
+    /// Discards everything before it; keeps everything after.
+    @MainActor
+    func playFromQueue(track: Track) async {
+        guard queue.playFromUpcoming(track) != nil else { return }
+        await loadAndPlay(track)
+    }
+
+    /// Insert tracks directly after the current track so they play next.
+    ///
+    /// Tracks already in the queue are moved, not duplicated.
+    func insertPlayNext(_ tracks: [Track]) {
+        queue.insertPlayNext(tracks)
     }
 
     // MARK: - Position Timer
@@ -315,6 +467,7 @@ final class PlaybackViewModel {
             currentPosition = 0
             stopPositionTimer()
             postStateDidChange()
+            trackDidEnd()
         }
     }
 
@@ -453,6 +606,18 @@ final class PlaybackViewModel {
         let m = totalSeconds / 60
         let s = totalSeconds % 60
         return String(format: "%d:%02d", m, s)
+    }
+
+    // MARK: - UserDefaults Helpers
+
+    private static func historySize() -> Int {
+        let val = UserDefaults.standard.integer(forKey: "playback_history_size")
+        return val > 0 ? val : 50
+    }
+
+    private static func contextCap() -> Int {
+        let val = UserDefaults.standard.integer(forKey: "playback_context_cap")
+        return val > 0 ? val : 100
     }
 
     // MARK: - Notifications
