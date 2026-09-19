@@ -81,32 +81,38 @@ final class FingerprintService: Sendable {
         
         // Feed ALL tracks into a single task group. The ConcurrencyLimiter
         // ensures exactly `workerCount` fpcalc subprocesses run at once.
-        let results: [Result<Void, Error>] = await withTaskGroup(of: Result<Void, Error>.self) { group in
-            for track in tracks {
-                group.addTask {
-                    // Check cancellation before acquiring a slot
-                    guard !tracker.isCancelled else {
-                        return .failure(CancellationError())
-                    }
-                    return await limiter.run {
-                        await self.processSingleFingerprint(
-                            track: track,
-                            repository: repository,
-                            libraryRoot: libraryRoot,
-                            tracker: tracker
-                        )
+        // onCancel bridges Swift task cancellation to the tracker so the
+        // per-track gates actually stop the loop.
+        let results: [Result<Void, Error>] = await withTaskCancellationHandler {
+            await withTaskGroup(of: Result<Void, Error>.self) { group in
+                for track in tracks {
+                    group.addTask {
+                        // Check cancellation before acquiring a slot
+                        guard !tracker.isCancelled else {
+                            return .failure(CancellationError())
+                        }
+                        return await limiter.run {
+                            await self.processSingleFingerprint(
+                                track: track,
+                                repository: repository,
+                                libraryRoot: libraryRoot,
+                                tracker: tracker
+                            )
+                        }
                     }
                 }
+
+                var collected: [Result<Void, Error>] = []
+                collected.reserveCapacity(tracks.count)
+                for await result in group {
+                    collected.append(result)
+                    // Early exit: stop collecting if cancelled
+                    if tracker.isCancelled { break }
+                }
+                return collected
             }
-            
-            var collected: [Result<Void, Error>] = []
-            collected.reserveCapacity(tracks.count)
-            for await result in group {
-                collected.append(result)
-                // Early exit: stop collecting if cancelled
-                if tracker.isCancelled { break }
-            }
-            return collected
+        } onCancel: {
+            tracker.cancel()
         }
         
         var processed = 0

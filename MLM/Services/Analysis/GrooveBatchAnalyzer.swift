@@ -28,30 +28,36 @@ final class GrooveBatchAnalyzer: Sendable {
 
         AppLogger.shared.info("Starting Groove (CoreML) batch: \(tracks.count) tracks, \(workerCount) workers (turbo: \(turboMode))", source: "GrooveBatch")
 
-        let results: [Result<Void, Error>] = await withTaskGroup(of: Result<Void, Error>.self) { group in
-            for track in tracks {
-                group.addTask {
-                    guard !tracker.isCancelled else {
-                        return .failure(CancellationError())
-                    }
-                    return await limiter.run {
-                        await self.processSingleAnalysis(
-                            track: track,
-                            trackRepository: trackRepository,
-                            libraryRoot: libraryRoot,
-                            tracker: tracker
-                        )
+        // onCancel bridges Swift task cancellation to the tracker so the
+        // per-track gates actually stop the loop.
+        let results: [Result<Void, Error>] = await withTaskCancellationHandler {
+            await withTaskGroup(of: Result<Void, Error>.self) { group in
+                for track in tracks {
+                    group.addTask {
+                        guard !tracker.isCancelled else {
+                            return .failure(CancellationError())
+                        }
+                        return await limiter.run {
+                            await self.processSingleAnalysis(
+                                track: track,
+                                trackRepository: trackRepository,
+                                libraryRoot: libraryRoot,
+                                tracker: tracker
+                            )
+                        }
                     }
                 }
-            }
 
-            var collected: [Result<Void, Error>] = []
-            collected.reserveCapacity(tracks.count)
-            for await result in group {
-                collected.append(result)
-                if tracker.isCancelled { break }
+                var collected: [Result<Void, Error>] = []
+                collected.reserveCapacity(tracks.count)
+                for await result in group {
+                    collected.append(result)
+                    if tracker.isCancelled { break }
+                }
+                return collected
             }
-            return collected
+        } onCancel: {
+            tracker.cancel()
         }
 
         var analyzed = 0

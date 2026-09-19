@@ -48,62 +48,68 @@ final class LibraryRepairService {
             source: "Repair"
         )
 
-        for (index, var track) in tracks.enumerated() {
-            guard !tracker.isCancelled else { break }
+        // Bridge Swift task cancellation to the tracker so the loop's
+        // isCancelled gates actually fire when the user taps Cancel.
+        await withTaskCancellationHandler {
+            for (index, var track) in tracks.enumerated() {
+                guard !tracker.isCancelled else { break }
 
-            // Resolve track file
-            guard let resolvedURL = resolveLocalURL(for: track, normalizedRoot: normalizedRoot) else {
-                tracker.updateProgress(
-                    current: index + 1,
-                    trackId: track.id ?? 0,
-                    trackTitle: track.title,
-                    trackArtist: track.artist,
-                    savedToDb: false
-                )
-                failed += 1
-                continue
+                // Resolve track file
+                guard let resolvedURL = resolveLocalURL(for: track, normalizedRoot: normalizedRoot) else {
+                    tracker.updateProgress(
+                        current: index + 1,
+                        trackId: track.id ?? 0,
+                        trackTitle: track.title,
+                        trackArtist: track.artist,
+                        savedToDb: false
+                    )
+                    failed += 1
+                    continue
+                }
+
+                do {
+                    // Extract metadata
+                    let metadata = try await MetadataExtractor.extract(from: resolvedURL)
+
+                    // Update track fields
+                    track.artist = metadata.artist
+                    track.albumArtist = metadata.albumArtist
+                    track.album = metadata.album
+                    track.title = metadata.title
+                    track.genre = metadata.genre
+                    track.year = metadata.year
+                    track.bitrate = metadata.bitrate
+                    track.duration = metadata.duration
+                    track.format = metadata.format
+
+                    // Save to database
+                    try await trackRepository.update(track)
+
+                    tracker.updateProgress(
+                        current: index + 1,
+                        trackId: track.id ?? 0,
+                        trackTitle: track.title,
+                        trackArtist: track.artist,
+                        savedToDb: true
+                    )
+                    succeeded += 1
+                } catch {
+                    AppLogger.shared.error(
+                        "Rescan Metadata: Error for \(track.artist) - \(track.title) [\(resolvedURL.lastPathComponent)]: \(error.localizedDescription)",
+                        source: "Repair"
+                    )
+                    tracker.updateProgress(
+                        current: index + 1,
+                        trackId: track.id ?? 0,
+                        trackTitle: track.title,
+                        trackArtist: track.artist,
+                        savedToDb: false
+                    )
+                    failed += 1
+                }
             }
-
-            do {
-                // Extract metadata
-                let metadata = try await MetadataExtractor.extract(from: resolvedURL)
-
-                // Update track fields
-                track.artist = metadata.artist
-                track.albumArtist = metadata.albumArtist
-                track.album = metadata.album
-                track.title = metadata.title
-                track.genre = metadata.genre
-                track.year = metadata.year
-                track.bitrate = metadata.bitrate
-                track.duration = metadata.duration
-                track.format = metadata.format
-
-                // Save to database
-                try await trackRepository.update(track)
-
-                tracker.updateProgress(
-                    current: index + 1,
-                    trackId: track.id ?? 0,
-                    trackTitle: track.title,
-                    trackArtist: track.artist,
-                    savedToDb: true
-                )
-                succeeded += 1
-            } catch {
-                AppLogger.shared.error(
-                    "Rescan Metadata: Error for \(track.artist) - \(track.title) [\(resolvedURL.lastPathComponent)]: \(error.localizedDescription)",
-                    source: "Repair"
-                )
-                tracker.updateProgress(
-                    current: index + 1,
-                    trackId: track.id ?? 0,
-                    trackTitle: track.title,
-                    trackArtist: track.artist,
-                    savedToDb: false
-                )
-                failed += 1
-            }
+        } onCancel: {
+            tracker.cancel()
         }
 
         return (succeeded, failed)
