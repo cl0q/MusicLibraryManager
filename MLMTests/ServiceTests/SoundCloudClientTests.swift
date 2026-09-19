@@ -338,3 +338,260 @@ struct SoundCloudClientTests {
         #expect(artworkRows == 0)
     }
 }
+
+@Suite("SoundCloudTrack DRM / downloadability")
+struct SoundCloudTrackDRMTests {
+
+    // MARK: - Helpers
+
+    private func trackJSON(
+        monetizationModel: String? = nil,
+        policy: String? = nil,
+        downloadable: Bool? = nil,
+        includeFields: Bool = true
+    ) -> String {
+        var fields: [String] = [
+            "\"id\": 1",
+            "\"title\": \"Test Track\"",
+            "\"permalink_url\": \"https://soundcloud.com/test/test-track\"",
+        ]
+        if includeFields {
+            if let v = monetizationModel {
+                fields.append("\"monetization_model\": \"\(v)\"")
+            } else {
+                fields.append("\"monetization_model\": null")
+            }
+            if let v = policy {
+                fields.append("\"policy\": \"\(v)\"")
+            } else {
+                fields.append("\"policy\": null")
+            }
+            if let v = downloadable {
+                fields.append("\"downloadable\": \(v)")
+            } else {
+                fields.append("\"downloadable\": null")
+            }
+        }
+        return "{ \(fields.joined(separator: ", ")) }"
+    }
+
+    private func decodeTrack(_ json: String) throws -> SoundCloudTrack {
+        let data = Data(json.utf8)
+        return try JSONDecoder().decode(SoundCloudTrack.self, from: data)
+    }
+
+    // MARK: - Decoding
+
+    @Test
+    func decodesMonetizationModelPolicyAndDownloadable() throws {
+        let json = trackJSON(
+            monetizationModel: "SUB_HIGH_TIER",
+            policy: "BLOCK",
+            downloadable: false
+        )
+        let track = try decodeTrack(json)
+        #expect(track.monetizationModel == "SUB_HIGH_TIER")
+        #expect(track.policy == "BLOCK")
+        #expect(track.downloadable == false)
+    }
+
+    @Test
+    func decodesWhenFieldsAbsent() throws {
+        // Minimal payload with no DRM fields at all — must still decode.
+        let json = """
+        {
+          "id": 2,
+          "title": "Plain Track",
+          "permalink_url": "https://soundcloud.com/x/y"
+        }
+        """
+        let track = try decodeTrack(json)
+        #expect(track.monetizationModel == nil)
+        #expect(track.policy == nil)
+        #expect(track.downloadable == nil)
+    }
+
+    @Test
+    func decodesWhenFieldsPresentButNull() throws {
+        let json = trackJSON(monetizationModel: nil, policy: nil, downloadable: nil, includeFields: true)
+        let track = try decodeTrack(json)
+        #expect(track.monetizationModel == nil)
+        #expect(track.policy == nil)
+        #expect(track.downloadable == nil)
+    }
+
+    @Test
+    func decodesUnknownMonetizationModelWithoutCrashing() throws {
+        let json = trackJSON(
+            monetizationModel: "FUTURE_PREMIUM_TIER_XYZ",
+            policy: "ALLOW",
+            downloadable: true
+        )
+        let track = try decodeTrack(json)
+        #expect(track.monetizationModel == "FUTURE_PREMIUM_TIER_XYZ")
+        #expect(track.policy == "ALLOW")
+        #expect(track.downloadable == true)
+    }
+
+    @Test
+    func decodesUnknownPolicyWithoutCrashing() throws {
+        let json = trackJSON(
+            monetizationModel: "AD_SUPPORTED",
+            policy: "SOME_NEW_POLICY",
+            downloadable: nil
+        )
+        let track = try decodeTrack(json)
+        #expect(track.policy == "SOME_NEW_POLICY")
+    }
+
+    // MARK: - isDownloadBlocked
+
+    @Test
+    func subHighTierWithBlockPolicyIsBlocked() throws {
+        let json = trackJSON(
+            monetizationModel: "SUB_HIGH_TIER",
+            policy: "BLOCK",
+            downloadable: false
+        )
+        let track = try decodeTrack(json)
+        #expect(track.isDownloadBlocked == true)
+    }
+
+    @Test
+    func subLowTierWithSnipPolicyIsBlocked() throws {
+        let json = trackJSON(
+            monetizationModel: "SUB_LOW_TIER",
+            policy: "SNIP",
+            downloadable: false
+        )
+        let track = try decodeTrack(json)
+        #expect(track.isDownloadBlocked == true)
+    }
+
+    @Test
+    func adSupportedWithAllowPolicyIsNotBlocked() throws {
+        let json = trackJSON(
+            monetizationModel: "AD_SUPPORTED",
+            policy: "ALLOW",
+            downloadable: true
+        )
+        let track = try decodeTrack(json)
+        #expect(track.isDownloadBlocked == false)
+    }
+
+    @Test
+    func allNilFieldsIsNotBlocked() throws {
+        let json = """
+        {
+          "id": 3,
+          "title": "Normal Track",
+          "permalink_url": "https://soundcloud.com/x/y"
+        }
+        """
+        let track = try decodeTrack(json)
+        #expect(track.isDownloadBlocked == false)
+    }
+
+    @Test
+    func nullFieldsIsNotBlocked() throws {
+        let json = trackJSON(monetizationModel: nil, policy: nil, downloadable: nil, includeFields: true)
+        let track = try decodeTrack(json)
+        #expect(track.isDownloadBlocked == false)
+    }
+
+    @Test
+    func unknownMonetizationModelIsNotBlocked() throws {
+        // Conservative: unknown monetization_model must NOT be treated as blocked.
+        let json = trackJSON(
+            monetizationModel: "BRAND_NEW_TIER",
+            policy: nil,
+            downloadable: nil
+        )
+        let track = try decodeTrack(json)
+        #expect(track.isDownloadBlocked == false)
+    }
+
+    @Test
+    func unknownPolicyIsNotBlocked() throws {
+        // Conservative: unknown policy must NOT be treated as blocked.
+        let json = trackJSON(
+            monetizationModel: nil,
+            policy: "FUTURE_POLICY",
+            downloadable: nil
+        )
+        let track = try decodeTrack(json)
+        #expect(track.isDownloadBlocked == false)
+    }
+
+    @Test
+    func downloadableFalseAloneIsNotBlocked() throws {
+        // downloadable: false without a blocking policy/monetization_model
+        // is ambiguous — be conservative and do NOT report as blocked.
+        let json = trackJSON(
+            monetizationModel: nil,
+            policy: nil,
+            downloadable: false
+        )
+        let track = try decodeTrack(json)
+        #expect(track.isDownloadBlocked == false)
+    }
+
+    // MARK: - Round-trip
+
+    @Test
+    func roundTripPreservesNewFields() throws {
+        let json = trackJSON(
+            monetizationModel: "SUB_HIGH_TIER",
+            policy: "BLOCK",
+            downloadable: false
+        )
+        let original = try decodeTrack(json)
+        let encoded = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(SoundCloudTrack.self, from: encoded)
+        #expect(decoded.monetizationModel == "SUB_HIGH_TIER")
+        #expect(decoded.policy == "BLOCK")
+        #expect(decoded.downloadable == false)
+    }
+
+    // MARK: - Full realistic payload
+
+    @Test
+    func fullRealisticPayloadDecodesAllPreExistingFields() throws {
+        let json = """
+        {
+          "id": 424242,
+          "title": "Full Track",
+          "duration": 240000,
+          "genre": "Electronic",
+          "permalink_url": "https://soundcloud.com/artist/full-track",
+          "stream_url": "https://api.soundcloud.com/stream/424242",
+          "artwork_url": "https://i1.sndcdn.com/artworks-full.jpg",
+          "created_at": "2026/01/01 12:00:00 +0000",
+          "user": {
+            "id": 7,
+            "username": "artist",
+            "avatar_url": "https://i1.sndcdn.com/avatars.jpg",
+            "full_name": "The Artist",
+            "permalink": "artist"
+          },
+          "monetization_model": "AD_SUPPORTED",
+          "policy": "ALLOW",
+          "downloadable": true
+        }
+        """
+        let track = try decodeTrack(json)
+        #expect(track.id == 424242)
+        #expect(track.title == "Full Track")
+        #expect(track.duration == 240000)
+        #expect(track.genre == "Electronic")
+        #expect(track.permalinkUrl == "https://soundcloud.com/artist/full-track")
+        #expect(track.streamUrl == "https://api.soundcloud.com/stream/424242")
+        #expect(track.artworkUrl == "https://i1.sndcdn.com/artworks-full.jpg")
+        #expect(track.createdAt == "2026/01/01 12:00:00 +0000")
+        #expect(track.user?.username == "artist")
+        #expect(track.monetizationModel == "AD_SUPPORTED")
+        #expect(track.policy == "ALLOW")
+        #expect(track.downloadable == true)
+        #expect(track.isDownloadBlocked == false)
+    }
+}

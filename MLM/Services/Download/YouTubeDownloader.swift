@@ -6,10 +6,10 @@ import Foundation
 /// and downloads the best available audio stream.
 final class YouTubeDownloader: Sendable {
 
-    enum DownloadResult {
-        case success(URL)
-        case notFound
-    }
+    /// Maximum wall-clock seconds for a single download invocation.
+    /// Generous because a long mix or slow connection can legitimately
+    /// take many minutes. 900s = 15 minutes.
+    static let downloadTimeoutSeconds: TimeInterval = 900
 
     private let ytDlpPath: String?
 
@@ -30,14 +30,19 @@ final class YouTubeDownloader: Sendable {
     /// - Parameters:
     ///   - query: Search query (e.g., "Artist - Title")
     ///   - outputDir: Directory to save the downloaded file
-    /// - Returns: Path to the downloaded file, or `.notFound`
+    /// - Returns: `.success(URL)` with the downloaded file, or `.failure`
+    ///   with a classified `DownloadFailure` describing what went wrong.
     func searchAndDownload(
         query: String,
         outputDir: URL,
         onProgress: ((Double) -> Void)? = nil
-    ) async throws -> DownloadResult {
+    ) async throws -> DownloadOutcome {
         guard let ytdlp = ytDlpPath else {
-            return .notFound
+            let failure = DownloadFailureClassifier.classifyTool(
+                source: "youtube", exitCode: 127,
+                stderr: "yt-dlp: command not found",
+                stdout: "", producedFile: false)
+            return .failure(failure)
         }
 
         let outputTemplate = outputDir.appendingPathComponent("%(title)s.%(ext)s").path
@@ -77,101 +82,72 @@ final class YouTubeDownloader: Sendable {
             "chain[YT]: yt-dlp \(arguments.joined(separator: " "))",
             source: "Download"
         )
-        let result = try await ProcessRunner.run(
-            ytdlp,
-            arguments: arguments,
-            onStderr: onProgress.map { cb in
-                { line in
-                    for sub in line.split(separator: "\n") {
-                        if let pct = ProcessRunner.parseProgressPercent(String(sub)) {
-                            cb(pct)
+
+        let result: ProcessRunner.ProcessResult
+        do {
+            result = try await ProcessRunner.run(
+                ytdlp,
+                arguments: arguments,
+                timeout: Self.downloadTimeoutSeconds,
+                onStderr: onProgress.map { cb in
+                    { line in
+                        for sub in line.split(separator: "\n") {
+                            if let pct = ProcessRunner.parseProgressPercent(String(sub)) {
+                                cb(pct)
+                            }
                         }
                     }
                 }
-            }
-        )
-
-        // Trust the printed filepath FIRST — yt-dlp commonly exits
-        // with code 101 ("--max-downloads reached") even though the
-        // file was successfully downloaded and printed via
-        // `--print after_move:filepath`. Treating that as failure
-        // (the old behaviour) was throwing away valid downloads.
-        //
-        // Note: `--newline --progress` makes yt-dlp emit progress lines
-        // to stdout alongside the final filepath, so we must walk lines
-        // from the end rather than trimming the whole blob.
-        if let outputPath = Self.parseDownloadedFilePath(
-            stdout: result.stdout,
-            outputDir: outputDir
-        ) {
-            return .success(URL(fileURLWithPath: outputPath))
-        }
-
-        // No file path on stdout: now inspect the failure modes.
-        let combined = (result.stdout + result.stderr).lowercased()
-        if combined.contains("no video results") || combined.contains("unable to extract") {
-            let stderrTail = String(result.stderr.suffix(600))
-                .replacingOccurrences(of: "\n", with: " | ")
-            AppLogger.shared.warn(
-                "chain[YT]: yt-dlp reported no results for '\(normalizedQuery)'. stderr tail: \(stderrTail)",
-                source: "Download"
             )
-            return .notFound
+        } catch is CancellationError {
+            // Preserve task cancellation propagation — the orchestrator
+            // relies on this to abort in-flight downloads when the user
+            // cancels. Re-throw rather than classifying as a failure.
+            throw CancellationError()
+        } catch {
+            return .failure(DownloadFailureClassifier.classifyTransport(
+                source: "youtube", error: error))
         }
 
-        guard result.isSuccess else {
-            // Surface enough stderr + stdout context to debug *why*
-            // yt-dlp gave up. The Logs tab is the diagnosis surface.
-            let stderrTail = String(result.stderr.suffix(800))
-                .replacingOccurrences(of: "\n", with: " | ")
-            let stdoutTail = String(result.stdout.suffix(400))
-                .replacingOccurrences(of: "\n", with: " | ")
-            AppLogger.shared.warn(
-                "chain[YT]: yt-dlp exited non-zero (code=\(result.exitCode)). stderr tail: \(stderrTail) | stdout tail: \(stdoutTail)",
-                source: "Download"
-            )
-            return .notFound
-        }
-
-        // No trusted stdout path and no recognized failure signature: do
-        // NOT scan outputDir for a "most recent" file. Even though batch
-        // callers now use request-specific staging directories, discovery
-        // callers may provide a shared target. Only a path this invocation
-        // provably printed may be returned (T-39-01).
-        AppLogger.shared.warn(
-            "chain[YT]: no trusted output path — treating as notFound (no directory scan)",
-            source: "Download"
-        )
-        return .notFound
+        return Self.classifyDownloadResult(result, outputDir: outputDir)
     }
 
     /// Download audio from a specific YouTube URL.
-    func downloadByURL(_ url: String, outputDir: URL) async throws -> DownloadResult {
+    ///
+    /// - Returns: `.success(URL)` with the downloaded file, or `.failure`
+    ///   with a classified `DownloadFailure` describing what went wrong.
+    func downloadByURL(_ url: String, outputDir: URL) async throws -> DownloadOutcome {
         guard let ytdlp = ytDlpPath else {
-            return .notFound
+            let failure = DownloadFailureClassifier.classifyTool(
+                source: "youtube", exitCode: 127,
+                stderr: "yt-dlp: command not found",
+                stdout: "", producedFile: false)
+            return .failure(failure)
         }
 
         let outputTemplate = outputDir.appendingPathComponent("%(title)s.%(ext)s").path
 
-        let result = try await ProcessRunner.run(
-            ytdlp,
-            arguments: [
-                url,
-                "-f", "bestaudio",
-                "-x",
-                "--print", "after_move:filepath",
-                "-o", outputTemplate
-            ]
-        )
-
-        guard result.isSuccess else { return .notFound }
-
-        let outputPath = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !outputPath.isEmpty && FileManager.default.fileExists(atPath: outputPath) {
-            return .success(URL(fileURLWithPath: outputPath))
+        let result: ProcessRunner.ProcessResult
+        do {
+            result = try await ProcessRunner.run(
+                ytdlp,
+                arguments: [
+                    url,
+                    "-f", "bestaudio",
+                    "-x",
+                    "--print", "after_move:filepath",
+                    "-o", outputTemplate
+                ],
+                timeout: Self.downloadTimeoutSeconds
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            return .failure(DownloadFailureClassifier.classifyTransport(
+                source: "youtube", error: error))
         }
 
-        return .notFound
+        return Self.classifyDownloadResult(result, outputDir: outputDir)
     }
 
     /// Search YouTube for videos using yt-dlp.
@@ -223,6 +199,84 @@ final class YouTubeDownloader: Sendable {
         }
 
         return Array(tracks.prefix(limit))
+    }
+
+    // MARK: - Result classification
+
+    /// Classify a completed yt-dlp `ProcessResult` into a `DownloadOutcome`.
+    ///
+    /// Path-first logic: if yt-dlp printed a filepath via `--print after_move:filepath`
+    /// AND that file exists on disk, the download succeeded — regardless of exit code.
+    /// This preserves the exit-101 (`--max-downloads` reached) success case.
+    ///
+    /// A `timedOut` result is NEVER success — the process was killed and any
+    /// partial file is unreliable.
+    ///
+    /// Visible + static for testability without spawning yt-dlp.
+    static func classifyDownloadResult(
+        _ result: ProcessRunner.ProcessResult,
+        outputDir: URL
+    ) -> DownloadOutcome {
+        // Timeout → always failure, even if a path was printed (partial file).
+        if result.timedOut {
+            let stderrTail = DownloadFailureClassifier.tail(result.stderr)
+            let stdoutTail = DownloadFailureClassifier.tail(result.stdout, 400)
+            AppLogger.shared.warn(
+                "chain[YT]: yt-dlp timed out after \(downloadTimeoutSeconds)s (code=\(result.exitCode)). stderr tail: \(stderrTail) | stdout tail: \(stdoutTail)",
+                source: "Download"
+            )
+            let failure = DownloadFailure(
+                klass: .networkTimeout,
+                source: "youtube",
+                detail: "yt-dlp timed out after \(downloadTimeoutSeconds)s; exit=\(result.exitCode); stderr=\(stderrTail)",
+                userMessage: "YouTube download timed out — the connection may be slow or YouTube is not responding",
+                heal: .retrySameSource
+            )
+            return .failure(failure)
+        }
+
+        // Trust the printed filepath FIRST — yt-dlp commonly exits
+        // with code 101 ("--max-downloads reached") even though the
+        // file was successfully downloaded and printed via
+        // `--print after_move:filepath`. Treating that as failure
+        // (the old behaviour) was throwing away valid downloads.
+        //
+        // Note: `--newline --progress` makes yt-dlp emit progress lines
+        // to stdout alongside the final filepath, so we must walk lines
+        // from the end rather than trimming the whole blob.
+        if let outputPath = parseDownloadedFilePath(
+            stdout: result.stdout,
+            outputDir: outputDir
+        ) {
+            return .success(URL(fileURLWithPath: outputPath))
+        }
+
+        // No file path on stdout: classify the failure via the shared classifier.
+        let stderrTail = DownloadFailureClassifier.tail(result.stderr)
+        let stdoutTail = DownloadFailureClassifier.tail(result.stdout, 400)
+
+        if !result.isSuccess {
+            AppLogger.shared.warn(
+                "chain[YT]: yt-dlp exited non-zero (code=\(result.exitCode)). stderr tail: \(stderrTail) | stdout tail: \(stdoutTail)",
+                source: "Download"
+            )
+        } else {
+            // Exit 0 but no trusted output path — unusual but observed in production
+            // (6 occurrences with ~1s runtime, yt-dlp bailed almost immediately).
+            AppLogger.shared.warn(
+                "chain[YT]: no trusted output path (code=\(result.exitCode), no directory scan). stderr tail: \(stderrTail) | stdout tail: \(stdoutTail)",
+                source: "Download"
+            )
+        }
+
+        let failure = DownloadFailureClassifier.classifyTool(
+            source: "youtube",
+            exitCode: result.exitCode,
+            stderr: result.stderr,
+            stdout: result.stdout,
+            producedFile: false
+        )
+        return .failure(failure)
     }
 
     // MARK: - Query Normalisation
@@ -398,7 +452,8 @@ final class YouTubeDownloader: Sendable {
                 "ytsearch\(limit):\(query)",
                 "--flat-playlist",
                 "-J",
-                "--no-warnings"
+                "--no-warnings",
+                "--socket-timeout", "10"
             ]
         )
         guard result.isSuccess, let data = result.stdout.data(using: .utf8) else { return [] }

@@ -12,13 +12,17 @@ import Foundation
 /// the flags are best-effort, not required.
 final class SoundCloudDownloader: Sendable {
 
-    enum DownloadResult {
-        case success(URL)
-        case notFound
-    }
-
     /// Supported audio file extensions for output detection.
     private static let audioExtensions: Set<String> = ["mp3", "m4a", "aac", "flac", "opus", "wav"]
+
+    /// Maximum wall-clock seconds to wait for scdl before killing it.
+    ///
+    /// 900s (15 min) is generous: SoundCloud DJ mixes can be 1–2 hours long
+    /// and legitimately take many minutes to download on a slow connection.
+    /// A timeout is classified as `.networkTimeout` (retryable) by
+    /// `DownloadFailureClassifier`, so over-running is always preferable to
+    /// cutting off a real download prematurely.
+    static let scdlTimeout: TimeInterval = 900
 
     private let scdlPath: String?
 
@@ -36,16 +40,19 @@ final class SoundCloudDownloader: Sendable {
     ///   - outputDir: Directory to save the downloaded file
     ///   - trackId: Internal track ID (for temp dir naming)
     ///   - title: Expected title for the output filename
-    /// - Returns: Path to the downloaded file, or `.notFound`
+    /// - Returns: `.success(URL)` with the downloaded file, or `.failure(DownloadFailure)`
+    ///   carrying a classified reason (DRM, transient, tool-missing, …).
     func download(
         trackURL: String,
         outputDir: URL,
         trackId: Int64,
         title: String,
         onProgress: ((Double) -> Void)? = nil
-    ) async throws -> DownloadResult {
+    ) async throws -> DownloadOutcome {
         guard let scdl = scdlPath else {
-            return .notFound
+            return .failure(DownloadFailureClassifier.classifyTransport(
+                source: "soundcloud",
+                error: URLError(.fileDoesNotExist)))
         }
 
         // Create temp dir to avoid filename collisions
@@ -84,66 +91,157 @@ final class SoundCloudDownloader: Sendable {
             source: "Download"
         )
 
-        let result = try await ProcessRunner.run(
-            scdl,
-            arguments: arguments,
-            onStderr: onProgress.map { cb in
-                { line in
-                    for sub in line.split(separator: "\n") {
-                        if let pct = ProcessRunner.parseProgressPercent(String(sub)) {
-                            cb(pct)
+        // Run scdl with a generous timeout. `do/catch` converts launch
+        // failures (binary missing at execution time, spawn error) into a
+        // classified transport failure rather than letting them propagate
+        // as an unstructured throw. `throws` is preserved on the function
+        // signature because FileManager operations below (createDirectory,
+        // moveItem) can still throw, and Task cancellation propagates
+        // through the async chain regardless.
+        let result: ProcessRunner.ProcessResult
+        do {
+            result = try await ProcessRunner.run(
+                scdl,
+                arguments: arguments,
+                timeout: Self.scdlTimeout,
+                onStderr: onProgress.map { cb in
+                    { line in
+                        for sub in line.split(separator: "\n") {
+                            if let pct = ProcessRunner.parseProgressPercent(String(sub)) {
+                                cb(pct)
+                            }
                         }
                     }
                 }
-            }
-        )
-        if !result.stderr.isEmpty {
-            // scdl is chatty on stderr even on success — debug-level on
-            // success, warn with the FULL message on failure so Python
-            // tracebacks aren't truncated mid-stack when something breaks.
-            if result.isSuccess {
+            )
+        } catch {
+            return .failure(DownloadFailureClassifier.classifyTransport(
+                source: "soundcloud", error: error))
+        }
+
+        // ── File scan runs FIRST ─────────────────────────────────────
+        //
+        // scdl is chatty on stderr and prints benign "not found"
+        // substrings (e.g. "artwork not found", "original format not
+        // found, falling back to transcoded") even during successful
+        // downloads. Checking stderr before the file scan caused false
+        // `.notFound` fallthroughs to YouTube.
+        //
+        // The produced file is the ground truth for exit-code
+        // unreliability: scdl exits 0 on DRM, 404, timeout — 47/47
+        // failures in production exited 0. A non-zero exit with a
+        // valid audio file in this invocation's exclusive temp dir is
+        // a real success (scdl can exit non-zero for benign reasons
+        // like an artwork fetch failing after the audio was fully
+        // written — the file is complete).
+        //
+        // A TIMEOUT is different: ProcessRunner sent SIGTERM/SIGKILL
+        // while scdl was still writing, so any file on disk is a
+        // *partial* write — bytes that do not match the container
+        // (e.g. "invalid start code ID3[3] in RIFF header" measured
+        // in production: 138 occurrences across 55 ffmpeg failures).
+        // A timed-out file must NEVER be accepted as success; it is
+        // discarded and the download is reported as a retryable
+        // timeout. Do not merge this case with the non-zero-exit
+        // case above — only a timeout implies truncation.
+        let producedFile = findMostRecentAudioFile(
+            in: tmpDir, notBefore: invocationStart)
+
+        // ── Timeout with a partial file: discard and fail ──────────
+        //
+        // A timeout means scdl was killed mid-write. Any file on disk
+        // is incomplete — accepting it would silently admit a corrupt
+        // file into the permanent library. Log the discard at .warning
+        // with byte size (valuable evidence that timeouts are
+        // truncating downloads), delete the partial file explicitly
+        // (belt-and-braces: the staging dir's `defer` would clean it
+        // up, but the intent must survive a future refactor of that
+        // defer), and return .networkTimeout.
+        if result.timedOut, let partialFile = producedFile {
+            let byteSize = (try? FileManager.default.attributesOfItem(
+                atPath: partialFile.path)[.size] as? Int) ?? -1
+            AppLogger.shared.log(
+                "scdl TIMEOUT trackId=\(trackId) url=\(trackURL) — discarding partial file '\(partialFile.lastPathComponent)' (\(byteSize) bytes)",
+                level: .warning,
+                source: "Download"
+            )
+            try? FileManager.default.removeItem(at: partialFile)
+            return .failure(DownloadFailure(
+                klass: .networkTimeout,
+                source: "soundcloud",
+                detail: "scdl timed out after \(Self.scdlTimeout)s for trackId=\(trackId) url=\(trackURL) — partial file '\(partialFile.lastPathComponent)' (\(byteSize) bytes) discarded",
+                userMessage: "SoundCloud download timed out — retry later",
+                heal: .retrySameSource))
+        }
+
+        if let downloadedFile = producedFile {
+            // Success — a real audio file exists and the process was
+            // NOT timed out. Log stderr at debug (tail only — the file
+            // is the success signal, stderr is just chatter). The exit
+            // code is recorded for diagnosis but does NOT veto a real
+            // file (non-zero exit ≠ interrupted write).
+            if !result.stderr.isEmpty {
                 AppLogger.shared.log(
-                    "scdl stderr: \(result.stderr.prefix(500))",
+                    "scdl trackId=\(trackId) exit=\(result.exitCode) stderr: \(DownloadFailureClassifier.tail(result.stderr))",
                     level: .debug,
                     source: "Download"
                 )
-            } else {
-                AppLogger.shared.log(
-                    "scdl exit=\(result.exitCode) stderr:\n\(result.stderr)",
-                    level: .warning,
-                    source: "Download"
-                )
             }
+
+            // Collapse a doubled audio-container extension (e.g. .m4a.m4a)
+            // before the move — RESEARCH Pitfall 4 flags scdl's own naming
+            // logic as the [ASSUMED] source; live confirmation is plan 39-07.
+            let collapsedName = Self.collapseDoubledAudioExtension(downloadedFile.lastPathComponent)
+
+            // Move to output directory
+            let outputFile = nextAvailableURL(
+                in: outputDir,
+                preferredName: collapsedName
+            )
+            try FileManager.default.moveItem(at: downloadedFile, to: outputFile)
+
+            return .success(outputFile)
         }
 
-        // Check stderr for "not found" indicators
-        let stderr = result.stderr.lowercased()
-        if stderr.contains("not found") || stderr.contains("404") || stderr.contains("not available") {
-            return .notFound
+        // ── No usable file produced ──────────────────────────────────
+        //
+        // Log the FULL untruncated stderr at .warning with track context.
+        // This is the diagnosis surface — keyed on file absence, NOT on
+        // exit code, because scdl exits 0 on most failures (DRM, 404,
+        // …). The old `!result.isSuccess` gate was dead code: 47/47
+        // real failures exited 0 and the warning never fired.
+        // The old `prefix(500)` head-truncation discarded the diagnostic
+        // (scdl/yt-dlp emit the error LAST); `tail` keeps the end.
+        if !result.stderr.isEmpty {
+            AppLogger.shared.log(
+                "scdl trackId=\(trackId) url=\(trackURL) exit=\(result.exitCode) stderr:\n\(result.stderr)",
+                level: .warning,
+                source: "Download"
+            )
         }
 
-        // Find the most recently created audio file in temp dir. This dir
-        // is exclusive to this trackId/invocation, but is still guarded:
-        // reject a candidate older than invocationStart (leftover from a
-        // crashed prior run) and fail rather than guess when more than one
-        // audio candidate is present.
-        guard let downloadedFile = findMostRecentAudioFile(in: tmpDir, notBefore: invocationStart) else {
-            return .notFound
+        // Classify the failure instead of returning a bare not-found.
+        // scdl exits 0 on most failures, so the exit code alone is
+        // useless — the classifier inspects stderr content to determine
+        // the real cause. This is what turns a DRM-protected track into
+        // "DRM-protected on SoundCloud" and a transient timeout into a
+        // retryable failure.
+        if result.timedOut {
+            return .failure(DownloadFailure(
+                klass: .networkTimeout,
+                source: "soundcloud",
+                detail: "scdl timed out after \(Self.scdlTimeout)s for trackId=\(trackId) url=\(trackURL)",
+                userMessage: "SoundCloud download timed out — retry later",
+                heal: .retrySameSource))
         }
 
-        // Collapse a doubled audio-container extension (e.g. .m4a.m4a)
-        // before the move — RESEARCH Pitfall 4 flags scdl's own naming
-        // logic as the [ASSUMED] source; live confirmation is plan 39-07.
-        let collapsedName = Self.collapseDoubledAudioExtension(downloadedFile.lastPathComponent)
-
-        // Move to output directory
-        let outputFile = nextAvailableURL(
-            in: outputDir,
-            preferredName: collapsedName
-        )
-        try FileManager.default.moveItem(at: downloadedFile, to: outputFile)
-
-        return .success(outputFile)
+        let failure = DownloadFailureClassifier.classifyTool(
+            source: "soundcloud",
+            exitCode: result.exitCode,
+            stderr: result.stderr,
+            stdout: result.stdout,
+            producedFile: false)
+        return .failure(failure)
     }
 
     // MARK: - Private

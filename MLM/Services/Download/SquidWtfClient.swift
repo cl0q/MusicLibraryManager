@@ -106,6 +106,14 @@ final class SquidWtfClient: Sendable {
         case captchaRequired
     }
 
+    /// Surfaced by `searchTrack` / `searchTracks` when the endpoint is
+    /// reachable but returned a non-200 status, so the orchestrator can
+    /// feed the status code to `DownloadFailureClassifier.classifyHTTP`
+    /// instead of conflating "endpoint sick" with "no convincing match".
+    enum SearchError: Error, Sendable {
+        case httpStatus(statusCode: Int, body: String?)
+    }
+
     // MARK: - Search
 
     /// Search for a track by free-text query. Returns the first track
@@ -125,12 +133,23 @@ final class SquidWtfClient: Sendable {
             (data, response) = try await session.data(for: URLRequest(url: url))
         } catch let err as URLError where Self.isUnreachable(err) {
             AppLogger.shared.warn(
-                "Squid: search endpoint unreachable (\(err.code.rawValue)) — set MLM_SQUID_API_BASE to override",
+                "Squid: search endpoint unreachable (URLError(\(err.code.rawValue))) — set MLM_SQUID_API_BASE to override",
                 source: "Download"
             )
-            return nil
+            // Re-throw so the orchestrator can classify via
+            // `DownloadFailureClassifier.classifyTransport(source:error:)`
+            // instead of conflating "endpoint dead" with "no convincing match".
+            throw err
         }
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard statusCode == 200 else {
+            let body = String(data: data.prefix(800), encoding: .utf8)
+            AppLogger.shared.warn(
+                "Squid: search returned HTTP \(statusCode)",
+                source: "Download"
+            )
+            throw SearchError.httpStatus(statusCode: statusCode, body: body)
+        }
 
         let decoded: SearchResponse
         do {
@@ -178,12 +197,20 @@ final class SquidWtfClient: Sendable {
             (data, response) = try await session.data(for: URLRequest(url: url))
         } catch let err as URLError where Self.isUnreachable(err) {
             AppLogger.shared.warn(
-                "Squid: search endpoint unreachable (\(err.code.rawValue)) — set MLM_SQUID_API_BASE to override",
+                "Squid: search endpoint unreachable (URLError(\(err.code.rawValue))) — set MLM_SQUID_API_BASE to override",
                 source: "Download"
             )
-            return []
+            throw err
         }
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else { return [] }
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard statusCode == 200 else {
+            let body = String(data: data.prefix(800), encoding: .utf8)
+            AppLogger.shared.warn(
+                "Squid: search returned HTTP \(statusCode)",
+                source: "Download"
+            )
+            throw SearchError.httpStatus(statusCode: statusCode, body: body)
+        }
 
         let decoded: SearchResponse
         do {
@@ -281,7 +308,13 @@ final class SquidWtfClient: Sendable {
         do {
             (data, response) = try await session.data(for: req)
         } catch let err as URLError where Self.isUnreachable(err) {
-            return .notFound
+            AppLogger.shared.warn(
+                "Squid: download endpoint unreachable (URLError(\(err.code.rawValue)))",
+                source: "Download"
+            )
+            // Re-throw so the orchestrator can classify via
+            // `DownloadFailureClassifier.classifyTransport(source:error:)`.
+            throw err
         }
 
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0

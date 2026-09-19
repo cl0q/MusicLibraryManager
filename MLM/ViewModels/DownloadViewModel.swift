@@ -308,6 +308,7 @@ final class DownloadViewModel {
 
     /// Retry failed downloads from the queue.
     func retryFailed() async {
+        guard !isDownloading else { return }
         guard let retryRunner = activeRetryRunner else { return }
         let requests = retryRunner.pendingRetryRequests()
         guard !requests.isEmpty else { return }
@@ -587,6 +588,7 @@ final class DownloadViewModel {
     /// download path. This does not pretend that the legacy queue's global
     /// retry operation can safely target a single row.
     func retryDownload(trackId: Int64) async {
+        guard !isDownloading else { return }
         guard let trackRepository else {
             AppLogger.shared.error(
                 "Cannot retry download because the track repository is unavailable",
@@ -612,6 +614,7 @@ final class DownloadViewModel {
     /// Fetches each track and hands them to the normal download path so
     /// the orchestrator re-runs its source chain per track.
     func retryAllFailed(trackIds: [Int64]) async {
+        guard !isDownloading else { return }
         guard let trackRepository else {
             AppLogger.shared.error(
                 "Cannot retry downloads because the track repository is unavailable",

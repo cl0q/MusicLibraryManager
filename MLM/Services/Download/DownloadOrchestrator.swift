@@ -186,6 +186,72 @@ final class DownloadOrchestrator {
         let bitrate: Int?
     }
 
+    // MARK: - Provider protocols (dependency injection for tests)
+
+    /// The slice of `SoundCloudDownloader` the chain actually calls.
+    /// Tests inject a fake; production uses the real class via the
+    /// extension at the bottom of this file.
+    protocol SoundCloudProviding: Sendable {
+        var isAvailable: Bool { get }
+        func download(
+            trackURL: String, outputDir: URL, trackId: Int64,
+            title: String, onProgress: ((Double) -> Void)?
+        ) async throws -> DownloadOutcome
+    }
+
+    /// The slice of `YouTubeDownloader` the chain actually calls.
+    protocol YouTubeProviding: Sendable {
+        var isAvailable: Bool { get }
+        func searchAndDownload(
+            query: String, outputDir: URL,
+            onProgress: ((Double) -> Void)?
+        ) async throws -> DownloadOutcome
+        func downloadByURL(_ url: String, outputDir: URL) async throws -> DownloadOutcome
+    }
+
+    /// The slice of `DABClient` the chain actually calls.
+    protocol DABProviding: Sendable {
+        func searchTrack(query: String) async throws -> DabTrack?
+        func matches(dabTrack: DabTrack, artist: String, title: String) -> Bool
+        func download(
+            dabTrack: DabTrack, outputDir: URL,
+            artist: String, title: String
+        ) async throws -> DABClient.DownloadResult
+    }
+
+    /// The slice of `SquidWtfClient` the chain actually calls.
+    protocol SquidProviding: Sendable {
+        func searchTrack(
+            query: String, artist: String, title: String
+        ) async throws -> SquidTrack?
+        func download(
+            track: SquidTrack, outputDir: URL,
+            artist: String, title: String
+        ) async throws -> SquidWtfClient.DownloadResult
+    }
+
+    /// Abstraction over `Task.sleep` so tests can verify retry backoff
+    /// without actually waiting. Production uses `WallClock`; tests use
+    /// `ImmediateClock` (no-op) or a counting clock.
+    protocol DownloaderClock: Sendable {
+        func sleep(_ seconds: Double) async
+    }
+
+    struct WallClock: DownloaderClock {
+        func sleep(_ seconds: Double) async {
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+        }
+    }
+
+    /// Internal result of the fallback chain: either a downloaded file
+    /// tagged with its source, or the terminal classified failure.
+    /// Replaces the old `(URL, DownloadSource)?` return so the caller
+    /// receives the failure instead of `nil`.
+    enum FallbackResult {
+        case success(URL, DownloadSource)
+        case failure(DownloadFailure)
+    }
+
     // MARK: - State
 
     private(set) var isRunning = false
@@ -206,11 +272,12 @@ final class DownloadOrchestrator {
     /// or `flacDir`). See SCDL-09.
     private let soundCloudDir: URL
     let transcodeService: TranscodeService
-    private let soundCloudDownloader: SoundCloudDownloader
-    private let youtubeDownloader: YouTubeDownloader
+    private let soundCloudDownloader: any SoundCloudProviding
+    private let youtubeDownloader: any YouTubeProviding
     private let retryQueue: DownloadQueue
-    private var dabClient: DABClient?
-    private let squidClient: SquidWtfClient
+    private let dabClient: (any DABProviding)?
+    private let squidClient: any SquidProviding
+    private let clock: any DownloaderClock
 
     init(
         libraryRoot: String,
@@ -227,6 +294,7 @@ final class DownloadOrchestrator {
         self.retryQueue = DownloadQueue(directory: flacDir)
         self.dabClient = DABClient(tokenStorage: tokenStorage)
         self.squidClient = SquidWtfClient()
+        self.clock = WallClock()
 
         // Once-at-boot endpoint reachability logs for the optional FLAC
         // stages (DAB + Squid) so the Logs tab tells the user up front
@@ -244,6 +312,29 @@ final class DownloadOrchestrator {
                 )
             }
         }
+    }
+
+    /// Test-only initializer — injects fake providers and a no-op clock
+    /// so the chain can be exercised without network or subprocess access.
+    init(
+        libraryRoot: String,
+        soundCloudDownloader: any SoundCloudProviding,
+        youtubeDownloader: any YouTubeProviding,
+        dabClient: (any DABProviding)?,
+        squidClient: any SquidProviding,
+        clock: any DownloaderClock
+    ) {
+        let root = URL(fileURLWithPath: libraryRoot)
+        self.flacDir = root.appendingPathComponent(ManagedLibraryLayout.transcodeOriginals)
+        self.aacDir = root.appendingPathComponent(ManagedLibraryLayout.youtubeDownloads)
+        self.soundCloudDir = root.appendingPathComponent(ManagedLibraryLayout.soundCloudDownloads)
+        self.transcodeService = TranscodeService()
+        self.soundCloudDownloader = soundCloudDownloader
+        self.youtubeDownloader = youtubeDownloader
+        self.retryQueue = DownloadQueue(directory: root)
+        self.dabClient = dabClient
+        self.squidClient = squidClient
+        self.clock = clock
     }
 
     private static func healthCheck(label: String, endpoint: String, configKey: String) async {
@@ -287,15 +378,20 @@ final class DownloadOrchestrator {
     /// Download a batch of tracks following the fallback chain.
     ///
     /// Processing is sequential (not parallel) to simplify rate limiting.
-    /// Chain: SoundCloud (if URL) → DAB → YouTube
+    /// Chain: SoundCloud (if URL) → DAB → Squid → YouTube
     func downloadBatch(
         _ requests: [DownloadRequest],
         onProgress: ((Int, Int, String) -> Void)? = nil,
         onTrackProgress: ((Double) -> Void)? = nil
     ) async -> BatchResult {
         isRunning = true
-        cancelRequested = false
-        defer { isRunning = false }
+        // cancelRequested is NOT reset here — if cancel() was called
+        // before downloadBatch, the flag must survive into the loop so
+        // the first iteration sees it. Reset in defer instead.
+        defer {
+            isRunning = false
+            cancelRequested = false
+        }
 
         var result = BatchResult()
         let total = requests.count
@@ -338,9 +434,6 @@ final class DownloadOrchestrator {
         }
 
         for (index, request) in requests.enumerated() {
-            // Check cancellation flag before starting a new download so
-            // the running track gets to finish but the next one is
-            // skipped — keeps the DB consistent with what's on disk.
             if cancelRequested {
                 result.cancelledTrackIds.formUnion(
                     requests[index...].map(\.trackId)
@@ -356,11 +449,8 @@ final class DownloadOrchestrator {
             currentItem = "\(request.artist) - \(request.title)"
             progress = Double(index) / Double(max(total, 1))
             onProgress?(index, total, currentItem)
-
-            // Reset per-track progress to 0 before the next attempt.
             onTrackProgress?(0)
 
-            // Try the fallback chain
             do {
                 let stagingDir = aacDir
                     .deletingLastPathComponent()
@@ -369,17 +459,27 @@ final class DownloadOrchestrator {
                 try FileManager.default.createDirectory(at: stagingDir, withIntermediateDirectories: true)
                 defer { try? FileManager.default.removeItem(at: stagingDir) }
 
-                if let (path, source) = try await downloadWithFallback(
+                let fallbackResult = try await downloadWithFallback(
                     request,
                     stagingDir: stagingDir,
                     onTrackProgress: onTrackProgress
-                ) {
-                    // Route to the source's correct final directory via a
-                    // collision-free temp-transcode + atomic move/replace
-                    // (SCDL-09) — replaces the old inline
-                    // transcodeService.transcode(... outputDir: aacDir) call,
-                    // which mis-routed SoundCloud/YouTube output and could
-                    // false-skip when input==output aliased.
+                )
+                // Cancellation may have been set during the chain
+                // (between sources inside downloadWithFallback). Route
+                // the track to cancelledTrackIds, not failedTrackIds —
+                // a user-cancelled track is not a failure and must not
+                // be enqueued to the retry queue.
+                if cancelRequested {
+                    result.cancelledTrackIds.insert(request.trackId)
+                    AppLogger.shared.log(
+                        "Download cancelled mid-chain for track \(request.trackId)",
+                        level: .info,
+                        source: "Download"
+                    )
+                    continue
+                }
+                switch fallbackResult {
+                case .success(let path, let source):
                     let finalized = try await finalize(sourcePath: path, source: source, request: request)
                     result.downloadedPaths[request.trackId] = finalized.path.path
                     result.downloadedMetadata[request.trackId] = DownloadedFileInfo(
@@ -387,19 +487,21 @@ final class DownloadOrchestrator {
                         bitrate: finalized.bitrate
                     )
                     result.succeeded += 1
-                } else {
-                    let failureReason = Self.failureReasonForExhaustedSources(
-                        preferredSource: request.preferredSource,
-                        youtubeAvailable: youtubeDownloader.isAvailable
-                    )
+                case .failure(let failure):
                     result.failed += 1
                     result.failedTrackIds.insert(request.trackId)
-                    result.failureReasons[request.trackId] = failureReason.userFacingText
+                    let terminalMessage = failure.userMessage
+                    result.failureReasons[request.trackId] = terminalMessage
+                    AppLogger.shared.log(
+                        "chain terminal failure for track \(request.trackId) (\(request.artist) - \(request.title)): \(failure.klass) [\(failure.source)] heal=\(failure.heal) — \(terminalMessage)",
+                        level: .warning,
+                        source: "Download"
+                    )
                     retryQueue.enqueue(
                         trackId: request.trackId,
                         query: request.query,
                         source: request.preferredSource.storageKey,
-                        error: failureReason.userFacingText,
+                        error: terminalMessage,
                         artist: request.artist,
                         title: request.title,
                         preferredSource: request.preferredSource.storageKey,
@@ -408,6 +510,15 @@ final class DownloadOrchestrator {
                     )
                 }
             } catch {
+                if cancelRequested {
+                    result.cancelledTrackIds.insert(request.trackId)
+                    AppLogger.shared.log(
+                        "Download cancelled during track \(request.trackId) (error: \(error.localizedDescription))",
+                        level: .info,
+                        source: "Download"
+                    )
+                    continue
+                }
                 result.failed += 1
                 result.failedTrackIds.insert(request.trackId)
                 let failureReason = DownloadFailureReason.failureReason(for: error)
@@ -436,11 +547,6 @@ final class DownloadOrchestrator {
     }
 
     /// Retry previously failed downloads.
-    ///
-    /// Rebuilds each request from the QueueItem's stored `preferredSource` +
-    /// `soundcloudURL` so a SoundCloud-pinned failure re-enters the
-    /// fail-closed `pinned[SC]` branch instead of silently defaulting to
-    /// `.auto` and running the full cross-provider chain — see SCDL-01.
     func pendingRetryRequests() -> [DownloadRequest] {
         retryQueue.retryableItems().map { item in
             let parsedIdentity = Self.parseIdentity(from: item.query)
@@ -458,9 +564,6 @@ final class DownloadOrchestrator {
         }
     }
 
-    /// All persisted legacy queue entries, including entries that reached the
-    /// global retry cap. Activity uses this to keep every recoverable failure
-    /// visible and offer an explicit per-row retry.
     func persistedRetryItems() -> [DownloadQueue.QueueItem] {
         retryQueue.items
     }
@@ -488,7 +591,6 @@ final class DownloadOrchestrator {
         )
     }
 
-    /// Remove retry entries only after the downloaded files were persisted.
     func dequeuePersistedRetries(trackIds: Set<Int64>) {
         retryQueue.dequeue(trackIds: trackIds)
     }
@@ -523,13 +625,6 @@ final class DownloadOrchestrator {
     }
 
     /// Download a single discovery track to a custom output directory.
-    ///
-    /// - Parameters:
-    ///   - artist: The track artist
-    ///   - title: The track title
-    ///   - soundcloudURL: SoundCloud permalink URL, if any
-    ///   - targetDir: Directory where the final file should be stored
-    /// - Returns: The URL of the downloaded file on success, or nil
     func downloadDiscoveryTrack(
         artist: String,
         title: String,
@@ -549,18 +644,16 @@ final class DownloadOrchestrator {
             userId: nil
         )
 
-        // 1. SoundCloud direct (if URL available and scdl installed)
+        // 1. SoundCloud direct
         if let scURL = request.soundcloudURL {
             if soundCloudDownloader.isAvailable {
                 AppLogger.shared.log("discovery[SC]: trying \(scURL)", level: .info, source: "Download")
-                let scResult = try await soundCloudDownloader.download(
-                    trackURL: scURL,
-                    outputDir: targetDir,
-                    trackId: -999,
-                    title: "\(request.artist) - \(request.title)",
+                let scOutcome = try await soundCloudDownloader.download(
+                    trackURL: scURL, outputDir: targetDir,
+                    trackId: -999, title: "\(request.artist) - \(request.title)",
                     onProgress: onProgress
                 )
-                if case .success(let path) = scResult {
+                if case .success(let path) = scOutcome {
                     AppLogger.shared.log("discovery[SC]: success → \(path.lastPathComponent)", level: .info, source: "Download")
                     return path
                 }
@@ -574,10 +667,8 @@ final class DownloadOrchestrator {
                 if let dabTrack = try await dab.searchTrack(query: request.query) {
                     if dab.matches(dabTrack: dabTrack, artist: request.artist, title: request.title) {
                         let dabResult = try await dab.download(
-                            dabTrack: dabTrack,
-                            outputDir: targetDir,
-                            artist: request.artist,
-                            title: request.title
+                            dabTrack: dabTrack, outputDir: targetDir,
+                            artist: request.artist, title: request.title
                         )
                         if case .success(let path) = dabResult {
                             AppLogger.shared.log("discovery[DAB]: success → \(path.lastPathComponent)", level: .info, source: "Download")
@@ -594,15 +685,11 @@ final class DownloadOrchestrator {
         do {
             AppLogger.shared.log("discovery[Squid]: searching \(request.query)", level: .info, source: "Download")
             if let squidTrack = try await squidClient.searchTrack(
-                query: request.query,
-                artist: request.artist,
-                title: request.title
+                query: request.query, artist: request.artist, title: request.title
             ) {
                 let squidResult = try await squidClient.download(
-                    track: squidTrack,
-                    outputDir: targetDir,
-                    artist: request.artist,
-                    title: request.title
+                    track: squidTrack, outputDir: targetDir,
+                    artist: request.artist, title: request.title
                 )
                 if case .success(let path) = squidResult {
                     AppLogger.shared.log("discovery[Squid]: success → \(path.lastPathComponent)", level: .info, source: "Download")
@@ -616,12 +703,10 @@ final class DownloadOrchestrator {
         // 4. YouTube
         if youtubeDownloader.isAvailable {
             AppLogger.shared.log("discovery[YT]: searching \(request.query)", level: .info, source: "Download")
-            let ytResult = try await youtubeDownloader.searchAndDownload(
-                query: request.query,
-                outputDir: targetDir,
-                onProgress: onProgress
+            let ytOutcome = try await youtubeDownloader.searchAndDownload(
+                query: request.query, outputDir: targetDir, onProgress: onProgress
             )
-            if case .success(let path) = ytResult {
+            if case .success(let path) = ytOutcome {
                 AppLogger.shared.log("discovery[YT]: success → \(path.lastPathComponent)", level: .info, source: "Download")
                 return path
             }
@@ -632,207 +717,491 @@ final class DownloadOrchestrator {
 
     // MARK: - Fallback Chain
 
-    /// Try downloading via SoundCloud → DAB → YouTube.
+    /// Maximum number of same-source retries before falling through.
+    static let maxSameSourceRetries = 2
+
+    /// Base delay in seconds for exponential backoff between same-source
+    /// retries. Actual delay = base × 2^attempt + random jitter (0–0.5s).
+    static let retryBaseDelay: Double = 1.0
+
+    /// Try downloading via the fallback chain (or a pinned source).
     ///
-    /// Returns the downloaded file's path tagged with the concrete
-    /// `DownloadSource` that produced it, so `finalize` can route the file
-    /// to its correct final directory (SCDL-09) regardless of whether the
-    /// request was pinned or ran the auto chain.
+    /// Returns `.success(URL, DownloadSource)` on success, or
+    /// `.failure(DownloadFailure)` carrying the terminal classified failure.
+    ///
+    /// Chain decision table (per `DownloadFailureClass`):
+    /// | Class              | Action                                        |
+    /// |--------------------|-----------------------------------------------|
+    /// | drmProtected       | STOP (permanent)                              |
+    /// | contentRemoved     | STOP (permanent)                              |
+    /// | geoBlocked         | STOP (permanent)                              |
+    /// | downloadsDisabled  | STOP (permanent)                              |
+    /// | mediaCorrupt       | STOP (quarantine)                             |
+    /// | rateLimited        | RETRY same source (<=2x), then fall through  |
+    /// | networkTimeout     | RETRY same source (<=2x), then fall through  |
+    /// | networkUnreachable | RETRY same source (<=2x), then fall through  |
+    /// | serverError        | RETRY same source (<=2x), then fall through  |
+    /// | toolStale          | fall through (TODO: ExternalToolHealth)       |
+    /// | toolMissing        | fall through                                  |
+    /// | authExpired        | fall through                                  |
+    /// | formatUnavailable  | fall through                                  |
+    /// | outputMissing      | fall through                                  |
+    /// | unknown            | fall through                                  |
     private func downloadWithFallback(
         _ request: DownloadRequest,
         stagingDir: URL,
         onTrackProgress: ((Double) -> Void)? = nil
-    ) async throws -> (URL, DownloadSource)? {
-        // Source pinning — when a request is bound to a specific source we
-        // do NOT fall through to other providers (SC playlists stay on SC,
-        // YT playlists stay on YT).
+    ) async throws -> FallbackResult {
+        var trace: [DownloadFailure] = []
+
+        // Source pinning — no cross-source fallback (existing intended behaviour).
         switch request.preferredSource {
         case .soundcloud:
             guard let scURL = request.soundcloudURL else {
                 AppLogger.shared.log(
-                    "pinned[SC]: no SoundCloud URL for track id=\(request.trackId) — \(request.artist) - \(request.title)",
+                    "pinned[SC]: no SoundCloud URL for track id=\(request.trackId)",
                     level: .warning, source: "Download"
                 )
-                return nil
+                return .failure(DownloadFailure(
+                    klass: .unknown, source: "soundcloud",
+                    detail: "no SoundCloud URL provided for pinned download",
+                    userMessage: "No SoundCloud URL — cannot download (pinned to SoundCloud)",
+                    heal: .none))
             }
             guard soundCloudDownloader.isAvailable else {
-                AppLogger.shared.log(
-                    "pinned[SC]: scdl not installed — install via `pip install scdl`",
-                    level: .warning, source: "Download"
-                )
-                return nil
+                return .failure(DownloadFailure(
+                    klass: .toolMissing, source: "soundcloud",
+                    detail: "scdl not found on PATH",
+                    userMessage: "scdl not installed — install via `pip install scdl`",
+                    heal: .installTool))
             }
-            AppLogger.shared.log("pinned[SC]: trying \(scURL)", level: .info, source: "Download")
-            let scResult = try await soundCloudDownloader.download(
-                trackURL: scURL,
-                outputDir: stagingDir,
+            let scOutcome = try await soundCloudDownloader.download(
+                trackURL: scURL, outputDir: stagingDir,
                 trackId: request.trackId,
                 title: "\(request.artist) - \(request.title)",
                 onProgress: onTrackProgress
             )
-            if case .success(let path) = scResult {
-                AppLogger.shared.log("pinned[SC]: success → \(path.lastPathComponent)", level: .info, source: "Download")
-                return (path, .soundcloud)
+            switch scOutcome {
+            case .success(let path):
+                return .success(path, .soundcloud)
+            case .failure(let f):
+                AppLogger.shared.log(
+                    "pinned[SC]: \(f.klass) heal=\(f.heal) — \(f.userMessage) (no cross-source fallback)",
+                    level: .warning, source: "Download"
+                )
+                return .failure(f)
             }
-            AppLogger.shared.log("pinned[SC]: not found (no cross-source fallback)", level: .warning, source: "Download")
-            return nil
 
         case .youtube:
             guard youtubeDownloader.isAvailable else {
-                AppLogger.shared.log(
-                    "pinned[YT]: yt-dlp not installed",
-                    level: .warning, source: "Download"
-                )
-                return nil
+                return .failure(DownloadFailure(
+                    klass: .toolMissing, source: "youtube",
+                    detail: "yt-dlp not found on PATH",
+                    userMessage: "yt-dlp not installed — open Settings",
+                    heal: .installTool))
             }
-            let ytResult: YouTubeDownloader.DownloadResult
+            let ytOutcome: DownloadOutcome
             if let ytURL = request.youtubeURL {
-                AppLogger.shared.log("pinned[YT]: downloading \(ytURL)", level: .info, source: "Download")
-                ytResult = try await youtubeDownloader.downloadByURL(ytURL, outputDir: stagingDir)
+                ytOutcome = try await youtubeDownloader.downloadByURL(ytURL, outputDir: stagingDir)
             } else {
-                AppLogger.shared.log("pinned[YT]: searching \(request.query)", level: .info, source: "Download")
-                ytResult = try await youtubeDownloader.searchAndDownload(
-                    query: request.query,
-                    outputDir: stagingDir,
+                ytOutcome = try await youtubeDownloader.searchAndDownload(
+                    query: request.query, outputDir: stagingDir,
                     onProgress: onTrackProgress
                 )
             }
-            if case .success(let path) = ytResult {
-                AppLogger.shared.log("pinned[YT]: success → \(path.lastPathComponent)", level: .info, source: "Download")
-                return (path, .youtube)
+            switch ytOutcome {
+            case .success(let path):
+                return .success(path, .youtube)
+            case .failure(let f):
+                AppLogger.shared.log(
+                    "pinned[YT]: \(f.klass) heal=\(f.heal) — \(f.userMessage) (no cross-source fallback)",
+                    level: .warning, source: "Download"
+                )
+                return .failure(f)
             }
-            AppLogger.shared.log("pinned[YT]: not found (no cross-source fallback)", level: .warning, source: "Download")
-            return nil
 
         case .auto:
-            break  // fall through to the full chain below
+            break
         }
 
-        // 1. SoundCloud direct (if URL available and scdl installed)
-        if request.soundcloudURL == nil {
+        // -- Auto chain: SoundCloud -> DAB -> Squid -> YouTube --
+
+        // 1. SoundCloud
+        if cancelRequested {
+            return .failure(DownloadFailure(
+                klass: .unknown, source: "all",
+                detail: "cancelled before SoundCloud stage",
+                userMessage: "Download cancelled",
+                heal: .none))
+        }
+        if let scURL = request.soundcloudURL, soundCloudDownloader.isAvailable {
+            AppLogger.shared.log("chain[SC]: trying \(scURL)", level: .info, source: "Download")
+            let scOutcome = try await attemptWithRetry(
+                source: "soundcloud",
+                operation: {
+                    try await self.soundCloudDownloader.download(
+                        trackURL: scURL, outputDir: stagingDir,
+                        trackId: request.trackId,
+                        title: "\(request.artist) - \(request.title)",
+                        onProgress: onTrackProgress
+                    )
+                }
+            )
+            switch scOutcome {
+            case .success(let path):
+                AppLogger.shared.log("chain[SC]: success -> \(path.lastPathComponent)", level: .info, source: "Download")
+                return .success(path, .soundcloud)
+            case .failure(let f):
+                trace.append(f)
+                AppLogger.shared.log(
+                    "chain[SC]: \(f.klass) heal=\(f.heal) — \(f.userMessage) — continuing to next source",
+                    level: .warning, source: "Download"
+                )
+                // TODO(coordinator): when f.klass == .toolStale, consult
+                // ExternalToolHealth here. If scdl is stale, surface the
+                // update remedy in userMessage before falling through.
+            }
+        } else if request.soundcloudURL == nil {
             AppLogger.shared.log(
-                "chain[SC]: no SoundCloud URL for track id=\(request.trackId) — \(request.artist) - \(request.title)",
+                "chain[SC]: no SoundCloud URL for track id=\(request.trackId)",
                 level: .info, source: "Download"
             )
+        } else {
+            AppLogger.shared.log(
+                "chain[SC]: scdl not installed — skipping",
+                level: .warning, source: "Download"
+            )
         }
-        if let scURL = request.soundcloudURL {
-            if soundCloudDownloader.isAvailable {
-                AppLogger.shared.log("chain[SC]: trying \(scURL)", level: .info, source: "Download")
-                let scResult = try await soundCloudDownloader.download(
-                    trackURL: scURL,
-                    outputDir: stagingDir,
-                    trackId: request.trackId,
-                    title: "\(request.artist) - \(request.title)",
-                    onProgress: onTrackProgress
-                )
-                if case .success(let path) = scResult {
-                    AppLogger.shared.log("chain[SC]: success → \(path.lastPathComponent)", level: .info, source: "Download")
-                    return (path, .soundcloud)
-                }
-                AppLogger.shared.log("chain[SC]: not found, falling through", level: .info, source: "Download")
-            } else {
+
+        // 2. DAB
+        if cancelRequested {
+            return .failure(DownloadFailure(
+                klass: .unknown, source: "all",
+                detail: "cancelled before DAB stage",
+                userMessage: "Download cancelled",
+                heal: .none))
+        }
+        if let dab = dabClient {
+            let dabResult = await attemptDAB(dab, request: request, stagingDir: stagingDir)
+            switch dabResult {
+            case .success(let path):
+                AppLogger.shared.log("chain[DAB]: success -> \(path.lastPathComponent)", level: .info, source: "Download")
+                return .success(path, .dab)
+            case .classifiedFailure(let f):
+                trace.append(f)
                 AppLogger.shared.log(
-                    "chain[SC]: scdl not installed — skipping (install via `pip install scdl`)",
+                    "chain[DAB]: \(f.klass) heal=\(f.heal) — \(f.userMessage) — continuing to next source",
+                    level: .warning, source: "Download"
+                )
+            case .noResults:
+                AppLogger.shared.log("chain[DAB]: no matching track found", level: .info, source: "Download")
+            case .captchaRequired:
+                // DAB does not produce captcha, but StageResult is shared
+                // with Squid which does. Handle exhaustively: classify as
+                // authExpired and continue to the next source.
+                let captchaFailure = DownloadFailure(
+                    klass: .authExpired, source: "dab",
+                    detail: "captcha/cookie required — set MLM_SQUID_CAPTCHA from browser dev-tools → Storage → Cookies for qobuz.squid.wtf",
+                    userMessage: "DAB requires a captcha cookie — try another source",
+                    heal: .refreshAuthThenRetry)
+                trace.append(captchaFailure)
+                AppLogger.shared.log(
+                    "chain[DAB]: captchaRequired — \(captchaFailure.userMessage)",
                     level: .warning, source: "Download"
                 )
             }
         }
 
-        // 2. DAB Music API — silently skipped if no creds and server requires auth
-        if let dab = dabClient {
-            do {
-                AppLogger.shared.log("chain[DAB]: searching \(request.query)", level: .info, source: "Download")
-                if let dabTrack = try await dab.searchTrack(query: request.query) {
-                    if dab.matches(dabTrack: dabTrack, artist: request.artist, title: request.title) {
-                        let dabResult = try await dab.download(
-                            dabTrack: dabTrack,
-                            outputDir: stagingDir,
-                            artist: request.artist,
-                            title: request.title
-                        )
-                        if case .success(let path) = dabResult {
-                            AppLogger.shared.log("chain[DAB]: success → \(path.lastPathComponent)", level: .info, source: "Download")
-                            return (path, .dab)
-                        }
-                    } else {
-                        AppLogger.shared.log(
-                            "chain[DAB]: hit rejected (artist mismatch): \(dabTrack.artist) - \(dabTrack.title)",
-                            level: .info, source: "Download"
-                        )
-                    }
-                }
-            } catch {
-                AppLogger.shared.log("chain[DAB]: error: \(error)", level: .warning, source: "Download")
-            }
+        // 3. Squid
+        if cancelRequested {
+            return .failure(DownloadFailure(
+                klass: .unknown, source: "all",
+                detail: "cancelled before Squid stage",
+                userMessage: "Download cancelled",
+                heal: .none))
         }
-
-        // 3. Squid.wtf (Qobuz mirror) — requires MLM_SQUID_CF_COOKIE env
-        //    for the actual download (Cloudflare bot-fight blocks
-        //    cookie-less calls with "Captcha required").
-        do {
-            AppLogger.shared.log("chain[Squid]: searching \(request.query)", level: .info, source: "Download")
-            if let squidTrack = try await squidClient.searchTrack(
-                query: request.query,
-                artist: request.artist,
-                title: request.title
-            ) {
-                let squidResult = try await squidClient.download(
-                    track: squidTrack,
-                    outputDir: stagingDir,
-                    artist: request.artist,
-                    title: request.title
-                )
-                switch squidResult {
-                case .success(let path):
-                    AppLogger.shared.log("chain[Squid]: success → \(path.lastPathComponent)", level: .info, source: "Download")
-                    return (path, .squid)
-                case .captchaRequired:
-                    AppLogger.shared.log(
-                        "chain[Squid]: search hit but download needs captcha_verified_at — set MLM_SQUID_CAPTCHA from your browser's cookie for qobuz.squid.wtf (open dev-tools, Storage → Cookies), then retry",
-                        level: .warning, source: "Download"
-                    )
-                case .notFound:
-                    AppLogger.shared.log("chain[Squid]: download endpoint returned nothing usable", level: .info, source: "Download")
-                }
-            } else {
-                AppLogger.shared.log("chain[Squid]: no convincing match for \(request.artist) - \(request.title)", level: .info, source: "Download")
-            }
-        } catch {
-            AppLogger.shared.log("chain[Squid]: error: \(error)", level: .warning, source: "Download")
+        let squidResult = await attemptSquid(request: request, stagingDir: stagingDir)
+        switch squidResult {
+        case .success(let path):
+            AppLogger.shared.log("chain[Squid]: success -> \(path.lastPathComponent)", level: .info, source: "Download")
+            return .success(path, .squid)
+        case .classifiedFailure(let f):
+            trace.append(f)
+            AppLogger.shared.log(
+                "chain[Squid]: \(f.klass) heal=\(f.heal) — \(f.userMessage) — continuing to next source",
+                level: .warning, source: "Download"
+            )
+        case .noResults:
+            AppLogger.shared.log("chain[Squid]: no convincing match for \(request.artist) - \(request.title)", level: .info, source: "Download")
+        case .captchaRequired:
+            let captchaDetail = "captcha_verified_at needed — set MLM_SQUID_CAPTCHA from your browser's cookie for qobuz.squid.wtf (open dev-tools, Storage → Cookies), then retry"
+            let captchaFailure = DownloadFailure(
+                klass: .authExpired, source: "squid",
+                detail: captchaDetail,
+                userMessage: "Squid requires a captcha cookie — set MLM_SQUID_CAPTCHA from browser dev-tools",
+                heal: .refreshAuthThenRetry)
+            trace.append(captchaFailure)
+            AppLogger.shared.log(
+                "chain[Squid]: \(captchaFailure.klass) — \(captchaDetail)",
+                level: .warning, source: "Download"
+            )
         }
 
         // 4. YouTube (last resort)
+        if cancelRequested {
+            return .failure(DownloadFailure(
+                klass: .unknown, source: "all",
+                detail: "cancelled before YouTube stage",
+                userMessage: "Download cancelled",
+                heal: .none))
+        }
         if youtubeDownloader.isAvailable {
             AppLogger.shared.log("chain[YT]: searching \(request.query)", level: .info, source: "Download")
-            let ytResult = try await youtubeDownloader.searchAndDownload(
-                query: request.query,
-                outputDir: stagingDir,
-                onProgress: onTrackProgress
+            let ytOutcome = try await attemptWithRetry(
+                source: "youtube",
+                operation: {
+                    try await self.youtubeDownloader.searchAndDownload(
+                        query: request.query, outputDir: stagingDir,
+                        onProgress: onTrackProgress
+                    )
+                }
             )
-            if case .success(let path) = ytResult {
-                AppLogger.shared.log("chain[YT]: success → \(path.lastPathComponent)", level: .info, source: "Download")
-                return (path, .youtube)
+            switch ytOutcome {
+            case .success(let path):
+                AppLogger.shared.log("chain[YT]: success -> \(path.lastPathComponent)", level: .info, source: "Download")
+                return .success(path, .youtube)
+            case .failure(let f):
+                trace.append(f)
+                AppLogger.shared.log(
+                    "chain[YT]: \(f.klass) heal=\(f.heal) — \(f.userMessage)",
+                    level: .warning, source: "Download"
+                )
+                // TODO(coordinator): when f.klass == .toolStale, consult
+                // ExternalToolHealth here. If yt-dlp is stale, surface the
+                // update remedy in userMessage.
+                // YouTube is the last source — select the best failure
+                // from the entire trace, not just YouTube's.
+                return .failure(Self.selectTerminalFailure(from: trace))
             }
-            AppLogger.shared.log("chain[YT]: not found", level: .warning, source: "Download")
+        } else {
+            AppLogger.shared.log("chain[YT]: yt-dlp not installed — skipping", level: .warning, source: "Download")
         }
 
-        return nil
+        // All sources exhausted.
+        let traceSummary = trace.map { "\($0.source)=\($0.klass)" }.joined(separator: ", ")
+        AppLogger.shared.log(
+            "chain: all sources exhausted for track \(request.trackId) [\(traceSummary)]",
+            level: .warning, source: "Download"
+        )
+        if !youtubeDownloader.isAvailable && request.preferredSource != .soundcloud {
+            return .failure(DownloadFailure(
+                klass: .toolMissing, source: "youtube",
+                detail: "yt-dlp not found; all sources exhausted",
+                userMessage: "yt-dlp not installed — open Settings",
+                heal: .installTool))
+        }
+        // Select the most informative failure from the trace.
+        if let best = trace.first {
+            return .failure(Self.selectTerminalFailure(from: trace))
+        }
+        return .failure(DownloadFailure(
+            klass: .outputMissing, source: "all",
+            detail: "all sources exhausted; trace: \(traceSummary)",
+            userMessage: "Track not found on any source",
+            heal: .none))
+    }
+
+    // MARK: - Chain helpers
+
+    /// Select the most informative failure from the per-source trace to
+    /// present as the terminal reason to the user.
+    ///
+    /// **Why not last-wins:** the last source in the chain (YouTube) often
+    /// returns a generic "no results" or a transport error from a dead
+    /// endpoint, discarding the more specific diagnosis from an earlier
+    /// source (e.g. SoundCloud's HTTP 403 → toolStale). The user sees the
+    /// least actionable message instead of the one that tells them what
+    /// to fix.
+    ///
+    /// Selection rule (first match wins):
+    /// 1. **Permanent failure** — strongest statement about the content
+    ///    (e.g. DRM-protected, content removed). The chain tries every
+    ///    source regardless, but when all fail the most definitive
+    ///    diagnosis wins.
+    /// 2. **First non-`.unknown` classified failure** — earliest source
+    ///    with a positive diagnosis, which is the user's preferred source
+    ///    and the one most likely to be right.
+    /// 3. **Last failure** — fallback when everything was `.unknown`.
+    ///
+    /// The full trace is always logged regardless of which failure is
+    /// selected, so discarded diagnoses remain diagnosable.
+    static func selectTerminalFailure(from trace: [DownloadFailure]) -> DownloadFailure {
+        guard !trace.isEmpty else {
+            return DownloadFailure(
+                klass: .outputMissing, source: "all",
+                detail: "no failures recorded",
+                userMessage: "Track not found on any source",
+                heal: .none)
+        }
+        // Rule 1: permanent failure wins.
+        if let permanent = trace.first(where: { $0.isPermanent }) {
+            return permanent
+        }
+        // Rule 2: first non-unknown classified failure wins.
+        if let diagnosed = trace.first(where: { $0.klass != .unknown }) {
+            return diagnosed
+        }
+        // Rule 3: last failure.
+        return trace.last!
+    }
+
+    /// Distinguishes "endpoint returned a classified failure" from
+    /// "searched and found no matching track" — the semantic collapse
+    /// that made 5,031 log lines of dead-endpoint probes indistinguishable
+    /// from legitimate no-match results.
+    private enum StageResult {
+        case success(URL)
+        case classifiedFailure(DownloadFailure)
+        case noResults
+        case captchaRequired
+    }
+
+    /// Retry a DownloadOutcome-returning operation on transient failures
+    /// (heal == .retrySameSource) with exponential backoff plus jitter.
+    /// Bounded to `maxSameSourceRetries`. Honours `cancelRequested`.
+    private func attemptWithRetry(
+        source: String,
+        operation: () async throws -> DownloadOutcome
+    ) async throws -> DownloadOutcome {
+        var lastOutcome: DownloadOutcome?
+        for attempt in 0...Self.maxSameSourceRetries {
+            if cancelRequested {
+                return lastOutcome ?? .failure(DownloadFailure(
+                    klass: .unknown, source: source,
+                    detail: "cancelled between retries",
+                    userMessage: "Download cancelled",
+                    heal: .none))
+            }
+            let outcome = try await operation()
+            switch outcome {
+            case .success:
+                return outcome
+            case .failure(let f):
+                lastOutcome = outcome
+                guard f.heal == .retrySameSource else {
+                    return outcome
+                }
+                if attempt == Self.maxSameSourceRetries {
+                    return outcome
+                }
+                let delay = Self.retryBaseDelay * pow(2.0, Double(attempt))
+                    + Double.random(in: 0...0.5)
+                AppLogger.shared.log(
+                    "chain[\(source)]: \(f.klass) — retrying in \(String(format: "%.1f", delay))s (attempt \(attempt + 1)/\(Self.maxSameSourceRetries))",
+                    level: .info, source: "Download"
+                )
+                await clock.sleep(delay)
+            }
+        }
+        return lastOutcome ?? .failure(DownloadFailure(
+            klass: .unknown, source: source,
+            detail: "retry loop exited unexpectedly",
+            userMessage: "Download failed — reason unknown",
+            heal: .fallThroughToNextSource))
+    }
+
+    /// Attempt the DAB stage: search -> match -> download.
+    private func attemptDAB(
+        _ dab: any DABProviding,
+        request: DownloadRequest,
+        stagingDir: URL
+    ) async -> StageResult {
+        AppLogger.shared.log("chain[DAB]: searching \(request.query)", level: .info, source: "Download")
+        do {
+            guard let dabTrack = try await dab.searchTrack(query: request.query) else {
+                return .noResults
+            }
+            if !dab.matches(dabTrack: dabTrack, artist: request.artist, title: request.title) {
+                AppLogger.shared.log(
+                    "chain[DAB]: hit rejected (artist mismatch): \(dabTrack.artist) - \(dabTrack.title)",
+                    level: .info, source: "Download"
+                )
+                return .noResults
+            }
+            let dabResult = try await dab.download(
+                dabTrack: dabTrack, outputDir: stagingDir,
+                artist: request.artist, title: request.title
+            )
+            switch dabResult {
+            case .success(let path):
+                return .success(path)
+            case .notFound:
+                return .noResults
+            }
+        } catch let urlError as URLError {
+            let f = DownloadFailureClassifier.classifyTransport(source: "dab", error: urlError)
+            return .classifiedFailure(f)
+        } catch let dabError as DABError {
+            switch dabError {
+            case .httpStatus(let code, let body):
+                let f = DownloadFailureClassifier.classifyHTTP(source: "dab", status: code, body: body)
+                return .classifiedFailure(f)
+            case .noCredentials:
+                return .noResults
+            case .loginFailed:
+                return .classifiedFailure(DownloadFailure(
+                    klass: .authExpired, source: "dab",
+                    detail: "DAB login failed",
+                    userMessage: "DAB authentication failed",
+                    heal: .refreshAuthThenRetry))
+            }
+        } catch {
+            let f = DownloadFailureClassifier.classifyTransport(source: "dab", error: error)
+            return .classifiedFailure(f)
+        }
+    }
+
+    /// Attempt the Squid stage: search -> download.
+    private func attemptSquid(
+        request: DownloadRequest,
+        stagingDir: URL
+    ) async -> StageResult {
+        AppLogger.shared.log("chain[Squid]: searching \(request.query)", level: .info, source: "Download")
+        do {
+            guard let squidTrack = try await squidClient.searchTrack(
+                query: request.query, artist: request.artist, title: request.title
+            ) else {
+                return .noResults
+            }
+            let squidResult = try await squidClient.download(
+                track: squidTrack, outputDir: stagingDir,
+                artist: request.artist, title: request.title
+            )
+            switch squidResult {
+            case .success(let path):
+                return .success(path)
+            case .captchaRequired:
+                return .captchaRequired
+            case .notFound:
+                return .noResults
+            }
+        } catch let urlError as URLError {
+            let f = DownloadFailureClassifier.classifyTransport(source: "squid", error: urlError)
+            return .classifiedFailure(f)
+        } catch let squidError as SquidWtfClient.SearchError {
+            switch squidError {
+            case .httpStatus(let code, let body):
+                let f = DownloadFailureClassifier.classifyHTTP(source: "squid", status: code, body: body)
+                return .classifiedFailure(f)
+            }
+        } catch {
+            let f = DownloadFailureClassifier.classifyTransport(source: "squid", error: error)
+            return .classifiedFailure(f)
+        }
     }
 
     // MARK: - Finalization (SCDL-09)
-    //
-    // Each provider's final, DB-referenced file must land in a directory
-    // whose name honestly describes its content: true-FLAC (DAB/Squid) in
-    // `00_FLAC`, everything else (SoundCloud/YouTube, both lossy) in their
-    // own final directories. Provider downloads and transcoding both use
-    // per-request staging directories, then deterministic track-ID filenames
-    // are atomically moved/replaced in the final directory.
 
-    /// Pure mapping from a concrete download source to its final directory:
-    /// `.soundcloud` gets its own directory; `.youtube`/`.dab`/`.squid` all
-    /// transcode/finalize into `aacDir` (the shared AAC library copy). For
-    /// `.dab`/`.squid` the true-FLAC *original* additionally stays behind in
-    /// `flacDir` untouched — see `preservesOriginal(for:)`.
     func finalDirectory(for source: DownloadSource) -> URL {
         switch source {
         case .soundcloud: return soundCloudDir
@@ -840,10 +1209,6 @@ final class DownloadOrchestrator {
         }
     }
 
-    /// Whether the original downloaded file for this source must be left
-    /// untouched on disk after finalization (true FLAC originals from
-    /// DAB/Squid), as opposed to being superseded by its own transcode and
-    /// deleted as a now-redundant lossy duplicate (SoundCloud/YouTube).
     func preservesOriginal(for source: DownloadSource) -> Bool {
         switch source {
         case .dab, .squid: return true
@@ -851,12 +1216,6 @@ final class DownloadOrchestrator {
         }
     }
 
-    /// Moves (or, on a basename collision, atomically replaces) `produced`
-    /// into `finalDir`, returning the resulting path.
-    ///
-    /// Using `replaceItemAt` on collision means finalization always
-    /// succeeds — there is never a stale "output already exists" skip
-    /// caused by a previous partial run leaving a same-named file behind.
     func placeFinal(
         _ produced: URL,
         into finalDir: URL,
@@ -896,20 +1255,12 @@ final class DownloadOrchestrator {
         return "\(identity.prefix(maxIdentityLength))\(suffix)"
     }
 
-    /// Finalizes a successful download: transcodes into a per-request temp
-    /// directory (so the transcode output can never alias the source file,
-    /// which would otherwise cause `TranscodeService` to falsely report
-    /// "output already exists"), then atomically places the result into the
-    /// source's correct final directory.
     func finalize(
         sourcePath: URL,
         source: DownloadSource,
         request: DownloadRequest
     ) async throws -> (path: URL, format: String, bitrate: Int?) {
         let fm = FileManager.default
-        // Per-request temp dir on the SAME volume as the library root so
-        // `placeFinal`'s move is an atomic same-filesystem rename, not a
-        // cross-volume copy — the library may live on an external drive.
         let tempDir = aacDir
             .deletingLastPathComponent()
             .appendingPathComponent(".mlm-transcode-tmp")
@@ -920,74 +1271,64 @@ final class DownloadOrchestrator {
         let transcodeInput: URL
         if preservesOriginal(for: source) {
             transcodeInput = try placeFinal(
-                sourcePath,
-                into: flacDir,
-                fileName: Self.finalFileName(
-                    for: request,
-                    pathExtension: sourcePath.pathExtension
-                )
+                sourcePath, into: flacDir,
+                fileName: Self.finalFileName(for: request, pathExtension: sourcePath.pathExtension)
             )
         } else {
             transcodeInput = sourcePath
         }
 
         let transcodeResult = try await transcodeService.transcode(
-            input: transcodeInput,
-            outputDir: tempDir
+            input: transcodeInput, outputDir: tempDir
         )
 
         switch transcodeResult {
         case .transcoded(let produced):
             let dest = try placeFinal(
-                produced,
-                into: finalDirectory(for: source),
-                fileName: Self.finalFileName(
-                    for: request,
-                    pathExtension: produced.pathExtension
-                )
+                produced, into: finalDirectory(for: source),
+                fileName: Self.finalFileName(for: request, pathExtension: produced.pathExtension)
             )
             return (dest, dest.pathExtension.lowercased(), TranscodeService.targetBitrate)
 
         case .skipped:
             if preservesOriginal(for: source) {
                 let kbps = await transcodeService.detectBitrateKbps(transcodeInput)
-                return (
-                    transcodeInput,
-                    transcodeInput.pathExtension.lowercased(),
-                    kbps
-                )
+                return (transcodeInput, transcodeInput.pathExtension.lowercased(), kbps)
             }
             let dest = try placeFinal(
-                transcodeInput,
-                into: sourceFileDirectory(for: source),
-                fileName: Self.finalFileName(
-                    for: request,
-                    pathExtension: transcodeInput.pathExtension
-                )
+                transcodeInput, into: sourceFileDirectory(for: source),
+                fileName: Self.finalFileName(for: request, pathExtension: transcodeInput.pathExtension)
             )
             let kbps = await transcodeService.detectBitrateKbps(dest)
             return (dest, dest.pathExtension.lowercased(), kbps)
 
         case .failed(let error):
-            AppLogger.shared.log("Transcode failed for \(request.title): \(error)", level: .warning)
+            // Deliberate: preserve the original un-transcoded file when
+            // ffmpeg fails — the user gets *something* playable rather
+            // than nothing. The log carries trackId, artist/title, source
+            // format and the ffmpeg error so the failure is diagnosable.
+            AppLogger.shared.log(
+                "Transcode failed for track \(request.trackId) (\(request.artist) - \(request.title), source=\(source), format=\(sourcePath.pathExtension)): \(error) — placing original un-transcoded file",
+                level: .warning,
+                source: "Download"
+            )
             if preservesOriginal(for: source) {
                 let kbps = await transcodeService.detectBitrateKbps(transcodeInput)
-                return (
-                    transcodeInput,
-                    transcodeInput.pathExtension.lowercased(),
-                    kbps
-                )
+                return (transcodeInput, transcodeInput.pathExtension.lowercased(), kbps)
             }
             let dest = try placeFinal(
-                transcodeInput,
-                into: sourceFileDirectory(for: source),
-                fileName: Self.finalFileName(
-                    for: request,
-                    pathExtension: transcodeInput.pathExtension
-                )
+                transcodeInput, into: sourceFileDirectory(for: source),
+                fileName: Self.finalFileName(for: request, pathExtension: transcodeInput.pathExtension)
             )
             let kbps = await transcodeService.detectBitrateKbps(dest)
             return (dest, dest.pathExtension.lowercased(), kbps)
         }
     }
 }
+
+// MARK: - Protocol conformance for production providers
+
+extension SoundCloudDownloader: DownloadOrchestrator.SoundCloudProviding {}
+extension YouTubeDownloader: DownloadOrchestrator.YouTubeProviding {}
+extension DABClient: DownloadOrchestrator.DABProviding {}
+extension SquidWtfClient: DownloadOrchestrator.SquidProviding {}

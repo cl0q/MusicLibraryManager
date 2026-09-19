@@ -80,10 +80,13 @@ final class DABClient: Sendable {
             (data, response) = try await session.data(for: request)
         } catch let urlError as URLError where Self.isUnreachable(urlError) {
             AppLogger.shared.warn(
-                "DAB: endpoint unreachable (\(urlError.code.rawValue) \(urlError.localizedDescription)) — set MLM_DAB_API_BASE to override",
+                "DAB: endpoint unreachable (URLError(\(urlError.code.rawValue)) \(urlError.localizedDescription)) — set MLM_DAB_API_BASE to override",
                 source: "Download"
             )
-            return []
+            // Re-throw so the orchestrator can classify via
+            // `DownloadFailureClassifier.classifyTransport(source:error:)`
+            // instead of conflating "endpoint dead" with "no results".
+            throw urlError
         }
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
 
@@ -99,7 +102,14 @@ final class DABClient: Sendable {
             return try await searchTracks(query: query, limit: limit)
         }
 
-        guard statusCode == 200 else { return [] }
+        guard statusCode == 200 else {
+            let body = String(data: data.prefix(800), encoding: .utf8)
+            AppLogger.shared.warn(
+                "DAB: search returned HTTP \(statusCode) — set MLM_DAB_API_BASE to override",
+                source: "Download"
+            )
+            throw DABError.httpStatus(statusCode: statusCode, body: body)
+        }
 
         let searchResponse = try JSONDecoder().decode(DabSearchResponse.self, from: data)
         return Array(searchResponse.tracks.prefix(limit))
@@ -190,9 +200,21 @@ final class DABClient: Sendable {
         do {
             (data, response) = try await session.data(for: request)
         } catch let urlError as URLError where Self.isUnreachable(urlError) {
-            return nil
+            AppLogger.shared.warn(
+                "DAB: stream endpoint unreachable (URLError(\(urlError.code.rawValue)))",
+                source: "Download"
+            )
+            throw urlError
         }
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard statusCode == 200 else {
+            let body = String(data: data.prefix(800), encoding: .utf8)
+            AppLogger.shared.warn(
+                "DAB: stream returned HTTP \(statusCode)",
+                source: "Download"
+            )
+            throw DABError.httpStatus(statusCode: statusCode, body: body)
+        }
 
         let streamResponse = try JSONDecoder().decode(DabStreamResponse.self, from: data)
         return streamResponse.url
@@ -386,14 +408,19 @@ struct DabStreamResponse: Codable {
     let url: String
 }
 
-enum DABError: LocalizedError {
+enum DABError: LocalizedError, Sendable {
     case noCredentials
     case loginFailed
+    /// The endpoint returned a non-200 HTTP status. Carries the status code
+    /// and a truncated body so the orchestrator can feed them to
+    /// `DownloadFailureClassifier.classifyHTTP(source:status:body:)`.
+    case httpStatus(statusCode: Int, body: String?)
 
     var errorDescription: String? {
         switch self {
         case .noCredentials: "DAB_EMAIL and DAB_PASSWORD environment variables not set"
         case .loginFailed: "DAB login failed"
+        case .httpStatus(let code, _): "DAB returned HTTP \(code)"
         }
     }
 }
