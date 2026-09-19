@@ -4,210 +4,167 @@ import SwiftUI
 struct LogsTab: View {
     private let logger = AppLogger.shared
 
-    enum Filter: String, CaseIterable, Identifiable {
-        case all = "All"
-        case warnings = "Warn+"
-        case errors = "Errors"
-        var id: String { rawValue }
-    }
+    @State private var levelFilter: LogLevelFilter = .all
+    @State private var sourceFilter: LogSourceFilter = .all
+    @State private var searchText: String = ""
+    @State private var debouncedSearchText: String = ""
 
-    private struct LogSourceChip: Identifiable {
-        let label: String
-        let tag: String?
-        var id: String { label }
-    }
+    @State private var isPaused: Bool = false
+    @State private var autoscrollEnabled: Bool = true
+    @State private var wrapEnabled: Bool = false
 
-    /// `nil` source filter == "all sources". Otherwise filter to entries
-    /// whose `source` matches this string. `""` matches entries with no
-    /// source attached.
-    @State private var filter: Filter = .all
-    @State private var sourceFilter: String? = nil
-    @State private var searchQuery: String = ""
+    @State private var cachedResult: LogFeedResult?
+    @State private var lastQuery: LogQuery?
+    @State private var lastEntryCount: Int = 0
+
+    private var currentQuery: LogQuery {
+        LogQuery(level: levelFilter, source: sourceFilter, searchText: debouncedSearchText)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            toolbar
+            toolbarRow
             Divider()
 
-            if filteredEntries.isEmpty {
+            if cachedResult?.isEmpty ?? true {
                 emptyState
             } else {
-                SelectableLogView(entries: filteredEntries)
+                SelectableLogView(
+                    entries: cachedResult?.rows ?? [],
+                    wrapEnabled: wrapEnabled,
+                    autoscrollEnabled: autoscrollEnabled,
+                    isPaused: isPaused,
+                    query: currentQuery
+                )
             }
         }
         .background(Color.mlmBase)
-    }
-
-    private var filteredEntries: [AppLogger.LogEntry] {
-        let base: [AppLogger.LogEntry]
-        switch filter {
-        case .all:      base = logger.entries
-        case .warnings: base = logger.entries.filter { $0.level == .warning || $0.level == .error }
-        case .errors:   base = logger.entries.filter { $0.level == .error }
-        }
-
-        let sourceFiltered: [AppLogger.LogEntry]
-        if let sf = sourceFilter {
-            if sf.isEmpty {
-                sourceFiltered = base.filter { $0.source == nil }
-            } else {
-                sourceFiltered = base.filter { $0.source == sf }
-            }
-        } else {
-            sourceFiltered = base
-        }
-
-        let query = searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !query.isEmpty else { return sourceFiltered }
-        return sourceFiltered.filter { entry in
-            entry.message.lowercased().contains(query) ||
-            (entry.source?.lowercased().contains(query) ?? false)
-        }
-    }
-
-    /// Unique source strings present in the buffer, alphabetised.
-    /// Drives the Source picker entries.
-    private var availableSources: [String] {
-        var seen = Set<String>()
-        var out: [String] = []
-        for e in logger.entries {
-            if let s = e.source, !seen.contains(s) {
-                seen.insert(s)
-                out.append(s)
+        .onChange(of: levelFilter) { _, _ in recomputeIfNeeded() }
+        .onChange(of: sourceFilter) { _, _ in recomputeIfNeeded() }
+        .onChange(of: logger.entries.count) { _, _ in recomputeIfNeeded() }
+        .task(id: searchText) {
+            do {
+                try await Task.sleep(nanoseconds: 250_000_000)
+                debouncedSearchText = searchText
+            } catch {
+                // Task was cancelled — bail out
             }
         }
-        return out.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        .onChange(of: debouncedSearchText) { _, _ in recomputeIfNeeded() }
+        .onAppear { recomputeIfNeeded() }
+    }
+
+    private func recomputeIfNeeded() {
+        let newQuery = currentQuery
+        let newCount = logger.entries.count
+        if LogFeed.shouldRequery(
+            previousQuery: lastQuery,
+            previousEntryCount: lastEntryCount,
+            newQuery: newQuery,
+            newEntryCount: newCount
+        ) {
+            cachedResult = LogFeed.evaluate(entries: logger.entries, query: newQuery)
+            lastQuery = newQuery
+            lastEntryCount = newCount
+        }
     }
 
     // MARK: - Toolbar
 
-    private var toolbar: some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 8) {
-                Text("\(filteredEntries.count) of \(logger.entries.count)")
-                    .font(MLMFont.muted)
-                    .foregroundColor(.mlmInkMuted)
-                    .frame(minWidth: 96, alignment: .leading)
+    private var toolbarRow: some View {
+        HStack(spacing: 8) {
+            levelMenu
 
-                Picker("Filter", selection: $filter) {
-                    ForEach(Filter.allCases) { f in
-                        Text(f.rawValue).tag(f)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 200)
+            sourceMenu
 
-                sourceMenu
+            searchField
 
-                Spacer()
+            Spacer(minLength: 4)
 
-                Button {
-                    NSWorkspace.shared.activateFileViewerSelecting([logger.logFileURL])
-                } label: {
-                    Label("Reveal Log", systemImage: "doc.text.magnifyingglass")
-                }
-                .font(MLMFont.muted)
-                .buttonStyle(.plain)
-                .help(logger.logFileURL.path)
+            pauseToggle
+            autoscrollToggle
+            wrapToggle
 
-                Button("Clear") {
-                    logger.clear()
-                }
-                .font(MLMFont.muted)
-                .buttonStyle(.plain)
-            }
-
-            let chips = [
-                LogSourceChip(label: "All", tag: nil),
-                LogSourceChip(label: "Sync", tag: "Sync"),
-                LogSourceChip(label: "Transcode", tag: "Transcode"),
-                LogSourceChip(label: "Downloader", tag: "Download"),
-                LogSourceChip(label: "perf", tag: "perf"),
-                LogSourceChip(label: "boot", tag: "boot")
-            ]
-
-            // Quick source-filter chips.
-            HStack(spacing: 8) {
-                Text("Sources:")
-                    .font(MLMFont.muted)
-                    .foregroundColor(.mlmInkMuted)
-                
-                ForEach(chips) { chip in
-                    let isSelected = (chip.tag == nil && sourceFilter == nil) || (chip.tag != nil && sourceFilter == chip.tag)
-                    Button {
-                        sourceFilter = chip.tag
-                    } label: {
-                        Text(chip.label)
-                            .font(.system(size: 10, weight: isSelected ? .bold : .regular))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(isSelected ? Color.accentColor : Color.mlmRaised)
-                            .foregroundColor(isSelected ? .white : .mlmInk)
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
-                Spacer()
-            }
-            .padding(.vertical, 2)
-
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11))
-                    .foregroundColor(.mlmInkMuted)
-                TextField("Search logs (message or source)...", text: $searchQuery)
-                    .textFieldStyle(.plain)
-                    .font(MLMFont.body)
-                if !searchQuery.isEmpty {
-                    Button {
-                        searchQuery = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.mlmInkMuted)
-                    }
-                    .buttonStyle(.borderless)
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Color.mlmRaised)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            clearButton
+            revealButton
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .frame(height: 32)
+        .background(Color.mlmSurface)
+        .accessibilityIdentifier("logs_toolbar")
     }
 
+    // MARK: Level filter
+
+    private var levelMenu: some View {
+        let counts = cachedResult?.countsByFilter ?? [:]
+        let count = counts[levelFilter] ?? 0
+        return Menu {
+            ForEach(LogLevelFilter.allCases) { filter in
+                Button {
+                    levelFilter = filter
+                } label: {
+                    let c = counts[filter] ?? 0
+                    if levelFilter == filter {
+                        Label("\(filter.label) (\(c))", systemImage: "checkmark")
+                    } else {
+                        Text("\(filter.label) (\(c))")
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text("\(levelFilter.label) (\(count))")
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9))
+            }
+            .font(MLMFont.muted)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .accessibilityIdentifier("logs_level_filter")
+    }
+
+    // MARK: Source filter
+
     private var sourceMenu: some View {
-        Menu {
+        let sources = cachedResult?.availableSources ?? []
+        return Menu {
             Button {
-                sourceFilter = nil
+                sourceFilter = .all
             } label: {
-                HStack {
-                    if sourceFilter == nil { Image(systemName: "checkmark") }
+                if sourceFilter == .all {
+                    Label("All sources", systemImage: "checkmark")
+                } else {
                     Text("All sources")
                 }
             }
+
             Divider()
-            ForEach(availableSources, id: \.self) { src in
+
+            ForEach(sources, id: \.self) { src in
                 Button {
-                    sourceFilter = src
+                    sourceFilter = .exact(src)
                 } label: {
-                    HStack {
-                        if sourceFilter == src { Image(systemName: "checkmark") }
+                    if case .exact(let selected) = sourceFilter, selected == src {
+                        Label(src, systemImage: "checkmark")
+                    } else {
                         Text(src)
                     }
                 }
             }
-            if logger.entries.contains(where: { $0.source == nil }) {
-                Divider()
-                Button {
-                    sourceFilter = ""
-                } label: {
-                    HStack {
-                        if sourceFilter == "" { Image(systemName: "checkmark") }
-                        Text("(no source)")
-                    }
+
+            Divider()
+
+            Button {
+                sourceFilter = .none
+            } label: {
+                if sourceFilter == .none {
+                    Label("(no source)", systemImage: "checkmark")
+                } else {
+                    Text("(no source)")
                 }
             }
         } label: {
@@ -216,19 +173,114 @@ struct LogsTab: View {
                     .font(.system(size: 11))
                 Text(sourceMenuLabel)
                     .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9))
             }
             .font(MLMFont.muted)
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+        .accessibilityIdentifier("logs_source_filter")
     }
 
     private var sourceMenuLabel: String {
         switch sourceFilter {
-        case .none:       return "All sources"
-        case .some(""):   return "(no source)"
-        case .some(let s): return s
+        case .all: return "All sources"
+        case .none: return "(no source)"
+        case .exact(let s): return s
         }
+    }
+
+    // MARK: Search field
+
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11))
+                .foregroundColor(.mlmInkMuted)
+            TextField("Search logs...", text: $searchText)
+                .textFieldStyle(.plain)
+                .font(MLMFont.body)
+                .accessibilityIdentifier("logs_search_field")
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.mlmInkMuted)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityIdentifier("logs_search_clear_button")
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color.mlmRaised)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .frame(minWidth: 120)
+    }
+
+    // MARK: Toggles
+
+    private var pauseToggle: some View {
+        Button {
+            isPaused.toggle()
+        } label: {
+            Image(systemName: isPaused ? "play.fill" : "pause.fill")
+                .font(.system(size: 12))
+        }
+        .buttonStyle(.plain)
+        .help(isPaused ? "Resume" : "Pause")
+        .accessibilityIdentifier("logs_pause_toggle")
+    }
+
+    private var autoscrollToggle: some View {
+        Button {
+            autoscrollEnabled.toggle()
+        } label: {
+            Image(systemName: "arrow.down.to.line")
+                .font(.system(size: 12))
+                .foregroundColor(autoscrollEnabled ? .accentColor : .mlmInkMuted)
+        }
+        .buttonStyle(.plain)
+        .help(autoscrollEnabled ? "Autoscroll on" : "Autoscroll off")
+        .accessibilityIdentifier("logs_autoscroll_toggle")
+    }
+
+    private var wrapToggle: some View {
+        Button {
+            wrapEnabled.toggle()
+        } label: {
+            Image(systemName: wrapEnabled ? "text.wordwrap" : "text.alignleft")
+                .font(.system(size: 12))
+                .foregroundColor(wrapEnabled ? .accentColor : .mlmInkMuted)
+        }
+        .buttonStyle(.plain)
+        .help(wrapEnabled ? "Wrap on" : "Wrap off")
+        .accessibilityIdentifier("logs_wrap_toggle")
+    }
+
+    // MARK: Actions
+
+    private var clearButton: some View {
+        Button("Clear") {
+            logger.clear()
+        }
+        .font(MLMFont.muted)
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("logs_clear_button")
+    }
+
+    private var revealButton: some View {
+        Button {
+            NSWorkspace.shared.activateFileViewerSelecting([logger.logFileURL])
+        } label: {
+            Image(systemName: "doc.text.magnifyingglass")
+                .font(.system(size: 12))
+        }
+        .buttonStyle(.plain)
+        .help(logger.logFileURL.path)
+        .accessibilityIdentifier("logs_reveal_button")
     }
 
     // MARK: - Empty state
@@ -238,7 +290,9 @@ struct LogsTab: View {
             Image(systemName: "text.alignleft")
                 .font(.system(size: 24))
                 .foregroundColor(.mlmInkMuted)
-            Text(filter == .all ? "No log entries" : "No entries match the filter")
+            Text(levelFilter == .all && sourceFilter == .all && debouncedSearchText.isEmpty
+                 ? "No log entries"
+                 : "No entries match the filter")
                 .font(MLMFont.body)
                 .foregroundColor(.mlmInkMuted)
             Text("Application events stream here in real time")
@@ -246,15 +300,18 @@ struct LogsTab: View {
                 .foregroundColor(.mlmInkMuted)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("logs_empty_state")
     }
 }
 
 // MARK: - SelectableLogView
 
-/// NSTextView-backed log renderer so the user can select and copy any text
-/// across rows — something SwiftUI's LazyVStack cannot do.
 private struct SelectableLogView: NSViewRepresentable {
     let entries: [AppLogger.LogEntry]
+    let wrapEnabled: Bool
+    let autoscrollEnabled: Bool
+    let isPaused: Bool
+    let query: LogQuery
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -269,6 +326,14 @@ private struct SelectableLogView: NSViewRepresentable {
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.lineFragmentPadding = 0
+        textView.setAccessibilityIdentifier("logs_text_view")
+
+        if !wrapEnabled {
+            textView.textContainer?.containerSize = NSSize(
+                width: CGFloat.greatestFiniteMagnitude,
+                height: CGFloat.greatestFiniteMagnitude
+            )
+        }
 
         let scroll = NSScrollView()
         scroll.documentView = textView
@@ -282,82 +347,95 @@ private struct SelectableLogView: NSViewRepresentable {
         guard let tv = scroll.documentView as? NSTextView,
               let storage = tv.textStorage else { return }
 
-        guard !entries.isEmpty else {
-            if storage.length > 0 {
-                storage.setAttributedString(NSAttributedString())
-                context.coordinator.lastRenderedID = nil
-            }
+        let coord = context.coordinator
+
+        // Handle pause — accumulate entries but do not render
+        if isPaused {
+            coord.pendingEntries = entries
+            coord.wasPaused = true
             return
         }
 
-        let atBottom = isAtBottom(scroll)
-        let coord = context.coordinator
-
-        // Decide whether to append incrementally or rebuild from scratch.
-        let newEntries: [AppLogger.LogEntry]
-        let rebuild: Bool
-
-        if let lastID = coord.lastRenderedID,
-           let lastIdx = entries.firstIndex(where: { $0.id == lastID }) {
-            let tail = entries[(lastIdx + 1)...]
-            guard !tail.isEmpty else { return }
-            newEntries = Array(tail)
-            rebuild = false
+        // If we were paused and are now resuming, flush pending entries
+        let activeEntries: [AppLogger.LogEntry]
+        if coord.wasPaused {
+            activeEntries = coord.pendingEntries ?? entries
+            coord.pendingEntries = nil
+            coord.wasPaused = false
+            coord.justResumedAutoscroll = autoscrollEnabled
+            // Force rebuild on resume
+            coord.storedFingerprint = nil
         } else {
-            newEntries = entries
-            rebuild = true
-            storage.setAttributedString(NSAttributedString())
+            activeEntries = entries
         }
 
-        storage.append(buildChunk(newEntries, prependNewline: storage.length > 0))
-        coord.lastRenderedID = entries.last?.id
-
-        if atBottom || rebuild {
-            tv.scrollToEndOfDocument(nil)
-        }
-    }
-
-    // MARK: - Helpers
-
-    private func buildChunk(_ chunk: [AppLogger.LogEntry], prependNewline: Bool) -> NSAttributedString {
-        let mono11  = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
-        let mono9b  = NSFont.monospacedSystemFont(ofSize: 9,  weight: .bold)
-        let mono11m = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
-        let nlAttrs: [NSAttributedString.Key: Any] = [.font: mono11]
-
-        let out = NSMutableAttributedString()
-        for (i, entry) in chunk.enumerated() {
-            if prependNewline || i > 0 {
-                out.append(NSAttributedString(string: "\n", attributes: nlAttrs))
+        // Handle empty
+        guard !activeEntries.isEmpty else {
+            if storage.length > 0 {
+                storage.setAttributedString(NSAttributedString())
             }
-
-            // Timestamp — HH:mm:ss.SSS is exactly 12 chars; fixed width via padding
-            out.append(NSAttributedString(
-                string: entry.formattedTime.padding(toLength: 12, withPad: " ", startingAt: 0) + "  ",
-                attributes: [.font: mono11, .foregroundColor: NSColor.secondaryLabelColor]
-            ))
-
-            // Level — right-pad to 5 chars (ERROR is longest)
-            out.append(NSAttributedString(
-                string: entry.level.rawValue.padding(toLength: 5, withPad: " ", startingAt: 0) + "  ",
-                attributes: [.font: mono9b, .foregroundColor: levelColor(entry.level)]
-            ))
-
-            // Source — right-pad to 14 chars
-            if let source = entry.source {
-                out.append(NSAttributedString(
-                    string: String(source.prefix(14)).padding(toLength: 14, withPad: " ", startingAt: 0) + "  ",
-                    attributes: [.font: mono11m, .foregroundColor: NSColor.controlAccentColor]
-                ))
-            }
-
-            // Message
-            out.append(NSAttributedString(
-                string: entry.message,
-                attributes: [.font: mono11, .foregroundColor: NSColor.labelColor]
-            ))
+            coord.storedFingerprint = nil
+            coord.lastRenderedID = nil
+            return
         }
-        return out
+
+        // Update wrap mode on the text container
+        if coord.currentWrap != wrapEnabled {
+            coord.currentWrap = wrapEnabled
+            if let container = tv.textContainer {
+                if wrapEnabled {
+                    container.containerSize = NSSize(
+                        width: tv.textContainer?.containerSize.width ?? 1000,
+                        height: CGFloat.greatestFiniteMagnitude
+                    )
+                } else {
+                    container.containerSize = NSSize(
+                        width: CGFloat.greatestFiniteMagnitude,
+                        height: CGFloat.greatestFiniteMagnitude
+                    )
+                }
+            }
+        }
+
+        let atBottom = isAtBottom(scroll)
+
+        // Build the incoming fingerprint (autoscroll deliberately excluded — A1)
+        let incoming = LogRenderFingerprint(query: query, wrapEnabled: wrapEnabled)
+
+        // Use the tested Module 4 plan logic for the stale-render fix
+        let plan = LogTextRenderer.plan(
+            storedFingerprint: coord.storedFingerprint,
+            incomingFingerprint: incoming,
+            lastRenderedEntryID: coord.lastRenderedID,
+            entries: activeEntries
+        )
+
+        switch plan {
+        case .rebuild:
+            let rendered = LogTextRenderer.attributedString(for: activeEntries, wrap: wrapEnabled)
+            storage.setAttributedString(rendered)
+            coord.storedFingerprint = incoming
+            coord.lastRenderedID = activeEntries.last?.id
+
+        case .appendFrom(let index):
+            let tail = Array(activeEntries[index...])
+            let rendered = LogTextRenderer.attributedString(for: tail, wrap: wrapEnabled)
+            storage.append(NSAttributedString(string: "\n"))
+            storage.append(rendered)
+            coord.storedFingerprint = incoming
+            coord.lastRenderedID = activeEntries.last?.id
+
+        case .noChange:
+            break
+        }
+
+        // Autoscroll logic — state stays in the view, never in the fingerprint
+        if autoscrollEnabled {
+            if coord.justResumedAutoscroll || atBottom {
+                tv.scrollToEndOfDocument(nil)
+            }
+        }
+        coord.justResumedAutoscroll = false
     }
 
     private func isAtBottom(_ scroll: NSScrollView) -> Bool {
@@ -365,16 +443,12 @@ private struct SelectableLogView: NSViewRepresentable {
         return scroll.documentVisibleRect.maxY >= doc.bounds.height - 20
     }
 
-    private func levelColor(_ level: AppLogger.Level) -> NSColor {
-        switch level {
-        case .info:    return .systemBlue
-        case .warning: return .systemOrange
-        case .error:   return .systemRed
-        case .debug:   return .systemGray
-        }
-    }
-
     final class Coordinator {
-        var lastRenderedID: UUID? = nil
+        var storedFingerprint: LogRenderFingerprint?
+        var lastRenderedID: UUID?
+        var currentWrap: Bool = false
+        var wasPaused: Bool = false
+        var pendingEntries: [AppLogger.LogEntry]?
+        var justResumedAutoscroll: Bool = false
     }
 }

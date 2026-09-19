@@ -1,17 +1,28 @@
-import AppKit
 import SwiftUI
+import AppKit
 
 /// Collapsible activity panel at the bottom of the window.
 ///
-/// Shows a 36px header bar when collapsed. Expands to reveal
-/// Operations and Logs tabs. Wired to ActivityViewModel and AppLogger.
+/// Shows a 36pt header bar with a composite summary driven by `ActivityFeed`.
+/// Expands to reveal Operations and Logs tabs. Panel state (expansion, height,
+/// selected tab) is persisted via `@AppStorage`.
 struct ActivityPanel: View {
-    @State private var isExpanded = false
-    @State private var selectedTab: ActivityTab = .operations
-    @Environment(\.container) private var container
 
-    @State private var expandedHeight: CGFloat = 284
-    @State private var baseHeight: CGFloat = 284
+    @AppStorage("activity.panel.expanded") private var isExpanded: Bool = false
+    @AppStorage("activity.panel.height") private var panelHeight: Double = 284
+    @AppStorage("activity.selectedTab") private var selectedTabRaw: String = "Operations"
+
+    @Environment(\.container) private var container
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @State private var dragBaseHeight: CGFloat = 284
+
+    private var selectedTab: Binding<ActivityTab> {
+        Binding(
+            get: { ActivityTab(rawValue: selectedTabRaw) ?? .operations },
+            set: { selectedTabRaw = $0.rawValue }
+        )
+    }
 
     enum ActivityTab: String, CaseIterable {
         case operations = "Operations"
@@ -23,37 +34,21 @@ struct ActivityPanel: View {
             activityHeader
 
             if isExpanded {
+                ResizeHandle(panelHeight: $panelHeight, dragBaseHeight: $dragBaseHeight)
                 activityContent
             }
         }
         .background(Color.mlmSurface)
         .clipped()
-        .overlay(
-            Group {
-                if isExpanded {
-                    Color.clear
-                        .frame(height: 6)
-                        .contentShape(Rectangle())
-                        .gesture(
-                            DragGesture()
-                                .onChanged { value in
-                                    let newHeight = baseHeight - value.translation.height
-                                    expandedHeight = min(max(newHeight, 150), 700)
-                                }
-                                .onEnded { value in
-                                    baseHeight = expandedHeight
-                                }
-                        )
-                        .onHover { inside in
-                            if inside {
-                                NSCursor.resizeUpDown.push()
-                            } else {
-                                NSCursor.pop()
-                            }
-                        }
-                }
-            },
-            alignment: .top
+        .accessibilityIdentifier("activity_panel")
+        .background(
+            Button("") {
+                collapsePanel()
+            }
+            .keyboardShortcut(.escape, modifiers: [])
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
         )
     }
 
@@ -61,15 +56,14 @@ struct ActivityPanel: View {
 
     private var activityHeader: some View {
         Button {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                isExpanded.toggle()
-            }
+            toggleExpanded()
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundColor(.mlmInkMuted)
                     .frame(width: 12)
+                    .accessibilityIdentifier("activity_header_chevron")
 
                 Text("Activity")
                     .font(MLMFont.sectionLabel)
@@ -78,60 +72,74 @@ struct ActivityPanel: View {
                 Spacer()
 
                 summarySection
+                    .accessibilityIdentifier("activity_header_summary")
             }
             .padding(.horizontal, 16)
             .frame(height: 36)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("activity_header")
     }
 
-    /// Right-aligned summary in the collapsed header. Downloads take
-    /// priority over generic operations so the user can see batch progress
-    /// without expanding the panel.
+    // MARK: - Composite summary (headline from ActivityFeed)
+
     @ViewBuilder
     private var summarySection: some View {
-        if let downloadVM = container.downloadViewModel, downloadVM.isDownloading {
-            ProgressView()
-                .controlSize(.mini)
-                .padding(.trailing, 4)
-            Text(downloadSummary(for: downloadVM))
-                .font(MLMFont.muted)
-                .foregroundColor(.mlmInkPrimary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-        } else if let activeDesc = PerformanceQueueService.shared.activeJobDescription {
-            ProgressView()
-                .controlSize(.mini)
-                .padding(.trailing, 4)
-            Text("\(activeDesc) (\(PerformanceQueueService.shared.pendingAnalysesCount) pending)")
-                .font(MLMFont.muted)
-                .foregroundColor(.mlmInkPrimary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-        } else if let vm = container.activityViewModel {
-            if vm.hasActiveOperations {
+        let snapshot = currentSnapshot()
+        let headline = snapshot.headline
+
+        HStack(spacing: 6) {
+            if headline.isBusy {
                 ProgressView()
                     .controlSize(.mini)
-                    .padding(.trailing, 4)
             }
-            Text(vm.summaryText)
+
+            Text(headline.text)
                 .font(MLMFont.muted)
-                .foregroundColor(vm.hasActiveOperations ? .mlmInkPrimary : .mlmInkMuted)
-        } else {
-            Text("No active operations")
-                .font(MLMFont.muted)
-                .foregroundColor(.mlmInkMuted)
+                .foregroundColor(headline.isEmpty ? .mlmInkMuted : .mlmInkPrimary)
+                .lineLimit(1)
+                .truncationMode(.middle)
         }
+        .help(headline.tooltip)
     }
 
-    private func downloadSummary(for vm: DownloadViewModel) -> String {
-        let completed = vm.completedCount + 1  // +1 to show 1-based count of current
-        let total = vm.totalCount
-        if vm.currentTrack.isEmpty {
-            return "Downloading \(min(completed, total)) / \(total)"
+    private func currentSnapshot() -> ActivityFeedSnapshot {
+        guard let vm = container.activityViewModel else {
+            return ActivityFeedSnapshot(
+                sections: [],
+                headline: ActivityHeadline(
+                    text: "No active operations",
+                    tooltip: "No active operations",
+                    isBusy: false,
+                    isEmpty: true
+                ),
+                isEmpty: true
+            )
         }
-        return "Downloading \(min(completed, total)) / \(total) — \(vm.currentTrack)"
+
+        let downloadState: DownloadSourceState? = container.downloadViewModel.map {
+            $0.sourceState(operationID: nil)
+        }
+
+        let queueService = PerformanceQueueService.shared
+        let queueState = QueueSourceState(
+            activeJobDescription: queueService.activeJobDescription,
+            pendingAnalyses: queueService.pendingAnalysesCount,
+            pendingDownloads: queueService.pendingDownloadsCount
+        )
+
+        return ActivityFeed.makeSnapshot(
+            operations: vm.operations,
+            stalledIDs: vm.stalledOperationIDs,
+            recentOperations: vm.recentOperations,
+            recentTruncated: vm.isRecentTruncated,
+            download: downloadState,
+            sync: nil,
+            queue: queueState,
+            persistedFailures: [],
+            now: Date()
+        )
     }
 
     // MARK: - Expanded content
@@ -141,7 +149,7 @@ struct ActivityPanel: View {
             Divider()
                 .overlay(Color.mlmEdgeSubtle)
 
-            Picker("Tab", selection: $selectedTab) {
+            Picker("Tab", selection: selectedTab) {
                 ForEach(ActivityTab.allCases, id: \.self) { tab in
                     Text(tab.rawValue).tag(tab)
                 }
@@ -149,9 +157,10 @@ struct ActivityPanel: View {
             .pickerStyle(.segmented)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
+            .accessibilityIdentifier("activity_tab_picker")
 
             Group {
-                switch selectedTab {
+                switch selectedTab.wrappedValue {
                 case .operations:
                     OperationsTab()
                 case .logs:
@@ -160,7 +169,71 @@ struct ActivityPanel: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(height: expandedHeight)
-        .transition(.move(edge: .bottom).combined(with: .opacity))
+        .frame(height: CGFloat(panelHeight))
+        .transition(
+            reduceMotion
+                ? .opacity
+                : .move(edge: .bottom).combined(with: .opacity)
+        )
+    }
+
+    // MARK: - Actions
+
+    private func toggleExpanded() {
+        if reduceMotion {
+            isExpanded.toggle()
+        } else {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isExpanded.toggle()
+            }
+        }
+        if !isExpanded == false {
+            dragBaseHeight = CGFloat(panelHeight)
+        }
+    }
+
+    private func collapsePanel() {
+        guard isExpanded else { return }
+        if reduceMotion {
+            isExpanded = false
+        } else {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isExpanded = false
+            }
+        }
+    }
+}
+
+// MARK: - Resize Handle
+
+/// A dedicated drag handle for resizing the panel. Placed between the header
+/// and the content so it does not overlap the collapse button.
+private struct ResizeHandle: View {
+    @Binding var panelHeight: Double
+    @Binding var dragBaseHeight: CGFloat
+
+    var body: some View {
+        Rectangle()
+            .fill(Color.mlmEdgeSubtle.opacity(0.5))
+            .frame(height: 4)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        let newHeight = dragBaseHeight - value.translation.height
+                        panelHeight = Double(Swift.min(Swift.max(newHeight, 150), 700))
+                    }
+                    .onEnded { _ in
+                        dragBaseHeight = CGFloat(panelHeight)
+                    }
+            )
+            .onHover { inside in
+                if inside {
+                    NSCursor.resizeUpDown.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+            .accessibilityIdentifier("activity_resize_handle")
     }
 }
