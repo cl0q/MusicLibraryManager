@@ -1,8 +1,8 @@
 import Foundation
 
 /// State and operations for the toolbar-owned global search presentation.
-/// It keeps local results available immediately and only fans out to remote
-/// services after the user explicitly selects All sources.
+/// Local results are available immediately; remote sources fan out concurrently
+/// only when scope == .allSources.
 @Observable
 @MainActor
 final class GlobalSearchPresentationViewModel {
@@ -20,31 +20,22 @@ final class GlobalSearchPresentationViewModel {
         var id: Self { self }
     }
 
-    enum Mode: String, CaseIterable, Identifiable {
-        case search = "Search"
-        case link = "Link"
-
-        var id: Self { self }
-    }
-
-    private(set) var localResults: [Track] = []
-    private(set) var remoteResults: [RemoteSearchResult] = []
+    private(set) var results: [Track] = []
     private(set) var sourceFailures: [SourceFailure] = []
     private(set) var isSearching = false
     private(set) var errorMessage: String?
-    private(set) var downloading: Set<String> = []
 
-    /// YouTube search is available whenever yt-dlp is installed, even if no
-    /// account-backed source is connected.
-    var canSearchAllSources: Bool { true }
+    var context: SearchResultsMerger.Context = .library
+    var contextPlaylistID: Int64?
+    private(set) var playlistContextTracks: [Track] = []
 
+    private let trackRepository: TrackRepository
+    private let playlistRepository: PlaylistRepository?
+    private let sourceRepository: SourceRepository
     private let soundCloudClient: SoundCloudClient?
     private let spotifyClient: SpotifyClient?
     private let youtubeDownloader: YouTubeDownloader
     private let dabClient: DABClient?
-    private let trackRepository: TrackRepository
-    private let sourceRepository: SourceRepository
-    private let downloadViewModel: DownloadViewModel
     private var activeRequest = UUID()
 
     init(
@@ -54,7 +45,7 @@ final class GlobalSearchPresentationViewModel {
         dabClient: DABClient?,
         trackRepository: TrackRepository,
         sourceRepository: SourceRepository,
-        downloadViewModel: DownloadViewModel
+        playlistRepository: PlaylistRepository? = nil
     ) {
         self.soundCloudClient = soundCloudClient
         self.spotifyClient = spotifyClient
@@ -62,26 +53,25 @@ final class GlobalSearchPresentationViewModel {
         self.dabClient = dabClient
         self.trackRepository = trackRepository
         self.sourceRepository = sourceRepository
-        self.downloadViewModel = downloadViewModel
+        self.playlistRepository = playlistRepository
     }
 
-    func search(query: String, scope: Scope, mode: Mode) async {
+    func search(query: String, scope: Scope) async {
         let request = UUID()
         activeRequest = request
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !trimmed.isEmpty else {
-            localResults = []
-            remoteResults = []
+            results = []
             sourceFailures = []
             errorMessage = nil
+            playlistContextTracks = []
             return
         }
 
         isSearching = true
         errorMessage = nil
-        localResults = []
-        remoteResults = []
+        results = []
         sourceFailures = []
         defer {
             if activeRequest == request {
@@ -89,172 +79,169 @@ final class GlobalSearchPresentationViewModel {
             }
         }
 
-        if mode == .link {
-            await resolveLink(trimmed, request: request)
-            return
+        // Fetch context tracks (playlist rows if applicable)
+        var contextTracks: [Track] = []
+        if context == .playlist, let playlistID = contextPlaylistID, let playlistRepository {
+            if let tracks = try? await playlistRepository.fetchTracks(playlistId: playlistID) {
+                contextTracks = tracks.filter { $0.matches(searchQuery: trimmed) }
+            }
         }
+        playlistContextTracks = contextTracks
 
+        guard activeRequest == request, !Task.isCancelled else { return }
+
+        // Local search — heavy DB work off the main actor
+        let trackRepo = trackRepository
+        let localTracks: [Track]
         do {
-            let local = try await trackRepository.search(query: trimmed)
-            guard activeRequest == request, !Task.isCancelled else { return }
-            localResults = local
+            localTracks = try await Self.performLocalSearch(trackRepository: trackRepo, query: trimmed)
         } catch {
             guard activeRequest == request else { return }
             errorMessage = "Could not search the library. Try again."
-        }
-
-        guard scope == .allSources, activeRequest == request, !Task.isCancelled else { return }
-        await searchRemoteSources(for: trimmed, request: request)
-    }
-
-    func download(_ result: RemoteSearchResult) async {
-        guard !downloading.contains(result.id) else { return }
-        downloading.insert(result.id)
-        defer { downloading.remove(result.id) }
-
-        do {
-            let sourceName = sourceName(for: result.source)
-            let source = try await sourceRepository.upsert(name: sourceName, userId: "search")
-            guard let sourceId = source.id else { return }
-
-            let track: Track
-            if let existing = try? await trackRepository.fetchTrackByExternalId(
-                result.externalId,
-                sourceName: sourceName
-            ) {
-                track = existing
-            } else {
-                var newTrack = Track(
-                    artist: result.artist,
-                    album: result.source.rawValue,
-                    title: result.title,
-                    format: sourceName,
-                    originalPath: result.sourceURL ?? "\(sourceName)://\(result.externalId)"
-                )
-                newTrack.duration = result.durationSeconds
-                let inserted = try await trackRepository.insert(newTrack)
-                guard let id = inserted.id else { return }
-                try await sourceRepository.linkTrackToSource(
-                    trackId: id,
-                    sourceId: sourceId,
-                    externalId: result.externalId
-                )
-                track = inserted
-            }
-
-            await downloadViewModel.downloadTracks(
-                [track],
-                preferredSource: result.source.preferredSource
-            )
-        } catch {
-            errorMessage = "Download failed: \(error.localizedDescription)"
-        }
-    }
-
-    private func searchRemoteSources(for query: String, request: UUID) async {
-        if let soundCloudClient {
-            do {
-                let results = try await soundCloudClient.search(query: query)
-                guard activeRequest == request, !Task.isCancelled else { return }
-                remoteResults.append(contentsOf: results)
-            } catch {
-                guard activeRequest == request, !Task.isCancelled else { return }
-                sourceFailures.append(SourceFailure(source: "SoundCloud", message: error.localizedDescription))
-            }
-        }
-
-        if let spotifyClient {
-            do {
-                let results = try await spotifyClient.search(query: query)
-                guard activeRequest == request, !Task.isCancelled else { return }
-                remoteResults.append(contentsOf: results)
-            } catch {
-                guard activeRequest == request, !Task.isCancelled else { return }
-                sourceFailures.append(SourceFailure(source: "Spotify", message: error.localizedDescription))
-            }
-        }
-
-        do {
-            let entries = try await youtubeDownloader.search(query: query)
-            guard activeRequest == request, !Task.isCancelled else { return }
-            remoteResults.append(contentsOf: entries.map { entry in
-                RemoteSearchResult(
-                    id: "yt-\(entry.id)",
-                    source: .youtube,
-                    artist: entry.uploader ?? "Unknown",
-                    title: entry.title,
-                    durationSeconds: entry.durationSeconds,
-                    externalId: entry.id,
-                    sourceURL: entry.url
-                )
-            })
-        } catch {
-            guard activeRequest == request, !Task.isCancelled else { return }
-            sourceFailures.append(SourceFailure(source: "YouTube", message: error.localizedDescription))
-        }
-
-        if let dabClient {
-            do {
-                let tracks = try await dabClient.searchTracks(query: query)
-                guard activeRequest == request, !Task.isCancelled else { return }
-                remoteResults.append(contentsOf: tracks.map { track in
-                    RemoteSearchResult(
-                        id: "dab-\(track.id)",
-                        source: .dab,
-                        artist: track.artist,
-                        title: track.title,
-                        durationSeconds: track.duration.map { Int($0) },
-                        externalId: String(track.id),
-                        sourceURL: nil
-                    )
-                })
-            } catch {
-                guard activeRequest == request, !Task.isCancelled else { return }
-                sourceFailures.append(SourceFailure(source: "DAB", message: error.localizedDescription))
-            }
-        }
-    }
-
-    private func resolveLink(_ url: String, request: UUID) async {
-        guard url.lowercased().hasPrefix("http") else {
-            errorMessage = "Paste a valid URL beginning with http."
             return
         }
 
-        do {
-            let source = Self.detectSource(from: url)
-            let entries = try await youtubeDownloader.fetchURLInfo(url: url)
+        guard activeRequest == request, !Task.isCancelled else { return }
+
+        // Remote search (only for .allSources)
+        var remoteTracks: [Track] = []
+        if scope == .allSources {
+            let remoteResults = await searchRemoteSources(for: trimmed, request: request)
             guard activeRequest == request, !Task.isCancelled else { return }
-            remoteResults = entries.map { entry in
-                RemoteSearchResult(
-                    id: "link-\(source.rawValue)-\(entry.id)",
-                    source: source,
-                    artist: entry.uploader ?? "Unknown",
-                    title: entry.title,
-                    durationSeconds: entry.durationSeconds,
-                    externalId: entry.id,
-                    sourceURL: entry.url
+
+            if !remoteResults.isEmpty {
+                let materializer = RemoteTrackMaterializer(
+                    trackRepository: trackRepository,
+                    sourceRepository: sourceRepository
                 )
+                do {
+                    remoteTracks = try await materializer.materialize(remoteResults)
+                } catch {
+                    guard activeRequest == request else { return }
+                    errorMessage = "Could not save remote results. Try again."
+                }
             }
-            if remoteResults.isEmpty {
-                errorMessage = "No downloadable items were found at this link."
-            }
-        } catch {
-            guard activeRequest == request, !Task.isCancelled else { return }
-            errorMessage = error.localizedDescription
         }
+
+        guard activeRequest == request, !Task.isCancelled else { return }
+
+        // Merge off the main actor
+        results = await Self.mergeSearchResults(
+            contextTracks: contextTracks,
+            libraryTracks: localTracks,
+            remoteTracks: remoteTracks
+        )
     }
 
-    private static func detectSource(from url: String) -> RemoteSearchResult.Source {
-        url.lowercased().contains("soundcloud.com") ? .soundcloud : .youtube
+    // MARK: - Nonisolated helpers (off-main work)
+
+    nonisolated private static func performLocalSearch(
+        trackRepository: TrackRepository,
+        query: String
+    ) async throws -> [Track] {
+        try await trackRepository.search(query: query, limit: 500)
     }
 
-    private func sourceName(for source: RemoteSearchResult.Source) -> String {
-        switch source {
-        case .soundcloud: "soundcloud"
-        case .spotify: "spotify"
-        case .youtube: "youtube"
-        case .dab: "dab"
+    nonisolated private static func mergeSearchResults(
+        contextTracks: [Track],
+        libraryTracks: [Track],
+        remoteTracks: [Track]
+    ) async -> [Track] {
+        SearchResultsMerger.merge(
+            contextTracks: contextTracks,
+            libraryTracks: libraryTracks,
+            remoteTracks: remoteTracks
+        )
+    }
+
+    private func searchRemoteSources(for query: String, request: UUID) async -> [RemoteSearchResult] {
+        var allResults: [RemoteSearchResult] = []
+        var failures: [SourceFailure] = []
+
+        await withTaskGroup(of: RemoteSourceResult.self) { group in
+            if let soundCloudClient {
+                group.addTask {
+                    do {
+                        let results = try await soundCloudClient.search(query: query)
+                        return .results(results)
+                    } catch {
+                        return .failure("SoundCloud", error.localizedDescription)
+                    }
+                }
+            }
+
+            if let spotifyClient {
+                group.addTask {
+                    do {
+                        let results = try await spotifyClient.search(query: query)
+                        return .results(results)
+                    } catch {
+                        return .failure("Spotify", error.localizedDescription)
+                    }
+                }
+            }
+
+            group.addTask {
+                do {
+                    let entries = try await self.youtubeDownloader.search(query: query)
+                    let results = entries.map { entry in
+                        RemoteSearchResult(
+                            id: "yt-\(entry.id)",
+                            source: .youtube,
+                            artist: entry.uploader ?? "Unknown",
+                            title: entry.title,
+                            durationSeconds: entry.durationSeconds,
+                            externalId: entry.id,
+                            sourceURL: entry.url
+                        )
+                    }
+                    return .results(results)
+                } catch {
+                    return .failure("YouTube", error.localizedDescription)
+                }
+            }
+
+            if let dabClient {
+                group.addTask {
+                    do {
+                        let tracks = try await dabClient.searchTracks(query: query)
+                        let results = tracks.map { track in
+                            RemoteSearchResult(
+                                id: "dab-\(track.id)",
+                                source: .dab,
+                                artist: track.artist,
+                                title: track.title,
+                                durationSeconds: track.duration.map { Int($0) },
+                                externalId: String(track.id),
+                                sourceURL: nil
+                            )
+                        }
+                        return .results(results)
+                    } catch {
+                        return .failure("DAB", error.localizedDescription)
+                    }
+                }
+            }
+
+            for await result in group {
+                guard activeRequest == request, !Task.isCancelled else { break }
+                switch result {
+                case .results(let tracks):
+                    allResults.append(contentsOf: tracks)
+                case .failure(let source, let message):
+                    failures.append(SourceFailure(source: source, message: message))
+                }
+            }
         }
+
+        if activeRequest == request {
+            sourceFailures = failures
+        }
+        return allResults
+    }
+
+    private enum RemoteSourceResult {
+        case results([RemoteSearchResult])
+        case failure(String, String)
     }
 }
