@@ -45,6 +45,16 @@ final class ArtworkBackfillService {
     /// Coalesces concurrent extractions per track id.
     private var inFlight: Set<Int64> = []
 
+    /// Track ids that have already been attempted for self-heal this session.
+    /// Prevents a scrolling table from re-triggering ffmpeg on the same failing
+    /// track on every render pass. Cleared at the end of
+    /// `reconcileDanglingArtworkFiles()` so a bulk repair can retry.
+    private var selfHealAttempted: Set<Int64> = []
+
+    /// Caps concurrent self-heal extractions at 2 (separate from the backfill
+    /// TaskGroup which uses `maxConcurrentTasks`).
+    private let selfHealLimiter = ConcurrencyLimiter(maxConcurrency: 2)
+
     /// NotificationCenter observer tokens (removed in deinit).
     private var libraryImportObserverToken: NSObjectProtocol?
     private var downloadCompleteObserverToken: NSObjectProtocol?
@@ -122,11 +132,92 @@ final class ArtworkBackfillService {
 
     /// Re-extract artwork for a single track (D-14 self-healing path).
     /// Called by TrackCoverView when DB says artwork exists but file is missing.
+    ///
+    /// Deduplication:
+    /// - `inFlight` prevents concurrent extractions of the same track.
+    /// - `selfHealAttempted` prevents a scrolling table from retrying the same
+    ///   failing track on every render pass (session-scoped, one attempt only).
+    /// - `selfHealLimiter` caps concurrent self-heals at 2.
     public func refreshSingleTrack(trackId: Int64) async {
         guard !inFlight.contains(trackId) else { return }
-        // TrackRepository.fetchTrack(id:) exists — using TrackRepository path (Path A)
-        guard let track = try? await trackRepository.fetchTrack(id: trackId) else { return }
-        await extractForTrack(track)
+        guard !selfHealAttempted.contains(trackId) else { return }
+        selfHealAttempted.insert(trackId)
+        inFlight.insert(trackId)
+        defer { inFlight.remove(trackId) }
+
+        await selfHealLimiter.run { [weak self] in
+            guard let self else { return }
+            // TrackRepository.fetchTrack(id:) exists — using TrackRepository path (Path A)
+            guard let track = try? await trackRepository.fetchTrack(id: trackId) else { return }
+            await extractForTrack(track)
+        }
+    }
+
+    // MARK: - Dangling artwork reconcile
+
+    /// Pure function: given all artwork rows with a non-empty path, return the
+    /// track ids whose path is non-absolute OR whose file does not exist on disk.
+    ///
+    /// Extracted for testability — the production path calls this inside a
+    /// detached task so the ~8.7k `FileManager.fileExists` calls stay off the
+    /// main actor.
+    nonisolated static func danglingTrackIds(from entries: [(trackId: Int64, artworkPath: String)]) -> [Int64] {
+        entries.compactMap { entry in
+            let path = entry.artworkPath
+            // Relative paths (e.g. "artwork_cache/4_500.jpg") are always dangling —
+            // they were never resolved to an absolute filesystem location.
+            if !path.hasPrefix("/") { return entry.trackId }
+            return FileManager.default.fileExists(atPath: path) ? nil : entry.trackId
+        }
+    }
+
+    /// Scan every artwork row that records a file path, detect rows whose cached
+    /// file no longer exists (or was stored as a relative path that never resolved),
+    /// mark them `source = 'missing'`, and clear the negative cache so the next
+    /// render pass can re-resolve them.
+    ///
+    /// Called at the start of `backfillMissing()` on every `.libraryDidImport`
+    /// trigger. Cheap enough to run every time: one DB read, one batch of
+    /// `fileExists` checks on a detached task, one batched UPDATE.
+    /// Converges: after one pass nothing dangles until the OS evicts cache files again.
+    @discardableResult
+    public func reconcileDanglingArtworkFiles() async -> Int {
+        let entries: [(trackId: Int64, artworkPath: String)]
+        do {
+            entries = try await analysisRepository.fetchAllArtworkPaths()
+        } catch {
+            AppLogger.shared.warn("ArtworkBackfill: reconcile fetch failed — \(error)",
+                                  source: "ArtworkBackfill")
+            return 0
+        }
+        guard !entries.isEmpty else { return 0 }
+
+        // fileExists checks run off the main actor (~8.7k calls).
+        let danglingIds: [Int64] = await Task.detached(priority: .utility) {
+            Self.danglingTrackIds(from: entries)
+        }.value
+
+        guard !danglingIds.isEmpty else { return 0 }
+
+        do {
+            try await analysisRepository.markArtworkFilesMissing(trackIds: danglingIds)
+        } catch {
+            AppLogger.shared.warn("ArtworkBackfill: reconcile update failed — \(error)",
+                                  source: "ArtworkBackfill")
+            return 0
+        }
+
+        // Clear the negative cache so previously-poisoned ids get a fresh chance.
+        TrackArtworkCache.shared.clearNegativeEntries()
+
+        // Allow self-heal to retry these tracks after the bulk repair.
+        for id in danglingIds {
+            selfHealAttempted.remove(id)
+        }
+
+        AppLogger.shared.info("ArtworkBackfill: reconciled \(danglingIds.count) dangling artwork rows",
+                              source: "ArtworkBackfill")
+        return danglingIds.count
     }
 
     // MARK: - Backfill orchestration
@@ -139,7 +230,11 @@ final class ArtworkBackfillService {
             inFlight.removeAll()
         }
 
-        // Fetch tracks that have no artwork row in the DB (D-15: only NULL rows, not re-extract)
+        // Reconcile dangling artwork files first — rows whose cached file is gone
+        // get `source = 'missing'` so `fetchTracksWithoutArtwork()` picks them up.
+        await reconcileDanglingArtworkFiles()
+
+        // Fetch tracks that have no artwork row or whose artwork file is missing.
         let tracks: [Track]
         do {
             tracks = try await trackRepository.fetchTracksWithoutArtwork()
@@ -161,38 +256,52 @@ final class ArtworkBackfillService {
         // Turbo mode increases this to 8 for M4 Macs
         let concurrentLimit = turboMode ? 8 : maxConcurrentTasks
         
-        await withTaskGroup(of: Void.self) { group in
-            var pending = tracks.makeIterator()
-            var running = 0
+        // Bridge Swift task cancellation to the tracker so the loop's
+        // isCancelled gates actually fire when the user taps Cancel.
+        await withTaskCancellationHandler {
+            await withTaskGroup(of: Void.self) { group in
+                var pending = tracks.makeIterator()
+                var running = 0
 
-            // Seed initial batch up to concurrentLimit
-            while running < concurrentLimit, let track = pending.next() {
-                guard let trackId = track.id else { continue }
-                inFlight.insert(trackId)
-                running += 1
-                group.addTask { [weak self] in
-                    await self?.extractForTrack(track, tracker: tracker)
-                }
-            }
-
-            // As tasks complete, add next batch to maintain concurrentLimit in flight
-            //
-            // SCDL-08: do NOT call tracker.updateProgress here — extractForTrack
-            // already calls it exactly once per completed track (on every return
-            // path: file-not-found, sentinel-write, save-failure, and success).
-            // Calling it again here double-counted every track, producing the
-            // 84/44 / 100/53 overshoot where `current` outran `total`. Mirror the
-            // tracker's single source of truth instead of maintaining a second counter.
-            for await _ in group {
-                progress.current = tracker.currentState.current
-                if let track = pending.next() {
+                // Seed initial batch up to concurrentLimit
+                while running < concurrentLimit, let track = pending.next() {
+                    if tracker.isCancelled {
+                        AppLogger.shared.info("ArtworkBackfill cancelled", source: "ArtworkBackfill")
+                        break
+                    }
                     guard let trackId = track.id else { continue }
                     inFlight.insert(trackId)
+                    running += 1
                     group.addTask { [weak self] in
                         await self?.extractForTrack(track, tracker: tracker)
                     }
                 }
+
+                // As tasks complete, add next batch to maintain concurrentLimit in flight
+                //
+                // SCDL-08: do NOT call tracker.updateProgress here — extractForTrack
+                // already calls it exactly once per completed track (on every return
+                // path: file-not-found, sentinel-write, save-failure, and success).
+                // Calling it again here double-counted every track, producing the
+                // 84/44 / 100/53 overshoot where `current` outran `total`. Mirror the
+                // tracker's single source of truth instead of maintaining a second counter.
+                for await _ in group {
+                    if tracker.isCancelled {
+                        AppLogger.shared.info("ArtworkBackfill cancelled", source: "ArtworkBackfill")
+                        break
+                    }
+                    progress.current = tracker.currentState.current
+                    if let track = pending.next() {
+                        guard let trackId = track.id else { continue }
+                        inFlight.insert(trackId)
+                        group.addTask { [weak self] in
+                            await self?.extractForTrack(track, tracker: tracker)
+                        }
+                    }
+                }
             }
+        } onCancel: {
+            tracker.cancel()
         }
         
         AppLogger.shared.info("ArtworkBackfill: complete", source: "ArtworkBackfill")
@@ -325,7 +434,9 @@ do {
         }
 
         inFlight.remove(trackId)
-        
+        // Artwork changed for this track — allow future self-heal attempts if needed.
+        selfHealAttempted.remove(trackId)
+
         // D-03: Notify UI per-track so covers appear incrementally ("pop-in" effect)
         NotificationCenter.default.post(
             name: .trackArtworkDidChange,

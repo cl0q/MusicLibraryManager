@@ -4,7 +4,8 @@ import Foundation
 
 @Suite("ArtworkDebugTests")
 struct ArtworkDebugTests {
-    @Test func debugExtraction() async {
+    @Test(.disabled("Environment-bound debug helper: requires /Volumes/Lexxar and crashes the full-suite runner (2026-09-04). Re-enable manually for artwork debugging."))
+    func debugExtraction() async {
         let organizedPath = "00_Artists/Get down-Potatoheadz feat. Da Rook MC.m4a"
         let libraryRoot = "/Volumes/Lexxar/Music"
         

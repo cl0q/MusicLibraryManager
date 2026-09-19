@@ -1,4 +1,6 @@
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 
 /// Album artwork service — extracts embedded art and fetches from MusicBrainz/CAA.
 ///
@@ -88,26 +90,31 @@ actor BatchResultCollector {
         
         AppLogger.shared.info("Starting artwork batch: \(tracks.count) tracks, \(workerCount) workers (turbo: \(turboMode))", source: "Artwork")
         
-        // Process all tracks with enforced parallelism
-        await withTaskGroup(of: Void.self) { group in
-            for track in tracks {
-                if tracker.isCancelled {
-                    AppLogger.shared.info("Artwork batch cancelled", source: "Artwork")
-                    return
-                }
-                
-                group.addTask {
-                    await limiter.run {
-                        await self.processSingleArtwork(
-                            track: track,
-                            repository: repository,
-                            libraryRoot: libraryRoot,
-                            tracker: tracker,
-                            collector: resultCollector
-                        )
+        // Bridge Swift task cancellation to the tracker so the loop's
+        // isCancelled gates actually fire when the user taps Cancel.
+        await withTaskCancellationHandler {
+            await withTaskGroup(of: Void.self) { group in
+                for track in tracks {
+                    if tracker.isCancelled {
+                        AppLogger.shared.info("Artwork batch cancelled", source: "Artwork")
+                        return
+                    }
+
+                    group.addTask {
+                        await limiter.run {
+                            await self.processSingleArtwork(
+                                track: track,
+                                repository: repository,
+                                libraryRoot: libraryRoot,
+                                tracker: tracker,
+                                collector: resultCollector
+                            )
+                        }
                     }
                 }
             }
+        } onCancel: {
+            tracker.cancel()
         }
 
         let result = await resultCollector.getResult()
@@ -358,15 +365,48 @@ actor BatchResultCollector {
 
     // MARK: - Helpers
 
-    /// Save artwork data resized to both 500px and 1200px.
+    /// Save artwork data resized to both small (≤256 px max side) and large (original).
     internal func saveResized(data: Data, trackId: Int64) throws {
         // Save the original as the "large" version
         let largePath = cachedPath(trackId: trackId, size: .large)
         try data.write(to: largePath)
 
-        // For the small version, also save (resize happens in the UI layer)
+        // Downscale the small version to max 256 px on its longest side.
         let smallPath = cachedPath(trackId: trackId, size: .small)
-        try data.write(to: smallPath)
+        if let downscaled = Self.downscaleJPEG(data: data, maxPixelSize: 256) {
+            try downscaled.write(to: smallPath)
+        } else {
+            // Fallback: write the original data if downscaling fails
+            try data.write(to: smallPath)
+        }
+    }
+
+    /// Downscale image data to a JPEG with maxPixelSize on the longest side.
+    /// Returns nil if the source data cannot be decoded.
+    internal static func downscaleJPEG(data: Data, maxPixelSize: Int) -> Data? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, [
+            kCGImageSourceShouldCache: false
+        ] as CFDictionary) else { return nil }
+
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+        ]
+        guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+
+        let mutableData = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            mutableData, UTType.jpeg.identifier as CFString, 1, nil
+        ) else { return nil }
+        CGImageDestinationAddImage(destination, thumbnail, [
+            kCGImageDestinationLossyCompressionQuality: 0.85
+        ] as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return mutableData as Data
     }
 
     /// Save artwork metadata to the database.
