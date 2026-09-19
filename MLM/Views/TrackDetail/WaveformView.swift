@@ -24,6 +24,9 @@ struct WaveformView: View {
     @Binding var gain: Float
     @Binding var waveformHeight: CGFloat
 
+    /// Optional time label rendered inside the Canvas under the playhead needle.
+    let needleTimeLabel: String?
+
     /// Called when the user clicks to seek. Provides a fraction (0.0–1.0).
     var onSeek: ((Double) -> Void)?
 
@@ -48,6 +51,7 @@ struct WaveformView: View {
         exponent: Binding<Float>,
         gain: Binding<Float>,
         waveformHeight: Binding<CGFloat>,
+        needleTimeLabel: String? = nil,
         onSeek: ((Double) -> Void)? = nil
     ) {
         self.data = data
@@ -58,6 +62,7 @@ struct WaveformView: View {
         self._exponent = exponent
         self._gain = gain
         self._waveformHeight = waveformHeight
+        self.needleTimeLabel = needleTimeLabel
         self.onSeek = onSeek
     }
 
@@ -162,9 +167,10 @@ struct WaveformView: View {
 
             let availableWidth = canvasSize.width
             let height = canvasSize.height
+
             let midY = height / 2
 
-            // Max bar height (half the canvas, leaving a small gap at center)
+            // Max bar height (half the waveform area, leaving a small gap at center)
             let maxBarHeight = midY - 1
 
             // Progress split point
@@ -219,6 +225,24 @@ struct WaveformView: View {
                     with: .color(.mlmAccent),
                     lineWidth: 1.5
                 )
+
+                // Draw needle time label inside the Canvas, centered on progressX,
+                // at the bottom of the waveform area. Same progressX expression as
+                // the playhead line — alignment holds by construction under any
+                // scroll/zoom because both are drawn in content space.
+                if let label = needleTimeLabel {
+                    let text = Text(label)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.mlmAccent)
+                    let resolved = context.resolve(text)
+                    let labelSize = resolved.measure(in: CGSize(width: 80, height: 20))
+                    // Center horizontally on progressX, clamp to content bounds
+                    let labelX = min(max(progressX - labelSize.width / 2, 0),
+                                     availableWidth - labelSize.width)
+                    let labelPoint = CGPoint(x: labelX, y: height - labelSize.height - 1)
+                    context.draw(resolved, at: CGPoint(x: labelX + labelSize.width / 2,
+                                                       y: labelPoint.y + labelSize.height / 2))
+                }
             }
         }
     }

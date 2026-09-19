@@ -24,6 +24,7 @@ struct MetadataPanel: View {
         case audio = "Audio"
         case file = "File"
         case similar = "Similar"
+        case debug = "Debug"
 
         var id: String { self.rawValue }
 
@@ -33,6 +34,7 @@ struct MetadataPanel: View {
             case .audio: return "waveform"
             case .file: return "doc"
             case .similar: return "sparkles"
+            case .debug: return "ladybug"
             }
         }
     }
@@ -53,6 +55,8 @@ struct MetadataPanel: View {
     // MARK: - Actions Data
     @State private var playlists: [Playlist] = []
     @State private var syncProfiles: [SyncProfile] = []
+    @State private var quickAddPlaylistId: Int64?
+    @State private var trackPlaylists: [Playlist] = []
 
     // MARK: - Suggestions State Variables
     @State private var similarTracks: [(track: Track, score: Float, bestMatchOffset: Double)] = []
@@ -80,7 +84,7 @@ struct MetadataPanel: View {
                             Text(tab.rawValue)
                                 .font(.system(size: 11, weight: .semibold))
                         }
-                        .foregroundColor(selectedTab == tab ? .white : .mlmInkSecondary)
+                        .foregroundColor(selectedTab == tab ? .white : .mlmInkMuted)
                         .padding(.vertical, 6)
                         .frame(maxWidth: .infinity)
                         .background(
@@ -92,7 +96,7 @@ struct MetadataPanel: View {
                 }
             }
             .padding(3)
-            .background(Color.mlmRaised)
+            .background(Color.mlmSurface)
             .cornerRadius(8)
             .padding(.horizontal, 12)
             .padding(.top, 8)
@@ -113,6 +117,8 @@ struct MetadataPanel: View {
                         fileTabContent
                     case .similar:
                         similarTabContent
+                    case .debug:
+                        DebugTabView(track: track)
                     }
                 }
                 .padding(12)
@@ -123,16 +129,36 @@ struct MetadataPanel: View {
                 .background(Color.mlmEdge)
 
             quickAddActionFooter
-                .padding(12)
-                .background(Color.mlmRaised)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
         }
         .task {
             await loadActionsData()
+            await loadTrackPlaylists()
             await loadDuplicateReference()
             await loadAvailability()
+            loadQuickAddPlaylistPreference()
+        }
+        .onChange(of: quickAddPlaylistId) { _, newValue in
+            if let id = newValue {
+                UserDefaults.standard.set(id, forKey: "detail.quickAddPlaylistId")
+            }
+        }
+        .onChange(of: playlists) { _, newPlaylists in
+            // Default to first playlist if current selection is invalid
+            if let currentId = quickAddPlaylistId,
+               newPlaylists.contains(where: { $0.id == currentId }) {
+                return
+            }
+            if let firstId = newPlaylists.first?.id {
+                quickAddPlaylistId = firstId
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { _ in
-            Task { await loadActionsData() }
+            Task {
+                await loadActionsData()
+                await loadTrackPlaylists()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .syncProfileDidChange)) { _ in
             Task { await loadActionsData() }
@@ -145,6 +171,7 @@ struct MetadataPanel: View {
             hasEmbedding = false
             checkEmbeddingStatus()
             Task { await loadDuplicateReference() }
+            Task { await loadTrackPlaylists() }
         }
         .onChange(of: selectedTab) { _, newTab in
             if newTab == .similar {
@@ -175,6 +202,7 @@ struct MetadataPanel: View {
             editableRow(label: "Album", value: track.album, field: .album)
             editableRow(label: "Genre", value: track.genre ?? "", field: .genre, placeholder: "No genre")
             editableRow(label: "Year", value: track.year.map { "\($0)" } ?? "", field: .year, placeholder: "No year")
+            playlistsSection
         }
     }
 
@@ -712,64 +740,74 @@ struct MetadataPanel: View {
     // MARK: - Persistent Quick-Add Action Footer
 
     private var quickAddActionFooter: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 12) {
-                // Playlist Menu Button
-                Menu {
-                    if playlists.isEmpty {
-                        Text("No playlists found")
-                    } else {
-                        ForEach(playlists) { playlist in
-                            Button(playlist.name) {
-                                addToPlaylist(playlist)
-                            }
-                        }
-                    }
-                } label: {
-                    HStack {
-                        Spacer()
-                        Image(systemName: "plus.rectangle.on.folder")
-                            .font(.system(size: 11, weight: .bold))
-                        Text("Add to Playlist...")
-                            .font(.system(size: 11, weight: .bold))
-                        Spacer()
-                    }
-                    .foregroundColor(.white)
-                    .padding(.vertical, 8)
-                    .background(Color.mlmAccent)
-                    .cornerRadius(6)
-                }
-                .menuStyle(.button)
-                .help("Add this track to a playlist")
-
-                // Sync Profile Menu Button
-                Menu {
-                    if syncProfiles.isEmpty {
-                        Text("No profiles found")
-                    } else {
-                        ForEach(syncProfiles) { profile in
-                            Button(profile.name) {
-                                addToSyncProfile(profile)
-                            }
-                        }
-                    }
-                } label: {
-                    HStack {
-                        Spacer()
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.system(size: 11, weight: .bold))
-                        Text("Add to Sync Profile...")
-                            .font(.system(size: 11, weight: .bold))
-                        Spacer()
-                    }
-                    .foregroundColor(.white)
-                    .padding(.vertical, 8)
-                    .background(Color.mlmActive)
-                    .cornerRadius(6)
-                }
-                .menuStyle(.button)
-                .help("Add this track to a sync profile")
+        HStack(spacing: 10) {
+            // Quick Add: Button + Picker
+            Button {
+                quickAddToSelectedPlaylist()
+            } label: {
+                Label("Quick Add", systemImage: "plus")
+                    .font(.system(size: 11, weight: .medium))
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .tint(.mlmAccent)
+            .disabled(quickAddPlaylistId == nil || playlists.isEmpty)
+            .accessibilityIdentifier("quick_add_button")
+
+            Picker("", selection: $quickAddPlaylistId) {
+                if playlists.isEmpty {
+                    Text("No playlists").tag(Int64?.none)
+                } else {
+                    Text("Select playlist").tag(Int64?.none)
+                    ForEach(playlists) { playlist in
+                        if let id = playlist.id {
+                            Text(playlist.name).tag(Int64?.some(id))
+                        }
+                    }
+                }
+            }
+            .pickerStyle(.menu)
+            .controlSize(.small)
+            .frame(maxWidth: 140)
+            .accessibilityIdentifier("quick_add_playlist_picker")
+
+            // Playlist Menu Button
+            Menu {
+                if playlists.isEmpty {
+                    Text("No playlists found")
+                } else {
+                    ForEach(playlists) { playlist in
+                        Button(playlist.name) {
+                            addToPlaylist(playlist)
+                        }
+                    }
+                }
+            } label: {
+                Label("Add to Playlist…", systemImage: "text.badge.plus")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .menuStyle(.button)
+            .help("Add this track to a playlist")
+
+            Spacer()
+        }
+    }
+
+    private func quickAddToSelectedPlaylist() {
+        guard let playlistId = quickAddPlaylistId,
+              let playlist = playlists.first(where: { $0.id == playlistId }) else { return }
+        addToPlaylist(playlist)
+    }
+
+    private func loadQuickAddPlaylistPreference() {
+        if let savedId = UserDefaults.standard.object(forKey: "detail.quickAddPlaylistId") as? Int64 {
+            quickAddPlaylistId = savedId
+        }
+    }
+
+    private func saveQuickAddPlaylistPreference() {
+        if let id = quickAddPlaylistId {
+            UserDefaults.standard.set(id, forKey: "detail.quickAddPlaylistId")
         }
     }
 
@@ -779,6 +817,101 @@ struct MetadataPanel: View {
         }
         if let syncRepo = container.syncRepository {
             syncProfiles = (try? await syncRepo.fetchAll()) ?? []
+        }
+    }
+
+    // MARK: - Playlist Membership
+
+    private var playlistsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("PLAYLISTS")
+                .font(.system(size: 9, weight: .bold))
+                .tracking(1.0)
+                .foregroundColor(.mlmInkMuted)
+                .padding(.top, 4)
+
+            if trackPlaylists.isEmpty {
+                Text("Not in any playlist")
+                    .font(MLMFont.muted)
+                    .foregroundColor(.mlmInkMuted)
+                    .lineLimit(1)
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.mlmSurface)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.mlmEdge.opacity(0.15), lineWidth: 1)
+                            )
+                    )
+                    .accessibilityIdentifier("detail_playlists_empty")
+            } else {
+                ForEach(trackPlaylists) { playlist in
+                    playlistMembershipRow(playlist)
+                }
+            }
+        }
+        .accessibilityIdentifier("detail_playlists_section")
+    }
+
+    private func playlistMembershipRow(_ playlist: Playlist) -> some View {
+        HStack(spacing: 8) {
+            Text(playlist.name)
+                .font(MLMFont.bodyBold)
+                .foregroundColor(.mlmInk)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Button {
+                removeFromPlaylist(playlist)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 13))
+                    .foregroundColor(.mlmInkMuted)
+            }
+            .buttonStyle(.plain)
+            .help("Remove from \(playlist.name)")
+            .accessibilityIdentifier("detail_playlist_remove_button")
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.mlmSurface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.mlmEdge.opacity(0.15), lineWidth: 1)
+                )
+        )
+        .accessibilityIdentifier("detail_playlist_row")
+    }
+
+    private func loadTrackPlaylists() async {
+        guard let playlistRepo = container.playlistRepository,
+              let trackId = track.id else {
+            trackPlaylists = []
+            return
+        }
+        trackPlaylists = (try? await playlistRepo.fetchPlaylists(forTrackId: trackId)) ?? []
+    }
+
+    private func removeFromPlaylist(_ playlist: Playlist) {
+        guard let playlistId = playlist.id,
+              let playlistRepo = container.playlistRepository,
+              let trackId = track.id else { return }
+
+        // Optimistic: the row disappears the instant the user clicks, and the
+        // notification-driven reload below confirms it against the DB.
+        trackPlaylists.removeAll { $0.id == playlistId }
+
+        Task {
+            try? await playlistRepo.removeTrack(playlistId: playlistId, trackId: trackId)
+            NotificationCenter.default.post(
+                name: .playlistDidChange,
+                object: nil,
+                userInfo: ["playlistId": playlistId]
+            )
         }
     }
 
