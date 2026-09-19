@@ -33,7 +33,10 @@ final class PlaylistDetailViewModel {
 
     /// Search query for filtering tracks within the playlist.
     var searchQuery: String = "" {
-        didSet { applyFilter() }
+        didSet {
+            guard oldValue != searchQuery else { return }
+            applyFilter()
+        }
     }
 
     /// Filtered tracks based on search query.
@@ -80,6 +83,7 @@ final class PlaylistDetailViewModel {
     private let trackRepository: TrackRepository
     private let sourceRepository: SourceRepository
     private let configRepository: ConfigRepository?
+    private let tableCache: PlaylistTableCache?
 
     // MARK: - Init
 
@@ -88,23 +92,57 @@ final class PlaylistDetailViewModel {
         playlistRepository: PlaylistRepository,
         trackRepository: TrackRepository,
         sourceRepository: SourceRepository,
-        configRepository: ConfigRepository? = nil
+        configRepository: ConfigRepository? = nil,
+        tableCache: PlaylistTableCache? = nil
     ) {
         self.playlist = playlist
         self.playlistRepository = playlistRepository
         self.trackRepository = trackRepository
         self.sourceRepository = sourceRepository
         self.configRepository = configRepository
+        self.tableCache = tableCache
     }
 
     // MARK: - Load
 
     /// Load all tracks for this playlist, ordered by position.
+    ///
+    /// Cache integration: on a cache hit the rows render instantly without
+    /// setting `isLoading`. On a miss (or after `refresh()`) the SQL fetch
+    /// runs and the result is stored for next time.
     @MainActor
     func loadTracks() async {
-        guard let playlistId = playlist.id else { return }
+        await loadTracksInternal(useCache: true)
+    }
 
-        isLoading = true
+    /// Refresh tracks (after external changes). Bypasses the cache so the
+    /// latest data is always fetched from SQLite.
+    @MainActor
+    func refresh() async {
+        await loadTracksInternal(useCache: false)
+    }
+
+    @MainActor
+    private func loadTracksInternal(useCache: Bool) async {
+        guard let playlistId = playlist.id else { return }
+        // [navperf] temporary instrumentation — remove after measurement
+        print("[navperf] playlistdetailvm-loadTracksInternal-start useCache=\(useCache) \(Date().timeIntervalSince1970)")
+
+        // Cache hit → populate instantly, no spinner.
+        if useCache, let cached = tableCache?.entry(for: playlistId) {
+            playlist = cached.playlist
+            source = cached.source
+            tracks = cached.tracks
+            availabilityByTrackID = cached.availabilityByTrackID
+            applyFilter()
+            return
+        }
+
+        // Only show the loading indicator when there are no rows yet —
+        // subsequent refreshes (notifications, cover revalidation) update
+        // in place so the table never blanks.
+        let showLoading = tracks.isEmpty
+        if showLoading { isLoading = true }
         errorMessage = nil
 
         do {
@@ -121,26 +159,41 @@ final class PlaylistDetailViewModel {
 
             let libraryRoot = await libraryRootSnapshot()
             let loadedTracks = try await playlistRepository.fetchTracks(playlistId: playlistId)
+            var navperfFileExistsCount = 0
+            // [navperf] temporary instrumentation — remove after measurement
+            print("[navperf] availability-map-start site=playlistDetail-160 tracks=\(loadedTracks.count) \(Date().timeIntervalSince1970)")
             let availability = TrackPresentationAvailability.map(
                 tracks: loadedTracks,
                 libraryRoot: libraryRoot,
-                fileExists: { FileManager.default.fileExists(atPath: $0.path) }
+                fileExists: { url in
+                    navperfFileExistsCount += 1
+                    return FileManager.default.fileExists(atPath: url.path)
+                }
             )
+            // [navperf] temporary instrumentation — remove after measurement
+            print("[navperf] availability-map-end site=playlistDetail-160 tracks=\(loadedTracks.count) fileExistsCalls=\(navperfFileExistsCount) \(Date().timeIntervalSince1970)")
 
             tracks = loadedTracks
             availabilityByTrackID = availability
             applyFilter()
+
+            // Store in LRU cache for instant re-entry.
+            tableCache?.store(PlaylistTableCache.Entry(
+                playlistId: playlistId,
+                playlistName: playlist.name,
+                playlist: playlist,
+                source: source,
+                tracks: loadedTracks,
+                availabilityByTrackID: availability,
+                fetchedAt: Date()
+            ))
         } catch {
             errorMessage = "Failed to load tracks: \(error.localizedDescription)"
         }
 
+        // [navperf] temporary instrumentation — remove after measurement
+        print("[navperf] playlistdetailvm-loadTracksInternal-end rows=\(tracks.count) \(Date().timeIntervalSince1970)")
         isLoading = false
-    }
-
-    /// Refresh tracks (after external changes).
-    @MainActor
-    func refresh() async {
-        await loadTracks()
     }
 
     /// Revalidates the existing rows after the configured library root changes
@@ -148,18 +201,36 @@ final class PlaylistDetailViewModel {
     @MainActor
     func refreshAvailabilitySnapshot() async {
         let libraryRoot = await libraryRootSnapshot()
+        var navperfFileExistsCount = 0
+        // [navperf] temporary instrumentation — remove after measurement
+        print("[navperf] availability-map-start site=playlistDetail-192 tracks=\(tracks.count) \(Date().timeIntervalSince1970)")
         availabilityByTrackID = TrackPresentationAvailability.map(
             tracks: tracks,
             libraryRoot: libraryRoot,
-            fileExists: { FileManager.default.fileExists(atPath: $0.path) }
+            fileExists: { url in
+                navperfFileExistsCount += 1
+                return FileManager.default.fileExists(atPath: url.path)
+            }
         )
+        // [navperf] temporary instrumentation — remove after measurement
+        print("[navperf] availability-map-end site=playlistDetail-192 tracks=\(tracks.count) fileExistsCalls=\(navperfFileExistsCount) \(Date().timeIntervalSince1970)")
     }
 
     // MARK: - Source Synchronization
 
     /// Whether this playlist supports synchronization from an external source.
+    /// Covers liked playlists (SoundCloud, Spotify, Apple Music) and any
+    /// remote playlist with an externalId that can be re-fetched (e.g. YouTube
+    /// playlists where externalId is the playlist URL).
     var canSync: Bool {
-        playlist.isLiked == 1 && playlist.sourceId != nil
+        if playlist.isLiked == 1 && playlist.sourceId != nil { return true }
+        // Remote playlists with a URL-based externalId (YouTube)
+        if playlist.sourceId != nil,
+           let extId = playlist.externalId,
+           extId.hasPrefix("http://") || extId.hasPrefix("https://") {
+            return true
+        }
+        return false
     }
 
     /// Whether the playlist is currently syncing.
@@ -280,7 +351,12 @@ final class PlaylistDetailViewModel {
                 newTracks = try await client.syncLibrary()
 
             case .unknown:
-                throw NSError(domain: "PlaylistDetailViewModel", code: 400, userInfo: [NSLocalizedDescriptionKey: "Unsupported source sync"])
+                // Check if this is a YouTube playlist (source name = "youtube")
+                if activeSource.name == "youtube", let externalId = playlist.externalId {
+                    newTracks = try await syncYouTubePlaylist(url: externalId, sourceId: activeSource.id!)
+                } else {
+                    throw NSError(domain: "PlaylistDetailViewModel", code: 400, userInfo: [NSLocalizedDescriptionKey: "Unsupported source sync"])
+                }
             }
 
             // Reload the tracks in this playlist
@@ -307,6 +383,71 @@ final class PlaylistDetailViewModel {
         }
 
         isSyncingSource = false
+    }
+
+    /// Sync a YouTube playlist by re-fetching its entries, diffing against
+    /// local tracks, inserting new ones, and returning the count of new tracks.
+    private func syncYouTubePlaylist(url: String, sourceId: Int64) async throws -> Int {
+        let container = DependencyContainer.shared
+        guard let trackRepo = container.trackRepository,
+              let sourceRepo = container.sourceRepository,
+              let plRepo = container.playlistRepository,
+              let playlistId = playlist.id else {
+            throw NSError(domain: "PlaylistDetailViewModel", code: 500,
+                          userInfo: [NSLocalizedDescriptionKey: "Missing dependencies for YouTube sync"])
+        }
+
+        let downloader = YouTubeDownloader()
+        guard downloader.isAvailable else {
+            throw NSError(domain: "PlaylistDetailViewModel", code: 503,
+                          userInfo: [NSLocalizedDescriptionKey: "yt-dlp not installed"])
+        }
+
+        // 1. Fetch remote playlist entries
+        let listing = try await downloader.listPlaylist(url: url)
+        guard !listing.entries.isEmpty else { return 0 }
+
+        // 2. For each remote entry, check if it already exists locally by external ID
+        var newEntries: [(id: String, title: String, uploader: String?, url: String)] = []
+        for entry in listing.entries {
+            let existing = try await trackRepo.fetchTrackByExternalId(entry.id, sourceName: "youtube")
+            if existing == nil {
+                newEntries.append((id: entry.id, title: entry.title, uploader: entry.uploader, url: entry.url))
+            }
+        }
+        guard !newEntries.isEmpty else { return 0 }
+
+        // 3. Insert new tracks and link to source
+        var insertedIds: [Int64] = []
+        for entry in newEntries {
+            var track = Track(
+                artist: entry.uploader ?? "Unknown",
+                album: "YouTube",
+                title: entry.title,
+                format: "youtube",
+                originalPath: entry.url
+            )
+            let inserted = try await trackRepo.insert(track)
+            guard let trackId = inserted.id else { continue }
+            try await sourceRepo.linkTrackToSource(
+                trackId: trackId,
+                sourceId: sourceId,
+                externalId: entry.id
+            )
+            insertedIds.append(trackId)
+        }
+
+        // 4. Append new tracks to the playlist
+        if !insertedIds.isEmpty {
+            let nextPosition = generateNextPosition()
+            try await plRepo.addTracks(
+                playlistId: playlistId,
+                trackIds: insertedIds,
+                startPosition: nextPosition
+            )
+        }
+
+        return newEntries.count
     }
 
     // MARK: - Add Tracks
@@ -341,44 +482,6 @@ final class PlaylistDetailViewModel {
             errorMessage = "Failed to add tracks: \(error.localizedDescription)"
         }
     }
-
-    /// Add tracks to the playlist at a specific index.
-    ///
-    /// Generates fractional positions for the new tracks.
-    ///
-    /// - Parameters:
-    ///   - trackIds: IDs of tracks to add
-    ///   - index: Target insertion index
-    @MainActor
-    func addTracks(_ trackIds: [Int64], at index: Int) async {
-        guard let playlistId = playlist.id else { return }
-        guard !trackIds.isEmpty else { return }
-
-        let targetPos: String
-        if tracks.isEmpty {
-            targetPos = FractionalIndexer.positionBetween(left: nil, right: nil)
-        } else {
-            targetPos = fractionalPosition(insertingAt: index, excluding: -1)
-        }
-
-        do {
-            try await playlistRepository.addTracks(
-                playlistId: playlistId,
-                trackIds: trackIds,
-                startPosition: targetPos
-            )
-            await loadTracks()
-
-            NotificationCenter.default.post(
-                name: .playlistDidChange,
-                object: nil,
-                userInfo: ["playlistId": playlistId]
-            )
-        } catch {
-            errorMessage = "Failed to add tracks: \(error.localizedDescription)"
-        }
-    }
-
 
     // MARK: - Remove Tracks
 
@@ -437,110 +540,135 @@ final class PlaylistDetailViewModel {
 
     // MARK: - Reorder (Drag & Drop)
 
-    /// Move a track to a new position via drag-and-drop.
+    /// Place one or more tracks at a given insertion index.
     ///
-    /// Uses fractional positioning: the new position is the midpoint between
-    /// the surrounding tracks, avoiding a full renumber of the playlist.
+    /// Handles internal reorders, external inserts, and mixed drops uniformly.
+    /// The `trackIDs` end up at `insertionIndex` (an index into the full
+    /// `tracks` array meaning "insert before the track currently there"),
+    /// in the order given.
     ///
-    /// - Parameters:
-    ///   - sourceIndex: Index of the track being moved (in `tracks` array)
-    ///   - destinationIndex: Target index to insert before
+    /// On success the in-memory state is updated optimistically — no
+    /// `loadTracks()` round-trip, so the UI never flickers.
     @MainActor
-    func moveTrack(from sourceIndex: Int, to destinationIndex: Int) async {
+    func placeTracks(_ trackIDs: [Int64], at insertionIndex: Int) async {
         guard let playlistId = playlist.id else { return }
-        guard sourceIndex != destinationIndex,
-              sourceIndex >= 0,
-              sourceIndex < tracks.count else { return }
+        guard !trackIDs.isEmpty else { return }
 
-        let track = tracks[sourceIndex]
-        guard let trackId = track.id else { return }
+        var seen = Set<Int64>()
+        let uniqueIDs = trackIDs.filter { seen.insert($0).inserted }
 
-        // Calculate new position
-        let newPosition = fractionalPosition(
-            insertingAt: destinationIndex > sourceIndex ? destinationIndex - 1 : destinationIndex,
-            excluding: sourceIndex
+        let memberIDSet = Set(tracks.compactMap(\.id)).intersection(uniqueIDs)
+        let memberIDs = uniqueIDs.filter { memberIDSet.contains($0) }
+        let nonMemberIDs = uniqueIDs.filter { !memberIDSet.contains($0) }
+
+        // Materialise non-member tracks from the library so we can assign
+        // them positions and update the in-memory array.
+        var fetchedNonMembers: [Track] = []
+        if !nonMemberIDs.isEmpty {
+            do {
+                let fetched = try await trackRepository.fetchTracks(ids: Set(nonMemberIDs))
+                // Reorder to match the drag order.
+                let byID = Dictionary(uniqueKeysWithValues: fetched.map { ($0.id!, $0) })
+                fetchedNonMembers = nonMemberIDs.compactMap { byID[$0] }
+            } catch {
+                errorMessage = "Failed to reorder: \(error.localizedDescription)"
+                await refresh()
+                return
+            }
+        }
+
+        // Remove members from the working array; non-members were never in it.
+        let remaining = tracks.filter { !memberIDSet.contains($0.id ?? -1) }
+
+        // Compute the insert point inside `remaining`. The raw `insertionIndex`
+        // is an index into the original `tracks` array, so count how many of
+        // the tracks before that index are NOT being removed.
+        let clampedInput = min(max(insertionIndex, 0), tracks.count)
+        let insertAt = min(
+            tracks.prefix(clampedInput).filter { !memberIDSet.contains($0.id ?? -1) }.count,
+            remaining.count
         )
 
-        do {
-            try await playlistRepository.reorderTrack(
-                playlistId: playlistId,
-                trackId: trackId,
-                newPosition: newPosition
-            )
-            await loadTracks()
+        let left = insertAt > 0 ? remaining[insertAt - 1].playlistPosition : nil
+        let right = insertAt < remaining.count ? remaining[insertAt].playlistPosition : nil
 
-            // Phase 36 / D-04 Re-Generate-Trigger: cover must regenerate
-            // when reordering touches the top-4 tracks. The userInfo payload
-            // lets Plan 02's PlaylistCoverService regenerate just one playlist
-            // instead of refreshing all on every reorder.
-            NotificationCenter.default.post(
-                name: .playlistDidChange,
-                object: nil,
-                userInfo: ["playlistId": playlistId]
-            )
+        // Assign sequential positions so the group stays bounded between
+        // left and right.
+        var placements: [(trackId: Int64, position: String)] = []
+        var previousPosition: String? = left
+        // Resolved in drag order so a multi-row drop keeps the order the user dragged.
+        let memberTrackByID = Dictionary(uniqueKeysWithValues: tracks.compactMap { track in track.id.map { ($0, track) } })
+        let nonMemberByID = Dictionary(uniqueKeysWithValues: fetchedNonMembers.compactMap { track in track.id.map { ($0, track) } })
+        var resolvedTracks: [Track] = []
+        for id in uniqueIDs {
+            if let t = memberTrackByID[id] ?? nonMemberByID[id] {
+                resolvedTracks.append(t)
+            }
+        }
+
+        for track in resolvedTracks {
+            guard let id = track.id else { continue }
+            let pos = FractionalIndexer.positionBetween(left: previousPosition, right: right)
+            placements.append((trackId: id, position: pos))
+            previousPosition = pos
+        }
+
+        guard !placements.isEmpty else { return }
+
+        do {
+            try await playlistRepository.placeTracks(playlistId: playlistId, placements: placements)
         } catch {
             errorMessage = "Failed to reorder: \(error.localizedDescription)"
+            await refresh()
+            return
         }
+
+        // Assign positions on the in-memory tracks.
+        let positionByID = Dictionary(uniqueKeysWithValues: placements.map { ($0.trackId, $0.position) })
+        for i in resolvedTracks.indices {
+            if let id = resolvedTracks[i].id, let pos = positionByID[id] {
+                resolvedTracks[i].playlistPosition = pos
+            }
+        }
+
+        // Optimistic in-memory update — no loadTracks() call.
+        var updated = remaining
+        updated.insert(contentsOf: resolvedTracks, at: insertAt)
+        tracks = updated
+        applyFilter()
+
+        if !nonMemberIDs.isEmpty {
+            await refreshAvailabilitySnapshot()
+        }
+
+        // Refresh the table cache so a later hit is truthful.
+        if let cache = tableCache {
+            cache.store(PlaylistTableCache.Entry(
+                playlistId: playlistId,
+                playlistName: playlist.name,
+                playlist: playlist,
+                source: source,
+                tracks: tracks,
+                availabilityByTrackID: availabilityByTrackID,
+                fetchedAt: Date()
+            ))
+        }
+
+        NotificationCenter.default.post(
+            name: .playlistDidChange,
+            object: nil,
+            userInfo: ["playlistId": playlistId]
+        )
     }
 
     // MARK: - M3U Import
 
-    /// Import tracks from an M3U file into this playlist.
-    ///
-    /// Reads the M3U file, resolves each line as a relative or
-    /// absolute file path, looks up matching tracks in the database,
-    /// and adds them to the playlist.
-    ///
-    /// - Parameter url: URL of the M3U/M3U8 file
+    /// Set an error message (used by the view when ingest preview fails).
     @MainActor
-    func importM3U(_ url: URL) async {
-        guard let playlistId = playlist.id else { return }
-        errorMessage = nil
-
-        do {
-            let contents = try String(contentsOf: url, encoding: .utf8)
-            let lines = contents
-                .components(separatedBy: .newlines)
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty && !$0.hasPrefix("#") }
-
-            guard !lines.isEmpty else {
-                errorMessage = "M3U file is empty or contains no tracks"
-                return
-            }
-
-            // Resolve lines to track IDs by matching original_path or organized_path
-            var matchedIds: [Int64] = []
-            for line in lines {
-                if let track = try await findTrackByPath(line) {
-                    if let id = track.id, !matchedIds.contains(id) {
-                        matchedIds.append(id)
-                    }
-                }
-            }
-
-            guard !matchedIds.isEmpty else {
-                errorMessage = "No matching tracks found in library for M3U entries"
-                return
-            }
-
-            let nextPosition = generateNextPosition()
-            try await playlistRepository.addTracks(
-                playlistId: playlistId,
-                trackIds: matchedIds,
-                startPosition: nextPosition
-            )
-
-            await loadTracks()
-            NotificationCenter.default.post(
-                name: .playlistDidChange,
-                object: nil,
-                userInfo: ["playlistId": playlistId]
-            )
-        } catch {
-            errorMessage = "Failed to import M3U: \(error.localizedDescription)"
-        }
+    func setErrorMessage(_ message: String) {
+        errorMessage = message
     }
+
 
     // MARK: - Filtering
 
@@ -572,71 +700,4 @@ final class PlaylistDetailViewModel {
         return FractionalIndexer.positionBetween(left: lastPos, right: nil)
     }
 
-    /// Calculate a fractional position for inserting at a given index.
-    ///
-    /// Uses FractionalIndexer to compute a base-62 midpoint between surrounding tracks.
-    ///
-    /// - Parameters:
-    ///   - index: Target insertion index
-    ///   - excludedIndex: Index of the track being moved (to skip)
-    /// - Returns: Position string for the new location
-    private func fractionalPosition(insertingAt index: Int, excluding excludedIndex: Int) -> String {
-        // Build list without the moving item
-        var filteredTracks: [Track] = []
-        for i in 0..<tracks.count {
-            if i != excludedIndex {
-                filteredTracks.append(tracks[i])
-            }
-        }
-
-        // Insert position between neighbors
-        let clampedIndex = min(max(index, 0), filteredTracks.count)
-
-        let leftPos: String?
-        let rightPos: String?
-
-        if clampedIndex == 0 {
-            // Before first
-            leftPos = nil
-            rightPos = filteredTracks.first?.playlistPosition
-        } else if clampedIndex >= filteredTracks.count {
-            // After last
-            leftPos = filteredTracks.last?.playlistPosition
-            rightPos = nil
-        } else {
-            // Between two items
-            leftPos = filteredTracks[clampedIndex - 1].playlistPosition
-            rightPos = filteredTracks[clampedIndex].playlistPosition
-        }
-
-        return FractionalIndexer.positionBetween(left: leftPos, right: rightPos)
-    }
-
-    // MARK: - Track Lookup
-
-    /// Find a track by file path (searches by filename in original_path or organized_path).
-    ///
-    /// M3U lines can be relative or absolute paths. We extract the filename
-    /// and search the library for a matching track.
-    private func findTrackByPath(_ path: String) async throws -> Track? {
-        let filename = URL(fileURLWithPath: path)
-            .deletingPathExtension()
-            .lastPathComponent
-            .lowercased()
-
-        guard !filename.isEmpty else { return nil }
-
-        // Use search to find potential matches by filename
-        let candidates = try await trackRepository.search(query: filename)
-        return candidates.first { track in
-            // Match by original_path ending or organized_path ending
-            let originalMatch = track.originalPath.lowercased().hasSuffix(
-                URL(fileURLWithPath: path).lastPathComponent.lowercased()
-            )
-            let organizedMatch = track.organizedPath?.lowercased().hasSuffix(
-                URL(fileURLWithPath: path).lastPathComponent.lowercased()
-            ) ?? false
-            return originalMatch || organizedMatch
-        }
-    }
 }

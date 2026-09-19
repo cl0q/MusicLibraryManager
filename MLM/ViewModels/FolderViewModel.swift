@@ -10,6 +10,29 @@ import Foundation
 @Observable
 final class FolderViewModel {
 
+    // MARK: - Persistence
+
+    static let lastSelectionKey = "folders.last_selection"
+
+    /// Persist the currently selected folder path so it can be restored after a sidebar switch.
+    func persistLastSelection() {
+        UserDefaults.standard.set(selectedFolderPath, forKey: Self.lastSelectionKey)
+    }
+
+    /// Restore a previously selected folder path if it still exists on disk.
+    /// Silently falls back to no selection (root) when the directory is missing.
+    private func restoreLastSelection() {
+        guard selectedFolderPath == nil,
+              let saved = UserDefaults.standard.string(forKey: Self.lastSelectionKey),
+              !saved.isEmpty else { return }
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: saved, isDirectory: &isDir), isDir.boolValue else {
+            UserDefaults.standard.removeObject(forKey: Self.lastSelectionKey)
+            return
+        }
+        selectedFolderPath = saved
+    }
+
     // MARK: - Published state
 
     private(set) var rootNodes: [DiskFolderNode] = []
@@ -84,6 +107,8 @@ final class FolderViewModel {
 
     @MainActor
     func loadRootFolders() async {
+        // [navperf] temporary instrumentation — remove after measurement
+        print("[navperf] foldervm-loadRootFolders-start \(Date().timeIntervalSince1970)")
         isLoading = true
         errorMessage = nil
         isDriveNotMounted = false
@@ -118,6 +143,9 @@ final class FolderViewModel {
             errorMessage = error.localizedDescription
         }
 
+        restoreLastSelection()
+        // [navperf] temporary instrumentation — remove after measurement
+        print("[navperf] foldervm-loadRootFolders-end rows=\(allRootNodes.count) \(Date().timeIntervalSince1970)")
         isLoading = false
     }
 
@@ -133,6 +161,8 @@ final class FolderViewModel {
         }
 
         let start = Date()
+        // [navperf] temporary instrumentation — remove after measurement
+        print("[navperf] foldervm-loadTracks-start \(Date().timeIntervalSince1970)")
         do {
             let dirURL = URL(fileURLWithPath: path)
             let fileURLs = try await diskScanner.filesInDirectory(dirURL)
@@ -141,11 +171,19 @@ final class FolderViewModel {
                 paths,
                 libraryRoot: libraryRootURL
             )
+            var navperfFileExistsCount = 0
+            // [navperf] temporary instrumentation — remove after measurement
+            print("[navperf] availability-map-start site=folder tracks=\(result.count) \(Date().timeIntervalSince1970)")
             let availability = TrackPresentationAvailability.map(
                 tracks: result,
                 libraryRoot: libraryRootURL,
-                fileExists: { FileManager.default.fileExists(atPath: $0.path) }
+                fileExists: { url in
+                    navperfFileExistsCount += 1
+                    return FileManager.default.fileExists(atPath: url.path)
+                }
             )
+            // [navperf] temporary instrumentation — remove after measurement
+            print("[navperf] availability-map-end site=folder tracks=\(result.count) fileExistsCalls=\(navperfFileExistsCount) \(Date().timeIntervalSince1970)")
             let ms = Int(Date().timeIntervalSince(start) * 1000)
             tracksInFolder = result
             availabilityByTrackID = availability
@@ -170,6 +208,8 @@ final class FolderViewModel {
                 "folder tracks load: \(result.count) tracks in \(ms)ms",
                 source: "perf"
             )
+            // [navperf] temporary instrumentation — remove after measurement
+            print("[navperf] foldervm-loadTracks-end rows=\(result.count) \(Date().timeIntervalSince1970)")
             applyTrackSort()
         } catch {
             tracksInFolder = []
@@ -185,6 +225,17 @@ final class FolderViewModel {
         if selectedFolderPath != nil {
             await loadTracksForSelectedFolder()
         }
+    }
+
+    /// Remove tracks in-place without a full SQL refetch.
+    @MainActor
+    func removeTracks(ids: Set<Int64>) {
+        tracksInFolder.removeAll { track in
+            guard let id = track.id else { return false }
+            return ids.contains(id)
+        }
+        availabilityByTrackID = availabilityByTrackID.filter { !ids.contains($0.key) }
+        selectedTrackIDs.subtract(ids)
     }
 
     // MARK: - Helpers

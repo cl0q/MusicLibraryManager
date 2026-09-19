@@ -24,6 +24,8 @@ struct SourcesView: View {
     @State private var viewModel: SourcesViewModel?
 
     var body: some View {
+        // [navperf] temporary instrumentation — remove after measurement
+        let _ = print("[navperf] section-body sources \(Date().timeIntervalSince1970)")
         Group {
             if let viewModel {
                 sourcesContent(viewModel)
@@ -34,8 +36,12 @@ struct SourcesView: View {
             }
         }
         .task {
+            // [navperf] temporary instrumentation — remove after measurement
+            print("[navperf] section-task-start sources \(Date().timeIntervalSince1970)")
             initializeViewModel()
             await viewModel?.loadSources()
+            // [navperf] temporary instrumentation — remove after measurement
+            print("[navperf] section-task-after-first-await sources \(Date().timeIntervalSince1970)")
         }
     }
 
@@ -106,9 +112,12 @@ struct SourcesView: View {
             sourceRepository: sourceRepo,
             oauthManager: container.oauthManager,
             trackRepository: container.trackRepository,
-            playlistRepository: container.playlistRepository
+            playlistRepository: container.playlistRepository,
+            tokenAccessStatus: container.tokenAccessStatus,
+            tokenRefreshService: container.tokenRefreshService
         )
     }
+
 }
 
 // MARK: - Source Card
@@ -117,8 +126,6 @@ struct SourcesView: View {
 struct SourceCard: View {
     let source: TokenStorage.Service
     let viewModel: SourcesViewModel
-
-    @State private var showPlaylists = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -190,6 +197,18 @@ struct SourceCard: View {
                     }
                     .disabled(viewModel.isSyncing(source))
 
+                    if viewModel.isTokenInaccessible(source) {
+                        Button {
+                            Task { await viewModel.reconnectSource(source) }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.uturn.backward")
+                                Text("Reconnect")
+                            }
+                        }
+                        .disabled(viewModel.isReconnecting(source))
+                    }
+
                     Button(role: .destructive) {
                         Task { await viewModel.disconnectSource(source) }
                     } label: {
@@ -227,19 +246,29 @@ struct SourceCard: View {
                     .lineLimit(2)
             }
 
+            // Token inaccessibility (keychain needs one explicit allow,
+            // e.g. after a rebuild changed the app's code identity)
+            if viewModel.isTokenInaccessible(source) {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                    Text("\(source.displayName) token inaccessible — reconnect in Settings")
+                        .lineLimit(2)
+                    Spacer()
+                }
+                .font(MLMFont.muted)
+                .foregroundColor(.mlmWarning)
+            }
+
             // Playlist browser (SoundCloud & Spotify, when connected)
             if isConnected, let remoteSource = remotePlaylistSource {
                 Button {
-                    showPlaylists = true
+                    AppDelegate.shared?.showRemotePlaylistsWindow(source: remoteSource)
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "music.note.list")
                         Text("Playlists")
                     }
                     .frame(maxWidth: .infinity)
-                }
-                .sheet(isPresented: $showPlaylists) {
-                    RemotePlaylistsView(source: remoteSource)
                 }
             }
         }
@@ -308,8 +337,6 @@ struct SourceCard: View {
 
 /// A card for importing a YouTube playlist by URL — no OAuth required.
 struct YouTubePlaylistCard: View {
-    @State private var showPlaylists = false
-
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
@@ -339,16 +366,13 @@ struct YouTubePlaylistCard: View {
             Spacer()
 
             Button {
-                showPlaylists = true
+                AppDelegate.shared?.showRemotePlaylistsWindow(source: .youtube)
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "music.note.list")
                     Text("Import playlist...")
                 }
                 .frame(maxWidth: .infinity)
-            }
-            .sheet(isPresented: $showPlaylists) {
-                RemotePlaylistsView(source: .youtube)
             }
         }
         .padding(12)

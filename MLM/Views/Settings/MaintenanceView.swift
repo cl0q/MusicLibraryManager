@@ -87,7 +87,76 @@ struct MaintenanceView: View {
                 }
                 .padding(.vertical, 4)
             }
-            
+
+            Section("Table Cache") {
+                VStack(alignment: .leading, spacing: 10) {
+                    // Local Library — always cached
+                    HStack {
+                        Label {
+                            Text("Local Library")
+                                .font(MLMFont.body)
+                        } icon: {
+                            Image(systemName: "internaldrive")
+                                .frame(width: 20)
+                        }
+                        Spacer()
+                        let libCount = container.libraryViewModel?.displayedTracks.count ?? 0
+                        Text("\(libCount) rows · \(Self.formatBytes(libCount * PlaylistTableCache.estimatedBytesPerTrack))")
+                            .font(MLMFont.muted)
+                            .foregroundColor(.mlmInkSecondary)
+                    }
+
+                    // Cached playlists
+                    let summaries = container.playlistTableCache?.summaries ?? []
+                    if summaries.isEmpty {
+                        HStack {
+                            Label {
+                                Text("No playlists cached")
+                                    .font(MLMFont.muted)
+                                    .foregroundColor(.mlmInkMuted)
+                            } icon: {
+                                Image(systemName: "tablecells")
+                                    .frame(width: 20)
+                            }
+                        }
+                    } else {
+                        ForEach(summaries) { summary in
+                            HStack {
+                                Label {
+                                    Text(summary.name)
+                                        .font(MLMFont.body)
+                                } icon: {
+                                    Image(systemName: "music.note.list")
+                                        .frame(width: 20)
+                                }
+                                Spacer()
+                                Text("\(summary.trackCount) rows · \(Self.formatBytes(summary.estimatedBytes))")
+                                    .font(MLMFont.muted)
+                                    .foregroundColor(.mlmInkSecondary)
+                            }
+                        }
+                    }
+
+                    Stepper(
+                        "Cached playlists: \(container.playlistTableCache?.cap ?? PlaylistTableCache.defaultCap)",
+                        onIncrement: {
+                            let current = container.playlistTableCache?.cap ?? PlaylistTableCache.defaultCap
+                            if current < PlaylistTableCache.validCapRange.upperBound {
+                                container.playlistTableCache?.cap = current + 1
+                            }
+                        },
+                        onDecrement: {
+                            let current = container.playlistTableCache?.cap ?? PlaylistTableCache.defaultCap
+                            if current > PlaylistTableCache.validCapRange.lowerBound {
+                                container.playlistTableCache?.cap = current - 1
+                            }
+                        }
+                    )
+                    .font(MLMFont.body)
+                }
+                .padding(.vertical, 4)
+            }
+
             Section("Analysis") {
                 maintenanceRow(
                     title: "Fingerprint all tracks",
@@ -799,5 +868,14 @@ struct MaintenanceView: View {
         if panel.runModal() == .OK, let url = panel.url {
             container.relocateTranscodeCache(to: url.path)
         }
+    }
+
+    // MARK: - Formatting
+
+    private static func formatBytes(_ bytes: Int) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB]
+        formatter.countStyle = .memory
+        return formatter.string(fromByteCount: Int64(bytes))
     }
 }

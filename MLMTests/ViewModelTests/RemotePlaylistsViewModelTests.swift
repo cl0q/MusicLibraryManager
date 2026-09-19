@@ -9,14 +9,27 @@ struct RemotePlaylistsViewModelTests {
     private final class FakeProvider: RemotePlaylistProvider {
         let displayName = "YouTube"
         let preferredSource: DownloadOrchestrator.PreferredSource = .youtube
-        let allowsURLImport = true
+        let browseMode: RemotePlaylistBrowseMode
         let preview: RemotePlaylistPreview
+        let summaries: [RemotePlaylistSummary]
 
         private(set) var fetchedURLs: [String] = []
         private(set) var persistedSelections: [[RemotePlaylistTrack]] = []
+        private(set) var fetchPlaylistsCallCount = 0
 
-        init(preview: RemotePlaylistPreview) {
+        init(
+            preview: RemotePlaylistPreview,
+            browseMode: RemotePlaylistBrowseMode = .urlOnly,
+            summaries: [RemotePlaylistSummary] = []
+        ) {
             self.preview = preview
+            self.browseMode = browseMode
+            self.summaries = summaries
+        }
+
+        func fetchPlaylists() async throws -> [RemotePlaylistSummary] {
+            fetchPlaylistsCallCount += 1
+            return summaries
         }
 
         func fetchPreview(for summary: RemotePlaylistSummary) async throws -> RemotePlaylistPreview {
@@ -177,5 +190,109 @@ struct RemotePlaylistsViewModelTests {
         #expect(viewModel.importResult?.didDownload == true)
         #expect(viewModel.importResult?.downloadedCount == 2)
         #expect(viewModel.importResult?.failedCount == 0)
+    }
+
+    // MARK: - Browse mode tests
+
+    @Test func soundCloudModeShowsBothURLFieldAndPlaylistList() async {
+        let provider = FakeProvider(preview: makePreview(), browseMode: .accountPlaylistsAndURL)
+        let viewModel = RemotePlaylistsViewModel(provider: provider, downloadViewModel: DownloadViewModel())
+
+        #expect(viewModel.showsURLField == true)
+        #expect(viewModel.showsPlaylistList == true)
+    }
+
+    @Test func accountPlaylistsModeHidesURLField() async {
+        let provider = FakeProvider(preview: makePreview(), browseMode: .accountPlaylists)
+        let viewModel = RemotePlaylistsViewModel(provider: provider, downloadViewModel: DownloadViewModel())
+
+        #expect(viewModel.showsURLField == false)
+        #expect(viewModel.showsPlaylistList == true)
+    }
+
+    @Test func urlOnlyModeHidesPlaylistList() async {
+        let provider = FakeProvider(preview: makePreview(), browseMode: .urlOnly)
+        let viewModel = RemotePlaylistsViewModel(provider: provider, downloadViewModel: DownloadViewModel())
+
+        #expect(viewModel.showsURLField == true)
+        #expect(viewModel.showsPlaylistList == false)
+    }
+
+    @Test func loadPlaylistsIsSkippedInURLOnlyMode() async {
+        let provider = FakeProvider(preview: makePreview(), browseMode: .urlOnly)
+        let viewModel = RemotePlaylistsViewModel(provider: provider, downloadViewModel: DownloadViewModel())
+
+        await viewModel.loadPlaylists()
+
+        #expect(provider.fetchPlaylistsCallCount == 0)
+    }
+
+    @Test func loadPlaylistsRunsInAccountPlaylistsAndURLMode() async {
+        let summaries = [
+            RemotePlaylistSummary(id: "1", title: "Alpha", trackCount: 5),
+            RemotePlaylistSummary(id: "2", title: "Beta", trackCount: 10),
+        ]
+        let provider = FakeProvider(
+            preview: makePreview(),
+            browseMode: .accountPlaylistsAndURL,
+            summaries: summaries
+        )
+        let viewModel = RemotePlaylistsViewModel(provider: provider, downloadViewModel: DownloadViewModel())
+
+        await viewModel.loadPlaylists()
+
+        #expect(provider.fetchPlaylistsCallCount == 1)
+        #expect(viewModel.playlists.count == 2)
+    }
+
+    @Test func downloadAllPersistsAndDownloadsEveryStagedTrack() async {
+        let provider = FakeProvider(preview: makePreview())
+        let batchRunner = RecordingBatchRunner()
+        let downloadViewModel = DownloadViewModel(trackPersister: SuccessfulPersister())
+        downloadViewModel.batchRunnerOverride = batchRunner
+        let viewModel = RemotePlaylistsViewModel(
+            provider: provider,
+            downloadViewModel: downloadViewModel
+        )
+        await viewModel.importFromURL("https://youtube.example/playlist")
+
+        await viewModel.downloadAll()
+
+        #expect(provider.persistedSelections.count == 1)
+        #expect(provider.persistedSelections[0].count == 3)
+        #expect(provider.persistedSelections[0].map(\.externalID) == ["video-1", "video-2", "video-3"])
+        #expect(batchRunner.receivedRequests.count == 3)
+        #expect(viewModel.importResult?.didDownload == true)
+        #expect(viewModel.importResult?.selectedTrackCount == 3)
+    }
+
+    @Test func allowsURLImportShimIsTrueOnlyForURLOnlyMode() async {
+        let urlOnly = FakeProvider(preview: makePreview(), browseMode: .urlOnly)
+        #expect(RemotePlaylistsViewModel(provider: urlOnly, downloadViewModel: DownloadViewModel()).allowsURLImport == true)
+
+        let accountOnly = FakeProvider(preview: makePreview(), browseMode: .accountPlaylists)
+        #expect(RemotePlaylistsViewModel(provider: accountOnly, downloadViewModel: DownloadViewModel()).allowsURLImport == false)
+
+        let both = FakeProvider(preview: makePreview(), browseMode: .accountPlaylistsAndURL)
+        #expect(RemotePlaylistsViewModel(provider: both, downloadViewModel: DownloadViewModel()).allowsURLImport == false)
+    }
+
+    @Test func playlistSummariesExposePrivacy() async {
+        let summaries = [
+            RemotePlaylistSummary(id: "1", title: "Public", trackCount: 5, isPrivate: false),
+            RemotePlaylistSummary(id: "2", title: "Private", trackCount: 3, isPrivate: true),
+        ]
+        let provider = FakeProvider(
+            preview: makePreview(),
+            browseMode: .accountPlaylistsAndURL,
+            summaries: summaries
+        )
+        let viewModel = RemotePlaylistsViewModel(provider: provider, downloadViewModel: DownloadViewModel())
+
+        await viewModel.loadPlaylists()
+
+        #expect(viewModel.playlists.count == 2)
+        #expect(viewModel.playlists[0].isPrivate == false)
+        #expect(viewModel.playlists[1].isPrivate == true)
     }
 }

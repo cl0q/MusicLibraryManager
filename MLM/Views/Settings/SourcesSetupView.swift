@@ -119,6 +119,10 @@ struct SourcesSetupView: View {
                 Button("Disconnect", role: .destructive) {
                     if let service { try? container.tokenStorage?.deleteCredentials(service: service) }
                 }
+            } else if let service {
+                Button("Reconnect") {
+                    reconnect(service)
+                }
             } else {
                 Button("Reconnect") {
                     AppDelegate.shared?.showSettingsWindow()
@@ -128,10 +132,36 @@ struct SourcesSetupView: View {
     }
 
     private func connectionStatus(for service: TokenStorage.Service?) -> String {
-        guard let service,
-              let credentials = try? container.tokenStorage?.getCredentials(service: service) else {
+        guard let service, let storage = container.tokenStorage else {
             return "Disconnected"
         }
-        return credentials.isExpired ? "Sign-in expired" : "Connected"
+        do {
+            guard let credentials = try storage.getCredentials(service: service) else {
+                return "Disconnected"
+            }
+            return credentials.isExpired ? "Sign-in expired" : "Connected"
+        } catch TokenStorage.KeychainError.itemInaccessible {
+            return "Token inaccessible"
+        } catch {
+            return "Disconnected"
+        }
+    }
+
+    /// User-initiated reconnect: one interactive keychain read, which may
+    /// prompt once. On success the shared access state and refresh backoff
+    /// are cleared so background checks resume immediately.
+    private func reconnect(_ service: TokenStorage.Service) {
+        Task { @MainActor in
+            guard let storage = container.tokenStorage else { return }
+            guard (try? storage.getCredentials(service: service, interactive: true)) != nil else {
+                return
+            }
+            await container.tokenRefreshService?.clearBackoff(service: service)
+            container.tokenAccessStatus?.markAccessible(service)
+            AppLogger.shared.info(
+                "\(service.displayName) token readable again after interactive keychain read (Settings)",
+                source: "Sources"
+            )
+        }
     }
 }

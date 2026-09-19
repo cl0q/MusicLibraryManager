@@ -96,11 +96,14 @@ final class SpotifyClient {
             throw SpotifyError.tokenExchangeFailed
         }
 
+        // User-initiated — the interactive variant may prompt once if the
+        // keychain item's ACL no longer matches this build.
         try tokenStorage.saveTokens(
             service: .spotify,
             accessToken: tokenResponse.accessToken,
             refreshToken: tokenResponse.refreshToken,
-            expiresIn: tokenResponse.expiresIn
+            expiresIn: tokenResponse.expiresIn,
+            interactive: true
         )
 
         let profile = try await fetchProfile()
@@ -129,6 +132,7 @@ final class SpotifyClient {
 
         var request = URLRequest(url: url)
         request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 15
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {

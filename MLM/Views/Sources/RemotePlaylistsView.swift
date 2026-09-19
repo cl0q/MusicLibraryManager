@@ -1,16 +1,27 @@
 import SwiftUI
 
 /// Which streaming source the remote-playlist browser targets.
-enum RemotePlaylistSource {
+enum RemotePlaylistSource: Equatable {
     case soundcloud
     case spotify
     case youtube
+}
+
+extension RemotePlaylistSource {
+    var windowTitle: String {
+        switch self {
+        case .soundcloud: "SoundCloud Playlists"
+        case .spotify:    "Spotify Playlists"
+        case .youtube:    "Import YouTube Playlist"
+        }
+    }
 }
 
 /// Remote-playlist browser for SoundCloud, Spotify, and YouTube. Playlist
 /// metadata stays staged until the review screen's Save or Download action.
 struct RemotePlaylistsView: View {
     let source: RemotePlaylistSource
+    var onRequestClose: (() -> Void)? = nil
 
     @Environment(\.container) private var container
     @Environment(\.dismiss) private var dismiss
@@ -31,19 +42,21 @@ struct RemotePlaylistsView: View {
             .frame(minWidth: 520, minHeight: 460)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+                    Button("Done") {
+                        if let onRequestClose {
+                            onRequestClose()
+                        } else {
+                            dismiss()
+                        }
+                    }
                 }
             }
-            .navigationTitle(navigationTitle)
+            .navigationTitle(source.windowTitle)
         }
         .task {
             initialize()
             await viewModel?.loadPlaylists()
         }
-    }
-
-    private var navigationTitle: String {
-        source == .youtube ? "Import YouTube Playlist" : "Playlists"
     }
 
     @ViewBuilder
@@ -52,26 +65,50 @@ struct RemotePlaylistsView: View {
             PlaylistDetailViewLoader(
                 playlistId: playlistID,
                 onBack: { showsPersistedPlaylist = false },
-                onTrackDoubleClick: { _ in }
+                onTrackDoubleClick: { _, _ in }
             )
         } else if vm.preview != nil {
             RemotePlaylistDetailView(
                 viewModel: vm,
                 onOpenPlaylist: { showsPersistedPlaylist = true },
-                onDone: { dismiss() }
+                onDone: {
+                    if let onRequestClose { onRequestClose() } else { dismiss() }
+                }
             )
-        } else if vm.allowsURLImport {
-            urlImport(vm)
         } else {
-            playlistList(vm)
+            browseView(vm)
         }
     }
 
+    /// Combined browse screen — shows the URL bar (when the source supports it)
+    /// above the playlist list (when the source supports it). SoundCloud gets
+    /// both at once; YouTube gets URL only; Spotify gets list only.
     @ViewBuilder
-    private func urlImport(_ vm: RemotePlaylistsViewModel) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+    private func browseView(_ vm: RemotePlaylistsViewModel) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if vm.showsURLField {
+                urlBar(vm)
+                Divider().background(Color.mlmEdge)
+            }
+            if vm.showsPlaylistList {
+                playlistList(vm)
+            } else if !vm.showsURLField {
+                // Neither surface — should not happen, but show a fallback
+                Text("No import method available")
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    /// Compact URL-import bar pinned above the playlist list. For YouTube
+    /// (.urlOnly, no list) this gets the full height; for SoundCloud it sits
+    /// above the list without pushing it off-screen.
+    @ViewBuilder
+    private func urlBar(_ vm: RemotePlaylistsViewModel) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
-                TextField("https://www.youtube.com/playlist?list=…", text: $urlInput)
+                TextField(urlPlaceholder, text: $urlInput)
                     .textFieldStyle(.roundedBorder)
                 Button("Load") {
                     Task { await vm.importFromURL(urlInput) }
@@ -80,14 +117,34 @@ struct RemotePlaylistsView: View {
                     vm.isPreviewLoading ||
                         urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 )
+                if vm.isPreviewLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                }
             }
-            if vm.isPreviewLoading {
-                ProgressView("Loading playlist…")
+            if let error = vm.errorMessage {
+                HStack(spacing: 6) {
+                    Text(error)
+                        .font(MLMFont.muted)
+                        .foregroundColor(.mlmError)
+                    if vm.shouldOfferSettings {
+                        Button("Open Settings") {
+                            AppDelegate.shared?.showSettingsWindow()
+                        }
+                        .font(MLMFont.muted)
+                    }
+                }
             }
-            errorMessage(vm)
-            Spacer()
         }
-        .padding(16)
+        .padding(12)
+    }
+
+    private var urlPlaceholder: String {
+        switch source {
+        case .youtube:    "https://www.youtube.com/playlist?list=…"
+        case .soundcloud: "https://soundcloud.com/…/sets/…"
+        case .spotify:    "https://open.spotify.com/playlist/…"
+        }
     }
 
     @ViewBuilder
@@ -118,9 +175,17 @@ struct RemotePlaylistsView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(playlist.title)
                                 .font(.body)
-                            Text("\(playlist.trackCount) tracks")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                            HStack(spacing: 4) {
+                                Text("\(playlist.trackCount) tracks")
+                                if playlist.isPrivate {
+                                    Label("Private", systemImage: "lock.fill")
+                                        .labelStyle(.titleAndIcon)
+                                        .font(MLMFont.muted)
+                                        .foregroundColor(.mlmInkSecondary)
+                                }
+                            }
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                         }
                         Spacer()
                         Image(systemName: "chevron.right")
@@ -130,16 +195,6 @@ struct RemotePlaylistsView: View {
                 }
                 .buttonStyle(.plain)
             }
-        }
-    }
-
-    @ViewBuilder
-    private func errorMessage(_ vm: RemotePlaylistsViewModel) -> some View {
-        if let error = vm.errorMessage {
-            Text(error)
-                .font(.caption)
-                .foregroundColor(.red)
-            settingsAction(vm)
         }
     }
 
@@ -254,11 +309,19 @@ private struct RemotePlaylistDetailView: View {
             }
 
             HStack {
-                Button("Download \(previewTracks.count) tracks") {
-                    Task { await viewModel.download(tracks: previewTracks) }
+                if mode == .all {
+                    Button("Download All (\(previewTracks.count) tracks)") {
+                        Task { await viewModel.downloadAll() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(previewTracks.isEmpty)
+                } else {
+                    Button("Download \(previewTracks.count) tracks") {
+                        Task { await viewModel.download(tracks: previewTracks) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(previewTracks.isEmpty)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(previewTracks.isEmpty)
 
                 Button("Save without downloading") {
                     Task { await viewModel.save(tracks: previewTracks) }

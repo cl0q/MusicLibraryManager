@@ -59,11 +59,41 @@ struct ProductionTokenRefreshing: SoundCloudTokenRefreshing {
 protocol SoundCloudTokenStoring: Sendable {
     func getCredentials(service: TokenStorage.Service) throws -> TokenStorage.Credentials?
     func saveTokens(service: TokenStorage.Service, accessToken: String, refreshToken: String?, expiresIn: Int?) throws
+    /// User-initiated save — allowed to prompt for keychain access once.
+    func saveTokens(service: TokenStorage.Service, accessToken: String, refreshToken: String?, expiresIn: Int?, interactive: Bool) throws
     func updateAccessToken(service: TokenStorage.Service, accessToken: String, expiresIn: Int) throws
     func deleteCredentials(service: TokenStorage.Service) throws
 }
 
+extension SoundCloudTokenStoring {
+    /// Default: non-interactive (preserves behavior for existing conformers).
+    func saveTokens(service: TokenStorage.Service, accessToken: String, refreshToken: String?, expiresIn: Int?, interactive: Bool) throws {
+        try saveTokens(service: service, accessToken: accessToken, refreshToken: refreshToken, expiresIn: expiresIn)
+    }
+}
+
 extension TokenStorage: SoundCloudTokenStoring {}
+
+/// Single-flight gate for token refresh.
+///
+/// A bare serialiser is NOT sufficient: SoundCloud rotates refresh tokens
+/// on use, so the second caller would present an already-invalidated token
+/// and fail.  After acquiring the gate, re-read the stored refresh token —
+/// if it differs from what this caller captured, another caller already
+/// completed the refresh and this one can skip the network call entirely.
+private actor RefreshGate {
+    func performIfTokenUnchanged(
+        capturedRefreshToken: String,
+        tokenStorage: SoundCloudTokenStoring,
+        operation: @Sendable () async throws -> Void
+    ) async throws {
+        let current = try tokenStorage.getCredentials(service: .soundcloud)
+        if let stored = current?.refreshToken, stored != capturedRefreshToken {
+            return
+        }
+        try await operation()
+    }
+}
 
 /// SoundCloud API client — OAuth 2.1 PKCE + liked songs/playlist sync.
 ///
@@ -107,6 +137,7 @@ final class SoundCloudClient: Sendable {
     private let playlistRepository: PlaylistRepository?
     private let httpRequesting: SoundCloudHTTPRequesting
     private let tokenRefreshing: SoundCloudTokenRefreshing
+    private let refreshGate = RefreshGate()
 
     // MARK: - Init
 
@@ -170,11 +201,14 @@ final class SoundCloudClient: Sendable {
         let tokenResponse = try await exchangeCode(code)
 
         // Step 3: Store tokens in Keychain
+        // User-initiated — the interactive variant may prompt once if the
+        // keychain item's ACL no longer matches this build.
         try tokenStorage.saveTokens(
             service: .soundcloud,
             accessToken: tokenResponse.accessToken,
             refreshToken: tokenResponse.refreshToken,
-            expiresIn: tokenResponse.expiresIn
+            expiresIn: tokenResponse.expiresIn,
+            interactive: true
         )
 
         // Step 4: Get user profile and create/update source record
@@ -254,6 +288,7 @@ final class SoundCloudClient: Sendable {
         var request = URLRequest(url: url)
         request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 15
 
         let (data, response) = try await httpRequesting.data(for: request)
         guard let http = response as? HTTPURLResponse else {
@@ -304,6 +339,7 @@ final class SoundCloudClient: Sendable {
         var request = URLRequest(url: url)
         request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 15
 
         let (data, response) = try await httpRequesting.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -338,19 +374,24 @@ final class SoundCloudClient: Sendable {
     /// the original request exactly once afterward.
     private func refreshSoundCloudToken(refreshToken: String, context: String) async throws {
         do {
-            let refreshed = try await tokenRefreshing.refresh(refreshToken: refreshToken)
-            try tokenStorage.updateAccessToken(
-                service: .soundcloud,
-                accessToken: refreshed.accessToken,
-                expiresIn: refreshed.expiresIn ?? 3600
-            )
-            if let newRefreshToken = refreshed.refreshToken {
-                try tokenStorage.saveTokens(
+            try await refreshGate.performIfTokenUnchanged(
+                capturedRefreshToken: refreshToken,
+                tokenStorage: tokenStorage
+            ) { [tokenRefreshing, tokenStorage] in
+                let refreshed = try await tokenRefreshing.refresh(refreshToken: refreshToken)
+                try tokenStorage.updateAccessToken(
                     service: .soundcloud,
                     accessToken: refreshed.accessToken,
-                    refreshToken: newRefreshToken,
-                    expiresIn: refreshed.expiresIn
+                    expiresIn: refreshed.expiresIn ?? 3600
                 )
+                if let newRefreshToken = refreshed.refreshToken {
+                    try tokenStorage.saveTokens(
+                        service: .soundcloud,
+                        accessToken: refreshed.accessToken,
+                        refreshToken: newRefreshToken,
+                        expiresIn: refreshed.expiresIn
+                    )
+                }
             }
         } catch {
             AppLogger.shared.error(
@@ -430,6 +471,11 @@ final class SoundCloudClient: Sendable {
             type: SoundCloudCollection<SoundCloudTrack>.self
         )
 
+        AppLogger.shared.info(
+            "SoundCloud: page 1 returned \(firstPage.collection.count) tracks, next_href=\(firstPage.nextHref ?? "nil")",
+            source: "SoundCloud"
+        )
+
         newCount += try await processLikedTracks(
             firstPage.collection,
             sourceId: sourceId,
@@ -440,10 +486,17 @@ final class SoundCloudClient: Sendable {
         nextURL = firstPage.nextHref.flatMap { URL(string: $0) }
 
         // Subsequent pages
+        var pageNumber = 1
         while let url = nextURL {
+            pageNumber += 1
             let page: SoundCloudCollection<SoundCloudTrack> = try await apiRequestURL(
                 url: url,
                 type: SoundCloudCollection<SoundCloudTrack>.self
+            )
+
+            AppLogger.shared.info(
+                "SoundCloud: page \(pageNumber) returned \(page.collection.count) tracks, next_href=\(page.nextHref ?? "nil")",
+                source: "SoundCloud"
             )
 
             newCount += try await processLikedTracks(
@@ -455,6 +508,11 @@ final class SoundCloudClient: Sendable {
             )
             nextURL = page.nextHref.flatMap { URL(string: $0) }
         }
+
+        AppLogger.shared.info(
+            "SoundCloud: pagination complete — fetched \(pageNumber) pages, \(orderedTrackIds.count) total tracks from API",
+            source: "SoundCloud"
+        )
 
         // Mirror the API order into the local "Liked from SoundCloud"
         // playlist. Replace-in-place: a removed Like upstream disappears
@@ -532,10 +590,12 @@ final class SoundCloudClient: Sendable {
             )
         }
 
-        // Update last sync timestamp
-        try await sourceRepository.setLastSyncTimestamp(
-            userId: String(user.id),
-            source: "soundcloud",
+        // Update last sync timestamp — use updateLastSync(sourceId:syncType:)
+        // so the write key ("soundcloud_liked_songs") matches the read key
+        // used by SourcesViewModel.loadSources() via getLastSync(sourceId:syncType:).
+        try await sourceRepository.updateLastSync(
+            sourceId: sourceId,
+            syncType: "liked_songs",
             timestamp: ISO8601DateFormatter().string(from: Date())
         )
 
@@ -747,9 +807,14 @@ final class SoundCloudClient: Sendable {
     }
 
     /// Fetch a lightweight list of the user's playlists (no track bodies)
-    /// for browsing. Returns the API playlist objects directly.
+    /// for browsing. Follows `next_href` cursor pagination to exhaustion,
+    /// capped at 40 pages to guarantee termination against a pathological
+    /// or looping `next_href`.
     func fetchPlaylists() async throws -> [SoundCloudPlaylist] {
-        let page: SoundCloudCollection<SoundCloudPlaylist> = try await apiRequest(
+        var all: [SoundCloudPlaylist] = []
+        let maxPages = 40
+
+        let firstPage: SoundCloudCollection<SoundCloudPlaylist> = try await apiRequest(
             endpoint: "me/playlists",
             queryItems: [
                 URLQueryItem(name: "limit", value: "50"),
@@ -757,7 +822,21 @@ final class SoundCloudClient: Sendable {
             ],
             type: SoundCloudCollection<SoundCloudPlaylist>.self
         )
-        return page.collection
+        all.append(contentsOf: firstPage.collection)
+        var nextURL = firstPage.nextHref.flatMap { URL(string: $0) }
+
+        var pageCount = 1
+        while let url = nextURL, pageCount < maxPages {
+            let page: SoundCloudCollection<SoundCloudPlaylist> = try await apiRequestURL(
+                url: url,
+                type: SoundCloudCollection<SoundCloudPlaylist>.self
+            )
+            all.append(contentsOf: page.collection)
+            nextURL = page.nextHref.flatMap { URL(string: $0) }
+            pageCount += 1
+        }
+
+        return all
     }
 
     /// Fetch the full, ordered track list for a playlist, following
@@ -786,6 +865,57 @@ final class SoundCloudClient: Sendable {
         }
 
         return tracks
+    }
+
+    /// Resolve a pasted SoundCloud URL to a playlist.
+    ///
+    /// Uses SoundCloud's `/resolve` endpoint, which replies with whatever
+    /// `kind` the URL points at (playlist, track, user, …). Throws
+    /// `SoundCloudError.notAPlaylistURL(url)` when the URL resolves to
+    /// anything other than `kind == "playlist"`, or when id/title are absent.
+    ///
+    /// The input URL's query string is preserved verbatim — private/"secret"
+    /// SoundCloud sets are only resolvable because of their `?si=<token>`
+    /// parameter, and dropping it would break exactly the private-playlist
+    /// case this feature exists for.
+    ///
+    /// The resolved resource's `sharing` field is forwarded to the returned
+    /// `SoundCloudPlaylist`, so a private set resolved from a pasted URL
+    /// reports `isPrivate == true` just like one fetched from the account list.
+    func resolvePlaylist(url rawURL: String) async throws -> SoundCloudPlaylist {
+        let trimmed = rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw SoundCloudError.notAPlaylistURL(rawURL)
+        }
+
+        // Accept bare `soundcloud.com/…` by prepending the scheme.
+        let normalised: String
+        if trimmed.hasPrefix("https://") || trimmed.hasPrefix("http://") {
+            normalised = trimmed
+        } else {
+            normalised = "https://" + trimmed
+        }
+
+        let resource: SoundCloudResolvedResource = try await apiRequest(
+            endpoint: "resolve",
+            queryItems: [URLQueryItem(name: "url", value: normalised)],
+            type: SoundCloudResolvedResource.self
+        )
+
+        guard resource.kind == "playlist",
+              let id = resource.id,
+              let title = resource.title else {
+            throw SoundCloudError.notAPlaylistURL(rawURL)
+        }
+
+        return SoundCloudPlaylist(
+            id: id,
+            title: title,
+            trackCount: resource.trackCount,
+            permalinkUrl: resource.permalinkUrl,
+            tracks: resource.tracks,
+            sharing: resource.sharing
+        )
     }
 
 
@@ -847,6 +977,7 @@ final class SoundCloudClient: Sendable {
         case tokenExpired
         case tokenExchangeFailed(String)
         case apiError(statusCode: Int, body: String)
+        case notAPlaylistURL(String)
 
         var errorDescription: String? {
             switch self {
@@ -861,6 +992,7 @@ final class SoundCloudClient: Sendable {
             case .tokenExpired: "SoundCloud session expired — click Connect to re-authenticate"
             case .tokenExchangeFailed(let body): "Token exchange failed: \(body)"
             case .apiError(let code, let body): "API error (\(code)): \(body)"
+            case .notAPlaylistURL: "That link is not a SoundCloud playlist"
             }
         }
     }
@@ -912,12 +1044,67 @@ struct SoundCloudTrack: Codable, Sendable {
     let user: SoundCloudUser?
     let createdAt: String?    // non-standard format
 
+    // MARK: - DRM / downloadability signals (SoundCloud API v2)
+    //
+    // These fields are optional — most track payloads do not carry them, and
+    // absence MUST NOT be interpreted as "blocked" (that would break every
+    // normal download). Only a positive signal from a known-bad combination
+    // flips `isDownloadBlocked` to true.
+    //
+    // Observed `monetization_model` values (as of 2026):
+    //   - "AD_SUPPORTED"   — free tier, ads between tracks. Downloadable.
+    //   - "SUB_HIGH_TIER"  — SoundCloud Go+/Next Pro premium-gated track.
+    //                        Not downloadable without a subscriber session.
+    //   - "SUB_LOW_TIER"   — lower subscription tier; same gating as above.
+    //
+    // Observed `policy` values:
+    //   - "ALLOW"    — normal playback / download permitted.
+    //   - "BLOCK"    — track is region- or tier-gated; playback blocked.
+    //   - "SNIP"     — track plays only a preview snippet (~30s).
+    //   - "LOCALIZE" — track blocked in the requester's region.
+    //
+    // `downloadable` is a legacy boolean flag from the v1 API. Some tracks
+    // set it to false without any premium gating (e.g. the uploader simply
+    // disabled downloads). Treating `downloadable: false` alone as "blocked"
+    // would false-positive on those, so we only use it as a tiebreaker when
+    // the monetization/policy signals are already suspicious.
+    //
+    // Decision logic (conservative — unknown values → not blocked):
+    //   blocked iff policy ∈ {"BLOCK", "SNIP", "LOCALIZE"}
+    //            OR monetization_model ∈ {"SUB_HIGH_TIER", "SUB_LOW_TIER"}
+    //
+    // We deliberately do NOT treat `downloadable: false` alone as blocking,
+    // and we do NOT treat unknown monetization_model or policy values as
+    // blocking. False positives waste ~20s of download attempts and produce
+    // misleading "Video unavailable" errors for tracks the user can see.
+    let monetizationModel: String?
+    let policy: String?
+    let downloadable: Bool?
+
+    /// True when the track is known to be DRM-protected, premium-gated, or
+    /// region-blocked — i.e. not downloadable by any tool. Returns false when
+    // the signals are absent, null, or unknown (conservative).
+    var isDownloadBlocked: Bool {
+        let blockedPolicies: Set<String> = ["BLOCK", "SNIP", "LOCALIZE"]
+        let blockedMonetization: Set<String> = ["SUB_HIGH_TIER", "SUB_LOW_TIER"]
+
+        if let policy, blockedPolicies.contains(policy) {
+            return true
+        }
+        if let monetizationModel, blockedMonetization.contains(monetizationModel) {
+            return true
+        }
+        return false
+    }
+
     enum CodingKeys: String, CodingKey {
-        case id, title, duration, genre, user
+        case id, title, duration, genre, user, downloadable
         case permalinkUrl = "permalink_url"
         case streamUrl = "stream_url"
         case artworkUrl = "artwork_url"
         case createdAt = "created_at"
+        case monetizationModel = "monetization_model"
+        case policy
     }
 }
 
@@ -930,11 +1117,59 @@ struct SoundCloudPlaylist: Codable, Sendable {
     let permalinkUrl: String?
     let artworkUrl: String?
     let tracks: [SoundCloudTrack]?
+    let sharing: String?
+
+    /// `true` only when the API explicitly reports `sharing == "private"`.
+    /// Missing or unknown values yield `false` (conservative).
+    var isPrivate: Bool { sharing?.lowercased() == "private" }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, description, tracks
+        case id, title, description, tracks, sharing
         case trackCount = "track_count"
         case permalinkUrl = "permalink_url"
         case artworkUrl = "artwork_url"
+    }
+
+    /// Internal memberwise init — used by `resolvePlaylist(url:)` to
+    /// synthesise a `SoundCloudPlaylist` from a `/resolve` response.
+    /// Does not affect `Codable` conformance (the synthesised init from
+    /// CodingKeys is what the decoder uses).
+    init(
+        id: Int,
+        title: String,
+        trackCount: Int? = nil,
+        description: String? = nil,
+        permalinkUrl: String? = nil,
+        artworkUrl: String? = nil,
+        tracks: [SoundCloudTrack]? = nil,
+        sharing: String? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.trackCount = trackCount
+        self.description = description
+        self.permalinkUrl = permalinkUrl
+        self.artworkUrl = artworkUrl
+        self.tracks = tracks
+        self.sharing = sharing
+    }
+}
+
+/// A resource returned by GET /resolve. SoundCloud's /resolve replies with
+/// whatever `kind` the URL points at (playlist, track, user, …), so every
+/// field is optional and `kind` decides whether it is usable as a playlist.
+struct SoundCloudResolvedResource: Codable, Sendable {
+    let kind: String?
+    let id: Int?
+    let title: String?
+    let trackCount: Int?
+    let permalinkUrl: String?
+    let tracks: [SoundCloudTrack]?
+    let sharing: String?
+
+    enum CodingKeys: String, CodingKey {
+        case kind, id, title, tracks, sharing
+        case trackCount = "track_count"
+        case permalinkUrl = "permalink_url"
     }
 }

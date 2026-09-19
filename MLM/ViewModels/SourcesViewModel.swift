@@ -24,6 +24,9 @@ final class SourcesViewModel {
     /// Errors per service.
     private var errors: [TokenStorage.Service: String] = [:]
 
+    /// Reconnect in progress per service.
+    private var reconnectingServices: Set<TokenStorage.Service> = []
+
     /// Whether loading is in progress.
     private(set) var isLoading = false
 
@@ -32,6 +35,8 @@ final class SourcesViewModel {
     private let tokenStorage: TokenStorage
     private let sourceRepository: SourceRepository
     private let oauthManager: OAuthManager?
+    private let tokenAccessStatus: TokenAccessStatus?
+    private let tokenRefreshService: TokenRefreshService?
 
     // Source clients (lazy-initialized)
     private var soundCloudClient: SoundCloudClient?
@@ -45,11 +50,15 @@ final class SourcesViewModel {
         sourceRepository: SourceRepository,
         oauthManager: OAuthManager?,
         trackRepository: TrackRepository? = nil,
-        playlistRepository: PlaylistRepository? = nil
+        playlistRepository: PlaylistRepository? = nil,
+        tokenAccessStatus: TokenAccessStatus? = nil,
+        tokenRefreshService: TokenRefreshService? = nil
     ) {
         self.tokenStorage = tokenStorage
         self.sourceRepository = sourceRepository
         self.oauthManager = oauthManager
+        self.tokenAccessStatus = tokenAccessStatus
+        self.tokenRefreshService = tokenRefreshService
 
         // Initialize source clients if dependencies are available
         if let oauth = oauthManager, let trackRepo = trackRepository {
@@ -123,6 +132,19 @@ final class SourcesViewModel {
         errors[service]
     }
 
+    /// Whether the source's keychain token currently needs user interaction
+    /// to read (surfaces the amber notice in the Sources card).
+    @MainActor
+    func isTokenInaccessible(_ service: TokenStorage.Service) -> Bool {
+        tokenAccessStatus?.isInaccessible(service) ?? false
+    }
+
+    /// Whether a reconnect is in progress for a source.
+    @MainActor
+    func isReconnecting(_ service: TokenStorage.Service) -> Bool {
+        reconnectingServices.contains(service)
+    }
+
     // MARK: - Load
 
     /// Load connection status and track counts from Keychain + database.
@@ -130,9 +152,20 @@ final class SourcesViewModel {
     func loadSources() async {
         isLoading = true
 
-        // Check Keychain for stored credentials
+        // Check Keychain for stored credentials, and keep the shared access
+        // state in sync (also covers services not registered with the
+        // background refresh loop).
         for service in TokenStorage.Service.allCases {
             connectionStatus[service] = tokenStorage.hasCredentials(service: service)
+            do {
+                _ = try tokenStorage.getCredentials(service: service)
+                tokenAccessStatus?.markAccessible(service)
+            } catch TokenStorage.KeychainError.itemInaccessible {
+                tokenAccessStatus?.markInaccessible(service)
+            } catch {
+                // Unreadable for another reason — hasCredentials above
+                // already answered the UI question.
+            }
         }
 
         // Load track counts from sources table
@@ -200,6 +233,37 @@ final class SourcesViewModel {
         }
     }
 
+    // MARK: - Reconnect
+
+    /// Reconnect a source whose keychain token is currently inaccessible.
+    ///
+    /// Tries one interactive keychain read first (the user is right here, so a
+    /// single prompt is acceptable); falls back to the full OAuth flow.
+    @MainActor
+    func reconnectSource(_ service: TokenStorage.Service) async {
+        guard !reconnectingServices.contains(service) else { return }
+        reconnectingServices.insert(service)
+        defer { reconnectingServices.remove(service) }
+
+        errors.removeValue(forKey: service)
+
+        if (try? tokenStorage.getCredentials(service: service, interactive: true)) != nil {
+            connectionStatus[service] = true
+            tokenAccessStatus?.markAccessible(service)
+            await tokenRefreshService?.clearBackoff(service: service)
+            AppLogger.shared.info(
+                "\(service.displayName) token readable again after interactive keychain read",
+                source: "Sources"
+            )
+            return
+        }
+
+        await connectSource(service)
+        guard errors[service] == nil else { return }
+        tokenAccessStatus?.markAccessible(service)
+        await tokenRefreshService?.clearBackoff(service: service)
+    }
+
     // MARK: - Disconnect
 
     /// Disconnect a streaming source — delete tokens.
@@ -212,6 +276,7 @@ final class SourcesViewModel {
             connectionStatus[service] = false
             trackCounts.removeValue(forKey: service)
             lastSyncTimestamps.removeValue(forKey: service)
+            tokenAccessStatus?.markAccessible(service)
         } catch {
             errors[service] = error.localizedDescription
         }

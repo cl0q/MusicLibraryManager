@@ -61,6 +61,7 @@ final class LibraryViewModel {
     /// Debounced: search changes trigger a refresh after 200 ms idle.
     var searchQuery: String = "" {
         didSet {
+            guard oldValue != searchQuery else { return }
             debouncer.debounce { @MainActor [weak self] in
                 self?.scheduleRefresh()
             }
@@ -88,6 +89,17 @@ final class LibraryViewModel {
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     private var libraryRootSnapshot: URL?
 
+    /// Parameters of the last successful fetch — used to skip redundant refetches
+    /// when the view reappears with the same tab/search/sort/libraryRoot.
+    private struct FetchSignature: Equatable {
+        var tab: LibraryTab
+        var search: String
+        var sortColumn: SortColumn
+        var sortAscending: Bool
+        var libraryRoot: URL?
+    }
+    private var lastFetchSignature: FetchSignature?
+
     // MARK: - Init
 
     init(trackRepository: TrackRepository, configRepository: ConfigRepository) {
@@ -100,6 +112,9 @@ final class LibraryViewModel {
     /// Cancel any in-flight fetch and start a new one for the current state.
     @MainActor
     func scheduleRefresh() {
+        let navperfSig = FetchSignature(tab: selectedTab, search: searchQuery, sortColumn: sortDescriptor.column, sortAscending: sortDescriptor.ascending, libraryRoot: libraryRootSnapshot)
+        // [navperf] temporary instrumentation — remove after measurement
+        print("[navperf] libraryvm-scheduleRefresh-enter signatureMatch=\(navperfSig == lastFetchSignature && !displayedTracks.isEmpty) \(Date().timeIntervalSince1970)")
         refreshTask?.cancel()
         isLoading = true
 
@@ -113,6 +128,8 @@ final class LibraryViewModel {
 
             let start = Date()
             do {
+                // [navperf] temporary instrumentation — remove after measurement
+                print("[navperf] libraryvm-fetch-start \(Date().timeIntervalSince1970)")
                 let result = try await trackRepository.fetchForLibrary(
                     tab: tab,
                     search: search.isEmpty ? nil : search,
@@ -120,17 +137,34 @@ final class LibraryViewModel {
                     ascending: sort.ascending
                 )
                 guard !Task.isCancelled else { return }
+                // [navperf] temporary instrumentation — remove after measurement
+                print("[navperf] libraryvm-fetch-end rows=\(result.count) \(Date().timeIntervalSince1970)")
 
-                let local  = (try? await trackRepository.countLocalTracks())  ?? localCount
-                let remote = (try? await trackRepository.countRemoteTracks()) ?? remoteCount
+                // [navperf] temporary instrumentation — remove after measurement
+                print("[navperf] libraryvm-counts-start \(Date().timeIntervalSince1970)")
+                let counts = try? await trackRepository.countTracksByAvailability()
+                // [navperf] temporary instrumentation — remove after measurement
+                print("[navperf] libraryvm-counts-end \(Date().timeIntervalSince1970)")
+                let local  = counts?.local  ?? localCount
+                let remote = counts?.remote ?? remoteCount
                 guard !Task.isCancelled else { return }
 
+                var navperfFileExistsCount = 0
+                // [navperf] temporary instrumentation — remove after measurement
+                print("[navperf] availability-map-start site=library tracks=\(result.count) \(Date().timeIntervalSince1970)")
                 let availability = TrackPresentationAvailability.map(
                     tracks: result,
                     libraryRoot: libraryRoot,
-                    fileExists: { FileManager.default.fileExists(atPath: $0.path) }
+                    fileExists: { url in
+                        navperfFileExistsCount += 1
+                        return FileManager.default.fileExists(atPath: url.path)
+                    }
                 )
+                // [navperf] temporary instrumentation — remove after measurement
+                print("[navperf] availability-map-end site=library tracks=\(result.count) fileExistsCalls=\(navperfFileExistsCount) \(Date().timeIntervalSince1970)")
 
+                // [navperf] temporary instrumentation — remove after measurement
+                print("[navperf] libraryvm-mainactor-apply-start \(Date().timeIntervalSince1970)")
                 await MainActor.run { [weak self] in
                     guard let self else { return }
                     displayedTracks = result
@@ -139,12 +173,21 @@ final class LibraryViewModel {
                     remoteCount     = remote
                     isLoading       = false
                     errorMessage    = nil
+                    lastFetchSignature = FetchSignature(
+                        tab: tab,
+                        search: search,
+                        sortColumn: sort.column,
+                        sortAscending: sort.ascending,
+                        libraryRoot: libraryRoot
+                    )
                     let ms = Int(Date().timeIntervalSince(start) * 1000)
                     AppLogger.shared.info(
                         "library refresh: \(result.count) rows in \(ms)ms (sort=\(sort.column.rawValue), tab=\(tab.rawValue))",
                         source: "perf"
                     )
                 }
+                // [navperf] temporary instrumentation — remove after measurement
+                print("[navperf] libraryvm-mainactor-apply-end \(Date().timeIntervalSince1970)")
             } catch {
                 guard !Task.isCancelled else { return }
                 await MainActor.run { [weak self] in
@@ -159,17 +202,65 @@ final class LibraryViewModel {
     }
 
     /// Await the current refresh to completion (used by `.task` in views).
+    ///
+    /// Cache guard: if the fetch parameters (tab, search, sort, library root)
+    /// match the last successful fetch and tracks are already populated, skip
+    /// the SQL query entirely. This makes navigating back to the Library instant.
     @MainActor
     func loadTracks() async {
+        // Fast path: if we already have a snapshot and the signature matches,
+        // skip the configRepository round-trip entirely.
+        if libraryRootSnapshot != nil {
+            let signature = FetchSignature(
+                tab: selectedTab,
+                search: searchQuery,
+                sortColumn: sortDescriptor.column,
+                sortAscending: sortDescriptor.ascending,
+                libraryRoot: libraryRootSnapshot
+            )
+            if signature == lastFetchSignature, !displayedTracks.isEmpty {
+                return
+            }
+        }
+
         await refreshLibraryRootSnapshot()
+
+        let signature = FetchSignature(
+            tab: selectedTab,
+            search: searchQuery,
+            sortColumn: sortDescriptor.column,
+            sortAscending: sortDescriptor.ascending,
+            libraryRoot: libraryRootSnapshot
+        )
+        if signature == lastFetchSignature, !displayedTracks.isEmpty {
+            return
+        }
+
         scheduleRefresh()
         await refreshTask?.value
     }
 
     /// Refresh after external changes (import, download, delete).
+    /// Bypasses the cache guard — forces a full SQL refetch.
     @MainActor
     func refresh() async {
-        await loadTracks()
+        await refreshLibraryRootSnapshot()
+        // [navperf] temporary instrumentation — remove after measurement
+        print("[navperf] libraryvm-refresh-bypass \(Date().timeIntervalSince1970)")
+        lastFetchSignature = nil
+        scheduleRefresh()
+        await refreshTask?.value
+    }
+
+    /// Remove tracks in-place without a full SQL refetch.
+    @MainActor
+    func removeTracks(ids: Set<Int64>) {
+        displayedTracks.removeAll { track in
+            guard let id = track.id else { return false }
+            return ids.contains(id)
+        }
+        availabilityByTrackID = availabilityByTrackID.filter { !ids.contains($0.key) }
+        selectedTrackIDs.subtract(ids)
     }
 
     // MARK: - Sort

@@ -136,38 +136,44 @@ final class PlaylistCoverService {
             }
 
             // 4. Decide branch (D-01) and compose.
+            // Hop the pixel work (bitmap allocation, image drawing, PNG encoding)
+            // off the main actor so cover revalidation on appearance never blocks
+            // the UI. MosaicCompositor is a plain enum — safe to call from any context.
             let coversDir = try ensureCoversDir()
             let pngURL = coversDir.appendingPathComponent("\(playlistId).png")
             let nonNilCount = artworks.compactMap { $0 }.count
+            let playlistName = playlist.name
 
-            if nonNilCount == 0 {
-                // D-03: fallback gradient + initials
-                try MosaicCompositor.composeFallbackPNG(
-                    playlistId: playlistId,
-                    name: playlist.name,
-                    outputURL: pngURL
-                )
-            } else if tracks.count < 4 || nonNilCount == 1 {
-                // D-01 auto1: single cover from the first available image
-                if let single = artworks.compactMap({ $0 }).first {
-                    try MosaicCompositor.composeSingleCoverPNG(image: single, outputURL: pngURL)
-                } else {
-                    // Defensive: nonNilCount > 0 but compact returned empty — shouldn't happen
+            try await Task.detached(priority: .userInitiated) {
+                if nonNilCount == 0 {
+                    // D-03: fallback gradient + initials
                     try MosaicCompositor.composeFallbackPNG(
-                        playlistId: playlistId, name: playlist.name, outputURL: pngURL
+                        playlistId: playlistId,
+                        name: playlistName,
+                        outputURL: pngURL
+                    )
+                } else if tracks.count < 4 || nonNilCount == 1 {
+                    // D-01 auto1: single cover from the first available image
+                    if let single = artworks.compactMap({ $0 }).first {
+                        try MosaicCompositor.composeSingleCoverPNG(image: single, outputURL: pngURL)
+                    } else {
+                        // Defensive: nonNilCount > 0 but compact returned empty — shouldn't happen
+                        try MosaicCompositor.composeFallbackPNG(
+                            playlistId: playlistId, name: playlistName, outputURL: pngURL
+                        )
+                    }
+                } else {
+                    // D-01 + D-02: 2×2 mosaic with gradient-tile gaps
+                    // Pad to exactly 4 tiles
+                    var tiles: [NSImage?] = Array(artworks)
+                    while tiles.count < 4 { tiles.append(nil) }
+                    let palette = GradientPalette.colors(forPlaylistId: playlistId)
+                    let gradients = Array(repeating: palette, count: 4)
+                    try MosaicCompositor.composeMosaicPNG(
+                        tiles: tiles, gradients: gradients, outputURL: pngURL
                     )
                 }
-            } else {
-                // D-01 + D-02: 2×2 mosaic with gradient-tile gaps
-                // Pad to exactly 4 tiles
-                var tiles: [NSImage?] = Array(artworks)
-                while tiles.count < 4 { tiles.append(nil) }
-                let palette = GradientPalette.colors(forPlaylistId: playlistId)
-                let gradients = Array(repeating: palette, count: 4)
-                try MosaicCompositor.composeMosaicPNG(
-                    tiles: tiles, gradients: gradients, outputURL: pngURL
-                )
-            }
+            }.value
 
             // 5. Persist the path with isCustom=false (auto).
             try await playlistRepository.setCoverPath(
@@ -204,7 +210,10 @@ final class PlaylistCoverService {
             }
             let coversDir = try ensureCoversDir()
             let pngURL = coversDir.appendingPathComponent("\(playlistId).png")
-            try MosaicCompositor.composeSingleCoverPNG(image: image, outputURL: pngURL)
+            // Hop pixel work off-main (same rationale as regenerateCover).
+            try await Task.detached(priority: .userInitiated) {
+                try MosaicCompositor.composeSingleCoverPNG(image: image, outputURL: pngURL)
+            }.value
 
             try await playlistRepository.setCoverPath(
                 id: playlistId,

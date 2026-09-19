@@ -34,7 +34,11 @@ final class RemotePlaylistsViewModel {
     // MARK: - Derived
 
     var displayName: String { provider.displayName }
-    var allowsURLImport: Bool { provider.allowsURLImport }
+    var browseMode: RemotePlaylistBrowseMode { provider.browseMode }
+    var showsURLField: Bool { provider.browseMode != .accountPlaylists }
+    var showsPlaylistList: Bool { provider.browseMode != .urlOnly }
+    /// Transitional shim — Module 5 removes this once the view migrates to `browseMode`.
+    var allowsURLImport: Bool { provider.browseMode == .urlOnly }
     var downloadNote: String? { provider.downloadNote }
     var selectedTitle: String? { preview?.title }
     var selectedTracks: [RemotePlaylistTrack] { preview?.tracks ?? [] }
@@ -52,7 +56,7 @@ final class RemotePlaylistsViewModel {
     // MARK: - Actions
 
     func loadPlaylists() async {
-        guard !provider.allowsURLImport else { return }
+        guard provider.browseMode != .urlOnly else { return }
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
@@ -97,10 +101,31 @@ final class RemotePlaylistsViewModel {
 
     /// Persist the exact reviewed rows before handing those durable records to
     /// the existing download pipeline.
+    ///
+    /// Incremental sync: only tracks with `organizedPath == nil` (not yet
+    /// downloaded) are sent to the download pipeline. Already-downloaded
+    /// tracks are skipped — this is how re-importing a grown playlist
+    /// (e.g. 3 → 5 tracks) only downloads the 2 new ones.
     func download(tracks: [RemotePlaylistTrack]) async {
         guard let persistence = await persist(tracks: tracks) else { return }
+
+        // Filter to only tracks that haven't been downloaded yet
+        let newTracks = persistence.tracks.filter { $0.organizedPath == nil }
+
+        if newTracks.isEmpty {
+            // All tracks already downloaded — just update the import result
+            importResult = RemotePlaylistImportResult(
+                playlistID: persistence.playlistID,
+                selectedTrackCount: tracks.count,
+                downloadedCount: 0,
+                failedCount: 0,
+                didDownload: false
+            )
+            return
+        }
+
         await downloadViewModel.downloadTracks(
-            persistence.tracks,
+            newTracks,
             preferredSource: provider.preferredSource
         )
         let result = downloadViewModel.lastResult
@@ -111,6 +136,11 @@ final class RemotePlaylistsViewModel {
             failedCount: result?.failed ?? 0,
             didDownload: true
         )
+    }
+
+    /// One-tap "Download All" over the whole staged preview.
+    func downloadAll() async {
+        await download(tracks: selectedTracks)
     }
 
     func cancelDownload() {
