@@ -82,6 +82,9 @@ struct ContentView: View {
                 .onAppear {
                     showFirstRunWizard = !container.hasLibraryRoot
                 }
+                .sheet(isPresented: $showUniversalSearch) {
+                    UniversalSearchView(onDismiss: { showUniversalSearch = false })
+                }
             } else if let error = container.initializationError {
                 errorView(error)
             } else {

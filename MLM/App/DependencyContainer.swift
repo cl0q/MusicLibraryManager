@@ -33,6 +33,9 @@ final class DependencyContainer {
     private(set) var tokenStorage: TokenStorage?
     private(set) var oauthManager: OAuthManager?
     private(set) var tokenRefreshService: TokenRefreshService?
+    /// Observable per-service keychain access state — drives the amber
+    /// "token inaccessible" notice in the Sources view.
+    private(set) var tokenAccessStatus: TokenAccessStatus?
     private(set) var mountObserver: MountObserver?
     /// Cover-image orchestrator (Phase 36 Plan 02). Observes `.playlistDidChange`
     /// and regenerates auto covers (skips rows with `cover_is_custom = 1`).
@@ -47,6 +50,15 @@ final class DependencyContainer {
     private(set) var discoveryReviewService: DiscoveryReviewService?
     private(set) var transcodeCache: TranscodeCache?
     private(set) var unifiedSearchService: UnifiedSearchService?
+    private(set) var playlistIngestService: PlaylistIngestService?
+    /// macOS media-key + Now Playing bridge (play/pause/next/prev).
+    private(set) var remoteCommandService: RemoteCommandService?
+    /// Auto-pause/resume when the default audio output device changes.
+    private(set) var outputDeviceMonitor: OutputDeviceMonitor?
+
+    // MARK: - Search
+
+    private(set) var searchCoordinator = SearchCoordinator()
 
     // MARK: - ViewModels (shared singletons)
 
@@ -54,6 +66,11 @@ final class DependencyContainer {
     private(set) var activityViewModel: ActivityViewModel?
     private(set) var downloadViewModel: DownloadViewModel?
     private(set) var syncViewModel: SyncViewModel?
+    /// Library VM owned by the container so navigating away from the Library
+    /// section and back doesn't tear it down and refetch 11k rows.
+    private(set) var libraryViewModel: LibraryViewModel?
+    /// LRU cache for playlist detail tables (Settings-adjustable cap).
+    private(set) var playlistTableCache: PlaylistTableCache?
 
     // MARK: - State
 
@@ -111,6 +128,11 @@ final class DependencyContainer {
         self.configRepository = ConfigRepository(database: dbPool)
         self.reelRepository = ReelRepository(database: dbPool)
 
+        // LRU cache for playlist detail tables — no repo dependencies.
+        await MainActor.run {
+            self.playlistTableCache = PlaylistTableCache()
+        }
+
         // Services
         self.importService = ImportService(
             database: dbPool,
@@ -132,7 +154,13 @@ final class DependencyContainer {
         self.tokenStorage = tokens
         let oauth = OAuthManager()
         self.oauthManager = oauth
-        let tokenRefresh = TokenRefreshService(tokenStorage: tokens, oauthManager: oauth)
+        let accessStatus = await MainActor.run { TokenAccessStatus() }
+        self.tokenAccessStatus = accessStatus
+        let tokenRefresh = TokenRefreshService(
+            tokenStorage: tokens,
+            oauthManager: oauth,
+            accessStatus: accessStatus
+        )
         self.tokenRefreshService = tokenRefresh
 
         // Register + start proactive token refresh for SoundCloud (SCDL-05).
@@ -169,6 +197,32 @@ final class DependencyContainer {
             audioPlayer: player,
             configRepository: self.configRepository
         )
+
+        // Library VM — owned by the container so it survives view teardown.
+        if let trackRepo = self.trackRepository, let cfRepo = self.configRepository {
+            await MainActor.run {
+                self.libraryViewModel = LibraryViewModel(
+                    trackRepository: trackRepo,
+                    configRepository: cfRepo
+                )
+            }
+        }
+
+        // Media-key + Now Playing bridge, and headphone auto-pause/resume.
+        // Both services need the PlaybackViewModel and must run on the
+        // main actor (MPRemoteCommandCenter registration and CoreAudio
+        // listener installation both touch UI-adjacent state).
+        if let playbackVM = self.playbackViewModel {
+            await MainActor.run {
+                let remote = RemoteCommandService()
+                remote.start(viewModel: playbackVM)
+                self.remoteCommandService = remote
+
+                let monitor = OutputDeviceMonitor()
+                monitor.start(viewModel: playbackVM)
+                self.outputDeviceMonitor = monitor
+            }
+        }
 
         self.activityViewModel = ActivityViewModel()
 
@@ -241,6 +295,19 @@ final class DependencyContainer {
             }
         }
 
+        // WP4 — Playlist ingest service (device → MLM m3u8 import with diff preview)
+        if let trackRepo = self.trackRepository,
+           let playlistRepo = self.playlistRepository {
+            let ingestSvc = PlaylistIngestService(
+                trackRepository: trackRepo,
+                playlistRepository: playlistRepo,
+                database: dbPool
+            )
+            self.playlistIngestService = ingestSvc
+            // Wire into SyncViewModel for device scan (Trigger B)
+            self.syncViewModel?.setIngestService(ingestSvc)
+        }
+
         // Check if library root is configured
         if let root = try await configRepository?.getLibraryRoot(), !root.isEmpty {
             hasLibraryRoot = true
@@ -305,7 +372,8 @@ final class DependencyContainer {
             let opId = activityVM?.startOperation(
                 type: .sync,
                 title: "Cache migration: \(newDir.lastPathComponent)",
-                detail: "Scanning existing cache..."
+                detail: "Scanning existing cache...",
+                retry: { [weak self] in self?.relocateTranscodeCache(to: newPath) }
             )
             AppLogger.shared.info("Cache migration: Moving transcode cache from \(oldDir.path) to \(newDir.path)", source: "Sync")
             

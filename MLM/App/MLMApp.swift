@@ -1,5 +1,44 @@
 import SwiftUI
 
+/// Tracks custom key-held repeat timing for arrow-key seeking.
+///
+/// Owns two Tasks (delay + repeat) per arrow direction. All mutation
+/// happens on the MainActor because the class is @MainActor-isolated.
+@MainActor
+final class SeekHoldState {
+    private var delayTask: Task<Void, Never>?
+    private var repeatTask: Task<Void, Never>?
+
+    /// Begin the hold → repeat cascade for a given seek delta.
+    /// The first seek already fired on `.down`; after `delayMS` the
+    /// repeat task starts seeking every `repeatMS` until cancelled.
+    func startHold(delta: TimeInterval, seek: @escaping @Sendable (TimeInterval) async -> Void) {
+        cancelAll()
+        delayTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            await self?.beginRepeat(delta: delta, seek: seek)
+        }
+    }
+
+    /// Cancel any pending delay and repeat tasks.
+    func cancelAll() {
+        delayTask?.cancel()
+        repeatTask?.cancel()
+        delayTask = nil
+        repeatTask = nil
+    }
+
+    private func beginRepeat(delta: TimeInterval, seek: @escaping @Sendable (TimeInterval) async -> Void) {
+        repeatTask = Task {
+            while !Task.isCancelled {
+                await seek(delta)
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
+    }
+}
+
 /// MLM — Music Library Manager (macOS Native)
 ///
 /// Native SwiftUI rewrite of the Tauri-based Music Library Manager.
@@ -10,6 +49,9 @@ struct MLMApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     @State private var container = DependencyContainer.shared
+
+    /// Custom hold-to-repeat state for arrow-key seeking.
+    @State private var seekHold = SeekHoldState()
 
     /// Reads the sidebar selection from the focused window via FocusedValues.
     @FocusedBinding(\.selectedSection) private var selectedSection
@@ -22,6 +64,12 @@ struct MLMApp: App {
             ContentView()
                 .environment(container)
                 .frame(minWidth: 900, minHeight: 600)
+                .onKeyPress(.leftArrow, phases: [.down, .repeat, .up]) { press in
+                    handleSeekKey(phase: press.phase, delta: -5)
+                }
+                .onKeyPress(.rightArrow, phases: [.down, .repeat, .up]) { press in
+                    handleSeekKey(phase: press.phase, delta: 5)
+                }
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
@@ -77,6 +125,18 @@ struct MLMApp: App {
 
                 Divider()
 
+                Button("Previous Track") {
+                    Task { await playbackVM?.back() }
+                }
+                .disabled(playbackVM?.hasTrack != true)
+
+                Button("Next Track") {
+                    Task { await playbackVM?.next() }
+                }
+                .disabled(playbackVM?.hasTrack != true)
+
+                Divider()
+
                 Button("Skip Back 10s") {
                     if let vm = playbackVM {
                         let newPos = max(0, vm.currentPosition - 10)
@@ -103,7 +163,6 @@ struct MLMApp: App {
                         name: .searchCommandTriggered, object: nil
                     )
                 }
-                .keyboardShortcut("f")
 
                 Divider()
 
@@ -126,6 +185,43 @@ struct MLMApp: App {
             }
         }
 
+    }
+
+    // MARK: - Arrow-key seek (hold-to-repeat)
+
+    /// Handle left/right arrow key press phases for ±5 s seeking.
+    ///
+    /// - `.down`: seek once immediately, start a 500 ms delay task.
+    /// - `.repeat`: swallowed (`.handled`) — our own timer drives repeats.
+    /// - `.up`: cancel all pending tasks.
+    ///
+    /// Ignores presses when ⌘/⌥/⌃ are held (so ⌘← / ⌘→ menu items
+    /// still reach the system) and when no track is loaded.
+    private func handleSeekKey(phase: KeyPress.Phases, delta: TimeInterval) -> KeyPress.Result {
+        // Let modifier combos (⌘←, ⌥←, ⌃←) fall through to menu shortcuts.
+        if let event = NSApp.currentEvent {
+            let blocked: NSEvent.ModifierFlags = [.command, .option, .control]
+            if event.modifierFlags.intersection(blocked).isEmpty == false {
+                return .ignored
+            }
+        }
+
+        switch phase {
+        case .down:
+            playbackVM?.seekBy(delta)
+            seekHold.startHold(delta: delta) { [playbackVM] d in
+                await playbackVM?.seekBy(d)
+            }
+            return .handled
+        case .repeat:
+            // Swallow system auto-repeat — our Task-based timer drives repeats.
+            return .handled
+        case .up:
+            seekHold.cancelAll()
+            return .handled
+        default:
+            return .ignored
+        }
     }
 
     // MARK: - Menu Actions

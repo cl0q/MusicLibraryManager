@@ -61,4 +61,36 @@ struct TrackArtworkCacheTests {
         #expect(cache.image(forTrackId: 7, size: .small) === smallImage)
         #expect(cache.image(forTrackId: 7, size: .large) === largeImage)
     }
+
+    // MARK: - Negative cache clearing (Defect 3 fix)
+
+    @Test func testClearNegativeEntriesEmptiesMarksButKeepsImages() {
+        let cache = TrackArtworkCache()
+        let image = NSImage(size: NSSize(width: 64, height: 64))
+
+        // Populate both a cached image and a negative mark for different tracks.
+        cache.setImage(image, forTrackId: 100, size: .small)
+        cache.markNoArtwork(trackId: 200)
+
+        #expect(cache.isKnownNoArtwork(trackId: 200) == true,
+                "Precondition: track 200 should be marked as no-artwork")
+
+        cache.clearNegativeEntries()
+
+        // Negative marks cleared
+        #expect(cache.isKnownNoArtwork(trackId: 200) == false,
+                "clearNegativeEntries must empty the negative-cache set")
+
+        // Cached images preserved (not dropped)
+        #expect(cache.image(forTrackId: 100, size: .small) === image,
+                "clearNegativeEntries must NOT drop cached images")
+    }
+
+    @Test func testClearNegativeEntriesIsIdempotent() {
+        let cache = TrackArtworkCache()
+        cache.markNoArtwork(trackId: 1)
+        cache.clearNegativeEntries()
+        cache.clearNegativeEntries() // second call must not crash
+        #expect(cache.isKnownNoArtwork(trackId: 1) == false)
+    }
 }
