@@ -20,6 +20,11 @@ final class SyncViewModel {
     private(set) var lastResult: SyncService.SyncResult?
     private(set) var errorMessage: String?
 
+    // WP4 — Device ingest scan state
+    private(set) var deviceIngestPreviews: [(fileName: String, preview: IngestPreview)] = []
+    private(set) var isScanningDevice = false
+    private(set) var deviceScanError: String?
+
     // Loaded content for the selected profile (used by SyncContentSections)
     private(set) var profilePlaylists: [Playlist] = []
     private(set) var profileTracks: [Track] = []
@@ -28,6 +33,7 @@ final class SyncViewModel {
 
     private let syncRepository: SyncRepository
     let syncService: SyncService
+    private var ingestService: PlaylistIngestService?
     private var previewTask: Task<Void, Never>?
     private var previewRequest = UUID()
     private static let sqliteDateFormatter: DateFormatter = {
@@ -39,9 +45,15 @@ final class SyncViewModel {
     }()
     private static let relativeTimeFormatter = RelativeDateTimeFormatter()
 
-    init(syncRepository: SyncRepository, syncService: SyncService) {
+    init(syncRepository: SyncRepository, syncService: SyncService, ingestService: PlaylistIngestService? = nil) {
         self.syncRepository = syncRepository
         self.syncService = syncService
+        self.ingestService = ingestService
+    }
+
+    /// Set the ingest service after initialization (WP4 wiring).
+    func setIngestService(_ service: PlaylistIngestService?) {
+        self.ingestService = service
     }
 
     // MARK: - CRUD
@@ -80,7 +92,8 @@ final class SyncViewModel {
         generateM3U8: Bool = false,
         transcodeMode: String = "keep_originals",
         fat32SafePaths: Bool = true,
-        cleanupRemovedFiles: Bool = true
+        cleanupRemovedFiles: Bool = true,
+        artworkMode: String = "keep_original"
     ) async {
         errorMessage = nil
         do {
@@ -92,7 +105,8 @@ final class SyncViewModel {
                     generateM3U8: generateM3U8,
                     transcodeMode: transcodeMode,
                     fat32SafePaths: fat32SafePaths,
-                    cleanupRemovedFiles: cleanupRemovedFiles
+                    cleanupRemovedFiles: cleanupRemovedFiles,
+                    artworkMode: artworkMode
                 )
             }
             await loadProfiles()
@@ -437,7 +451,8 @@ final class SyncViewModel {
         cleanupRemovedFiles: Bool? = nil,
         playlistPathPrefix: String? = nil,
         playlistFormat: String? = nil,
-        normalizeLoudness: Bool? = nil
+        normalizeLoudness: Bool? = nil,
+        artworkMode: String? = nil
     ) async {
         guard let profileId = selectedProfile?.id else { return }
         do {
@@ -451,7 +466,8 @@ final class SyncViewModel {
                 fat32SafePaths: fat32SafePaths,
                 cleanupRemovedFiles: cleanupRemovedFiles,
                 playlistFormat: playlistFormat,
-                normalizeLoudness: normalizeLoudness
+                normalizeLoudness: normalizeLoudness,
+                artworkMode: artworkMode
             )
             await loadProfiles()
             // Refresh selectedProfile from the reloaded list to reflect updated fields
@@ -558,5 +574,117 @@ final class SyncViewModel {
         preview = currentPreview
         previewComputedAt = Date()
         isPreviewStale = false
+    }
+
+    // MARK: - WP4: Device Ingest Scan
+
+    /// Scan the profile's output folder for m3u8 files and build previews.
+    ///
+    /// For `.ios` profiles (spec §2), scans `<root>/Playlists/*.m3u8` first,
+    /// then falls back to root-level `*.m3u8` (legacy/loose files).
+    /// For rockbox/doppi, recursively walks the output folder.
+    ///
+    /// Populates `deviceIngestPreviews` with files that have changes.
+    @MainActor
+    func scanDeviceForPlaylistChanges(profile: SyncProfile) async {
+        guard let ingestService else {
+            deviceScanError = "Ingest service not available"
+            return
+        }
+        guard let profileId = profile.id else { return }
+
+        isScanningDevice = true
+        deviceScanError = nil
+        deviceIngestPreviews = []
+
+        let outputFolder = profile.outputFolder
+        guard FileManager.default.fileExists(atPath: outputFolder) else {
+            deviceScanError = "Device not connected — output folder not found"
+            isScanningDevice = false
+            return
+        }
+
+        let fm = FileManager.default
+        var results: [(fileName: String, preview: IngestPreview)] = []
+        var seenPaths = Set<String>()
+
+        // Collect candidate m3u8 URLs depending on profile format
+        var m3u8URLs: [(url: URL, displayName: String)] = []
+
+        if profile.playlistFormatEnum == .ios {
+            // Primary: <root>/Playlists/*.m3u8
+            let playlistsDir = SyncService.playlistsFolder(for: profile)
+            if let entries = try? fm.contentsOfDirectory(atPath: playlistsDir) {
+                for entry in entries where entry.hasSuffix(".m3u8") {
+                    let fullPath = (playlistsDir as NSString).appendingPathComponent(entry)
+                    m3u8URLs.append((URL(fileURLWithPath: fullPath), "Playlists/\(entry)"))
+                }
+            }
+            // Fallback: root-level *.m3u8 (legacy/loose files)
+            if let entries = try? fm.contentsOfDirectory(atPath: outputFolder) {
+                for entry in entries where entry.hasSuffix(".m3u8") {
+                    let fullPath = (outputFolder as NSString).appendingPathComponent(entry)
+                    m3u8URLs.append((URL(fileURLWithPath: fullPath), entry))
+                }
+            }
+        } else {
+            // Rockbox/Doppi: recursive walk
+            if let enumerator = fm.enumerator(atPath: outputFolder) {
+                for case let relativePath as String in enumerator {
+                    guard relativePath.hasSuffix(".m3u8") else { continue }
+                    let fullPath = (outputFolder as NSString).appendingPathComponent(relativePath)
+                    m3u8URLs.append((URL(fileURLWithPath: fullPath), relativePath))
+                }
+            }
+        }
+
+        for (url, displayName) in m3u8URLs {
+            guard !seenPaths.contains(url.path) else { continue }
+            seenPaths.insert(url.path)
+
+            do {
+                let ingestedPreview = try await ingestService.preview(url: url, profileId: profileId)
+                if !ingestedPreview.isEmpty || !ingestedPreview.unresolved.isEmpty {
+                    results.append((fileName: displayName, preview: ingestedPreview))
+                }
+            } catch {
+                AppLogger.shared.error(
+                    "Failed to preview \(displayName): \(error.localizedDescription)",
+                    source: "PlaylistIngest"
+                )
+            }
+        }
+
+        deviceIngestPreviews = results
+        isScanningDevice = false
+    }
+
+    /// Apply a single device ingest preview.
+    ///
+    /// - Parameters:
+    ///   - index: Index into `deviceIngestPreviews`
+    ///   - profile: The sync profile
+    /// - Returns: The target playlist ID on success
+    @MainActor
+    func applyDeviceIngest(at index: Int, profile: SyncProfile, fileURL: URL) async -> Int64? {
+        guard let ingestService, let profileId = profile.id else { return nil }
+        guard index >= 0, index < deviceIngestPreviews.count else { return nil }
+
+        do {
+            let result = try await ingestService.ingest(url: fileURL, profileId: profileId)
+            // Remove from the list after successful apply
+            deviceIngestPreviews.remove(at: index)
+            return result.playlistId
+        } catch {
+            deviceScanError = "Failed to apply \(deviceIngestPreviews[index].fileName): \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    /// Clear the device scan results.
+    @MainActor
+    func clearDeviceScanResults() {
+        deviceIngestPreviews = []
+        deviceScanError = nil
     }
 }

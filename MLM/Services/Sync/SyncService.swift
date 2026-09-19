@@ -17,6 +17,31 @@ final class SyncService {
     /// normalized exports feel as loud as streaming without clipping.
     static let loudnessTargetLUFS: Double = -14.0
 
+    // MARK: - iOS Layout Helpers (IOS_SIDECAR_PLAN §2)
+
+    /// The folder under which audio files are written for a profile.
+    ///
+    /// `.ios` profiles use a fixed layout with audio under `<root>/Music/`,
+    /// independent of `playlist_path_prefix`. Rockbox/Doppi write directly
+    /// into `<root>` (the profile output folder).
+    static func musicRootFolder(for profile: SyncProfile) -> String {
+        if profile.playlistFormatEnum == .ios {
+            return (profile.outputFolder as NSString).appendingPathComponent("Music")
+        }
+        return profile.outputFolder
+    }
+
+    /// The folder into which `.m3u8` playlist files are written.
+    ///
+    /// `.ios` profiles put playlists under `<root>/Playlists/`.
+    /// Rockbox/Doppi write them into `<root>` (the profile output folder).
+    static func playlistsFolder(for profile: SyncProfile) -> String {
+        if profile.playlistFormatEnum == .ios {
+            return (profile.outputFolder as NSString).appendingPathComponent("Playlists")
+        }
+        return profile.outputFolder
+    }
+
     // MARK: - Types
 
     struct PreviewResult {
@@ -223,7 +248,7 @@ final class SyncService {
                 let destPath = TranscodeCache.buildProfilePath(
                     track: track,
                     libraryRoot: libraryRoot,
-                    profileOutputFolder: profile.outputFolder,
+                    profileOutputFolder: Self.musicRootFolder(for: profile),
                     transcodeMode: profile.transcodeModeEnum
                 )
 
@@ -263,7 +288,7 @@ final class SyncService {
                 let destPath = TranscodeCache.buildProfilePath(
                     track: track,
                     libraryRoot: libraryRoot,
-                    profileOutputFolder: profile.outputFolder,
+                    profileOutputFolder: Self.musicRootFolder(for: profile),
                     transcodeMode: profile.transcodeModeEnum
                 )
                 preview.filesToRemove.append(FilePreview(
@@ -354,7 +379,7 @@ final class SyncService {
             let destination = TranscodeCache.buildProfilePath(
                 track: track,
                 libraryRoot: libraryRoot,
-                profileOutputFolder: profile.outputFolder,
+                profileOutputFolder: Self.musicRootFolder(for: profile),
                 transcodeMode: profile.transcodeModeEnum
             )
             guard FileManager.default.fileExists(atPath: destination.path) else { return nil }
@@ -549,10 +574,16 @@ final class SyncService {
             return max(-24.0, min(12.0, raw))
         }()
 
+        // WP-B: artwork resize only applies to AAC transcode modes.
+        // keepOriginals links the untouched library file with its full-size cover — deliberate.
+        let artworkMaxPx: Int? = profile.artworkModeEnum == .resize250 ? 250 : nil
+
         switch profile.transcodeModeEnum {
         case .keepOriginals:
             try await waitForSyncPermission()
-            // Bypass TranscodeCache — link original file directly (no transcode)
+            // Bypass TranscodeCache — link original file directly (no transcode).
+            // Artwork resize is deliberately NOT applied here: keepOriginals
+            // preserves the library file untouched including its full-size cover.
             if let organizedPath = track.organizedPath,
                let sourceURL = TranscodeCache.resolveSourceURL(sourcePath: organizedPath, libraryRoot: libraryRoot) {
                 let destURL = URL(fileURLWithPath: file.destinationPath)
@@ -577,6 +608,9 @@ final class SyncService {
                 }
                 // For keepOriginals, file is already at destURL — update sync state directly
                 if FileManager.default.fileExists(atPath: destURL.path) {
+                    // Embed mlm_uuid into the synced file (best-effort, never fails sync)
+                    await embedMlmUuid(track: track, destinationURL: destURL)
+
                     let checksum = try TranscodeCache.sha256(of: destURL)
                     let size = try FileManager.default.attributesOfItem(atPath: destURL.path)[.size] as? Int ?? 0
                     try await syncRepository.updateSyncState(
@@ -597,24 +631,33 @@ final class SyncService {
             }
         case .aac248:
             try await waitForSyncPermission()
-            cachedURL = try await transcodeCache.ensureCached(track: track, bitrateKbps: 248, libraryRoot: libraryRoot, normalizationGainDB: normalizationGainDB)
+            cachedURL = try await transcodeCache.ensureCached(track: track, bitrateKbps: 248, libraryRoot: libraryRoot, normalizationGainDB: normalizationGainDB, mlmUuid: track.mlmUuid, artworkMaxPx: artworkMaxPx)
         case .aac320:
             try await waitForSyncPermission()
-            cachedURL = try await transcodeCache.ensureCached(track: track, bitrateKbps: 320, libraryRoot: libraryRoot, normalizationGainDB: normalizationGainDB)
+            cachedURL = try await transcodeCache.ensureCached(track: track, bitrateKbps: 320, libraryRoot: libraryRoot, normalizationGainDB: normalizationGainDB, mlmUuid: track.mlmUuid, artworkMaxPx: artworkMaxPx)
         }
 
         // For aac248/aac320, link cached file to destination
         if profile.transcodeModeEnum != .keepOriginals {
             try await waitForSyncPermission()
             let bitrate: Int = profile.transcodeModeEnum == .aac320 ? 320 : 248
-            if let _ = cachedURL {
+            if let cachedURL {
                 let destURL = TranscodeCache.buildProfilePath(
                     track: track,
                     libraryRoot: libraryRoot,
-                    profileOutputFolder: profile.outputFolder,
+                    profileOutputFolder: Self.musicRootFolder(for: profile),
                     transcodeMode: profile.transcodeModeEnum
                 )
-                // Clean up any alternative extensions of the same track to prevent stale or duplicate files (e.g. old fake .m4a)
+
+                try transcodeCache.linkToProfile(
+                    trackId: file.trackId,
+                    bitrateKbps: bitrate,
+                    destinationPath: destURL,
+                    normalized: normalizationGainDB != nil,
+                    artworkMaxPx: artworkMaxPx
+                )
+
+                // linkToProfile succeeded — safe to remove alternative-extension siblings.
                 let stemURL = destURL.deletingPathExtension()
                 let alternativeExtensions = ["m4a", "mp3", "wav", "flac", "aac", "ogg"]
                 for ext in alternativeExtensions {
@@ -624,15 +667,13 @@ final class SyncService {
                     }
                 }
 
-                try transcodeCache.linkToProfile(
-                    trackId: file.trackId,
-                    bitrateKbps: bitrate,
-                    destinationPath: destURL,
-                    normalized: normalizationGainDB != nil
-                )
+                // UUID is already embedded into the cache file by ensureCached(mlmUuid:),
+                // so the hardlink/copy to the device carries the tag without a second
+                // ffmpeg pass on the device volume.
 
-                // Update sync state
-                let checksum = try TranscodeCache.sha256(of: destURL)
+                // Hash the local cache file (byte-identical to the device copy)
+                // to avoid reading the entire file back over USB 2.
+                let checksum = try TranscodeCache.sha256(of: cachedURL)
                 let size = try FileManager.default.attributesOfItem(atPath: destURL.path)[.size] as? Int ?? 0
 
                 try await syncRepository.updateSyncState(
@@ -704,7 +745,8 @@ final class SyncService {
             activityViewModel?.startOperation(
                 type: .sync,
                 title: "Sync: \(profile.name)",
-                detail: "0 / \(total)"
+                detail: "0 / \(total)",
+                retry: { [weak self] in _ = try? await self?.executeSync(profileId: profileId) }
             )
         }
 
@@ -752,7 +794,7 @@ final class SyncService {
         }
 
         // 2. Sync new files
-        let libraryRoot = try await configRepository.getLibraryRoot() ?? ""
+        let libraryRoot = try await finalisingOperationOnThrow(operationId) { try await configRepository.getLibraryRoot() ?? "" }
         let workerCount = syncTurboLevel.workerCount()
         AppLogger.shared.info(
             "Syncing new files: \(preview.filesToAdd.count) tracks with \(workerCount) workers (background processing: \(syncTurboLevel.displayName))",
@@ -839,7 +881,12 @@ final class SyncService {
 
         // 3. Generate M3U8 playlists (M3U8 gate — SYNC-v2-20)
         if profile.generateM3U8 && !result.wasCancelled {
-            try await generatePlaylists(profileId: profileId, profile: profile, libraryRoot: libraryRoot)
+            try await finalisingOperationOnThrow(operationId) { try await generatePlaylists(profileId: profileId, profile: profile, libraryRoot: libraryRoot) }
+        }
+
+        // 4. Write mlm-library.json manifest for iOS dialect profiles
+        if profile.playlistFormatEnum == .ios && !result.wasCancelled {
+            try await finalisingOperationOnThrow(operationId) { try await generateManifest(profileId: profileId, profile: profile, libraryRoot: libraryRoot) }
         }
 
         currentFile = ""
@@ -864,6 +911,24 @@ final class SyncService {
         return result
     }
 
+    /// Fails the Activity operation when `work` throws, then rethrows. Without this a throw between
+    /// registration and the finalisation block leaves the row permanently `.running` — the caller cannot
+    /// terminalise it because `operationId` is local to `executeSync`.
+    private func finalisingOperationOnThrow<T>(
+        _ operationId: UUID?,
+        _ work: () async throws -> T
+    ) async rethrows -> T {
+        do { return try await work() }
+        catch {
+            if let operationId {
+                await MainActor.run {
+                    self.activityViewModel?.failOperation(id: operationId, error: error.localizedDescription)
+                }
+            }
+            throw error
+        }
+    }
+
     // MARK: - Single-Track Retry (D-13 / SYNC-v2-17)
 
     /// Execute sync for a single track (for retry of failed tracks).
@@ -881,7 +946,7 @@ final class SyncService {
         let destinationPath = TranscodeCache.buildProfilePath(
             track: track,
             libraryRoot: libraryRoot,
-            profileOutputFolder: profile.outputFolder,
+            profileOutputFolder: Self.musicRootFolder(for: profile),
             transcodeMode: profile.transcodeModeEnum
         ).path
         let filePreview = FilePreview(
@@ -933,31 +998,39 @@ final class SyncService {
 
     // MARK: - M3U8 Generation
 
-    /// Generate playlist files for each playlist in the profile (Rockbox/Doppi).
+    /// Generate playlist files for each playlist in the profile (Rockbox/Doppi/iOS).
     private func generatePlaylists(profileId: Int64, profile: SyncProfile, libraryRoot: String) async throws {
         let playlists = try await syncRepository.fetchProfilePlaylists(profileId: profileId)
         let profileDir = URL(fileURLWithPath: profile.outputFolder)
+        let isIOS = profile.playlistFormatEnum == .ios
 
+        // For the iOS dialect, ensure stable UUIDs on every playlist and track before writing.
+        if isIOS {
+            try await ensureMlmUuids(playlists: playlists)
+        }
+
+        let playlistRepo = PlaylistRepository(database: syncRepository.databaseWriter)
+        var metadataMemo: [Int64: PlaylistTrackMemoEntry] = [:]
         for playlist in playlists {
-            let playlistRepo = PlaylistRepository(database: syncRepository.databaseWriter)
-            let tracks = try await playlistRepo.fetchTracks(playlistId: playlist.id!)
+            guard let playlistId = playlist.id else { continue }
+            let tracks = try await playlistRepo.fetchTracks(playlistId: playlistId)
 
             var m3u = "#EXTM3U\n"
+            if isIOS, let plUuid = playlist.mlmUuid {
+                m3u += "#EXTMLM-PLAYLIST:\(plUuid)\n"
+            }
+            // Collect snapshot entries for iOS dialect (WP3)
+            var snapshotEntries: [(uuid: String?, path: String)] = []
             for track in tracks {
                 let duration = track.duration ?? 0
                 let destPath = TranscodeCache.buildProfilePath(
                     track: track,
                     libraryRoot: libraryRoot,
-                    profileOutputFolder: profile.outputFolder,
+                    profileOutputFolder: Self.musicRootFolder(for: profile),
                     transcodeMode: profile.transcodeModeEnum
                 )
-                
-                // Only include track if it physically exists on the device destination (skipped or missing tracks are omitted)
-                let fileURL = URL(fileURLWithPath: destPath.path)
-                guard FileManager.default.fileExists(atPath: fileURL.path) else {
-                    continue
-                }
 
+                let fileURL = URL(fileURLWithPath: destPath.path)
                 let isDoppi = profile.playlistFormatEnum == .doppi
 
                 // Make path relative to profile root or absolute depending on format
@@ -985,8 +1058,13 @@ final class SyncService {
                         let prefix = profile.playlistPathPrefix
                         fullPath = prefix.isEmpty ? relativePath : "\(prefix)/\(relativePath)"
                     }
+                } else if isIOS {
+                    // iOS dialect: relative path from profile output root (includes Music/ prefix),
+                    // no leading slash, independent of playlist_path_prefix (spec §2).
+                    let relativePath = destPath.path.replacingOccurrences(of: profileDir.path + "/", with: "")
+                    fullPath = relativePath
                 } else {
-                    // Doppi or other formats: relative to output folder with a leading slash
+                    // Doppi: relative to output folder with a leading slash
                     let relativePath = destPath.path.replacingOccurrences(of: profileDir.path + "/", with: "")
                     let prefix = profile.playlistPathPrefix
                     fullPath = prefix.isEmpty ? relativePath : "\(prefix)/\(relativePath)"
@@ -995,58 +1073,84 @@ final class SyncService {
                     }
                 }
 
-                // For Doppi matching and Rockbox presentation, extract the original mixed-case
-                // metadata tags directly from the synced file itself, rather than relying on
-                // the database values which are entirely normalized to lowercase.
-                var artist = track.artist
-                var title = track.title
-                var albumArtist: String? = nil
-                
-                let asset = AVAsset(url: fileURL)
-                if let commonItems = try? await asset.load(.commonMetadata) {
-                    for item in commonItems {
-                        if item.commonKey == .commonKeyArtist {
-                            if let val = try? await item.load(.stringValue),
-                               !val.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty {
-                                artist = val.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-                            }
-                        } else if item.commonKey == .commonKeyTitle {
-                            if let val = try? await item.load(.stringValue),
-                               !val.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty {
-                                title = val.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+                let loadMetadata: () async throws -> PlaylistTrackMemoEntry = {
+                    // Only include track if it physically exists on the device destination (skipped or missing tracks are omitted)
+                    guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                        return PlaylistTrackMemoEntry(exists: false, artist: track.artist, title: track.title, albumArtist: nil)
+                    }
+
+                    // For Doppi matching and Rockbox presentation, extract the original mixed-case
+                    // metadata tags directly from the synced file itself, rather than relying on
+                    // the database values which are entirely normalized to lowercase.
+                    var artist = track.artist
+                    var title = track.title
+                    var albumArtist: String? = nil
+
+                    let asset = AVAsset(url: fileURL)
+                    if let commonItems = try? await asset.load(.commonMetadata) {
+                        for item in commonItems {
+                            if item.commonKey == .commonKeyArtist {
+                                if let val = try? await item.load(.stringValue),
+                                   !val.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty {
+                                    artist = val.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+                                }
+                            } else if item.commonKey == .commonKeyTitle {
+                                if let val = try? await item.load(.stringValue),
+                                   !val.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty {
+                                    title = val.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+                                }
                             }
                         }
                     }
+
+                    // Load album artist from iTunes/ID3 format-specific metadata to match Doppi's grouping preferences
+                    if let allItems = try? await asset.load(.metadata) {
+                        let itunesAlbumArtists = AVMetadataItem.metadataItems(from: allItems, filteredByIdentifier: .iTunesMetadataAlbumArtist)
+                        let id3Bands = AVMetadataItem.metadataItems(from: allItems, filteredByIdentifier: .id3MetadataBand)
+                        if let rawAlbumArtist = itunesAlbumArtists.first?.stringValue ?? id3Bands.first?.stringValue,
+                           !rawAlbumArtist.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty {
+                            albumArtist = rawAlbumArtist.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+                        }
+                    }
+
+                    // Casing fallback for title: if title is still the lowercase track.title and matches the file's name stem,
+                    // we can use the capitalized filename stem as a high-quality fallback!
+                    if title == track.title {
+                        let fileStem = fileURL.deletingPathExtension().lastPathComponent
+                        if fileStem.lowercased() == track.title.lowercased() {
+                            title = fileStem
+                        }
+                    }
+
+                    return PlaylistTrackMemoEntry(exists: true, artist: artist, title: title, albumArtist: albumArtist)
                 }
 
-                // Load album artist from iTunes/ID3 format-specific metadata to match Doppi's grouping preferences
-                if let allItems = try? await asset.load(.metadata) {
-                    let itunesAlbumArtists = AVMetadataItem.metadataItems(from: allItems, filteredByIdentifier: .iTunesMetadataAlbumArtist)
-                    let id3Bands = AVMetadataItem.metadataItems(from: allItems, filteredByIdentifier: .id3MetadataBand)
-                    if let rawAlbumArtist = itunesAlbumArtists.first?.stringValue ?? id3Bands.first?.stringValue,
-                       !rawAlbumArtist.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty {
-                        albumArtist = rawAlbumArtist.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-                    }
+                let memoEntry: PlaylistTrackMemoEntry
+                if let trackId = track.id {
+                    memoEntry = try await SyncService.memoizedMetadata(key: trackId, in: &metadataMemo, loader: loadMetadata)
+                } else {
+                    memoEntry = try await loadMetadata()
                 }
-                
-                // Casing fallback for title: if title is still the lowercase track.title and matches the file's name stem,
-                // we can use the capitalized filename stem as a high-quality fallback!
-                if title == track.title {
-                    let fileStem = fileURL.deletingPathExtension().lastPathComponent
-                    if fileStem.lowercased() == track.title.lowercased() {
-                        title = fileStem
-                    }
-                }
-                
-                let displayArtist = isDoppi ? (albumArtist ?? artist) : artist
+
+                // Only include track if it physically exists on the device destination (skipped or missing tracks are omitted)
+                guard memoEntry.exists else { continue }
+
+                let displayArtist = isDoppi ? (memoEntry.albumArtist ?? memoEntry.artist) : memoEntry.artist
                 let infoString: String
                 if isDoppi {
-                    infoString = displayArtist.isEmpty ? title : "\(title) - \(displayArtist)"
+                    infoString = displayArtist.isEmpty ? memoEntry.title : "\(memoEntry.title) - \(displayArtist)"
                 } else {
-                    infoString = artist.isEmpty ? title : "\(artist) - \(title)"
+                    infoString = memoEntry.artist.isEmpty ? memoEntry.title : "\(memoEntry.artist) - \(memoEntry.title)"
                 }
                 m3u += "#EXTINF:\(duration),\(infoString)\n"
+                if isIOS, let trackUuid = track.mlmUuid {
+                    m3u += "#EXTMLM:\(trackUuid)\n"
+                }
                 m3u += "\(fullPath)\n"
+                // Record for snapshot (iOS dialect only)
+                if isIOS {
+                    snapshotEntries.append((uuid: track.mlmUuid, path: fullPath))
+                }
             }
 
             // Apply precomposed NFC Unicode normalization to the entire playlist contents
@@ -1056,10 +1160,164 @@ final class SyncService {
             let isDoppi = profile.playlistFormatEnum == .doppi
             let extensionStr = isDoppi ? ".m3u" : ".m3u8"
             let playlistName = PathSanitizer.sanitizeComponent(playlist.name) + extensionStr
-            let playlistPath = profileDir.appendingPathComponent(playlistName)
-            
+            // iOS dialect writes playlists into <root>/Playlists/ (spec §2);
+            // Rockbox/Doppi write into the profile output folder directly.
+            let playlistDirURL = URL(fileURLWithPath: Self.playlistsFolder(for: profile))
+            try? FileManager.default.createDirectory(at: playlistDirURL, withIntermediateDirectories: true)
+            let playlistPath = playlistDirURL.appendingPathComponent(playlistName)
+
             try normalizedM3U.write(to: playlistPath, atomically: true, encoding: .utf8)
+
+            // Persist snapshot for iOS dialect (WP3) — enables ingest diff
+            if isIOS, let playlistId = playlist.id {
+                let snapshotJson: [[String: String?]] = snapshotEntries.map {
+                    ["uuid": $0.uuid, "path": $0.path]
+                }
+                let data = try JSONSerialization.data(withJSONObject: snapshotJson)
+                let json = String(data: data, encoding: .utf8) ?? "[]"
+                try await syncRepository.databaseWriter.write { db in
+                    try db.execute(
+                        sql: "DELETE FROM playlist_sync_snapshots WHERE profile_id = ? AND playlist_id = ?",
+                        arguments: [profileId, playlistId]
+                    )
+                    try db.execute(
+                        sql: """
+                            INSERT INTO playlist_sync_snapshots (profile_id, playlist_id, playlist_uuid, snapshot_json, written_at)
+                            VALUES (?, ?, ?, ?, datetime('now'))
+                            """,
+                        arguments: [profileId, playlistId, playlist.mlmUuid, json]
+                    )
+                }
+            }
         }
+    }
+
+    // MARK: - iOS UUID Ensuring
+
+    /// Ensure every playlist and its tracks have stable `mlm_uuid` values, persisting any newly generated ones.
+    private func ensureMlmUuids(playlists: [Playlist]) async throws {
+        var updatedPlaylists: [Playlist] = []
+        var updatedTracks: [Track] = []
+        let playlistRepo = PlaylistRepository(database: syncRepository.databaseWriter)
+
+        for var playlist in playlists {
+            guard let playlistId = playlist.id else { continue }
+            let tracks = try await playlistRepo.fetchTracks(playlistId: playlistId)
+
+            if playlist.ensureMlmUuid() {
+                updatedPlaylists.append(playlist)
+            }
+            for var track in tracks {
+                if track.ensureMlmUuid() {
+                    updatedTracks.append(track)
+                }
+            }
+        }
+
+        // Persist all newly assigned UUIDs in a single write transaction
+        if !updatedPlaylists.isEmpty || !updatedTracks.isEmpty {
+            try await syncRepository.databaseWriter.write { db in
+                for var pl in updatedPlaylists {
+                    try pl.update(db)
+                }
+                for var tr in updatedTracks {
+                    tr.searchText = DatabaseManager.foldedSearchText(tr.rawSearchText)
+                    try tr.update(db)
+                }
+            }
+        }
+    }
+
+    // MARK: - iOS Manifest
+
+    /// Write `mlm-library.json` into the profile output root (iOS dialect, spec §3).
+    ///
+    /// Collects all profile tracks whose destination file physically exists,
+    /// plus all profile playlists with their generated filenames.
+    func generateManifest(profileId: Int64, profile: SyncProfile, libraryRoot: String) async throws {
+        let profileDir = URL(fileURLWithPath: profile.outputFolder)
+        let musicRoot = URL(fileURLWithPath: Self.musicRootFolder(for: profile))
+
+        // Resolve profile track set (manual + rules)
+        let rules = try await syncRepository.fetchProfileRules(profileId: profileId)
+        let trackIds = try await trackRepository.fetchTrackIdsForSyncProfile(profileId: profileId, rules: rules)
+        let allTracks = try await trackRepository.fetchTracks(ids: trackIds)
+
+        // Ensure UUIDs for manifest tracks
+        var tracksNeedingPersist: [Track] = []
+        var manifestTracks: [ManifestTrack] = []
+        for var track in allTracks {
+            let destPath = TranscodeCache.buildProfilePath(
+                track: track,
+                libraryRoot: libraryRoot,
+                profileOutputFolder: Self.musicRootFolder(for: profile),
+                transcodeMode: profile.transcodeModeEnum
+            )
+            let fileURL = URL(fileURLWithPath: destPath.path)
+            guard FileManager.default.fileExists(atPath: fileURL.path) else { continue }
+
+            if track.ensureMlmUuid() {
+                tracksNeedingPersist.append(track)
+            }
+            guard let uuid = track.mlmUuid else { continue }
+
+            // Manifest `path` is relative to the music root (spec §3):
+            // for .ios profiles this strips the Music/ prefix; for rockbox/doppi
+            // musicRoot == profileDir so the behaviour is unchanged.
+            let relativePath = destPath.path.replacingOccurrences(of: musicRoot.path + "/", with: "")
+            manifestTracks.append(ManifestTrack(
+                uuid: uuid,
+                title: track.title,
+                artist: track.artist,
+                albumArtist: track.albumArtist,
+                album: track.album,
+                duration: track.duration ?? 0,
+                path: relativePath,
+                energyBucket: track.energyBucket,
+                lufsI: track.lufsI
+            ))
+        }
+
+        // Persist any newly generated track UUIDs
+        if !tracksNeedingPersist.isEmpty {
+            try await syncRepository.databaseWriter.write { db in
+                for var tr in tracksNeedingPersist {
+                    tr.searchText = DatabaseManager.foldedSearchText(tr.rawSearchText)
+                    try tr.update(db)
+                }
+            }
+        }
+
+        // Resolve playlists
+        let playlists = try await syncRepository.fetchProfilePlaylists(profileId: profileId)
+        if playlists.contains(where: { $0.mlmUuid == nil }) {
+            try await ensureMlmUuids(playlists: playlists)
+        }
+        // Re-fetch after potential UUID persistence
+        let freshPlaylists = try await syncRepository.fetchProfilePlaylists(profileId: profileId)
+        let manifestPlaylists: [ManifestPlaylist] = freshPlaylists.map { pl in
+            let extStr = ".m3u8"
+            let filename = PathSanitizer.sanitizeComponent(pl.name) + extStr
+            return ManifestPlaylist(
+                uuid: pl.mlmUuid ?? "",
+                name: pl.name,
+                file: filename
+            )
+        }
+
+        let manifest = LibraryManifest(
+            schema: 1,
+            profile: profile.name,
+            generatedAt: ISO8601DateFormatter().string(from: Date()),
+            tracks: manifestTracks,
+            playlists: manifestPlaylists
+        )
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(manifest)
+        let manifestURL = profileDir.appendingPathComponent("mlm-library.json")
+        try data.write(to: manifestURL)
     }
 
     // MARK: - Helpers
@@ -1099,5 +1357,268 @@ final class SyncService {
             return "The destination is not writable"
         }
         return "Could not sync this track"
+    }
+
+    // MARK: - MLM UUID tag embedding
+
+    /// Re-mux `sourceURL` into `scratchOutput`, stamping the MLM UUID tag (and faststart).
+    ///
+    /// Owns the extension switch, ffmpeg-missing warning, existing-comment read,
+    /// arg construction, ProcessRunner invocation, and scratch-output cleanup on
+    /// failure. Both `embedMlmUuid(track:destinationURL:)` and
+    /// `TranscodeCache.embedMlmUuidIntoCacheIfNeeded` funnel through this helper
+    /// so the embed logic lives in exactly one place.
+    ///
+    /// Returns true when ffmpeg succeeded and `scratchOutput` is readable.
+    /// On failure `scratchOutput` is removed if it exists.
+    static func embedMlmUuid(uuid: String, sourceURL: URL, scratchOutput: URL) async -> Bool {
+        let ext = sourceURL.pathExtension.lowercased()
+
+        // Read existing comment before building args (m4a/aac/mp4 preserve user comment)
+        let existingComment: String?
+        switch ext {
+        case "m4a", "aac", "mp4":
+            existingComment = await readExistingComment(url: sourceURL)
+        default:
+            existingComment = nil
+        }
+
+        guard let ffmpeg = ProcessRunner.findExecutable("ffmpeg") else {
+            AppLogger.shared.warn(
+                "embedMlmUuid: ffmpeg not found; skipping tag embed for \(sourceURL.lastPathComponent)",
+                source: "Sync"
+            )
+            return false
+        }
+
+        guard let args = embedMlmUuidArguments(
+            uuid: uuid,
+            inputPath: sourceURL.path,
+            outputPath: scratchOutput.path,
+            fileExtension: ext,
+            existingComment: existingComment
+        ) else {
+            AppLogger.shared.debug(
+                "embedMlmUuid: skipping unsupported format '\(ext)' for \(sourceURL.lastPathComponent)",
+                source: "Sync"
+            )
+            return false
+        }
+
+        do {
+            let result = try await ProcessRunner.run(ffmpeg, arguments: args)
+            if result.isSuccess {
+                guard FileManager.default.fileExists(atPath: scratchOutput.path) else {
+                    AppLogger.shared.warn(
+                        "embedMlmUuid: ffmpeg reported success but output missing for \(sourceURL.lastPathComponent)",
+                        source: "Sync"
+                    )
+                    return false
+                }
+                return true
+            } else {
+                AppLogger.shared.warn(
+                    "embedMlmUuid: ffmpeg failed (exit \(result.exitCode)) for \(sourceURL.lastPathComponent): \(result.stderr.prefix(200))",
+                    source: "Sync"
+                )
+                try? FileManager.default.removeItem(at: scratchOutput)
+                return false
+            }
+        } catch {
+            AppLogger.shared.warn(
+                "embedMlmUuid: error embedding UUID for \(sourceURL.lastPathComponent): \(error.localizedDescription)",
+                source: "Sync"
+            )
+            try? FileManager.default.removeItem(at: scratchOutput)
+            return false
+        }
+    }
+
+    /// Embed the track's `mlm_uuid` into the destination file's metadata.
+    ///
+    /// - mp3 → ID3 TXXX frame with description `MLM_UUID`
+    /// - m4a/aac/mp4 → `comment` field prefixed with `MLM_UUID:<uuid>`;
+    ///   any pre-existing user comment is preserved after a `|||` separator.
+    ///
+    /// Embedding failure NEVER fails the sync — errors are logged and ignored.
+    /// Uses ffmpeg's `-metadata` flag for formats it supports cleanly.
+    ///
+    /// Two-phase swap: ffmpeg writes to local scratch (avoids faststart second
+    /// pass on the slow device volume), then scratch is copied to a dot-prefixed
+    /// sibling temp on the destination volume, and only then is the destination
+    /// removed and the sibling renamed into place. If the sibling copy fails the
+    /// original destination is left completely untouched.
+    func embedMlmUuid(track: Track, destinationURL: URL) async {
+        guard let uuid = track.mlmUuid, !uuid.isEmpty else { return }
+        if await UuidTagIO.readMlmUuid(from: destinationURL) == uuid { return }
+
+        let ext = destinationURL.pathExtension.lowercased()
+
+        // Local scratch temp — ffmpeg's faststart second pass rewrites the entire
+        // output, so doing it locally avoids a full device-volume round-trip.
+        let scratchURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(".mlm_embed_\(UUID().uuidString).\(ext)")
+        defer { try? FileManager.default.removeItem(at: scratchURL) }
+
+        guard await Self.embedMlmUuid(uuid: uuid, sourceURL: destinationURL, scratchOutput: scratchURL) else {
+            return
+        }
+
+        // Copy scratch → sibling temp on the destination volume. The sibling
+        // must live on the same volume so the final rename is same-volume
+        // (effectively free) and the destination is never removed until the
+        // new bytes are safely there.
+        let destDir = destinationURL.deletingLastPathComponent()
+        let destName = destinationURL.lastPathComponent
+        let siblingURL = destDir.appendingPathComponent(".\(destName).mlm_swap_\(UUID().uuidString)")
+
+        do {
+            try FileManager.default.copyItem(at: scratchURL, to: siblingURL)
+        } catch {
+            AppLogger.shared.warn(
+                "embedMlmUuid: copy to destination volume failed for \(destName): \(error.localizedDescription)",
+                source: "Sync"
+            )
+            try? FileManager.default.removeItem(at: siblingURL)
+            return
+        }
+
+        // Bytes are on the destination volume — safe to remove+rename.
+        do {
+            try? FileManager.default.removeItem(at: destinationURL)
+            try FileManager.default.moveItem(at: siblingURL, to: destinationURL)
+            AppLogger.shared.debug(
+                "embedMlmUuid: embedded UUID into \(destName)",
+                source: "Sync"
+            )
+        } catch {
+            AppLogger.shared.error(
+                "embedMlmUuid: rename to destination failed for \(destName): \(error.localizedDescription) — attempting restore",
+                source: "Sync"
+            )
+            // Try to restore by moving the sibling back into place.
+            do {
+                try FileManager.default.moveItem(at: siblingURL, to: destinationURL)
+            } catch {
+                AppLogger.shared.error(
+                    "embedMlmUuid: restore also failed for \(destName): \(error.localizedDescription) — sibling temp left at \(siblingURL.lastPathComponent)",
+                    source: "Sync"
+                )
+            }
+        }
+    }
+
+    /// Read the existing `comment` tag from an audio file via ffprobe.
+    /// Returns nil on any failure (missing ffprobe, unreadable file, no comment).
+    static func readExistingComment(url: URL) async -> String? {
+        guard let ffprobe = ProcessRunner.findExecutable("ffprobe") else { return nil }
+        let args = [
+            "-v", "quiet",
+            "-show_entries", "format_tags=comment",
+            "-of", "csv=p=0",
+            url.path,
+        ]
+        do {
+            let result = try await ProcessRunner.run(ffprobe, arguments: args)
+            guard result.isSuccess else { return nil }
+            let trimmed = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        } catch {
+            return nil
+        }
+    }
+
+    /// Build the comment-field value that embeds `uuid` while preserving any
+    /// pre-existing user comment.
+    ///
+    /// - No existing comment → `MLM_UUID:<uuid>`
+    /// - Existing comment already starts with `MLM_UUID:` → replace the uuid
+    ///   portion (idempotent re-embed), keep anything after `|||`.
+    /// - Existing comment without our prefix → `MLM_UUID:<uuid>|||<existing>`
+    static func buildMlmComment(uuid: String, existingComment: String?) -> String {
+        guard let existing = existingComment, !existing.isEmpty else {
+            return "MLM_UUID:\(uuid)"
+        }
+        if existing.hasPrefix("MLM_UUID:") {
+            // Idempotent: replace the uuid portion, preserve anything after |||
+            if let separatorRange = existing.range(of: "|||") {
+                return "MLM_UUID:\(uuid)\(existing[separatorRange.lowerBound...])"
+            }
+            return "MLM_UUID:\(uuid)"
+        }
+        return "MLM_UUID:\(uuid)|||\(existing)"
+    }
+
+    /// Parse an MLM UUID out of a comment-field value written by `buildMlmComment`.
+    /// Returns nil if the comment does not carry our prefix.
+    static func parseMlmUuid(fromComment comment: String) -> String? {
+        guard comment.hasPrefix("MLM_UUID:") else { return nil }
+        let afterPrefix = comment.dropFirst("MLM_UUID:".count)
+        if let separatorIndex = afterPrefix.range(of: "|||")?.lowerBound {
+            let uuid = String(afterPrefix[..<separatorIndex])
+            return uuid.isEmpty ? nil : uuid
+        }
+        let uuid = String(afterPrefix)
+        return uuid.isEmpty ? nil : uuid
+    }
+
+    /// Build the ffmpeg arguments that would embed `mlm_uuid` into a file.
+    /// Exposed for testing the command construction without running ffmpeg.
+    ///
+    /// For m4a/aac/mp4, `existingComment` controls the comment-field value
+    /// (see `buildMlmComment`). Pass nil/empty for the simple case.
+    static func embedMlmUuidArguments(
+        uuid: String,
+        inputPath: String,
+        outputPath: String,
+        fileExtension: String,
+        existingComment: String? = nil
+    ) -> [String]? {
+        let metadataKey: String
+        let metadataValue: String
+        switch fileExtension.lowercased() {
+        case "mp3":
+            metadataKey = "TXXX:MLM_UUID"
+            metadataValue = uuid
+        case "m4a", "aac", "mp4":
+            metadataKey = "comment"
+            metadataValue = buildMlmComment(uuid: uuid, existingComment: existingComment)
+        default:
+            return nil
+        }
+        return [
+            "-y",
+            "-i", inputPath,
+            "-map", "0:a",
+            "-map", "0:v?",
+            "-c", "copy",
+            "-metadata", "\(metadataKey)=\(metadataValue)",
+            // Keep moov before mdat so players can start playback before the
+            // whole file is read. Harmless no-op on mp3/ADTS aac.
+            "-movflags", "+faststart",
+            outputPath,
+        ]
+    }
+
+    // MARK: - Playlist Metadata Memo
+
+    struct PlaylistTrackMemoEntry: Equatable {
+        let exists: Bool
+        let artist: String
+        let title: String
+        let albumArtist: String?
+    }
+
+    static func memoizedMetadata<K: Hashable>(
+        key: K,
+        in cache: inout [K: PlaylistTrackMemoEntry],
+        loader: () async throws -> PlaylistTrackMemoEntry
+    ) async rethrows -> PlaylistTrackMemoEntry {
+        if let cached = cache[key] {
+            return cached
+        }
+        let value = try await loader()
+        cache[key] = value
+        return value
     }
 }

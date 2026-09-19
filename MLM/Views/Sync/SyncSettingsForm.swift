@@ -18,6 +18,7 @@ struct SyncSettingsForm: View {
     @State private var localCleanup: Bool
     @State private var localPlaylistFormat: String
     @State private var localNormalizeLoudness: Bool
+    @State private var localArtworkMode: String
     @State private var localBackgroundProcessing: SyncTurboLevel
 
     init(profile: SyncProfile, vm: SyncViewModel) {
@@ -29,6 +30,7 @@ struct SyncSettingsForm: View {
         _localCleanup = State(initialValue: profile.cleanupRemovedFiles)
         _localPlaylistFormat = State(initialValue: profile.playlistFormat)
         _localNormalizeLoudness = State(initialValue: profile.normalizeLoudness)
+        _localArtworkMode = State(initialValue: profile.artworkMode)
         _localBackgroundProcessing = State(initialValue: vm.syncService.syncTurboLevel)
     }
 
@@ -92,6 +94,7 @@ struct SyncSettingsForm: View {
                                 content: Picker("", selection: $localPlaylistFormat) {
                                     Text("Rockbox").tag("rockbox")
                                     Text("Doppi").tag("doppi")
+                                    Text("iOS").tag("ios")
                                 }
                                 .pickerStyle(.segmented)
                                 .frame(width: 220)
@@ -135,6 +138,27 @@ struct SyncSettingsForm: View {
                         )
                         .onChange(of: localNormalizeLoudness) { _, newValue in
                             Task { await vm.updateProfileSettings(normalizeLoudness: newValue) }
+                        }
+
+                        Divider().background(Color.mlmEdgeSubtle)
+
+                        settingRow(
+                            icon: "photo",
+                            title: "Artwork",
+                            description: localTranscodeMode == "keep_originals"
+                                ? "No effect in Originals mode"
+                                : "Resize cover art for low-RAM players",
+                            content: Picker("", selection: $localArtworkMode) {
+                                Text("Original").tag("keep_original")
+                                Text("250 px").tag("resize_250")
+                            }
+                            .pickerStyle(.segmented)
+                            .frame(width: 180)
+                            .labelsHidden()
+                            .disabled(localTranscodeMode == "keep_originals")
+                        )
+                        .onChange(of: localArtworkMode) { _, newValue in
+                            Task { await vm.updateProfileSettings(artworkMode: newValue) }
                         }
 
                         Divider().background(Color.mlmEdgeSubtle)
@@ -205,6 +229,7 @@ struct SyncSettingsForm: View {
             localCleanup = profile.cleanupRemovedFiles
             localPlaylistFormat = profile.playlistFormat
             localNormalizeLoudness = profile.normalizeLoudness
+            localArtworkMode = profile.artworkMode
             localBackgroundProcessing = vm.syncService.syncTurboLevel
         }
     }

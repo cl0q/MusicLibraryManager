@@ -10,13 +10,17 @@ struct SyncContentSections: View {
     let profile: SyncProfile
     let vm: SyncViewModel
 
+    /// Hint pointing users at the library context-menu path for adding
+    /// individual tracks to a profile (replaces the old 12k-row picker sheet).
+    static let trackAddHint: String =
+        "Add individual tracks from the Library: right-click a track and choose Sync to ▸ your profile from the context menu."
+
     @State private var playlistsExpanded: Bool = false
     @State private var tracksExpanded: Bool = false
     @State private var hoveredPlaylistId: Int64? = nil
     @State private var hoveredTrackId: Int64? = nil
-    
+
     @State private var showPlaylistPicker = false
-    @State private var showTrackPicker = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -126,28 +130,17 @@ struct SyncContentSections: View {
                                 .frame(width: 24, height: 24)
                                 .background(Color.mlmAccent.opacity(0.1))
                                 .cornerRadius(6)
-                            
+
                             Text("Tracks (\(vm.profileTracks.count))")
                                 .font(MLMFont.bodyBold)
                                 .foregroundColor(.mlmInk)
-                            
+
                             Spacer()
                         }
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    
-                    // Direct Action Add Button
-                    Button {
-                        showTrackPicker = true
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 16))
-                            .foregroundColor(.mlmAccent)
-                            .padding(.horizontal, 8)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Add tracks…")
+                    .help(SyncContentSections.trackAddHint)
 
                     // Expand Chevron
                     Button {
@@ -174,7 +167,7 @@ struct SyncContentSections: View {
                             .padding(.bottom, 6)
                         
                         if vm.profileTracks.isEmpty {
-                            Text("No tracks — select the plus button to add tracks")
+                            Text("No tracks — \(SyncContentSections.trackAddHint)")
                                 .font(MLMFont.muted)
                                 .foregroundColor(.mlmInkMuted)
                                 .padding(.horizontal, 16)
@@ -202,9 +195,6 @@ struct SyncContentSections: View {
         }
         .sheet(isPresented: $showPlaylistPicker) {
             PlaylistPickerSheet(vm: vm)
-        }
-        .sheet(isPresented: $showTrackPicker) {
-            TrackPickerSheet(vm: vm)
         }
     }
 

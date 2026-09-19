@@ -42,9 +42,13 @@ final class TranscodeCache: @unchecked Sendable {
     /// Examples: `{trackId}_248.m4a`, `{trackId}_320.m4a`
     /// When `normalized` is true a `_norm` marker keeps loudness-normalized
     /// exports from colliding with the plain transcode of the same track.
-    func cachePath(trackId: Int64, bitrateKbps: Int, normalized: Bool = false) -> URL {
-        // Filename pattern: {trackId}_{bitrateKbps}[_norm].m4a  e.g. 42_248.m4a or 42_248_norm.m4a
-        let suffix = normalized ? "_norm" : ""
+    /// When `artworkMaxPx` is non-nil an `_art<px>` suffix keeps resized-cover
+    /// entries separate from full-art entries (no cache migration needed).
+    func cachePath(trackId: Int64, bitrateKbps: Int, normalized: Bool = false, artworkMaxPx: Int? = nil) -> URL {
+        var suffix = normalized ? "_norm" : ""
+        if let px = artworkMaxPx {
+            suffix += "_art\(px)"
+        }
         return cacheDir.appendingPathComponent("\(trackId)_\(bitrateKbps)\(suffix).m4a")
     }
 
@@ -66,13 +70,18 @@ final class TranscodeCache: @unchecked Sendable {
     /// - Parameter bitrateKbps: Target AAC bitrate in kbps. Defaults to 248 for back-compat.
     /// - Parameter normalizationGainDB: When non-nil, a loudness gain (dB) is
     ///   baked into the exported audio and the cache entry is `_norm`-suffixed.
-    func ensureCached(track: Track, bitrateKbps: Int = 248, libraryRoot: String? = nil, normalizationGainDB: Double? = nil) async throws -> URL? {
+    /// - Parameter mlmUuid: When non-nil, the cache file is tagged with this
+    ///   UUID after transcode/copy. Pre-existing untagged cache entries
+    ///   self-heal on the next sync without a cache-format migration.
+    /// - Parameter artworkMaxPx: When non-nil, embedded cover art is downscaled
+    ///   to fit within this many pixels. The cache entry is `_art<px>`-suffixed.
+    func ensureCached(track: Track, bitrateKbps: Int = 248, libraryRoot: String? = nil, normalizationGainDB: Double? = nil, mlmUuid: String? = nil, artworkMaxPx: Int? = nil) async throws -> URL? {
         guard let trackId = track.id else {
             AppLogger.shared.warn("ensureCached: track has no id", source: "Sync")
             return nil
         }
         let normalized = normalizationGainDB != nil
-        let cached = cachePath(trackId: trackId, bitrateKbps: bitrateKbps, normalized: normalized)
+        let cached = cachePath(trackId: trackId, bitrateKbps: bitrateKbps, normalized: normalized, artworkMaxPx: artworkMaxPx)
 
         // Check bitrate-suffixed cache entry
         if FileManager.default.fileExists(atPath: cached.path) {
@@ -81,6 +90,7 @@ final class TranscodeCache: @unchecked Sendable {
             if size > 0 {
                 // Self-healing: verify the cached .m4a file is a valid AAC/MP4 container, not a renamed MP3/FLAC
                 if await verifyCacheCodec(cached) {
+                    await embedMlmUuidIntoCacheIfNeeded(cached, mlmUuid: mlmUuid)
                     return cached
                 } else {
                     AppLogger.shared.warn(
@@ -128,7 +138,9 @@ final class TranscodeCache: @unchecked Sendable {
             return nil
         }
 
-        let targetName = "\(trackId)_\(bitrateKbps)\(normalized ? "_norm" : "").m4a"
+        var targetSuffix = normalized ? "_norm" : ""
+        if let px = artworkMaxPx { targetSuffix += "_art\(px)" }
+        let targetName = "\(trackId)_\(bitrateKbps)\(targetSuffix).m4a"
         let result = try await transcodeService.transcode(
             input: sourceURL,
             outputDir: cacheDir,
@@ -136,7 +148,8 @@ final class TranscodeCache: @unchecked Sendable {
             bitrateKbps: bitrateKbps,
             sourceFormat: track.format,
             sourceBitrate: track.bitrate,
-            normalizationGainDB: normalizationGainDB
+            normalizationGainDB: normalizationGainDB,
+            artworkMaxPx: artworkMaxPx
         )
 
         switch result {
@@ -146,6 +159,7 @@ final class TranscodeCache: @unchecked Sendable {
                 try? FileManager.default.removeItem(at: cached)
                 try FileManager.default.moveItem(at: url, to: cached)
             }
+            await embedMlmUuidIntoCacheIfNeeded(cached, mlmUuid: mlmUuid)
             return cached
         case .skipped(let reason):
             // Source is already lossy — copy to bitrate-suffixed cache path
@@ -155,6 +169,7 @@ final class TranscodeCache: @unchecked Sendable {
             )
             try? FileManager.default.removeItem(at: cached)
             try FileManager.default.copyItem(at: sourceURL, to: cached)
+            await embedMlmUuidIntoCacheIfNeeded(cached, mlmUuid: mlmUuid)
             return cached
         case .failed(let msg):
             AppLogger.shared.error(
@@ -192,6 +207,57 @@ final class TranscodeCache: @unchecked Sendable {
             }
         } catch {}
         return false
+    }
+
+    // MARK: - Cache UUID Tagging
+
+    /// Embed the MLM UUID into a cache file if it is not already tagged correctly.
+    ///
+    /// Uses `UuidTagIO.readMlmUuid` to check first so pre-existing untagged cache
+    /// entries self-heal on the next sync without a cache-format migration.
+    /// Cache files are always .m4a so the m4a branch of the embed applies.
+    ///
+    /// The ffmpeg scratch temp is created inside `cacheDir` (same volume as the
+    /// cache file, which may be user-relocated to another disk) so the faststart
+    /// second pass never crosses volumes. The swap uses `replaceItemAt` for an
+    /// atomic-ish rename; if anything fails the existing cache file survives
+    /// untouched and the temp is cleaned up.
+    private func embedMlmUuidIntoCacheIfNeeded(_ cacheFile: URL, mlmUuid: String?) async {
+        guard let uuid = mlmUuid, !uuid.isEmpty else { return }
+        let current = await UuidTagIO.readMlmUuid(from: cacheFile)
+        if current == uuid { return }
+
+        let ext = cacheFile.pathExtension.lowercased()
+        // Scratch temp lives inside cacheDir so ffmpeg's faststart second pass
+        // stays on the same volume as the cache file.
+        let scratchURL = cacheDir.appendingPathComponent(".mlm_cache_embed_\(UUID().uuidString).\(ext)")
+
+        guard await SyncService.embedMlmUuid(uuid: uuid, sourceURL: cacheFile, scratchOutput: scratchURL) else {
+            try? FileManager.default.removeItem(at: scratchURL)
+            return
+        }
+
+        // Atomic-ish swap: replaceItemAt moves scratch into place.
+        do {
+            _ = try FileManager.default.replaceItemAt(cacheFile, withItemAt: scratchURL)
+        } catch {
+            // Fallback: remove + move (replaceItemAt can fail on some volume types).
+            AppLogger.shared.warn(
+                "embedMlmUuidIntoCache: replaceItemAt failed for \(cacheFile.lastPathComponent): \(error.localizedDescription) — falling back to remove+move",
+                source: "Sync"
+            )
+            do {
+                try? FileManager.default.removeItem(at: cacheFile)
+                try FileManager.default.moveItem(at: scratchURL, to: cacheFile)
+            } catch {
+                AppLogger.shared.warn(
+                    "embedMlmUuidIntoCache: fallback swap also failed for \(cacheFile.lastPathComponent): \(error.localizedDescription)",
+                    source: "Sync"
+                )
+            }
+        }
+        // Harmless no-op after a successful replaceItemAt (scratch is already gone).
+        try? FileManager.default.removeItem(at: scratchURL)
     }
 
     // MARK: - Path Resolution
@@ -233,9 +299,9 @@ final class TranscodeCache: @unchecked Sendable {
     /// Uses hardlink first, falls back to copy for cross-filesystem.
     /// Looks up the bitrate-suffixed cache entry; falls back to the legacy
     /// non-suffixed path for back-compat with pre-Phase-38 cache entries.
-    func linkToProfile(trackId: Int64, bitrateKbps: Int, destinationPath: URL, normalized: Bool = false) throws {
+    func linkToProfile(trackId: Int64, bitrateKbps: Int, destinationPath: URL, normalized: Bool = false, artworkMaxPx: Int? = nil) throws {
         let cached: URL
-        let suffixed = cachePath(trackId: trackId, bitrateKbps: bitrateKbps, normalized: normalized)
+        let suffixed = cachePath(trackId: trackId, bitrateKbps: bitrateKbps, normalized: normalized, artworkMaxPx: artworkMaxPx)
         let legacy = cachePath(trackId: trackId)
         if FileManager.default.fileExists(atPath: suffixed.path) {
             cached = suffixed
@@ -250,20 +316,35 @@ final class TranscodeCache: @unchecked Sendable {
         }
 
         // Ensure parent directory exists
+        let destDir = destinationPath.deletingLastPathComponent()
         try FileManager.default.createDirectory(
-            at: destinationPath.deletingLastPathComponent(),
+            at: destDir,
             withIntermediateDirectories: true
         )
 
-        // Remove existing file at destination
-        try? FileManager.default.removeItem(at: destinationPath)
+        // Stage-then-swap: write to a temp on the same volume, then rename.
+        // The temp must live on the destination volume so the rename is atomic
+        // and cheap (no cross-volume copy). ASCII-safe name for FAT32.
+        let tempURL = destDir.appendingPathComponent(".mlm_ltp_\(UUID().uuidString)")
 
         do {
-            // Try hardlink first (same filesystem, instant, no disk space)
-            try FileManager.default.linkItem(at: cached, to: destinationPath)
+            do {
+                try FileManager.default.linkItem(at: cached, to: tempURL)
+            } catch {
+                try FileManager.default.copyItem(at: cached, to: tempURL)
+            }
         } catch {
-            // Fallback to copy (cross-filesystem) — common for iPod/FAT32 destinations
-            try FileManager.default.copyItem(at: cached, to: destinationPath)
+            try? FileManager.default.removeItem(at: tempURL)
+            throw error
+        }
+
+        // Temp is in place — safe to remove destination and rename.
+        do {
+            try? FileManager.default.removeItem(at: destinationPath)
+            try FileManager.default.moveItem(at: tempURL, to: destinationPath)
+        } catch {
+            try? FileManager.default.removeItem(at: tempURL)
+            throw error
         }
     }
 

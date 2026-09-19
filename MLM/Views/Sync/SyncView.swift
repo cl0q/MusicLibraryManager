@@ -18,8 +18,13 @@ struct SyncView: View {
     @State private var profilePendingRename: SyncProfile?
     @State private var renameDraft = ""
     @State private var showingRenameSheet = false
+    // WP4 — Device ingest scan
+    @State private var showingDeviceIngestSheet = false
+    @State private var deviceIngestProfile: SyncProfile?
 
     var body: some View {
+        // [navperf] temporary instrumentation — remove after measurement
+        let _ = print("[navperf] section-body sync \(Date().timeIntervalSince1970)")
         ZStack(alignment: .bottom) {
             Group {
                 if let vm = container.syncViewModel {
@@ -31,10 +36,14 @@ struct SyncView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .task {
+                        // [navperf] temporary instrumentation — remove after measurement
+                        print("[navperf] section-task-start sync \(Date().timeIntervalSince1970)")
                         // Refresh on first appear; subsequent re-mounts skip re-init
                         // because VM lives in the container.
                         if vm.profiles.isEmpty && !vm.isLoading {
                             await vm.loadProfiles()
+                            // [navperf] temporary instrumentation — remove after measurement
+                            print("[navperf] section-task-after-first-await sync \(Date().timeIntervalSince1970)")
                         }
                     }
                 } else {
@@ -61,6 +70,11 @@ struct SyncView: View {
             }
             .sheet(isPresented: $showingRenameSheet) {
                 renameProfileSheet
+            }
+            .sheet(isPresented: $showingDeviceIngestSheet) {
+                if let profile = deviceIngestProfile {
+                    DeviceIngestResultsView(profile: profile)
+                }
             }
 
             SyncToast(
@@ -126,6 +140,11 @@ struct SyncView: View {
                             }
                             Button("Duplicate") {
                                 Task { await vm.duplicateProfile(profile) }
+                            }
+                            Button("Read playlist changes from device…") {
+                                deviceIngestProfile = profile
+                                showingDeviceIngestSheet = true
+                                Task { await vm.scanDeviceForPlaylistChanges(profile: profile) }
                             }
                             Button("Delete…", role: .destructive) {
                                 profilePendingDeletion = profile
@@ -272,7 +291,8 @@ struct SyncView: View {
                             generateM3U8: applyDefaults ? true : false,
                             transcodeMode: applyDefaults ? "aac_248" : "keep_originals",
                             fat32SafePaths: true,
-                            cleanupRemovedFiles: true
+                            cleanupRemovedFiles: true,
+                            artworkMode: applyDefaults ? "resize_250" : "keep_original"
                         )
                         if vm.errorMessage == nil {
                             showCreateSheet = false
@@ -320,6 +340,7 @@ struct SyncView: View {
         .padding(24)
         .frame(width: 360)
     }
+
 }
 
 // MARK: - Profile Row
