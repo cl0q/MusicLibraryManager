@@ -251,9 +251,6 @@ struct ContentView: View {
                     .help("Universal Search — paste a URL to download")
                 }
             }
-            .sheet(isPresented: $showUniversalSearch) {
-                UniversalSearchView(onDismiss: { showUniversalSearch = false })
-            }
 
             // Separator
             Rectangle()
