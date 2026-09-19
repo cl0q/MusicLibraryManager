@@ -36,6 +36,8 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
     var albumId: Int64?
     var searchText: String?
     var playlistPosition: String? = nil
+    /// Stable UUID identity for iOS sidecar sync (lazy UUIDv4 uppercase string).
+    var mlmUuid: String? = nil
 
     static let databaseTableName = "tracks"
 
@@ -69,6 +71,7 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
         static let bpm = Column(CodingKeys.bpm)
         static let albumId = Column(CodingKeys.albumId)
         static let searchText = Column(CodingKeys.searchText)
+        static let mlmUuid = Column(CodingKeys.mlmUuid)
     }
 
     // MARK: - Snake case mapping
@@ -101,6 +104,7 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
         case albumId = "album_id"
         case searchText = "search_text"
         case playlistPosition = "playlist_position"
+        case mlmUuid = "mlm_uuid"
     }
 
     // MARK: - Computed Properties
@@ -146,6 +150,18 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
             if let organizedURL, fileExists(organizedURL) {
                 return .local
             }
+
+            // Fallback: stale organized_path rows from the old Tauri app may point
+            // at a location that no longer exists, while the original import path
+            // is still valid (mirrors PlaybackViewModel.loadAndPlay fallback).
+            if !originalPath.isEmpty {
+                let expanded = (originalPath as NSString).expandingTildeInPath
+                let originalURL = URL(fileURLWithPath: expanded)
+                if fileExists(originalURL) {
+                    return .local
+                }
+            }
+
             return .fileMissing
         }
 
@@ -210,6 +226,7 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
         container[Columns.bpm] = bpm
         container[Columns.albumId] = albumId
         container[Columns.searchText] = searchText
+        container[Columns.mlmUuid] = mlmUuid
     }
 
     mutating func didInsert(_ inserted: InsertionSuccess) {
@@ -317,6 +334,27 @@ extension Track {
         self.bpm = nil
         self.albumId = nil
         self.playlistPosition = nil
+        self.mlmUuid = nil
+    }
+}
+
+// MARK: - MLM UUID helpers
+
+extension Track {
+    /// Generate a fresh UUIDv4 uppercase string suitable for `mlm_uuid`.
+    static func generateMlmUuid() -> String {
+        UUID().uuidString.uppercased()
+    }
+
+    /// Ensure this track has an `mlm_uuid`; generate one lazily if missing.
+    /// Returns `true` if a new UUID was assigned.
+    @discardableResult
+    mutating func ensureMlmUuid() -> Bool {
+        if mlmUuid == nil {
+            mlmUuid = Track.generateMlmUuid()
+            return true
+        }
+        return false
     }
 }
 

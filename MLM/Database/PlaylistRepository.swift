@@ -7,6 +7,16 @@ import GRDB
 final class PlaylistRepository: Sendable {
     private let database: any DatabaseWriter
 
+    // Must match SQLite CURRENT_TIMESTAMP format (space-separated, no T/Z)
+    // because playlist_tracks.added_at is TEXT and sorted as a string.
+    private static let addedAtFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
     init(database: any DatabaseWriter) {
         self.database = database
     }
@@ -124,6 +134,19 @@ final class PlaylistRepository: Sendable {
         }
     }
 
+    /// Fetch the playlists that contain a given track, pinned first then
+    /// alphabetical — the same ordering `fetchAll()` uses.
+    func fetchPlaylists(forTrackId trackId: Int64) async throws -> [Playlist] {
+        try await database.read { db in
+            try Playlist.fetchAll(db, sql: """
+                SELECT p.* FROM playlists p
+                INNER JOIN playlist_tracks pt ON pt.playlist_id = p.id
+                WHERE pt.track_id = ?
+                ORDER BY p.is_pinned DESC, p.name
+            """, arguments: [trackId])
+        }
+    }
+
     /// Count tracks in a playlist.
     ///
     /// Joins `playlist_tracks` with `tracks` so the count matches what
@@ -197,7 +220,7 @@ final class PlaylistRepository: Sendable {
                 playlistId: playlistId,
                 trackId: trackId,
                 position: position,
-                addedAt: nil
+                addedAt: Self.addedAtFormatter.string(from: Date())
             )
             try entry.insert(db, onConflict: .ignore)
         }
@@ -216,7 +239,7 @@ final class PlaylistRepository: Sendable {
                     playlistId: playlistId,
                     trackId: trackId,
                     position: currentPos,
-                    addedAt: nil
+                    addedAt: Self.addedAtFormatter.string(from: Date())
                 )
                 try entry.insert(db, onConflict: .ignore)
             }
@@ -240,6 +263,40 @@ final class PlaylistRepository: Sendable {
                 sql: "UPDATE playlist_tracks SET position = ? WHERE playlist_id = ? AND track_id = ?",
                 arguments: [newPosition, playlistId, trackId]
             )
+        }
+    }
+
+    /// Persist fractional positions for several tracks in a single transaction.
+    ///
+    /// Members get their `position` updated; non-members get a new
+    /// `playlist_tracks` row inserted (with `added_at` left to its default).
+    /// The read-then-branch avoids depending on the unique constraint so it
+    /// also works on legacy databases where the constraint may be absent.
+    func placeTracks(playlistId: Int64, placements: [(trackId: Int64, position: String)]) async throws {
+        guard !placements.isEmpty else { return }
+        try await database.write { db in
+            let existingRows = try Row.fetchAll(db, sql: """
+                SELECT track_id FROM playlist_tracks WHERE playlist_id = ?
+            """, arguments: [playlistId])
+            let existingIDs = Set(existingRows.compactMap { $0["track_id"] as? Int64 })
+
+            for placement in placements {
+                if existingIDs.contains(placement.trackId) {
+                    try db.execute(
+                        sql: "UPDATE playlist_tracks SET position = ? WHERE playlist_id = ? AND track_id = ?",
+                        arguments: [placement.position, playlistId, placement.trackId]
+                    )
+                } else {
+                    var entry = PlaylistTrack(
+                        id: nil,
+                        playlistId: playlistId,
+                        trackId: placement.trackId,
+                        position: placement.position,
+                        addedAt: Self.addedAtFormatter.string(from: Date())
+                    )
+                    try entry.insert(db)
+                }
+            }
         }
     }
 
@@ -309,7 +366,8 @@ final class PlaylistRepository: Sendable {
                 coverImageUrl: nil,
                 sourceId: sourceId,
                 externalId: externalId,
-                dateCreated: ISO8601DateFormatter().string(from: Date())
+                dateCreated: ISO8601DateFormatter().string(from: Date()),
+                mlmUuid: nil
             )
             try playlist.insert(db)
             return playlist
@@ -424,7 +482,96 @@ final class PlaylistRepository: Sendable {
                 coverImageUrl: nil,
                 sourceId: sourceId,
                 externalId: externalId,
-                dateCreated: ISO8601DateFormatter().string(from: Date())
+                dateCreated: ISO8601DateFormatter().string(from: Date()),
+                mlmUuid: nil
+            )
+            try playlist.insert(db)
+            return playlist
+        }
+    }
+
+    /// Create (or reuse) the local playlist that mirrors a remote source playlist,
+    /// without ever clobbering an unrelated playlist that happens to share its name.
+    ///
+    /// - If a row already matches (sourceId, externalId) with isLiked == 0, that row IS
+    ///   this same remote playlist: reuse it (idempotent re-import), syncing its name to
+    ///   the upstream title only when the rename would not collide with another playlist.
+    /// - Otherwise insert a new row with category "synced", choosing the first free name
+    ///   by appending " 2", " 3", … so an existing same-named playlist is left untouched.
+    ///
+    /// Name uniqueness is checked case-insensitively across ALL playlists (any category,
+    /// including the liked playlist) because the UI shows one flat name space, and the
+    /// suffix loop is what keeps the UNIQUE(name, category) index satisfied instead of
+    /// adopting a clashing row.
+    @discardableResult
+    func createSourcePlaylistPreservingExisting(
+        name: String,
+        sourceId: Int64,
+        externalId: String
+    ) async throws -> Playlist {
+        try await database.write { db in
+            // Reuse branch: match on (sourceId, externalId, isLiked == 0).
+            if let existing = try Playlist
+                .filter(Playlist.Columns.sourceId == sourceId)
+                .filter(sql: "external_id = ?", arguments: [externalId])
+                .filter(Playlist.Columns.isLiked == 0)
+                .fetchOne(db)
+            {
+                // Sync the name to upstream only when the new name is free.
+                if existing.name != name, let id = existing.id {
+                    let collision = try Playlist
+                        .filter(sql: "LOWER(name) = LOWER(?)", arguments: [name])
+                        .fetchOne(db)
+                    if collision == nil {
+                        try db.execute(
+                            sql: "UPDATE playlists SET name = ? WHERE id = ?",
+                            arguments: [name, id]
+                        )
+                        if let updated = try Playlist.fetchOne(db, id: id) {
+                            return updated
+                        }
+                    }
+                }
+                return existing
+            }
+
+            // Insert branch: find the first free name.
+            let takenNames = try String.fetchAll(db, sql: "SELECT name FROM playlists")
+            let takenLower = Set(takenNames.map { $0.lowercased() })
+
+            let chosen: String
+            if !takenLower.contains(name.lowercased()) {
+                chosen = name
+            } else {
+                var found: String?
+                for suffix in 2...500 {
+                    let candidate = "\(name) \(suffix)"
+                    if !takenLower.contains(candidate.lowercased()) {
+                        found = candidate
+                        break
+                    }
+                }
+                guard let free = found else {
+                    throw PlaylistRepositoryError.noUniquePlaylistNameAvailable(name)
+                }
+                chosen = free
+            }
+
+            var playlist = Playlist(
+                id: nil,
+                name: chosen,
+                description: nil,
+                category: "synced",
+                isLiked: 0,
+                isSmart: 0,
+                isPinned: 0,
+                coverIsCustom: 0,
+                coverImagePath: nil,
+                coverImageUrl: nil,
+                sourceId: sourceId,
+                externalId: externalId,
+                dateCreated: ISO8601DateFormatter().string(from: Date()),
+                mlmUuid: nil
             )
             try playlist.insert(db)
             return playlist
@@ -450,21 +597,44 @@ final class PlaylistRepository: Sendable {
                     playlistId: playlistId,
                     trackId: trackId,
                     position: position,
-                    addedAt: nil
+                    addedAt: Self.addedAtFormatter.string(from: Date())
                 )
                 try entry.insert(db, onConflict: .ignore)
             }
+        }
+    }
+
+    // MARK: - iOS Sidecar Ingest Helpers (WP3)
+
+    /// Find a playlist by its stable `mlm_uuid`.
+    func findByMlmUuid(_ uuid: String) async throws -> Playlist? {
+        try await database.read { db in
+            try Playlist
+                .filter(Playlist.Columns.mlmUuid == uuid)
+                .fetchOne(db)
+        }
+    }
+
+    /// Find a playlist by exact name (case-insensitive).
+    func findByName(_ name: String) async throws -> Playlist? {
+        try await database.read { db in
+            try Playlist
+                .filter(sql: "LOWER(name) = LOWER(?)", arguments: [name])
+                .fetchOne(db)
         }
     }
 }
 
 enum PlaylistRepositoryError: LocalizedError {
     case cannotDeleteLikedPlaylist
+    case noUniquePlaylistNameAvailable(String)
 
     var errorDescription: String? {
         switch self {
         case .cannotDeleteLikedPlaylist:
             return "Cannot delete a synchronized 'Liked' playlist."
+        case .noUniquePlaylistNameAvailable(let baseName):
+            return "Could not find a free playlist name derived from '\(baseName)' after 499 suffixed attempts."
         }
     }
 }

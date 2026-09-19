@@ -14,6 +14,14 @@ enum TranscodeMode: String, CaseIterable {
 enum PlaylistFormat: String, CaseIterable, Codable {
     case rockbox = "rockbox"
     case doppi = "doppi"
+    case ios = "ios"
+}
+
+/// Per-profile artwork handling for AAC transcode (WP-B).
+/// `resize250` downscales embedded cover art to fit a 250×250 box.
+enum ArtworkMode: String, CaseIterable {
+    case keepOriginal = "keep_original"
+    case resize250 = "resize_250"
 }
 
 /// A device sync profile.
@@ -39,6 +47,10 @@ struct SyncProfile: Codable, FetchableRecord, MutablePersistableRecord, Identifi
     /// Only applies when transcodeMode != keepOriginals.
     var normalizeLoudness: Bool = false
 
+    /// Artwork handling for AAC transcode (WP-B).
+    /// `resize_250` downscales embedded cover art to fit a 250×250 box.
+    var artworkMode: String = "keep_original"
+
     /// Type-safe computed accessor. All consumers (SyncService, SyncSettingsForm, tests)
     /// use this for switch statements. DB writes always use `.rawValue` strings.
     var transcodeModeEnum: TranscodeMode {
@@ -48,6 +60,11 @@ struct SyncProfile: Codable, FetchableRecord, MutablePersistableRecord, Identifi
     /// Type-safe computed accessor for playlist format.
     var playlistFormatEnum: PlaylistFormat {
         PlaylistFormat(rawValue: playlistFormat) ?? .rockbox
+    }
+
+    /// Type-safe computed accessor for artwork mode.
+    var artworkModeEnum: ArtworkMode {
+        ArtworkMode(rawValue: artworkMode) ?? .keepOriginal
     }
 
     static let databaseTableName = "sync_profiles"
@@ -64,6 +81,7 @@ struct SyncProfile: Codable, FetchableRecord, MutablePersistableRecord, Identifi
         case cleanupRemovedFiles = "cleanup_removed_files"
         case playlistFormat = "playlist_format"
         case normalizeLoudness = "normalize_loudness"
+        case artworkMode = "artwork_mode"
     }
 
     enum Columns {
@@ -85,7 +103,8 @@ struct SyncProfile: Codable, FetchableRecord, MutablePersistableRecord, Identifi
         fat32SafePaths: Bool = true,
         cleanupRemovedFiles: Bool = true,
         playlistFormat: String = "rockbox",
-        normalizeLoudness: Bool = false
+        normalizeLoudness: Bool = false,
+        artworkMode: String = "keep_original"
     ) {
         self.id = id
         self.name = name
@@ -99,6 +118,7 @@ struct SyncProfile: Codable, FetchableRecord, MutablePersistableRecord, Identifi
         self.cleanupRemovedFiles = cleanupRemovedFiles
         self.playlistFormat = playlistFormat
         self.normalizeLoudness = normalizeLoudness
+        self.artworkMode = artworkMode
     }
 
     mutating func didInsert(_ inserted: InsertionSuccess) {
@@ -174,4 +194,55 @@ struct SyncState: Codable, FetchableRecord, PersistableRecord, Identifiable {
         case syncedSize = "synced_size"
         case syncedTimestamp = "synced_timestamp"
     }
+}
+
+// MARK: - iOS Library Manifest (spec §3)
+
+/// Top-level `mlm-library.json` structure written to the profile output root.
+struct LibraryManifest: Codable {
+    let schema: Int
+    let profile: String
+    let generatedAt: String
+    let tracks: [ManifestTrack]
+    let playlists: [ManifestPlaylist]
+
+    enum CodingKeys: String, CodingKey {
+        case schema
+        case profile
+        case generatedAt = "generated_at"
+        case tracks
+        case playlists
+    }
+}
+
+/// A track entry in the library manifest.
+struct ManifestTrack: Codable {
+    let uuid: String
+    let title: String
+    let artist: String
+    let albumArtist: String
+    let album: String
+    let duration: Int
+    let path: String
+    let energyBucket: Int?
+    let lufsI: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case uuid
+        case title
+        case artist
+        case albumArtist = "album_artist"
+        case album
+        case duration
+        case path
+        case energyBucket = "energy_bucket"
+        case lufsI = "lufs_i"
+    }
+}
+
+/// A playlist entry in the library manifest.
+struct ManifestPlaylist: Codable {
+    let uuid: String
+    let name: String
+    let file: String
 }

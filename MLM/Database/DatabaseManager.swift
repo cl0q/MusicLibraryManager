@@ -853,6 +853,62 @@ final class DatabaseManager: Sendable {
             try db.create(index: "idx_review_queue_group_key", on: "review_queue", columns: ["group_key"], options: .ifNotExists)
         }
 
+        // ──────────────────────────────────────────────────────────────
+        // Migration v35: stable UUID identity for iOS sidecar sync
+        // Adds nullable `mlm_uuid TEXT` to `tracks` and `playlists`.
+        // UUIDs are lazily generated (UUIDv4 uppercase) on first sync/export
+        // if unset; uniqueness enforced in code, not at the DB level.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v35_mlm_uuid") { db in
+            if try !db.columns(in: "tracks").contains(where: { $0.name == "mlm_uuid" }) {
+                try db.alter(table: "tracks") { table in
+                    table.add(column: "mlm_uuid", .text)
+                }
+            }
+            if try !db.columns(in: "playlists").contains(where: { $0.name == "mlm_uuid" }) {
+                try db.alter(table: "playlists") { table in
+                    table.add(column: "mlm_uuid", .text)
+                }
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        // Migration v36: playlist sync snapshots for iOS ingest diff (WP3)
+        // Stores the last-exported (or last-applied) ordered track list per
+        // (profile, playlist) so PlaylistIngestService can compute a 3-way
+        // diff (added / removed / reordered) against an incoming m3u8.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v36_playlist_sync_snapshots") { db in
+            try db.create(table: "playlist_sync_snapshots", options: .ifNotExists) { table in
+                table.autoIncrementedPrimaryKey("id")
+                table.column("profile_id", .integer).notNull()
+                table.column("playlist_id", .integer).notNull()
+                table.column("playlist_uuid", .text)
+                table.column("snapshot_json", .text).notNull()
+                table.column("written_at", .datetime).notNull().defaults(to: Date())
+            }
+            try db.create(
+                index: "idx_pss_profile_playlist",
+                on: "playlist_sync_snapshots",
+                columns: ["profile_id", "playlist_id"],
+                options: .ifNotExists
+            )
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        // Migration v37_artwork_mode: per-profile artwork resize (WP-B)
+        // Adds artwork_mode TEXT to sync_profiles. When set to 'resize_250'
+        // AAC transcode downscales embedded cover art to fit a 250×250 box
+        // for low-RAM players (e.g. iPod Video 5th gen running Rockbox).
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v37_artwork_mode") { db in
+            if try !db.columns(in: "sync_profiles").contains(where: { $0.name == "artwork_mode" }) {
+                try db.alter(table: "sync_profiles") { t in
+                    t.add(column: "artwork_mode", .text).notNull().defaults(to: "keep_original")
+                }
+            }
+        }
+
         // Reels are a resumable identification queue. This table is isolated
         // from tracks because importing a video must not create a music row.
         migrator.registerMigration("v34_imported_reels") { db in
@@ -865,6 +921,51 @@ final class DatabaseManager: Sendable {
                 table.column("updated_at", .datetime).notNull().defaults(to: Date())
             }
             try db.create(index: "idx_imported_reels_updated_at", on: "imported_reels", columns: ["updated_at"], options: .ifNotExists)
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        // Migration v38_track_index_hygiene: remove vestigial duplicate
+        // indexes left by the dropped Tauri predecessor and add missing
+        // indexes for SortColumn.danceability and SortColumn.format.
+        // Keeps idx_tracks_genre (only index on genre) and
+        // idx_organized_path_null (partial index, not a duplicate).
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v38_track_index_hygiene") { db in
+            try db.execute(sql: "DROP INDEX IF EXISTS idx_title")
+            try db.execute(sql: "DROP INDEX IF EXISTS idx_album")
+            try db.execute(sql: "DROP INDEX IF EXISTS idx_artist")
+            try db.execute(sql: "DROP INDEX IF EXISTS idx_tracks_album_id")
+            try db.execute(sql: "DROP INDEX IF EXISTS idx_duplicate")
+            try db.execute(sql: "DROP INDEX IF EXISTS idx_variant_of")
+            try db.create(indexOn: "tracks", columns: ["danceability"], options: .ifNotExists)
+            try db.create(indexOn: "tracks", columns: ["format"], options: .ifNotExists)
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        // Migration v39_sync_orphan_cleanup: remove child rows whose
+        // profile_id references a deleted sync_profile. These orphans
+        // accumulated because foreign-key enforcement was disabled on
+        // every connection, leaving ON DELETE CASCADE inert.
+        // Also cleans playlist_sync_snapshots (no FK declared but
+        // treated as profile-scoped by SyncRepository.delete).
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v39_sync_orphan_cleanup") { db in
+            let tables = [
+                "sync_state",
+                "sync_profile_tracks",
+                "sync_profile_playlists",
+                "sync_profile_rules",
+                "playlist_sync_snapshots",
+            ]
+            var totalDeleted: Int = 0
+            for table in tables {
+                try db.execute(sql: "DELETE FROM \(table) WHERE profile_id NOT IN (SELECT id FROM sync_profiles)")
+                let changes = db.changesCount
+                totalDeleted += changes
+            }
+            if totalDeleted > 0 {
+                AppLogger.shared.info("v39_sync_orphan_cleanup: removed \(totalDeleted) orphan sync rows", source: "Database")
+            }
         }
 
         return migrator

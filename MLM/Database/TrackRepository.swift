@@ -149,27 +149,40 @@ final class TrackRepository: Sendable {
         }
     }
 
-    /// Count remote tracks.
-    func countRemoteTracks() async throws -> Int {
+    func countTracksByAvailability() async throws -> (local: Int, remote: Int) {
         try await database.read { db in
-            try Track
-                .filter(Track.Columns.organizedPath == nil)
-                .fetchCount(db)
+            let sql = """
+                SELECT organized_path IS NOT NULL AS is_local, COUNT(*) AS cnt
+                FROM tracks
+                GROUP BY is_local
+            """
+            let rows = try Row.fetchAll(db, sql: sql)
+            var local = 0
+            var remote = 0
+            for row in rows {
+                let isLocal: Bool = row["is_local"]
+                let cnt: Int = row["cnt"]
+                if isLocal { local = cnt } else { remote = cnt }
+            }
+            return (local: local, remote: remote)
         }
     }
 
     /// Search tracks by title, artist, or album.
-    func search(query: String) async throws -> [Track] {
+    func search(query: String, limit: Int? = nil) async throws -> [Track] {
         let pattern = "%\(query)%"
         return try await database.read { db in
-            try Track
+            let request = Track
                 .filter(
                     Track.Columns.title.like(pattern) ||
                     Track.Columns.artist.like(pattern) ||
                     Track.Columns.album.like(pattern)
                 )
                 .order(Track.Columns.artist, Track.Columns.title)
-                .fetchAll(db)
+            if let limit {
+                return try request.limit(limit).fetchAll(db)
+            }
+            return try request.fetchAll(db)
         }
     }
 
@@ -742,23 +755,30 @@ final class TrackRepository: Sendable {
         }
     }
 
-    /// Fetch tracks that lack artwork.
+    /// Fetch tracks that lack artwork or whose cached artwork file is gone.
+    ///
+    /// Matches two disjoint sets:
+    /// - `a.track_id IS NULL` — no artwork row at all (never extracted).
+    /// - `a.source = 'missing'` — we had a cover, the cached file is gone
+    ///   (set by `ArtworkBackfillService.reconcileDanglingArtworkFiles()`).
     ///
     /// SCDL-08: this predicate is intentionally narrower than
     /// `fetchTracksEligibleForProviderArtwork()` below — it excludes tracks that
-    /// already have a sentinel artwork row (NULL `artwork_path`, e.g. `source =
-    /// "none"`). That sentinel exists so the embedded auto-backfill
+    /// already have a sentinel artwork row with `source = "none"` (NULL
+    /// `artwork_path`). That sentinel exists so the embedded auto-backfill
     /// (`ArtworkBackfillService`) does NOT re-run ffmpeg over the same art-less
-    /// tracks on every import. Do NOT widen this query to include sentinel rows —
-    /// doing so reintroduces the ffmpeg-storm regression (RESEARCH Pitfall 1).
-    /// Provider/MusicBrainz callers that need sentinel rows to stay eligible must
-    /// use `fetchTracksEligibleForProviderArtwork()` instead of modifying this one.
+    /// tracks on every import. Do NOT widen this query to include `'none'`
+    /// sentinel rows — doing so reintroduces the ffmpeg-storm regression
+    /// (RESEARCH Pitfall 1). Provider/MusicBrainz callers that need sentinel
+    /// rows to stay eligible must use
+    /// `fetchTracksEligibleForProviderArtwork()` instead of modifying this one.
     func fetchTracksWithoutArtwork() async throws -> [Track] {
         try await database.read { db in
             try Track.fetchAll(db, sql: """
                 SELECT t.* FROM tracks t
                 LEFT JOIN artwork a ON a.track_id = t.id
-                WHERE a.track_id IS NULL AND t.organized_path IS NOT NULL
+                WHERE (a.track_id IS NULL OR a.source = 'missing')
+                  AND t.organized_path IS NOT NULL
                 ORDER BY t.id
             """)
         }
@@ -923,6 +943,46 @@ final class TrackRepository: Sendable {
             }
 
             return tracks
+        }
+    }
+
+    // MARK: - iOS Sidecar Ingest Helpers (WP3)
+
+    /// Fetch a track by its stable `mlm_uuid` (iOS sidecar identity).
+    func fetchByMlmUuid(_ uuid: String) async throws -> Track? {
+        try await database.read { db in
+            try Track
+                .filter(Track.Columns.mlmUuid == uuid)
+                .fetchOne(db)
+        }
+    }
+
+    /// Shared filename-suffix matching helper (generalised from
+    /// `PlaylistDetailViewModel.findTrackByPath`).
+    ///
+    /// Given a relative or absolute path string, extracts the filename stem
+    /// and looks for a track whose `original_path` or `organized_path` ends
+    /// with the same filename (case-insensitive). Returns the first match.
+    ///
+    /// This lives in the repository layer so both `PlaylistIngestService`
+    /// (WP3) and `PlaylistDetailViewModel` (WP4) can share it.
+    func findTrackByFilename(path: String) async throws -> Track? {
+        let filename = URL(fileURLWithPath: path)
+            .deletingPathExtension()
+            .lastPathComponent
+            .lowercased()
+
+        guard !filename.isEmpty else { return nil }
+
+        let candidates = try await search(query: filename)
+        return candidates.first { track in
+            let originalMatch = track.originalPath.lowercased().hasSuffix(
+                URL(fileURLWithPath: path).lastPathComponent.lowercased()
+            )
+            let organizedMatch = track.organizedPath?.lowercased().hasSuffix(
+                URL(fileURLWithPath: path).lastPathComponent.lowercased()
+            ) ?? false
+            return originalMatch || organizedMatch
         }
     }
 
@@ -1304,20 +1364,31 @@ final class TrackRepository: Sendable {
                 ORDER BY l.date_added DESC
             """
             let rows = try Row.fetchAll(db, sql: sql)
-            var results: [(track: Track, log: TrackDiscoveryLog, seedTrack: Track?)] = []
-            
-            for row in rows {
-                let log = try TrackDiscoveryLog(row: row)
-                let track = try Track(row: row)
-                
-                var seedTrack: Track? = nil
-                if let seedId = log.seedTrackId {
-                    seedTrack = try Track.fetchOne(db, key: seedId)
-                }
-                
-                results.append((track, log, seedTrack))
+
+            let parsed: [(track: Track, log: TrackDiscoveryLog)] = try rows.map { row in
+                (try Track(row: row), try TrackDiscoveryLog(row: row))
             }
-            return results
+
+            let seedIds = Array(Set(parsed.compactMap { $0.log.seedTrackId }))
+
+            var seedMap: [Int64: Track] = [:]
+            if !seedIds.isEmpty {
+                let placeholders = Array(repeating: "?", count: seedIds.count).joined(separator: ", ")
+                let seedTracks = try Track.fetchAll(
+                    db,
+                    sql: "SELECT * FROM tracks WHERE id IN (\(placeholders))",
+                    arguments: StatementArguments(seedIds)
+                )
+                for track in seedTracks {
+                    if let id = track.id {
+                        seedMap[id] = track
+                    }
+                }
+            }
+
+            return parsed.map { track, log in
+                (track, log, log.seedTrackId.flatMap { seedMap[$0] })
+            }
         }
     }
     

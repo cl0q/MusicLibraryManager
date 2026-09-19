@@ -86,6 +86,46 @@ final class AnalysisRepository: Sendable {
         }
     }
 
+    /// Fetch all artwork rows that have a non-empty `artwork_path`.
+    ///
+    /// Used by `ArtworkBackfillService.reconcileDanglingArtworkFiles()` to detect
+    /// rows whose cached file no longer exists on disk.
+    func fetchAllArtworkPaths() async throws -> [(trackId: Int64, artworkPath: String)] {
+        try await database.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT track_id, artwork_path FROM artwork
+                WHERE artwork_path IS NOT NULL AND artwork_path <> ''
+            """)
+            return rows.map { row in
+                (trackId: row["track_id"] as Int64, artworkPath: row["artwork_path"] as String)
+            }
+        }
+    }
+
+    /// Mark artwork files as missing: clear `artwork_path` and `resolution`,
+    /// set `source = 'missing'`. Preserves `remote_url` and
+    /// `musicbrainz_release_group_id` so provider lookups still work.
+    ///
+    /// Batches the ids in chunks of 500 to avoid building one enormous statement.
+    func markArtworkFilesMissing(trackIds: [Int64]) async throws {
+        guard !trackIds.isEmpty else { return }
+        let chunkSize = 500
+        try await database.write { db in
+            for chunkStart in stride(from: 0, to: trackIds.count, by: chunkSize) {
+                let chunk = Array(trackIds[chunkStart..<min(chunkStart + chunkSize, trackIds.count)])
+                let placeholders = chunk.map { _ in "?" }.joined(separator: ", ")
+                try db.execute(
+                    sql: """
+                        UPDATE artwork
+                        SET artwork_path = NULL, resolution = NULL, source = 'missing'
+                        WHERE track_id IN (\(placeholders))
+                    """,
+                    arguments: StatementArguments(chunk)
+                )
+            }
+        }
+    }
+
     // MARK: - ReplayGain
 
     /// Fetch ReplayGain data for a track.

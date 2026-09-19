@@ -22,6 +22,8 @@ struct Playlist: Codable, FetchableRecord, MutablePersistableRecord, Identifiabl
     var sourceId: Int64?
     var externalId: String?
     var dateCreated: String?
+    /// Stable UUID identity for iOS sidecar sync (lazy UUIDv4 uppercase string).
+    var mlmUuid: String? = nil
 
     static let databaseTableName = "playlists"
 
@@ -36,6 +38,7 @@ struct Playlist: Codable, FetchableRecord, MutablePersistableRecord, Identifiabl
         case sourceId = "source_id"
         case externalId = "external_id"
         case dateCreated = "date_created"
+        case mlmUuid = "mlm_uuid"
     }
 
     enum Columns {
@@ -48,6 +51,7 @@ struct Playlist: Codable, FetchableRecord, MutablePersistableRecord, Identifiabl
         static let coverIsCustom = Column(CodingKeys.coverIsCustom)
         static let sourceId = Column(CodingKeys.sourceId)
         static let dateCreated = Column(CodingKeys.dateCreated)
+        static let mlmUuid = Column(CodingKeys.mlmUuid)
     }
 
     /// Whether this is a native (local-only) playlist.
@@ -57,6 +61,26 @@ struct Playlist: Codable, FetchableRecord, MutablePersistableRecord, Identifiabl
 
     mutating func didInsert(_ inserted: InsertionSuccess) {
         id = inserted.rowID
+    }
+}
+
+// MARK: - MLM UUID helpers
+
+extension Playlist {
+    /// Generate a fresh UUIDv4 uppercase string suitable for `mlm_uuid`.
+    static func generateMlmUuid() -> String {
+        UUID().uuidString.uppercased()
+    }
+
+    /// Ensure this playlist has an `mlm_uuid`; generate one lazily if missing.
+    /// Returns `true` if a new UUID was assigned.
+    @discardableResult
+    mutating func ensureMlmUuid() -> Bool {
+        if mlmUuid == nil {
+            mlmUuid = Playlist.generateMlmUuid()
+            return true
+        }
+        return false
     }
 }
 
@@ -197,7 +221,8 @@ extension Playlist {
             coverImageUrl: nil,
             sourceId: nil,
             externalId: nil,
-            dateCreated: nil
+            dateCreated: nil,
+            mlmUuid: nil
         )
     }
 }

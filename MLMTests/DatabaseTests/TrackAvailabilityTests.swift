@@ -21,6 +21,46 @@ struct TrackAvailabilityTests {
         #expect(!track.isRemote)
     }
 
+    @Test func staleOrganizedPathButExistingOriginalPathReturnsLocal() {
+        // Regression: old Tauri app rows may have a stale organized_path that no
+        // longer exists, while the original import path is still valid.
+        // availability() must mirror the PlaybackViewModel.loadAndPlay fallback.
+        var track = Track(
+            artist: "Artist",
+            album: "Album",
+            title: "Track",
+            format: "m4a",
+            originalPath: "/Users/music/real-track.m4a"
+        )
+        track.organizedPath = "Artist/Album/stale-path.m4a"
+
+        let libraryRoot = URL(fileURLWithPath: "/library")
+        let result = track.availability(libraryRoot: libraryRoot) { url in
+            // organized path does NOT exist
+            if url.path == "/library/Artist/Album/stale-path.m4a" { return false }
+            // original path DOES exist
+            if url.path == "/Users/music/real-track.m4a" { return true }
+            return false
+        }
+        #expect(result == .local)
+    }
+
+    @Test func staleOrganizedPathAndMissingOriginalPathReturnsFileMissing() {
+        // When both organized and original paths are absent, .fileMissing is correct.
+        var track = Track(
+            artist: "Artist",
+            album: "Album",
+            title: "Track",
+            format: "m4a",
+            originalPath: "/Users/music/gone.m4a"
+        )
+        track.organizedPath = "Artist/Album/stale-path.m4a"
+
+        let libraryRoot = URL(fileURLWithPath: "/library")
+        let result = track.availability(libraryRoot: libraryRoot) { _ in false }
+        #expect(result == .fileMissing)
+    }
+
     @Test func availabilityMapsDownloadStateAndFailureRecord() throws {
         var downloading = makeTrack()
         downloading.downloadStatus = "downloading"

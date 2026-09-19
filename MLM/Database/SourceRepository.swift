@@ -35,18 +35,35 @@ final class SourceRepository: Sendable {
     }
 
     /// Create or update a source.
+    ///
+    /// IMPORTANT — do not "simplify" this back into a single insert-then-branch.
+    /// GRDB's `didInsert` fires even when `INSERT OR IGNORE` is ignored by the
+    /// unique-key constraint, and assigns `id = db.lastInsertedRowID`, which on
+    /// an ignored insert is the rowid of whatever was last inserted on this
+    /// connection — not the source row. That stale rowid then propagates into
+    /// every caller (`findOrCreateSourcePlaylist`, `linkTrackToSource`, …) and
+    /// breaks idempotency: re-importing the same remote playlist stacks
+    /// duplicates because each call sees a different `sourceId`.
+    ///
+    /// The safe shape is: fetch inside the same write transaction (GRDB
+    /// serialises writers, so this is race-free), insert only if absent, and
+    /// always return the fetched row — never trust the post-insert `source.id`.
     @discardableResult
     func upsert(name: String, userId: String) async throws -> Source {
         try await database.write { db in
+            if let existing = try Source
+                .filter(Source.Columns.name == name && Source.Columns.userId == userId)
+                .fetchOne(db) {
+                return existing
+            }
             var source = Source(id: nil, name: name, userId: userId, enabled: 1)
             try source.insert(db, onConflict: .ignore)
-            // Refetch to get the ID (insert might have been ignored)
-            if source.id == nil {
-                source = try Source
-                    .filter(Source.Columns.name == name && Source.Columns.userId == userId)
-                    .fetchOne(db)!
+            guard let fetched = try Source
+                .filter(Source.Columns.name == name && Source.Columns.userId == userId)
+                .fetchOne(db) else {
+                throw SourceRepositoryError.upsertRefetchFailed(name: name, userId: userId)
             }
-            return source
+            return fetched
         }
     }
 
@@ -151,4 +168,15 @@ final class SourceRepository: Sendable {
 
     /// Exposes the shared writer for repositories that need cross-repo access.
     var databaseWriter: any DatabaseWriter { database }
+}
+
+enum SourceRepositoryError: Error, CustomStringConvertible {
+    case upsertRefetchFailed(name: String, userId: String)
+
+    var description: String {
+        switch self {
+        case .upsertRefetchFailed(let name, let userId):
+            return "SourceRepository.upsert(\(name), \(userId)): row not found after insert"
+        }
+    }
 }

@@ -42,9 +42,16 @@ final class SyncRepository: Sendable {
         }
     }
 
-    /// Delete a sync profile.
+    /// Delete a sync profile and all its child rows.
+    /// Foreign-key enforcement is disabled on every connection, so the
+    /// declared ON DELETE CASCADE is inert — children must be removed first.
     func delete(id: Int64) async throws {
         _ = try await database.write { db in
+            try db.execute(sql: "DELETE FROM sync_state WHERE profile_id = ?", arguments: [id])
+            try db.execute(sql: "DELETE FROM sync_profile_tracks WHERE profile_id = ?", arguments: [id])
+            try db.execute(sql: "DELETE FROM sync_profile_playlists WHERE profile_id = ?", arguments: [id])
+            try db.execute(sql: "DELETE FROM sync_profile_rules WHERE profile_id = ?", arguments: [id])
+            try db.execute(sql: "DELETE FROM playlist_sync_snapshots WHERE profile_id = ?", arguments: [id])
             try SyncProfile.deleteOne(db, id: id)
         }
     }
@@ -114,9 +121,10 @@ final class SyncRepository: Sendable {
     func fetchLastSyncTimestamps() async throws -> [Int64: String] {
         try await database.read { db in
             let rows = try Row.fetchAll(db, sql: """
-                SELECT profile_id, MAX(synced_timestamp) AS last_sync
-                FROM sync_state
-                GROUP BY profile_id
+                SELECT ss.profile_id, MAX(ss.synced_timestamp) AS last_sync
+                FROM sync_state ss
+                INNER JOIN sync_profiles sp ON sp.id = ss.profile_id
+                GROUP BY ss.profile_id
                 """)
             return Dictionary(uniqueKeysWithValues: rows.compactMap { row in
                 guard let profileID: Int64 = row["profile_id"],
@@ -238,7 +246,8 @@ final class SyncRepository: Sendable {
         fat32SafePaths: Bool? = nil,
         cleanupRemovedFiles: Bool? = nil,
         playlistFormat: String? = nil,
-        normalizeLoudness: Bool? = nil
+        normalizeLoudness: Bool? = nil,
+        artworkMode: String? = nil
     ) async throws {
         try await database.write { db in
             var sets: [String] = []
@@ -279,6 +288,10 @@ final class SyncRepository: Sendable {
             if let normalizeLoudness {
                 sets.append("normalize_loudness = ?")
                 args.append(normalizeLoudness ? 1 : 0)
+            }
+            if let artworkMode {
+                sets.append("artwork_mode = ?")
+                args.append(artworkMode)
             }
 
             guard !sets.isEmpty else { return }
