@@ -38,9 +38,14 @@ final class ConcurrencyLimiter: Sendable {
     /// Blocks (suspends) until a slot is available.
     func run<T: Sendable>(operation: @Sendable () async throws -> T) async rethrows -> T {
         await semaphore.wait()
-        let result = try await operation()
-        await semaphore.signal()
-        return result
+        do {
+            let result = try await operation()
+            await semaphore.signal()
+            return result
+        } catch {
+            await semaphore.signal()
+            throw error
+        }
     }
 }
 

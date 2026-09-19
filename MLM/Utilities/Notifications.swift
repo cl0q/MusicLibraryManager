@@ -117,6 +117,12 @@ extension Notification.Name {
     /// Posted when the user triggers "More Info" via the Library menu (⌘I).
     static let showTrackDetail = Notification.Name("MLMShowTrackDetail")
 
+    /// Open the right-hand track detail inspector for one track.
+    ///
+    /// - `userInfo["trackId"]`: `Int64` — the track to show
+    /// - `userInfo["play"]`: `Bool` — whether to start playback after opening (default `false`)
+    static let openTrackDetailForTrack = Notification.Name("MLMOpenTrackDetailForTrack")
+
     /// Posted when the user picks "Settings…" (⌘,) from the app menu.
     /// ContentView listens and presents the Settings sheet.
     static let openSettings = Notification.Name("MLMOpenSettings")

@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// Helper for running external CLI processes (ffmpeg, yt-dlp, scdl, fpcalc).
 ///
@@ -23,13 +24,30 @@ final class ProcessRunner {
         }
     }
 
+    /// Thread-safe mutable flag, used to record whether a timeout fired
+    /// while the continuation is still suspended.
+    private final class TimedOutFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _value = false
+
+        var value: Bool {
+            get { lock.lock(); defer { lock.unlock() }; return _value }
+            set { lock.lock(); _value = newValue; lock.unlock() }
+        }
+    }
+
     /// Result of a process execution.
     struct ProcessResult {
         let exitCode: Int32
         let stdout: String
         let stderr: String
+        /// `true` when the process was killed because it exceeded the timeout.
+        /// Always `false` when no timeout was specified (backward compatible).
+        let timedOut: Bool
+        /// The child's pid. Useful for diagnostics.
+        let processIdentifier: pid_t
 
-        var isSuccess: Bool { exitCode == 0 }
+        var isSuccess: Bool { exitCode == 0 && !timedOut }
     }
 
     /// Run a CLI process and wait for completion.
@@ -38,12 +56,26 @@ final class ProcessRunner {
     ///   - executable: Path to the executable (e.g., "/opt/homebrew/bin/ffmpeg")
     ///   - arguments: Command-line arguments
     ///   - workingDirectory: Optional working directory
+    ///   - timeout: Maximum wall-clock seconds to wait. `nil` (default) = no
+    ///     timeout — behaves identically to the pre-timeout API. When the
+    ///     timeout elapses the child is sent SIGTERM; if it is still running
+    ///     2 s later it is escalated to SIGKILL.
     ///   - onOutput: Optional line-by-line stdout callback for progress
+    ///   - onStderr: Optional line-by-line stderr callback for progress
     /// - Returns: ProcessResult with exit code, stdout, and stderr
+    ///
+    /// ### Grandchild limitation
+    /// Foundation's `Process` does not expose a way to place the child in its
+    /// own process group, so `terminate()` / SIGKILL only reaches the direct
+    /// child. If that child spawned grandchildren (e.g. `yt-dlp` → `ffmpeg`),
+    /// those may survive as orphans. A real process-group kill would require
+    /// replacing `Process` with raw `posix_spawn` + `POSIX_SPAWN_SETPGROUP`;
+    /// that is a larger change and is left as a follow-up.
     static func run(
         _ executable: String,
         arguments: [String] = [],
         workingDirectory: URL? = nil,
+        timeout: TimeInterval? = nil,
         onOutput: ((String) -> Void)? = nil,
         onStderr: ((String) -> Void)? = nil
     ) async throws -> ProcessResult {
@@ -86,7 +118,12 @@ final class ProcessRunner {
             }
         }
 
-        // Wait for process completion using checked continuation and terminationHandler
+        let timedOutFlag = TimedOutFlag()
+
+        // Wait for process completion using checked continuation and terminationHandler.
+        // The terminationHandler is the SOLE resumer of the continuation — the timeout
+        // timer only kills the process, which then triggers terminationHandler naturally.
+        // This preserves HEAD's exactly-once resumption guarantee.
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             process.terminationHandler = { _ in
                 continuation.resume()
@@ -98,6 +135,23 @@ final class ProcessRunner {
                 stdoutPipe.fileHandleForReading.readabilityHandler = nil
                 stderrPipe.fileHandleForReading.readabilityHandler = nil
                 continuation.resume(throwing: error)
+                return
+            }
+
+            // Timeout: send SIGTERM, escalate to SIGKILL after grace period.
+            // Does NOT resume the continuation — that is terminationHandler's job.
+            if let timeout = timeout {
+                let pid = process.processIdentifier
+                DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                    guard process.isRunning else { return }
+                    timedOutFlag.value = true
+                    process.terminate() // SIGTERM
+                    // Escalate to SIGKILL if still running after 2 s grace
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 2.0) {
+                        guard process.isRunning else { return }
+                        kill(pid, SIGKILL)
+                    }
+                }
             }
         }
 
@@ -105,7 +159,8 @@ final class ProcessRunner {
         stdoutPipe.fileHandleForReading.readabilityHandler = nil
         stderrPipe.fileHandleForReading.readabilityHandler = nil
 
-        // Flush any remaining data in the pipes
+        // Flush any remaining data in the pipes — preserves partial output
+        // captured before a timeout kill.
         let remainingStdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
         if !remainingStdout.isEmpty {
             stdoutBuffer.append(remainingStdout)
@@ -122,19 +177,36 @@ final class ProcessRunner {
             }
         }
 
+        let didTimeout = timedOutFlag.value
+
+        if didTimeout, let t = timeout {
+            let exeName = URL(fileURLWithPath: executable).lastPathComponent
+            AppLogger.shared.log(
+                "Process '\(exeName)' (pid \(process.processIdentifier)) timed out after \(t)s — killed",
+                level: .error,
+                source: "ProcessRunner"
+            )
+        }
+
         return ProcessResult(
             exitCode: process.terminationStatus,
             stdout: String(data: stdoutBuffer.data, encoding: .utf8) ?? "",
-            stderr: String(data: stderrBuffer.data, encoding: .utf8) ?? ""
+            stderr: String(data: stderrBuffer.data, encoding: .utf8) ?? "",
+            timedOut: didTimeout,
+            processIdentifier: process.processIdentifier
         )
     }
 
     /// Run a CLI process and return the raw stdout binary Data.
     /// Useful for reading audio streams decodes (PCM) without UTF-8 corruption.
+    ///
+    /// ### Grandchild limitation
+    /// See `run(_:arguments:workingDirectory:timeout:onOutput:onStderr:)`.
     static func runBinary(
         _ executable: String,
         arguments: [String] = [],
-        workingDirectory: URL? = nil
+        workingDirectory: URL? = nil,
+        timeout: TimeInterval? = nil
     ) async throws -> Data {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
@@ -169,6 +241,8 @@ final class ProcessRunner {
             }
         }
 
+        let timedOutFlag = TimedOutFlag()
+
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             process.terminationHandler = { _ in
                 continuation.resume()
@@ -180,6 +254,20 @@ final class ProcessRunner {
                 stdoutPipe.fileHandleForReading.readabilityHandler = nil
                 stderrPipe.fileHandleForReading.readabilityHandler = nil
                 continuation.resume(throwing: error)
+                return
+            }
+
+            if let timeout = timeout {
+                let pid = process.processIdentifier
+                DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                    guard process.isRunning else { return }
+                    timedOutFlag.value = true
+                    process.terminate()
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 2.0) {
+                        guard process.isRunning else { return }
+                        kill(pid, SIGKILL)
+                    }
+                }
             }
         }
 
@@ -194,6 +282,26 @@ final class ProcessRunner {
         let remainingStderr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
         if !remainingStderr.isEmpty {
             stderrBuffer.append(remainingStderr)
+        }
+
+        let didTimeout = timedOutFlag.value
+
+        if didTimeout, let t = timeout {
+            let exeName = URL(fileURLWithPath: executable).lastPathComponent
+            AppLogger.shared.log(
+                "Process '\(exeName)' (pid \(process.processIdentifier)) timed out after \(t)s — killed",
+                level: .error,
+                source: "ProcessRunner"
+            )
+            let stderrString = String(data: stderrBuffer.data, encoding: .utf8) ?? ""
+            throw NSError(
+                domain: "ProcessRunner",
+                code: -1,
+                userInfo: [
+                    NSLocalizedDescriptionKey: "Binary '\(exeName)' timed out after \(t)s",
+                    "stderr": stderrString
+                ]
+            )
         }
 
         let exitCode = process.terminationStatus

@@ -6,10 +6,26 @@ import os
 /// Three sinks per log call:
 /// - In-memory ring buffer (last 500 entries) — backs the Activity → Logs tab
 /// - `~/Library/Logs/MLM/mlm.log` with rotation at 5 MB (kept: 3 backups)
+///   (disabled automatically during test runs; see File-sink gating below)
 /// - Apple unified logging (`os.Logger`, subsystem "com.ilczuk.mlm") —
 ///   appears in Console.app under MLM's subsystem and in Xcode's debug console
 ///
 /// Thread-safe via NSLock around mutable state.
+///
+/// ## File-sink gating
+///
+/// When the process is detected as a test harness (XCTest / swift-testing),
+/// the on-disk file sink is disabled so `~/Library/Logs/MLM/mlm.log` is not
+/// polluted with fixture-driven noise. The in-memory ring buffer and unified
+/// logging continue to work normally.
+///
+/// Detection is evaluated **once** at process start and cached in a static let.
+///
+/// Override environment variables:
+/// - `MLM_LOGGER_FILE_SINK` = `force-on` | `force-off`
+///   Forces the file sink on or off regardless of auto-detection.
+/// - `MLM_LOGGER_FILE_DIRECTORY` = absolute path
+///   Redirects the log directory (only meaningful when file sink is on).
 @Observable
 final class AppLogger {
     static let shared = AppLogger()
@@ -52,6 +68,65 @@ final class AppLogger {
     /// Subsystem for unified logging — appears in Console.app's filter.
     private static let subsystem = "com.ilczuk.mlm"
 
+    // MARK: - File-sink gating
+
+    /// Environment variable names for controlling the file sink.
+    enum FileSinkEnv {
+        /// `"force-on"` or `"force-off"` — overrides auto-detection.
+        static let override = "MLM_LOGGER_FILE_SINK"
+        /// Absolute path to redirect the log directory (only used when file sink is on).
+        static let directory = "MLM_LOGGER_FILE_DIRECTORY"
+    }
+
+    /// Pure function: detect whether the process is a test harness.
+    ///
+    /// Signals checked (any one is sufficient):
+    /// 1. `XCTestConfigurationFilePath` — set by `xctest` / `swift test`
+    /// 2. `XCTestBundlePath` — set by some Xcode test runners
+    /// 3. `__XCODE_BUILT_PRODUCTS_DIR_PATHS` — set during Xcode-driven test runs
+    /// 4. `XCTestCase` class loadable via `NSClassFromString` — runtime confirmation
+    ///
+    /// The `classLookup` parameter exists so tests can supply a stub.
+    static func isTestProcess(
+        environment: [String: String],
+        classLookup: (String) -> Any? = { NSClassFromString($0) }
+    ) -> Bool {
+        if environment["XCTestConfigurationFilePath"] != nil { return true }
+        if environment["XCTestBundlePath"] != nil { return true }
+        if environment["__XCODE_BUILT_PRODUCTS_DIR_PATHS"] != nil { return true }
+        if classLookup("XCTestCase") != nil { return true }
+        return false
+    }
+
+    /// Resolve the explicit file-sink override from the environment.
+    /// Returns `nil` when the variable is unset or has an unrecognised value.
+    static func fileSinkOverride(environment: [String: String]) -> Bool? {
+        switch environment[FileSinkEnv.override] {
+        case "force-on": return true
+        case "force-off": return false
+        default: return nil
+        }
+    }
+
+    /// Resolve whether the file sink should be enabled.
+    /// Override wins over auto-detection when set.
+    static func resolveFileSinkEnabled(
+        environment: [String: String],
+        classLookup: (String) -> Any? = { NSClassFromString($0) }
+    ) -> Bool {
+        if let override = fileSinkOverride(environment: environment) {
+            return override
+        }
+        return !isTestProcess(environment: environment, classLookup: classLookup)
+    }
+
+    /// Cached result — evaluated exactly once per process.
+    @ObservationIgnored static let fileSinkEnabled: Bool = resolveFileSinkEnabled(
+        environment: ProcessInfo.processInfo.environment
+    )
+
+    // MARK: - Instance state
+
     private(set) var entries: [LogEntry] = []
     private let lock = NSLock()
 
@@ -59,7 +134,8 @@ final class AppLogger {
     var sink: (@Sendable (LogEntry) -> Void)?
 
     @ObservationIgnored private let fileQueue = DispatchQueue(label: "mlm.applogger.file", qos: .utility)
-    @ObservationIgnored private lazy var fileURL: URL = Self.makeLogFileURL()
+    @ObservationIgnored private let fileURL: URL
+    @ObservationIgnored private let fileSinkActive: Bool
     @ObservationIgnored private lazy var iso8601: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -68,12 +144,39 @@ final class AppLogger {
     @ObservationIgnored private lazy var loggers: [String: Logger] = [:]
     @ObservationIgnored private let loggerLock = NSLock()
 
+    /// Default initializer — used by `AppLogger.shared`.
+    /// Reads environment once (already cached in static lets) and configures
+    /// the file sink accordingly. When the file sink is disabled, the log
+    /// directory is NOT created.
     private init() {
-        // Best-effort directory creation on first use.
-        try? FileManager.default.createDirectory(
-            at: fileURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
+        self.fileSinkActive = Self.fileSinkEnabled
+
+        if let dirOverride = ProcessInfo.processInfo.environment[FileSinkEnv.directory] {
+            self.fileURL = URL(fileURLWithPath: dirOverride).appendingPathComponent("mlm.log")
+        } else {
+            self.fileURL = Self.makeLogFileURL()
+        }
+
+        // Best-effort directory creation — only when the file sink is active.
+        if fileSinkActive {
+            try? FileManager.default.createDirectory(
+                at: fileURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+        }
+    }
+
+    /// Internal initializer for testing file-sink behaviour with a controlled directory.
+    /// Does NOT affect `AppLogger.shared`.
+    internal init(fileSinkEnabled: Bool, fileSinkDirectory: URL) {
+        self.fileSinkActive = fileSinkEnabled
+        self.fileURL = fileSinkDirectory.appendingPathComponent("mlm.log")
+        if fileSinkActive {
+            try? FileManager.default.createDirectory(
+                at: fileSinkDirectory,
+                withIntermediateDirectories: true
+            )
+        }
     }
 
     // MARK: - Logging API
@@ -99,6 +202,8 @@ final class AppLogger {
         osLogger(for: source).log(level: level.osLogType, "\(message, privacy: .public)")
 
         // Sink 3: file (async on serial queue, best-effort)
+        // Gated: disabled during test runs so ~/Library/Logs/MLM/ stays clean.
+        guard fileSinkActive else { return }
         fileQueue.async { [fileURL, iso8601] in
             Self.appendToFile(
                 entry: entry,

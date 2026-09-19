@@ -22,8 +22,9 @@ final class TrackArtworkCache: @unchecked Sendable {
 
     init() {
         cache.countLimit = 200
-        // ~20 MB budget. Cost is the decoded pixel size we set on insert.
-        cache.totalCostLimit = 20 * 1024 * 1024
+        // ~48 MB budget. With downsized small images (~256 px, ~1 MB each) and
+        // large images (~1200 px, ~11 MB each) this holds ~20 small + a few large.
+        cache.totalCostLimit = 48 * 1024 * 1024
     }
 
     // MARK: - Cache operations
@@ -67,6 +68,16 @@ final class TrackArtworkCache: @unchecked Sendable {
     /// Remove all cached images (e.g., on low-memory warning).
     func removeAll() {
         cache.removeAllObjects()
+        noArtworkLock.lock()
+        noArtworkIds.removeAll()
+        noArtworkLock.unlock()
+    }
+
+    /// Clear negative-cache entries without dropping cached images.
+    ///
+    /// Called after a bulk reconcile marks dangling artwork rows as `'missing'`
+    /// so that previously-poisoned track ids get a fresh chance to resolve.
+    func clearNegativeEntries() {
         noArtworkLock.lock()
         noArtworkIds.removeAll()
         noArtworkLock.unlock()
