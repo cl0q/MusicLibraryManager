@@ -668,7 +668,7 @@ Schema for every screen: **Purpose · Wireframe · Anatomy · States · Interact
 | Space check | Amber banner when tight: `Not enough space on device — need ≈4.2 GB, 1.0 GB available` |
 | During sync | Inline determinate progress **in the detail view** + `Pause` + `Cancel` (today: only a redirect line to the collapsed Activity panel, `SyncProfileDetailView.swift:65,80–85`) |
 | Current item | `Copying:` vs `Transcoding:` prefix — the distinction exists in code, surface it |
-| Failures | `Failed tracks (n)` disclosure: **Artist – Title** (not `Track #4821`, `SyncFailedDisclosure.swift:39`) + plain reason + `Retry` (retries one track without recomputing the whole preview, unlike `SyncService.swift:560`) |
+| Failures | `Failed tracks (n)` disclosure: aligned rows with **Title Artist** + reason + album, per-row context menu (Play, Play Next, Show Details, Retry Sync, Reveal in Finder, Copy File Path), double-click plays + opens detail inspector, Retry button (`SyncFailedDisclosure.swift`) |
 
 **Settings section (English, collapsed by default — keep pattern):** `Playlists (create .m3u8 files for Rockbox or Doppi)` · `Format & app (Rockbox / Doppi)` · `Transcode mode (Originals / AAC 248k / AAC 320k)` · `Normalize volume (−14 LUFS, AAC modes only)` · `Compatible paths (FAT32-safe)` · `Clean up (remove deleted tracks from destination)` · **`Background processing: Conservative / Standard / Fast`** — the renamed, relocated ex-Turbo setting (§2.1).
 
@@ -789,6 +789,7 @@ Schema for every screen: **Purpose · Wireframe · Anatomy · States · Interact
 | Audio | LUFS, Loudness Range, True Peak, BPM, Energy (n/5), Danceability (%); `Run analysis` buttons for missing values (labels + help English); waveform options (Sensitivity/Gain/Height/Reset) |
 | File | Path cards `Original path` / `Library path` with `Copy` / `Show in Finder`; rows: `Format`, `Bitrate`, `Duration`, `Added`, **Status** (vocabulary §1.6 — replaces `Lokal`/`Remote`), `Downloaded`, **Source** (`SoundCloud` / `YouTube` / `Local import` — new), duplicate link row (§3.9) |
 | Similar | **Real tab content, not a sheet launcher** (today selecting it force-opens a sheet and bounces back to General on dismiss, `MetadataPanel.swift:143–151`): analyzed → top-5 local similar tracks inline + `Show all` opens the Similar sheet; not analyzed → `No analysis yet` + `Analyze this track` + one-line explainer |
+| Debug | Lazy ffmpeg/ffprobe diagnostics (`DebugTabView.swift`): decode-check card (errors, warnings, broken frames, exit code), stream-info card (container, codec, sample rate, channels, bitrate, duration), decoder-log card with Copy + Re-run. Runs once when the tab is first selected; shows "No local file" or "ffmpeg not found" cards when prerequisites are missing |
 
 **Changes vs. current** — `Groove` tab → `Similar`; German labels → English; source row added; availability vocabulary unified; emoji removed.
 
