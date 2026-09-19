@@ -144,6 +144,29 @@ if [[ -d "${SPM_BUNDLE_PATH}" ]]; then
   fi
 fi
 
+# --- Auth helper (mlm-auth) -------------------------------------------------
+# The app delegates ALL keychain access to this helper binary, so it must be
+# installed into the bundle's MacOS/ dir — the app locates it via
+# Bundle.main.url(forAuxiliaryExecutable: "mlm-auth"). Sign it with the
+# stable "MLM Dev" identity when available (a one-time keychain "Always
+# Allow" then survives app rebuilds — see scripts/setup-dev-signing.sh);
+# otherwise fall back to ad-hoc so the flow keeps working with no setup.
+# This MUST happen before the final .app signing step below.
+HELPER_BIN=".build/${ARCH}-apple-macosx/${CONFIG}/mlm-auth"
+if [[ -f "${HELPER_BIN}" ]]; then
+  cp "${HELPER_BIN}" "${APP_BUNDLE}/Contents/MacOS/mlm-auth"
+  chmod +x "${APP_BUNDLE}/Contents/MacOS/mlm-auth"
+  if security find-identity -v -p codesigning 2>/dev/null | grep -q '"MLM Dev"'; then
+    echo "› signing mlm-auth with stable identity 'MLM Dev'"
+    codesign --force --sign "MLM Dev" "${APP_BUNDLE}/Contents/MacOS/mlm-auth" 2>/dev/null || true
+  else
+    echo "› signing mlm-auth ad-hoc (run scripts/setup-dev-signing.sh for a stable identity)"
+    codesign --force --sign - "${APP_BUNDLE}/Contents/MacOS/mlm-auth" 2>/dev/null || true
+  fi
+else
+  echo "⚠ mlm-auth helper not found at ${HELPER_BIN} — token storage will be unavailable until it is built"
+fi
+
 # Ad-hoc sign so macOS picks up Info.plist changes (bundle id, display name, etc.)
 # without bumping into stale signature caches. Errors are non-fatal — unsigned
 # bundles still launch from `open`.

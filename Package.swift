@@ -8,6 +8,9 @@ let package = Package(
     ],
     products: [
         .executable(name: "MLM", targets: ["MLM"]),
+        // Keychain access helper — the ONLY component that imports Security.
+        // See MLMAuthHelper/main.swift for why it exists.
+        .executable(name: "mlm-auth", targets: ["MLMAuthHelper"]),
     ],
     dependencies: [
         // GRDB — best Swift SQLite library, migration support, Codable mapping
@@ -30,6 +33,14 @@ let package = Package(
                 .linkedFramework("AVKit"),
                 .linkedFramework("AVFoundation")
             ]
+        ),
+        // Small CLI that owns ALL keychain access for the app (single JSON
+        // item per OAuth service). Signed with a stable identity by
+        // scripts/setup-dev-signing.sh so a one-time keychain "Always Allow"
+        // consent survives app rebuilds.
+        .executableTarget(
+            name: "MLMAuthHelper",
+            path: "MLMAuthHelper"
         ),
         .testTarget(
             name: "MLMTests",
