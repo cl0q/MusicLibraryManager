@@ -1,0 +1,591 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0C40735A7BA015500F481B91 /* LibraryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 803D728C860DFB88A2BE17D9 /* LibraryViewModel.swift */; };
+		0F82D7CA8EF22B3811161989 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = DE7E20F46A49A08F11725B3B /* GRDB */; };
+		16AA3827129FFF10C5A64C88 /* PlaylistEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBBBB2E41E2BB2FC3F2EB262 /* PlaylistEngineTests.swift */; };
+		1761464A8B20E1254681B9C9 /* AddTrackToPlaylistSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A79C0502121CAC3661615F2F /* AddTrackToPlaylistSheet.swift */; };
+		187469674EA0A9508D2FCC04 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 466095D97DA62E9141E20386 /* EmptyStateView.swift */; };
+		2AA292C10D7C0C82F440D66C /* PlaylistListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32045B2837DAE32149AD6803 /* PlaylistListView.swift */; };
+		3D032E11A1ECD5E55EA8B74B /* EnergyBucketFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 523166F0897DBECA304E1CAA /* EnergyBucketFilter.swift */; };
+		47AA9C175795BFF779E5B105 /* LikesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1268A102BC2012866F783160 /* LikesService.swift */; };
+		492BDE16340A45A56573844F /* IndexedTrack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 419B0903280A9E5EEEEC53DF /* IndexedTrack.swift */; };
+		5A7B9AD8082F8F54FAFCD981 /* SyncFolderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B691270F2CC0E87D40C22112 /* SyncFolderTests.swift */; };
+		5C012152C31000550CE327D8 /* SyncFolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BDDEFCB8501561331E5CD6F /* SyncFolder.swift */; };
+		601AF51911203FB238BA4956 /* MLMMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F76949CCF16383E5EBABBA00 /* MLMMobileApp.swift */; };
+		63C05FF79445640958D42195 /* PlaylistEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61E2A5E082182A5DC5358839 /* PlaylistEngine.swift */; };
+		6C8FACA6D286184099E53CF1 /* LikesServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66ACB5A175B7670E49D51EE2 /* LikesServiceTests.swift */; };
+		7698BFE085CFB455B0AA940E /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE3C05EADE45D310B08272C5 /* ContentView.swift */; };
+		7B299DDECC4D1890DC610EBA /* PlaylistDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E64B9BF4E4FBF5C8CB1FB8D /* PlaylistDetailViewModel.swift */; };
+		82F4A1A8F5B3B8334CAC4542 /* PlaylistModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66978B2726FDE27266BDAFF7 /* PlaylistModels.swift */; };
+		8778B11B9B94A61B50036498 /* PlaybackServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF916089BE680AED8CAD759E /* PlaybackServiceTests.swift */; };
+		8C51023A10A7843B681FC7DC /* ManifestTrack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100530E4124A28E9480870C1 /* ManifestTrack.swift */; };
+		9E23F9C42CEAEB90BCD91FD5 /* LibraryIndexerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6F9F1669E2C25C32671809B /* LibraryIndexerTests.swift */; };
+		B502E16FC0E364D1945FB435 /* FullPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4057701A4E8AFC2A10063B0 /* FullPlayerView.swift */; };
+		BA89A9D52B0C21A1196BA037 /* ManifestPlaylist.swift in Sources */ = {isa = PBXBuildFile; fileRef = 238162B5F4632B34F57E689E /* ManifestPlaylist.swift */; };
+		BC3637824E59AF6EE6457B99 /* PlaybackService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AABBE1880CA9340225F5D9 /* PlaybackService.swift */; };
+		BE838219456CD9E584E9076A /* LibraryIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AA4452A29D759830FCD962 /* LibraryIndexer.swift */; };
+		C09DDF119D51AFC1A5EFD5A8 /* PlaylistDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F42E11412111AF600847A037 /* PlaylistDetailView.swift */; };
+		C1D939D325FD4F6928435105 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 639D473AC0209E8C282BED87 /* GRDB */; };
+		C227AC6D87FD2352A88F5D4D /* LibraryManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF4E1874EF46C548FDD68705 /* LibraryManifest.swift */; };
+		D144A007EDAC3DC2C82014CF /* TrackRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6085EDADBADB33591E0279E6 /* TrackRowView.swift */; };
+		D80557F26424558C924A7540 /* MiniPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 944752E43EA1830C4284B05A /* MiniPlayerView.swift */; };
+		DA3EDE6DFB891F520C0AEE89 /* ManifestDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 168EC07F6ED25FB8F569498F /* ManifestDecodingTests.swift */; };
+		EDF053C681A8AF10FDBF24AE /* TrackListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 853824BF8507CD1D3419F964 /* TrackListView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		CC92C72AA01DF825DE628885 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 163661D1E6839FD9B16B2FA1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 475B224E3E5A22B36145947D;
+			remoteInfo = MLMMobile;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		100530E4124A28E9480870C1 /* ManifestTrack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifestTrack.swift; sourceTree = "<group>"; };
+		1268A102BC2012866F783160 /* LikesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LikesService.swift; sourceTree = "<group>"; };
+		168EC07F6ED25FB8F569498F /* ManifestDecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifestDecodingTests.swift; sourceTree = "<group>"; };
+		238162B5F4632B34F57E689E /* ManifestPlaylist.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifestPlaylist.swift; sourceTree = "<group>"; };
+		2A39ECB530E6688522616750 /* MLMMobileTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = MLMMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		2E25EE041C10093CEA51412C /* MLMMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MLMMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		32045B2837DAE32149AD6803 /* PlaylistListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistListView.swift; sourceTree = "<group>"; };
+		3E64B9BF4E4FBF5C8CB1FB8D /* PlaylistDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistDetailViewModel.swift; sourceTree = "<group>"; };
+		419B0903280A9E5EEEEC53DF /* IndexedTrack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IndexedTrack.swift; sourceTree = "<group>"; };
+		466095D97DA62E9141E20386 /* EmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyStateView.swift; sourceTree = "<group>"; };
+		523166F0897DBECA304E1CAA /* EnergyBucketFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnergyBucketFilter.swift; sourceTree = "<group>"; };
+		6085EDADBADB33591E0279E6 /* TrackRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackRowView.swift; sourceTree = "<group>"; };
+		61E2A5E082182A5DC5358839 /* PlaylistEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistEngine.swift; sourceTree = "<group>"; };
+		66978B2726FDE27266BDAFF7 /* PlaylistModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistModels.swift; sourceTree = "<group>"; };
+		66ACB5A175B7670E49D51EE2 /* LikesServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LikesServiceTests.swift; sourceTree = "<group>"; };
+		7BDDEFCB8501561331E5CD6F /* SyncFolder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncFolder.swift; sourceTree = "<group>"; };
+		803D728C860DFB88A2BE17D9 /* LibraryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryViewModel.swift; sourceTree = "<group>"; };
+		853824BF8507CD1D3419F964 /* TrackListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackListView.swift; sourceTree = "<group>"; };
+		944752E43EA1830C4284B05A /* MiniPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniPlayerView.swift; sourceTree = "<group>"; };
+		A79C0502121CAC3661615F2F /* AddTrackToPlaylistSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddTrackToPlaylistSheet.swift; sourceTree = "<group>"; };
+		AA22462A742D484A9EA4337D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		B4057701A4E8AFC2A10063B0 /* FullPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullPlayerView.swift; sourceTree = "<group>"; };
+		B691270F2CC0E87D40C22112 /* SyncFolderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncFolderTests.swift; sourceTree = "<group>"; };
+		CF4E1874EF46C548FDD68705 /* LibraryManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryManifest.swift; sourceTree = "<group>"; };
+		D2AA4452A29D759830FCD962 /* LibraryIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryIndexer.swift; sourceTree = "<group>"; };
+		D2AABBE1880CA9340225F5D9 /* PlaybackService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackService.swift; sourceTree = "<group>"; };
+		D6F9F1669E2C25C32671809B /* LibraryIndexerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryIndexerTests.swift; sourceTree = "<group>"; };
+		DF916089BE680AED8CAD759E /* PlaybackServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackServiceTests.swift; sourceTree = "<group>"; };
+		EBBBB2E41E2BB2FC3F2EB262 /* PlaylistEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistEngineTests.swift; sourceTree = "<group>"; };
+		F42E11412111AF600847A037 /* PlaylistDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistDetailView.swift; sourceTree = "<group>"; };
+		F76949CCF16383E5EBABBA00 /* MLMMobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MLMMobileApp.swift; sourceTree = "<group>"; };
+		FE3C05EADE45D310B08272C5 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		66AB882320AEDF8219772198 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0F82D7CA8EF22B3811161989 /* GRDB in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA6368B3901E1A18D9E50D0C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C1D939D325FD4F6928435105 /* GRDB in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		054558A95ABD9DCBD9CE0F45 /* MLMMobile */ = {
+			isa = PBXGroup;
+			children = (
+				AA22462A742D484A9EA4337D /* Info.plist */,
+				F76949CCF16383E5EBABBA00 /* MLMMobileApp.swift */,
+				BAD467196A4F3E394565ABA8 /* Models */,
+				5FAC8F84A96984B6E68AEA91 /* Services */,
+				A2CCF4E5886E6B80333EFB60 /* ViewModels */,
+				D117464895967DC70C09A075 /* Views */,
+			);
+			path = MLMMobile;
+			sourceTree = "<group>";
+		};
+		5FAC8F84A96984B6E68AEA91 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				D2AA4452A29D759830FCD962 /* LibraryIndexer.swift */,
+				1268A102BC2012866F783160 /* LikesService.swift */,
+				D2AABBE1880CA9340225F5D9 /* PlaybackService.swift */,
+				61E2A5E082182A5DC5358839 /* PlaylistEngine.swift */,
+				7BDDEFCB8501561331E5CD6F /* SyncFolder.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		6C234056ECEBBB773512C5AC /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				2E25EE041C10093CEA51412C /* MLMMobile.app */,
+				2A39ECB530E6688522616750 /* MLMMobileTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		9FB076AF38B71E7CF5EF4264 = {
+			isa = PBXGroup;
+			children = (
+				054558A95ABD9DCBD9CE0F45 /* MLMMobile */,
+				F1B54F81CB4AD79C1110DDFD /* MLMMobileTests */,
+				6C234056ECEBBB773512C5AC /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A2CCF4E5886E6B80333EFB60 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				803D728C860DFB88A2BE17D9 /* LibraryViewModel.swift */,
+				3E64B9BF4E4FBF5C8CB1FB8D /* PlaylistDetailViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		BAD467196A4F3E394565ABA8 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				419B0903280A9E5EEEEC53DF /* IndexedTrack.swift */,
+				CF4E1874EF46C548FDD68705 /* LibraryManifest.swift */,
+				238162B5F4632B34F57E689E /* ManifestPlaylist.swift */,
+				100530E4124A28E9480870C1 /* ManifestTrack.swift */,
+				66978B2726FDE27266BDAFF7 /* PlaylistModels.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		D117464895967DC70C09A075 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				A79C0502121CAC3661615F2F /* AddTrackToPlaylistSheet.swift */,
+				FE3C05EADE45D310B08272C5 /* ContentView.swift */,
+				466095D97DA62E9141E20386 /* EmptyStateView.swift */,
+				523166F0897DBECA304E1CAA /* EnergyBucketFilter.swift */,
+				B4057701A4E8AFC2A10063B0 /* FullPlayerView.swift */,
+				944752E43EA1830C4284B05A /* MiniPlayerView.swift */,
+				F42E11412111AF600847A037 /* PlaylistDetailView.swift */,
+				32045B2837DAE32149AD6803 /* PlaylistListView.swift */,
+				853824BF8507CD1D3419F964 /* TrackListView.swift */,
+				6085EDADBADB33591E0279E6 /* TrackRowView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		F1B54F81CB4AD79C1110DDFD /* MLMMobileTests */ = {
+			isa = PBXGroup;
+			children = (
+				D6F9F1669E2C25C32671809B /* LibraryIndexerTests.swift */,
+				66ACB5A175B7670E49D51EE2 /* LikesServiceTests.swift */,
+				168EC07F6ED25FB8F569498F /* ManifestDecodingTests.swift */,
+				DF916089BE680AED8CAD759E /* PlaybackServiceTests.swift */,
+				EBBBB2E41E2BB2FC3F2EB262 /* PlaylistEngineTests.swift */,
+				B691270F2CC0E87D40C22112 /* SyncFolderTests.swift */,
+			);
+			path = MLMMobileTests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		475B224E3E5A22B36145947D /* MLMMobile */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6ADADEFCE1C7692A08A68ADA /* Build configuration list for PBXNativeTarget "MLMMobile" */;
+			buildPhases = (
+				DB14D2A2D1BCE6FE8DAEB2C5 /* Sources */,
+				AA6368B3901E1A18D9E50D0C /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MLMMobile;
+			packageProductDependencies = (
+				639D473AC0209E8C282BED87 /* GRDB */,
+			);
+			productName = MLMMobile;
+			productReference = 2E25EE041C10093CEA51412C /* MLMMobile.app */;
+			productType = "com.apple.product-type.application";
+		};
+		957DCEA25D53FF2CE301C5DB /* MLMMobileTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7D8AC79D0F128AD762FE1EC4 /* Build configuration list for PBXNativeTarget "MLMMobileTests" */;
+			buildPhases = (
+				92EC463E80FBF41C6B84591F /* Sources */,
+				66AB882320AEDF8219772198 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				1D4C510E2CEEA75F51ADD77F /* PBXTargetDependency */,
+			);
+			name = MLMMobileTests;
+			packageProductDependencies = (
+				DE7E20F46A49A08F11725B3B /* GRDB */,
+			);
+			productName = MLMMobileTests;
+			productReference = 2A39ECB530E6688522616750 /* MLMMobileTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		163661D1E6839FD9B16B2FA1 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					475B224E3E5A22B36145947D = {
+						ProvisioningStyle = Automatic;
+					};
+					957DCEA25D53FF2CE301C5DB = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 541081D4CC8F06DC75EBEB00 /* Build configuration list for PBXProject "MLMMobile" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 9FB076AF38B71E7CF5EF4264;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				56F5107BB406A20A0275DA4C /* XCRemoteSwiftPackageReference "GRDB" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 6C234056ECEBBB773512C5AC /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				475B224E3E5A22B36145947D /* MLMMobile */,
+				957DCEA25D53FF2CE301C5DB /* MLMMobileTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		92EC463E80FBF41C6B84591F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9E23F9C42CEAEB90BCD91FD5 /* LibraryIndexerTests.swift in Sources */,
+				6C8FACA6D286184099E53CF1 /* LikesServiceTests.swift in Sources */,
+				DA3EDE6DFB891F520C0AEE89 /* ManifestDecodingTests.swift in Sources */,
+				8778B11B9B94A61B50036498 /* PlaybackServiceTests.swift in Sources */,
+				16AA3827129FFF10C5A64C88 /* PlaylistEngineTests.swift in Sources */,
+				5A7B9AD8082F8F54FAFCD981 /* SyncFolderTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DB14D2A2D1BCE6FE8DAEB2C5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1761464A8B20E1254681B9C9 /* AddTrackToPlaylistSheet.swift in Sources */,
+				7698BFE085CFB455B0AA940E /* ContentView.swift in Sources */,
+				187469674EA0A9508D2FCC04 /* EmptyStateView.swift in Sources */,
+				3D032E11A1ECD5E55EA8B74B /* EnergyBucketFilter.swift in Sources */,
+				B502E16FC0E364D1945FB435 /* FullPlayerView.swift in Sources */,
+				492BDE16340A45A56573844F /* IndexedTrack.swift in Sources */,
+				BE838219456CD9E584E9076A /* LibraryIndexer.swift in Sources */,
+				C227AC6D87FD2352A88F5D4D /* LibraryManifest.swift in Sources */,
+				0C40735A7BA015500F481B91 /* LibraryViewModel.swift in Sources */,
+				47AA9C175795BFF779E5B105 /* LikesService.swift in Sources */,
+				601AF51911203FB238BA4956 /* MLMMobileApp.swift in Sources */,
+				BA89A9D52B0C21A1196BA037 /* ManifestPlaylist.swift in Sources */,
+				8C51023A10A7843B681FC7DC /* ManifestTrack.swift in Sources */,
+				D80557F26424558C924A7540 /* MiniPlayerView.swift in Sources */,
+				BC3637824E59AF6EE6457B99 /* PlaybackService.swift in Sources */,
+				C09DDF119D51AFC1A5EFD5A8 /* PlaylistDetailView.swift in Sources */,
+				7B299DDECC4D1890DC610EBA /* PlaylistDetailViewModel.swift in Sources */,
+				63C05FF79445640958D42195 /* PlaylistEngine.swift in Sources */,
+				2AA292C10D7C0C82F440D66C /* PlaylistListView.swift in Sources */,
+				82F4A1A8F5B3B8334CAC4542 /* PlaylistModels.swift in Sources */,
+				5C012152C31000550CE327D8 /* SyncFolder.swift in Sources */,
+				EDF053C681A8AF10FDBF24AE /* TrackListView.swift in Sources */,
+				D144A007EDAC3DC2C82014CF /* TrackRowView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		1D4C510E2CEEA75F51ADD77F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 475B224E3E5A22B36145947D /* MLMMobile */;
+			targetProxy = CC92C72AA01DF825DE628885 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		5600B5EF7A1EDE31B55BC43E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = RFV322677X;
+				INFOPLIST_FILE = MLMMobile/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.musiclibrarymanager.mlmmobile;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		941A981CDF8308378F9EC32A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.10;
+			};
+			name = Release;
+		};
+		A5D131CE4948CA8A56AE1A35 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.musiclibrarymanager.mlmmobile.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MLMMobile.app/MLMMobile";
+			};
+			name = Debug;
+		};
+		D3259897B778A6CA39C44009 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.10;
+			};
+			name = Debug;
+		};
+		DAE369BFD83C7C6E40E7AD74 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.musiclibrarymanager.mlmmobile.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MLMMobile.app/MLMMobile";
+			};
+			name = Release;
+		};
+		E993EE102B0D4C92EF488DBA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = RFV322677X;
+				INFOPLIST_FILE = MLMMobile/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.musiclibrarymanager.mlmmobile;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		541081D4CC8F06DC75EBEB00 /* Build configuration list for PBXProject "MLMMobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D3259897B778A6CA39C44009 /* Debug */,
+				941A981CDF8308378F9EC32A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		6ADADEFCE1C7692A08A68ADA /* Build configuration list for PBXNativeTarget "MLMMobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5600B5EF7A1EDE31B55BC43E /* Debug */,
+				E993EE102B0D4C92EF488DBA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		7D8AC79D0F128AD762FE1EC4 /* Build configuration list for PBXNativeTarget "MLMMobileTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A5D131CE4948CA8A56AE1A35 /* Debug */,
+				DAE369BFD83C7C6E40E7AD74 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		56F5107BB406A20A0275DA4C /* XCRemoteSwiftPackageReference "GRDB" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/groue/GRDB.swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 7.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		639D473AC0209E8C282BED87 /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 56F5107BB406A20A0275DA4C /* XCRemoteSwiftPackageReference "GRDB" */;
+			productName = GRDB;
+		};
+		DE7E20F46A49A08F11725B3B /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 56F5107BB406A20A0275DA4C /* XCRemoteSwiftPackageReference "GRDB" */;
+			productName = GRDB;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 163661D1E6839FD9B16B2FA1 /* Project object */;
+}
