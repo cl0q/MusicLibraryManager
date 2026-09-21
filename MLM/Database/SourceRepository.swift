@@ -166,6 +166,34 @@ final class SourceRepository: Sendable {
         )
     }
 
+    /// Batch-fetch external IDs for a set of track IDs in one query.
+    ///
+    /// Used by the "Link Source" diff in PlaylistDetailViewModel: tier-1 match
+    /// of the diff needs each local track's external IDs, and issuing one
+    /// `fetchTrackSources` per track would be O(N) round-trips. A single
+    /// `WHERE track_id IN (…)` query returns every (track_id, external_id)
+    /// pair, grouped into `[trackId: [externalId]]`.
+    ///
+    /// Empty input returns `[:]` without hitting the database.
+    func fetchExternalIDs(trackIds: Set<Int64>) async throws -> [Int64: [String]] {
+        guard !trackIds.isEmpty else { return [:] }
+        let placeholders = trackIds.map { _ in "?" }.joined(separator: ",")
+        let args = trackIds.map { $0 as DatabaseValueConvertible }
+        return try await database.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT track_id, external_id FROM track_sources
+                WHERE track_id IN (\(placeholders))
+            """, arguments: StatementArguments(args))
+            var result: [Int64: [String]] = [:]
+            for row in rows {
+                guard let trackId: Int64 = row["track_id"],
+                      let externalId: String = row["external_id"] else { continue }
+                result[trackId, default: []].append(externalId)
+            }
+            return result
+        }
+    }
+
     /// Exposes the shared writer for repositories that need cross-repo access.
     var databaseWriter: any DatabaseWriter { database }
 }

@@ -700,4 +700,190 @@ final class PlaylistDetailViewModel {
         return FractionalIndexer.positionBetween(left: lastPos, right: nil)
     }
 
+    // MARK: - Source Linking
+
+    /// Phase of the "Link Source" sheet: idle until the user hits Check,
+    /// checking while the remote playlist is fetched, failed with a
+    /// user-facing message, or validated with the remote title/count/diff.
+    enum LinkCheckPhase: Equatable {
+        case idle
+        case checking
+        case failed(String)
+        case validated(remoteTitle: String, remoteTrackCount: Int, diff: PlaylistLinkDiff)
+    }
+
+    /// Current phase of the link-source sheet.
+    private(set) var linkCheckPhase: LinkCheckPhase = .idle
+
+    /// Preview and provider captured at `.validated` so `commitPendingLink`
+    /// can write the source row without re-fetching.
+    private var pendingLinkPreview: RemotePlaylistPreview?
+    private var pendingLinkProvider: (any RemotePlaylistProvider)?
+
+    /// Linking only makes sense for regular (non-liked, non-smart) playlists.
+    /// Liked playlists already have a fixed source identity; smart playlists
+    /// have no upstream at all.
+    var canLinkSource: Bool {
+        playlist.isLiked == 0 && playlist.isSmart == 0
+    }
+
+    /// The URL to prefill the link sheet with, derived from `externalId`
+    /// when it looks like a URL. Returns nil otherwise.
+    var linkedSourceURL: String? {
+        guard let extId = playlist.externalId else { return nil }
+        if extId.hasPrefix("http://") || extId.hasPrefix("https://") {
+            return extId
+        }
+        return nil
+    }
+
+    /// Validate a pasted playlist URL without writing anything to the library.
+    ///
+    /// Sets `linkCheckPhase` through its lifecycle: `.checking` → either
+    /// `.failed(message)` or `.validated(title, count, diff)`. On success the
+    /// preview and provider are stashed in `pendingLinkPreview`/
+    /// `pendingLinkProvider` for `commitPendingLink()` to consume.
+    @MainActor
+    func checkPlaylistLink(url: String) async {
+        linkCheckPhase = .checking
+        pendingLinkPreview = nil
+        pendingLinkProvider = nil
+
+        let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            linkCheckPhase = .failed("Enter a playlist URL.")
+            return
+        }
+        let normalized = URLDetector.normalize(trimmed)
+
+        let provider: any RemotePlaylistProvider
+        switch URLDetector.classify(trimmed) {
+        case .youtubePlaylist:
+            provider = YouTubePlaylistProvider(
+                downloader: YouTubeDownloader(),
+                trackRepository: trackRepository,
+                sourceRepository: sourceRepository,
+                playlistRepository: playlistRepository
+            )
+        case .soundcloudPlaylist:
+            let container = DependencyContainer.shared
+            guard let tokenStorage = container.tokenStorage,
+                  let oauthManager = container.oauthManager else {
+                linkCheckPhase = .failed("SoundCloud is not connected — sign in in Settings first.")
+                return
+            }
+            let client = SoundCloudClient(
+                tokenStorage: tokenStorage,
+                oauthManager: oauthManager,
+                trackRepository: trackRepository,
+                sourceRepository: sourceRepository,
+                playlistRepository: playlistRepository
+            )
+            provider = SoundCloudPlaylistProvider(
+                client: client,
+                trackRepository: trackRepository,
+                sourceRepository: sourceRepository,
+                playlistRepository: playlistRepository
+            )
+        default:
+            linkCheckPhase = .failed("That doesn't look like a YouTube or SoundCloud playlist link.")
+            return
+        }
+
+        let preview: RemotePlaylistPreview
+        do {
+            preview = try await provider.fetchPreview(fromURL: normalized)
+        } catch let error as RemotePlaylistProviderError {
+            linkCheckPhase = .failed(error.errorDescription ?? "Could not load that playlist.")
+            return
+        } catch {
+            linkCheckPhase = .failed(error.localizedDescription)
+            return
+        }
+
+        let remoteEntries = preview.tracks.map {
+            PlaylistDifferRemoteEntry(
+                externalID: $0.externalID,
+                title: $0.title,
+                artist: $0.artist,
+                originalPath: $0.originalPath
+            )
+        }
+
+        let ids = Set(tracks.compactMap { $0.id })
+        let externalIDsByTrack: [Int64: [String]]
+        do {
+            externalIDsByTrack = try await sourceRepository.fetchExternalIDs(trackIds: ids)
+        } catch {
+            externalIDsByTrack = [:]
+        }
+        let localEntries = tracks.map { track in
+            PlaylistDifferLocalTrack(
+                id: track.id ?? -1,
+                title: track.title,
+                artist: track.artist,
+                originalPath: track.originalPath,
+                externalIDs: externalIDsByTrack[track.id ?? -1] ?? []
+            )
+        }
+
+        let diff = PlaylistLinkDiffComputer.compute(remote: remoteEntries, local: localEntries)
+        pendingLinkPreview = preview
+        pendingLinkProvider = provider
+        linkCheckPhase = .validated(
+            remoteTitle: preview.title,
+            remoteTrackCount: preview.tracks.count,
+            diff: diff
+        )
+    }
+
+    /// Commit the validated link: write `source_id` + `external_id` onto the
+    /// playlist row. Does NOT import tracks, does NOT call `persist()`.
+    ///
+    /// Returns true on success (caller dismisses the sheet and shows a
+    /// success alert); false on failure (caller stays on the sheet with
+    /// `linkCheckPhase` set to `.failed`).
+    @MainActor
+    func commitPendingLink() async -> Bool {
+        guard let preview = pendingLinkPreview,
+              let provider = pendingLinkProvider,
+              let playlistId = playlist.id else {
+            linkCheckPhase = .failed("Nothing to commit.")
+            return false
+        }
+
+        do {
+            let sourceRow = try await provider.sourceRowForLinking()
+            guard let sourceId = sourceRow.id else {
+                throw RemotePlaylistProviderError.previewUnavailable
+            }
+            try await playlistRepository.updateSourceLink(
+                id: playlistId,
+                sourceId: sourceId,
+                externalId: preview.externalID
+            )
+            errorMessage = nil
+            linkCheckPhase = .idle
+            pendingLinkPreview = nil
+            pendingLinkProvider = nil
+            await refresh()
+            NotificationCenter.default.post(
+                name: .playlistDidChange,
+                object: nil,
+                userInfo: ["playlistId": playlistId]
+            )
+            return true
+        } catch {
+            linkCheckPhase = .failed(error.localizedDescription)
+            return false
+        }
+    }
+
+    /// Reset the link-check state (user cancelled or edited the URL).
+    func cancelLinkCheck() {
+        linkCheckPhase = .idle
+        pendingLinkPreview = nil
+        pendingLinkProvider = nil
+    }
+
 }

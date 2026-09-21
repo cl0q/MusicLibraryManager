@@ -42,6 +42,13 @@ struct PlaylistDetailView: View {
     @State private var ingestSuccessMessage: String?
     @State private var coverImage: NSImage?
 
+    // Source-linking sheet state
+    @State private var showLinkSheet = false
+    @State private var linkURLText = ""
+    @State private var showLinkMismatchAlert = false
+    @State private var linkSuccessMessage: String?
+    @State private var lastValidatedPhase: PlaylistDetailViewModel.LinkCheckPhase?
+
     var body: some View {
         Group {
             if let viewModel {
@@ -188,6 +195,55 @@ struct PlaylistDetailView: View {
         } message: {
             Text(ingestSuccessMessage ?? "")
         }
+        .sheet(isPresented: $showLinkSheet) {
+            linkSourceSheet
+        }
+        .alert("Different tracks", isPresented: $showLinkMismatchAlert) {
+            Button("Cancel", role: .cancel) {
+                viewModel?.cancelLinkCheck()
+            }
+            Button("Link Anyway") {
+                Task {
+                    if let vm = viewModel, await vm.commitPendingLink() {
+                        showLinkSheet = false
+                        if case .validated(let title, _, _) = lastValidatedPhase {
+                            linkSuccessMessage = "Linked to \(title)"
+                        }
+                    }
+                }
+            }
+        } message: {
+            if case .validated(_, _, let diff) = viewModel?.linkCheckPhase {
+                Text("The remote playlist has \(diff.remoteOnly) track(s) this playlist doesn't, and this playlist has \(diff.localOnly) track(s) the remote doesn't. Linking only changes where Sync pulls new tracks from — nothing is added or removed now.")
+            }
+        }
+        .alert("Link Updated", isPresented: linkSuccessBinding) {
+            Button("OK", role: .cancel) {
+                linkSuccessMessage = nil
+            }
+        } message: {
+            Text(linkSuccessMessage ?? "")
+        }
+        .onChange(of: linkURLText) { _, _ in
+            viewModel?.cancelLinkCheck()
+        }
+        .onChange(of: viewModel?.linkCheckPhase) { _, newPhase in
+            if case .validated(_, _, let diff) = newPhase {
+                lastValidatedPhase = newPhase
+                if !diff.hasDifferences {
+                    Task {
+                        if let vm = viewModel, await vm.commitPendingLink() {
+                            showLinkSheet = false
+                            if case .validated(let title, _, _) = newPhase {
+                                linkSuccessMessage = "Linked to \(title)"
+                            }
+                        }
+                    }
+                } else {
+                    showLinkMismatchAlert = true
+                }
+            }
+        }
         .task(id: playlist.id) {
             coverImage = nil
         }
@@ -202,6 +258,111 @@ struct PlaylistDetailView: View {
                 return
             }
             coverImage = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        }
+    }
+
+    // MARK: - Link Source Sheet
+
+    private var linkSourceSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Image(systemName: "link")
+                        .foregroundColor(.mlmAccent)
+                    Text("Link Playlist Source")
+                        .font(MLMFont.title3)
+                        .foregroundColor(.mlmInk)
+                }
+                Text("Paste a YouTube or SoundCloud playlist URL to link this playlist to a remote source.")
+                    .font(MLMFont.muted)
+                    .foregroundColor(.mlmInkMuted)
+            }
+
+            Divider()
+
+            TextField("https://youtube.com/playlist?list=… or https://soundcloud.com/…/sets/…", text: $linkURLText)
+                .textFieldStyle(.roundedBorder)
+                .disabled(isLinkChecking)
+
+            phaseView
+
+            Spacer(minLength: 0)
+
+            Divider()
+
+            HStack {
+                Button("Cancel") {
+                    viewModel?.cancelLinkCheck()
+                    showLinkSheet = false
+                }
+                .disabled(isLinkChecking)
+
+                Spacer()
+
+                if isLinkChecking {
+                    ProgressView()
+                        .controlSize(.small)
+                        .padding(.trailing, 8)
+                }
+
+                Button("Check") {
+                    Task { await viewModel?.checkPlaylistLink(url: linkURLText) }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.mlmAccent)
+                .disabled(isLinkChecking || linkURLText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 440, maxWidth: 520, minHeight: 240, maxHeight: 340)
+    }
+
+    private var isLinkChecking: Bool {
+        if case .checking = viewModel?.linkCheckPhase { return true }
+        return false
+    }
+
+    private var linkSuccessBinding: Binding<Bool> {
+        Binding(
+            get: { linkSuccessMessage != nil },
+            set: { if !$0 { linkSuccessMessage = nil } }
+        )
+    }
+
+    @ViewBuilder
+    private var phaseView: some View {
+        if let phase = viewModel?.linkCheckPhase {
+            switch phase {
+            case .idle:
+                EmptyView()
+            case .checking:
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Checking link…")
+                        .font(MLMFont.body)
+                        .foregroundColor(.mlmInkSecondary)
+                }
+            case .failed(let message):
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .font(MLMFont.muted)
+                    .foregroundColor(.mlmError)
+            case .validated(let remoteTitle, let remoteTrackCount, let diff):
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Remote playlist “\(remoteTitle)” · \(remoteTrackCount) tracks")
+                        .font(MLMFont.body)
+                        .foregroundColor(.mlmInk)
+                    if diff.hasDifferences {
+                        Text("Differs: \(diff.remoteOnly) track(s) only remote, \(diff.localOnly) only local.")
+                            .font(MLMFont.muted)
+                            .foregroundColor(.mlmAttention)
+                    } else {
+                        Text("Matches the tracks in this playlist.")
+                            .font(MLMFont.muted)
+                            .foregroundColor(.mlmInkSecondary)
+                    }
+                }
+            }
         }
     }
 
@@ -351,6 +512,20 @@ struct PlaylistDetailView: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(viewModel.isSyncingSource)
+            }
+
+            // Link Source button
+            if viewModel.canLinkSource {
+                Button {
+                    linkURLText = viewModel.linkedSourceURL ?? ""
+                    viewModel.cancelLinkCheck()
+                    showLinkSheet = true
+                } label: {
+                    Label(viewModel.playlist.sourceId != nil ? "Change Link…" : "Link Source…", systemImage: "link")
+                        .font(MLMFont.body)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("playlist_link_source_button")
             }
 
             // Import M3U

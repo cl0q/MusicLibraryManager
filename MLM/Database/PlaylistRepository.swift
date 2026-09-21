@@ -69,6 +69,21 @@ final class PlaylistRepository: Sendable {
         }
     }
 
+    /// Atomically update both `source_id` and `external_id` on a playlist row.
+    ///
+    /// Used by the "Link Source" flow in PlaylistDetailView: the user pastes a
+    /// remote playlist URL, we validate it, and on commit write both columns in
+    /// a single UPDATE so observers never see a half-applied state (source_id
+    /// pointing at a source with a stale or nil external_id, or vice versa).
+    func updateSourceLink(id: Int64, sourceId: Int64?, externalId: String?) async throws {
+        try await database.write { db in
+            try db.execute(
+                sql: "UPDATE playlists SET source_id = ?, external_id = ? WHERE id = ?",
+                arguments: [sourceId, externalId, id]
+            )
+        }
+    }
+
     /// Delete a playlist.
     func delete(id: Int64) async throws {
         try await database.write { db in

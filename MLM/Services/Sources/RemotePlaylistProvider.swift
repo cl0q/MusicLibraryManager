@@ -39,6 +39,16 @@ protocol RemotePlaylistProvider: AnyObject {
         preview: RemotePlaylistPreview,
         selectedTracks: [RemotePlaylistTrack]
     ) async throws -> RemotePlaylistPersistence
+
+    /// Return (or create) the `sources` row this provider writes tracks under.
+    ///
+    /// Used by the "Link Source" flow in PlaylistDetailViewModel: when the
+    /// user commits a pasted URL we need to write `source_id` onto the
+    /// playlists row, and the correct source row depends on the provider
+    /// (YouTube uses userId "local", SoundCloud uses the logged-in user's
+    /// numeric ID). Spotify never reaches this code path — the default
+    /// implementation throws `previewUnavailable`.
+    func sourceRowForLinking() async throws -> Source
 }
 
 extension RemotePlaylistProvider {
@@ -49,6 +59,9 @@ extension RemotePlaylistProvider {
         throw RemotePlaylistProviderError.previewUnavailable
     }
     func fetchPreview(fromURL url: String) async throws -> RemotePlaylistPreview {
+        throw RemotePlaylistProviderError.previewUnavailable
+    }
+    func sourceRowForLinking() async throws -> Source {
         throw RemotePlaylistProviderError.previewUnavailable
     }
 }
@@ -126,6 +139,13 @@ final class SoundCloudPlaylistProvider: RemotePlaylistProvider {
         }
         cache[String(playlist.id)] = playlist
         return try await makePreview(from: playlist)
+    }
+
+    /// SoundCloud's source row is keyed by the logged-in user's numeric ID,
+    /// matching the userId used in `persist()`.
+    func sourceRowForLinking() async throws -> Source {
+        let user = try await client.fetchProfile()
+        return try await sourceRepository.upsert(name: "soundcloud", userId: String(user.id))
     }
 
     func persist(
@@ -392,6 +412,16 @@ final class YouTubePlaylistProvider: RemotePlaylistProvider {
                 )
             }
         )
+    }
+
+    /// YouTube's source row is userId "local" — there's no per-user OAuth
+    /// identity; playlist URLs are public.
+    func sourceRowForLinking() async throws -> Source {
+        let source = try await sourceRepository.upsert(name: "youtube", userId: "local")
+        guard source.id != nil else {
+            throw RemotePlaylistProviderError.previewUnavailable
+        }
+        return source
     }
 
     func persist(
