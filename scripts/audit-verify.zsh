@@ -53,7 +53,11 @@ if [[ ! -f "Package.swift" ]]; then
 fi
 
 # One label for this exact OS / Xcode / architecture combination.
-: ${MLM_SNAPSHOT_SET:="macos-$(sw_vers -productVersion 2>/dev/null | tr -d ' ')-$(uname -m)"}
+# The harness only accepts [A-Za-z0-9_-] (no dots — they would allow path
+# traversal), so any invalid char in the derived label is replaced with '-'
+# (e.g. macOS "27.0" -> "27-0", giving "macos-27-0-arm64").
+_raw_snapshot_set="macos-$(sw_vers -productVersion 2>/dev/null)-$(uname -m)"
+: ${MLM_SNAPSHOT_SET:="${_raw_snapshot_set//[^A-Za-z0-9_-]/-}"}
 export MLM_SNAPSHOT_SET
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
