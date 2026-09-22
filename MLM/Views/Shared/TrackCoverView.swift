@@ -2,6 +2,11 @@ import AppKit
 import ImageIO
 import SwiftUI
 
+extension EnvironmentValues {
+    /// Presentation-only hosts can render placeholders without accessing artwork caches.
+    @Entry var trackArtworkLoadingEnabled: Bool = true
+}
+
 /// Displays track album artwork with Solar-gradient fallback.
 ///
 /// Loading flow:
@@ -29,6 +34,7 @@ struct TrackCoverView: View {
     @State private var isLoading = false
 
     @Environment(\.container) private var container
+    @Environment(\.trackArtworkLoadingEnabled) private var artworkLoadingEnabled
 
     var body: some View {
         ZStack {
@@ -45,11 +51,16 @@ struct TrackCoverView: View {
         .onReceive(
             NotificationCenter.default.publisher(for: .trackArtworkDidChange)
         ) { note in
+            guard artworkLoadingEnabled else { return }
             guard (note.userInfo?["trackId"] as? Int64) == trackId else { return }
             TrackArtworkCache.shared.invalidate(forTrackId: trackId)
             Task { await loadImage() }
         }
         .task(id: trackId) {
+            guard artworkLoadingEnabled else {
+                image = nil
+                return
+            }
             // Synchronous probe: clears any stale image from a previous track
             // and avoids a one-frame placeholder flash for already-cached art.
             image = TrackArtworkCache.shared.image(forTrackId: trackId, size: size)

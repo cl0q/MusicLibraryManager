@@ -103,6 +103,27 @@ final class PlaylistDetailViewModel {
         self.tableCache = tableCache
     }
 
+    /// Deterministic construction path for static UI fixtures. It preloads
+    /// table state without starting the normal repository loading task.
+    init(
+        playlist: Playlist,
+        playlistRepository: PlaylistRepository,
+        trackRepository: TrackRepository,
+        sourceRepository: SourceRepository,
+        preloadedTracks: [Track],
+        availabilityByTrackID: [Int64: TrackAvailability] = [:]
+    ) {
+        self.playlist = playlist
+        self.playlistRepository = playlistRepository
+        self.trackRepository = trackRepository
+        self.sourceRepository = sourceRepository
+        self.configRepository = nil
+        self.tableCache = nil
+        self.tracks = preloadedTracks
+        self.displayedTracks = preloadedTracks
+        self.availabilityByTrackID = availabilityByTrackID
+    }
+
     // MARK: - Load
 
     /// Load all tracks for this playlist, ordered by position.

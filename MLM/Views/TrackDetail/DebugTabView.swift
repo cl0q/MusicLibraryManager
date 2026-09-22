@@ -17,6 +17,12 @@ struct DebugTabView: View {
     @State private var missingLocalFile = false
     @State private var ffmpegMissing = false
 
+    init(track: Track, preloadedMissingLocalFile: Bool = false) {
+        self.track = track
+        self._missingLocalFile = State(initialValue: preloadedMissingLocalFile)
+        self._hasRun = State(initialValue: preloadedMissingLocalFile)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if isLoading {

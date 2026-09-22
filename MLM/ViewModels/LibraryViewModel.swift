@@ -107,6 +107,27 @@ final class LibraryViewModel {
         self.configRepository = configRepository
     }
 
+    /// Deterministic construction path for static UI fixtures. It preloads
+    /// presentation state only; callers retain the same repository dependencies
+    /// and no fetch, service, or playback work starts from this initializer.
+    init(
+        trackRepository: TrackRepository,
+        configRepository: ConfigRepository,
+        preloadedTracks: [Track],
+        selectedTab: LibraryTab = .local,
+        availabilityByTrackID: [Int64: TrackAvailability] = [:],
+        localCount: Int? = nil,
+        remoteCount: Int? = nil
+    ) {
+        self.trackRepository = trackRepository
+        self.configRepository = configRepository
+        self.selectedTab = selectedTab
+        self.displayedTracks = preloadedTracks
+        self.localCount = localCount ?? preloadedTracks.filter(\.isLocal).count
+        self.remoteCount = remoteCount ?? preloadedTracks.filter(\.isRemote).count
+        self.availabilityByTrackID = availabilityByTrackID
+    }
+
     // MARK: - Data loading
 
     /// Cancel any in-flight fetch and start a new one for the current state.

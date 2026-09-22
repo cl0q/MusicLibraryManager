@@ -48,7 +48,10 @@ let package = Package(
                 "MLM",
                 .product(name: "GRDB", package: "GRDB.swift"),
             ],
-            path: "MLMTests"
+            path: "MLMTests",
+            exclude: [
+                "Snapshots/__Snapshots__",
+            ]
         ),
     ]
 )

@@ -3,9 +3,9 @@ import GRDB
 
 /// Repository for album detection, variants, and sibling discovery.
 final class AlbumRepository: Sendable {
-    private let database: DatabasePool
+    private let database: any DatabaseWriter
 
-    init(database: DatabasePool) {
+    init(database: any DatabaseWriter) {
         self.database = database
     }
 

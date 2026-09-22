@@ -21,6 +21,14 @@ struct ReviewQueueView: View {
     /// When opened from a track inspector, the matching pending group expands.
     var focusTrackID: Int64?
 
+    init(
+        focusTrackID: Int64? = nil,
+        initialViewModel: ReviewQueueViewModel? = nil
+    ) {
+        self.focusTrackID = focusTrackID
+        self._viewModel = State(initialValue: initialViewModel)
+    }
+
     var body: some View {
         // [navperf] temporary instrumentation — remove after measurement
         let _ = print("[navperf] section-body review \(Date().timeIntervalSince1970)")

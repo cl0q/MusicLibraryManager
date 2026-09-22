@@ -133,7 +133,10 @@ struct PlaylistCard: View {
             coverImage = nil
         }
         .task(id: playlist.coverImagePath) {
-            let path = playlist.coverImagePath
+            guard let path = playlist.coverImagePath else {
+                coverImage = nil
+                return
+            }
             let coversDir = Self.coversDirectory
             let cgImage: CGImage? = try? await Task.detached(priority: .userInitiated) {
                 PlaylistCard.loadCoverCGImage(coverImagePath: path, coversDir: coversDir)

@@ -15,6 +15,16 @@ struct LibraryView: View {
     @State private var availablePlaylists: [Playlist] = []
     @State private var availableSyncProfiles: [SyncProfile] = []
     @State private var isRescanning = false
+    private let usesPreloadedModel: Bool
+
+    init(
+        onTrackDoubleClick: ((Track, [Track]) -> Void)? = nil,
+        initialViewModel: LibraryViewModel? = nil
+    ) {
+        self.onTrackDoubleClick = onTrackDoubleClick
+        self._viewModel = State(initialValue: initialViewModel)
+        self.usesPreloadedModel = initialViewModel != nil
+    }
 
     var body: some View {
         // [navperf] temporary instrumentation — remove after measurement
@@ -28,6 +38,7 @@ struct LibraryView: View {
             }
         }
         .task {
+            guard !usesPreloadedModel else { return }
             // [navperf] temporary instrumentation — remove after measurement
             print("[navperf] libraryview-task-start \(Date().timeIntervalSince1970)")
             initializeViewModel()

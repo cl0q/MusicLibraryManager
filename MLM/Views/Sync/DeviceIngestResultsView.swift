@@ -118,7 +118,7 @@ struct DeviceIngestResultsView: View {
 }
 
 /// A single file row in the device ingest results.
-private struct DeviceIngestFileRow: View {
+struct DeviceIngestFileRow: View {
     let fileName: String
     let preview: IngestPreview
     let onApply: () -> Void

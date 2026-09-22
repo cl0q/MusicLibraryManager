@@ -91,6 +91,20 @@ final class DependencyContainer {
 
     private init() {}
 
+    /// Test-only composition root for UI fixtures. It deliberately wires only
+    /// database repositories: no playback, keychain, network, process, mount,
+    /// or background service is started by this initializer.
+    init(snapshotDatabase: any DatabaseWriter) {
+        self.trackRepository = TrackRepository(database: snapshotDatabase)
+        self.playlistRepository = PlaylistRepository(database: snapshotDatabase)
+        self.syncRepository = SyncRepository(database: snapshotDatabase)
+        self.albumRepository = AlbumRepository(database: snapshotDatabase)
+        self.sourceRepository = SourceRepository(database: snapshotDatabase)
+        self.analysisRepository = AnalysisRepository(database: snapshotDatabase)
+        self.configRepository = ConfigRepository(database: snapshotDatabase)
+        self.reelRepository = ReelRepository(database: snapshotDatabase)
+    }
+
     static func configureSoundCloudTokenRefresh(
         _ tokenRefresh: any TokenRefreshConfiguring,
         clientId: String,
