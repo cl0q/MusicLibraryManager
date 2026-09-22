@@ -54,33 +54,58 @@ final class UniversalSearchViewModel {
             state = .resolving
             switch source {
             case .youtube:
+                // Fetch real metadata from yt-dlp
+                var title: String? = nil
+                var artist: String? = nil
+                var duration: Int? = nil
+                let downloader = YouTubeDownloader()
+                if downloader.isAvailable {
+                    if let entries = try? await downloader.fetchURLInfo(url: url),
+                       let entry = entries.first {
+                        title = entry.title
+                        artist = entry.uploader
+                        duration = entry.durationSeconds
+                    }
+                }
                 let videoID = URLDetector.extractYouTubeVideoID(url)
                 let thumb = artworkURL
                     ?? videoID.map { "https://i.ytimg.com/vi/\($0)/maxresdefault.jpg" }
-                let title = videoID.map { "YouTube Video (\($0))" } ?? "YouTube Video"
                 state = .resolved(UniversalSearchResult(
                     source: source,
                     url: url,
-                    title: title,
-                    artist: nil,
+                    title: title ?? "YouTube Video",
+                    artist: artist,
                     artworkURL: thumb,
-                    durationSeconds: nil
+                    durationSeconds: duration
                 ))
             case .soundcloud:
+                // Fetch real metadata from SoundCloud API
+                var title: String? = nil
+                var artist: String? = nil
+                var duration: Int? = nil
+                var thumb = artworkURL
+                if let client = DependencyContainer.shared.soundCloudClient,
+                   let track = try? await client.resolveTrack(url: url) {
+                    title = track.title
+                    artist = track.user?.username
+                    duration = track.duration.map { $0 / 1000 }
+                    thumb = track.artworkUrl ?? thumb
+                }
                 state = .resolved(UniversalSearchResult(
                     source: source,
                     url: url,
-                    title: "SoundCloud Track",
-                    artist: nil,
-                    artworkURL: artworkURL,
-                    durationSeconds: nil
+                    title: title ?? "SoundCloud Track",
+                    artist: artist,
+                    artworkURL: thumb,
+                    durationSeconds: duration
                 ))
             case .directAudio:
                 let filename = (url as NSString).lastPathComponent
+                let cleanName = (filename as NSString).deletingPathExtension
                 state = .resolved(UniversalSearchResult(
                     source: source,
                     url: url,
-                    title: filename,
+                    title: cleanName,
                     artist: nil,
                     artworkURL: nil,
                     durationSeconds: nil

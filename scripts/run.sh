@@ -58,7 +58,7 @@ if [[ -f "${REPO_ENV}" ]]; then
 fi
 
 ARCH="$(uname -m)"   # arm64 or x86_64
-BIN_PATH=".build/${ARCH}-apple-macosx/${CONFIG}/MLM"
+BIN_PATH=".build/out/Products/${CONFIG^}/MLM"
 APP_BUNDLE=".build/MLM.app"
 
 if [[ "${DO_CLEAN}" == "1" ]]; then
@@ -122,7 +122,7 @@ if [[ -f "${ICON_SRC}" ]]; then
 fi
 
 # Copy SPM resource bundle and YAMNet model into the app bundle
-SPM_BUNDLE_PATH="${APP_ROOT}/.build/${ARCH}-apple-macosx/${CONFIG}/MLM_MLM.bundle"
+SPM_BUNDLE_PATH="${APP_ROOT}/.build/out/Products/${CONFIG^}/MLM_MLM.bundle"
 if [[ -d "${SPM_BUNDLE_PATH}" ]]; then
   echo "› installing SPM resource bundle"
   rm -rf "${APP_BUNDLE}/Contents/Resources/MLM_MLM.bundle"
@@ -152,7 +152,7 @@ fi
 # Allow" then survives app rebuilds — see scripts/setup-dev-signing.sh);
 # otherwise fall back to ad-hoc so the flow keeps working with no setup.
 # This MUST happen before the final .app signing step below.
-HELPER_BIN=".build/${ARCH}-apple-macosx/${CONFIG}/mlm-auth"
+HELPER_BIN=".build/out/Products/${CONFIG^}/mlm-auth"
 if [[ -f "${HELPER_BIN}" ]]; then
   cp "${HELPER_BIN}" "${APP_BUNDLE}/Contents/MacOS/mlm-auth"
   chmod +x "${APP_BUNDLE}/Contents/MacOS/mlm-auth"

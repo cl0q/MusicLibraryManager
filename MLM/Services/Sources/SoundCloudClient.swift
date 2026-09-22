@@ -882,6 +882,28 @@ final class SoundCloudClient: Sendable {
     /// The resolved resource's `sharing` field is forwarded to the returned
     /// `SoundCloudPlaylist`, so a private set resolved from a pasted URL
     /// reports `isPrivate == true` just like one fetched from the account list.
+    /// Resolve a SoundCloud track URL to its full track metadata.
+    func resolveTrack(url rawURL: String) async throws -> SoundCloudTrack {
+        let trimmed = rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw SoundCloudError.notAPlaylistURL(rawURL)
+        }
+
+        let normalised: String
+        if trimmed.hasPrefix("https://") || trimmed.hasPrefix("http://") {
+            normalised = trimmed
+        } else {
+            normalised = "https://" + trimmed
+        }
+
+        let track: SoundCloudTrack = try await apiRequest(
+            endpoint: "resolve",
+            queryItems: [URLQueryItem(name: "url", value: normalised)],
+            type: SoundCloudTrack.self
+        )
+        return track
+    }
+
     func resolvePlaylist(url rawURL: String) async throws -> SoundCloudPlaylist {
         let trimmed = rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {

@@ -60,6 +60,9 @@ final class DependencyContainer {
 
     private(set) var searchCoordinator = SearchCoordinator()
 
+    /// SoundCloud API client — exposed for universal search metadata resolution.
+    private(set) var soundCloudClient: SoundCloudClient?
+
     // MARK: - ViewModels (shared singletons)
 
     private(set) var playbackViewModel: PlaybackViewModel?
@@ -180,6 +183,7 @@ final class DependencyContainer {
             sourceRepository: self.sourceRepository!,
             playlistRepository: self.playlistRepository
         )
+        self.soundCloudClient = scClient
         let dab = DABClient(tokenStorage: tokens)
         let squid = SquidWtfClient()
         let ytDownloader = YouTubeDownloader()

@@ -156,6 +156,8 @@ final class DownloadOrchestrator {
         var preferredSource: PreferredSource = .auto
         /// Direct YouTube video URL, used when `preferredSource == .youtube`.
         var youtubeURL: String? = nil
+        /// Artwork/thumbnail URL to embed into the downloaded file after finalize.
+        var artworkURL: String? = nil
         /// Attempts already recorded by a legacy retry-queue item before this
         /// request starts. Fresh requests use zero and derive their count from
         /// the database record instead.
@@ -1255,6 +1257,13 @@ final class DownloadOrchestrator {
         return "\(identity.prefix(maxIdentityLength))\(suffix)"
     }
 
+    /// Embed artwork from the request's artworkURL into the finalized file.
+    private func embedArtworkIfNeeded(request: DownloadRequest, at path: URL) async {
+        guard let artworkStr = request.artworkURL,
+              let artworkURL = URL(string: artworkStr) else { return }
+        _ = await ArtworkService.embedArtwork(from: artworkURL, into: path)
+    }
+
     func finalize(
         sourcePath: URL,
         source: DownloadSource,
@@ -1288,11 +1297,13 @@ final class DownloadOrchestrator {
                 produced, into: finalDirectory(for: source),
                 fileName: Self.finalFileName(for: request, pathExtension: produced.pathExtension)
             )
+            await embedArtworkIfNeeded(request: request, at: dest)
             return (dest, dest.pathExtension.lowercased(), TranscodeService.targetBitrate)
 
         case .skipped:
             if preservesOriginal(for: source) {
                 let kbps = await transcodeService.detectBitrateKbps(transcodeInput)
+                await embedArtworkIfNeeded(request: request, at: transcodeInput)
                 return (transcodeInput, transcodeInput.pathExtension.lowercased(), kbps)
             }
             let dest = try placeFinal(
@@ -1300,6 +1311,7 @@ final class DownloadOrchestrator {
                 fileName: Self.finalFileName(for: request, pathExtension: transcodeInput.pathExtension)
             )
             let kbps = await transcodeService.detectBitrateKbps(dest)
+            await embedArtworkIfNeeded(request: request, at: dest)
             return (dest, dest.pathExtension.lowercased(), kbps)
 
         case .failed(let error):

@@ -12,6 +12,7 @@ struct UniversalSearchView: View {
     @State private var viewModel = UniversalSearchViewModel()
     @FocusState private var searchFocused: Bool
     var onDismiss: () -> Void
+    var onDownload: ((UniversalSearchResult) -> Void)?
 
     var body: some View {
         ZStack {
@@ -187,7 +188,8 @@ struct UniversalSearchView: View {
                 artworkURL: result.artworkURL,
                 source: result.source,
                 actionLabel: "Download",
-                actionStyle: .primary
+                actionStyle: .primary,
+                onAction: { onDownload?(result) }
             )
         }
     }
@@ -256,7 +258,8 @@ struct UniversalSearchView: View {
         artworkURL: String?,
         source: ArtworkResolver.Source,
         actionLabel: String,
-        actionStyle: CardActionStyle
+        actionStyle: CardActionStyle,
+        onAction: (() -> Void)? = nil
     ) -> some View {
         HStack(spacing: 14) {
             // Artwork
@@ -280,11 +283,11 @@ struct UniversalSearchView: View {
 
             // Action button
             if actionStyle == .primary {
-                Button(actionLabel) { }
+                Button(actionLabel) { onAction?() }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
             } else {
-                Button(actionLabel) { }
+                Button(actionLabel) { onAction?() }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
             }

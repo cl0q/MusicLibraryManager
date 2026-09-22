@@ -19,8 +19,12 @@ final class AudioEmbeddingService: @unchecked Sendable {
 
     /// Attempt to load the compiled CoreML model dynamically from the main app bundle.
     private func loadModel() {
-        let modelURL = Bundle.module.url(forResource: "YAMNet", withExtension: "mlmodelc") ??
-                       Bundle.main.url(forResource: "YAMNet", withExtension: "mlmodelc")
+        // Search for the model in Bundle.main's resource directory.
+        // We deliberately avoid Bundle.module here — its static initializer
+        // has a fatalError when the SwiftPM resource bundle isn't embedded
+        // (e.g. when launched via run.sh's manually-created .app bundle).
+        let resourceDir = Bundle.main.resourceURL
+        let modelURL = resourceDir?.appendingPathComponent("YAMNet.mlmodelc")
         
         guard let resolvedURL = modelURL else {
             AppLogger.shared.log(

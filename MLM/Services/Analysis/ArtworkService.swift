@@ -276,6 +276,68 @@ actor BatchResultCollector {
     /// Static and async so callers on @MainActor can call without blocking the UI.
     /// Runs in Task.detached to isolate the blocking Process.waitUntilExit() call.
     /// Returns nil silently if ffmpeg is not installed (D-07) or if no embedded art exists.
+    /// Download artwork from a URL and embed it into an audio file.
+    /// Uses ffmpeg to attach the image as cover art. Works for m4a, mp3, flac, ogg.
+    static func embedArtwork(from imageURL: URL, into audioURL: URL) async -> Bool {
+        await Task.detached(priority: .utility) { () -> Bool in
+            let fm = FileManager.default
+            let tmpDir = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            do { try fm.createDirectory(at: tmpDir, withIntermediateDirectories: true) } catch { return false }
+            defer { try? fm.removeItem(at: tmpDir) }
+
+            // 1. Download the image
+            let coverPath = tmpDir.appendingPathComponent("cover.jpg")
+            do {
+                let (data, _) = try await URLSession.shared.data(from: imageURL)
+                guard !data.isEmpty else { return false }
+                try data.write(to: coverPath)
+            } catch {
+                return false
+            }
+
+            // 2. Embed via ffmpeg
+            guard let ffmpeg = ProcessRunner.findExecutable("ffmpeg") else { return false }
+
+            let outputPath = tmpDir.appendingPathComponent("out" + audioURL.pathExtension)
+            let ext = audioURL.pathExtension.lowercased()
+
+            var args: [String] = [
+                "-i", audioURL.path,
+                "-i", coverPath.path,
+                "-map", "0:a",
+                "-map", "1:0",
+                "-c", "copy",
+            ]
+            if ext == "m4a" || ext == "aac" {
+                args += ["-disposition:v:0", "attached_pic"]
+            } else if ext == "mp3" {
+                args += ["-id3v2_version", "3", "-metadata:s:v", "title=Album cover", "-metadata:s:v", "comment=Cover (front)"]
+            } else {
+                args += ["-disposition:v:0", "attached_pic"]
+            }
+            args += ["-y", outputPath.path]
+
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: ffmpeg)
+            process.arguments = args
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+                guard process.terminationStatus == 0, fm.fileExists(atPath: outputPath.path) else { return false }
+
+                // 3. Replace the original with the artwork-embedded version
+                try fm.removeItem(at: audioURL)
+                try fm.moveItem(at: outputPath, to: audioURL)
+                return true
+            } catch {
+                return false
+            }
+        }.value
+    }
+
     static func extractEmbeddedArtwork(from url: URL) async -> Data? {
         return await Task.detached(priority: .utility) { () -> Data? in
             guard let ffmpeg = ProcessRunner.findExecutable("ffmpeg") else {

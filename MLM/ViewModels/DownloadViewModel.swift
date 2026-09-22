@@ -180,7 +180,8 @@ final class DownloadViewModel {
     ///   (e.g. `.soundcloud` for SoundCloud playlists). Defaults to `.auto`.
     func downloadTracks(
         _ tracks: [Track],
-        preferredSource: DownloadOrchestrator.PreferredSource = .auto
+        preferredSource: DownloadOrchestrator.PreferredSource = .auto,
+        artworkURL: String? = nil
     ) async {
         guard let runner = activeBatchRunner else {
             AppLogger.shared.log("Download orchestrator not configured", level: .error, source: "Download")
@@ -226,7 +227,8 @@ final class DownloadViewModel {
                     soundcloudURL: scURL,
                     userId: userId,
                     preferredSource: preferredSource,
-                    youtubeURL: ytURL
+                    youtubeURL: ytURL,
+                    artworkURL: artworkURL
                 )
             )
         }

@@ -83,7 +83,12 @@ struct ContentView: View {
                     showFirstRunWizard = !container.hasLibraryRoot
                 }
                 .sheet(isPresented: $showUniversalSearch) {
-                    UniversalSearchView(onDismiss: { showUniversalSearch = false })
+                    UniversalSearchView(
+                        onDismiss: { showUniversalSearch = false },
+                        onDownload: { result in
+                            handleUniversalDownload(result: result)
+                        }
+                    )
                 }
             } else if let error = container.initializationError {
                 errorView(error)
@@ -386,6 +391,75 @@ struct ContentView: View {
             Task {
                 await playbackVM.playTrack(track, queue: queue)
             }
+        }
+    }
+
+    /// Handle a download request from the universal search panel.
+    /// Inserts the track into the DB with resolved metadata, then downloads.
+    private func handleUniversalDownload(result: UniversalSearchResult) {
+        guard let downloadVM = container.downloadViewModel,
+              let trackRepo = container.trackRepository,
+              let sourceRepo = container.sourceRepository else { return }
+
+        let source = result.source
+        let url = result.url
+
+        // Determine preferred source for the download orchestrator
+        let preferred: DownloadOrchestrator.PreferredSource
+        switch source {
+        case .soundcloud: preferred = .soundcloud
+        case .youtube: preferred = .youtube
+        default: preferred = .auto
+        }
+
+        // Album = source name, artist = resolved uploader/artist
+        let albumName: String
+        switch source {
+        case .youtube: albumName = "YouTube"
+        case .soundcloud: albumName = "SoundCloud"
+        case .directAudio: albumName = "Downloads"
+        case .genericWeb: albumName = "Web"
+        }
+
+        Task {
+            // 1. Insert track into DB with resolved metadata
+            var track = Track(
+                artist: result.artist ?? "Unknown Artist",
+                album: albumName,
+                title: result.title ?? "Unknown Title",
+                format: source == .directAudio ? "audio" : "youtube",
+                originalPath: url
+            )
+            let inserted = try await trackRepo.insert(track)
+            guard let trackId = inserted.id else { return }
+
+            // 2. Link to source
+            if let src = try? await sourceRepo.upsert(name: sourceLabel(source), userId: ""),
+               let sourceId = src.id {
+                try? await sourceRepo.linkTrackToSource(
+                    trackId: trackId,
+                    sourceId: sourceId,
+                    externalId: url
+                )
+            }
+
+            // 3. Re-fetch and download (with artwork for embedding)
+            if let fullTrack = try? await trackRepo.fetchTrack(id: trackId) {
+                await downloadVM.downloadTracks(
+                    [fullTrack],
+                    preferredSource: preferred,
+                    artworkURL: result.artworkURL
+                )
+            }
+        }
+    }
+
+    private func sourceLabel(_ source: ArtworkResolver.Source) -> String {
+        switch source {
+        case .youtube: return "YouTube"
+        case .soundcloud: return "SoundCloud"
+        case .directAudio: return "Direct"
+        case .genericWeb: return "Web"
         }
     }
 
