@@ -24,6 +24,9 @@ code_map.md
 HANDOFF_PROMPT.md
 mlm_gaps.md
 
+# Audit verification logs (scripts/audit-verify.zsh)
+audit-run-*.log
+
 # Swift / SPM build output
 .build/
 Package.resolved
