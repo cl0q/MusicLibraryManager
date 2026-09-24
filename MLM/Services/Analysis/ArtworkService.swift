@@ -328,10 +328,25 @@ actor BatchResultCollector {
                 process.waitUntilExit()
                 guard process.terminationStatus == 0, fm.fileExists(atPath: outputPath.path) else { return false }
 
-                // 3. Replace the original with the artwork-embedded version
-                try fm.removeItem(at: audioURL)
-                try fm.moveItem(at: outputPath, to: audioURL)
-                return true
+                // 3. Replace the original with the artwork-embedded version.
+                // Stage the ffmpeg output on the destination volume first, then
+                // swap it in with a failure-atomic replace. A delete-then-move
+                // could permanently destroy the user's audio if the move failed
+                // (I/O error, permission, or the volume changing mid-operation).
+                let stagedURL = audioURL.deletingLastPathComponent()
+                    .appendingPathComponent(".mlm-artwork-\(UUID().uuidString)." + audioURL.pathExtension)
+                do {
+                    try fm.moveItem(at: outputPath, to: stagedURL)
+                } catch {
+                    return false
+                }
+                do {
+                    _ = try fm.replaceItemAt(audioURL, withItemAt: stagedURL)
+                    return true
+                } catch {
+                    try? fm.removeItem(at: stagedURL)
+                    return false
+                }
             } catch {
                 return false
             }
