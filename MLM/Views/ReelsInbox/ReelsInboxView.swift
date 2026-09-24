@@ -1545,7 +1545,7 @@ struct ReelsInboxView: View {
         
         let fileURL = reel.fileURL
         
-        Task.detached(priority: .userInitiated) { [index] in
+        Task.detached(priority: .userInitiated) {
             let isAccessing = fileURL.startAccessingSecurityScopedResource()
             defer {
                 if isAccessing {
@@ -1558,7 +1558,9 @@ struct ReelsInboxView: View {
             guard let audioTrack = try? await asset.loadTracks(withMediaType: .audio).first else {
                 await MainActor.run {
                     self.matchingReelId = nil
-                    self.importedReels[index].matchFailed = true
+                    if let index = self.importedReels.firstIndex(where: { $0.id == reel.id }) {
+                        self.importedReels[index].matchFailed = true
+                    }
                 }
                 return
             }
@@ -1566,7 +1568,9 @@ struct ReelsInboxView: View {
             guard let reader = try? AVAssetReader(asset: asset) else {
                 await MainActor.run {
                     self.matchingReelId = nil
-                    self.importedReels[index].matchFailed = true
+                    if let index = self.importedReels.firstIndex(where: { $0.id == reel.id }) {
+                        self.importedReels[index].matchFailed = true
+                    }
                 }
                 return
             }
@@ -1587,7 +1591,9 @@ struct ReelsInboxView: View {
             guard reader.startReading() else {
                 await MainActor.run {
                     self.matchingReelId = nil
-                    self.importedReels[index].matchFailed = true
+                    if let index = self.importedReels.firstIndex(where: { $0.id == reel.id }) {
+                        self.importedReels[index].matchFailed = true
+                    }
                 }
                 return
             }
@@ -1623,6 +1629,7 @@ struct ReelsInboxView: View {
             
             await MainActor.run {
                 self.matchingReelId = nil
+                guard let index = self.importedReels.firstIndex(where: { $0.id == reel.id }) else { return }
                 if finalDidMatch {
                     self.importedReels[index].matchedTitle = finalTitle
                     self.importedReels[index].matchedArtist = finalArtist
@@ -1660,7 +1667,7 @@ struct ReelsInboxView: View {
         }
         let fileURL = reel.fileURL
         
-        Task.detached(priority: .userInitiated) { [index] in
+        Task.detached(priority: .userInitiated) {
             let isAccessing = fileURL.startAccessingSecurityScopedResource()
             defer {
                 if isAccessing {
@@ -1673,6 +1680,7 @@ struct ReelsInboxView: View {
             // 1. Get video duration
             guard let durationTime = try? await asset.load(.duration) else {
                 await MainActor.run {
+                    guard let index = self.importedReels.firstIndex(where: { $0.id == reel.id }) else { return }
                     self.importedReels[index].isOcrRunning = false
                     if self.selectedReel?.id == reel.id {
                         self.selectedReel = self.importedReels[index]
@@ -1683,6 +1691,7 @@ struct ReelsInboxView: View {
             let duration = CMTimeGetSeconds(durationTime)
             guard duration > 0 else {
                 await MainActor.run {
+                    guard let index = self.importedReels.firstIndex(where: { $0.id == reel.id }) else { return }
                     self.importedReels[index].isOcrRunning = false
                     if self.selectedReel?.id == reel.id {
                         self.selectedReel = self.importedReels[index]
@@ -1736,6 +1745,7 @@ struct ReelsInboxView: View {
             AppLogger.shared.info("OCR Extraction Complete: Parsed \(finalTexts.count) unique prominent strings from Reel '\(reel.fileURL.lastPathComponent)': \(finalTexts)", source: "ReelsOCR")
             
             await MainActor.run {
+                guard let index = self.importedReels.firstIndex(where: { $0.id == reel.id }) else { return }
                 self.importedReels[index].keyframes = finalKeyframes
                 self.importedReels[index].recognizedTexts = finalTexts
                 self.importedReels[index].isOcrRunning = false
