@@ -662,21 +662,24 @@ final class SyncViewModel {
     /// Apply a single device ingest preview.
     ///
     /// - Parameters:
-    ///   - index: Index into `deviceIngestPreviews`
+    ///   - fileName: Stable file name identifying the preview in `deviceIngestPreviews`
     ///   - profile: The sync profile
     /// - Returns: The target playlist ID on success
     @MainActor
-    func applyDeviceIngest(at index: Int, profile: SyncProfile, fileURL: URL) async -> Int64? {
+    func applyDeviceIngest(fileName: String, profile: SyncProfile, fileURL: URL) async -> Int64? {
         guard let ingestService, let profileId = profile.id else { return nil }
-        guard index >= 0, index < deviceIngestPreviews.count else { return nil }
 
         do {
             let result = try await ingestService.ingest(url: fileURL, profileId: profileId)
-            // Remove from the list after successful apply
-            deviceIngestPreviews.remove(at: index)
+            // Remove by stable identity after the await: other applies may have
+            // mutated the list while this ingest was in flight, so a captured
+            // index would be stale (out of bounds or the wrong row).
+            if let idx = deviceIngestPreviews.firstIndex(where: { $0.fileName == fileName }) {
+                deviceIngestPreviews.remove(at: idx)
+            }
             return result.playlistId
         } catch {
-            deviceScanError = "Failed to apply \(deviceIngestPreviews[index].fileName): \(error.localizedDescription)"
+            deviceScanError = "Failed to apply \(fileName): \(error.localizedDescription)"
             return nil
         }
     }

@@ -97,7 +97,7 @@ struct DeviceIngestResultsView: View {
                         .foregroundColor(.mlmInk)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                    ForEach(Array(vm.deviceIngestPreviews.enumerated()), id: \.offset) { index, item in
+                    ForEach(Array(vm.deviceIngestPreviews.enumerated()), id: \.offset) { _, item in
                         DeviceIngestFileRow(
                             fileName: item.fileName,
                             preview: item.preview,
@@ -106,7 +106,7 @@ struct DeviceIngestResultsView: View {
                                     let outputFolder = profile.outputFolder
                                     let fullPath = (outputFolder as NSString).appendingPathComponent(item.fileName)
                                     let fileURL = URL(fileURLWithPath: fullPath)
-                                    _ = await vm.applyDeviceIngest(at: index, profile: profile, fileURL: fileURL)
+                                    _ = await vm.applyDeviceIngest(fileName: item.fileName, profile: profile, fileURL: fileURL)
                                 }
                             }
                         )
