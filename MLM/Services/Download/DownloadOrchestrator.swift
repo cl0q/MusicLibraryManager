@@ -1156,6 +1156,12 @@ final class DownloadOrchestrator {
                     detail: "DAB login failed",
                     userMessage: "DAB authentication failed",
                     heal: .refreshAuthThenRetry))
+            case .invalidStreamURL(let value):
+                return .classifiedFailure(DownloadFailure(
+                    klass: .unknown, source: "dab",
+                    detail: "DAB returned an unusable stream URL: \(value)",
+                    userMessage: "DAB returned an invalid download link — trying another source",
+                    heal: .none))
             }
         } catch {
             let f = DownloadFailureClassifier.classifyTransport(source: "dab", error: error)

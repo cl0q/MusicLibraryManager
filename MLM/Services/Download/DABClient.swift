@@ -166,9 +166,17 @@ final class DABClient: Sendable {
         let streamURL = try await getStreamURL(trackId: dabTrack.id)
         guard let streamURL else { return .notFound }
 
+        guard let streamRequestURL = URL(string: streamURL) else {
+            AppLogger.shared.warn(
+                "DAB: stream URL rejected by URL(string:) — entering fallback",
+                source: "Download"
+            )
+            throw DABError.invalidStreamURL(streamURL)
+        }
+
         // Download to temp file, then rename
         let tmpURL = outputDir.appendingPathComponent(filename + ".tmp")
-        var request = URLRequest(url: URL(string: streamURL)!)
+        var request = URLRequest(url: streamRequestURL)
         addAuthCookie(to: &request)
 
         let (tempLocal, _) = try await session.download(for: request)
@@ -415,12 +423,16 @@ enum DABError: LocalizedError, Sendable {
     /// and a truncated body so the orchestrator can feed them to
     /// `DownloadFailureClassifier.classifyHTTP(source:status:body:)`.
     case httpStatus(statusCode: Int, body: String?)
+    /// The provider returned a stream URL string that `URL(string:)` cannot
+    /// represent. Carries the offending value for diagnostics.
+    case invalidStreamURL(String)
 
     var errorDescription: String? {
         switch self {
         case .noCredentials: "DAB_EMAIL and DAB_PASSWORD environment variables not set"
         case .loginFailed: "DAB login failed"
         case .httpStatus(let code, _): "DAB returned HTTP \(code)"
+        case .invalidStreamURL(let value): "DAB returned an unusable stream URL: \(value)"
         }
     }
 }
