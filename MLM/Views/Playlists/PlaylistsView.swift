@@ -340,9 +340,6 @@ struct PlaylistsView: View {
                 Text(message)
                     .font(MLMFont.bodyBold)
                     .foregroundColor(.mlmInk)
-                Text("Unpin one playlist before pinning another. (Maximum: 8)")
-                    .font(MLMFont.muted)
-                    .foregroundColor(.mlmInkSecondary)
             }
             Spacer()
         }
@@ -351,7 +348,7 @@ struct PlaylistsView: View {
         .background(Color.mlmRaised)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("pin_limit_banner")
-        .accessibilityLabel("Pin limit reached. Maximum eight pinned playlists. Unpin one to free a slot.")
+        .accessibilityLabel("Pin limit reached (8). Unpin one first.")
     }
 
     /// Drop-rejected banner (UI-SPEC line 174). Same visual structure as the
