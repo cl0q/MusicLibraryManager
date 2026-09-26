@@ -6,7 +6,7 @@ import Foundation
 struct SearchResultsMerger: Sendable {
     enum Context: Equatable {
         case library
-        case playlist
+        case playlist(Int64)
         case other
     }
 

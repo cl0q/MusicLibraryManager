@@ -81,7 +81,7 @@ final class GlobalSearchPresentationViewModel {
 
         // Fetch context tracks (playlist rows if applicable)
         var contextTracks: [Track] = []
-        if context == .playlist, let playlistID = contextPlaylistID, let playlistRepository {
+        if case .playlist = context, let playlistID = contextPlaylistID, let playlistRepository {
             if let tracks = try? await playlistRepository.fetchTracks(playlistId: playlistID) {
                 contextTracks = tracks.filter { $0.matches(searchQuery: trimmed) }
             }

@@ -303,7 +303,7 @@ struct ContentView: View {
     private var searchMergerContext: SearchResultsMerger.Context {
         switch container.searchCoordinator.context {
         case .library: .library
-        case .playlist: .playlist
+        case .playlist(let id): .playlist(id)
         case .other: .other
         }
     }
