@@ -456,6 +456,7 @@ final class PlaybackViewModel {
 
         if await loadAndPlay(previousTrack) {
             history = proposedHistory
+            recordSuccessfulPlayback(previousTrack)
             queue = proposedQueue
         }
     }
