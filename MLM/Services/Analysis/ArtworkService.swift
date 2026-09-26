@@ -344,28 +344,43 @@ actor BatchResultCollector {
                 guard process.terminationStatus == 0, fm.fileExists(atPath: outputPath.path) else { return false }
 
                 // 3. Replace the original with the artwork-embedded version.
-                // Stage the ffmpeg output on the destination volume first, then
-                // swap it in with a failure-atomic replace. A delete-then-move
-                // could permanently destroy the user's audio if the move failed
-                // (I/O error, permission, or the volume changing mid-operation).
-                let stagedURL = audioURL.deletingLastPathComponent()
-                    .appendingPathComponent(".mlm-artwork-\(UUID().uuidString)." + audioURL.pathExtension)
-                do {
-                    try fm.moveItem(at: outputPath, to: stagedURL)
-                } catch {
-                    return false
-                }
-                do {
-                    _ = try fm.replaceItemAt(audioURL, withItemAt: stagedURL)
-                    return true
-                } catch {
-                    try? fm.removeItem(at: stagedURL)
-                    return false
-                }
+                return Self.replaceArtworkOutput(outputPath, into: audioURL)
             } catch {
                 return false
             }
         }.value
+    }
+
+    /// Stage the generated artwork output beside its destination, then swap it in
+    /// with a failure-atomic replace. A delete-then-move could permanently destroy
+    /// the user's audio if the move failed (I/O error, permission, or the volume
+    /// changing mid-operation), so this never removes the original before a
+    /// successful replace. `replaceItem` is injectable purely so the failure
+    /// boundary is regression-testable without ffmpeg or real filesystem faults.
+    static func replaceArtworkOutput(
+        _ outputURL: URL,
+        into audioURL: URL,
+        replaceItem: ((URL, URL) throws -> Void)? = nil
+    ) -> Bool {
+        let fm = FileManager.default
+        let stagedURL = audioURL.deletingLastPathComponent()
+            .appendingPathComponent(".mlm-artwork-\(UUID().uuidString)." + audioURL.pathExtension)
+        do {
+            try fm.moveItem(at: outputURL, to: stagedURL)
+        } catch {
+            return false
+        }
+        do {
+            if let replaceItem {
+                try replaceItem(audioURL, stagedURL)
+            } else {
+                _ = try fm.replaceItemAt(audioURL, withItemAt: stagedURL)
+            }
+            return true
+        } catch {
+            try? fm.removeItem(at: stagedURL)
+            return false
+        }
     }
 
     static func extractEmbeddedArtwork(from url: URL) async -> Data? {

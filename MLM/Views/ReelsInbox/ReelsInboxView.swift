@@ -79,7 +79,23 @@ struct ReelsInboxView: View {
     
     // Custom manual search query input
     @State private var customSearchQuery: String = ""
-    
+
+    /// Applies an asynchronous result only if its originating reel still exists.
+    /// Detached OCR/Shazam work must re-resolve the reel by stable id after every
+    /// await; keeping this as a testable helper lets the identity boundary be
+    /// covered without AV work. Returns the updated reel, or nil if it was deleted.
+    static func updateImportedReel(
+        id: UUID,
+        in importedReels: inout [ImportedReel],
+        mutate: (inout ImportedReel) -> Void
+    ) -> ImportedReel? {
+        guard let index = importedReels.firstIndex(where: { $0.id == id }) else {
+            return nil
+        }
+        mutate(&importedReels[index])
+        return importedReels[index]
+    }
+
     var body: some View {
         HSplitView {
             // Left Panel: Reels list
