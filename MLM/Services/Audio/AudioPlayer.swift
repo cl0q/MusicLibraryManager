@@ -327,6 +327,11 @@ final class AudioPlayer: AudioPlayerControlling, @unchecked Sendable {
     func stop() {
         scheduleGeneration += 1
         playerNode.stop()
+        audioFile = nil
+        audioFormat = nil
+        duration = 0
+        sampleRate = 44100
+        totalFrames = 0
         seekFrameOffset = 0
         state = .stopped
     }
