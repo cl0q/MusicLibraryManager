@@ -1086,7 +1086,7 @@ final class SyncService {
                     var title = track.title
                     var albumArtist: String? = nil
 
-                    let asset = AVAsset(url: fileURL)
+                    let asset = AVURLAsset(url: fileURL)
                     if let commonItems = try? await asset.load(.commonMetadata) {
                         for item in commonItems {
                             if item.commonKey == .commonKeyArtist {
@@ -1107,7 +1107,9 @@ final class SyncService {
                     if let allItems = try? await asset.load(.metadata) {
                         let itunesAlbumArtists = AVMetadataItem.metadataItems(from: allItems, filteredByIdentifier: .iTunesMetadataAlbumArtist)
                         let id3Bands = AVMetadataItem.metadataItems(from: allItems, filteredByIdentifier: .id3MetadataBand)
-                        if let rawAlbumArtist = itunesAlbumArtists.first?.stringValue ?? id3Bands.first?.stringValue,
+                        let itunesAlbumArtist = try? await itunesAlbumArtists.first?.load(.stringValue)
+                        let id3AlbumArtist = try? await id3Bands.first?.load(.stringValue)
+                        if let rawAlbumArtist = itunesAlbumArtist ?? id3AlbumArtist,
                            !rawAlbumArtist.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty {
                             albumArtist = rawAlbumArtist.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
                         }
@@ -1216,11 +1218,13 @@ final class SyncService {
 
         // Persist all newly assigned UUIDs in a single write transaction
         if !updatedPlaylists.isEmpty || !updatedTracks.isEmpty {
+            let playlistsToPersist = updatedPlaylists
+            let tracksToPersist = updatedTracks
             try await syncRepository.databaseWriter.write { db in
-                for var pl in updatedPlaylists {
+                for pl in playlistsToPersist {
                     try pl.update(db)
                 }
-                for var tr in updatedTracks {
+                for var tr in tracksToPersist {
                     tr.searchText = DatabaseManager.foldedSearchText(tr.rawSearchText)
                     try tr.update(db)
                 }
@@ -1280,8 +1284,9 @@ final class SyncService {
 
         // Persist any newly generated track UUIDs
         if !tracksNeedingPersist.isEmpty {
+            let tracksToPersist = tracksNeedingPersist
             try await syncRepository.databaseWriter.write { db in
-                for var tr in tracksNeedingPersist {
+                for var tr in tracksToPersist {
                     tr.searchText = DatabaseManager.foldedSearchText(tr.rawSearchText)
                     try tr.update(db)
                 }
