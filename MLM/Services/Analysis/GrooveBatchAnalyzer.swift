@@ -34,16 +34,21 @@ final class GrooveBatchAnalyzer: Sendable {
             await withTaskGroup(of: Result<Void, Error>.self) { group in
                 for track in tracks {
                     group.addTask {
-                        guard !tracker.isCancelled else {
-                            return .failure(CancellationError())
-                        }
-                        return await limiter.run {
-                            await self.processSingleAnalysis(
-                                track: track,
-                                trackRepository: trackRepository,
-                                libraryRoot: libraryRoot,
-                                tracker: tracker
-                            )
+                        do {
+                            return try await limiter.runCancellable {
+                                try Task.checkCancellation()
+                                guard !tracker.isCancelled else {
+                                    throw CancellationError()
+                                }
+                                return await self.processSingleAnalysis(
+                                    track: track,
+                                    trackRepository: trackRepository,
+                                    libraryRoot: libraryRoot,
+                                    tracker: tracker
+                                )
+                            }
+                        } catch {
+                            return .failure(error)
                         }
                     }
                 }
@@ -52,7 +57,10 @@ final class GrooveBatchAnalyzer: Sendable {
                 collected.reserveCapacity(tracks.count)
                 for await result in group {
                     collected.append(result)
-                    if tracker.isCancelled { break }
+                    if tracker.isCancelled || Task.isCancelled {
+                        group.cancelAll()
+                        break
+                    }
                 }
                 return collected
             }
@@ -121,6 +129,8 @@ final class GrooveBatchAnalyzer: Sendable {
         do {
             let totalDuration = Double(track.duration ?? 0)
             let res = try await embeddingService.analyzeTrackDrop(at: resolvedPath, totalDuration: totalDuration)
+            try Task.checkCancellation()
+            guard !tracker.isCancelled else { throw CancellationError() }
 
             // Classify if it's a mix category (e.g. for long tracks > 10 mins)
             let mixCat = MixClassifier.classify(

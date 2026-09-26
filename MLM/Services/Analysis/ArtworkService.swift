@@ -97,18 +97,27 @@ actor BatchResultCollector {
                 for track in tracks {
                     if tracker.isCancelled {
                         AppLogger.shared.info("Artwork batch cancelled", source: "Artwork")
+                        group.cancelAll()
                         return
                     }
 
                     group.addTask {
-                        await limiter.run {
-                            await self.processSingleArtwork(
-                                track: track,
-                                repository: repository,
-                                libraryRoot: libraryRoot,
-                                tracker: tracker,
-                                collector: resultCollector
-                            )
+                        do {
+                            try await limiter.runCancellable {
+                                try Task.checkCancellation()
+                                guard !tracker.isCancelled else {
+                                    throw CancellationError()
+                                }
+                                await self.processSingleArtwork(
+                                    track: track,
+                                    repository: repository,
+                                    libraryRoot: libraryRoot,
+                                    tracker: tracker,
+                                    collector: resultCollector
+                                )
+                            }
+                        } catch {
+                            return
                         }
                     }
                 }
@@ -130,6 +139,7 @@ actor BatchResultCollector {
         tracker: MaintenanceProgressTracker,
         collector: BatchResultCollector
     ) async {
+        guard !tracker.isCancelled && !Task.isCancelled else { return }
         guard let trackId = track.id else {
             await collector.addFailed()
             tracker.updateProgress(
@@ -170,7 +180,9 @@ actor BatchResultCollector {
             let trackURL = URL(fileURLWithPath: resolvedPath)
             if let embeddedData = await Self.extractEmbeddedArtwork(from: trackURL) {
                 do {
+                    guard !tracker.isCancelled && !Task.isCancelled else { return }
                     try saveResized(data: embeddedData, trackId: trackId)
+                    guard !tracker.isCancelled && !Task.isCancelled else { return }
                     try await saveArtworkRecord(
                         trackId: trackId,
                         source: "embedded",
@@ -214,7 +226,9 @@ actor BatchResultCollector {
                     throw ArtworkFetchError.invalidProviderResponse
                 }
 
+                guard !tracker.isCancelled && !Task.isCancelled else { return }
                 try saveResized(data: data, trackId: trackId)
+                guard !tracker.isCancelled && !Task.isCancelled else { return }
                 try await saveArtworkRecord(
                     trackId: trackId,
                     source: "soundcloud",
@@ -238,6 +252,7 @@ actor BatchResultCollector {
 
         // 3. Try MusicBrainz / Cover Art Archive
         do {
+            guard !tracker.isCancelled && !Task.isCancelled else { return }
             if try await fetchFromMusicBrainz(track: track, repository: repository) {
                 await collector.addFetched()
                 tracker.updateProgress(
@@ -354,44 +369,28 @@ actor BatchResultCollector {
     }
 
     static func extractEmbeddedArtwork(from url: URL) async -> Data? {
-        return await Task.detached(priority: .utility) { () -> Data? in
-            guard let ffmpeg = ProcessRunner.findExecutable("ffmpeg") else {
-                AppLogger.shared.warn("ffmpeg not found — artwork extraction disabled")
-                return nil
-            }
+        guard let ffmpeg = ProcessRunner.findExecutable("ffmpeg") else {
+            AppLogger.shared.warn("ffmpeg not found — artwork extraction disabled")
+            return nil
+        }
 
-            let tmpOutput = FileManager.default.temporaryDirectory
-                .appendingPathComponent(UUID().uuidString + ".jpg")
-
-            // ffmpeg -i input -an -vcodec mjpeg -vframes 1 output.jpg
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: ffmpeg)
-            process.arguments = [
+        do {
+            let data = try await ProcessRunner.runBinary(
+                ffmpeg,
+                arguments: [
                 "-i", url.path,
                 "-an", "-vcodec", "mjpeg", "-vframes", "1",
-                "-update", "1",
-                "-y", tmpOutput.path
-            ]
-            process.standardOutput = FileHandle.nullDevice
-            process.standardError = FileHandle.nullDevice
-
-            do {
-                try process.run()
-                process.waitUntilExit()
-
-                if process.terminationStatus == 0,
-                   FileManager.default.fileExists(atPath: tmpOutput.path) {
-                    let data = try Data(contentsOf: tmpOutput)
-                    try? FileManager.default.removeItem(at: tmpOutput)
-                    return data.isEmpty ? nil : data
-                }
-            } catch {
-                AppLogger.shared.warn("ffmpeg extraction error: \(error.localizedDescription)")
-            }
-
-            try? FileManager.default.removeItem(at: tmpOutput)
+                "-f", "image2pipe", "-"
+                ],
+                timeout: 2 * 60
+            )
+            return data.isEmpty ? nil : data
+        } catch is CancellationError {
             return nil
-        }.value
+        } catch {
+            AppLogger.shared.warn("ffmpeg extraction error: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     // MARK: - MusicBrainz

@@ -45,7 +45,8 @@ final class ReplayGainAnalyzer: Sendable {
                 "-af", "ebur128=peak=true",
                 "-f", "null",
                 "-"
-            ]
+            ],
+            timeout: 15 * 60
         )
 
         // ebur128 outputs to stderr
@@ -88,18 +89,22 @@ final class ReplayGainAnalyzer: Sendable {
             await withTaskGroup(of: Result<Void, Error>.self) { group in
                 for track in tracks {
                     group.addTask {
-                        // Check cancellation before acquiring a slot
-                        guard !tracker.isCancelled else {
-                            return .failure(CancellationError())
-                        }
-                        return await limiter.run {
-                            await self.processSingleAnalysis(
-                                track: track,
-                                repository: repository,
-                                trackRepository: trackRepository,
-                                libraryRoot: libraryRoot,
-                                tracker: tracker
-                            )
+                        do {
+                            return try await limiter.runCancellable {
+                                try Task.checkCancellation()
+                                guard !tracker.isCancelled else {
+                                    throw CancellationError()
+                                }
+                                return await self.processSingleAnalysis(
+                                    track: track,
+                                    repository: repository,
+                                    trackRepository: trackRepository,
+                                    libraryRoot: libraryRoot,
+                                    tracker: tracker
+                                )
+                            }
+                        } catch {
+                            return .failure(error)
                         }
                     }
                 }
@@ -108,8 +113,10 @@ final class ReplayGainAnalyzer: Sendable {
                 collected.reserveCapacity(tracks.count)
                 for await result in group {
                     collected.append(result)
-                    // Early exit: stop collecting if cancelled
-                    if tracker.isCancelled { break }
+                    if tracker.isCancelled || Task.isCancelled {
+                        group.cancelAll()
+                        break
+                    }
                 }
                 return collected
             }
@@ -180,6 +187,8 @@ final class ReplayGainAnalyzer: Sendable {
         
         do {
             if let gain = try await analyzeTrack(path: resolvedPath) {
+                try Task.checkCancellation()
+                guard !tracker.isCancelled else { throw CancellationError() }
                 // Save ReplayGain data
                 let rg = ReplayGain(
                     trackId: trackId,
@@ -190,6 +199,8 @@ final class ReplayGainAnalyzer: Sendable {
                     analyzedAt: ISO8601DateFormatter().string(from: Date())
                 )
                 try await repository.saveReplayGain(rg)
+                try Task.checkCancellation()
+                guard !tracker.isCancelled else { throw CancellationError() }
 
                 // Compute and save energy bucket
                 let bucket = EnergyBucketer.bucket(lufs: gain.loudness)
