@@ -40,8 +40,12 @@ struct UniversalSearchResult: Equatable {
 final class UniversalSearchViewModel {
     var query: String = ""
     var state: UniversalSearchState = .idle
+    private(set) var textResults: [Track] = []
+    private var activeRequest = UUID()
 
     func submit(_ input: String) async {
+        let request = UUID()
+        activeRequest = request
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
@@ -67,6 +71,7 @@ final class UniversalSearchViewModel {
                         duration = entry.durationSeconds
                     }
                 }
+                guard activeRequest == request, !Task.isCancelled else { return }
                 let videoID = URLDetector.extractYouTubeVideoID(url)
                 let thumb = artworkURL
                     ?? videoID.map { "https://i.ytimg.com/vi/\($0)/maxresdefault.jpg" }
@@ -91,6 +96,7 @@ final class UniversalSearchViewModel {
                     duration = track.duration.map { $0 / 1000 }
                     thumb = track.artworkUrl ?? thumb
                 }
+                guard activeRequest == request, !Task.isCancelled else { return }
                 state = .resolved(UniversalSearchResult(
                     source: source,
                     url: url,
@@ -137,11 +143,27 @@ final class UniversalSearchViewModel {
 
         case .searchText:
             state = .searching
+        textResults = []
+        guard let repository = DependencyContainer.shared.trackRepository else {
+            state = .error("Library search is unavailable.")
+            return
+        }
+        do {
+            let results = try await repository.search(query: trimmed, limit: 50)
+            guard activeRequest == request, !Task.isCancelled else { return }
+            textResults = results
+            state = .results
+        } catch {
+            guard activeRequest == request, !Task.isCancelled else { return }
+            state = .error("Could not search the library. Please try again.")
+        }
         }
     }
 
     func clear() {
+        activeRequest = UUID()
         query = ""
+        textResults = []
         state = .idle
     }
 }
