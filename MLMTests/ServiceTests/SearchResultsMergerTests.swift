@@ -92,8 +92,9 @@ struct SearchResultsMergerTests {
 
     @Test func contextEquatable() {
         #expect(SearchResultsMerger.Context.library == SearchResultsMerger.Context.library)
-        #expect(SearchResultsMerger.Context.playlist == SearchResultsMerger.Context.playlist)
+        #expect(SearchResultsMerger.Context.playlist(1) == SearchResultsMerger.Context.playlist(1))
+        #expect(SearchResultsMerger.Context.playlist(1) != SearchResultsMerger.Context.playlist(2))
         #expect(SearchResultsMerger.Context.other == SearchResultsMerger.Context.other)
-        #expect(SearchResultsMerger.Context.library != SearchResultsMerger.Context.playlist)
+        #expect(SearchResultsMerger.Context.library != SearchResultsMerger.Context.playlist(1))
     }
 }
