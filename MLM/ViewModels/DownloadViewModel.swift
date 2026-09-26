@@ -69,6 +69,7 @@ extension TrackRepository: DownloadTrackPersisting {}
 /// Wraps `DownloadOrchestrator` and exposes state for the Activity Panel
 /// and download triggers from context menus / batch operations.
 @Observable
+@MainActor
 final class DownloadViewModel {
     // MARK: - State
 
@@ -84,6 +85,7 @@ final class DownloadViewModel {
     private(set) var failedCount: Int = 0
     private(set) var totalCount: Int = 0
     private(set) var lastResult: DownloadOrchestrator.BatchResult?
+    private var activeBatchID: UUID?
 
     /// Queue of pending download items for display.
     private(set) var queueItems: [DownloadItem] = []
@@ -104,6 +106,7 @@ final class DownloadViewModel {
     }
 
     private(set) var discoveryStatuses: [String: DiscoveryStatus] = [:]
+    private(set) var discoveryFailureMessages: [String: String] = [:]
     private var discoveryQueue: [DiscoveryDownloadRequest] = []
     private var isProcessingDiscoveryQueue = false
 
@@ -190,6 +193,13 @@ final class DownloadViewModel {
 
         let remoteTracks = tracks.filter { $0.isRemote }
         guard !remoteTracks.isEmpty else { return }
+        guard !isDownloading else {
+            AppLogger.shared.log("Download batch rejected because another batch is active", level: .warning, source: "Download")
+            return
+        }
+        let batchID = UUID()
+        activeBatchID = batchID
+        isDownloading = true
 
         // Notify priority queue service that download is active
         await PerformanceQueueService.shared.setExternalDownloadActive(true)
@@ -199,7 +209,6 @@ final class DownloadViewModel {
             }
         }
 
-        isDownloading = true
         totalCount = remoteTracks.count
         completedCount = 0
         failedCount = 0
@@ -251,7 +260,7 @@ final class DownloadViewModel {
             await runner.downloadBatch(
                 requests,
                 onProgress: { [weak self] index, total, current in
-                    guard let self else { return }
+                    guard let self, self.activeBatchID == batchID else { return }
                     self.currentTrack = current
                     self.currentTrackProgress = 0
                     self.progress = Double(index) / Double(max(total, 1))
@@ -262,7 +271,7 @@ final class DownloadViewModel {
                     }
                 },
                 onTrackProgress: { [weak self] fraction in
-                    guard let self, self.totalCount > 0 else { return }
+                    guard let self, self.activeBatchID == batchID, self.totalCount > 0 else { return }
                     self.currentTrackProgress = fraction
                     // Combined: completed tracks plus the running fraction of
                     // the in-flight track, normalized by total batch size.
@@ -305,7 +314,7 @@ final class DownloadViewModel {
             result: result,
             persistenceFailures: persistenceFailures
         )
-        finishBatch(finalResult)
+        finishBatch(finalResult, batchID: batchID)
     }
 
     /// Retry failed downloads from the queue.
@@ -314,6 +323,9 @@ final class DownloadViewModel {
         guard let retryRunner = activeRetryRunner else { return }
         let requests = retryRunner.pendingRetryRequests()
         guard !requests.isEmpty else { return }
+        let batchID = UUID()
+        activeBatchID = batchID
+        isDownloading = true
 
         await PerformanceQueueService.shared.setExternalDownloadActive(true)
         defer {
@@ -322,7 +334,6 @@ final class DownloadViewModel {
             }
         }
 
-        isDownloading = true
         totalCount = requests.count
         completedCount = 0
         failedCount = 0
@@ -343,7 +354,7 @@ final class DownloadViewModel {
         let result = terminalResult(
             await retryRunner.retryFailed(
                 onProgress: { [weak self] index, total, current in
-                    guard let self else { return }
+                    guard let self, self.activeBatchID == batchID else { return }
                     self.currentTrack = current
                     self.currentTrackProgress = 0
                     self.progress = Double(index) / Double(max(total, 1))
@@ -353,7 +364,7 @@ final class DownloadViewModel {
                     }
                 },
                 onTrackProgress: { [weak self] fraction in
-                    guard let self, self.totalCount > 0 else { return }
+                    guard let self, self.activeBatchID == batchID, self.totalCount > 0 else { return }
                     self.currentTrackProgress = fraction
                     self.progress = (
                         Double(self.completedCount) + fraction
@@ -391,7 +402,7 @@ final class DownloadViewModel {
             result: result,
             persistenceFailures: persistenceFailures
         )
-        finishBatch(finalResult)
+        finishBatch(finalResult, batchID: batchID)
     }
 
     private func resultAfterPersistence(
@@ -548,7 +559,9 @@ final class DownloadViewModel {
         }
     }
 
-    private func finishBatch(_ result: DownloadOrchestrator.BatchResult) {
+    private func finishBatch(_ result: DownloadOrchestrator.BatchResult, batchID: UUID) {
+        guard activeBatchID == batchID else { return }
+        activeBatchID = nil
         lastResult = result
         completedCount = result.succeeded
         failedCount = result.failed

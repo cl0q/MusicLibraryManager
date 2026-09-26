@@ -386,6 +386,19 @@ final class DownloadOrchestrator {
         onProgress: ((Int, Int, String) -> Void)? = nil,
         onTrackProgress: ((Double) -> Void)? = nil
     ) async -> BatchResult {
+        guard !isRunning else {
+            var rejected = BatchResult()
+            rejected.failed = requests.count
+            rejected.failedTrackIds = Set(requests.map(\.trackId))
+            for request in requests {
+                rejected.failureReasons[request.trackId] = "Another download batch is already running."
+            }
+            AppLogger.shared.warn(
+                "Rejected concurrent download batch with \(requests.count) request(s)",
+                source: "Download"
+            )
+            return rejected
+        }
         isRunning = true
         // cancelRequested is NOT reset here — if cancel() was called
         // before downloadBatch, the flag must survive into the loop so
