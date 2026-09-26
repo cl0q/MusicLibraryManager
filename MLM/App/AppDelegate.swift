@@ -41,7 +41,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             do {
                 try await DependencyContainer.shared.initialize()
             } catch {
-                print("Failed to initialize: \(error)")
+                await DependencyContainer.shared.reportInitializationFailure(error)
             }
         }
     }
