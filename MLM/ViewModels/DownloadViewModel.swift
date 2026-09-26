@@ -657,12 +657,21 @@ final class DownloadViewModel {
         seedTrack: Track
     ) {
         let key = soundcloudURL ?? "\(artist) - \(title)"
-        
+
         // Don't duplicate downloads
         if discoveryStatuses[key] == .queued || discoveryStatuses[key] == .downloading {
             return
         }
-        
+        guard orchestrator != nil, trackRepository != nil, !libraryRoot.isEmpty else {
+            discoveryStatuses[key] = .failed
+            discoveryFailureMessages[key] = "Downloads are unavailable until a library is configured."
+            AppLogger.shared.error(
+                "Rejected discovery download before download dependencies were configured",
+                source: "Download"
+            )
+            return
+        }
+
         let request = DiscoveryDownloadRequest(
             artist: artist,
             title: title,
@@ -670,29 +679,35 @@ final class DownloadViewModel {
             source: source,
             seedTrack: seedTrack
         )
-        
+
         discoveryStatuses[key] = .queued
+        discoveryFailureMessages.removeValue(forKey: key)
         discoveryQueue.append(request)
-        
-        // Start background processing if not already running
-        if !isProcessingDiscoveryQueue {
-            Task {
-                await processDiscoveryQueue()
-            }
-        }
+
+        // Claim ownership before spawning so multiple enqueues in the same
+        // turn cannot schedule competing queue workers.
+        guard !isProcessingDiscoveryQueue else { return }
+        isProcessingDiscoveryQueue = true
+        Task { await processDiscoveryQueue() }
     }
 
     private func processDiscoveryQueue() async {
-        guard let orchestrator, let trackRepository else { return }
-        isProcessingDiscoveryQueue = true
-        
+        guard let orchestrator, let trackRepository else {
+            isProcessingDiscoveryQueue = false
+            return
+        }
+
         await PerformanceQueueService.shared.setExternalDownloadActive(true)
         defer {
             Task {
                 await PerformanceQueueService.shared.setExternalDownloadActive(false)
             }
+            isDownloading = false
+            currentTrack = ""
+            progress = 1.0
+            isProcessingDiscoveryQueue = false
         }
-        
+
         while !discoveryQueue.isEmpty {
             let request = discoveryQueue.removeFirst()
             let key = request.soundcloudURL ?? "\(request.artist) - \(request.title)"
@@ -803,12 +818,6 @@ final class DownloadViewModel {
             }
         }
         
-        await MainActor.run {
-            self.isDownloading = false
-            self.currentTrack = ""
-            self.progress = 1.0
-            self.isProcessingDiscoveryQueue = false
-        }
     }
 
     // MARK: - Persistence
