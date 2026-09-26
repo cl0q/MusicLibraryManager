@@ -202,14 +202,23 @@ final class PlaylistCoverService {
                 }
             }.value
 
-            // 5. Persist the path with isCustom=false (auto).
+            // 5. Re-check the custom lock immediately before committing. The
+            // artwork extraction and PNG compose above are slow and run across
+            // suspension points, so a custom cover set meanwhile (D-05, LOGIC-018)
+            // must not be clobbered by this now-stale auto regeneration.
+            if let current = try? await playlistRepository.fetch(id: playlistId),
+               current.coverIsCustom == 1 {
+                return
+            }
+
+            // 6. Persist the path with isCustom=false (auto).
             try await playlistRepository.setCoverPath(
                 id: playlistId,
                 path: "playlist-covers/\(playlistId).png",
                 isCustom: false
             )
 
-            // 6. Tagged completion notification (origin guard prevents self-trigger).
+            // 7. Tagged completion notification (origin guard prevents self-trigger).
             NotificationCenter.default.post(
                 name: .playlistDidChange,
                 object: nil,
