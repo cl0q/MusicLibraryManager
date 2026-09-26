@@ -7,67 +7,53 @@ import Foundation
 /// - originalPath stores the sourceURL or a synthetic "source://externalId" URI
 /// - track_sources links the track to a source row with the externalId
 final class RemoteTrackMaterializer: Sendable {
-    private let trackRepository: TrackRepository
     private let sourceRepository: SourceRepository
 
     init(trackRepository: TrackRepository, sourceRepository: SourceRepository) {
-        self.trackRepository = trackRepository
+        _ = trackRepository // Preserves the existing construction surface.
         self.sourceRepository = sourceRepository
     }
 
     func materialize(_ results: [RemoteSearchResult]) async throws -> [Track] {
         guard !results.isEmpty else { return [] }
 
-        // Pre-resolve distinct sources once per batch (not once per track).
-        let distinctSourceNames = Set(results.map { Self.sourceName(for: $0.source) })
-        var sourceIds: [String: Int64] = [:]
-        for name in distinctSourceNames {
-            let source = try await sourceRepository.upsert(name: name, userId: "search")
-            if let id = source.id {
-                sourceIds[name] = id
+        // A missing provider identity is deliberately not persisted: without
+        // one there is no stable identity for a future materialization to
+        // reconcile. Repeated hits in this input are materialized once then
+        // expanded back into their original display order.
+        var tracksByIdentity: [String: Track] = [:]
+        var orderedIdentities: [String] = []
+        for result in results {
+            let sourceName = Self.sourceName(for: result.source)
+            let externalId = result.externalId.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !externalId.isEmpty else {
+                AppLogger.shared.warn(
+                    "Skipped remote search result without provider identity",
+                    source: "Search"
+                )
+                continue
+            }
+            let identity = "\(sourceName)\u{1F}\(externalId)"
+            orderedIdentities.append(identity)
+            guard tracksByIdentity[identity] == nil else { continue }
+
+            var newTrack = Track(
+                artist: result.artist,
+                album: result.source.rawValue,
+                title: result.title,
+                format: sourceName,
+                originalPath: result.sourceURL ?? "\(sourceName)://\(externalId)"
+            )
+            newTrack.duration = result.durationSeconds
+            if let canonical = try await sourceRepository.materializeRemoteTrack(
+                newTrack,
+                sourceName: sourceName,
+                externalId: externalId
+            ) {
+                tracksByIdentity[identity] = canonical
             }
         }
-
-        // Parallel per-track work, collecting results by original index.
-        let indexedResults = Array(results.enumerated())
-        return try await withThrowingTaskGroup(of: (Int, Track?).self) { group in
-            for (index, result) in indexedResults {
-                group.addTask { [trackRepository, sourceRepository, sourceIds] in
-                    let sourceName = Self.sourceName(for: result.source)
-                    if let existing = try await trackRepository.fetchTrackByExternalId(
-                        result.externalId,
-                        sourceName: sourceName
-                    ) {
-                        return (index, existing)
-                    }
-                    guard let sourceId = sourceIds[sourceName] else { return (index, nil) }
-
-                    var newTrack = Track(
-                        artist: result.artist,
-                        album: result.source.rawValue,
-                        title: result.title,
-                        format: sourceName,
-                        originalPath: result.sourceURL ?? "\(sourceName)://\(result.externalId)"
-                    )
-                    newTrack.duration = result.durationSeconds
-                    let inserted = try await trackRepository.insert(newTrack)
-                    guard let id = inserted.id else { return (index, nil) }
-                    try await sourceRepository.linkTrackToSource(
-                        trackId: id,
-                        sourceId: sourceId,
-                        externalId: result.externalId
-                    )
-                    return (index, inserted)
-                }
-            }
-
-            var collected: [(Int, Track)] = []
-            collected.reserveCapacity(results.count)
-            for try await (index, track) in group {
-                if let track { collected.append((index, track)) }
-            }
-            return collected.sorted { $0.0 < $1.0 }.map { $0.1 }
-        }
+        return orderedIdentities.compactMap { tracksByIdentity[$0] }
     }
 
     private static func sourceName(for source: RemoteSearchResult.Source) -> String {

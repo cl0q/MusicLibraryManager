@@ -67,6 +67,64 @@ final class SourceRepository: Sendable {
         }
     }
 
+    /// Get or create the canonical remote track for a provider identity.
+    /// The source lookup, identity lookup, track insert, and link insert share
+    /// one serialized writer transaction so separate materializers cannot
+    /// create duplicate tracks for the same `(source, external_id)`.
+    func materializeRemoteTrack(
+        _ track: Track,
+        sourceName: String,
+        externalId: String
+    ) async throws -> Track? {
+        let identity = externalId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !identity.isEmpty else { return nil }
+
+        return try await database.write { db in
+            let source: Source
+            if let existing = try Source
+                .filter(Source.Columns.name == sourceName && Source.Columns.userId == "search")
+                .fetchOne(db) {
+                source = existing
+            } else {
+                var inserted = Source(id: nil, name: sourceName, userId: "search", enabled: 1)
+                try inserted.insert(db)
+                guard let fetched = try Source
+                    .filter(Source.Columns.name == sourceName && Source.Columns.userId == "search")
+                    .fetchOne(db) else {
+                    throw SourceRepositoryError.upsertRefetchFailed(name: sourceName, userId: "search")
+                }
+                source = fetched
+            }
+
+            guard let sourceId = source.id else {
+                throw SourceRepositoryError.upsertRefetchFailed(name: sourceName, userId: "search")
+            }
+            if let existing = try Track.fetchOne(db, sql: """
+                SELECT t.* FROM tracks t
+                INNER JOIN track_sources ts ON ts.track_id = t.id
+                WHERE ts.source_id = ? AND ts.external_id = ?
+                LIMIT 1
+            """, arguments: [sourceId, identity]) {
+                return existing
+            }
+
+            var newTrack = track
+            newTrack.searchText = DatabaseManager.foldedSearchText(newTrack.rawSearchText)
+            try newTrack.insert(db)
+            guard let trackId = newTrack.id else { return nil }
+            try db.execute(sql: """
+                INSERT INTO track_sources (track_id, source_id, external_id, added_at)
+                VALUES (?, ?, ?, ?)
+            """, arguments: [
+                trackId,
+                sourceId,
+                identity,
+                ISO8601DateFormatter().string(from: Date()),
+            ])
+            return newTrack
+        }
+    }
+
     /// Toggle source enabled state.
     func toggleEnabled(id: Int64) async throws {
         try await database.write { db in
@@ -126,9 +184,11 @@ final class SourceRepository: Sendable {
     /// Count tracks linked to a source.
     func countTracks(sourceId: Int64) async throws -> Int {
         try await database.read { db in
-            try TrackSource
-                .filter(TrackSource.Columns.sourceId == sourceId)
-                .fetchCount(db)
+            try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM track_sources ts
+                INNER JOIN tracks t ON t.id = ts.track_id
+                WHERE ts.source_id = ?
+            """, arguments: [sourceId]) ?? 0
         }
     }
 

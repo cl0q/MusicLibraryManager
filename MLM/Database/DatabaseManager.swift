@@ -968,6 +968,124 @@ final class DatabaseManager: Sendable {
             }
         }
 
+        // Foreign keys remain disabled for shared-database compatibility.
+        // Remove historical children that were left behind before repositories
+        // began applying their own transactional cascades.
+        migrator.registerMigration("v40_track_playlist_orphan_cleanup") { db in
+            let trackTables = [
+                "track_sources", "playlist_tracks", "sync_profile_tracks", "sync_state",
+                "fingerprints", "artwork", "replaygain", "track_analysis", "track_tags",
+                "review_queue", "track_embeddings", "track_segment_embeddings",
+                "track_discovery_log",
+            ]
+            for table in trackTables {
+                try db.execute(sql: "DELETE FROM \(table) WHERE track_id NOT IN (SELECT id FROM tracks)")
+            }
+            try db.execute(sql: """
+                DELETE FROM track_similarity_feedback
+                WHERE seed_track_id NOT IN (SELECT id FROM tracks)
+                   OR target_track_id NOT IN (SELECT id FROM tracks)
+            """)
+            try db.execute(sql: "UPDATE track_discovery_log SET seed_track_id = NULL WHERE seed_track_id NOT IN (SELECT id FROM tracks)")
+            try db.execute(sql: "DELETE FROM playlist_tracks WHERE playlist_id NOT IN (SELECT id FROM playlists)")
+            try db.execute(sql: "DELETE FROM playlist_tags WHERE playlist_id NOT IN (SELECT id FROM playlists)")
+            try db.execute(sql: "DELETE FROM sync_profile_playlists WHERE playlist_id NOT IN (SELECT id FROM playlists)")
+            try db.execute(sql: "DELETE FROM playlist_sync_snapshots WHERE playlist_id NOT IN (SELECT id FROM playlists)")
+        }
+
+        // A remote provider's external ID identifies exactly one linked track.
+        // Merge legacy duplicates into the oldest row before applying the
+        // unique index, including membership/reference rows that otherwise
+        // would be orphaned with foreign keys disabled.
+        migrator.registerMigration("v41_remote_provider_identity") { db in
+            try db.execute(sql: """
+                CREATE TEMP TABLE remote_track_duplicates AS
+                SELECT duplicate_id, MIN(canonical_id) AS canonical_id FROM (
+                    SELECT
+                        track_id AS duplicate_id,
+                        MIN(track_id) OVER (
+                            PARTITION BY source_id, external_id
+                        ) AS canonical_id
+                    FROM track_sources
+                )
+                WHERE duplicate_id != canonical_id
+                GROUP BY duplicate_id
+            """)
+            try db.execute(sql: """
+                INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, position, added_at)
+                SELECT pt.playlist_id, d.canonical_id, pt.position, pt.added_at
+                FROM playlist_tracks pt
+                INNER JOIN remote_track_duplicates d ON d.duplicate_id = pt.track_id
+            """)
+            try db.execute(sql: """
+                INSERT OR IGNORE INTO sync_profile_tracks (profile_id, track_id)
+                SELECT spt.profile_id, d.canonical_id
+                FROM sync_profile_tracks spt
+                INNER JOIN remote_track_duplicates d ON d.duplicate_id = spt.track_id
+            """)
+            try db.execute(sql: """
+                INSERT OR IGNORE INTO sync_state (profile_id, track_id, synced_checksum, synced_size, synced_timestamp)
+                SELECT ss.profile_id, d.canonical_id, ss.synced_checksum, ss.synced_size, ss.synced_timestamp
+                FROM sync_state ss
+                INNER JOIN remote_track_duplicates d ON d.duplicate_id = ss.track_id
+            """)
+            for table in [
+                "fingerprints", "artwork", "replaygain", "track_analysis",
+                "track_embeddings", "track_segment_embeddings", "track_tags",
+            ] {
+                try db.execute(sql: """
+                    UPDATE OR IGNORE \(table)
+                    SET track_id = (
+                        SELECT canonical_id FROM remote_track_duplicates
+                        WHERE duplicate_id = \(table).track_id
+                    )
+                    WHERE track_id IN (SELECT duplicate_id FROM remote_track_duplicates)
+                """)
+            }
+            try db.execute(sql: """
+                INSERT OR IGNORE INTO track_sources (track_id, source_id, external_id, added_at)
+                SELECT d.canonical_id, ts.source_id, ts.external_id, ts.added_at
+                FROM track_sources ts
+                INNER JOIN remote_track_duplicates d ON d.duplicate_id = ts.track_id
+            """)
+            try db.execute(sql: """
+                UPDATE track_discovery_log
+                SET seed_track_id = (
+                    SELECT canonical_id FROM remote_track_duplicates
+                    WHERE duplicate_id = track_discovery_log.seed_track_id
+                )
+                WHERE seed_track_id IN (SELECT duplicate_id FROM remote_track_duplicates)
+            """)
+            try db.execute(sql: "DELETE FROM playlist_tracks WHERE track_id IN (SELECT duplicate_id FROM remote_track_duplicates)")
+            try db.execute(sql: "DELETE FROM sync_profile_tracks WHERE track_id IN (SELECT duplicate_id FROM remote_track_duplicates)")
+            try db.execute(sql: "DELETE FROM sync_state WHERE track_id IN (SELECT duplicate_id FROM remote_track_duplicates)")
+            try db.execute(sql: "DELETE FROM track_sources WHERE track_id IN (SELECT duplicate_id FROM remote_track_duplicates)")
+            try db.execute(sql: "DELETE FROM fingerprints WHERE track_id IN (SELECT duplicate_id FROM remote_track_duplicates)")
+            try db.execute(sql: "DELETE FROM artwork WHERE track_id IN (SELECT duplicate_id FROM remote_track_duplicates)")
+            try db.execute(sql: "DELETE FROM replaygain WHERE track_id IN (SELECT duplicate_id FROM remote_track_duplicates)")
+            try db.execute(sql: "DELETE FROM track_analysis WHERE track_id IN (SELECT duplicate_id FROM remote_track_duplicates)")
+            try db.execute(sql: "DELETE FROM track_embeddings WHERE track_id IN (SELECT duplicate_id FROM remote_track_duplicates)")
+            try db.execute(sql: "DELETE FROM track_segment_embeddings WHERE track_id IN (SELECT duplicate_id FROM remote_track_duplicates)")
+            try db.execute(sql: "DELETE FROM track_tags WHERE track_id IN (SELECT duplicate_id FROM remote_track_duplicates)")
+            try db.execute(sql: "DELETE FROM review_queue WHERE track_id IN (SELECT duplicate_id FROM remote_track_duplicates) OR related_track_id IN (SELECT duplicate_id FROM remote_track_duplicates)")
+            try db.execute(sql: "DELETE FROM track_similarity_feedback WHERE seed_track_id IN (SELECT duplicate_id FROM remote_track_duplicates) OR target_track_id IN (SELECT duplicate_id FROM remote_track_duplicates)")
+            try db.execute(sql: "DELETE FROM track_discovery_log WHERE discovered_track_id IN (SELECT duplicate_id FROM remote_track_duplicates)")
+            try db.execute(sql: "DELETE FROM tracks WHERE id IN (SELECT duplicate_id FROM remote_track_duplicates)")
+            try db.execute(sql: """
+                DELETE FROM track_sources
+                WHERE rowid NOT IN (
+                    SELECT MIN(rowid)
+                    FROM track_sources
+                    GROUP BY source_id, external_id
+                )
+            """)
+            try db.execute(sql: """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_track_sources_provider_identity
+                ON track_sources(source_id, external_id)
+            """)
+            try db.execute(sql: "DROP TABLE remote_track_duplicates")
+        }
+
         return migrator
     }
 

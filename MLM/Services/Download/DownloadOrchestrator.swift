@@ -386,6 +386,19 @@ final class DownloadOrchestrator {
         onProgress: ((Int, Int, String) -> Void)? = nil,
         onTrackProgress: ((Double) -> Void)? = nil
     ) async -> BatchResult {
+        guard !isRunning else {
+            var rejected = BatchResult()
+            rejected.failed = requests.count
+            rejected.failedTrackIds = Set(requests.map(\.trackId))
+            for request in requests {
+                rejected.failureReasons[request.trackId] = "Another download batch is already running."
+            }
+            AppLogger.shared.warn(
+                "Rejected concurrent download batch with \(requests.count) request(s)",
+                source: "Download"
+            )
+            return rejected
+        }
         isRunning = true
         // cancelRequested is NOT reset here — if cancel() was called
         // before downloadBatch, the flag must survive into the loop so
@@ -420,17 +433,7 @@ final class DownloadOrchestrator {
             result.failedTrackIds = Set(requests.map(\.trackId))
             for req in requests {
                 result.failureReasons[req.trackId] = failureReason.userFacingText
-                retryQueue.enqueue(
-                    trackId: req.trackId,
-                    query: req.query,
-                    source: req.preferredSource.storageKey,
-                    error: failureReason.userFacingText,
-                    artist: req.artist,
-                    title: req.title,
-                    preferredSource: req.preferredSource.storageKey,
-                    soundcloudURL: req.soundcloudURL,
-                    youtubeURL: req.youtubeURL
-                )
+                enqueueRetry(req, error: failureReason.userFacingText)
             }
             return result
         }
@@ -499,17 +502,7 @@ final class DownloadOrchestrator {
                         level: .warning,
                         source: "Download"
                     )
-                    retryQueue.enqueue(
-                        trackId: request.trackId,
-                        query: request.query,
-                        source: request.preferredSource.storageKey,
-                        error: terminalMessage,
-                        artist: request.artist,
-                        title: request.title,
-                        preferredSource: request.preferredSource.storageKey,
-                        soundcloudURL: request.soundcloudURL,
-                        youtubeURL: request.youtubeURL
-                    )
+                    enqueueRetry(request, error: terminalMessage)
                 }
             } catch {
                 if cancelRequested {
@@ -529,17 +522,7 @@ final class DownloadOrchestrator {
                     "Download failed for track \(request.trackId) (\(request.artist) - \(request.title)): \(error.localizedDescription) [type=\(String(describing: type(of: error)))]",
                     source: "Download"
                 )
-                retryQueue.enqueue(
-                    trackId: request.trackId,
-                    query: request.query,
-                    source: request.preferredSource.storageKey,
-                    error: failureReason.userFacingText,
-                    artist: request.artist,
-                    title: request.title,
-                    preferredSource: request.preferredSource.storageKey,
-                    soundcloudURL: request.soundcloudURL,
-                    youtubeURL: request.youtubeURL
-                )
+                enqueueRetry(request, error: failureReason.userFacingText)
             }
         }
 
@@ -594,7 +577,14 @@ final class DownloadOrchestrator {
     }
 
     func dequeuePersistedRetries(trackIds: Set<Int64>) {
-        retryQueue.dequeue(trackIds: trackIds)
+        do {
+            try retryQueue.dequeue(trackIds: trackIds)
+        } catch {
+            AppLogger.shared.error(
+                "Failed to persist retry-queue dequeue; queue state was restored: \(error.localizedDescription)",
+                source: "Download"
+            )
+        }
     }
 
     func enqueuePersistenceFailures(
@@ -602,16 +592,27 @@ final class DownloadOrchestrator {
         trackIds: Set<Int64>
     ) {
         for request in requests where trackIds.contains(request.trackId) {
-            retryQueue.enqueue(
+            enqueueRetry(request, error: "Downloaded file could not be saved to library")
+        }
+    }
+
+    private func enqueueRetry(_ request: DownloadRequest, error: String) {
+        do {
+            try retryQueue.enqueue(
                 trackId: request.trackId,
                 query: request.query,
                 source: request.preferredSource.storageKey,
-                error: "Downloaded file could not be saved to library",
+                error: error,
                 artist: request.artist,
                 title: request.title,
                 preferredSource: request.preferredSource.storageKey,
                 soundcloudURL: request.soundcloudURL,
                 youtubeURL: request.youtubeURL
+            )
+        } catch {
+            AppLogger.shared.error(
+                "Failed to persist retry queue; in-memory change was rolled back: \(error.localizedDescription)",
+                source: "Download"
             )
         }
     }

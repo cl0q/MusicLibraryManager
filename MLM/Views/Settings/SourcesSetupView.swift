@@ -10,6 +10,8 @@ struct SourcesSetupView: View {
     @Environment(\.container) private var container
     @State private var squidCookie: String = ""
     @State private var savedAt: Date?
+    @State private var pendingDisconnect: TokenStorage.Service?
+    @State private var showingDisconnectConfirmation = false
 
     var body: some View {
         Form {
@@ -80,6 +82,20 @@ struct SourcesSetupView: View {
         .onReceive(NotificationCenter.default.publisher(for: .qobuzCookieStatusDidChange)) { _ in
             squidCookie = UserDefaults.standard.string(forKey: SquidWtfClient.userDefaultsKey) ?? ""
         }
+        .alert(
+            "Disconnect \(pendingDisconnect?.displayName ?? "source")?",
+            isPresented: $showingDisconnectConfirmation,
+            presenting: pendingDisconnect
+        ) { service in
+            Button("Disconnect", role: .destructive) {
+                disconnect(service)
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDisconnect = nil
+            }
+        } message: { service in
+            Text("This removes the saved \(service.displayName) credentials from this Mac. Syncing will stop until you reconnect.")
+        }
     }
 
     private func save() {
@@ -117,11 +133,24 @@ struct SourcesSetupView: View {
             Spacer()
             if connectionStatus(for: service) == "Connected" {
                 Button("Disconnect", role: .destructive) {
-                    if let service { try? container.tokenStorage?.deleteCredentials(service: service) }
+                    pendingDisconnect = service
+                    showingDisconnectConfirmation = service != nil
                 }
             } else if let service {
                 Button("Reconnect") {
                     reconnect(service)
+                }
+
+                private func disconnect(_ service: TokenStorage.Service) {
+                    defer { pendingDisconnect = nil }
+                    do {
+                        try container.tokenStorage?.deleteCredentials(service: service)
+                    } catch {
+                        AppLogger.shared.error(
+                            "Failed to remove \(service.displayName) credentials: \(error.localizedDescription)",
+                            source: "Sources"
+                        )
+                    }
                 }
             } else {
                 Button("Reconnect") {

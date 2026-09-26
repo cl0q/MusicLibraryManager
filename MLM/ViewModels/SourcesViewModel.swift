@@ -29,6 +29,8 @@ final class SourcesViewModel {
 
     /// Whether loading is in progress.
     private(set) var isLoading = false
+    /// A repository-load failure is distinct from a source being disconnected.
+    private(set) var loadError: String?
 
     // MARK: - Dependencies
 
@@ -151,6 +153,8 @@ final class SourcesViewModel {
     @MainActor
     func loadSources() async {
         isLoading = true
+        loadError = nil
+        defer { isLoading = false }
 
         // Check Keychain for stored credentials, and keep the shared access
         // state in sync (also covers services not registered with the
@@ -186,10 +190,12 @@ final class SourcesViewModel {
                 }
             }
         } catch {
-            print("[SourcesVM] Error loading sources: \(error)")
+            loadError = "Could not load source details. \(error.localizedDescription)"
+            AppLogger.shared.error(
+                "Error loading source details: \(error.localizedDescription)",
+                source: "Sources"
+            )
         }
-
-        isLoading = false
     }
 
     // MARK: - Connect

@@ -483,15 +483,34 @@ final class TrackRepository: Sendable {
 
     /// Delete a track by ID.
     func delete(id: Int64) async throws {
-        _ = try await database.write { db in
-            try Track.deleteOne(db, id: id)
-        }
+        try await delete(ids: [id])
     }
 
     /// Delete multiple tracks by IDs.
     func delete(ids: [Int64]) async throws {
+        let uniqueIDs = Array(Set(ids))
+        guard !uniqueIDs.isEmpty else { return }
         try await database.write { db in
-            try Track.deleteAll(db, ids: ids)
+            // Foreign-key enforcement is deliberately disabled for compatibility
+            // with the shared database, so remove every dependent row ourselves.
+            for id in uniqueIDs {
+                try db.execute(sql: "DELETE FROM track_sources WHERE track_id = ?", arguments: [id])
+                try db.execute(sql: "DELETE FROM playlist_tracks WHERE track_id = ?", arguments: [id])
+                try db.execute(sql: "DELETE FROM sync_profile_tracks WHERE track_id = ?", arguments: [id])
+                try db.execute(sql: "DELETE FROM sync_state WHERE track_id = ?", arguments: [id])
+                try db.execute(sql: "DELETE FROM fingerprints WHERE track_id = ?", arguments: [id])
+                try db.execute(sql: "DELETE FROM artwork WHERE track_id = ?", arguments: [id])
+                try db.execute(sql: "DELETE FROM replaygain WHERE track_id = ?", arguments: [id])
+                try db.execute(sql: "DELETE FROM track_analysis WHERE track_id = ?", arguments: [id])
+                try db.execute(sql: "DELETE FROM track_tags WHERE track_id = ?", arguments: [id])
+                try db.execute(sql: "DELETE FROM review_queue WHERE track_id = ? OR related_track_id = ?", arguments: [id, id])
+                try db.execute(sql: "DELETE FROM track_embeddings WHERE track_id = ?", arguments: [id])
+                try db.execute(sql: "DELETE FROM track_segment_embeddings WHERE track_id = ?", arguments: [id])
+                try db.execute(sql: "DELETE FROM track_similarity_feedback WHERE seed_track_id = ? OR target_track_id = ?", arguments: [id, id])
+                try db.execute(sql: "DELETE FROM track_discovery_log WHERE discovered_track_id = ?", arguments: [id])
+                try db.execute(sql: "UPDATE track_discovery_log SET seed_track_id = NULL WHERE seed_track_id = ?", arguments: [id])
+                try Track.deleteOne(db, id: id)
+            }
         }
     }
 

@@ -54,6 +54,23 @@ struct SourcesView: View {
             Divider()
                 .background(Color.mlmEdge)
 
+            if let loadError = viewModel.loadError {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                    Text(loadError)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    Button("Retry") {
+                        Task { await viewModel.loadSources() }
+                    }
+                }
+                .font(MLMFont.muted)
+                .foregroundColor(.mlmError)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(Color.mlmBase)
+            }
+
             ScrollView {
                 LazyVGrid(
                     columns: [GridItem(.adaptive(minimum: 280, maximum: 340), spacing: 12, alignment: .top)],
