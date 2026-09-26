@@ -35,7 +35,7 @@ struct PinnedPlaylistsDisclosure: View {
     let topLevelIcon: String
     let topLevelSection: SidebarSection
     let onUnpin: (Int64) -> Void
-    let onDelete: (Int64) -> Void
+    let onDelete: (Playlist) -> Void
     let onSelectSection: (SidebarSection) -> Void
 
     @AppStorage("sidebar.pinnedPlaylists.expanded") private var pinnedExpanded = true
@@ -141,7 +141,7 @@ struct PinnedPlaylistsDisclosure: View {
         Divider()
         if pl.isLiked == 0 {
             Button("Delete", role: .destructive) {
-                if let pid = pl.id { onDelete(pid) }
+                onDelete(pl)
             }
         }
     }

@@ -13,6 +13,7 @@ struct SidebarView: View {
     @State private var pendingConflictsCount: Int = 0
     @State private var pendingRecommendationsCount: Int = 0
     @State private var hasExpiredSource = false
+    @State private var pendingPlaylistDeletion: Playlist?
 
     var body: some View {
         List(selection: $selectedSection) {
@@ -72,6 +73,35 @@ struct SidebarView: View {
         .onReceive(NotificationCenter.default.publisher(for: .downloadDidComplete)) { _ in
             updatePendingRecommendationsCount()
         }
+        .confirmationDialog(
+            "Delete playlist?",
+            isPresented: Binding(
+                get: { pendingPlaylistDeletion != nil },
+                set: { if !$0 { pendingPlaylistDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Playlist", role: .destructive) {
+                guard let id = pendingPlaylistDeletion?.id else { return }
+                pendingPlaylistDeletion = nil
+                Task {
+                    do {
+                        try await container.playlistRepository?.delete(id: id)
+                        NotificationCenter.default.post(name: .playlistDidChange, object: nil)
+                    } catch {
+                        AppLogger.shared.error(
+                            "Could not delete playlist: \(error.localizedDescription)",
+                            source: "Sidebar"
+                        )
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingPlaylistDeletion = nil
+            }
+        } message: {
+            Text("Delete “\(pendingPlaylistDeletion?.name ?? "")”? Its music files will remain in your library.")
+        }
     }
 
     @ViewBuilder
@@ -86,11 +116,8 @@ struct SidebarView: View {
                     NotificationCenter.default.post(name: .playlistDidChange, object: nil)
                 }
             },
-            onDelete: { pid in
-                Task {
-                    try? await container.playlistRepository?.delete(id: pid)
-                    NotificationCenter.default.post(name: .playlistDidChange, object: nil)
-                }
+            onDelete: { playlist in
+                pendingPlaylistDeletion = playlist
             },
             onSelectSection: { targetSection in
                 // [navperf] temporary instrumentation — remove after measurement
