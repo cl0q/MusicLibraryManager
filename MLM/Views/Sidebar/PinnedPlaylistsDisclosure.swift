@@ -46,6 +46,7 @@ struct PinnedPlaylistsDisclosure: View {
     // Inline-rename state (D-11). All local — no shared plumbing needed.
     @State private var renamingId: Int64?
     @State private var renameText: String = ""
+    @State private var renameError: String?
     @FocusState private var renameFocused: Bool
 
     var body: some View {
@@ -75,6 +76,14 @@ struct PinnedPlaylistsDisclosure: View {
         .task { await loadPinned() }
         .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { _ in
             Task { await loadPinned() }
+        }
+        .alert("Could not rename playlist", isPresented: Binding(
+            get: { renameError != nil },
+            set: { if !$0 { renameError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(renameError ?? "Please try again.")
         }
     }
 
@@ -158,7 +167,7 @@ struct PinnedPlaylistsDisclosure: View {
             try await container.playlistRepository?.rename(id: id, name: trimmed)
             NotificationCenter.default.post(name: .playlistDidChange, object: nil)
         } catch {
-            // Silent-fail on rename collision / DB error; row reverts on next loadPinned().
+            renameError = error.localizedDescription
         }
         renamingId = nil
         renameText = ""
