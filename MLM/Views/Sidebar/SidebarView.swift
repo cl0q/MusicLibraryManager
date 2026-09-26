@@ -197,33 +197,6 @@ struct SidebarView: View {
         .tag(section)
     }
 
-    // MARK: - Queue footer
-
-    private var queueFooter: some View {
-        Button {
-            selectedSection = .queue
-        } label: {
-            HStack {
-                Label(SidebarSection.queue.label, systemImage: SidebarSection.queue.icon)
-                    .font(MLMFont.body)
-                    .foregroundColor(selectedSection == .queue ? .white : .mlmInkSecondary)
-                Spacer()
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(selectedSection == .queue ? Color.accentColor : Color.clear)
-            )
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 8)
-        .padding(.top, 8)
-        .keyboardShortcut("8")
-        .accessibilityIdentifier("sidebar_queue_footer")
-        .accessibilityLabel("sidebar_queue_footer")
-    }
-
     // MARK: - Settings footer
 
     private var settingsFooter: some View {
@@ -244,13 +217,8 @@ struct SidebarView: View {
         .accessibilityLabel("settings_button")
     }
 
-    /// Bottom safeAreaInset content: queue footer above settings.
     private var bottomInset: some View {
-        VStack(spacing: 0) {
-            queueFooter
-            Divider()
-            settingsFooter
-        }
+        settingsFooter
     }
 
     private func updatePendingDuplicatesCount() {
