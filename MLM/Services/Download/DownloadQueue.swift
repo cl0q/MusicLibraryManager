@@ -69,7 +69,8 @@ final class DownloadQueue {
         preferredSource: String? = nil,
         soundcloudURL: String? = nil,
         youtubeURL: String? = nil
-    ) {
+    ) throws {
+        let previousItems = items
         // Check if already queued
         if let idx = items.firstIndex(where: { $0.trackId == trackId && $0.source == source }) {
             items[idx].attemptCount += 1
@@ -99,20 +100,37 @@ final class DownloadQueue {
         // Keep capped items on disk. The global batch retry deliberately
         // skips them, but Activity still exposes each one for an explicit
         // retry instead of silently discarding a durable failure.
-        save()
+        do {
+            try save()
+        } catch {
+            items = previousItems
+            throw error
+        }
     }
 
     /// Remove a successfully retried item.
-    func dequeue(trackId: Int64, source: String) {
+    func dequeue(trackId: Int64, source: String) throws {
+        let previousItems = items
         items.removeAll { $0.trackId == trackId && $0.source == source }
-        save()
+        do {
+            try save()
+        } catch {
+            items = previousItems
+            throw error
+        }
     }
 
     /// Remove successfully persisted retries regardless of their source key.
-    func dequeue(trackIds: Set<Int64>) {
+    func dequeue(trackIds: Set<Int64>) throws {
         guard !trackIds.isEmpty else { return }
+        let previousItems = items
         items.removeAll { trackIds.contains($0.trackId) }
-        save()
+        do {
+            try save()
+        } catch {
+            items = previousItems
+            throw error
+        }
     }
 
     /// Get items eligible for the legacy global retry control. Capped items
@@ -122,9 +140,15 @@ final class DownloadQueue {
     }
 
     /// Clear the entire queue.
-    func clear() {
+    func clear() throws {
+        let previousItems = items
         items.removeAll()
-        save()
+        do {
+            try save()
+        } catch {
+            items = previousItems
+            throw error
+        }
     }
 
     // MARK: - Persistence
@@ -138,20 +162,30 @@ final class DownloadQueue {
         items = decoded
     }
 
-    private func save() {
-        guard let data = try? JSONEncoder().encode(items) else { return }
-        try? FileManager.default.createDirectory(
+    private func save() throws {
+        let data = try JSONEncoder().encode(items)
+        try FileManager.default.createDirectory(
             at: queuePath.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        // Atomic write: temp + rename
-        let tmpPath = queuePath.appendingPathExtension("tmp")
+        let temporaryPath = queuePath.appendingPathExtension("new")
+        let backupName = queuePath.lastPathComponent + ".backup"
         do {
-            try data.write(to: tmpPath, options: .atomic)
-            try FileManager.default.moveItem(at: tmpPath, to: queuePath)
+            try? FileManager.default.removeItem(at: temporaryPath)
+            try data.write(to: temporaryPath, options: .atomic)
+            if FileManager.default.fileExists(atPath: queuePath.path) {
+                _ = try FileManager.default.replaceItemAt(
+                    queuePath,
+                    withItemAt: temporaryPath,
+                    backupItemName: backupName,
+                    options: [.usingNewMetadataOnly]
+                )
+            } else {
+                try FileManager.default.moveItem(at: temporaryPath, to: queuePath)
+            }
         } catch {
-            // Fallback: direct write
-            try? data.write(to: queuePath, options: .atomic)
+            try? FileManager.default.removeItem(at: temporaryPath)
+            throw error
         }
     }
 }
