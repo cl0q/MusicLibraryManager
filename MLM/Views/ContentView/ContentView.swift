@@ -247,14 +247,6 @@ struct ContentView: View {
                         }
                     )
                 }
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showUniversalSearch = true
-                    } label: {
-                        Image(systemName: "globe")
-                    }
-                    .help("Universal Search — paste a URL to download")
-                }
             }
 
             // Separator
