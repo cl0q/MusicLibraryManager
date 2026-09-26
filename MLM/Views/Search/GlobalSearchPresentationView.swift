@@ -203,6 +203,9 @@ struct GlobalSearchPresentationView: View {
             playlistRepository: container.playlistRepository
         )
         vm.context = context
+        if case .playlist(let playlistID) = context {
+            vm.contextPlaylistID = playlistID
+        }
         viewModel = vm
     }
 }

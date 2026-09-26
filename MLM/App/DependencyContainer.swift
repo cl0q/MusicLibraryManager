@@ -91,6 +91,17 @@ final class DependencyContainer {
 
     private init() {}
 
+    /// Publishes a terminal bootstrap failure for the root loading view.
+    @MainActor
+    func reportInitializationFailure(_ error: Error) {
+        isInitialized = false
+        initializationError = error
+        AppLogger.shared.error(
+            "Application initialization failed: \(error.localizedDescription)",
+            source: "App"
+        )
+    }
+
     /// Test-only composition root for UI fixtures. It deliberately wires only
     /// database repositories: no playback, keychain, network, process, mount,
     /// or background service is started by this initializer.

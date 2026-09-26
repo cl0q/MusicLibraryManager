@@ -254,7 +254,7 @@ final class PlaylistViewModel {
         if willPin {
             let pinnedCount = playlists.filter { $0.isPinned == 1 }.count
             if pinnedCount >= 8 {
-                pinLimitHintMessage = "Pinned limit reached"
+                pinLimitHintMessage = "Pin limit reached (8). Unpin one first."
                 // Schedule auto-clear after 3 seconds (UI-SPEC line 241).
                 Task { @MainActor [weak self] in
                     try? await Task.sleep(for: .seconds(3))

@@ -25,6 +25,7 @@ struct PlaylistsView: View {
     @State private var showFailedTracksWhenOpened = false
     @State private var showNewPlaylistPopover = false
     @State private var availableSyncProfiles: [SyncProfile] = []
+    @State private var pendingDeletion: Playlist?
 
     /// Callback when a track is double-clicked in the detail view.
     var onTrackDoubleClick: ((Track, [Track]) -> Void)?
@@ -97,6 +98,25 @@ struct PlaylistsView: View {
                     userInfo: ["playlistId": pid, "coverRevalidation": pid]
                 )
             }
+        }
+        .confirmationDialog(
+            "Delete playlist?",
+            isPresented: Binding(
+                get: { pendingDeletion != nil },
+                set: { if !$0 { pendingDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Playlist", role: .destructive) {
+                guard let playlistID = pendingDeletion?.id else { return }
+                pendingDeletion = nil
+                Task { await viewModel?.deletePlaylist(id: playlistID) }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDeletion = nil
+            }
+        } message: {
+            Text("Delete “\(pendingDeletion?.name ?? "")”? Its music files will remain in your library.")
         }
     }
 
@@ -340,9 +360,6 @@ struct PlaylistsView: View {
                 Text(message)
                     .font(MLMFont.bodyBold)
                     .foregroundColor(.mlmInk)
-                Text("Unpin one playlist before pinning another. (Maximum: 8)")
-                    .font(MLMFont.muted)
-                    .foregroundColor(.mlmInkSecondary)
             }
             Spacer()
         }
@@ -351,7 +368,7 @@ struct PlaylistsView: View {
         .background(Color.mlmRaised)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("pin_limit_banner")
-        .accessibilityLabel("Pin limit reached. Maximum eight pinned playlists. Unpin one to free a slot.")
+        .accessibilityLabel("Pin limit reached (8). Unpin one first.")
     }
 
     /// Drop-rejected banner (UI-SPEC line 174). Same visual structure as the
@@ -488,7 +505,7 @@ private struct PlaylistsGridCard: View {
                 Task { await viewModel.togglePin(id: playlist.id!) }
             },
             onDelete: {
-                Task { await viewModel.deletePlaylist(id: playlist.id!) }
+                pendingDeletion = playlist
             },
             onSpringLoad: {
                 showFailedTracksWhenOpened = false

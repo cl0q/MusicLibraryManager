@@ -13,6 +13,7 @@ struct SidebarView: View {
     @State private var pendingConflictsCount: Int = 0
     @State private var pendingRecommendationsCount: Int = 0
     @State private var hasExpiredSource = false
+    @State private var pendingPlaylistDeletion: Playlist?
 
     var body: some View {
         List(selection: $selectedSection) {
@@ -72,6 +73,35 @@ struct SidebarView: View {
         .onReceive(NotificationCenter.default.publisher(for: .downloadDidComplete)) { _ in
             updatePendingRecommendationsCount()
         }
+        .confirmationDialog(
+            "Delete playlist?",
+            isPresented: Binding(
+                get: { pendingPlaylistDeletion != nil },
+                set: { if !$0 { pendingPlaylistDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Playlist", role: .destructive) {
+                guard let id = pendingPlaylistDeletion?.id else { return }
+                pendingPlaylistDeletion = nil
+                Task {
+                    do {
+                        try await container.playlistRepository?.delete(id: id)
+                        NotificationCenter.default.post(name: .playlistDidChange, object: nil)
+                    } catch {
+                        AppLogger.shared.error(
+                            "Could not delete playlist: \(error.localizedDescription)",
+                            source: "Sidebar"
+                        )
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingPlaylistDeletion = nil
+            }
+        } message: {
+            Text("Delete “\(pendingPlaylistDeletion?.name ?? "")”? Its music files will remain in your library.")
+        }
     }
 
     @ViewBuilder
@@ -86,11 +116,8 @@ struct SidebarView: View {
                     NotificationCenter.default.post(name: .playlistDidChange, object: nil)
                 }
             },
-            onDelete: { pid in
-                Task {
-                    try? await container.playlistRepository?.delete(id: pid)
-                    NotificationCenter.default.post(name: .playlistDidChange, object: nil)
-                }
+            onDelete: { playlist in
+                pendingPlaylistDeletion = playlist
             },
             onSelectSection: { targetSection in
                 // [navperf] temporary instrumentation — remove after measurement
@@ -170,33 +197,6 @@ struct SidebarView: View {
         .tag(section)
     }
 
-    // MARK: - Queue footer
-
-    private var queueFooter: some View {
-        Button {
-            selectedSection = .queue
-        } label: {
-            HStack {
-                Label(SidebarSection.queue.label, systemImage: SidebarSection.queue.icon)
-                    .font(MLMFont.body)
-                    .foregroundColor(selectedSection == .queue ? .white : .mlmInkSecondary)
-                Spacer()
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(selectedSection == .queue ? Color.accentColor : Color.clear)
-            )
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 8)
-        .padding(.top, 8)
-        .keyboardShortcut("8")
-        .accessibilityIdentifier("sidebar_queue_footer")
-        .accessibilityLabel("sidebar_queue_footer")
-    }
-
     // MARK: - Settings footer
 
     private var settingsFooter: some View {
@@ -217,13 +217,8 @@ struct SidebarView: View {
         .accessibilityLabel("settings_button")
     }
 
-    /// Bottom safeAreaInset content: queue footer above settings.
     private var bottomInset: some View {
-        VStack(spacing: 0) {
-            queueFooter
-            Divider()
-            settingsFooter
-        }
+        settingsFooter
     }
 
     private func updatePendingDuplicatesCount() {

@@ -247,14 +247,6 @@ struct ContentView: View {
                         }
                     )
                 }
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showUniversalSearch = true
-                    } label: {
-                        Image(systemName: "globe")
-                    }
-                    .help("Universal Search — paste a URL to download")
-                }
             }
 
             // Separator
@@ -303,7 +295,7 @@ struct ContentView: View {
     private var searchMergerContext: SearchResultsMerger.Context {
         switch container.searchCoordinator.context {
         case .library: .library
-        case .playlist: .playlist
+        case .playlist(let id): .playlist(id)
         case .other: .other
         }
     }

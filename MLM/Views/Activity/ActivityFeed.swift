@@ -326,7 +326,9 @@ enum ActivityFeed {
         let status: ActivityRowStatus = isStalled ? .stalled : .running
 
         var actions: [ActivityRowAction] = []
-        actions.append(.cancel(operationID: op.id))
+        if op.isCancellable {
+            actions.append(.cancel(operationID: op.id))
+        }
 
         let percentText = "\(Int((op.progress * 100).rounded()))%"
         let identifier = "operation_row_" + op.type.rawValue

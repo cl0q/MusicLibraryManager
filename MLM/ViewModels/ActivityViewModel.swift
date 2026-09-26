@@ -264,6 +264,7 @@ final class ActivityViewModel {
         let timestamp = now()
         onMain {
             guard let idx = self.operations.firstIndex(where: { $0.id == id }) else { return }
+            guard self.operations[idx].isCancellable else { return }
             self.operations[idx].status = .cancelled
             self.operations[idx].completedAt = timestamp
             if let detail { self.operations[idx].detail = detail }
