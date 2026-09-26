@@ -227,11 +227,34 @@ struct UniversalSearchView: View {
     private var resultsListBody: some View {
         VStack(spacing: 0) {
             sectionLabel("Results")
-            Text("Text search results appear here")
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.25))
-                .padding(.vertical, 24)
-                .frame(maxWidth: .infinity)
+            if viewModel.textResults.isEmpty {
+                Text("No matching tracks")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white.opacity(0.25))
+                    .padding(.vertical, 24)
+                    .frame(maxWidth: .infinity)
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(viewModel.textResults) { track in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(track.title)
+                                        .font(.system(size: 14, weight: .medium))
+                                    Text(track.artist)
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.white.opacity(0.5))
+                                }
+                                Spacer()
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            Divider().overlay(Color.white.opacity(0.06))
+                        }
+                    }
+                }
+                .frame(maxHeight: 280)
+            }
         }
     }
 
