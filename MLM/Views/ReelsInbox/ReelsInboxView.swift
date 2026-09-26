@@ -1299,7 +1299,7 @@ struct ReelsInboxView: View {
                                     Button("Use both as \"Artist - Title\"") {
                                         applySmartMetadata(text, for: reel)
                                     }
-                                    Button("Kopieren") {
+                                    Button("Copy") {
                                         copyToClipboard(text)
                                     }
                                 } label: {
