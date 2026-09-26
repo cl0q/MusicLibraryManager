@@ -360,15 +360,19 @@ struct TrackContextMenu: View {
         guard let playlistId = playlist.id,
               let playlistRepo = container.playlistRepository else { return }
 
-        let trackIds = Array(selectedTrackIDs)
-        let position = String(format: "%06d", 999000)
+        let trackIds = selectedTracks.compactMap(\.id)
 
         Task {
-            try? await playlistRepo.addTracks(
-                playlistId: playlistId,
-                trackIds: trackIds,
-                startPosition: position
-            )
+            do {
+                try await playlistRepo.appendTracks(playlistId: playlistId, trackIds: trackIds)
+            } catch {
+                AppLogger.shared.log(
+                    "Failed to add tracks to playlist: \(error)",
+                    level: .error,
+                    source: "Library"
+                )
+                return
+            }
             // D-04: userInfo lets PlaylistCoverService regenerate this playlist's cover.
             NotificationCenter.default.post(
                 name: .playlistDidChange,
