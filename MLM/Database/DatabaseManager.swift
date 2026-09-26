@@ -976,7 +976,6 @@ final class DatabaseManager: Sendable {
                 "track_sources", "playlist_tracks", "sync_profile_tracks", "sync_state",
                 "fingerprints", "artwork", "replaygain", "track_analysis", "track_tags",
                 "review_queue", "track_embeddings", "track_segment_embeddings",
-                "track_discovery_log",
             ]
             for table in trackTables {
                 try db.execute(sql: "DELETE FROM \(table) WHERE track_id NOT IN (SELECT id FROM tracks)")
@@ -986,6 +985,10 @@ final class DatabaseManager: Sendable {
                 WHERE seed_track_id NOT IN (SELECT id FROM tracks)
                    OR target_track_id NOT IN (SELECT id FROM tracks)
             """)
+            // track_discovery_log has no `track_id` column: a discovered row is
+            // deleted when its discovered track is gone, and its seed reference
+            // is nulled when the seed track is gone (mirrors TrackRepository.delete).
+            try db.execute(sql: "DELETE FROM track_discovery_log WHERE discovered_track_id NOT IN (SELECT id FROM tracks)")
             try db.execute(sql: "UPDATE track_discovery_log SET seed_track_id = NULL WHERE seed_track_id NOT IN (SELECT id FROM tracks)")
             try db.execute(sql: "DELETE FROM playlist_tracks WHERE playlist_id NOT IN (SELECT id FROM playlists)")
             try db.execute(sql: "DELETE FROM playlist_tags WHERE playlist_id NOT IN (SELECT id FROM playlists)")
