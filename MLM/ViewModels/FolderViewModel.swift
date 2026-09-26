@@ -396,7 +396,7 @@ final class FolderViewModel {
                     self.loadingNodePaths.remove(path)
                 }
             } catch {
-                await MainActor.run {
+                _ = await MainActor.run {
                     self.loadingNodePaths.remove(path)
                 }
                 AppLogger.shared.error("Failed to load children for \(path): \(error.localizedDescription)", source: "folders")

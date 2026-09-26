@@ -239,11 +239,12 @@ final class SourceRepository: Sendable {
         guard !trackIds.isEmpty else { return [:] }
         let placeholders = trackIds.map { _ in "?" }.joined(separator: ",")
         let args = trackIds.map { $0 as DatabaseValueConvertible }
+        let statementArgs = StatementArguments(args)
         return try await database.read { db in
             let rows = try Row.fetchAll(db, sql: """
                 SELECT track_id, external_id FROM track_sources
                 WHERE track_id IN (\(placeholders))
-            """, arguments: StatementArguments(args))
+            """, arguments: statementArgs)
             var result: [Int64: [String]] = [:]
             for row in rows {
                 guard let trackId: Int64 = row["track_id"],

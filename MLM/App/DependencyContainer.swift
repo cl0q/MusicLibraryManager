@@ -397,7 +397,7 @@ final class DependencyContainer {
         
         let activityVM = self.activityViewModel
         
-        Task.detached {
+        Task.detached { [weak self] in
             let opId = activityVM?.startOperation(
                 type: .sync,
                 title: "Cache migration: \(newDir.lastPathComponent)",

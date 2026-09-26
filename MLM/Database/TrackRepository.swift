@@ -1079,12 +1079,13 @@ final class TrackRepository: Sendable {
         if let permalink = permalink, !permalink.isEmpty {
             paths.append(permalink)
         }
+        let queryPaths = paths
         return try await database.read { db in
             try Track.fetchOne(db, sql: """
                 SELECT * FROM tracks
-                WHERE original_path IN (\(paths.map { _ in "?" }.joined(separator: ", ")))
+                WHERE original_path IN (\(queryPaths.map { _ in "?" }.joined(separator: ", ")))
                 LIMIT 1
-            """, arguments: StatementArguments(paths))
+            """, arguments: StatementArguments(queryPaths))
         }
     }
 
