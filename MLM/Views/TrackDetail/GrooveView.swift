@@ -176,6 +176,8 @@ struct GrooveView: View {
     @State private var swarmRecommendations: [SwarmRecommendation] = []
     
     @State private var selectedSwarmSource: SwarmRecommendationService.SwarmSource = .soundcloud
+    @State private var swarmRequestTask: Task<Void, Never>?
+    @State private var swarmRequestID = UUID()
     
     @State private var isLoadingLocal = false
     @State private var isLoadingSwarm = false
@@ -237,11 +239,12 @@ struct GrooveView: View {
         .background(Color.mlmBase)
         .task {
             await loadLocalGrooves()
-            await loadSwarmRecommendations()
+            loadSwarmRecommendations()
             await loadActionsData()
         }
         .onDisappear {
             previewPlayer.stop()
+            swarmRequestTask?.cancel()
         }
         .onReceive(NotificationCenter.default.publisher(for: .downloadDidComplete)) { _ in
             Task {
@@ -525,7 +528,7 @@ struct GrooveView: View {
                 .frame(width: 180)
                 .onChange(of: selectedSwarmSource) { _ in
                     swarmLimit = 10
-                    Task { await loadSwarmRecommendations() }
+                    loadSwarmRecommendations()
                 }
                 
                 if isLoadingSwarm {
@@ -533,7 +536,7 @@ struct GrooveView: View {
                         .controlSize(.small)
                 } else {
                     Button {
-                        Task { await loadSwarmRecommendations() }
+                        loadSwarmRecommendations()
                     } label: {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 11))
@@ -853,57 +856,65 @@ struct GrooveView: View {
         }
     }
     
-    private func loadSwarmRecommendations() async {
-        guard let swarmService = container.swarmRecommendationService else { return }
-        isLoadingSwarm = true
-        swarmError = nil
-        do {
-            let list = try await swarmService.fetchRecommendations(for: seedTrack, source: selectedSwarmSource, limit: swarmLimit)
-            await MainActor.run {
-                self.swarmRecommendations = list
-                self.isLoadingSwarm = false
-            }
-            await refreshLocalStatuses()
-        } catch {
-            await MainActor.run {
-                self.swarmError = error.localizedDescription
-                self.isLoadingSwarm = false
-            }
-        }
+    private func loadSwarmRecommendations() {
+        startSwarmRequest(limit: 10, appending: false)
     }
 
     private func loadMoreRecommendations() async {
+        startSwarmRequest(limit: swarmLimit + 10, appending: true)
+    }
+
+    private func startSwarmRequest(limit: Int, appending: Bool) {
         guard let swarmService = container.swarmRecommendationService else { return }
+        swarmRequestTask?.cancel()
+        let request = UUID()
+        swarmRequestID = request
+        let source = selectedSwarmSource
+        let currentRecommendations = swarmRecommendations
+
         isLoadingSwarm = true
-        swarmLimit += 10
-        do {
-            let newList = try await swarmService.fetchRecommendations(for: seedTrack, source: selectedSwarmSource, limit: swarmLimit)
-            
-            // Physically extend the list, filtering out any existing duplicates
-            var currentKeys = Set(swarmRecommendations.map { $0.scDownloadUrl ?? "\($0.artist) - \($0.title)" })
-            var extended: [SwarmRecommendation] = swarmRecommendations
-            for rec in newList {
-                let key = rec.scDownloadUrl ?? "\(rec.artist) - \(rec.title)"
-                if !currentKeys.contains(key) {
-                    extended.append(rec)
-                    currentKeys.insert(key)
+        swarmError = nil
+        swarmRequestTask = Task {
+            do {
+                let list = try await swarmService.fetchRecommendations(
+                    for: seedTrack,
+                    source: source,
+                    limit: limit
+                )
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    guard self.swarmRequestID == request else { return }
+                    if appending {
+                        var currentKeys = Set(currentRecommendations.map {
+                            $0.scDownloadUrl ?? "\($0.artist) - \($0.title)"
+                        })
+                        var extended = currentRecommendations
+                        for rec in list {
+                            let key = rec.scDownloadUrl ?? "\(rec.artist) - \(rec.title)"
+                            if currentKeys.insert(key).inserted {
+                                extended.append(rec)
+                            }
+                        }
+                        self.swarmRecommendations = extended
+                    } else {
+                        self.swarmRecommendations = list
+                    }
+                    self.swarmLimit = limit
+                    self.isLoadingSwarm = false
                 }
-            }
-            
-            await MainActor.run {
-                self.swarmRecommendations = extended
-                self.isLoadingSwarm = false
-            }
-            await refreshLocalStatuses()
-        } catch {
-            await MainActor.run {
-                self.swarmError = error.localizedDescription
-                self.isLoadingSwarm = false
+                await refreshLocalStatuses(request: request)
+            } catch {
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    guard self.swarmRequestID == request else { return }
+                    self.swarmError = error.localizedDescription
+                    self.isLoadingSwarm = false
+                }
             }
         }
     }
     
-    private func refreshLocalStatuses() async {
+    private func refreshLocalStatuses(request: UUID? = nil) async {
         guard let trackRepo = container.trackRepository else { return }
         var statusMap: [String: Track] = [:]
         var logMap: [Int64: String] = [:]
@@ -951,6 +962,7 @@ struct GrooveView: View {
         }
         
         await MainActor.run {
+            guard request == nil || self.swarmRequestID == request else { return }
             self.localStatusCache = statusMap
             self.discoveryLogStatus = logMap
         }
