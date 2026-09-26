@@ -288,7 +288,8 @@ struct PlaylistsView: View {
                         viewModel: viewModel,
                         availableSyncProfiles: availableSyncProfiles,
                         selectedPlaylist: $selectedPlaylist,
-                        showFailedTracksWhenOpened: $showFailedTracksWhenOpened
+                        showFailedTracksWhenOpened: $showFailedTracksWhenOpened,
+                        pendingDeletion: $pendingDeletion
                     )
                 }
             }
@@ -468,6 +469,7 @@ private struct PlaylistsGridCard: View {
     let availableSyncProfiles: [SyncProfile]
     @Binding var selectedPlaylist: Playlist?
     @Binding var showFailedTracksWhenOpened: Bool
+    @Binding var pendingDeletion: Playlist?
 
     @Environment(\.container) private var container
 
