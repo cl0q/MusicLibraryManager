@@ -109,8 +109,11 @@ final class PlaybackViewModel {
     /// - Parameter track: The track to play
     @MainActor
     func playTrack(_ track: Track) async {
-        queue.replaceContext([], cap: 0)
-        await loadAndPlay(track)
+        var proposedQueue = queue
+        proposedQueue.replaceContext([], cap: 0)
+        if await loadAndPlay(track) {
+            queue = proposedQueue
+        }
     }
 
     /// Play a track with the visible table order as its queue.
@@ -122,8 +125,11 @@ final class PlaybackViewModel {
         let startIndex = tracks.firstIndex(of: track) ?? 0
         let afterClicked = Array(tracks.dropFirst(startIndex + 1))
         let cap = Self.contextCap()
-        queue.replaceContext(afterClicked, cap: cap)
-        await loadAndPlay(track)
+        var proposedQueue = queue
+        proposedQueue.replaceContext(afterClicked, cap: cap)
+        if await loadAndPlay(track) {
+            queue = proposedQueue
+        }
     }
 
     /// Play the given tracks in random order.
@@ -137,16 +143,9 @@ final class PlaybackViewModel {
     /// Internal: resolve the track's file and start playback without
     /// touching the queue. Used by playTrack variants and queue navigation.
     @MainActor
-    private func loadAndPlay(_ track: Track) async {
+    private func loadAndPlay(_ track: Track) async -> Bool {
         errorMessage = nil
         unavailableTrack = nil
-
-        // Record history
-        history.append(track)
-        let historyCap = Self.historySize()
-        if history.count > historyCap {
-            history.removeFirst(history.count - historyCap)
-        }
 
         let root = (try? await configRepository?.getLibraryRoot()) ?? nil
 
@@ -158,8 +157,7 @@ final class PlaybackViewModel {
         if let root, let organized = track.organizedPath, !organized.isEmpty {
             let url = URL(fileURLWithPath: root).appendingPathComponent(organized)
             if FileManager.default.fileExists(atPath: url.path) {
-                await playFile(at: url, track: track)
-                return
+                return await playFile(at: url, track: track)
             }
         }
 
@@ -167,18 +165,18 @@ final class PlaybackViewModel {
         if raw.hasPrefix("/") || raw.hasPrefix("~") {
             let expanded = (raw as NSString).expandingTildeInPath
             if FileManager.default.fileExists(atPath: expanded) {
-                await playFile(at: URL(fileURLWithPath: expanded), track: track)
-                return
+                return await playFile(at: URL(fileURLWithPath: expanded), track: track)
             }
         }
 
-        errorMessage = "File missing. The audio file could not be found on disk."
+        errorMessage = "Playback unavailable: \(track.title) — file could not be found on disk."
         unavailableTrack = track
         AppLogger.shared.log(
             "Playback failed: no resolvable file for track id=\(track.id ?? -1) — organized='\(track.organizedPath ?? "")' original='\(track.originalPath)'",
             level: .warning,
             source: "Playback"
         )
+        return false
     }
 
     /// Load a file URL and start playback.
@@ -187,7 +185,8 @@ final class PlaybackViewModel {
     ///   - url: File URL to the audio file
     ///   - track: Optional Track metadata to associate
     @MainActor
-    func playFile(at url: URL, track: Track? = nil) async {
+    @discardableResult
+    func playFile(at url: URL, track: Track? = nil) async -> Bool {
         errorMessage = nil
         unavailableTrack = nil
 
@@ -195,17 +194,18 @@ final class PlaybackViewModel {
             // Load the file
             try audioPlayer.loadFile(at: url)
 
-            // Update state
-            currentTrack = track
-            duration = audioPlayer.duration
-            currentPosition = 0
-
             // Apply LUFS gain compensation
             audioPlayer.applyLUFSCompensation(lufsI: track?.lufsI)
 
             // Start playback
             try audioPlayer.play()
+            currentTrack = track
+            duration = audioPlayer.duration
+            currentPosition = 0
             playbackState = .playing
+            if let track {
+                recordSuccessfulPlayback(track)
+            }
 
             // Notify observers
             postTrackDidChange()
@@ -216,25 +216,30 @@ final class PlaybackViewModel {
 
             // Extract waveform data in background
             extractWaveform(for: url, trackID: track?.id)
+            return true
         } catch {
             let ext = url.pathExtension.lowercased()
             let unsupportedHint = Self.unsupportedFormatHints[ext]
-            errorMessage = unsupportedHint ?? "Playback failed: \(error.localizedDescription)"
+            let trackName = track?.title ?? url.lastPathComponent
+            errorMessage = unsupportedHint ?? "Playback unavailable: \(trackName) — \(error.localizedDescription)"
             unavailableTrack = track
-            playbackState = .stopped
+            // `AudioPlayer.loadFile` stops and clears its prior file before it
+            // can throw. Do not leave controls presenting a stale track.
+            clearStoppedPlaybackState()
             AppLogger.shared.log(
                 "Playback failed for \(url.lastPathComponent) (.\(ext)): \(error.localizedDescription)",
                 level: .warning,
                 source: "Playback"
             )
             postStateDidChange()
+            return false
         }
     }
 
     @MainActor
     func retryUnavailableTrack() async {
         guard let unavailableTrack else { return }
-        await playTrack(unavailableTrack)
+        _ = await loadAndPlay(unavailableTrack)
     }
 
     /// Format-specific error blurbs when AVAudioFile rejects a file.
@@ -247,6 +252,27 @@ final class PlaybackViewModel {
         "ogg": "Vorbis/Ogg is not supported by macOS audio. Transcode it to M4A.",
         "webm": "WebM is not supported by macOS audio. Transcode it to M4A."
     ]
+
+    /// Commit history only after the file loaded and playback really started.
+    private func recordSuccessfulPlayback(_ track: Track) {
+        history.append(track)
+        let historyCap = Self.historySize()
+        if history.count > historyCap {
+            history.removeFirst(history.count - historyCap)
+        }
+    }
+
+    /// A throwing load has already stopped AudioPlayer. Mirror that cleared
+    /// state instead of retaining stale metadata and transport controls.
+    private func clearStoppedPlaybackState() {
+        currentTrack = nil
+        playbackState = .stopped
+        currentPosition = 0
+        duration = 0
+        waveformData = []
+        stopPositionTimer()
+        postTrackDidChange()
+    }
 
     // MARK: - Playback Controls
 
@@ -356,12 +382,17 @@ final class PlaybackViewModel {
     /// is exhausted, stops playback and clears the current track.
     @MainActor
     func trackDidEnd() {
-        guard let nextTrack = queue.advance() else {
+        var proposedQueue = queue
+        guard let nextTrack = proposedQueue.advance() else {
             // Queue exhausted — stop.
             stop()
             return
         }
-        Task { await loadAndPlay(nextTrack) }
+        Task {
+            if await loadAndPlay(nextTrack) {
+                queue = proposedQueue
+            }
+        }
     }
 
     /// Skip to the next track in the queue.
@@ -369,11 +400,14 @@ final class PlaybackViewModel {
     /// At the end of the queue, stops playback.
     @MainActor
     func next() async {
-        guard let nextTrack = queue.advance() else {
+        var proposedQueue = queue
+        guard let nextTrack = proposedQueue.advance() else {
             stop()
             return
         }
-        await loadAndPlay(nextTrack)
+        if await loadAndPlay(nextTrack) {
+            queue = proposedQueue
+        }
     }
 
     /// Go back to the previous track, or restart the current one if
@@ -399,12 +433,12 @@ final class PlaybackViewModel {
             return
         }
 
-        // Remove current track from history (it was appended in loadAndPlay)
-        if let current = currentTrack, let idx = history.lastIndex(where: { $0.id == current.id }) {
-            history.remove(at: idx)
+        var proposedHistory = history
+        if let current = currentTrack, let idx = proposedHistory.lastIndex(where: { $0.id == current.id }) {
+            proposedHistory.remove(at: idx)
         }
 
-        guard let previousTrack = history.popLast() else {
+        guard let previousTrack = proposedHistory.popLast() else {
             // No previous track — restart current
             do {
                 try audioPlayer.seek(to: 0)
@@ -415,20 +449,27 @@ final class PlaybackViewModel {
             return
         }
 
-        // Push old current to front of context
+        var proposedQueue = queue
         if let current = currentTrack {
-            queue.pushToFront(current)
+            proposedQueue.pushToFront(current)
         }
 
-        await loadAndPlay(previousTrack)
+        if await loadAndPlay(previousTrack) {
+            history = proposedHistory
+            recordSuccessfulPlayback(previousTrack)
+            queue = proposedQueue
+        }
     }
 
     /// Play a specific track from the upcoming queue.
     /// Discards everything before it; keeps everything after.
     @MainActor
     func playFromQueue(track: Track) async {
-        guard queue.playFromUpcoming(track) != nil else { return }
-        await loadAndPlay(track)
+        var proposedQueue = queue
+        guard proposedQueue.playFromUpcoming(track) != nil else { return }
+        if await loadAndPlay(track) {
+            queue = proposedQueue
+        }
     }
 
     /// Insert tracks directly after the current track so they play next.

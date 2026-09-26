@@ -122,7 +122,21 @@ struct PlayerBar: View {
 
     private var trackInfoColumn: some View {
         VStack(alignment: .leading, spacing: 2) {
-            if let error = viewModel.errorMessage {
+            if let track = viewModel.currentTrack {
+                HStack(spacing: 4) {
+                    Text(track.title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                }
+                Text(subtitleText(for: track))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                if let error = viewModel.errorMessage {
+                    playbackError(error)
+                }
+            } else if let error = viewModel.errorMessage {
                 HStack(spacing: 4) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 10))
@@ -141,17 +155,6 @@ struct PlayerBar: View {
                         .accessibilityLabel("retry_button")
                     }
                 }
-            } else if let track = viewModel.currentTrack {
-                HStack(spacing: 4) {
-                    Text(track.title)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                }
-                Text(subtitleText(for: track))
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
             } else {
                 Text("Not Playing")
                     .font(.system(size: 12, weight: .semibold))
@@ -159,6 +162,28 @@ struct PlayerBar: View {
             }
         }
         .frame(minWidth: 80, maxWidth: 160)
+    }
+
+    @ViewBuilder
+    private func playbackError(_ error: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(.red)
+            Text(error)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.red)
+                .lineLimit(1)
+            if viewModel.unavailableTrack != nil {
+                Button("Retry") {
+                    Task { await viewModel.retryUnavailableTrack() }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .accessibilityIdentifier("retry_button")
+                .accessibilityLabel("retry_button")
+            }
+        }
     }
 
     // MARK: - Scrubber

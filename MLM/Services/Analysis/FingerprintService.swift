@@ -32,7 +32,8 @@ final class FingerprintService: Sendable {
 
         let result = try await ProcessRunner.run(
             fpcalc,
-            arguments: ["-raw", "-json", path]
+            arguments: ["-raw", "-json", path],
+            timeout: 15 * 60
         )
 
         guard result.isSuccess,
@@ -87,17 +88,21 @@ final class FingerprintService: Sendable {
             await withTaskGroup(of: Result<Void, Error>.self) { group in
                 for track in tracks {
                     group.addTask {
-                        // Check cancellation before acquiring a slot
-                        guard !tracker.isCancelled else {
-                            return .failure(CancellationError())
-                        }
-                        return await limiter.run {
-                            await self.processSingleFingerprint(
-                                track: track,
-                                repository: repository,
-                                libraryRoot: libraryRoot,
-                                tracker: tracker
-                            )
+                        do {
+                            return try await limiter.runCancellable {
+                                try Task.checkCancellation()
+                                guard !tracker.isCancelled else {
+                                    throw CancellationError()
+                                }
+                                return await self.processSingleFingerprint(
+                                    track: track,
+                                    repository: repository,
+                                    libraryRoot: libraryRoot,
+                                    tracker: tracker
+                                )
+                            }
+                        } catch {
+                            return .failure(error)
                         }
                     }
                 }
@@ -106,8 +111,10 @@ final class FingerprintService: Sendable {
                 collected.reserveCapacity(tracks.count)
                 for await result in group {
                     collected.append(result)
-                    // Early exit: stop collecting if cancelled
-                    if tracker.isCancelled { break }
+                    if tracker.isCancelled || Task.isCancelled {
+                        group.cancelAll()
+                        break
+                    }
                 }
                 return collected
             }
@@ -177,6 +184,8 @@ final class FingerprintService: Sendable {
         
         do {
             if let result = try await generateFingerprint(path: resolvedPath) {
+                try Task.checkCancellation()
+                guard !tracker.isCancelled else { throw CancellationError() }
                 let fingerprint = Fingerprint(
                     trackId: trackId,
                     fingerprint: result.fingerprint,  // Already Data (little-endian int32 bytes)

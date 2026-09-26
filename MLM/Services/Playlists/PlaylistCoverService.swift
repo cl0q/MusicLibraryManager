@@ -3,6 +3,31 @@ import AVFoundation
 import Foundation
 import GRDB
 
+private actor PlaylistCoverOperationGate {
+    private var active: Set<Int64> = []
+    private var waiters: [Int64: [CheckedContinuation<Void, Never>]] = [:]
+
+    func acquire(_ playlistId: Int64) async {
+        if !active.contains(playlistId) {
+            active.insert(playlistId)
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters[playlistId, default: []].append(continuation)
+        }
+    }
+
+    func release(_ playlistId: Int64) {
+        guard var playlistWaiters = waiters[playlistId], !playlistWaiters.isEmpty else {
+            active.remove(playlistId)
+            return
+        }
+        let next = playlistWaiters.removeFirst()
+        waiters[playlistId] = playlistWaiters.isEmpty ? nil : playlistWaiters
+        next.resume()
+    }
+}
+
 /// Orchestrates auto-generation of playlist cover images.
 ///
 /// Lifecycle: long-lived (held by `DependencyContainer`). Observes `.playlistDidChange`
@@ -15,7 +40,7 @@ import GRDB
 /// Re-entry safety:
 /// - Notifications posted by this service tag `userInfo["origin"] = "coverService"`
 ///   so the observer ignores its own emissions (prevents an infinite regenerate loop).
-/// - `inFlight: Set<Int64>` coalesces rapid duplicate requests per playlist id.
+/// - A per-playlist gate serializes auto, custom, and reset mutations.
 ///
 /// Database type: `any DatabaseWriter` (mirrors `TrackRepository.init(database:)`).
 /// Accepts `DatabasePool` (production) AND `DatabaseQueue` (in-memory tests) — both
@@ -34,8 +59,8 @@ final class PlaylistCoverService {
     private let trackRepository: TrackRepository
     private let configRepository: ConfigRepository
 
-    /// Coalesces concurrent regenerations per playlist id.
-    private var inFlight: Set<Int64> = []
+    /// Serializes auto, custom, and reset mutations sharing one playlist PNG.
+    private let operationGate = PlaylistCoverOperationGate()
 
     /// NotificationCenter observer token for `.playlistDidChange` (removed in deinit).
     private var playlistObserverToken: NSObjectProtocol?
@@ -109,10 +134,12 @@ final class PlaylistCoverService {
     /// Regenerate the auto-cover for `playlistId`.
     /// No-op if `playlists.cover_is_custom == 1` (D-05).
     func regenerateCover(playlistId: Int64) async {
-        guard !inFlight.contains(playlistId) else { return }
-        inFlight.insert(playlistId)
-        defer { inFlight.remove(playlistId) }
+        await withPlaylistOperation(playlistId) {
+            await regenerateCoverLocked(playlistId: playlistId)
+        }
+    }
 
+    private func regenerateCoverLocked(playlistId: Int64) async {
         do {
             // 1. Load playlist; bail if user-locked.
             guard let playlist = try await playlistRepository.fetch(id: playlistId) else { return }
@@ -200,6 +227,12 @@ final class PlaylistCoverService {
 
     /// User dropped/picked an image. Compose + persist + flip lock to 1 (D-05).
     func setCustomCover(playlistId: Int64, sourceURL: URL) async {
+        await withPlaylistOperation(playlistId) {
+            await setCustomCoverLocked(playlistId: playlistId, sourceURL: sourceURL)
+        }
+    }
+
+    private func setCustomCoverLocked(playlistId: Int64, sourceURL: URL) async {
         do {
             guard let image = NSImage(contentsOf: sourceURL) else {
                 AppLogger.shared.error(
@@ -235,6 +268,12 @@ final class PlaylistCoverService {
 
     /// D-06: clear the user lock and regenerate from track artwork.
     func resetToAuto(playlistId: Int64) async {
+        await withPlaylistOperation(playlistId) {
+            await resetToAutoLocked(playlistId: playlistId)
+        }
+    }
+
+    private func resetToAutoLocked(playlistId: Int64) async {
         do {
             try await playlistRepository.setCoverPath(
                 id: playlistId, path: nil, isCustom: false
@@ -243,7 +282,7 @@ final class PlaylistCoverService {
             let coversDir = try ensureCoversDir()
             let pngURL = coversDir.appendingPathComponent("\(playlistId).png")
             try? FileManager.default.removeItem(at: pngURL)
-            await regenerateCover(playlistId: playlistId)
+            await regenerateCoverLocked(playlistId: playlistId)
         } catch {
             AppLogger.shared.error(
                 "resetToAuto failed for playlist \(playlistId): \(error)",
@@ -254,8 +293,17 @@ final class PlaylistCoverService {
 
     // MARK: - Private helpers
 
+    private func withPlaylistOperation(
+        _ playlistId: Int64,
+        operation: () async -> Void
+    ) async {
+        await operationGate.acquire(playlistId)
+        await operation()
+        await operationGate.release(playlistId)
+    }
+
     /// Find all playlists that (a) contain `trackId` and (b) have cover_is_custom = 0,
-    /// then schedule a cover regen for each. Coalesced via inFlight Set (per-playlist).
+    /// then schedule a serialized cover regeneration for each.
     ///
     /// Uses a direct DB read rather than a PlaylistRepository method because no such
     /// method exists; adding a dedicated repo method for this one-off query is not

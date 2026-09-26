@@ -24,15 +24,72 @@ final class ProcessRunner {
         }
     }
 
-    /// Thread-safe mutable flag, used to record whether a timeout fired
-    /// while the continuation is still suspended.
-    private final class TimedOutFlag: @unchecked Sendable {
+    /// Coordinates termination and continuation resumption across process
+    /// completion, task cancellation, and timeout racing on different threads.
+    private final class ProcessCompletion: @unchecked Sendable {
         private let lock = NSLock()
-        private var _value = false
+        private let process: Process
+        private var continuation: CheckedContinuation<Void, Error>?
+        private var didResume = false
+        private var cancellationRequested = false
+        private var didTimeout = false
 
-        var value: Bool {
-            get { lock.lock(); defer { lock.unlock() }; return _value }
-            set { lock.lock(); _value = newValue; lock.unlock() }
+        init(process: Process) {
+            self.process = process
+        }
+
+        func install(_ continuation: CheckedContinuation<Void, Error>) {
+            lock.lock()
+            self.continuation = continuation
+            lock.unlock()
+        }
+
+        func didStart() {
+            lock.lock()
+            let shouldTerminate = cancellationRequested
+            lock.unlock()
+            if shouldTerminate { requestTermination(timedOut: false) }
+        }
+
+        func requestTermination(timedOut: Bool) {
+            lock.lock()
+            if timedOut && !process.isRunning {
+                lock.unlock()
+                return
+            }
+            cancellationRequested = true
+            didTimeout = didTimeout || timedOut
+            let pid = process.isRunning ? process.processIdentifier : 0
+            lock.unlock()
+
+            guard pid > 0 else { return }
+            process.terminate()
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2) { [weak self] in
+                guard let self, self.process.isRunning else { return }
+                kill(pid, SIGKILL)
+            }
+        }
+
+        func finish(throwing error: Error? = nil) {
+            lock.lock()
+            guard !didResume, let continuation else {
+                lock.unlock()
+                return
+            }
+            didResume = true
+            self.continuation = nil
+            lock.unlock()
+            if let error {
+                continuation.resume(throwing: error)
+            } else {
+                continuation.resume()
+            }
+        }
+
+        var timedOut: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return didTimeout
         }
     }
 
@@ -118,42 +175,7 @@ final class ProcessRunner {
             }
         }
 
-        let timedOutFlag = TimedOutFlag()
-
-        // Wait for process completion using checked continuation and terminationHandler.
-        // The terminationHandler is the SOLE resumer of the continuation — the timeout
-        // timer only kills the process, which then triggers terminationHandler naturally.
-        // This preserves HEAD's exactly-once resumption guarantee.
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            process.terminationHandler = { _ in
-                continuation.resume()
-            }
-            do {
-                try process.run()
-            } catch {
-                process.terminationHandler = nil
-                stdoutPipe.fileHandleForReading.readabilityHandler = nil
-                stderrPipe.fileHandleForReading.readabilityHandler = nil
-                continuation.resume(throwing: error)
-                return
-            }
-
-            // Timeout: send SIGTERM, escalate to SIGKILL after grace period.
-            // Does NOT resume the continuation — that is terminationHandler's job.
-            if let timeout = timeout {
-                let pid = process.processIdentifier
-                DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-                    guard process.isRunning else { return }
-                    timedOutFlag.value = true
-                    process.terminate() // SIGTERM
-                    // Escalate to SIGKILL if still running after 2 s grace
-                    DispatchQueue.global().asyncAfter(deadline: .now() + 2.0) {
-                        guard process.isRunning else { return }
-                        kill(pid, SIGKILL)
-                    }
-                }
-            }
-        }
+        let didTimeout = try await waitForExit(process, timeout: timeout)
 
         // Disable readability handlers
         stdoutPipe.fileHandleForReading.readabilityHandler = nil
@@ -176,8 +198,6 @@ final class ProcessRunner {
                 onStderr(line)
             }
         }
-
-        let didTimeout = timedOutFlag.value
 
         if didTimeout, let t = timeout {
             let exeName = URL(fileURLWithPath: executable).lastPathComponent
@@ -241,35 +261,7 @@ final class ProcessRunner {
             }
         }
 
-        let timedOutFlag = TimedOutFlag()
-
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            process.terminationHandler = { _ in
-                continuation.resume()
-            }
-            do {
-                try process.run()
-            } catch {
-                process.terminationHandler = nil
-                stdoutPipe.fileHandleForReading.readabilityHandler = nil
-                stderrPipe.fileHandleForReading.readabilityHandler = nil
-                continuation.resume(throwing: error)
-                return
-            }
-
-            if let timeout = timeout {
-                let pid = process.processIdentifier
-                DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-                    guard process.isRunning else { return }
-                    timedOutFlag.value = true
-                    process.terminate()
-                    DispatchQueue.global().asyncAfter(deadline: .now() + 2.0) {
-                        guard process.isRunning else { return }
-                        kill(pid, SIGKILL)
-                    }
-                }
-            }
-        }
+        let didTimeout = try await waitForExit(process, timeout: timeout)
 
         stdoutPipe.fileHandleForReading.readabilityHandler = nil
         stderrPipe.fileHandleForReading.readabilityHandler = nil
@@ -283,8 +275,6 @@ final class ProcessRunner {
         if !remainingStderr.isEmpty {
             stderrBuffer.append(remainingStderr)
         }
-
-        let didTimeout = timedOutFlag.value
 
         if didTimeout, let t = timeout {
             let exeName = URL(fileURLWithPath: executable).lastPathComponent
@@ -319,6 +309,41 @@ final class ProcessRunner {
         }
 
         return stdoutBuffer.data
+    }
+
+    /// Wait for a process while ensuring cancellation and timeout only ever
+    /// resume the continuation through the process termination handler.
+    private static func waitForExit(
+        _ process: Process,
+        timeout: TimeInterval?
+    ) async throws -> Bool {
+        let completion = ProcessCompletion(process: process)
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                completion.install(continuation)
+                process.terminationHandler = { _ in
+                    completion.finish()
+                }
+                do {
+                    try process.run()
+                    completion.didStart()
+                } catch {
+                    process.terminationHandler = nil
+                    completion.finish(throwing: error)
+                    return
+                }
+
+                if let timeout {
+                    DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                        completion.requestTermination(timedOut: true)
+                    }
+                }
+            }
+        } onCancel: {
+            completion.requestTermination(timedOut: false)
+        }
+        try Task.checkCancellation()
+        return completion.timedOut
     }
 
     /// Parse a yt-dlp / scdl progress line for a percentage 0...1.

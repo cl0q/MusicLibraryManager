@@ -41,6 +41,10 @@ final class ImportService: Sendable {
         let failures: [String]
         /// Total files scanned.
         let totalScanned: Int
+        /// Whether cancellation stopped saving or analysis enqueueing.
+        let cancelled: Bool
+        /// Number of tracks committed before cancellation, if any.
+        let committed: Int
     }
 
     /// Progress update during import.
@@ -130,7 +134,7 @@ final class ImportService: Sendable {
         try Task.checkCancellation()
 
         guard !audioFiles.isEmpty else {
-            return ImportResult(succeeded: 0, failed: 0, skipped: 0, failures: [], totalScanned: 0)
+            return ImportResult(succeeded: 0, failed: 0, skipped: 0, failures: [], totalScanned: 0, cancelled: false, committed: 0)
         }
 
         onProgress?(ImportProgress(
@@ -205,8 +209,10 @@ final class ImportService: Sendable {
         ))
 
         // Phase 3: Batch insert into database
-        try Task.checkCancellation()
-        let (succeeded, skipped, dbFailures, insertedTracks) = await saveBatches(successfulMetadata)
+        guard !Task.isCancelled else {
+            return ImportResult(succeeded: 0, failed: failures.count, skipped: 0, failures: failures, totalScanned: audioFiles.count, cancelled: true, committed: 0)
+        }
+        let (succeeded, skipped, dbFailures, insertedTracks, wasCancelled) = await saveBatches(successfulMetadata)
         failures.append(contentsOf: dbFailures)
 
         onProgress?(ImportProgress(
@@ -216,8 +222,13 @@ final class ImportService: Sendable {
             currentFile: nil
         ))
 
-        // Enqueue successfully imported tracks for background analysis
+        // Enqueue only work that was committed before cancellation.
+        var enqueueCancelled = wasCancelled
         for track in insertedTracks {
+            if Task.isCancelled {
+                enqueueCancelled = true
+                break
+            }
             await PerformanceQueueService.shared.enqueueAnalysis(track: track)
         }
 
@@ -226,7 +237,9 @@ final class ImportService: Sendable {
             failed: failures.count,
             skipped: skipped,
             failures: failures,
-            totalScanned: audioFiles.count
+            totalScanned: audioFiles.count,
+            cancelled: enqueueCancelled,
+            committed: succeeded
         )
     }
 
@@ -239,13 +252,16 @@ final class ImportService: Sendable {
     ///
     /// - Parameter metadata: Array of extracted metadata
     /// - Returns: (succeeded count, skipped count, failure messages, successfully inserted tracks)
-    private func saveBatches(_ metadata: [TrackMetadata]) async -> (Int, Int, [String], [Track]) {
+    private func saveBatches(_ metadata: [TrackMetadata]) async -> (Int, Int, [String], [Track], Bool) {
         var totalSucceeded = 0
         var totalSkipped = 0
         var failures: [String] = []
         var allInsertedTracks: [Track] = []
 
         for batch in metadata.chunked(into: Self.batchSize) {
+            if Task.isCancelled {
+                return (totalSucceeded, totalSkipped, failures, allInsertedTracks, true)
+            }
             do {
                 let (succeeded, skipped, insertedTracks) = try await saveBatch(batch)
                 totalSucceeded += succeeded
@@ -256,7 +272,7 @@ final class ImportService: Sendable {
             }
         }
 
-        return (totalSucceeded, totalSkipped, failures, allInsertedTracks)
+        return (totalSucceeded, totalSkipped, failures, allInsertedTracks, Task.isCancelled)
     }
 
     /// Save a single batch of metadata within a transaction.

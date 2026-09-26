@@ -47,6 +47,22 @@ final class ConcurrencyLimiter: Sendable {
             throw error
         }
     }
+
+    /// Execute `operation` while holding a slot, abandoning a queued waiter
+    /// promptly when its task is cancelled.
+    func runCancellable<T: Sendable>(
+        operation: @Sendable () async throws -> T
+    ) async throws -> T {
+        try await semaphore.waitCancellable()
+        do {
+            let result = try await operation()
+            await semaphore.signal()
+            return result
+        } catch {
+            await semaphore.signal()
+            throw error
+        }
+    }
 }
 
 /// A simple async-aware counting semaphore.
@@ -56,6 +72,7 @@ final class ConcurrencyLimiter: Sendable {
 actor AsyncSemaphore {
     private var count: Int
     private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var cancellableWaiters: [UUID: CheckedContinuation<Void, Error>] = [:]
 
     init(count: Int) {
         self.count = count
@@ -77,8 +94,39 @@ actor AsyncSemaphore {
         if let next = waiters.first {
             waiters.removeFirst()
             next.resume()
+        } else if let next = cancellableWaiters.first {
+            cancellableWaiters.removeValue(forKey: next.key)
+            next.value.resume()
         } else {
             count += 1
         }
+    }
+
+    /// Acquire a permit, removing the waiter and throwing when the surrounding
+    /// task is cancelled before admission.
+    func waitCancellable() async throws {
+        try Task.checkCancellation()
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                if count > 0 {
+                    count -= 1
+                    continuation.resume()
+                } else if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                } else {
+                    cancellableWaiters[id] = continuation
+                }
+            }
+        } onCancel: {
+            Task {
+                await self.cancelWaiter(id: id)
+            }
+        }
+    }
+
+    private func cancelWaiter(id: UUID) {
+        guard let continuation = cancellableWaiters.removeValue(forKey: id) else { return }
+        continuation.resume(throwing: CancellationError())
     }
 }

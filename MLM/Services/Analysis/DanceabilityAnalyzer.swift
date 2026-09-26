@@ -37,7 +37,8 @@ final class DanceabilityAnalyzer: Sendable {
                 "-ac", "1",
                 "-f", "s16le",
                 "-"
-            ]
+            ],
+            timeout: 15 * 60
         )
 
         guard !pcmData.isEmpty else { return nil }
@@ -209,7 +210,8 @@ final class DanceabilityAnalyzer: Sendable {
 
         let pcmData = try await ProcessRunner.runBinary(
             ffmpeg,
-            arguments: ["-i", path, "-ar", "11025", "-ac", "1", "-f", "s16le", "-"]
+            arguments: ["-i", path, "-ar", "11025", "-ac", "1", "-f", "s16le", "-"],
+            timeout: 15 * 60
         )
         guard !pcmData.isEmpty else { return [] }
 
@@ -343,16 +345,21 @@ final class DanceabilityAnalyzer: Sendable {
             await withTaskGroup(of: Result<Void, Error>.self) { group in
                 for track in tracks {
                     group.addTask {
-                        guard !tracker.isCancelled else {
-                            return .failure(CancellationError())
-                        }
-                        return await limiter.run {
-                            await self.processSingleAnalysis(
-                                track: track,
-                                trackRepository: trackRepository,
-                                libraryRoot: libraryRoot,
-                                tracker: tracker
-                            )
+                        do {
+                            return try await limiter.runCancellable {
+                                try Task.checkCancellation()
+                                guard !tracker.isCancelled else {
+                                    throw CancellationError()
+                                }
+                                return await self.processSingleAnalysis(
+                                    track: track,
+                                    trackRepository: trackRepository,
+                                    libraryRoot: libraryRoot,
+                                    tracker: tracker
+                                )
+                            }
+                        } catch {
+                            return .failure(error)
                         }
                     }
                 }
@@ -361,7 +368,10 @@ final class DanceabilityAnalyzer: Sendable {
                 collected.reserveCapacity(tracks.count)
                 for await result in group {
                     collected.append(result)
-                    if tracker.isCancelled { break }
+                    if tracker.isCancelled || Task.isCancelled {
+                        group.cancelAll()
+                        break
+                    }
                 }
                 return collected
             }
@@ -429,6 +439,8 @@ final class DanceabilityAnalyzer: Sendable {
 
         do {
             if let result = try await analyzeTrack(path: resolvedPath) {
+                try Task.checkCancellation()
+                guard !tracker.isCancelled else { throw CancellationError() }
                 try await trackRepository.updateDanceability(trackId: trackId, danceability: result.danceability, bpm: result.bpm)
 
                 tracker.updateProgress(
