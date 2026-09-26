@@ -277,23 +277,6 @@ struct PlaylistTable: View {
 
     private func updateCachedRows() {
         let displayed = viewModel.displayedTracks
-        let availabilityCount = viewModel.availabilityByTrackID.count
-
-        // Guard: skip rebuild when inputs haven't changed (prevents redundant
-        // work when multiple onChange triggers fire for the same logical update).
-        // Uses a rolling hash over every displayed track id so reorders are
-        // detected — a simple (count, first, last) fingerprint would miss a
-        // middle-row swap.
-        var hash: Int = displayed.count
-        for track in displayed {
-            hash = hash &* 31 &+ Int(truncatingIfNeeded: track.id ?? 0)
-        }
-        hash = hash &* 31 &+ availabilityCount
-        let fingerprint = (hash: hash, availCount: availabilityCount)
-        if let prev = lastRebuildFingerprint, prev == fingerprint {
-            return
-        }
-
         let mapped = displayed
             .enumerated()
             .compactMap { idx, track in
@@ -307,11 +290,7 @@ struct PlaylistTable: View {
                 }
             }
         self.cachedRows = mapped.sorted(using: sortOrder)
-        self.lastRebuildFingerprint = fingerprint
     }
-
-    // Fingerprint for guarding redundant rebuilds (O(1) comparison).
-    @State private var lastRebuildFingerprint: (hash: Int, availCount: Int)? = nil
 }
 
 // MARK: - Helper Cell Views for Compiler Performance
