@@ -968,6 +968,31 @@ final class DatabaseManager: Sendable {
             }
         }
 
+        // Foreign keys remain disabled for shared-database compatibility.
+        // Remove historical children that were left behind before repositories
+        // began applying their own transactional cascades.
+        migrator.registerMigration("v40_track_playlist_orphan_cleanup") { db in
+            let trackTables = [
+                "track_sources", "playlist_tracks", "sync_profile_tracks", "sync_state",
+                "fingerprints", "artwork", "replaygain", "track_analysis", "track_tags",
+                "review_queue", "track_embeddings", "track_segment_embeddings",
+                "track_discovery_log",
+            ]
+            for table in trackTables {
+                try db.execute(sql: "DELETE FROM \(table) WHERE track_id NOT IN (SELECT id FROM tracks)")
+            }
+            try db.execute(sql: """
+                DELETE FROM track_similarity_feedback
+                WHERE seed_track_id NOT IN (SELECT id FROM tracks)
+                   OR target_track_id NOT IN (SELECT id FROM tracks)
+            """)
+            try db.execute(sql: "UPDATE track_discovery_log SET seed_track_id = NULL WHERE seed_track_id NOT IN (SELECT id FROM tracks)")
+            try db.execute(sql: "DELETE FROM playlist_tracks WHERE playlist_id NOT IN (SELECT id FROM playlists)")
+            try db.execute(sql: "DELETE FROM playlist_tags WHERE playlist_id NOT IN (SELECT id FROM playlists)")
+            try db.execute(sql: "DELETE FROM sync_profile_playlists WHERE playlist_id NOT IN (SELECT id FROM playlists)")
+            try db.execute(sql: "DELETE FROM playlist_sync_snapshots WHERE playlist_id NOT IN (SELECT id FROM playlists)")
+        }
+
         return migrator
     }
 

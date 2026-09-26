@@ -90,6 +90,12 @@ final class PlaylistRepository: Sendable {
             if let playlist = try Playlist.fetchOne(db, id: id), playlist.isLiked == 1 {
                 throw PlaylistRepositoryError.cannotDeleteLikedPlaylist
             }
+            // Foreign-key enforcement is disabled for compatibility with the
+            // shared database, so declared cascades do not execute.
+            try db.execute(sql: "DELETE FROM playlist_tracks WHERE playlist_id = ?", arguments: [id])
+            try db.execute(sql: "DELETE FROM playlist_tags WHERE playlist_id = ?", arguments: [id])
+            try db.execute(sql: "DELETE FROM sync_profile_playlists WHERE playlist_id = ?", arguments: [id])
+            try db.execute(sql: "DELETE FROM playlist_sync_snapshots WHERE playlist_id = ?", arguments: [id])
             try Playlist.deleteOne(db, id: id)
         }
     }

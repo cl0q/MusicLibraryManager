@@ -126,9 +126,11 @@ final class SourceRepository: Sendable {
     /// Count tracks linked to a source.
     func countTracks(sourceId: Int64) async throws -> Int {
         try await database.read { db in
-            try TrackSource
-                .filter(TrackSource.Columns.sourceId == sourceId)
-                .fetchCount(db)
+            try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM track_sources ts
+                INNER JOIN tracks t ON t.id = ts.track_id
+                WHERE ts.source_id = ?
+            """, arguments: [sourceId]) ?? 0
         }
     }
 
