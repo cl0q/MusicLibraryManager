@@ -93,28 +93,14 @@ final class FolderViewModel {
     private(set) var searchResults: [DiskFolderNode] = []
     private(set) var isSearching = false
     private var searchTask: Task<Void, Never>? = nil
+    private var selectedFolderTask: Task<Void, Never>? = nil
+    private var selectedFolderRequest = UUID()
     private(set) var loadingNodePaths = Set<String>()
 
     var selectedFolderPath: String? = nil {
         didSet {
             if oldValue != selectedFolderPath {
-                if let path = selectedFolderPath {
-                    Task {
-                        await ensureAncestorsLoaded(for: path)
-                        await loadTracksForSelectedFolder()
-                        
-                        await MainActor.run {
-                            if let node = findNode(for: path) {
-                                let hasPlaceholder = node.children.contains { $0.id.hasSuffix("/__placeholder__") }
-                                if hasPlaceholder {
-                                    loadChildren(for: path)
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    Task { await loadTracksForSelectedFolder() }
-                }
+                startSelectedFolderLoad()
             }
         }
     }
@@ -154,10 +140,54 @@ final class FolderViewModel {
         let standardizedRoot = rootURL?.standardizedFileURL
         if let previousRoot = libraryRootURL?.standardizedFileURL,
            previousRoot != standardizedRoot {
+            libraryRootURL = standardizedRoot
             selectedFolderPath = nil
             clearPersistedLastSelection()
+            return
         }
         libraryRootURL = standardizedRoot
+    }
+
+    private func startSelectedFolderLoad() {
+        selectedFolderTask?.cancel()
+        let request = UUID()
+        selectedFolderRequest = request
+        let requestedPath = selectedFolderPath
+        let requestedRoot = libraryRootURL?.standardizedFileURL
+
+        selectedFolderTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            if let requestedPath {
+                await self.ensureAncestorsLoaded(for: requestedPath)
+                guard self.isCurrentFolderRequest(
+                    request,
+                    path: requestedPath,
+                    rootURL: requestedRoot
+                ) else { return }
+
+                if let node = self.findNode(for: requestedPath) {
+                    let hasPlaceholder = node.children.contains { $0.id.hasSuffix("/__placeholder__") }
+                    if hasPlaceholder {
+                        self.loadChildren(for: requestedPath)
+                    }
+                }
+            }
+            await self.loadTracksForSelectedFolder(
+                path: requestedPath,
+                rootURL: requestedRoot,
+                request: request
+            )
+        }
+    }
+
+    private func isCurrentFolderRequest(
+        _ request: UUID,
+        path: String?,
+        rootURL: URL?
+    ) -> Bool {
+        selectedFolderRequest == request &&
+            selectedFolderPath == path &&
+            libraryRootURL?.standardizedFileURL == rootURL
     }
 
     // MARK: - Load tree
@@ -209,8 +239,20 @@ final class FolderViewModel {
     // MARK: - Track loading
 
     @MainActor
-    private func loadTracksForSelectedFolder() async {
-        guard let path = selectedFolderPath else {
+    private func loadTracksForSelectedFolder(
+        path: String?,
+        rootURL: URL?,
+        request: UUID
+    ) async {
+        guard let path else {
+            guard isCurrentFolderRequest(request, path: nil, rootURL: rootURL) else { return }
+            tracksInFolder = []
+            availabilityByTrackID = [:]
+            unindexedAudioFileCount = 0
+            return
+        }
+        guard let rootURL, isPath(URL(fileURLWithPath: path), within: rootURL) else {
+            guard isCurrentFolderRequest(request, path: path, rootURL: rootURL) else { return }
             tracksInFolder = []
             availabilityByTrackID = [:]
             unindexedAudioFileCount = 0
@@ -226,14 +268,14 @@ final class FolderViewModel {
             let paths = fileURLs.map { $0.standardizedFileURL.path }
             let result = try await trackRepository.fetchTracksByFilesystemPaths(
                 paths,
-                libraryRoot: libraryRootURL
+                libraryRoot: rootURL
             )
             var navperfFileExistsCount = 0
             // [navperf] temporary instrumentation — remove after measurement
             print("[navperf] availability-map-start site=folder tracks=\(result.count) \(Date().timeIntervalSince1970)")
             let availability = TrackPresentationAvailability.map(
                 tracks: result,
-                libraryRoot: libraryRootURL,
+                libraryRoot: rootURL,
                 fileExists: { url in
                     navperfFileExistsCount += 1
                     return FileManager.default.fileExists(atPath: url.path)
@@ -242,25 +284,29 @@ final class FolderViewModel {
             // [navperf] temporary instrumentation — remove after measurement
             print("[navperf] availability-map-end site=folder tracks=\(result.count) fileExistsCalls=\(navperfFileExistsCount) \(Date().timeIntervalSince1970)")
             let ms = Int(Date().timeIntervalSince(start) * 1000)
-            tracksInFolder = result
-            availabilityByTrackID = availability
             let indexedPaths = Set(result.compactMap { track -> String? in
                 guard let organizedPath = track.organizedPath, !organizedPath.isEmpty else { return nil }
                 if (organizedPath as NSString).isAbsolutePath {
                     return URL(fileURLWithPath: organizedPath).standardizedFileURL.path
                 }
-                return libraryRootURL?.appendingPathComponent(organizedPath).standardizedFileURL.path
+                return rootURL.appendingPathComponent(organizedPath).standardizedFileURL.path
             })
             let originalPaths = Set(result.compactMap { track -> String? in
                 guard (track.originalPath as NSString).isAbsolutePath else { return nil }
                 return URL(fileURLWithPath: track.originalPath).standardizedFileURL.path
             })
-            unindexedAudioFileCount = fileURLs.reduce(into: 0) { count, fileURL in
+            let unindexedCount = fileURLs.reduce(into: 0) { count, fileURL in
                 let path = fileURL.standardizedFileURL.path
                 if !indexedPaths.contains(path) && !originalPaths.contains(path) {
                     count += 1
                 }
             }
+            guard isCurrentFolderRequest(request, path: path, rootURL: rootURL),
+                  !Task.isCancelled
+            else { return }
+            tracksInFolder = result
+            availabilityByTrackID = availability
+            unindexedAudioFileCount = unindexedCount
             AppLogger.shared.info(
                 "folder tracks load: \(result.count) tracks in \(ms)ms",
                 source: "perf"
@@ -269,6 +315,9 @@ final class FolderViewModel {
             print("[navperf] foldervm-loadTracks-end rows=\(result.count) \(Date().timeIntervalSince1970)")
             applyTrackSort()
         } catch {
+            guard isCurrentFolderRequest(request, path: path, rootURL: rootURL),
+                  !Task.isCancelled
+            else { return }
             tracksInFolder = []
             availabilityByTrackID = [:]
             unindexedAudioFileCount = 0
@@ -280,7 +329,7 @@ final class FolderViewModel {
     func refresh() async {
         await loadRootFolders()
         if selectedFolderPath != nil {
-            await loadTracksForSelectedFolder()
+            startSelectedFolderLoad()
         }
     }
 
