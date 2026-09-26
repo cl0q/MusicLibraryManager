@@ -248,33 +248,78 @@ struct TrackContextMenu: View {
     private func removeSelectedTracks(snapshot: [Track], ids: [Int64]) {
         guard let trackRepo = container.trackRepository else { return }
         Task {
-            // Trash local files first; ignore failures (missing files are fine).
+            var removableIDs = Set(snapshot.filter(\.isRemote).compactMap(\.id))
+            var failures: [String] = []
+            var trashedItems: [(original: URL, trash: URL?)] = []
+
+            // A local row is removable only after its corresponding file
+            // successfully reaches Trash. Keep the returned Trash URL until
+            // the database mutation succeeds so a failed mutation remains
+            // recoverable.
             for track in snapshot where track.isLocal {
-                if let url = await resolveLocalURL(for: track) {
-                    var trashed: NSURL? = nil
-                    try? FileManager.default.trashItem(at: url, resultingItemURL: &trashed)
+                guard let id = track.id else { continue }
+                guard let url = await resolveLocalURL(for: track) else {
+                    failures.append("\(track.artist) — \(track.title): file could not be located")
+                    continue
+                }
+                do {
+                    var trashed: NSURL?
+                    try FileManager.default.trashItem(at: url, resultingItemURL: &trashed)
+                    removableIDs.insert(id)
+                    trashedItems.append((url, trashed as URL?))
+                } catch {
+                    failures.append("\(track.artist) — \(track.title): \(error.localizedDescription)")
                 }
             }
+
+            let deletableIDs = ids.filter { removableIDs.contains($0) }
             do {
-                try await trackRepo.delete(ids: ids)
+                if !deletableIDs.isEmpty {
+                    try await trackRepo.delete(ids: deletableIDs)
+                }
                 AppLogger.shared.log(
-                    "Removed \(ids.count) track(s) from library",
+                    "Removed \(deletableIDs.count) track(s) from library",
                     level: .info,
                     source: "Library"
                 )
-                NotificationCenter.default.post(
-                    name: .libraryDidDeleteTracks,
-                    object: nil,
-                    userInfo: ["removedIds": ids]
-                )
+                if !deletableIDs.isEmpty {
+                    NotificationCenter.default.post(
+                        name: .libraryDidDeleteTracks,
+                        object: nil,
+                        userInfo: ["removedIds": deletableIDs]
+                    )
+                }
+                if !failures.isEmpty {
+                    await presentRemovalFailure(
+                        "Some tracks were kept in the Library because they could not be moved to Trash.",
+                        details: failures.joined(separator: "\n")
+                    )
+                }
             } catch {
+                let recovery = trashedItems.map { item in
+                    "\(item.original.lastPathComponent) (Trash: \(item.trash?.path ?? "unknown location"))"
+                }.joined(separator: "\n")
                 AppLogger.shared.log(
-                    "Failed to remove tracks: \(error)",
+                    "Failed to remove tracks after trashing files: \(error). Recovery: \(recovery)",
                     level: .error,
                     source: "Library"
                 )
+                await presentRemovalFailure(
+                    "The Library database could not be updated. The moved files remain in Trash and can be restored.",
+                    details: recovery.isEmpty ? error.localizedDescription : recovery
+                )
             }
         }
+    }
+
+    @MainActor
+    private func presentRemovalFailure(_ message: String, details: String) {
+        let alert = NSAlert()
+        alert.messageText = "Could Not Remove All Tracks"
+        alert.informativeText = "\(message)\n\n\(details)"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     // MARK: - Actions
