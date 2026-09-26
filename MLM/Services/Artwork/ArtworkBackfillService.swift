@@ -267,6 +267,7 @@ final class ArtworkBackfillService {
                 while running < concurrentLimit, let track = pending.next() {
                     if tracker.isCancelled {
                         AppLogger.shared.info("ArtworkBackfill cancelled", source: "ArtworkBackfill")
+                        group.cancelAll()
                         break
                     }
                     guard let trackId = track.id else { continue }
@@ -286,8 +287,9 @@ final class ArtworkBackfillService {
                 // 84/44 / 100/53 overshoot where `current` outran `total`. Mirror the
                 // tracker's single source of truth instead of maintaining a second counter.
                 for await _ in group {
-                    if tracker.isCancelled {
+                    if tracker.isCancelled || Task.isCancelled {
                         AppLogger.shared.info("ArtworkBackfill cancelled", source: "ArtworkBackfill")
+                        group.cancelAll()
                         break
                     }
                     progress.current = tracker.currentState.current
@@ -310,48 +312,41 @@ final class ArtworkBackfillService {
     // MARK: - Per-track extraction
 
     private func extractForTrack(_ track: Track, tracker: MaintenanceProgressTracker? = nil) async {
-        guard let trackId = track.id,
-              let organizedPath = track.organizedPath,
-              !organizedPath.isEmpty else {
-            if let trackId = track.id { inFlight.remove(trackId) }
-            return
+        guard let trackId = track.id else { return }
+        var savedToDatabase = false
+        defer {
+            inFlight.remove(trackId)
+            tracker?.updateProgress(
+                trackId: trackId,
+                trackTitle: track.title,
+                trackArtist: track.artist,
+                savedToDb: savedToDatabase
+            )
         }
+        guard !Task.isCancelled, tracker?.isCancelled != true else { return }
 
         // organizedPath is stored as a relative path (e.g., "Artist/Album/track.flac").
         // Resolve it against the library root, mirroring PlaylistCoverService.resolveLocalURL.
         let libraryRoot = (try? await configRepository.getLibraryRoot()) ?? nil
-        var trackURL: URL
-        let resolvedOrganized: URL
-        if let root = libraryRoot, !root.isEmpty {
-            resolvedOrganized = URL(fileURLWithPath: root).appendingPathComponent(organizedPath)
-        } else {
-            resolvedOrganized = URL(fileURLWithPath: organizedPath)
-        }
-
-        if FileManager.default.fileExists(atPath: resolvedOrganized.path) {
-            trackURL = resolvedOrganized
-        } else if FileManager.default.fileExists(atPath: track.originalPath) {
-            trackURL = URL(fileURLWithPath: track.originalPath)
-        } else {
-            trackURL = resolvedOrganized // Fall back so the warning log below formats nicely
-        }
-
-        guard FileManager.default.fileExists(atPath: trackURL.path) else {
-            AppLogger.shared.warn("ArtworkBackfill: audio file not found at \(trackURL.path) — skipping track \(trackId)",
-                                  source: "ArtworkBackfill")
-            inFlight.remove(trackId)
-            if let tracker = tracker {
-                tracker.updateProgress(
-                    trackId: trackId,
-                    trackTitle: track.title,
-                    trackArtist: track.artist,
-                    savedToDb: false
-                )
+        let organizedURL: URL? = track.organizedPath.flatMap { organizedPath in
+            guard !organizedPath.isEmpty else { return nil }
+            if let libraryRoot, !libraryRoot.isEmpty {
+                return URL(fileURLWithPath: libraryRoot).appendingPathComponent(organizedPath)
             }
+            return URL(fileURLWithPath: organizedPath)
+        }
+        let originalURL = track.originalPath.isEmpty ? nil : URL(fileURLWithPath: track.originalPath)
+        guard let trackURL = [organizedURL, originalURL]
+            .compactMap({ $0 })
+            .first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
+            let attemptedPath = organizedURL?.path ?? originalURL?.path ?? "(no path)"
+            AppLogger.shared.warn("ArtworkBackfill: audio file not found at \(attemptedPath) — skipping track \(trackId)",
+                                  source: "ArtworkBackfill")
             return
         }
 
-        // Extract embedded artwork (static async; runs ffmpeg in Task.detached internally)
+        // Extract embedded artwork through ProcessRunner so task cancellation
+        // terminates ffmpeg before any persistence work can continue.
         // D-07: returns nil silently if ffmpeg not found — no user-facing error
         guard let data = await ArtworkService.extractEmbeddedArtwork(from: trackURL) else {
             // No embedded art. Write a sentinel row (NULL path) so this track
@@ -366,16 +361,8 @@ final class ArtworkBackfillService {
                 resolution: nil,
                 fetchedAt: ISO8601DateFormatter().string(from: Date())
             )
+            guard !Task.isCancelled, tracker?.isCancelled != true else { return }
             try? await analysisRepository.saveArtwork(sentinel)
-            inFlight.remove(trackId)
-            if let tracker = tracker {
-                tracker.updateProgress(
-                    trackId: trackId,
-                    trackTitle: track.title,
-                    trackArtist: track.artist,
-                    savedToDb: false
-                )
-            }
             return
         }
 
@@ -385,15 +372,6 @@ final class ArtworkBackfillService {
         } catch {
             AppLogger.shared.warn("ArtworkBackfill: saveResized failed for track \(trackId): \(error)",
                                   source: "ArtworkBackfill")
-            inFlight.remove(trackId)
-            if let tracker = tracker {
-                tracker.updateProgress(
-                    trackId: trackId,
-                    trackTitle: track.title,
-                    trackArtist: track.artist,
-                    savedToDb: false
-                )
-            }
             return
         }
 
@@ -407,33 +385,17 @@ final class ArtworkBackfillService {
             resolution: "1200",
             fetchedAt: ISO8601DateFormatter().string(from: Date())
         )
-do {
+        guard !Task.isCancelled, tracker?.isCancelled != true else { return }
+        do {
             try await analysisRepository.saveArtwork(artwork)
-            if let tracker = tracker {
-                tracker.updateProgress(
-                    trackId: trackId,
-                    trackTitle: track.title,
-                    trackArtist: track.artist,
-                    savedToDb: true
-                )
-                AppLogger.shared.debug("ArtworkBackfill [\(tracker.currentState.current)/\(tracker.currentState.total)] \(track.artist) - \(track.title) → saved ✓", source: "ArtworkBackfill")
-            }
+            savedToDatabase = true
+            AppLogger.shared.debug("ArtworkBackfill [\(tracker?.currentState.current ?? 0)/\(tracker?.currentState.total ?? 0)] \(track.artist) - \(track.title) → saved ✓", source: "ArtworkBackfill")
         } catch {
             AppLogger.shared.warn("ArtworkBackfill: saveArtwork DB failed for track \(trackId): \(error)",
                                   source: "ArtworkBackfill")
-            if let tracker = tracker {
-                tracker.updateProgress(
-                    trackId: trackId,
-                    trackTitle: track.title,
-                    trackArtist: track.artist,
-                    savedToDb: false
-                )
-            }
-            inFlight.remove(trackId)
             return
         }
 
-        inFlight.remove(trackId)
         // Artwork changed for this track — allow future self-heal attempts if needed.
         selfHealAttempted.remove(trackId)
 
