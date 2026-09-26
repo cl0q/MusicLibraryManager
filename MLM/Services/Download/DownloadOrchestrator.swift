@@ -1004,7 +1004,7 @@ final class DownloadOrchestrator {
                 heal: .installTool))
         }
         // Select the most informative failure from the trace.
-        if let best = trace.first {
+        if !trace.isEmpty {
             return .failure(Self.selectTerminalFailure(from: trace))
         }
         return .failure(DownloadFailure(

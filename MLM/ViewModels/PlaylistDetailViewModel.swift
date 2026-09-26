@@ -425,7 +425,7 @@ final class PlaylistDetailViewModel {
         // 3. Insert new tracks and link to source
         var insertedIds: [Int64] = []
         for entry in newEntries {
-            var track = Track(
+            let track = Track(
                 artist: entry.uploader ?? "Unknown",
                 album: "YouTube",
                 title: entry.title,
@@ -563,7 +563,6 @@ final class PlaylistDetailViewModel {
         let uniqueIDs = trackIDs.filter { seen.insert($0).inserted }
 
         let memberIDSet = Set(tracks.compactMap(\.id)).intersection(uniqueIDs)
-        let memberIDs = uniqueIDs.filter { memberIDSet.contains($0) }
         let nonMemberIDs = uniqueIDs.filter { !memberIDSet.contains($0) }
 
         // Materialise non-member tracks from the library so we can assign
