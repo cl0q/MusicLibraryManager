@@ -13,24 +13,71 @@ final class FolderViewModel {
     // MARK: - Persistence
 
     static let lastSelectionKey = "folders.last_selection"
+    static let lastSelectionRootKey = "folders.last_selection_root"
+    static let lastSelectionRelativePathKey = "folders.last_selection_relative_path"
 
     /// Persist the currently selected folder path so it can be restored after a sidebar switch.
     func persistLastSelection() {
-        UserDefaults.standard.set(selectedFolderPath, forKey: Self.lastSelectionKey)
+        guard let rootURL = libraryRootURL,
+              let selectedFolderPath,
+              let relativePath = relativePath(selectedFolderPath, within: rootURL)
+        else {
+            clearPersistedLastSelection()
+            return
+        }
+
+        UserDefaults.standard.set(rootURL.standardizedFileURL.path, forKey: Self.lastSelectionRootKey)
+        UserDefaults.standard.set(relativePath, forKey: Self.lastSelectionRelativePathKey)
+        UserDefaults.standard.removeObject(forKey: Self.lastSelectionKey)
     }
 
     /// Restore a previously selected folder path if it still exists on disk.
     /// Silently falls back to no selection (root) when the directory is missing.
     private func restoreLastSelection() {
         guard selectedFolderPath == nil,
-              let saved = UserDefaults.standard.string(forKey: Self.lastSelectionKey),
-              !saved.isEmpty else { return }
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: saved, isDirectory: &isDir), isDir.boolValue else {
-            UserDefaults.standard.removeObject(forKey: Self.lastSelectionKey)
+              let rootURL = libraryRootURL,
+              let savedRoot = UserDefaults.standard.string(forKey: Self.lastSelectionRootKey),
+              let savedRelativePath = UserDefaults.standard.string(forKey: Self.lastSelectionRelativePathKey),
+              savedRoot == rootURL.standardizedFileURL.path,
+              !savedRelativePath.isEmpty
+        else {
+            clearPersistedLastSelection()
             return
         }
-        selectedFolderPath = saved
+
+        let saved = rootURL
+            .appendingPathComponent(savedRelativePath)
+            .standardizedFileURL
+        guard isPath(saved, within: rootURL) else {
+            clearPersistedLastSelection()
+            return
+        }
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: saved.path, isDirectory: &isDir), isDir.boolValue else {
+            clearPersistedLastSelection()
+            return
+        }
+        selectedFolderPath = saved.path
+    }
+
+    private func clearPersistedLastSelection() {
+        UserDefaults.standard.removeObject(forKey: Self.lastSelectionKey)
+        UserDefaults.standard.removeObject(forKey: Self.lastSelectionRootKey)
+        UserDefaults.standard.removeObject(forKey: Self.lastSelectionRelativePathKey)
+    }
+
+    private func relativePath(_ path: String, within rootURL: URL) -> String? {
+        let pathURL = URL(fileURLWithPath: path).standardizedFileURL
+        guard isPath(pathURL, within: rootURL) else { return nil }
+        return pathURL.pathComponents.dropFirst(rootURL.standardizedFileURL.pathComponents.count)
+            .joined(separator: "/")
+    }
+
+    private func isPath(_ pathURL: URL, within rootURL: URL) -> Bool {
+        let rootComponents = rootURL.standardizedFileURL.pathComponents
+        let pathComponents = pathURL.standardizedFileURL.pathComponents
+        guard pathComponents.count > rootComponents.count else { return false }
+        return zip(pathComponents, rootComponents).allSatisfy { $0 == $1 }
     }
 
     // MARK: - Published state
@@ -103,6 +150,16 @@ final class FolderViewModel {
         self.configRepository = configRepository
     }
 
+    private func setLibraryRoot(_ rootURL: URL?) {
+        let standardizedRoot = rootURL?.standardizedFileURL
+        if let previousRoot = libraryRootURL?.standardizedFileURL,
+           previousRoot != standardizedRoot {
+            selectedFolderPath = nil
+            clearPersistedLastSelection()
+        }
+        libraryRootURL = standardizedRoot
+    }
+
     // MARK: - Load tree
 
     @MainActor
@@ -117,7 +174,7 @@ final class FolderViewModel {
         do {
             guard let rootPath = try await configRepository.getLibraryRoot(), !rootPath.isEmpty else {
                 allRootNodes = []
-                libraryRootURL = nil
+                setLibraryRoot(nil)
                 applyFilter()
                 isLoading = false
                 return
@@ -128,13 +185,13 @@ final class FolderViewModel {
             guard FileManager.default.fileExists(atPath: rootURL.path) else {
                 isDriveNotMounted = true
                 allRootNodes = []
-                libraryRootURL = nil
+                setLibraryRoot(nil)
                 applyFilter()
                 isLoading = false
                 return
             }
 
-            libraryRootURL = rootURL
+            setLibraryRoot(rootURL)
 
             let nodes = try await diskScanner.scan(rootURL: rootURL, recursive: false)
             allRootNodes = nodes
