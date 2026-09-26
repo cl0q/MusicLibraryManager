@@ -140,23 +140,25 @@ struct SourcesSetupView: View {
                 Button("Reconnect") {
                     reconnect(service)
                 }
-
-                private func disconnect(_ service: TokenStorage.Service) {
-                    defer { pendingDisconnect = nil }
-                    do {
-                        try container.tokenStorage?.deleteCredentials(service: service)
-                    } catch {
-                        AppLogger.shared.error(
-                            "Failed to remove \(service.displayName) credentials: \(error.localizedDescription)",
-                            source: "Sources"
-                        )
-                    }
-                }
             } else {
                 Button("Reconnect") {
                     AppDelegate.shared?.showSettingsWindow()
                 }
             }
+        }
+    }
+
+    /// Removes saved credentials for a source after the user confirms the
+    /// consequence in the disconnect alert.
+    private func disconnect(_ service: TokenStorage.Service) {
+        defer { pendingDisconnect = nil }
+        do {
+            try container.tokenStorage?.deleteCredentials(service: service)
+        } catch {
+            AppLogger.shared.error(
+                "Failed to remove \(service.displayName) credentials: \(error.localizedDescription)",
+                source: "Sources"
+            )
         }
     }
 
