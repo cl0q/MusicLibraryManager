@@ -169,9 +169,11 @@ struct MetadataPanel: View {
         .onChange(of: track) { _ in
             similarTracks = []
             hasEmbedding = false
+            availability = .notDownloaded
             checkEmbeddingStatus()
             Task { await loadDuplicateReference() }
             Task { await loadTrackPlaylists() }
+            Task { await loadAvailability() }
         }
         .onChange(of: selectedTab) { _, newTab in
             if newTab == .similar {
@@ -1099,7 +1101,9 @@ struct MetadataPanel: View {
     }
 
     private func loadAvailability() async {
+        let requestedTrackID = track.id
         let root = try? await container.configRepository?.getLibraryRoot()
+        guard track.id == requestedTrackID else { return }
         if root == nil,
            let organizedPath = track.organizedPath,
            !organizedPath.isEmpty,
