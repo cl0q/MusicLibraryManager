@@ -69,7 +69,6 @@ extension TrackRepository: DownloadTrackPersisting {}
 /// Wraps `DownloadOrchestrator` and exposes state for the Activity Panel
 /// and download triggers from context menus / batch operations.
 @Observable
-@MainActor
 final class DownloadViewModel {
     // MARK: - State
 
