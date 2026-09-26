@@ -277,6 +277,10 @@ final class SyncViewModel {
               let cached = syncService.cachedPreview(profileId: profileId),
               cached.deviceWasConnected == FileManager.default.fileExists(atPath: profile.outputFolder)
         else {
+            preview = nil
+            previewComputedAt = nil
+            previewProcessed = 0
+            previewTotal = 0
             return
         }
 
@@ -316,7 +320,10 @@ final class SyncViewModel {
                     self.previewTotal = total
                 }
             }
-            guard previewRequest == request, !Task.isCancelled else { return }
+            guard previewRequest == request,
+                  selectedProfile?.id == id,
+                  !Task.isCancelled
+            else { return }
             preview = freshPreview
             previewComputedAt = syncService.cachedPreview(profileId: id)?.computedAt
             previewProcessed = previewTotal
