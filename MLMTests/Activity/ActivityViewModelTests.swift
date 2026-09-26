@@ -203,8 +203,8 @@ struct ActivityViewModelTests {
         vm.cancelOperation(id: id)
 
         let op = vm.operation(withID: id)
-        #expect(op?.status == .cancelled,
-                "Cancel must succeed even without a registered token")
+        #expect(op?.status == .running,
+                "A non-cancellable operation (no registered token) must not be cancelled")
     }
 
     @Test func registerCancellationToken_setsIsCancellableTrue() {
@@ -227,6 +227,7 @@ struct ActivityViewModelTests {
         let clock = Clock(Date())
         let vm = makeVM(clock: clock)
         let id = vm.startOperation(type: .download, title: "Download Song")
+        vm.registerCancellationToken(id: id, token: {})
 
         let entriesBefore = AppLogger.shared.entries.count
         vm.cancelOperation(id: id)

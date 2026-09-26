@@ -3,7 +3,7 @@ import Testing
 import GRDB
 @testable import MLM
 
-@Suite("FolderSelectionRegressionTests")
+@Suite("FolderSelectionRegressionTests", .serialized)
 @MainActor
 struct FolderSelectionRegressionTests {
     private static var repositoryRoot: URL {

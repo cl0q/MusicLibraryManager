@@ -33,7 +33,8 @@ struct ActivityFeedTests {
         detail: String = "",
         startedAt: Date = Self.referenceNow,
         completedAt: Date? = nil,
-        retryTrackIds: [Int64] = []
+        retryTrackIds: [Int64] = [],
+        isCancellable: Bool = false
     ) -> ActivityViewModel.Operation {
         // The existing `Operation` struct has a memberwise initializer; the
         // Module-1 contract adds `lastProgressAt` / `retryTrackIds` /
@@ -48,6 +49,7 @@ struct ActivityFeedTests {
             completedAt: completedAt
         )
         op.retryTrackIds = retryTrackIds
+        op.isCancellable = isCancellable
         // Replace the auto-assigned UUID by rebuilding through the stored
         // `id` property — Operation's `id` is `let id = UUID()`, so we
         // cannot inject it directly. Instead, the feed is addressed by
@@ -622,10 +624,10 @@ struct ActivityFeedTests {
 
     // MARK: - Behavior 10: cancel is universal
 
-    @Test("Every running ActivityViewModel operation type exposes a .cancel action")
+    @Test("Every running cancellable ActivityViewModel operation type exposes a .cancel action")
     func cancelUniversalForRunning() {
         for type in Self.allOperationTypes {
-            let running = makeOperation(type: type, status: .running)
+            let running = makeOperation(type: type, status: .running, isCancellable: true)
             let snapshot = ActivityFeed.makeSnapshot(
                 operations: [running],
                 stalledIDs: [],

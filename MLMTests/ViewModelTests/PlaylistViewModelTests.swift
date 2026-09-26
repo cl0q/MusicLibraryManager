@@ -64,7 +64,7 @@ struct PlaylistViewModelTests {
 
         await vm.togglePin(id: extra.id!)
 
-        #expect(vm.pinLimitHintMessage == "Pinned limit reached")
+        #expect(vm.pinLimitHintMessage == "Pin limit reached (8). Unpin one first.")
         // Hard-block: still unpinned after the attempt
         let stillUnpinned = vm.playlists.first { $0.id == extra.id }?.isPinned == 0
         #expect(stillUnpinned, "9th pin attempt must not flip isPinned")

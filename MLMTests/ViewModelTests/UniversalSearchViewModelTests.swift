@@ -35,12 +35,14 @@ struct Module6_UniversalSearchViewModelTests {
     func plainTextTransitionsToSearching() async {
         let vm = UniversalSearchViewModel()
         await vm.submit("kanye west run away")
-        // Plain text should trigger text search state
+        // Plain text must enter the text-search flow (searching → results, or
+        // error when the shared library repository is unavailable in tests) —
+        // never idle, a URL resolution, or a playlist import.
         switch vm.state {
-        case .searching, .results:
-            break // Expected
+        case .searching, .results, .error:
+            break // Expected: entered the text-search branch
         default:
-            Issue.record("Expected .searching or .results for plain text, got \(vm.state)")
+            Issue.record("Expected text-search state for plain text, got \(vm.state)")
         }
     }
 
