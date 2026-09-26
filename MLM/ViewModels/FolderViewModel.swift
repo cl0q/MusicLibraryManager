@@ -13,24 +13,71 @@ final class FolderViewModel {
     // MARK: - Persistence
 
     static let lastSelectionKey = "folders.last_selection"
+    static let lastSelectionRootKey = "folders.last_selection_root"
+    static let lastSelectionRelativePathKey = "folders.last_selection_relative_path"
 
     /// Persist the currently selected folder path so it can be restored after a sidebar switch.
     func persistLastSelection() {
-        UserDefaults.standard.set(selectedFolderPath, forKey: Self.lastSelectionKey)
+        guard let rootURL = libraryRootURL,
+              let selectedFolderPath,
+              let relativePath = relativePath(selectedFolderPath, within: rootURL)
+        else {
+            clearPersistedLastSelection()
+            return
+        }
+
+        UserDefaults.standard.set(rootURL.standardizedFileURL.path, forKey: Self.lastSelectionRootKey)
+        UserDefaults.standard.set(relativePath, forKey: Self.lastSelectionRelativePathKey)
+        UserDefaults.standard.removeObject(forKey: Self.lastSelectionKey)
     }
 
     /// Restore a previously selected folder path if it still exists on disk.
     /// Silently falls back to no selection (root) when the directory is missing.
     private func restoreLastSelection() {
         guard selectedFolderPath == nil,
-              let saved = UserDefaults.standard.string(forKey: Self.lastSelectionKey),
-              !saved.isEmpty else { return }
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: saved, isDirectory: &isDir), isDir.boolValue else {
-            UserDefaults.standard.removeObject(forKey: Self.lastSelectionKey)
+              let rootURL = libraryRootURL,
+              let savedRoot = UserDefaults.standard.string(forKey: Self.lastSelectionRootKey),
+              let savedRelativePath = UserDefaults.standard.string(forKey: Self.lastSelectionRelativePathKey),
+              savedRoot == rootURL.standardizedFileURL.path,
+              !savedRelativePath.isEmpty
+        else {
+            clearPersistedLastSelection()
             return
         }
-        selectedFolderPath = saved
+
+        let saved = rootURL
+            .appendingPathComponent(savedRelativePath)
+            .standardizedFileURL
+        guard isPath(saved, within: rootURL) else {
+            clearPersistedLastSelection()
+            return
+        }
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: saved.path, isDirectory: &isDir), isDir.boolValue else {
+            clearPersistedLastSelection()
+            return
+        }
+        selectedFolderPath = saved.path
+    }
+
+    private func clearPersistedLastSelection() {
+        UserDefaults.standard.removeObject(forKey: Self.lastSelectionKey)
+        UserDefaults.standard.removeObject(forKey: Self.lastSelectionRootKey)
+        UserDefaults.standard.removeObject(forKey: Self.lastSelectionRelativePathKey)
+    }
+
+    private func relativePath(_ path: String, within rootURL: URL) -> String? {
+        let pathURL = URL(fileURLWithPath: path).standardizedFileURL
+        guard isPath(pathURL, within: rootURL) else { return nil }
+        return pathURL.pathComponents.dropFirst(rootURL.standardizedFileURL.pathComponents.count)
+            .joined(separator: "/")
+    }
+
+    private func isPath(_ pathURL: URL, within rootURL: URL) -> Bool {
+        let rootComponents = rootURL.standardizedFileURL.pathComponents
+        let pathComponents = pathURL.standardizedFileURL.pathComponents
+        guard pathComponents.count > rootComponents.count else { return false }
+        return zip(pathComponents, rootComponents).allSatisfy { $0 == $1 }
     }
 
     // MARK: - Published state
@@ -46,28 +93,14 @@ final class FolderViewModel {
     private(set) var searchResults: [DiskFolderNode] = []
     private(set) var isSearching = false
     private var searchTask: Task<Void, Never>? = nil
+    private var selectedFolderTask: Task<Void, Never>? = nil
+    private var selectedFolderRequest = UUID()
     private(set) var loadingNodePaths = Set<String>()
 
     var selectedFolderPath: String? = nil {
         didSet {
             if oldValue != selectedFolderPath {
-                if let path = selectedFolderPath {
-                    Task {
-                        await ensureAncestorsLoaded(for: path)
-                        await loadTracksForSelectedFolder()
-                        
-                        await MainActor.run {
-                            if let node = findNode(for: path) {
-                                let hasPlaceholder = node.children.contains { $0.id.hasSuffix("/__placeholder__") }
-                                if hasPlaceholder {
-                                    loadChildren(for: path)
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    Task { await loadTracksForSelectedFolder() }
-                }
+                startSelectedFolderLoad()
             }
         }
     }
@@ -103,6 +136,60 @@ final class FolderViewModel {
         self.configRepository = configRepository
     }
 
+    private func setLibraryRoot(_ rootURL: URL?) {
+        let standardizedRoot = rootURL?.standardizedFileURL
+        if let previousRoot = libraryRootURL?.standardizedFileURL,
+           previousRoot != standardizedRoot {
+            libraryRootURL = standardizedRoot
+            selectedFolderPath = nil
+            clearPersistedLastSelection()
+            return
+        }
+        libraryRootURL = standardizedRoot
+    }
+
+    private func startSelectedFolderLoad() {
+        selectedFolderTask?.cancel()
+        let request = UUID()
+        selectedFolderRequest = request
+        let requestedPath = selectedFolderPath
+        let requestedRoot = libraryRootURL?.standardizedFileURL
+
+        selectedFolderTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            if let requestedPath {
+                await self.ensureAncestorsLoaded(for: requestedPath)
+                guard self.isCurrentFolderRequest(
+                    request,
+                    path: requestedPath,
+                    rootURL: requestedRoot
+                ) else { return }
+
+                if let node = self.findNode(for: requestedPath) {
+                    let hasPlaceholder = node.children.contains { $0.id.hasSuffix("/__placeholder__") }
+                    if hasPlaceholder {
+                        self.loadChildren(for: requestedPath)
+                    }
+                }
+            }
+            await self.loadTracksForSelectedFolder(
+                path: requestedPath,
+                rootURL: requestedRoot,
+                request: request
+            )
+        }
+    }
+
+    private func isCurrentFolderRequest(
+        _ request: UUID,
+        path: String?,
+        rootURL: URL?
+    ) -> Bool {
+        selectedFolderRequest == request &&
+            selectedFolderPath == path &&
+            libraryRootURL?.standardizedFileURL == rootURL
+    }
+
     // MARK: - Load tree
 
     @MainActor
@@ -117,7 +204,7 @@ final class FolderViewModel {
         do {
             guard let rootPath = try await configRepository.getLibraryRoot(), !rootPath.isEmpty else {
                 allRootNodes = []
-                libraryRootURL = nil
+                setLibraryRoot(nil)
                 applyFilter()
                 isLoading = false
                 return
@@ -128,13 +215,13 @@ final class FolderViewModel {
             guard FileManager.default.fileExists(atPath: rootURL.path) else {
                 isDriveNotMounted = true
                 allRootNodes = []
-                libraryRootURL = nil
+                setLibraryRoot(nil)
                 applyFilter()
                 isLoading = false
                 return
             }
 
-            libraryRootURL = rootURL
+            setLibraryRoot(rootURL)
 
             let nodes = try await diskScanner.scan(rootURL: rootURL, recursive: false)
             allRootNodes = nodes
@@ -152,8 +239,20 @@ final class FolderViewModel {
     // MARK: - Track loading
 
     @MainActor
-    private func loadTracksForSelectedFolder() async {
-        guard let path = selectedFolderPath else {
+    private func loadTracksForSelectedFolder(
+        path: String?,
+        rootURL: URL?,
+        request: UUID
+    ) async {
+        guard let path else {
+            guard isCurrentFolderRequest(request, path: nil, rootURL: rootURL) else { return }
+            tracksInFolder = []
+            availabilityByTrackID = [:]
+            unindexedAudioFileCount = 0
+            return
+        }
+        guard let rootURL, isPath(URL(fileURLWithPath: path), within: rootURL) else {
+            guard isCurrentFolderRequest(request, path: path, rootURL: rootURL) else { return }
             tracksInFolder = []
             availabilityByTrackID = [:]
             unindexedAudioFileCount = 0
@@ -169,14 +268,14 @@ final class FolderViewModel {
             let paths = fileURLs.map { $0.standardizedFileURL.path }
             let result = try await trackRepository.fetchTracksByFilesystemPaths(
                 paths,
-                libraryRoot: libraryRootURL
+                libraryRoot: rootURL
             )
             var navperfFileExistsCount = 0
             // [navperf] temporary instrumentation — remove after measurement
             print("[navperf] availability-map-start site=folder tracks=\(result.count) \(Date().timeIntervalSince1970)")
             let availability = TrackPresentationAvailability.map(
                 tracks: result,
-                libraryRoot: libraryRootURL,
+                libraryRoot: rootURL,
                 fileExists: { url in
                     navperfFileExistsCount += 1
                     return FileManager.default.fileExists(atPath: url.path)
@@ -185,25 +284,29 @@ final class FolderViewModel {
             // [navperf] temporary instrumentation — remove after measurement
             print("[navperf] availability-map-end site=folder tracks=\(result.count) fileExistsCalls=\(navperfFileExistsCount) \(Date().timeIntervalSince1970)")
             let ms = Int(Date().timeIntervalSince(start) * 1000)
-            tracksInFolder = result
-            availabilityByTrackID = availability
             let indexedPaths = Set(result.compactMap { track -> String? in
                 guard let organizedPath = track.organizedPath, !organizedPath.isEmpty else { return nil }
                 if (organizedPath as NSString).isAbsolutePath {
                     return URL(fileURLWithPath: organizedPath).standardizedFileURL.path
                 }
-                return libraryRootURL?.appendingPathComponent(organizedPath).standardizedFileURL.path
+                return rootURL.appendingPathComponent(organizedPath).standardizedFileURL.path
             })
             let originalPaths = Set(result.compactMap { track -> String? in
                 guard (track.originalPath as NSString).isAbsolutePath else { return nil }
                 return URL(fileURLWithPath: track.originalPath).standardizedFileURL.path
             })
-            unindexedAudioFileCount = fileURLs.reduce(into: 0) { count, fileURL in
+            let unindexedCount = fileURLs.reduce(into: 0) { count, fileURL in
                 let path = fileURL.standardizedFileURL.path
                 if !indexedPaths.contains(path) && !originalPaths.contains(path) {
                     count += 1
                 }
             }
+            guard isCurrentFolderRequest(request, path: path, rootURL: rootURL),
+                  !Task.isCancelled
+            else { return }
+            tracksInFolder = result
+            availabilityByTrackID = availability
+            unindexedAudioFileCount = unindexedCount
             AppLogger.shared.info(
                 "folder tracks load: \(result.count) tracks in \(ms)ms",
                 source: "perf"
@@ -212,6 +315,9 @@ final class FolderViewModel {
             print("[navperf] foldervm-loadTracks-end rows=\(result.count) \(Date().timeIntervalSince1970)")
             applyTrackSort()
         } catch {
+            guard isCurrentFolderRequest(request, path: path, rootURL: rootURL),
+                  !Task.isCancelled
+            else { return }
             tracksInFolder = []
             availabilityByTrackID = [:]
             unindexedAudioFileCount = 0
@@ -223,7 +329,7 @@ final class FolderViewModel {
     func refresh() async {
         await loadRootFolders()
         if selectedFolderPath != nil {
-            await loadTracksForSelectedFolder()
+            startSelectedFolderLoad()
         }
     }
 

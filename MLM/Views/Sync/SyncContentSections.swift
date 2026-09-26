@@ -21,6 +21,21 @@ struct SyncContentSections: View {
     @State private var hoveredTrackId: Int64? = nil
 
     @State private var showPlaylistPicker = false
+    @State private var pendingRemoval: PendingRemoval?
+
+    private enum PendingRemoval {
+        case playlist(Playlist)
+        case track(Track)
+
+        var displayName: String {
+            switch self {
+            case .playlist(let playlist):
+                playlist.name
+            case .track(let track):
+                "\(track.artist) — \(track.title)"
+            }
+        }
+    }
 
     var body: some View {
         VStack(spacing: 12) {
@@ -107,9 +122,9 @@ struct SyncContentSections: View {
                 }
             }
             .background(Color.mlmSurface)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: 8)
                     .stroke(Color.mlmEdgeSubtle, lineWidth: 1)
             )
             .padding(.horizontal, 16)
@@ -186,15 +201,43 @@ struct SyncContentSections: View {
                 }
             }
             .background(Color.mlmSurface)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: 8)
                     .stroke(Color.mlmEdgeSubtle, lineWidth: 1)
             )
             .padding(.horizontal, 16)
         }
         .sheet(isPresented: $showPlaylistPicker) {
             PlaylistPickerSheet(vm: vm)
+        }
+        .alert(
+            "Remove from profile?",
+            isPresented: Binding(
+                get: { pendingRemoval != nil },
+                set: { if !$0 { pendingRemoval = nil } }
+            ),
+            presenting: pendingRemoval
+        ) { removal in
+            Button("Remove", role: .destructive) {
+                pendingRemoval = nil
+                Task {
+                    switch removal {
+                    case .playlist(let playlist):
+                        await vm.removePlaylists([playlist.id ?? -1])
+                    case .track(let track):
+                        await vm.removeTracks([track.id ?? -1])
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingRemoval = nil
+            }
+        } message: { removal in
+            Text(
+                "“\(removal.displayName)” will no longer sync to \(profile.name)'s destination. "
+                    + "This does not delete the library original. If enabled, destination cleanup happens on the next sync."
+            )
         }
     }
 
@@ -205,7 +248,7 @@ struct SyncContentSections: View {
             ZStack {
                 if hoveredPlaylistId == playlist.id {
                     Button {
-                        Task { await vm.removePlaylists([playlist.id ?? -1]) }
+                        pendingRemoval = .playlist(playlist)
                     } label: {
                         Image(systemName: "trash")
                             .foregroundColor(.mlmError)
@@ -246,7 +289,7 @@ struct SyncContentSections: View {
         }
         .contextMenu {
             Button(role: .destructive) {
-                Task { await vm.removePlaylists([playlist.id ?? -1]) }
+                pendingRemoval = .playlist(playlist)
             } label: {
                 Label("Remove from profile", systemImage: "minus.circle")
             }
@@ -260,7 +303,7 @@ struct SyncContentSections: View {
             ZStack {
                 if hoveredTrackId == track.id {
                     Button {
-                        Task { await vm.removeTracks([track.id ?? -1]) }
+                        pendingRemoval = .track(track)
                     } label: {
                         Image(systemName: "trash")
                             .foregroundColor(.mlmError)
@@ -301,7 +344,7 @@ struct SyncContentSections: View {
         }
         .contextMenu {
             Button(role: .destructive) {
-                Task { await vm.removeTracks([track.id ?? -1]) }
+                pendingRemoval = .track(track)
             } label: {
                 Label("Remove from profile", systemImage: "minus.circle")
             }

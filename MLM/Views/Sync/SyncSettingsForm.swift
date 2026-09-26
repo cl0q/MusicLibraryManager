@@ -215,9 +215,9 @@ struct SyncSettingsForm: View {
             }
         }
         .background(Color.mlmSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 8)
                 .stroke(Color.mlmEdgeSubtle, lineWidth: 1)
         )
         .padding(.horizontal, 16)

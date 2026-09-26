@@ -36,6 +36,8 @@ final class SyncViewModel {
     private var ingestService: PlaylistIngestService?
     private var previewTask: Task<Void, Never>?
     private var previewRequest = UUID()
+    private var contentTask: Task<Void, Never>?
+    private var contentRequest = UUID()
     private static let sqliteDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -134,6 +136,7 @@ final class SyncViewModel {
                 selectedProfile = nil
                 preview = nil
                 previewTask?.cancel()
+                contentTask?.cancel()
             }
             syncService.invalidatePreview(profileId: id)
         } catch {
@@ -219,11 +222,17 @@ final class SyncViewModel {
         previewTask?.cancel()
         let request = UUID()
         previewRequest = request
+        contentTask?.cancel()
+        let contentRequest = UUID()
+        self.contentRequest = contentRequest
         profilePlaylists = []
         profileTracks = []
         presentCachedPreview(for: profile)
         if let profileId = profile.id {
-            Task { await self.loadProfileContent(profileId: profileId) }
+            contentTask = Task { [weak self] in
+                guard let self else { return }
+                await self.loadProfileContent(profileId: profileId, request: contentRequest)
+            }
         }
         await refreshPreview(for: profile, request: request, forceRefresh: forceRefresh)
     }
@@ -277,6 +286,10 @@ final class SyncViewModel {
               let cached = syncService.cachedPreview(profileId: profileId),
               cached.deviceWasConnected == FileManager.default.fileExists(atPath: profile.outputFolder)
         else {
+            preview = nil
+            previewComputedAt = nil
+            previewProcessed = 0
+            previewTotal = 0
             return
         }
 
@@ -316,7 +329,10 @@ final class SyncViewModel {
                     self.previewTotal = total
                 }
             }
-            guard previewRequest == request, !Task.isCancelled else { return }
+            guard previewRequest == request,
+                  selectedProfile?.id == id,
+                  !Task.isCancelled
+            else { return }
             preview = freshPreview
             previewComputedAt = syncService.cachedPreview(profileId: id)?.computedAt
             previewProcessed = previewTotal
@@ -337,10 +353,22 @@ final class SyncViewModel {
 
     @MainActor
     func loadProfileContent(profileId: Int64) async {
+        await loadProfileContent(profileId: profileId, request: contentRequest)
+    }
+
+    @MainActor
+    private func loadProfileContent(profileId: Int64, request: UUID) async {
         do {
-            profilePlaylists = try await syncRepository.fetchProfilePlaylists(profileId: profileId)
-            profileTracks = try await syncRepository.fetchProfileTracks(profileId: profileId)
+            let playlists = try await syncRepository.fetchProfilePlaylists(profileId: profileId)
+            let tracks = try await syncRepository.fetchProfileTracks(profileId: profileId)
+            guard contentRequest == request,
+                  selectedProfile?.id == profileId,
+                  !Task.isCancelled
+            else { return }
+            profilePlaylists = playlists
+            profileTracks = tracks
         } catch {
+            guard contentRequest == request, !Task.isCancelled else { return }
             AppLogger.shared.error("loadProfileContent failed: \(error)", source: "sync")
         }
     }
