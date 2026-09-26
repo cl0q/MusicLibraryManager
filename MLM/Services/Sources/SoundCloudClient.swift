@@ -332,6 +332,9 @@ final class SoundCloudClient: Sendable {
         type: T.Type,
         didRetryAfterRefresh: Bool = false
     ) async throws -> T {
+        guard isApprovedAPIURL(url) else {
+            throw SoundCloudError.invalidURL(url.absoluteString)
+        }
         guard let credentials = try tokenStorage.getCredentials(service: .soundcloud) else {
             throw SoundCloudError.notAuthenticated
         }
@@ -363,6 +366,26 @@ final class SoundCloudClient: Sendable {
 
         let decoder = JSONDecoder()
         return try decoder.decode(type, from: data)
+    }
+
+    /// `next_href` is provider input. Resolve relative cursors against the
+    /// approved API origin, but never attach credentials to another origin.
+    private func paginationURL(from href: String) throws -> URL {
+        guard let url = URL(string: href, relativeTo: Self.apiBase)?.absoluteURL,
+              isApprovedAPIURL(url) else {
+            throw SoundCloudError.invalidURL(href)
+        }
+        return url
+    }
+
+    private func isApprovedAPIURL(_ url: URL) -> Bool {
+        guard let base = URLComponents(url: Self.apiBase, resolvingAgainstBaseURL: false),
+              let candidate = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return false
+        }
+        return candidate.scheme?.lowercased() == "https"
+            && candidate.host?.lowercased() == base.host?.lowercased()
+            && candidate.port == base.port
     }
 
     /// Refresh the SoundCloud access token via the injected seam (SCDL-04).
@@ -483,7 +506,7 @@ final class SoundCloudClient: Sendable {
             startIndex: &trackIndex,
             collectedIds: &orderedTrackIds
         )
-        nextURL = firstPage.nextHref.flatMap { URL(string: $0) }
+        nextURL = try firstPage.nextHref.map { try paginationURL(from: $0) }
 
         // Subsequent pages
         var pageNumber = 1
@@ -506,7 +529,7 @@ final class SoundCloudClient: Sendable {
                 startIndex: &trackIndex,
                 collectedIds: &orderedTrackIds
             )
-            nextURL = page.nextHref.flatMap { URL(string: $0) }
+            nextURL = try page.nextHref.map { try paginationURL(from: $0) }
         }
 
         AppLogger.shared.info(
@@ -823,7 +846,7 @@ final class SoundCloudClient: Sendable {
             type: SoundCloudCollection<SoundCloudPlaylist>.self
         )
         all.append(contentsOf: firstPage.collection)
-        var nextURL = firstPage.nextHref.flatMap { URL(string: $0) }
+        var nextURL = try firstPage.nextHref.map { try paginationURL(from: $0) }
 
         var pageCount = 1
         while let url = nextURL, pageCount < maxPages {
@@ -832,7 +855,7 @@ final class SoundCloudClient: Sendable {
                 type: SoundCloudCollection<SoundCloudPlaylist>.self
             )
             all.append(contentsOf: page.collection)
-            nextURL = page.nextHref.flatMap { URL(string: $0) }
+            nextURL = try page.nextHref.map { try paginationURL(from: $0) }
             pageCount += 1
         }
 
@@ -853,7 +876,7 @@ final class SoundCloudClient: Sendable {
             type: SoundCloudCollection<SoundCloudTrack>.self
         )
         tracks.append(contentsOf: firstPage.collection)
-        var nextURL = firstPage.nextHref.flatMap { URL(string: $0) }
+        var nextURL = try firstPage.nextHref.map { try paginationURL(from: $0) }
 
         while let url = nextURL {
             let page: SoundCloudCollection<SoundCloudTrack> = try await apiRequestURL(
@@ -861,7 +884,7 @@ final class SoundCloudClient: Sendable {
                 type: SoundCloudCollection<SoundCloudTrack>.self
             )
             tracks.append(contentsOf: page.collection)
-            nextURL = page.nextHref.flatMap { URL(string: $0) }
+            nextURL = try page.nextHref.map { try paginationURL(from: $0) }
         }
 
         return tracks
