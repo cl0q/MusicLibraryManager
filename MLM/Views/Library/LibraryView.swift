@@ -54,6 +54,9 @@ struct LibraryView: View {
         .onReceive(NotificationCenter.default.publisher(for: .libraryDidImport)) { _ in
             Task { await viewModel?.refresh() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .libraryRootDidChange)) { _ in
+            Task { await viewModel?.refresh() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .libraryDidDeleteTracks)) { note in
             if let ids = note.userInfo?["removedIds"] as? [Int64] {
                 viewModel?.removeTracks(ids: Set(ids))
@@ -75,6 +78,19 @@ struct LibraryView: View {
     private func libraryContent(_ viewModel: LibraryViewModel) -> some View {
         VStack(spacing: 0) {
             libraryHeader(viewModel)
+            if !container.isLibraryDriveMounted {
+                Label(
+                    "Library drive is disconnected. Local tracks remain visible but cannot be played.",
+                    systemImage: "externaldrive.badge.exclamationmark"
+                )
+                .font(MLMFont.muted)
+                .foregroundColor(.mlmAttention)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.mlmAttention.opacity(0.12))
+                .accessibilityIdentifier("library_drive_disconnected_banner")
+            }
             Divider()
             LibraryTable(
                 viewModel: viewModel,
