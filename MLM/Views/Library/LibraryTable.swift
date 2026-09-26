@@ -75,16 +75,8 @@ struct LibraryTable: View {
     /// Rebuild cached row wrappers only when the track array actually changed.
     private func rebuildRowsIfNeeded() {
         let tracks = viewModel.displayedTracks
-        // O(1) fingerprint: count + first/last ID
-        let firstID = tracks.first?.id
-        let lastID = tracks.last?.id
-        let fingerprint = (count: tracks.count, firstID: firstID, lastID: lastID)
-        if let prev = lastRowFingerprint, prev == fingerprint { return }
         cachedRows = tracks.compactMap { track in
             track.id.map { TrackTable.Row(id: $0, track: track) }
         }
-        lastRowFingerprint = fingerprint
     }
-
-    @State private var lastRowFingerprint: (count: Int, firstID: Int64?, lastID: Int64?)? = nil
 }
