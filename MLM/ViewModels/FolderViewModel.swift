@@ -194,8 +194,6 @@ final class FolderViewModel {
 
     @MainActor
     func loadRootFolders() async {
-        // [navperf] temporary instrumentation — remove after measurement
-        print("[navperf] foldervm-loadRootFolders-start \(Date().timeIntervalSince1970)")
         isLoading = true
         errorMessage = nil
         isDriveNotMounted = false
@@ -231,8 +229,6 @@ final class FolderViewModel {
         }
 
         restoreLastSelection()
-        // [navperf] temporary instrumentation — remove after measurement
-        print("[navperf] foldervm-loadRootFolders-end rows=\(allRootNodes.count) \(Date().timeIntervalSince1970)")
         isLoading = false
     }
 
@@ -260,8 +256,6 @@ final class FolderViewModel {
         }
 
         let start = Date()
-        // [navperf] temporary instrumentation — remove after measurement
-        print("[navperf] foldervm-loadTracks-start \(Date().timeIntervalSince1970)")
         do {
             let dirURL = URL(fileURLWithPath: path)
             let fileURLs = try await diskScanner.filesInDirectory(dirURL)
@@ -270,19 +264,13 @@ final class FolderViewModel {
                 paths,
                 libraryRoot: rootURL
             )
-            var navperfFileExistsCount = 0
-            // [navperf] temporary instrumentation — remove after measurement
-            print("[navperf] availability-map-start site=folder tracks=\(result.count) \(Date().timeIntervalSince1970)")
             let availability = TrackPresentationAvailability.map(
                 tracks: result,
                 libraryRoot: rootURL,
                 fileExists: { url in
-                    navperfFileExistsCount += 1
                     return FileManager.default.fileExists(atPath: url.path)
                 }
             )
-            // [navperf] temporary instrumentation — remove after measurement
-            print("[navperf] availability-map-end site=folder tracks=\(result.count) fileExistsCalls=\(navperfFileExistsCount) \(Date().timeIntervalSince1970)")
             let ms = Int(Date().timeIntervalSince(start) * 1000)
             let indexedPaths = Set(result.compactMap { track -> String? in
                 guard let organizedPath = track.organizedPath, !organizedPath.isEmpty else { return nil }
@@ -311,8 +299,6 @@ final class FolderViewModel {
                 "folder tracks load: \(result.count) tracks in \(ms)ms",
                 source: "perf"
             )
-            // [navperf] temporary instrumentation — remove after measurement
-            print("[navperf] foldervm-loadTracks-end rows=\(result.count) \(Date().timeIntervalSince1970)")
             applyTrackSort()
         } catch {
             guard isCurrentFolderRequest(request, path: path, rootURL: rootURL),

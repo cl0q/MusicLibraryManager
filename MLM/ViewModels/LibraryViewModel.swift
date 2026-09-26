@@ -133,9 +133,6 @@ final class LibraryViewModel {
     /// Cancel any in-flight fetch and start a new one for the current state.
     @MainActor
     func scheduleRefresh() {
-        let navperfSig = FetchSignature(tab: selectedTab, search: searchQuery, sortColumn: sortDescriptor.column, sortAscending: sortDescriptor.ascending, libraryRoot: libraryRootSnapshot)
-        // [navperf] temporary instrumentation — remove after measurement
-        print("[navperf] libraryvm-scheduleRefresh-enter signatureMatch=\(navperfSig == lastFetchSignature && !displayedTracks.isEmpty) \(Date().timeIntervalSince1970)")
         refreshTask?.cancel()
         isLoading = true
 
@@ -149,8 +146,6 @@ final class LibraryViewModel {
 
             let start = Date()
             do {
-                // [navperf] temporary instrumentation — remove after measurement
-                print("[navperf] libraryvm-fetch-start \(Date().timeIntervalSince1970)")
                 let result = try await trackRepository.fetchForLibrary(
                     tab: tab,
                     search: search.isEmpty ? nil : search,
@@ -158,34 +153,20 @@ final class LibraryViewModel {
                     ascending: sort.ascending
                 )
                 guard !Task.isCancelled else { return }
-                // [navperf] temporary instrumentation — remove after measurement
-                print("[navperf] libraryvm-fetch-end rows=\(result.count) \(Date().timeIntervalSince1970)")
 
-                // [navperf] temporary instrumentation — remove after measurement
-                print("[navperf] libraryvm-counts-start \(Date().timeIntervalSince1970)")
                 let counts = try? await trackRepository.countTracksByAvailability()
-                // [navperf] temporary instrumentation — remove after measurement
-                print("[navperf] libraryvm-counts-end \(Date().timeIntervalSince1970)")
                 let local  = counts?.local  ?? localCount
                 let remote = counts?.remote ?? remoteCount
                 guard !Task.isCancelled else { return }
 
-                var navperfFileExistsCount = 0
-                // [navperf] temporary instrumentation — remove after measurement
-                print("[navperf] availability-map-start site=library tracks=\(result.count) \(Date().timeIntervalSince1970)")
                 let availability = TrackPresentationAvailability.map(
                     tracks: result,
                     libraryRoot: libraryRoot,
                     fileExists: { url in
-                        navperfFileExistsCount += 1
                         return FileManager.default.fileExists(atPath: url.path)
                     }
                 )
-                // [navperf] temporary instrumentation — remove after measurement
-                print("[navperf] availability-map-end site=library tracks=\(result.count) fileExistsCalls=\(navperfFileExistsCount) \(Date().timeIntervalSince1970)")
 
-                // [navperf] temporary instrumentation — remove after measurement
-                print("[navperf] libraryvm-mainactor-apply-start \(Date().timeIntervalSince1970)")
                 await MainActor.run { [weak self] in
                     guard let self else { return }
                     displayedTracks = result
@@ -207,8 +188,6 @@ final class LibraryViewModel {
                         source: "perf"
                     )
                 }
-                // [navperf] temporary instrumentation — remove after measurement
-                print("[navperf] libraryvm-mainactor-apply-end \(Date().timeIntervalSince1970)")
             } catch {
                 guard !Task.isCancelled else { return }
                 await MainActor.run { [weak self] in
@@ -266,8 +245,6 @@ final class LibraryViewModel {
     @MainActor
     func refresh() async {
         await refreshLibraryRootSnapshot()
-        // [navperf] temporary instrumentation — remove after measurement
-        print("[navperf] libraryvm-refresh-bypass \(Date().timeIntervalSince1970)")
         lastFetchSignature = nil
         scheduleRefresh()
         await refreshTask?.value

@@ -13,8 +13,6 @@ struct FoldersView: View {
     var onTrackDoubleClick: ((Track, [Track]) -> Void)?
 
     var body: some View {
-        // [navperf] temporary instrumentation — remove after measurement
-        let _ = print("[navperf] section-body folders \(Date().timeIntervalSince1970)")
         Group {
             if let viewModel {
                 foldersContent(viewModel)
@@ -25,12 +23,8 @@ struct FoldersView: View {
             }
         }
         .task {
-            // [navperf] temporary instrumentation — remove after measurement
-            print("[navperf] section-task-start folders \(Date().timeIntervalSince1970)")
             initializeViewModel()
             await viewModel?.loadRootFolders()
-            // [navperf] temporary instrumentation — remove after measurement
-            print("[navperf] section-task-after-first-await folders \(Date().timeIntervalSince1970)")
             await reloadPlaylists()
             await reloadSyncProfiles()
         }

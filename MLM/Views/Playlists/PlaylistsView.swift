@@ -35,8 +35,6 @@ struct PlaylistsView: View {
     ]
 
     var body: some View {
-        // [navperf] temporary instrumentation — remove after measurement
-        let _ = print("[navperf] section-body playlists \(Date().timeIntervalSince1970)")
         Group {
             if let selectedPlaylist, viewModel != nil {
                 PlaylistDetailView(
@@ -57,12 +55,8 @@ struct PlaylistsView: View {
             }
         }
         .task {
-            // [navperf] temporary instrumentation — remove after measurement
-            print("[navperf] section-task-start playlists \(Date().timeIntervalSince1970)")
             initializeViewModel()
             await viewModel?.loadPlaylists()
-            // [navperf] temporary instrumentation — remove after measurement
-            print("[navperf] section-task-after-first-await playlists \(Date().timeIntervalSince1970)")
             await reloadSyncProfiles()
         }
         .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { _ in

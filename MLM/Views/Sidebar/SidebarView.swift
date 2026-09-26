@@ -120,8 +120,6 @@ struct SidebarView: View {
                 pendingPlaylistDeletion = playlist
             },
             onSelectSection: { targetSection in
-                // [navperf] temporary instrumentation — remove after measurement
-                print("[navperf] pinned-row-action \(targetSection) \(Date().timeIntervalSince1970)")
                 selectedSection = targetSection
             }
         )
@@ -129,8 +127,6 @@ struct SidebarView: View {
 
     private func sidebarRow(_ section: SidebarSection) -> some View {
         Button {
-            // [navperf] temporary instrumentation — remove after measurement
-            print("[navperf] sidebar-row-action \(section) \(Date().timeIntervalSince1970)")
             selectedSection = section
         } label: {
             HStack {

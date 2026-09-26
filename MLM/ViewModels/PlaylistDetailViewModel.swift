@@ -146,8 +146,6 @@ final class PlaylistDetailViewModel {
     @MainActor
     private func loadTracksInternal(useCache: Bool) async {
         guard let playlistId = playlist.id else { return }
-        // [navperf] temporary instrumentation — remove after measurement
-        print("[navperf] playlistdetailvm-loadTracksInternal-start useCache=\(useCache) \(Date().timeIntervalSince1970)")
 
         // Cache hit → populate instantly, no spinner.
         if useCache, let cached = tableCache?.entry(for: playlistId) {
@@ -180,19 +178,13 @@ final class PlaylistDetailViewModel {
 
             let libraryRoot = await libraryRootSnapshot()
             let loadedTracks = try await playlistRepository.fetchTracks(playlistId: playlistId)
-            var navperfFileExistsCount = 0
-            // [navperf] temporary instrumentation — remove after measurement
-            print("[navperf] availability-map-start site=playlistDetail-160 tracks=\(loadedTracks.count) \(Date().timeIntervalSince1970)")
             let availability = TrackPresentationAvailability.map(
                 tracks: loadedTracks,
                 libraryRoot: libraryRoot,
                 fileExists: { url in
-                    navperfFileExistsCount += 1
                     return FileManager.default.fileExists(atPath: url.path)
                 }
             )
-            // [navperf] temporary instrumentation — remove after measurement
-            print("[navperf] availability-map-end site=playlistDetail-160 tracks=\(loadedTracks.count) fileExistsCalls=\(navperfFileExistsCount) \(Date().timeIntervalSince1970)")
 
             tracks = loadedTracks
             availabilityByTrackID = availability
@@ -212,8 +204,6 @@ final class PlaylistDetailViewModel {
             errorMessage = "Failed to load tracks: \(error.localizedDescription)"
         }
 
-        // [navperf] temporary instrumentation — remove after measurement
-        print("[navperf] playlistdetailvm-loadTracksInternal-end rows=\(tracks.count) \(Date().timeIntervalSince1970)")
         isLoading = false
     }
 
@@ -222,19 +212,13 @@ final class PlaylistDetailViewModel {
     @MainActor
     func refreshAvailabilitySnapshot() async {
         let libraryRoot = await libraryRootSnapshot()
-        var navperfFileExistsCount = 0
-        // [navperf] temporary instrumentation — remove after measurement
-        print("[navperf] availability-map-start site=playlistDetail-192 tracks=\(tracks.count) \(Date().timeIntervalSince1970)")
         availabilityByTrackID = TrackPresentationAvailability.map(
             tracks: tracks,
             libraryRoot: libraryRoot,
             fileExists: { url in
-                navperfFileExistsCount += 1
                 return FileManager.default.fileExists(atPath: url.path)
             }
         )
-        // [navperf] temporary instrumentation — remove after measurement
-        print("[navperf] availability-map-end site=playlistDetail-192 tracks=\(tracks.count) fileExistsCalls=\(navperfFileExistsCount) \(Date().timeIntervalSince1970)")
     }
 
     // MARK: - Source Synchronization

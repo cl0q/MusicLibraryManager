@@ -27,8 +27,6 @@ struct LibraryView: View {
     }
 
     var body: some View {
-        // [navperf] temporary instrumentation — remove after measurement
-        let _ = { print("[navperf] libraryview-body \(Date().timeIntervalSince1970)") }()
         Group {
             if let viewModel {
                 libraryContent(viewModel)
@@ -39,8 +37,6 @@ struct LibraryView: View {
         }
         .task {
             guard !usesPreloadedModel else { return }
-            // [navperf] temporary instrumentation — remove after measurement
-            print("[navperf] libraryview-task-start \(Date().timeIntervalSince1970)")
             initializeViewModel()
             viewModel?.searchQuery = container.searchCoordinator.query
             // Run track loading and sidebar data fetches concurrently —
@@ -100,8 +96,6 @@ struct LibraryView: View {
             )
         }
         .onChange(of: container.searchCoordinator.query) { _, q in
-            // [navperf] temporary instrumentation — remove after measurement
-            print("[navperf] libraryview-onchange-search \(q.count) \(Date().timeIntervalSince1970)")
             guard q != viewModel.searchQuery else { return }
             viewModel.searchQuery = q
         }

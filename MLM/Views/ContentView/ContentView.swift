@@ -172,8 +172,6 @@ struct ContentView: View {
             NewSyncProfileFromSelectionSheet(trackIds: selection.trackIds)
         }
         .onChange(of: selectedSection) { _, newSection in
-            // [navperf] temporary instrumentation — remove after measurement
-            print("[navperf] onchange-section-start \(newSection) \(Date().timeIntervalSince1970)")
             container.searchCoordinator.dismiss()
             container.searchCoordinator.query = ""
             isGlobalSearchFocused = false
@@ -185,8 +183,6 @@ struct ContentView: View {
             default:
                 container.searchCoordinator.context = .other
             }
-            // [navperf] temporary instrumentation — remove after measurement
-            print("[navperf] onchange-section-end \(newSection) \(Date().timeIntervalSince1970)")
         }
     }
 
@@ -302,8 +298,6 @@ struct ContentView: View {
 
     @ViewBuilder
     private var detailView: some View {
-        // [navperf] temporary instrumentation — remove after measurement
-        let _ = print("[navperf] detailview-body isPresented=\(container.searchCoordinator.isPresented) \(Date().timeIntervalSince1970)")
         if container.searchCoordinator.isPresented {
             GlobalSearchPresentationView(
                 query: Bindable(container.searchCoordinator).query,
@@ -332,8 +326,6 @@ struct ContentView: View {
                 .opacity(selectedSection == .library ? 1 : 0)
                 .allowsHitTesting(selectedSection == .library)
 
-                // [navperf] temporary instrumentation — remove after measurement
-                let _ = print("[navperf] zstack-switch \(selectedSection) \(Date().timeIntervalSince1970)")
                 switch selectedSection {
                 case .library:
                     Color.clear
@@ -510,8 +502,6 @@ private struct LibraryHost: View, Equatable {
     }
 
     var body: some View {
-        // [navperf] temporary instrumentation — remove after measurement
-        let _ = print("[navperf] libraryhost-body \(Date().timeIntervalSince1970)")
         LibraryView(onTrackDoubleClick: stored)
             .onAppear {
                 if stored == nil { stored = initialCallback }

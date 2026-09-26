@@ -10,8 +10,6 @@ struct PlaybackQueueView: View {
     @State private var upNextSelection = Set<Int64>()
 
     var body: some View {
-        // [navperf] temporary instrumentation — remove after measurement
-        let _ = print("[navperf] section-body queue \(Date().timeIntervalSince1970)")
         VStack(spacing: 0) {
             if let playbackVM = container.playbackViewModel {
                 // History section

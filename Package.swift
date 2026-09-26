@@ -51,6 +51,7 @@ let package = Package(
             path: "MLMTests",
             exclude: [
                 "Snapshots/__Snapshots__",
+                "Fixtures/playlist-cover-fixtures/README.md",
             ]
         ),
     ]

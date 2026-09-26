@@ -24,8 +24,6 @@ struct SourcesView: View {
     @State private var viewModel: SourcesViewModel?
 
     var body: some View {
-        // [navperf] temporary instrumentation — remove after measurement
-        let _ = print("[navperf] section-body sources \(Date().timeIntervalSince1970)")
         Group {
             if let viewModel {
                 sourcesContent(viewModel)
@@ -36,12 +34,8 @@ struct SourcesView: View {
             }
         }
         .task {
-            // [navperf] temporary instrumentation — remove after measurement
-            print("[navperf] section-task-start sources \(Date().timeIntervalSince1970)")
             initializeViewModel()
             await viewModel?.loadSources()
-            // [navperf] temporary instrumentation — remove after measurement
-            print("[navperf] section-task-after-first-await sources \(Date().timeIntervalSince1970)")
         }
     }
 

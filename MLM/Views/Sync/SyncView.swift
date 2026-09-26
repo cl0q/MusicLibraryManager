@@ -23,8 +23,6 @@ struct SyncView: View {
     @State private var deviceIngestProfile: SyncProfile?
 
     var body: some View {
-        // [navperf] temporary instrumentation — remove after measurement
-        let _ = print("[navperf] section-body sync \(Date().timeIntervalSince1970)")
         ZStack(alignment: .bottom) {
             Group {
                 if let vm = container.syncViewModel {
@@ -36,14 +34,10 @@ struct SyncView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .task {
-                        // [navperf] temporary instrumentation — remove after measurement
-                        print("[navperf] section-task-start sync \(Date().timeIntervalSince1970)")
                         // Refresh on first appear; subsequent re-mounts skip re-init
                         // because VM lives in the container.
                         if vm.profiles.isEmpty && !vm.isLoading {
                             await vm.loadProfiles()
-                            // [navperf] temporary instrumentation — remove after measurement
-                            print("[navperf] section-task-after-first-await sync \(Date().timeIntervalSince1970)")
                         }
                     }
                 } else {

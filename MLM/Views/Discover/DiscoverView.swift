@@ -13,8 +13,6 @@ struct DiscoverView: View {
     @State private var selectedTab: Tab = .recommendations
 
     var body: some View {
-        // [navperf] temporary instrumentation — remove after measurement
-        let _ = print("[navperf] section-body discover \(Date().timeIntervalSince1970)")
         VStack(spacing: 0) {
             HStack(spacing: 16) {
                 Text("Discover")
