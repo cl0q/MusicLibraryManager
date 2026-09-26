@@ -216,9 +216,11 @@ struct UniversalSearchView: View {
                         .lineLimit(1)
                 }
                 Spacer()
-                Button("Import") { }
+                Button("Import") {}
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
+                    .disabled(true)
+                    .help("Playlist imports are not available from this search panel. Use Sources to import a playlist.")
             }
             .padding(16)
         }
