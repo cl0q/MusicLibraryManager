@@ -406,7 +406,7 @@ struct DownloadOrchestratorTests {
         let tmp = try makeTempLibrary()
         defer { try? FileManager.default.removeItem(at: tmp) }
         let queue = DownloadQueue(directory: tmp)
-        queue.enqueue(
+        try queue.enqueue(
             trackId: 9, query: "Artist - Title", source: "soundcloud", error: "network hiccup",
             artist: "Artist", title: "Title",
             preferredSource: DownloadOrchestrator.PreferredSource.soundcloud.storageKey,
@@ -427,7 +427,7 @@ struct DownloadOrchestratorTests {
         let tmp = try makeTempLibrary()
         defer { try? FileManager.default.removeItem(at: tmp) }
         let queue = DownloadQueue(directory: tmp)
-        queue.enqueue(trackId: 1, query: "Artist - Title", source: "soundcloud", error: "e")
+        try queue.enqueue(trackId: 1, query: "Artist - Title", source: "soundcloud", error: "e")
         let item = try #require(queue.items.first)
         #expect(item.source == "soundcloud")
     }
@@ -437,7 +437,7 @@ struct DownloadOrchestratorTests {
         let tmp = try makeTempLibrary()
         defer { try? FileManager.default.removeItem(at: tmp) }
         let queue = DownloadQueue(directory: tmp)
-        queue.enqueue(
+        try queue.enqueue(
             trackId: 77, query: "Artist - Title",
             source: DownloadOrchestrator.PreferredSource.soundcloud.storageKey,
             error: "scdl timed out",
@@ -464,9 +464,9 @@ struct DownloadOrchestratorTests {
         let tmp = try makeTempLibrary()
         defer { try? FileManager.default.removeItem(at: tmp) }
         let queue = DownloadQueue(directory: tmp)
-        queue.enqueue(trackId: 1, query: "A - One", source: "soundcloud", error: "e")
-        queue.enqueue(trackId: 2, query: "A - Two", source: "soundcloud", error: "e")
-        queue.dequeue(trackIds: [1])
+        try queue.enqueue(trackId: 1, query: "A - One", source: "soundcloud", error: "e")
+        try queue.enqueue(trackId: 2, query: "A - Two", source: "soundcloud", error: "e")
+        try queue.dequeue(trackIds: [1])
         #expect(queue.items.map(\.trackId) == [2])
     }
 
@@ -478,7 +478,7 @@ struct DownloadOrchestratorTests {
         try FileManager.default.createDirectory(at: queueDirectory, withIntermediateDirectories: true)
         let queue = DownloadQueue(directory: queueDirectory)
         for _ in 0..<3 {
-            queue.enqueue(
+            try queue.enqueue(
                 trackId: 88, query: "Artist - Capped Failure",
                 source: "youtube", error: "Video unavailable",
                 artist: "Artist", title: "Capped Failure"
