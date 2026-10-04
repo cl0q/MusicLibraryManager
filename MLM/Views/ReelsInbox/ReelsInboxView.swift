@@ -73,6 +73,12 @@ struct ReelsInboxView: View {
     
     // Active search task to support cancellation and prevent overlapping/rate-limits
     @State private var searchTask: Task<Void, Never>? = nil
+
+    // Deletion confirmation state
+    @State private var reelsPendingDeletion: [ImportedReel]? = nil
+
+    // Persistence error alert
+    @State private var deletionErrorMessage: String? = nil
     
     // For visual keyframe preview sheet/modal
     @State private var expandedKeyframe: KeyframeData? = nil
@@ -613,8 +619,32 @@ struct ReelsInboxView: View {
         .padding(.vertical, 8)
         .padding(.horizontal, 12)
         .background(Color.mlmSurface)
+        .modifier(ReelDeleteConfirmationModifier(
+            isPresented: deletionDialogBinding,
+            count: reelsPendingDeletion?.count ?? 0,
+            onConfirm: performConfirmedDeletion,
+            onCancel: { reelsPendingDeletion = nil }
+        ))
+        .modifier(ReelDeletionErrorModifier(
+            isPresented: deletionErrorBinding,
+            message: deletionErrorMessage ?? ""
+        ))
     }
-    
+
+    private var deletionDialogBinding: Binding<Bool> {
+        Binding(
+            get: { reelsPendingDeletion != nil },
+            set: { if !$0 { reelsPendingDeletion = nil } }
+        )
+    }
+
+    private var deletionErrorBinding: Binding<Bool> {
+        Binding(
+            get: { deletionErrorMessage != nil },
+            set: { if !$0 { deletionErrorMessage = nil } }
+        )
+    }
+
     // MARK: - Actions & Handlers
     private func selectFolder() {
         let panel = NSOpenPanel()
@@ -714,14 +744,54 @@ struct ReelsInboxView: View {
     }
     
     private func deleteReels(at offsets: IndexSet) {
-        let reels = offsets.map { importedReels[$0] }
-        importedReels.remove(atOffsets: offsets)
-        selectedReel = nil
-        avPlayer.pause()
-        avPlayer.replaceCurrentItem(with: nil)
+        reelsPendingDeletion = offsets.map { importedReels[$0] }
+    }
+
+    private func performConfirmedDeletion() {
+        guard let reelsToDelete = reelsPendingDeletion else { return }
+        let deletingSelected = reelsToDelete.contains(where: { $0.id == selectedReel?.id })
+        let deletedIDs = Set(reelsToDelete.map(\.id))
+
+        // Remove optimistically; failed reels are re-inserted below.
+        let originalIndices = reelsToDelete.compactMap { reel -> (Int, ImportedReel)? in
+            guard let idx = importedReels.firstIndex(where: { $0.id == reel.id }) else { return nil }
+            return (idx, reel)
+        }
+        importedReels.removeAll { deletedIDs.contains($0.id) }
+
+        if deletingSelected {
+            selectedReel = nil
+            avPlayer.pause()
+            avPlayer.replaceCurrentItem(with: nil)
+            searchTask?.cancel()
+        }
+
         Task {
-            for reel in reels {
-                try? await container.reelRepository?.delete(id: reel.id.uuidString)
+            let outcome: ReelDeletionOutcome
+            if let repo = container.reelRepository {
+                outcome = await ReelDeletionController.delete(reelsToDelete) { id in
+                    try await repo.delete(id: id)
+                }
+            } else {
+                // No repository: treat as no-op success (memory-only reels, nothing to persist).
+                outcome = ReelDeletionOutcome(deletedIDs: reelsToDelete.map(\.id), failed: [])
+            }
+
+            await MainActor.run {
+                // Restore failed reels at their original positions (or append if indices shifted).
+                for failure in outcome.failed {
+                    if let original = originalIndices.first(where: { $0.1.id == failure.reel.id }),
+                       original.0 <= importedReels.count {
+                        importedReels.insert(failure.reel, at: min(original.0, importedReels.count))
+                    } else {
+                        importedReels.append(failure.reel)
+                    }
+                }
+                if !outcome.failed.isEmpty {
+                    let names = outcome.failed.map(\.reel.title).joined(separator: ", ")
+                    deletionErrorMessage = "Failed to delete: \(names)"
+                }
+                reelsPendingDeletion = nil
             }
         }
     }
@@ -2205,5 +2275,49 @@ struct ExpandedKeyframeView: View {
         }
         .frame(minWidth: 700, idealWidth: 850, minHeight: 480, idealHeight: 560)
         .background(Color.mlmBase)
+    }
+}
+
+// MARK: - Reel Deletion UI Modifiers
+
+private struct ReelDeleteConfirmationModifier: ViewModifier {
+    @Binding var isPresented: Bool
+    let count: Int
+    let onConfirm: () -> Void
+    let onCancel: () -> Void
+
+    func body(content: Content) -> some View {
+        let title = count == 1 ? "Delete 1 reel?" : "Delete \(count) reels?"
+        return content.confirmationDialog(
+            title,
+            isPresented: $isPresented,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive, action: onConfirm)
+                .accessibilityIdentifier("reel_delete_confirm_button")
+                .accessibilityLabel("Delete permanently")
+
+            Button("Cancel", role: .cancel, action: onCancel)
+                .accessibilityIdentifier("reel_delete_cancel_button")
+                .accessibilityLabel("Cancel deletion")
+        } message: {
+            Text("The database entry will be removed. The media file on disk is not affected.")
+        }
+    }
+}
+
+private struct ReelDeletionErrorModifier: ViewModifier {
+    @Binding var isPresented: Bool
+    let message: String
+
+    func body(content: Content) -> some View {
+        content.alert(
+            "Deletion Error",
+            isPresented: $isPresented
+        ) {
+            Button("OK") { isPresented = false }
+        } message: {
+            Text(message)
+        }
     }
 }
