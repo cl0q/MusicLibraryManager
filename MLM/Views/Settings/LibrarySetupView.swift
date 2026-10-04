@@ -146,9 +146,9 @@ struct LibrarySetupView: View {
                         .foregroundColor(.mlmInkSecondary)
                     Spacer()
                     Button {
-                        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: root)
+                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: root)])
                     } label: {
-                        Label("Reveal in Finder", systemImage: "arrow.right.circle")
+                        Label("Show in Finder", systemImage: "arrow.right.circle")
                             .font(MLMFont.muted)
                     }
                     .buttonStyle(.plain)

@@ -5,7 +5,7 @@ import SwiftUI
 /// Organized into three tabs:
 /// - **General**: Primary tags with click-to-edit inline support (Title, Artist, Album Artist, Album, Genre, Year).
 /// - **Audio & Analysis**: Audio analytical values and manual trigger controls.
-/// - **File & System**: Format badge, bitrate, dates, and full paths with Copy and Reveal in Finder.
+/// - **File & System**: Format badge, bitrate, dates, and full paths with Copy and Show in Finder.
 struct MetadataPanel: View {
     let track: Track
 
@@ -589,7 +589,7 @@ struct MetadataPanel: View {
                     .controlSize(.small)
                     .help("Copy path")
 
-                    // Reveal in Finder (Only available if track is local)
+                    // Show in Finder (only available if track is local)
                     if track.isLocal {
                         Button {
                             revealInFinder(for: track)

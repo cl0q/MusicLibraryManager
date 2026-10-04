@@ -5,7 +5,7 @@ import SwiftUI
 ///
 /// Defaults to collapsed to avoid visual clutter when syncs partially fail.
 /// Fetches full `Track` records on appear so the rows can show album info and
-/// support Play / Play Next / Reveal in Finder actions.
+/// support Play / Play Next / Show in Finder actions.
 struct SyncFailedDisclosure: View {
     let failedTracks: [SyncService.SyncFailure]
     let vm: SyncViewModel
@@ -175,7 +175,7 @@ struct SyncFailedDisclosure: View {
         Button {
             Task { await revealInFinder(failure.trackId) }
         } label: {
-            Label("Reveal in Finder", systemImage: "folder")
+            Label("Show in Finder", systemImage: "folder")
         }
         .disabled(track == nil)
 

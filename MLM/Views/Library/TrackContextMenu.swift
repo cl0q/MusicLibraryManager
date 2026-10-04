@@ -161,7 +161,7 @@ struct TrackContextMenu: View {
             if hasLocal {
                 Section {
                     Button { revealInFinder() } label: {
-                        Label("Reveal in Finder", systemImage: "folder")
+                        Label("Show in Finder", systemImage: "folder")
                     }
 
                     Button { copyPath() } label: {
