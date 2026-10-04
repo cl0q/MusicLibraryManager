@@ -56,11 +56,23 @@ struct FinderActionCopyTests {
         }
     }
 
+    /// "Reveal in …" is only allowed where nothing opens in Finder (UI-GROUNDTRUTH §2.2).
+    @Test func noOtherRevealLabels() throws {
+        let allowed: Set<String> = ["Reveal in Grid"]
+        for file in swiftSources {
+            for literal in try stringLiterals(in: String(contentsOf: file, encoding: .utf8))
+            where literal.hasPrefix("Reveal in ") && !allowed.contains(literal) {
+                Issue.record("\(file.lastPathComponent): \"\(literal)\" — Finder actions are \"Show in Finder\"")
+            }
+        }
+    }
+
     @Test func formerViolationsUseShowInFinder() throws {
         for path in [
             "MLM/Views/Settings/LibrarySetupView.swift",
             "MLM/Views/Library/TrackContextMenu.swift",
             "MLM/Views/Sync/SyncFailedDisclosure.swift",
+            "MLM/Views/Sync/SyncProfileDetailView.swift",
         ] {
             let src = try String(contentsOf: projectRoot.appendingPathComponent(path), encoding: .utf8)
             #expect(src.contains("\"Show in Finder\""), "\(path) lost its Show in Finder label")

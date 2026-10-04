@@ -111,9 +111,6 @@ extension Notification.Name {
     /// Posted when the user triggers "Import from Folder…" via the Library menu.
     static let showImportDialog = Notification.Name("MLMShowImportDialog")
 
-    /// Posted when the user triggers "Reveal in Finder" via the Library menu.
-    static let revealSelectedInFinder = Notification.Name("MLMRevealSelectedInFinder")
-
     /// Posted when the user triggers "More Info" via the Library menu (⌘I).
     static let showTrackDetail = Notification.Name("MLMShowTrackDetail")
 

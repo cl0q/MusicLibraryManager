@@ -343,7 +343,7 @@ struct SyncProfileDetailView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
                 .contextMenu {
-                    Button("Reveal in destination") {
+                    Button("Show in Finder") {
                         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.destinationPath)])
                     }
                 }
