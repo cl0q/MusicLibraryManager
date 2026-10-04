@@ -274,7 +274,8 @@ final class DependencyContainer {
                     database: dbPool,
                     playlistRepository: plRepo,
                     trackRepository: trRepo,
-                    configRepository: cfRepo
+                    configRepository: cfRepo,
+                    coversDirectory: dbManager.playlistCoversDirectory
                 )
             }
         }
@@ -297,16 +298,11 @@ final class DependencyContainer {
 
         // A2 — Backup service. Creates, lists, prunes, and restores backup bundles.
         if let cfRepo = self.configRepository {
-            let appSupport = FileManager.default
-                .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            let coversDir = appSupport
-                .appendingPathComponent("com.musiclibrary.app")
-                .appendingPathComponent("playlist-covers")
             let pool = dbManager.pool
             let service = BackupService(
                 database: pool,
                 databasePath: dbManager.databasePath,
-                coversDirectory: coversDir,
+                coversDirectory: dbManager.playlistCoversDirectory,
                 configRepository: cfRepo,
                 poolCloser: { try pool.close() }
             )

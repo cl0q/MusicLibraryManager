@@ -17,13 +17,14 @@ import AppKit
 @Suite("PlaylistCoverService (Phase 36)", .serialized)
 struct PlaylistCoverServiceTests {
 
-    /// Per-test redirection of `~/Library/Application Support/com.musiclibrary.app/playlist-covers/`.
-    /// The service uses the production path; tests verify against that path and clean up.
-    private static func coversDir() -> URL {
-        FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("com.musiclibrary.app")
-            .appendingPathComponent("playlist-covers")
+    /// Per-test covers folder in a temp dir — the live install under Application Support is
+    /// never written. Stored cover paths stay relative (`playlist-covers/<id>.png`).
+    private let coversDir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("PlaylistCoverServiceTests-\(UUID().uuidString)")
+        .appendingPathComponent("playlist-covers")
+
+    private func cleanup() {
+        try? FileManager.default.removeItem(at: coversDir.deletingLastPathComponent())
     }
 
     private func makeService() async throws -> (DatabaseQueue, PlaylistRepository, PlaylistCoverService) {
@@ -37,23 +38,24 @@ struct PlaylistCoverServiceTests {
             database: db,
             playlistRepository: plRepo,
             trackRepository: trRepo,
-            configRepository: cfRepo
+            configRepository: cfRepo,
+            coversDirectory: coversDir
         )
         return (db, plRepo, svc)
     }
 
     @Test func fallback_with_zero_tracks_writes_PNG() async throws {
         let (_, repo, svc) = try await makeService()
+        defer { cleanup() }
         let pl = try await repo.create(name: "Empty Test")
         let id = pl.id!
 
         await svc.regenerateCover(playlistId: id)
 
         // PNG must exist
-        let pngURL = Self.coversDir().appendingPathComponent("\(id).png")
+        let pngURL = coversDir.appendingPathComponent("\(id).png")
         #expect(FileManager.default.fileExists(atPath: pngURL.path),
                 "Fallback PNG was not written")
-        defer { try? FileManager.default.removeItem(at: pngURL) }
 
         // DB row updated
         let fetched = try await repo.fetch(id: id)
@@ -67,6 +69,7 @@ struct PlaylistCoverServiceTests {
 
     @Test func respects_cover_is_custom_flag() async throws {
         let (_, repo, svc) = try await makeService()
+        defer { cleanup() }
         let pl = try await repo.create(name: "Locked")
         let id = pl.id!
         try await repo.setCoverPath(id: id, path: "playlist-covers/sentinel.png", isCustom: true)
@@ -81,6 +84,7 @@ struct PlaylistCoverServiceTests {
 
     @Test func setCustomCover_flipsLockTo1() async throws {
         let (_, repo, svc) = try await makeService()
+        defer { cleanup() }
         let pl = try await repo.create(name: "Custom Test")
         let id = pl.id!
 
@@ -98,8 +102,7 @@ struct PlaylistCoverServiceTests {
 
         await svc.setCustomCover(playlistId: id, sourceURL: tmpPNG)
 
-        let pngURL = Self.coversDir().appendingPathComponent("\(id).png")
-        defer { try? FileManager.default.removeItem(at: pngURL) }
+        let pngURL = coversDir.appendingPathComponent("\(id).png")
 
         let fetched = try await repo.fetch(id: id)
         #expect(fetched?.coverIsCustom == 1, "setCustomCover must flip lock to 1")
@@ -109,6 +112,7 @@ struct PlaylistCoverServiceTests {
 
     @Test func resetToAuto_clearsLockAndRegens() async throws {
         let (_, repo, svc) = try await makeService()
+        defer { cleanup() }
         let pl = try await repo.create(name: "Reset Auto Test")
         let id = pl.id!
         // Precondition: custom
@@ -116,17 +120,18 @@ struct PlaylistCoverServiceTests {
 
         await svc.resetToAuto(playlistId: id)
 
-        let pngURL = Self.coversDir().appendingPathComponent("\(id).png")
-        defer { try? FileManager.default.removeItem(at: pngURL) }
+        let pngURL = coversDir.appendingPathComponent("\(id).png")
 
         let fetched = try await repo.fetch(id: id)
         #expect(fetched?.coverIsCustom == 0, "resetToAuto must clear the lock")
         #expect(fetched?.coverImagePath == "playlist-covers/\(id).png",
                 "resetToAuto must regenerate (path points at new auto cover)")
+        #expect(FileManager.default.fileExists(atPath: pngURL.path))
     }
 
     @Test func reentry_guard_skips_self_notifications() async throws {
         let (_, repo, svc) = try await makeService()
+        defer { cleanup() }
         // Keep `svc` alive across the await — the observer's [weak self] would
         // otherwise let the service be released before the test completes.
         _ = svc

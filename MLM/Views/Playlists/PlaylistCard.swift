@@ -387,12 +387,8 @@ struct PlaylistCard: View {
     }
 
     /// Resolved on-disk URL of the playlist-covers cache directory.
-    /// Same path as `PlaylistCoverService.ensureCoversDir`.
     static var coversDirectory: URL {
-        FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("com.musiclibrary.app")
-            .appendingPathComponent("playlist-covers")
+        DatabaseManager.defaultPlaylistCoversDirectory
     }
 
     // MARK: - Drop Target

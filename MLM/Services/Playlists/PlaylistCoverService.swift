@@ -58,6 +58,8 @@ final class PlaylistCoverService {
     private let playlistRepository: PlaylistRepository
     private let trackRepository: TrackRepository
     private let configRepository: ConfigRepository
+    /// Where cover PNGs are written; stored cover paths stay relative (`playlist-covers/<id>.png`).
+    private let coversDirectory: URL
 
     /// Serializes auto, custom, and reset mutations sharing one playlist PNG.
     private let operationGate = PlaylistCoverOperationGate()
@@ -74,12 +76,14 @@ final class PlaylistCoverService {
         database: any DatabaseWriter,
         playlistRepository: PlaylistRepository,
         trackRepository: TrackRepository,
-        configRepository: ConfigRepository
+        configRepository: ConfigRepository,
+        coversDirectory: URL = DatabaseManager.defaultPlaylistCoversDirectory
     ) {
         self.database = database
         self.playlistRepository = playlistRepository
         self.trackRepository = trackRepository
         self.configRepository = configRepository
+        self.coversDirectory = coversDirectory
         startObserving()
     }
 
@@ -214,7 +218,7 @@ final class PlaylistCoverService {
             // 6. Persist the path with isCustom=false (auto).
             try await playlistRepository.setCoverPath(
                 id: playlistId,
-                path: "playlist-covers/\(playlistId).png",
+                path: "\(DatabaseManager.playlistCoversFolderName)/\(playlistId).png",
                 isCustom: false
             )
 
@@ -259,7 +263,7 @@ final class PlaylistCoverService {
 
             try await playlistRepository.setCoverPath(
                 id: playlistId,
-                path: "playlist-covers/\(playlistId).png",
+                path: "\(DatabaseManager.playlistCoversFolderName)/\(playlistId).png",
                 isCustom: true   // D-05 sticky-lock
             )
             NotificationCenter.default.post(
@@ -343,12 +347,8 @@ final class PlaylistCoverService {
     }
 
     private func ensureCoversDir() throws -> URL {
-        let dir = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("com.musiclibrary.app")
-            .appendingPathComponent("playlist-covers")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
+        try FileManager.default.createDirectory(at: coversDirectory, withIntermediateDirectories: true)
+        return coversDirectory
     }
 
     private func resolveLocalURL(for track: Track, libraryRoot: String?) -> URL? {

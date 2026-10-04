@@ -43,7 +43,7 @@ final class DatabaseManager: Sendable {
         _ = try BackupService.performPreMigrationBackupIfNeeded(
             pool: pool,
             databasePath: databasePath,
-            coversDirectory: directory.appendingPathComponent("playlist-covers")
+            coversDirectory: Self.playlistCoversDirectory(forDatabaseAt: databasePath)
         )
 
         // Run all migrations
@@ -88,6 +88,27 @@ final class DatabaseManager: Sendable {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let appDir = appSupport.appendingPathComponent("com.musiclibrary.app")
         return appDir.appendingPathComponent("music_library.db")
+    }
+
+    // MARK: - Playlist Covers
+
+    /// Name of the playlist covers folder. Stored cover paths are relative to the
+    /// database's folder (`playlist-covers/<id>.png`).
+    static let playlistCoversFolderName = "playlist-covers"
+
+    /// Playlist covers always live next to the database.
+    static func playlistCoversDirectory(forDatabaseAt databasePath: URL) -> URL {
+        databasePath.deletingLastPathComponent().appendingPathComponent(playlistCoversFolderName)
+    }
+
+    /// Covers folder of the default database, for callers without a `DatabaseManager`.
+    static var defaultPlaylistCoversDirectory: URL {
+        playlistCoversDirectory(forDatabaseAt: defaultDatabasePath())
+    }
+
+    /// Covers folder of this database.
+    var playlistCoversDirectory: URL {
+        Self.playlistCoversDirectory(forDatabaseAt: databasePath)
     }
 
     // MARK: - Database Migrator
