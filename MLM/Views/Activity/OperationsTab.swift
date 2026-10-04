@@ -147,14 +147,6 @@ struct OperationsTab: View {
             .buttonStyle(.plain)
             .padding(.trailing, 16)
             .accessibilityIdentifier("operations_recent_clear_button")
-        case .clearAnalysisQueue:
-            Button("Clear") {
-                showClearQueueAlert = true
-            }
-            .font(MLMFont.muted)
-            .buttonStyle(.plain)
-            .padding(.trailing, 16)
-            .accessibilityIdentifier("operation_analysis_clear_button")
         default:
             EmptyView()
         }
@@ -348,7 +340,11 @@ struct OperationsTab: View {
             .buttonStyle(.bordered)
 
         case .clearAnalysisQueue:
-            EmptyView()
+            Button("Clear") {
+                showClearQueueAlert = true
+            }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("operation_analysis_clear_button")
 
         case .clearRecent:
             EmptyView()

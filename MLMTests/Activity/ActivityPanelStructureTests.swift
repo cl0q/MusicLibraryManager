@@ -332,6 +332,36 @@ struct ActivityPanelStructureTests {
         }
     }
 
+    // UI-008 regression lock: the ROW action renderer must wire .clearAnalysisQueue
+    // to the confirmation-alert trigger, not return EmptyView. The feed emits
+    // .clearAnalysisQueue only as a row action (rowForQueueSource), so the live
+    // route is actionButton → showClearQueueAlert → .alert → clearQueue(). Scoped
+    // to the actionButton function body to prove the row case specifically.
+    @Test
+    func operationsTab_rowClearAnalysisQueueOpensAlert() throws {
+        let src = try readSource("MLM/Views/Activity/OperationsTab.swift")
+
+        // Isolate the row actionButton(_ action:...) function body.
+        let fnStart = try #require(src.range(of: "func actionButton(")?.lowerBound,
+                "OperationsTab must define a row actionButton(_ action:) renderer")
+        let tail = src[fnStart...]
+        let fnEnd = tail.range(of: "\n    private func ")?.lowerBound ?? tail.endIndex
+        let body = String(tail[..<fnEnd])
+
+        // Within that body, the .clearAnalysisQueue case must set the alert trigger
+        // and must NOT be an EmptyView.
+        let caseStart = try #require(body.range(of: "case .clearAnalysisQueue:")?.lowerBound,
+                "actionButton must handle .clearAnalysisQueue (UI-008 row route)")
+        let caseTail = body[caseStart...]
+        let caseEnd = caseTail.range(of: "\n        case ")?.lowerBound ?? caseTail.endIndex
+        let caseBody = String(caseTail[..<caseEnd])
+
+        #expect(caseBody.contains("showClearQueueAlert = true"),
+                "The .clearAnalysisQueue ROW action must set showClearQueueAlert = true to open the confirmation alert (UI-008)")
+        #expect(!caseBody.contains("EmptyView()"),
+                "The .clearAnalysisQueue ROW action must render a control, not EmptyView (UI-008 dead-action regression)")
+    }
+
     // MARK: - Item 13: 250 ms search debounce
 
     @Test
