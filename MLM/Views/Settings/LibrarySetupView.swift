@@ -19,6 +19,23 @@ struct LibrarySetupView: View {
 
     var body: some View {
         Form {
+            // MARK: - Library File Section (A3)
+            if let package = container.activeLibrary?.packageURL {
+                Section {
+                    libraryFileRow(package)
+                    Toggle("Open the last library at launch", isOn: Binding(
+                        get: { LibraryLaunchCoordinator.shared.rememberLastLibrary },
+                        set: { LibraryLaunchCoordinator.shared.setRememberLastLibrary($0) }
+                    ))
+                } header: {
+                    Label("Library file", systemImage: "opticaldisc")
+                } footer: {
+                    Text("When off, MLM asks which library to open at launch.")
+                        .font(MLMFont.muted)
+                        .foregroundColor(.mlmInkMuted)
+                }
+            }
+
             // MARK: - Library Root Section
             Section {
                 libraryRootRow
@@ -69,6 +86,23 @@ struct LibrarySetupView: View {
     }
 
     // MARK: - Library Root Row
+
+    /// Library name, path of the library file and `Show in Finder`.
+    private func libraryFileRow(_ package: URL) -> some View {
+        LabeledContent(LibraryLaunchCoordinator.shared.activeLibraryName
+                       ?? package.deletingPathExtension().lastPathComponent) {
+            HStack(spacing: 8) {
+                Text(package.path)
+                    .font(MLMFont.data)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+                Button("Show in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([package])
+                }
+            }
+        }
+    }
 
     private var libraryRootRow: some View {
         VStack(alignment: .leading, spacing: 8) {

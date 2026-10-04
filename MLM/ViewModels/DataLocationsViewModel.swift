@@ -7,6 +7,8 @@ struct DataLocations: Sendable, Equatable {
     var credentialsFile: URL
     var transcodeCache: URL?
     var libraryFolder: URL?
+    /// The open library file (A3); `nil` while the pre-A3 layout is in use.
+    var libraryFile: URL? = nil
 }
 
 /// What the Backup tab knows about the backup folder.
@@ -70,6 +72,7 @@ enum LibrarySizeResult: Sendable, Equatable {
 final class DataLocationsViewModel {
 
     enum Location: CaseIterable, Sendable {
+        case libraryFile
         case database
         case playlistCovers
         case backups
@@ -109,7 +112,7 @@ final class DataLocationsViewModel {
         static let backupHint = "Change the backup folder in the Backup tab."
         static let transcodeHint = "Change the location in the Maintenance tab."
         static let recentChangesHelp = "Recent changes are kept in a separate file (-wal) and merged into the database automatically."
-        static let footer = "The database, playlist covers and credentials file are in your user Library folder and remain there if you delete the app. Audio files are never moved by this tab."
+        static let footer = "Library files and the credentials file remain on your Mac if you delete the app. Audio files are never moved by this tab."
     }
 
     // MARK: - State
@@ -258,6 +261,16 @@ final class DataLocationsViewModel {
         count == 1 ? "1 \(singular)" : "\(count.formatted()) \(plural)"
     }
 
+    /// The `Library file` row only exists once the library lives in a library file.
+    var showsLibraryFile: Bool { row(.libraryFile).url != nil }
+
+    /// Total size of the library file.
+    var libraryFileDetail: String? {
+        let file = row(.libraryFile)
+        guard file.state == .available, let size = file.sizeBytes else { return nil }
+        return Self.formatBytes(size)
+    }
+
     /// `‹total› · database file ‹size› · recent changes ‹size›`
     var databaseDetail: String? {
         guard let file = databaseFileBytes else { return nil }
@@ -353,6 +366,10 @@ final class DataLocationsViewModel {
         }
 
         var rows: [Location: LocationRow] = [:]
+
+        if let libraryFile = locations.libraryFile {
+            rows[.libraryFile] = directoryRow(libraryFile)
+        }
 
         let database = locations.database
         var databaseRow = LocationRow(url: database, state: state(of: database))

@@ -211,6 +211,18 @@ struct LibraryPackageTests {
         }
     }
 
+    @Test func reassignGivesACopyItsOwnIdentity() throws {
+        let dir = try makeTempDir()
+        let package = try LibraryPackage.createEmpty(named: "Copy", libraryId: "old", in: dir, now: fixedNow)
+        try LibraryPackage.reassignLibraryId("new", in: package, now: fixedNow.addingTimeInterval(60))
+        #expect(try LibraryPackage.readDatabaseLibraryId(at: LibraryPackage.databaseURL(in: package)) == "new")
+        let manifest = try LibraryPackageManifest.read(from: LibraryPackage.manifestURL(in: package))
+        #expect(manifest.libraryId == "new")
+        #expect(manifest.name == "Copy")
+        #expect(manifest.createdAt == fixedNow.addingTimeInterval(60))
+        #expect(try LibraryPackage.validate(at: package, expectedLibraryId: "new", now: fixedNow).manifestRepaired == false)
+    }
+
     @Test func readDatabaseLibraryIdDoesNotCreateMissingDatabase() throws {
         let dir = try makeTempDir()
         let dbURL = dir.appendingPathComponent("music_library.db")

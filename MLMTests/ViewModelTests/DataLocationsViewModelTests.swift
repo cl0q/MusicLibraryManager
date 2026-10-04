@@ -128,7 +128,8 @@ struct DataLocationsViewModelTests {
         #expect(vm.row(.credentialsFile).url == fx.locations.credentialsFile)
         #expect(vm.row(.transcodeCache).url == fx.locations.transcodeCache)
         #expect(vm.row(.libraryFolder).url == fx.locations.libraryFolder)
-        for location in DataLocationsViewModel.Location.allCases {
+        // Legacy-layout fixture: the library file row is covered by its own tests.
+        for location in DataLocationsViewModel.Location.allCases where location != .libraryFile {
             #expect(vm.row(location).state == .available, "\(location)")
             #expect(vm.row(location).canShowInFinder, "\(location)")
         }
@@ -142,6 +143,35 @@ struct DataLocationsViewModelTests {
         #expect(vm.trackCountText == "12,935 tracks" || vm.trackCountText == "12.935 tracks")
         #expect(vm.backupCount == 3)
         #expect(vm.isMeasuring == false)
+    }
+
+    @Test func libraryFileRowIsMeasuredAsAWhole() async throws {
+        let f = try Fixture()
+        defer { f.cleanup() }
+        var locations = f.locations
+        let package = f.root.appendingPathComponent("Main Library.mlibm")
+        try FileManager.default.createDirectory(at: package, withIntermediateDirectories: true)
+        try Data(count: 700).write(to: package.appendingPathComponent("music_library.db"))
+        try Data(count: 100).write(to: package.appendingPathComponent("library.json"))
+        locations.libraryFile = package
+
+        let vm = f.makeViewModel(locations: locations)
+        await vm.refresh()
+        let row = vm.row(.libraryFile)
+        #expect(row.state == .available)
+        #expect(row.url == package)
+        #expect((row.sizeBytes ?? 0) >= 800)
+        #expect(vm.libraryFileDetail == DataLocationsViewModel.formatBytes(row.sizeBytes ?? 0))
+        #expect(vm.showsLibraryFile)
+    }
+
+    @Test func legacyLayoutHasNoLibraryFileRow() async throws {
+        let f = try Fixture()
+        defer { f.cleanup() }
+        let vm = f.makeViewModel()
+        await vm.refresh()
+        #expect(!vm.showsLibraryFile)
+        #expect(vm.libraryFileDetail == nil)
     }
 
     @Test func databaseSidecarsAreReportedSeparately() async throws {
@@ -374,6 +404,6 @@ struct DataLocationsViewModelTests {
         #expect(Copy.recentChangesHelp
             == "Recent changes are kept in a separate file (-wal) and merged into the database automatically.")
         #expect(Copy.footer
-            == "The database, playlist covers and credentials file are in your user Library folder and remain there if you delete the app. Audio files are never moved by this tab.")
+            == "Library files and the credentials file remain on your Mac if you delete the app. Audio files are never moved by this tab.")
     }
 }

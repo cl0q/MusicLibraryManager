@@ -2,26 +2,20 @@ import AppKit
 import SwiftUI
 
 /// Window content while no library is open (A3): `No library open`, a library that can't
-/// be opened, and the `New Library` sheet. Minimal native placeholder — the real library
-/// picker is B1. Copy: UI-GROUNDTRUTH §3.17 / §5.6.
+/// be opened, and a Finder copy that needs its own identity. Minimal native placeholder —
+/// the real library picker is B1. Copy: UI-GROUNDTRUTH §3.17 / §5.6.
 struct LibraryLaunchStateView: View {
     let screen: LibraryLaunchCoordinator.Screen
-    let onCreateLibrary: (String) -> Void
+    let onNewLibrary: () -> Void
     let onOpenLibrary: (URL) -> Void
+    let onOpenAsSeparateLibrary: (URL) -> Void
     let onRetry: () -> Void
     let onDismissProblem: () -> Void
-
-    @State private var showNewLibrary = false
-    @State private var newLibraryName = ""
 
     var body: some View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.mlmBase)
-            .sheet(isPresented: $showNewLibrary) { newLibrarySheet }
-            .onAppear {
-                if screen == .createFirstLibrary { presentNewLibrary(defaultName: "Main Library") }
-            }
     }
 
     @ViewBuilder
@@ -57,6 +51,15 @@ struct LibraryLaunchStateView: View {
             } actions: {
                 Button("OK", action: onDismissProblem)
             }
+        case .duplicateCopy(let name, let originalName, let packageURL):
+            ContentUnavailableView {
+                Label("\"\(name)\" is a copy of \"\(originalName)\"", systemImage: "doc.on.doc")
+            } description: {
+                Text("To open it, MLM makes the copy a separate library. \"\(originalName)\" is not changed.")
+            } actions: {
+                Button("Open as separate library") { onOpenAsSeparateLibrary(packageURL) }
+                Button("Cancel", action: onDismissProblem)
+            }
         default:
             ContentUnavailableView {
                 Label("No library open", systemImage: "opticaldisc")
@@ -70,53 +73,9 @@ struct LibraryLaunchStateView: View {
 
     @ViewBuilder
     private var openAndNewButtons: some View {
-        Button("New Library…") { presentNewLibrary(defaultName: "New Library") }
-        Button("Open Library…", action: chooseLibraryFile)
-    }
-
-    private var newLibrarySheet: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("New Library")
-                .font(MLMFont.sectionHeader)
-            Form {
-                TextField("Name", text: $newLibraryName)
-            }
-            .formStyle(.columns)
-            Text("A library keeps its own tracks, playlists and settings. Audio files stay where they are.")
-                .font(MLMFont.muted)
-                .foregroundStyle(Color.mlmInkSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Spacer()
-                Button("Cancel", role: .cancel) { showNewLibrary = false }
-                    .keyboardShortcut(.cancelAction)
-                Button("Create") {
-                    showNewLibrary = false
-                    onCreateLibrary(newLibraryName.trimmingCharacters(in: .whitespacesAndNewlines))
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(newLibraryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        }
-        .padding(20)
-        .frame(width: 380)
-    }
-
-    private func presentNewLibrary(defaultName: String) {
-        newLibraryName = defaultName
-        showNewLibrary = true
-    }
-
-    /// Library files are directories; until the document type is registered (A3 Wave 4)
-    /// the panel offers them as folders.
-    private func chooseLibraryFile() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.treatsFilePackagesAsDirectories = false
-        if panel.runModal() == .OK, let url = panel.url {
-            onOpenLibrary(url)
+        Button("New Library…", action: onNewLibrary)
+        Button("Open Library…") {
+            if let url = LibraryFilePanel.chooseLibraryFile() { onOpenLibrary(url) }
         }
     }
 }

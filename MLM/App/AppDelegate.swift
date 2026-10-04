@@ -42,6 +42,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Library files opened in Finder (double-click, Open With) — at launch or while running.
+    /// The coordinator decides: launch library, open directly, or ask to switch (A3, A0 D9).
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let url = urls.first(where: { $0.pathExtension == LibraryPackage.fileExtension }) else { return }
+        Task { @MainActor in
+            await LibraryLaunchCoordinator.shared.handleOpen(url)
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         // Cleanup on termination
     }

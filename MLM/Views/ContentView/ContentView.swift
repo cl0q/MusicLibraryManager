@@ -110,8 +110,9 @@ struct ContentView: View {
                 // No library open yet (A3): first run, picker placeholder, or a problem.
                 LibraryLaunchStateView(
                     screen: launch.screen,
-                    onCreateLibrary: { name in Task { await launch.createLibrary(named: name) } },
+                    onNewLibrary: { launch.requestNewLibrary() },
                     onOpenLibrary: { url in Task { await launch.open(packageAt: url) } },
+                    onOpenAsSeparateLibrary: { url in Task { await launch.openAsSeparateLibrary(url) } },
                     onRetry: { Task { await launch.retry() } },
                     onDismissProblem: { launch.dismissProblem() }
                 )
@@ -119,6 +120,7 @@ struct ContentView: View {
                 loadingView
             }
         }
+        .modifier(LibraryFilePresentation(launch: launch))
         .focusedSceneValue(\.selectedSection, $selectedSection)
         .focusedSceneValue(\.playbackViewModel, container.playbackViewModel)
         // Handle library drive unmount — pause playback
@@ -718,5 +720,91 @@ private struct GlobalSearchField: View {
         container.searchCoordinator.query = text
         let hasLocal = hasLocalTable()
         container.searchCoordinator.queryChanged(hasLocalTable: hasLocal)
+    }
+}
+
+// MARK: - Library files (A3)
+
+/// `New Library` sheet, `Switch to "‹name›"?` and problems with a library chosen while
+/// another one is open. Copy: UI-GROUNDTRUTH §3.17.
+private struct LibraryFilePresentation: ViewModifier {
+    let launch: LibraryLaunchCoordinator
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(item: Binding(get: { launch.newLibraryRequest }, set: { if $0 == nil { launch.cancelNewLibrary() } })) { request in
+                NewLibrarySheet(
+                    defaultName: request.defaultName,
+                    onCreate: { name in Task { await launch.createLibrary(named: name) } },
+                    onCancel: { launch.cancelNewLibrary() }
+                )
+            }
+            .alert(
+                "Switch to \"\(launch.pendingSwitch?.name ?? "")\"?",
+                isPresented: Binding(get: { launch.pendingSwitch != nil }, set: { if !$0 { launch.cancelSwitch() } })
+            ) {
+                Button("Relaunch") { launch.confirmSwitch() }
+                Button("Cancel", role: .cancel) { launch.cancelSwitch() }
+            } message: {
+                Text("MLM relaunches to open this library. Finish active downloads and syncs first.")
+            }
+            .alert(
+                problemTitle,
+                isPresented: Binding(get: { launch.switchProblem != nil }, set: { if !$0 { launch.dismissProblem() } })
+            ) {
+                problemButtons
+            } message: {
+                problemMessage
+            }
+    }
+
+    private var problemTitle: String {
+        switch launch.switchProblem {
+        case .unavailable(let entry, _): return "\"\(entry.displayName)\" can't be opened"
+        case .mismatch(let name, _): return "\"\(name)\" can't be opened"
+        case .invalid(let name): return "\"\(name)\" isn't a valid library file."
+        case .duplicateCopy(let name, let originalName, _): return "\"\(name)\" is a copy of \"\(originalName)\""
+        default: return ""
+        }
+    }
+
+    @ViewBuilder
+    private var problemMessage: some View {
+        switch launch.switchProblem {
+        case .unavailable(_, .notConnected):
+            Text("The library file is on a disk that isn't connected. Connect the disk, then try again.")
+        case .unavailable:
+            Text("The library file isn't where MLM last found it. Open it from its new location, or create a new library.")
+        case .mismatch:
+            Text("The library file and its database don't belong together. This can happen when files inside a library file were replaced. MLM didn't change anything.")
+        case .duplicateCopy(_, let originalName, _):
+            Text("To open it, MLM makes the copy a separate library. \"\(originalName)\" is not changed.")
+        default:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var problemButtons: some View {
+        switch launch.switchProblem {
+        case .mismatch(_, let packageURL):
+            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([packageURL]) }
+            Button("OK", role: .cancel) { launch.dismissProblem() }
+        case .duplicateCopy(_, _, let packageURL):
+            Button("Open as separate library") { Task { await launch.openAsSeparateLibrary(packageURL) } }
+            Button("Cancel", role: .cancel) { launch.dismissProblem() }
+        case .unavailable:
+            Button("Open Library…") {
+                launch.dismissProblem()
+                if let url = LibraryFilePanel.chooseLibraryFile() { Task { await launch.handleOpen(url) } }
+            }
+            Button("New Library…") {
+                launch.dismissProblem()
+                launch.requestNewLibrary()
+            }
+            Button("Cancel", role: .cancel) { launch.dismissProblem() }
+        default:
+            Button("OK", role: .cancel) { launch.dismissProblem() }
+        }
     }
 }

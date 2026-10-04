@@ -107,6 +107,40 @@ cat > "${APP_BUNDLE}/Contents/Info.plist" <<'PLIST'
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
+  <!-- Library files (A3, A0 D9): a .mlibm directory Finder shows as one file. -->
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key><string>com.ilczuk.mlm.library</string>
+      <key>UTTypeDescription</key><string>MLM Library File</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>com.apple.package</string>
+        <string>public.data</string>
+      </array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array>
+          <string>mlibm</string>
+        </array>
+      </dict>
+    </dict>
+  </array>
+  <!-- TODO(B1): dedicated .mlibm document icon; until then macOS derives one from the app icon. -->
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key><string>MLM Library File</string>
+      <key>CFBundleTypeRole</key><string>Editor</string>
+      <key>LSHandlerRank</key><string>Owner</string>
+      <key>LSTypeIsPackage</key><true/>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>com.ilczuk.mlm.library</string>
+      </array>
+    </dict>
+  </array>
 </dict>
 </plist>
 PLIST

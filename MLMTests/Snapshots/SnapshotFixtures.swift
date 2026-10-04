@@ -367,6 +367,7 @@ enum SnapshotFixtures {
         "Settings/LibrarySetupView.swift": "Deferred: import/filesystem state and folder panels require inert import model.",
         "Shared/LibraryAdoptionSheet.swift": "Deferred: A3 adoption sheet driven by the launch coordinator; baselines wait for the B1 library picker design.",
         "Shared/LibraryLaunchStateView.swift": "Deferred: A3 launch placeholder with open panel; baselines wait for the B1 library picker design.",
+        "Shared/NewLibrarySheet.swift": "Deferred: A3 New Library sheet; baselines wait for the B1 library picker design.",
         "Settings/MaintenanceView.swift": "Deferred: reads shared BatchControl/maintenance queues and paths; inject passive state.",
         "Settings/SettingsView.swift": "Deferred: AppStorage selection and PlaybackSettings read real defaults; inject preference store.",
         "Settings/SourcesSetupView.swift": "Deferred: AppStorage cookie and credential state require isolated preferences and auth provider.",
@@ -426,6 +427,7 @@ Shared/DownloadRetryBudget.swift
 Shared/FirstRunWizard.swift
 Shared/LibraryAdoptionSheet.swift
 Shared/LibraryLaunchStateView.swift
+Shared/NewLibrarySheet.swift
 Shared/SelectionCreationSheets.swift
 Shared/SpringLoadableHover.swift
 Shared/StatusChip.swift

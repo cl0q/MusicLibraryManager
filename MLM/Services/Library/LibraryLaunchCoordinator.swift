@@ -27,6 +27,27 @@ final class LibraryLaunchCoordinator {
         case mismatch(name: String, packageURL: URL)
         /// `"‹name›" isn't a valid library file.`
         case invalid(name: String)
+        /// `"‹name›" is a copy of "‹original›"` — a Finder copy; `Open as separate library`.
+        case duplicateCopy(name: String, originalName: String, packageURL: URL)
+    }
+
+    /// `Switch to "‹name›"?` — waiting for `Relaunch` / `Cancel`.
+    struct SwitchRequest: Equatable {
+        let url: URL
+        let name: String
+    }
+
+    /// The `New Library` sheet is up, with this name prefilled.
+    struct NewLibraryRequest: Identifiable, Equatable {
+        let id = UUID()
+        let defaultName: String
+    }
+
+    /// A registered library for `Open Recent`, with whether it can be opened now.
+    struct RecentLibrary: Equatable, Identifiable {
+        let entry: LibraryRegistry.Entry
+        let availability: LibraryAvailability
+        var id: String { entry.libraryId }
     }
 
     /// Progress of the adoption sheet.
@@ -65,6 +86,24 @@ final class LibraryLaunchCoordinator {
 
     private(set) var screen: Screen = .resolving
     private(set) var adoptionState: AdoptionState = .idle
+    private(set) var pendingSwitch: SwitchRequest?
+    private(set) var newLibraryRequest: NewLibraryRequest?
+    /// A library chosen while another is open couldn't be opened (shown as an alert).
+    private(set) var switchProblem: Screen?
+    /// Registry setting behind `Open the last library at launch`.
+    private(set) var rememberLastLibrary = true
+    /// Other registered libraries, most recently opened first (`Open Recent`).
+    private(set) var recentLibraries: [RecentLibrary] = []
+    /// The open library file, `nil` for the legacy layout or before anything is open.
+    private(set) var activePackageURL: URL?
+    private(set) var activeLibraryName: String?
+    private var activeLibraryId: String?
+
+    private var hasStarted = false
+    /// A library file opened before launch started (double-click to launch).
+    private var launchOpenURL: URL?
+    /// A library file opened while launch was resolving; handled once it settles.
+    private var queuedOpenURL: URL?
 
     let store: LibraryRegistryStore
     private let adoption: LibraryAdoption
@@ -107,6 +146,14 @@ final class LibraryLaunchCoordinator {
     ///
     /// - Parameter openedFileURL: a library file the user opened to launch the app.
     func start(openedFileURL: URL? = nil) async {
+        await resolveAndOpen(openedFileURL: openedFileURL)
+        if let queued = queuedOpenURL.take() {
+            await handleOpen(queued)
+        }
+    }
+
+    private func resolveAndOpen(openedFileURL: URL?) async {
+        hasStarted = true
         screen = .resolving
         let registry: LibraryRegistry
         do {
@@ -115,13 +162,14 @@ final class LibraryLaunchCoordinator {
             reportFailure(error)
             return
         }
+        refreshRegistryState(registry)
 
         let pending = pendingOpen.take().map { URL(fileURLWithPath: $0) }
         let decision = LibraryLaunchResolver.resolve(.init(
             registry: registry,
             legacyDatabaseExists: FileManager.default.fileExists(atPath: legacyDatabaseURL.path),
             adoptionInProgress: adoption.isInProgress,
-            openedFileURL: openedFileURL ?? pending,
+            openedFileURL: openedFileURL ?? launchOpenURL.take() ?? pending,
             availability: { LibraryRegistry.availability(of: $0) }
         ))
 
@@ -135,6 +183,7 @@ final class LibraryLaunchCoordinator {
             await resumeAdoption()
         case .createFirstLibrary:
             screen = .createFirstLibrary
+            newLibraryRequest = NewLibraryRequest(defaultName: "Main Library")
         case .noLibrary:
             screen = .noLibrary
         case .libraryUnavailable(let entry, let availability):
@@ -147,9 +196,89 @@ final class LibraryLaunchCoordinator {
         await start()
     }
 
-    /// `OK` on a mismatch / invalid screen.
+    /// `OK` / `Cancel` on a problem: the alert while a library is open, otherwise the screen.
     func dismissProblem() {
-        screen = .noLibrary
+        if switchProblem != nil {
+            switchProblem = nil
+        } else {
+            screen = .noLibrary
+        }
+    }
+
+    // MARK: - Opening files (double-click, Open Library…, Open Recent)
+
+    /// Route a library file the user opened, whatever state the app is in.
+    func handleOpen(_ url: URL) async {
+        let url = Self.canonical(url)
+        guard hasStarted else {
+            launchOpenURL = url
+            return
+        }
+        switch screen {
+        case .opened:
+            guard url.path != activePackageURL?.path else { return }
+            pendingSwitch = SwitchRequest(url: url, name: url.deletingPathExtension().lastPathComponent)
+        case .resolving:
+            queuedOpenURL = url
+        case .offerAdoption:
+            // The adoption sheet comes first; the file can be opened afterwards.
+            break
+        default:
+            await open(packageAt: url)
+        }
+    }
+
+    /// `Relaunch` on `Switch to "‹name›"?`.
+    func confirmSwitch() {
+        guard let request = pendingSwitch else { return }
+        pendingSwitch = nil
+        if case .failed(let problem) = switchLibrary(to: request.url) {
+            switchProblem = problem
+        }
+    }
+
+    func cancelSwitch() {
+        pendingSwitch = nil
+    }
+
+    /// `Open as separate library` on a Finder copy: new identity, then open (or switch).
+    func openAsSeparateLibrary(_ url: URL) async {
+        switchProblem = nil
+        do {
+            try LibraryPackage.reassignLibraryId(UUID().uuidString.lowercased(), in: url, now: now())
+        } catch {
+            let problem = Screen.invalid(name: url.deletingPathExtension().lastPathComponent)
+            if screen == .opened { switchProblem = problem } else { screen = problem }
+            return
+        }
+        if screen == .opened {
+            if case .failed(let problem) = switchLibrary(to: url) { switchProblem = problem }
+        } else {
+            await open(packageAt: url)
+        }
+    }
+
+    // MARK: - Settings
+
+    func setRememberLastLibrary(_ remember: Bool) {
+        guard var registry = try? store.load(now: now()).registry else { return }
+        registry.rememberLastLibrary = remember
+        do {
+            try store.save(registry)
+            rememberLastLibrary = remember
+        } catch {
+            AppLogger.shared.error("Saving library setting failed: \(error)", source: "Library")
+        }
+    }
+
+    private func refreshRegistryState(_ registry: LibraryRegistry) {
+        rememberLastLibrary = registry.rememberLastLibrary
+        recentLibraries = registry.recentEntries
+            .filter { $0.libraryId != activeLibraryId }
+            .map { RecentLibrary(entry: $0, availability: LibraryRegistry.availability(of: $0.url)) }
+        if let activeLibraryId, let entry = registry.entry(withId: activeLibraryId) {
+            activeLibraryName = entry.displayName
+        }
     }
 
     // MARK: - Open / create (nothing open yet)
@@ -164,18 +293,43 @@ final class LibraryLaunchCoordinator {
         }
     }
 
-    /// `New Library` sheet → create in the default folder, register, open.
+    /// `New Library…` (menu or launch screen).
+    func requestNewLibrary() {
+        newLibraryRequest = NewLibraryRequest(defaultName: screen == .createFirstLibrary ? "Main Library" : "New Library")
+    }
+
+    func cancelNewLibrary() {
+        newLibraryRequest = nil
+    }
+
+    /// `New Library` sheet → create in the default folder, register, open. While another
+    /// library is open, the new one is offered as a switch instead.
     func createLibrary(named name: String) async {
+        newLibraryRequest = nil
         do {
-            let package = try LibraryPackage.createEmpty(
+            let libraryId = UUID().uuidString.lowercased()
+            let package = Self.canonical(try LibraryPackage.createEmpty(
                 named: name,
-                libraryId: UUID().uuidString.lowercased(),
+                libraryId: libraryId,
                 in: store.librariesDirectory,
                 now: now()
-            )
-            await open(packageAt: package)
+            ))
+            if screen == .opened {
+                var registry = try store.load(now: now()).registry
+                registry.upsert(libraryId: libraryId, url: package, name: name)
+                try store.save(registry)
+                refreshRegistryState(registry)
+                pendingSwitch = SwitchRequest(url: package, name: name)
+            } else {
+                await open(packageAt: package)
+            }
         } catch {
-            reportFailure(error)
+            if screen == .opened {
+                AppLogger.shared.error("Creating a library failed: \(error)", source: "Library")
+                switchProblem = .invalid(name: name)
+            } else {
+                reportFailure(error)
+            }
         }
     }
 
@@ -275,6 +429,11 @@ final class LibraryLaunchCoordinator {
     private func finishOpening(_ location: LibraryLocation) async {
         do {
             try await openLibrary(location)
+            activePackageURL = location.packageURL
+            if let registry = try? store.load(now: now()).registry {
+                activeLibraryId = location.packageURL.flatMap { registry.entry(at: $0)?.libraryId }
+                refreshRegistryState(registry)
+            }
             screen = .opened
         } catch {
             reportFailure(error)
@@ -311,7 +470,7 @@ final class LibraryLaunchCoordinator {
         if let other = registry.entry(withId: libraryId),
            other.url.standardizedFileURL.path != url.standardizedFileURL.path,
            FileManager.default.fileExists(atPath: other.url.path) {
-            return .problem(.mismatch(name: displayName, packageURL: url))
+            return .problem(.duplicateCopy(name: displayName, originalName: other.displayName, packageURL: url))
         }
 
         registry.upsert(libraryId: libraryId, url: url, name: validated.manifest.name)
@@ -339,4 +498,12 @@ final class LibraryLaunchCoordinator {
 extension LibraryRegistry.Entry {
     /// Display name of an entry; falls back to the file name.
     var displayName: String { name.isEmpty ? url.deletingPathExtension().lastPathComponent : name }
+}
+
+private extension Optional {
+    /// Returns the value and clears the optional.
+    mutating func take() -> Wrapped? {
+        defer { self = nil }
+        return self
+    }
 }

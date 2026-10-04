@@ -23,6 +23,8 @@ struct LibraryLaunchCoordinatorTests {
         var relaunches = 0
         var pendingPath: String?
         var openError: Error?
+        /// Runs while the container is "opening" (a suspension point during launch).
+        var duringOpen: (@MainActor () async -> Void)?
         var coordinator: LibraryLaunchCoordinator!
 
         init(now: Date) throws {
@@ -49,6 +51,10 @@ struct LibraryLaunchCoordinatorTests {
                     set: { [unowned self] in self.pendingPath = $0 }),
                 openLibrary: { [unowned self] location in
                     if let openError = self.openError { throw openError }
+                    if let duringOpen = self.duringOpen {
+                        self.duringOpen = nil
+                        await duringOpen()
+                    }
                     self.opened.append(location)
                 },
                 reportFailure: { [unowned self] in self.failures.append(String(describing: $0)) },
@@ -289,8 +295,7 @@ struct LibraryLaunchCoordinatorTests {
     }
 
     @Test func finderCopyIsNotSilentlyRepointed() async throws {
-        // Interim (Wave 2): a copy whose id is registered at another existing file is held
-        // as a mismatch; Wave 4 adds the "give the copy a new identity" prompt.
+        // A copy whose id is registered at another existing file asks first (decision 12).
         let f = try Fixture(now: fixedNow)
         let original = try f.makePackage("Main Library", id: "lib-a")
         try f.register(original, id: "lib-a", name: "Main Library")
@@ -298,9 +303,184 @@ struct LibraryLaunchCoordinatorTests {
         try FileManager.default.copyItem(at: original, to: copy)
 
         await f.coordinator.open(packageAt: copy)
-        #expect(f.coordinator.screen == .mismatch(name: "Main Library copy", packageURL: f.canonical(copy)))
+        #expect(f.coordinator.screen == .duplicateCopy(
+            name: "Main Library copy", originalName: "Main Library", packageURL: f.canonical(copy)))
         #expect(f.opened.isEmpty)
         #expect(try f.registry().entry(withId: "lib-a")?.url == f.canonical(original))
+    }
+
+    @Test func copyOpensAsASeparateLibraryWithANewIdentity() async throws {
+        let f = try Fixture(now: fixedNow)
+        let original = try f.makePackage("Main Library", id: "lib-a")
+        try f.register(original, id: "lib-a", name: "Main Library")
+        let copy = f.root.appendingPathComponent("Main Library copy.mlibm")
+        try FileManager.default.copyItem(at: original, to: copy)
+        await f.coordinator.open(packageAt: copy)
+
+        await f.coordinator.openAsSeparateLibrary(f.canonical(copy))
+        let newId = try #require(try LibraryPackage.readDatabaseLibraryId(at: LibraryPackage.databaseURL(in: copy)))
+        #expect(newId != "lib-a")
+        #expect(try LibraryPackageManifest.read(from: LibraryPackage.manifestURL(in: copy)).libraryId == newId)
+        #expect(try LibraryPackage.readDatabaseLibraryId(at: LibraryPackage.databaseURL(in: original)) == "lib-a")
+        let registry = try f.registry()
+        #expect(registry.libraries.count == 2)
+        #expect(registry.entry(withId: "lib-a")?.url == f.canonical(original))
+        #expect(f.opened == [.package(f.canonical(copy))])
+    }
+
+    // MARK: - Opening files (double-click, Open Library…, Open Recent)
+
+    @Test func fileOpenedBeforeLaunchIsTheLaunchLibrary() async throws {
+        let f = try Fixture(now: fixedNow)
+        let a = try f.makePackage("A", id: "lib-a")
+        let b = try f.makePackage("B", id: "lib-b")
+        try f.register(a, id: "lib-a", name: "A")
+        await f.coordinator.handleOpen(b)
+        #expect(f.opened.isEmpty)
+        await f.coordinator.start()
+        #expect(f.opened == [.package(f.canonical(b))])
+    }
+
+    @Test func fileOpenedWhileLaunchIsResolvingIsHandledAfterwards() async throws {
+        let f = try Fixture(now: fixedNow)
+        let a = try f.makePackage("A", id: "lib-a")
+        let b = try f.makePackage("B", id: "lib-b")
+        try f.register(a, id: "lib-a", name: "A")
+        let coordinator = f.coordinator!
+        f.duringOpen = { await coordinator.handleOpen(b) }
+        await f.coordinator.start()
+        #expect(f.opened == [.package(f.canonical(a))])
+        #expect(f.coordinator.pendingSwitch == .init(url: f.canonical(b), name: "B"))
+    }
+
+    @Test func fileOpenedOnALaunchScreenOpensDirectly() async throws {
+        let f = try Fixture(now: fixedNow)
+        await f.coordinator.start()   // nothing anywhere → first-library screen
+        let b = try LibraryPackage.createEmpty(
+            named: "B", libraryId: "lib-b", in: f.root.appendingPathComponent("disk"), now: Date())
+        await f.coordinator.handleOpen(b)
+        #expect(f.opened == [.package(f.canonical(b))])
+    }
+
+    @Test func fileOpenedWhileALibraryIsOpenAsksToSwitch() async throws {
+        let f = try Fixture(now: fixedNow)
+        let a = try f.makePackage("A", id: "lib-a")
+        let b = try f.makePackage("B", id: "lib-b")
+        try f.register(a, id: "lib-a", name: "A")
+        await f.coordinator.start()
+
+        await f.coordinator.handleOpen(b)
+        #expect(f.coordinator.pendingSwitch == .init(url: f.canonical(b), name: "B"))
+        #expect(f.relaunches == 0)
+
+        f.coordinator.confirmSwitch()
+        #expect(f.relaunches == 1)
+        #expect(f.coordinator.pendingSwitch == nil)
+        #expect(try f.registry().lastActiveLibraryId == "lib-b")
+    }
+
+    @Test func cancellingTheSwitchChangesNothing() async throws {
+        let f = try Fixture(now: fixedNow)
+        let a = try f.makePackage("A", id: "lib-a")
+        let b = try f.makePackage("B", id: "lib-b")
+        try f.register(a, id: "lib-a", name: "A")
+        await f.coordinator.start()
+        await f.coordinator.handleOpen(b)
+        f.coordinator.cancelSwitch()
+        #expect(f.coordinator.pendingSwitch == nil)
+        #expect(f.relaunches == 0)
+        #expect(try f.registry().lastActiveLibraryId == "lib-a")
+    }
+
+    @Test func openingTheOpenLibraryAgainDoesNothing() async throws {
+        let f = try Fixture(now: fixedNow)
+        let a = try f.makePackage("A", id: "lib-a")
+        try f.register(a, id: "lib-a", name: "A")
+        await f.coordinator.start()
+        await f.coordinator.handleOpen(a)
+        #expect(f.coordinator.pendingSwitch == nil)
+        #expect(f.opened.count == 1)
+    }
+
+    @Test func switchProblemIsReportedWithoutRelaunch() async throws {
+        let f = try Fixture(now: fixedNow)
+        let a = try f.makePackage("A", id: "lib-a")
+        try f.register(a, id: "lib-a", name: "A")
+        await f.coordinator.start()
+        let empty = f.root.appendingPathComponent("Empty.mlibm")
+        try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+
+        await f.coordinator.handleOpen(empty)
+        f.coordinator.confirmSwitch()
+        #expect(f.relaunches == 0)
+        #expect(f.coordinator.switchProblem == .invalid(name: "Empty"))
+        f.coordinator.dismissProblem()
+        #expect(f.coordinator.switchProblem == nil)
+        #expect(f.coordinator.screen == .opened)
+    }
+
+    @Test func newLibraryWhileOpenIsCreatedThenOfferedAsSwitch() async throws {
+        let f = try Fixture(now: fixedNow)
+        let a = try f.makePackage("A", id: "lib-a")
+        try f.register(a, id: "lib-a", name: "A")
+        await f.coordinator.start()
+
+        await f.coordinator.createLibrary(named: "Second")
+        let second = f.store.librariesDirectory.appendingPathComponent("Second.mlibm")
+        #expect(FileManager.default.fileExists(atPath: second.path))
+        #expect(f.coordinator.pendingSwitch == .init(url: f.canonical(second), name: "Second"))
+        #expect(f.opened.count == 1)
+    }
+
+    @Test func firstRunAsksForMainLibrary() async throws {
+        let f = try Fixture(now: fixedNow)
+        await f.coordinator.start()
+        #expect(f.coordinator.newLibraryRequest?.defaultName == "Main Library")
+    }
+
+    @Test func newLibraryFromTheMenuSuggestsNewLibrary() async throws {
+        let f = try Fixture(now: fixedNow)
+        let a = try f.makePackage("A", id: "lib-a")
+        try f.register(a, id: "lib-a", name: "A")
+        await f.coordinator.start()
+        #expect(f.coordinator.newLibraryRequest == nil)
+        f.coordinator.requestNewLibrary()
+        #expect(f.coordinator.newLibraryRequest?.defaultName == "New Library")
+        f.coordinator.cancelNewLibrary()
+        #expect(f.coordinator.newLibraryRequest == nil)
+    }
+
+    // MARK: - Settings and menu state
+
+    @Test func rememberLastLibraryIsReadAndWritten() async throws {
+        let f = try Fixture(now: fixedNow)
+        let a = try f.makePackage("A", id: "lib-a")
+        try f.register(a, id: "lib-a", name: "A")
+        await f.coordinator.start()
+        #expect(f.coordinator.rememberLastLibrary)
+        f.coordinator.setRememberLastLibrary(false)
+        #expect(!f.coordinator.rememberLastLibrary)
+        #expect(try f.registry().rememberLastLibrary == false)
+    }
+
+    @Test func recentLibrariesExcludeTheOpenOneAndCarryTheirState() async throws {
+        let f = try Fixture(now: fixedNow)
+        let a = try f.makePackage("A", id: "lib-a")
+        let b = try f.makePackage("B", id: "lib-b")
+        try f.register(a, id: "lib-a", name: "A")
+        try f.register(b, id: "lib-b", name: "B", active: false)
+        try f.register(f.root.appendingPathComponent("Gone.mlibm"), id: "lib-c", name: "Gone", active: false)
+        var registry = try f.registry()
+        registry.markOpened(libraryId: "lib-c", at: fixedNow.addingTimeInterval(-60))
+        registry.markOpened(libraryId: "lib-b", at: fixedNow.addingTimeInterval(-30))
+        registry.lastActiveLibraryId = "lib-a"
+        try f.store.save(registry)
+        await f.coordinator.start()
+
+        let recent = f.coordinator.recentLibraries
+        #expect(recent.map(\.entry.libraryId) == ["lib-b", "lib-c"])
+        #expect(recent.map(\.availability) == [.available, .notFound])
+        #expect(f.coordinator.activeLibraryName == "A")
     }
 
     @Test func invalidLibraryFileIsReported() async throws {

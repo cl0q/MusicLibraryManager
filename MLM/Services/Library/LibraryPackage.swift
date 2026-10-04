@@ -143,6 +143,30 @@ enum LibraryPackage {
         try readDatabaseIdentity(at: url).libraryId
     }
 
+    /// Gives a Finder copy its own identity (Step-0 decision 12): replaces the database's
+    /// `library_id` and rewrites the manifest for a new library with the same name. Only
+    /// called after the user chose `Open as separate library`.
+    static func reassignLibraryId(_ libraryId: String, in package: URL, now: Date) throws {
+        let database = databaseURL(in: package)
+        var config = Configuration()
+        config.foreignKeysEnabled = false
+        let queue = try DatabaseQueue(path: database.path, configuration: config)
+        try queue.write { db in
+            try db.execute(
+                sql: "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES ('library_id', ?, datetime('now'))",
+                arguments: [libraryId])
+        }
+        try queue.close()
+        let name = (try? LibraryPackageManifest.read(from: manifestURL(in: package)).name)
+            ?? package.deletingPathExtension().lastPathComponent
+        try LibraryPackageManifest(
+            libraryId: libraryId,
+            name: name,
+            createdAt: now,
+            schemaVersion: try readDatabaseIdentity(at: database).schemaVersion
+        ).write(to: manifestURL(in: package))
+    }
+
     /// Library id plus the last applied migration (the manifest's `schema_version`).
     ///
     /// Uses a plain connection (not read-only) so WAL contents are seen.

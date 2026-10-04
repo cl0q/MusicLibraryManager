@@ -320,6 +320,7 @@ final class DependencyContainer {
             self.backupService = service
             // Launch-throttled backup (at most once per 24 h). Failure is logged, never fatal.
             Task.detached {
+                await service.ensureDefaultDestinationExists()
                 do {
                     if let info = try await service.createBackupIfDue() {
                         AppLogger.shared.info("Launch backup created: \(info.url.lastPathComponent)", source: "Backup")

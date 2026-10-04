@@ -94,6 +94,11 @@ struct MLMApp: App {
                     createNewPlaylist()
                 }
                 .keyboardShortcut("n")
+
+                Divider()
+
+                // Library files (A3): New Library… · Open Library… ⌘O · Open Recent ▸
+                LibraryCommands(launch: LibraryLaunchCoordinator.shared)
             }
 
             // MARK: - Navigate menu (⌘1–⌘7)

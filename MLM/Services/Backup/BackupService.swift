@@ -161,6 +161,14 @@ final class BackupService: Sendable {
         await scope().destination
     }
 
+    /// Create this library's default backup folder so it shows as a location before the
+    /// first backup. A custom folder is never created (it may be on a disconnected volume).
+    func ensureDefaultDestinationExists() async {
+        let scope = await scope()
+        guard scope.customDestination == nil else { return }
+        try? fileManager.createDirectory(at: scope.destination, withIntermediateDirectories: true)
+    }
+
     /// `library_id` of the open library (`""` when the database has none).
     private func activeLibraryId() async -> String {
         ((try? await configRepository.get(key: "library_id")) ?? nil) ?? ""

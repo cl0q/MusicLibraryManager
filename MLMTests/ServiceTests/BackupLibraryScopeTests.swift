@@ -80,6 +80,27 @@ struct BackupLibraryScopeTests {
         #expect(await a.service().destinationDirectory() == custom)
     }
 
+    @Test func defaultFolderIsCreatedSoStorageLocationFindsIt() async throws {
+        let root = try makeRoot()
+        let backups = root.appendingPathComponent("backups")
+        let a = try await Library(id: "lib-a", in: root, backupsRoot: backups)
+        await a.service().ensureDefaultDestinationExists()
+        var isDirectory: ObjCBool = false
+        #expect(FileManager.default.fileExists(atPath: backups.appendingPathComponent("lib-a").path, isDirectory: &isDirectory))
+        #expect(isDirectory.boolValue)
+    }
+
+    @Test func customFolderIsNeverCreated() async throws {
+        // A custom folder may sit on a disconnected volume; creating it would put a stray
+        // folder on the startup disk.
+        let root = try makeRoot()
+        let custom = root.appendingPathComponent("not-mounted/backups")
+        let a = try await Library(id: "lib-a", in: root, backupsRoot: root.appendingPathComponent("backups"),
+                                  customDestination: custom)
+        await a.service().ensureDefaultDestinationExists()
+        #expect(!FileManager.default.fileExists(atPath: custom.path))
+    }
+
     @Test func productionBackupsRootIsInApplicationSupport() {
         #expect(BackupService.defaultBackupsRoot.path.hasSuffix(
             "Library/Application Support/com.musiclibrary.app/backups"))

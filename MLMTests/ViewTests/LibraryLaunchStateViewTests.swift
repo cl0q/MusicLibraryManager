@@ -18,8 +18,13 @@ struct LibraryLaunchStateViewTests {
         try String(contentsOf: projectRoot.appendingPathComponent(relativePath), encoding: .utf8)
     }
 
+    /// The launch placeholder plus the `New Library` sheet it opens (A3 Wave 4 moved the
+    /// sheet into its own file so File → New Library… can use it too).
     private var viewSource: String {
-        get throws { try source("MLM/Views/Shared/LibraryLaunchStateView.swift") }
+        get throws {
+            try source("MLM/Views/Shared/LibraryLaunchStateView.swift")
+                + source("MLM/Views/Shared/NewLibrarySheet.swift")
+        }
     }
 
     private func stringLiterals(in source: String) throws -> [String] {
@@ -37,7 +42,8 @@ struct LibraryLaunchStateViewTests {
     }
 
     @Test func usesApprovedCopy() throws {
-        let src = try viewSource
+        // The default names ("Main Library" / "New Library") come from the coordinator.
+        let src = try viewSource + source("MLM/Services/Library/LibraryLaunchCoordinator.swift")
         let approved = [
             "No library open",
             "Create a new library or open an existing library file.",

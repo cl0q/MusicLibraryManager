@@ -84,7 +84,8 @@ struct DataLocationsViewTests {
             "Change the backup folder in the Backup tab.",
             "Change the location in the Maintenance tab.",
             "Recent changes are kept in a separate file (-wal) and merged into the database automatically.",
-            "The database, playlist covers and credentials file are in your user Library folder and remain there if you delete the app. Audio files are never moved by this tab.",
+            "Library files and the credentials file remain on your Mac if you delete the app. Audio files are never moved by this tab.",
+            "Library file",
         ]
         for string in approved {
             #expect(src.contains(string), "missing approved copy: \(string)")

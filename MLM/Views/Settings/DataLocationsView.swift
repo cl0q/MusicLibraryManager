@@ -32,6 +32,7 @@ struct DataLocationsView: View {
                   let backupService = container.backupService else { return }
             let databasePath = manager.databasePath
             let coversDirectory = manager.playlistCoversDirectory
+            let libraryFile = container.activeLibrary?.packageURL
             let transcodeCache = container.transcodeCache
             let trackRepository = container.trackRepository
 
@@ -43,7 +44,8 @@ struct DataLocationsView: View {
                         playlistCovers: coversDirectory,
                         credentialsFile: CredentialsLoader.envFilePath,
                         transcodeCache: transcodeCache?.cacheDir,
-                        libraryFolder: root.flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+                        libraryFolder: root.flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) },
+                        libraryFile: libraryFile
                     )
                 },
                 backupStatus: {
@@ -70,6 +72,9 @@ private struct DataLocationsForm: View {
     var body: some View {
         Form {
             Section("Library data") {
+                if viewModel.showsLibraryFile {
+                    locationRow("Library file", .libraryFile, detail: viewModel.libraryFileDetail)
+                }
                 locationRow("Database", .database, detail: viewModel.databaseDetail)
                     .help(DataLocationsViewModel.Copy.recentChangesHelp)
                 locationRow("Playlist covers", .playlistCovers, detail: viewModel.playlistCoversDetail)
