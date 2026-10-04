@@ -233,10 +233,14 @@ struct ActivityViewModelTests {
         vm.cancelOperation(id: id)
 
         // AppLogger dispatches to main asynchronously — poll for the entry.
-        let entry = await waitForLogEntry { entry in
+        // The 2 s default can spuriously expire under full-suite parallel
+        // main-actor contention; waitForLogEntry returns the instant the entry
+        // appears, so the larger budget only adds headroom and never slows a
+        // healthy run.
+        let entry = await waitForLogEntry(matching: { entry in
             entry.message.contains("Download Song")
                 && entry.message.lowercased().contains("cancel")
-        }
+        }, timeout: 15.0)
 
         #expect(entry != nil,
                 "cancelOperation MUST write an AppLogger entry (behavior 5)")
