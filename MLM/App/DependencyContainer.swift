@@ -55,6 +55,8 @@ final class DependencyContainer {
     private(set) var remoteCommandService: RemoteCommandService?
     /// Auto-pause/resume when the default audio output device changes.
     private(set) var outputDeviceMonitor: OutputDeviceMonitor?
+    /// Backup service (A2). Creates, lists, prunes, and restores backup bundles.
+    private(set) var backupService: BackupService?
 
     // MARK: - Search
 
@@ -290,6 +292,34 @@ final class DependencyContainer {
                     analysisRepository: aRepo,
                     configRepository: cfRepo
                 )
+            }
+        }
+
+        // A2 — Backup service. Creates, lists, prunes, and restores backup bundles.
+        if let cfRepo = self.configRepository {
+            let appSupport = FileManager.default
+                .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            let coversDir = appSupport
+                .appendingPathComponent("com.musiclibrary.app")
+                .appendingPathComponent("playlist-covers")
+            let pool = dbManager.pool
+            let service = BackupService(
+                database: pool,
+                databasePath: dbManager.databasePath,
+                coversDirectory: coversDir,
+                configRepository: cfRepo,
+                poolCloser: { try pool.close() }
+            )
+            self.backupService = service
+            // Launch-throttled backup (at most once per 24 h). Failure is logged, never fatal.
+            Task.detached {
+                do {
+                    if let info = try await service.createBackupIfDue() {
+                        AppLogger.shared.info("Launch backup created: \(info.url.lastPathComponent)", source: "Backup")
+                    }
+                } catch {
+                    AppLogger.shared.error("Launch backup failed: \(error.localizedDescription)", source: "Backup")
+                }
             }
         }
 

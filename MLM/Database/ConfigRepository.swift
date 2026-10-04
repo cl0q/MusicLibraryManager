@@ -91,4 +91,14 @@ final class ConfigRepository: Sendable {
         }
         return Int(value)
     }
+
+    /// Get the custom backup destination path.
+    func getBackupDestination() async throws -> String? {
+        try await get(key: "backup_destination")
+    }
+
+    /// Set the custom backup destination path.
+    func setBackupDestination(_ path: String) async throws {
+        try await set(key: "backup_destination", value: path)
+    }
 }

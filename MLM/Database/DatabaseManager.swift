@@ -3,15 +3,10 @@ import GRDB
 
 /// Manages the GRDB connection pool and database migrations.
 ///
-/// Opens the same SQLite database file as the Tauri app, ensuring
-/// schema parity. Both apps can operate on the same library.
-///
 /// ## Database Location
 ///
 /// The database is stored in the app's Application Support directory:
-/// `~/Library/Application Support/com.mlm.music-library-manager/music_library.db`
-///
-/// This matches the Tauri app's data directory location.
+/// `~/Library/Application Support/com.musiclibrary.app/music_library.db`
 final class DatabaseManager: Sendable {
     /// The database connection pool for concurrent reads + serialized writes.
     let pool: DatabasePool
@@ -42,6 +37,14 @@ final class DatabaseManager: Sendable {
         }
 
         self.pool = try DatabasePool(path: databasePath.path, configuration: config)
+
+        // Pre-migration backup: if any migrations are pending, back up before running them.
+        // Failure aborts startup — migrations must never run unprotected.
+        _ = try BackupService.performPreMigrationBackupIfNeeded(
+            pool: pool,
+            databasePath: databasePath,
+            coversDirectory: directory.appendingPathComponent("playlist-covers")
+        )
 
         // Run all migrations
         try migrator.migrate(pool)
@@ -102,7 +105,10 @@ final class DatabaseManager: Sendable {
         buildMigrator()
     }
 
-    private static func buildMigrator() -> DatabaseMigrator {
+    /// Build the migrator with all registered migrations.
+    ///
+    /// Internal so `BackupService` can detect pending migrations for the pre-migration hook.
+    static func buildMigrator() -> DatabaseMigrator {
         var migrator = DatabaseMigrator()
 
         // Disable deferred foreign key checks during migration
