@@ -1,3 +1,4 @@
+
 import SwiftUI
 
 /// A floating Liquid Glass universal search panel.
@@ -36,7 +37,7 @@ struct UniversalSearchView: View {
     private var glassPanel: some View {
         VStack(spacing: 0) {
             searchBar
-            Divider().overlay(Color.white.opacity(0.06))
+            Divider().overlay(Color.mlmEdgeSubtle)
             resultsBody
             footer
         }
@@ -44,7 +45,7 @@ struct UniversalSearchView: View {
         .shadow(color: .black.opacity(0.35), radius: 24, y: 8)
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5)
+                .strokeBorder(Color.mlmEdgeSubtle, lineWidth: 0.5)
         )
     }
 
@@ -54,15 +55,15 @@ struct UniversalSearchView: View {
         HStack(spacing: 14) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(Color.mlmInkMuted)
 
             TextField("", text: $viewModel.query, prompt:
                 Text("Paste a URL or search for music…")
-                    .foregroundColor(.white.opacity(0.25))
+                    .foregroundColor(Color.mlmInkMuted)
             )
             .textFieldStyle(.plain)
-            .font(.system(size: 20, weight: .medium))
-            .foregroundStyle(.white)
+            .font(.title3.weight(.medium))
+            .foregroundStyle(Color.mlmInkPrimary)
             .focused($searchFocused)
             .onSubmit { Task { await viewModel.submit(viewModel.query) } }
 
@@ -81,15 +82,15 @@ struct UniversalSearchView: View {
                     .fill(color)
                     .frame(width: 6, height: 6)
                 Text(label)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .font(MLMFont.badge)
+                    .foregroundStyle(Color.mlmInkSecondary)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
-            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            .background(Color.mlmOverlay.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
             .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(.white.opacity(0.1), lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Color.mlmEdgeSubtle, lineWidth: 0.5)
             )
         }
     }
@@ -98,24 +99,24 @@ struct UniversalSearchView: View {
         let q = viewModel.query
         if q.contains("youtube.com") || q.contains("youtu.be") {
             if q.contains("playlist") || q.contains("list=") {
-                return ("YouTube · Playlist", .red)
+                return ("YouTube · Playlist", Color.mlmBrandYouTube)
             }
-            return ("YouTube · Video", .red)
+            return ("YouTube · Video", Color.mlmBrandYouTube)
         }
         if q.contains("soundcloud.com") {
             if q.contains("/sets/") {
-                return ("SoundCloud · Playlist", .orange)
+                return ("SoundCloud · Playlist", Color.mlmBrandSoundCloud)
             }
-            return ("SoundCloud", .orange)
+            return ("SoundCloud", Color.mlmBrandSoundCloud)
         }
         if q.contains("open.spotify.com") {
-            return ("Spotify", .green)
+            return ("Spotify", Color.mlmBrandSpotify)
         }
         if q.hasPrefix("http") {
-            return ("Web Page", .blue)
+            return ("Web Page", Color.mlmActive)
         }
         if !q.isEmpty {
-            return ("Search", .white.opacity(0.3))
+            return ("Search", Color.mlmInkMuted)
         }
         return ("", .clear)
     }
@@ -146,10 +147,10 @@ struct UniversalSearchView: View {
         VStack(spacing: 12) {
             Image(systemName: "link")
                 .font(.system(size: 28, weight: .light))
-                .foregroundStyle(.white.opacity(0.15))
+                .foregroundStyle(Color.mlmInkMuted)
             Text("Paste a YouTube, SoundCloud, or direct audio URL")
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.2))
+                .font(MLMFont.muted)
+                .foregroundStyle(Color.mlmInkMuted)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 48)
@@ -160,8 +161,8 @@ struct UniversalSearchView: View {
             ProgressView()
                 .controlSize(.small)
             Text("Resolving…")
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.4))
+                .font(MLMFont.muted)
+                .foregroundStyle(Color.mlmInkMuted)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 32)
@@ -172,8 +173,8 @@ struct UniversalSearchView: View {
             ProgressView()
                 .controlSize(.small)
             Text("Searching…")
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.4))
+                .font(MLMFont.muted)
+                .foregroundStyle(Color.mlmInkMuted)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 32)
@@ -198,21 +199,21 @@ struct UniversalSearchView: View {
         VStack(spacing: 0) {
             sectionLabel("Playlist")
             HStack(spacing: 14) {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(.white.opacity(0.06))
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.mlmOverlay)
                     .frame(width: 56, height: 56)
                     .overlay(
                         Image(systemName: "list.bullet")
                             .font(.system(size: 20, weight: .light))
-                            .foregroundStyle(.white.opacity(0.3))
+                            .foregroundStyle(Color.mlmInkMuted)
                     )
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Playlist detected")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .font(MLMFont.bodyBold)
+                        .foregroundStyle(Color.mlmInkPrimary)
                     Text(viewModel.query)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.35))
+                        .font(MLMFont.dataSmall)
+                        .foregroundStyle(Color.mlmInkMuted)
                         .lineLimit(1)
                 }
                 Spacer()
@@ -231,8 +232,8 @@ struct UniversalSearchView: View {
             sectionLabel("Results")
             if viewModel.textResults.isEmpty {
                 Text("No matching tracks")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.25))
+                    .font(MLMFont.muted)
+                    .foregroundStyle(Color.mlmInkMuted)
                     .padding(.vertical, 24)
                     .frame(maxWidth: .infinity)
             } else {
@@ -242,16 +243,16 @@ struct UniversalSearchView: View {
                             HStack {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(track.title)
-                                        .font(.system(size: 14, weight: .medium))
+                                        .font(MLMFont.bodyBold)
                                     Text(track.artist)
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(.white.opacity(0.5))
+                                        .font(MLMFont.muted)
+                                        .foregroundStyle(Color.mlmInkSecondary)
                                 }
                                 Spacer()
                             }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 10)
-                            Divider().overlay(Color.white.opacity(0.06))
+                            Divider().overlay(Color.mlmEdgeSubtle)
                         }
                     }
                 }
@@ -264,10 +265,10 @@ struct UniversalSearchView: View {
         VStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 20, weight: .light))
-                .foregroundStyle(.yellow.opacity(0.5))
+                .foregroundStyle(Color.mlmAttention)
             Text(msg)
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.4))
+                .font(MLMFont.muted)
+                .foregroundStyle(Color.mlmInkMuted)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 32)
@@ -295,12 +296,12 @@ struct UniversalSearchView: View {
             // Info
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white)
+                    .font(MLMFont.bodyBold)
+                    .foregroundStyle(Color.mlmInkPrimary)
                     .lineLimit(1)
                 Text(subtitle)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .font(MLMFont.muted)
+                    .foregroundStyle(Color.mlmInkMuted)
                     .lineLimit(1)
             }
 
@@ -319,8 +320,8 @@ struct UniversalSearchView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(.white.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .background(Color.mlmOverlay.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
         .padding(.horizontal, 8)
         .padding(.bottom, 4)
     }
@@ -337,7 +338,7 @@ struct UniversalSearchView: View {
                 default:
                     ProgressView().controlSize(.mini)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(.white.opacity(0.03))
+                        .background(Color.mlmOverlay.opacity(0.5))
                 }
             }
         } else {
@@ -354,7 +355,7 @@ struct UniversalSearchView: View {
             )
             Image(systemName: sourceIcon(source))
                 .font(.system(size: 18, weight: .light))
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(Color.mlmInkSecondary)
         }
     }
 
@@ -364,16 +365,16 @@ struct UniversalSearchView: View {
         HStack {
             HStack(spacing: 6) {
                 kbd("↵"); Text("to action")
-                Text("·").foregroundStyle(.white.opacity(0.15))
+                Text("·").foregroundStyle(Color.mlmInkMuted)
                 kbd("tab"); Text("to navigate")
-                Text("·").foregroundStyle(.white.opacity(0.15))
+                Text("·").foregroundStyle(Color.mlmInkMuted)
                 kbd("esc"); Text("to close")
             }
             Spacer()
             Text("⌘K to reopen")
         }
-        .font(.system(size: 11))
-        .foregroundStyle(.white.opacity(0.2))
+        .font(MLMFont.badge)
+        .foregroundStyle(Color.mlmInkMuted)
         .padding(.horizontal, 24)
         .padding(.vertical, 10)
     }
@@ -382,10 +383,10 @@ struct UniversalSearchView: View {
 
     private func sectionLabel(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11, weight: .semibold))
+            .font(MLMFont.sectionLabel)
             .textCase(.uppercase)
             .tracking(0.06)
-            .foregroundStyle(.white.opacity(0.25))
+            .foregroundStyle(Color.mlmInkMuted)
             .padding(.horizontal, 16)
             .padding(.top, 12)
             .padding(.bottom, 6)
@@ -394,13 +395,13 @@ struct UniversalSearchView: View {
 
     private func kbd(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 10, weight: .medium))
+            .font(MLMFont.badge)
             .padding(.horizontal, 5)
             .padding(.vertical, 1)
-            .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 3))
+            .background(Color.mlmOverlay, in: RoundedRectangle(cornerRadius: 3))
             .overlay(
                 RoundedRectangle(cornerRadius: 3)
-                    .strokeBorder(.white.opacity(0.08), lineWidth: 0.5)
+                    .strokeBorder(Color.mlmEdgeSubtle, lineWidth: 0.5)
             )
     }
 
@@ -424,10 +425,10 @@ struct UniversalSearchView: View {
 
     private func sourceColor(_ source: ArtworkResolver.Source) -> Color {
         switch source {
-        case .youtube: return .red
-        case .soundcloud: return .orange
-        case .directAudio: return .green
-        case .genericWeb: return .blue
+        case .youtube: return .mlmBrandYouTube
+        case .soundcloud: return .mlmBrandSoundCloud
+        case .directAudio: return .mlmSuccess
+        case .genericWeb: return .mlmActive
         }
     }
 }
