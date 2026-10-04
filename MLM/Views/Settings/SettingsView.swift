@@ -34,6 +34,12 @@ struct SettingsView: View {
                 }
                 .tag("backup")
 
+            DataLocationsView()
+                .tabItem {
+                    Label("Storage Location", systemImage: "internaldrive")
+                }
+                .tag("storage")
+
             PlaybackSettingsView()
                 .tabItem {
                     Label("Playback", systemImage: "play.circle")
