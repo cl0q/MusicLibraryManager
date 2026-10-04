@@ -58,7 +58,9 @@ struct MLMApp: App {
     @FocusedValue(\.playbackViewModel) private var playbackVM
 
     var body: some Scene {
-        WindowGroup {
+        // One window only (A3): opening a library file from Finder reuses it and asks to
+        // switch, instead of a window group spawning a second window per opened file.
+        Window("MLM", id: "main") {
             ContentView()
                 .environment(container)
                 .frame(minWidth: 900, minHeight: 600)

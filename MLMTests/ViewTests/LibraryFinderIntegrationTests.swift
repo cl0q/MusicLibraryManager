@@ -66,6 +66,25 @@ struct LibraryFinderIntegrationTests {
         #expect(src.contains("LibraryLaunchCoordinator.shared.handleOpen("))
     }
 
+    /// One MLM window only: a `WindowGroup` opens a second window for every library file
+    /// opened in Finder, and a second switch alert then cancels the relaunch.
+    @Test func appHasExactlyOneMainWindow() throws {
+        let app = try source("MLM/App/MLMApp.swift")
+        #expect(!app.contains("WindowGroup"))
+        #expect(app.contains("Window(\"MLM\", id: \"main\")"))
+    }
+
+    /// Termination is requested after the alert has gone, and a waiter left behind by a
+    /// cancelled termination is stopped instead of relaunching MLM later.
+    @Test func relaunchNeverLeavesAWaiterBehind() throws {
+        let src = try source("MLM/Services/Backup/BackupService.swift")
+        let start = try #require(src.range(of: "static func relaunchApp()"))
+        let body = String(src[start.lowerBound...].prefix(2500))
+        #expect(body.contains("DispatchQueue.main.async"))
+        #expect(body.contains("if process.isRunning"))
+        #expect(body.contains("process.terminate()"))
+    }
+
     @Test func fileMenuHasTheLibraryItems() throws {
         let src = try source("MLM/App/LibraryCommands.swift")
         for string in ["New Library…", "Open Library…", "Open Recent", " — Not found", " — Not connected"] {

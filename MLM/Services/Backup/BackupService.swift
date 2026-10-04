@@ -363,7 +363,19 @@ final class BackupService: Sendable {
             target
         ]
         try? process.run()
-        NSApplication.shared.terminate(nil)
+
+        // Terminate on the next turn, once a presenting alert has gone: an attached sheet can
+        // cancel termination. If MLM is still running a few seconds later, termination was
+        // cancelled — stop the waiter, or it would relaunch MLM whenever the user quits.
+        DispatchQueue.main.async {
+            NSApplication.shared.terminate(nil)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+            if process.isRunning {
+                process.terminate()
+                AppLogger.shared.error("Relaunch was cancelled; MLM kept running", source: "App")
+            }
+        }
     }
 
     // MARK: - Pre-migration backup (synchronous)
