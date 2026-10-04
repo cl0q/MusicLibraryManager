@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import AppKit
 import ImageIO
+import os
 
 // MARK: Accessibility labels for shotty UI automation (snake_case literals)
 
@@ -138,7 +139,7 @@ struct PlaylistCard: View {
                 return
             }
             let coversDir = Self.coversDirectory
-            let cgImage: CGImage? = try? await Task.detached(priority: .userInitiated) {
+            let cgImage: CGImage? = await Task.detached(priority: .userInitiated) {
                 PlaylistCard.loadCoverCGImage(coverImagePath: path, coversDir: coversDir)
             }.value
             guard !Task.isCancelled, let cgImage else {
@@ -409,8 +410,8 @@ struct PlaylistCard: View {
         let trackProviders = providers.filter { $0.hasItemConformingToTypeIdentifier("com.musiclibrary.trackdrag") }
         if !trackProviders.isEmpty {
             let group = DispatchGroup()
-            let lock = NSLock()
-            var trackIds: [Int64] = []
+            // Load callbacks run on arbitrary queues; collect behind a lock.
+            let collected = OSAllocatedUnfairLock<[Int64]>(initialState: [])
             
             for provider in trackProviders {
                 group.enter()
@@ -419,9 +420,7 @@ struct PlaylistCard: View {
                     guard let data else { return }
                     do {
                         let dragData = try JSONDecoder().decode(TrackDragData.self, from: data)
-                        lock.lock()
-                        trackIds.append(dragData.trackId)
-                        lock.unlock()
+                        collected.withLock { $0.append(dragData.trackId) }
                     } catch {
                         // ignore malformed items
                     }
@@ -429,6 +428,7 @@ struct PlaylistCard: View {
             }
             
             group.notify(queue: .main) {
+                let trackIds = collected.withLock { $0 }
                 if !trackIds.isEmpty, let onTracksDropped = self.onTracksDropped {
                     Task {
                         await onTracksDropped(trackIds)
