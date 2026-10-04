@@ -36,13 +36,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.applicationIconImage = icon
         }
 
-        // Initialize database on launch
-        Task {
-            do {
-                try await DependencyContainer.shared.initialize()
-            } catch {
-                DependencyContainer.shared.reportInitializationFailure(error)
-            }
+        // Choose and open the library for this launch (A3).
+        Task { @MainActor in
+            await LibraryLaunchCoordinator.shared.start()
         }
     }
 

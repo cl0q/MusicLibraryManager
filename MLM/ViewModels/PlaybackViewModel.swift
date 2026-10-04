@@ -90,9 +90,17 @@ final class PlaybackViewModel {
 
     // MARK: - Init
 
-    init(audioPlayer: any AudioPlayerControlling = AudioPlayer(), configRepository: ConfigRepository? = nil) {
+    /// Waveform cache of the open library (A3: namespaced per library).
+    private let waveformCacheDirectory: URL
+
+    init(
+        audioPlayer: any AudioPlayerControlling = AudioPlayer(),
+        configRepository: ConfigRepository? = nil,
+        waveformCacheDirectory: URL = ActiveLibrary.defaultWaveformCacheRoot
+    ) {
         self.audioPlayer = audioPlayer
         self.configRepository = configRepository
+        self.waveformCacheDirectory = waveformCacheDirectory
     }
 
     deinit {
@@ -516,13 +524,17 @@ final class PlaybackViewModel {
 
     /// Helper to get the local binary cache URL for the track's waveform data.
     private func getWaveformCacheURL(for trackID: Int64?, or url: URL) -> URL {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        let base = caches.appendingPathComponent("com.musiclibrary.app/waveforms")
+        Self.waveformCacheURL(in: waveformCacheDirectory, trackID: trackID, fileURL: url)
+    }
+
+    /// Cache file for a track's waveform inside `directory` (keyed by track ID, which is
+    /// only unique within one library — hence the per-library directory).
+    static func waveformCacheURL(in directory: URL, trackID: Int64?, fileURL: URL) -> URL {
         if let id = trackID {
-            return base.appendingPathComponent("\(id).bin")
+            return directory.appendingPathComponent("\(id).bin")
         } else {
-            let hash = abs(url.path.hash)
-            return base.appendingPathComponent("hash_\(hash).bin")
+            let hash = abs(fileURL.path.hash)
+            return directory.appendingPathComponent("hash_\(hash).bin")
         }
     }
 

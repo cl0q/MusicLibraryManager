@@ -47,8 +47,10 @@ struct LibraryRegistry: Codable, Equatable, Sendable {
         var name: String
         var lastOpenedAt: Date?
 
+        /// Without a trailing slash, also when the library file exists (it is a directory),
+        /// so URLs from the registry compare equal to the ones the app builds.
         var url: URL {
-            URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            URL(filePath: (path as NSString).expandingTildeInPath, directoryHint: .notDirectory)
         }
 
         enum CodingKeys: String, CodingKey {
@@ -89,8 +91,15 @@ struct LibraryRegistry: Codable, Equatable, Sendable {
     // MARK: - Mutations
 
     /// Adds the library, or re-points an existing entry with the same id (moved/renamed file).
+    /// One path holds one library: an entry of another id at the same path is replaced.
     mutating func upsert(libraryId: String, url: URL, name: String) {
         let path = (url.standardizedFileURL.path as NSString).abbreviatingWithTildeInPath
+        let target = url.standardizedFileURL.path
+        let replaced = libraries.filter { $0.libraryId != libraryId && $0.url.standardizedFileURL.path == target }
+        libraries.removeAll { entry in replaced.contains(entry) }
+        if let last = lastActiveLibraryId, replaced.contains(where: { $0.libraryId == last }) {
+            lastActiveLibraryId = nil
+        }
         if let index = libraries.firstIndex(where: { $0.libraryId == libraryId }) {
             libraries[index].path = path
             libraries[index].name = name

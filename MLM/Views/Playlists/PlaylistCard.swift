@@ -387,9 +387,11 @@ struct PlaylistCard: View {
         return CGImageSourceCreateThumbnailAtIndex(source, 0, thumbOptions as CFDictionary)
     }
 
-    /// Resolved on-disk URL of the playlist-covers cache directory.
+    /// Playlist covers folder of the open library (next to its database). Cards only exist
+    /// once a library is open; the legacy folder is a fallback for that impossible case.
     static var coversDirectory: URL {
-        DatabaseManager.defaultPlaylistCoversDirectory
+        DependencyContainer.shared.databaseManager?.playlistCoversDirectory
+            ?? DatabaseManager.playlistCoversDirectory(forDatabaseAt: DatabaseManager.legacyDatabaseURL)
     }
 
     // MARK: - Drop Target

@@ -43,6 +43,8 @@ extension FocusedValues {
 /// ```
 struct ContentView: View {
     @Environment(\.container) private var container
+    /// Chooses the library at launch (A3); its screens show until a library is open.
+    private var launch: LibraryLaunchCoordinator { LibraryLaunchCoordinator.shared }
 
     @State private var selectedSection: SidebarSection = .library
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
@@ -92,6 +94,15 @@ struct ContentView: View {
                 }
             } else if let error = container.initializationError {
                 errorView(error)
+            } else if launch.screen != .resolving, launch.screen != .opened {
+                // No library open yet (A3): first run, picker placeholder, or a problem.
+                LibraryLaunchStateView(
+                    screen: launch.screen,
+                    onCreateLibrary: { name in Task { await launch.createLibrary(named: name) } },
+                    onOpenLibrary: { url in Task { await launch.open(packageAt: url) } },
+                    onRetry: { Task { await launch.retry() } },
+                    onDismissProblem: { launch.dismissProblem() }
+                )
             } else {
                 loadingView
             }

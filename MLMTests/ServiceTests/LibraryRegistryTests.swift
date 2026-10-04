@@ -58,6 +58,26 @@ struct LibraryRegistryTests {
         #expect(registry.entry(withId: "a")?.name == "Main")
     }
 
+    @Test func upsertKeepsOneEntryPerPath() {
+        var registry = LibraryRegistry()
+        let url = URL(fileURLWithPath: "/x/Main Library.mlibm")
+        registry.upsert(libraryId: "old", url: url, name: "Old")
+        registry.lastActiveLibraryId = "old"
+        registry.upsert(libraryId: "new", url: URL(fileURLWithPath: "/x/Main Library.mlibm/"), name: "New")
+        #expect(registry.libraries.map(\.libraryId) == ["new"])
+        #expect(registry.lastActiveLibraryId == nil)
+    }
+
+    @Test func entryURLHasNoTrailingSlashForExistingDirectories() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LibraryRegistryTests-\(UUID().uuidString)/A.mlibm")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        var registry = LibraryRegistry()
+        registry.upsert(libraryId: "a", url: dir, name: "A")
+        #expect(registry.libraries[0].url == URL(filePath: dir.path, directoryHint: .notDirectory))
+        #expect(!registry.libraries[0].url.absoluteString.hasSuffix("/"))
+    }
+
     @Test func markOpenedSetsLastActiveAndTimestamp() {
         var registry = LibraryRegistry()
         registry.upsert(libraryId: "a", url: URL(fileURLWithPath: "/x/A.mlibm"), name: "A")

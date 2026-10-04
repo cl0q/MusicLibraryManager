@@ -5,8 +5,9 @@ import GRDB
 ///
 /// ## Database Location
 ///
-/// The database is stored in the app's Application Support directory:
-/// `~/Library/Application Support/com.musiclibrary.app/music_library.db`
+/// Since A3 the database lives inside a library file (`<name>.mlibm/music_library.db`).
+/// Before adoption it is still at the legacy location
+/// `~/Library/Application Support/com.musiclibrary.app/music_library.db`.
 final class DatabaseManager: Sendable {
     /// The database connection pool for concurrent reads + serialized writes.
     let pool: DatabasePool
@@ -14,15 +15,20 @@ final class DatabaseManager: Sendable {
     /// The path to the database file.
     let databasePath: URL
 
-    /// Initialize the database manager.
-    ///
-    /// Creates the database file and directory if they don't exist,
-    /// then runs all pending migrations to bring the schema up to date.
-    ///
-    /// - Throws: DatabaseError if the database cannot be opened or migrated
-    init() throws {
-        let databasePath = Self.defaultDatabasePath()
+    /// Open the database at the legacy location (pre-A3 layout).
+    convenience init() throws {
+        try self.init(databaseURL: Self.legacyDatabaseURL)
+    }
 
+    /// Open the production database at `databaseURL` — a library file's database or the
+    /// legacy one.
+    ///
+    /// Creates the database file and directory if they don't exist, enables WAL, backs up
+    /// if migrations are pending, then runs all pending migrations.
+    ///
+    /// - Parameter backupsRoot: root of the default backup folders (injected by tests).
+    /// - Throws: DatabaseError if the database cannot be opened or migrated
+    init(databaseURL databasePath: URL, backupsRoot: URL = BackupService.defaultBackupsRoot) throws {
         // Ensure the parent directory exists
         let directory = databasePath.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -43,7 +49,8 @@ final class DatabaseManager: Sendable {
         _ = try BackupService.performPreMigrationBackupIfNeeded(
             pool: pool,
             databasePath: databasePath,
-            coversDirectory: Self.playlistCoversDirectory(forDatabaseAt: databasePath)
+            coversDirectory: Self.playlistCoversDirectory(forDatabaseAt: databasePath),
+            backupsRoot: backupsRoot
         )
 
         // Run all migrations
@@ -81,10 +88,9 @@ final class DatabaseManager: Sendable {
 
     // MARK: - Database Path
 
-    /// Default database path in Application Support.
-    ///
-    /// Matches the Tauri app's data directory so both apps share the same DB.
-    private static func defaultDatabasePath() -> URL {
+    /// Pre-A3 database location in Application Support. Only the launch resolver and the
+    /// adoption of an old-style install look here.
+    static var legacyDatabaseURL: URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let appDir = appSupport.appendingPathComponent("com.musiclibrary.app")
         return appDir.appendingPathComponent("music_library.db")
@@ -99,11 +105,6 @@ final class DatabaseManager: Sendable {
     /// Playlist covers always live next to the database.
     static func playlistCoversDirectory(forDatabaseAt databasePath: URL) -> URL {
         databasePath.deletingLastPathComponent().appendingPathComponent(playlistCoversFolderName)
-    }
-
-    /// Covers folder of the default database, for callers without a `DatabaseManager`.
-    static var defaultPlaylistCoversDirectory: URL {
-        playlistCoversDirectory(forDatabaseAt: defaultDatabasePath())
     }
 
     /// Covers folder of this database.

@@ -42,8 +42,6 @@ final class SeekHoldState {
 /// MLM — Music Library Manager (macOS Native)
 ///
 /// Native SwiftUI rewrite of the Tauri-based Music Library Manager.
-/// Shares the same SQLite database and schema for seamless switching
-/// between the Tauri and native macOS versions.
 @main
 struct MLMApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate

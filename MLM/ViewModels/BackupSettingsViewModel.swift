@@ -212,6 +212,8 @@ final class BackupSettingsViewModel {
             return Copy.restoreSafetyBackupFailed
         case .restoreSwapFailed:
             return Copy.relaunchRequired
+        case .wrongLibrary:
+            return Copy.generic
         }
     }
 
@@ -223,7 +225,7 @@ final class BackupSettingsViewModel {
             return detail
         case .bundleIncomplete(let url):
             return url.path
-        case .destinationNotWritable, .restoreSafetyBackupFailed:
+        case .destinationNotWritable, .restoreSafetyBackupFailed, .wrongLibrary:
             return nil
         }
     }

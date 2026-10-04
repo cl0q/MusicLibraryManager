@@ -14,6 +14,8 @@ final class DependencyContainer {
     // MARK: - Database
 
     private(set) var databaseManager: DatabaseManager?
+    /// The open library (A3). `nil` until `initialize(location:)` has opened one.
+    private(set) var activeLibrary: ActiveLibrary?
 
     // MARK: - Repositories
 
@@ -138,16 +140,24 @@ final class DependencyContainer {
         }
     }
 
-    /// Initialize the database and all repositories.
+    /// Open the library at `location` and build all repositories and services around it.
     ///
-    /// Call once during app launch (from AppDelegate).
-    /// Uses the shared database path so both Tauri and native app
-    /// operate on the same SQLite file.
-    func initialize() async throws {
-        let dbManager = try DatabaseManager()
+    /// Called once per launch by `LibraryLaunchCoordinator` (A0 D4: one library per process;
+    /// switching relaunches).
+    func initialize(location: LibraryLocation) async throws {
+        let dbManager = try DatabaseManager(databaseURL: location.databaseURL)
         self.databaseManager = dbManager
 
         let dbPool = dbManager.pool
+        let libraryId = (try? await dbPool.read { db in
+            try String.fetchOne(db, sql: "SELECT value FROM app_config WHERE key = 'library_id'")
+        }) ?? nil
+        let library = ActiveLibrary(
+            databaseURL: dbManager.databasePath,
+            libraryId: libraryId ?? "",
+            packageURL: location.packageURL
+        )
+        self.activeLibrary = library
 
         self.trackRepository = TrackRepository(database: dbPool)
         self.playlistRepository = PlaylistRepository(database: dbPool)
@@ -226,7 +236,8 @@ final class DependencyContainer {
         // Shared ViewModels
         self.playbackViewModel = PlaybackViewModel(
             audioPlayer: player,
-            configRepository: self.configRepository
+            configRepository: self.configRepository,
+            waveformCacheDirectory: library.namespacedCacheDirectory(in: ActiveLibrary.defaultWaveformCacheRoot)
         )
 
         // Library VM — owned by the container so it survives view teardown.
@@ -329,9 +340,7 @@ final class DependencyContainer {
             if let customPath = customPath, !customPath.isEmpty {
                 cacheDir = URL(fileURLWithPath: customPath)
             } else {
-                cacheDir = FileManager.default
-                    .urls(for: .cachesDirectory, in: .userDomainMask)[0]
-                    .appendingPathComponent("com.mlm.transcode_cache")
+                cacheDir = library.namespacedCacheDirectory(in: ActiveLibrary.defaultTranscodeCacheRoot)
             }
             let cache = TranscodeCache(cacheDir: cacheDir)
             self.transcodeCache = cache

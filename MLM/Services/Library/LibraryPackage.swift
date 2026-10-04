@@ -123,6 +123,20 @@ enum LibraryPackage {
 
     // MARK: - Database identity
 
+    /// Writes `libraryId` into the database of `package`, only if it has none. Used once for
+    /// a library file built by hand; an existing id is never replaced.
+    static func assignLibraryId(_ libraryId: String, toDatabaseIn package: URL) throws {
+        var config = Configuration()
+        config.foreignKeysEnabled = false
+        let queue = try DatabaseQueue(path: databaseURL(in: package).path, configuration: config)
+        defer { try? queue.close() }
+        try queue.write { db in
+            try db.execute(
+                sql: "INSERT OR IGNORE INTO app_config (key, value, updated_at) VALUES ('library_id', ?, datetime('now'))",
+                arguments: [libraryId])
+        }
+    }
+
     /// `app_config.library_id` of the database at `url`, or `nil` when the database, the
     /// table or the key doesn't exist. Never creates a database.
     static func readDatabaseLibraryId(at url: URL) throws -> String? {

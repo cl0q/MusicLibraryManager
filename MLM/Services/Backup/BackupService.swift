@@ -19,10 +19,13 @@ struct BackupInfo: Codable, Sendable, Equatable {
     let trackCount: Int?
     let databaseSizeBytes: Int64?
     let isComplete: Bool
+    /// `library_id` of the library the bundle was made from; `nil` when the bundle has no
+    /// readable manifest, `""` for a database without a library id.
+    let libraryId: String?
 
     // Custom Codable: encode `url` as a path string for JSON portability.
     private enum CodingKeys: String, CodingKey {
-        case url, createdAt, reason, schemaVersion, trackCount, databaseSizeBytes, isComplete
+        case url, createdAt, reason, schemaVersion, trackCount, databaseSizeBytes, isComplete, libraryId
     }
 
     init(
@@ -32,7 +35,8 @@ struct BackupInfo: Codable, Sendable, Equatable {
         schemaVersion: String?,
         trackCount: Int?,
         databaseSizeBytes: Int64?,
-        isComplete: Bool
+        isComplete: Bool,
+        libraryId: String? = nil
     ) {
         self.url = url
         self.createdAt = createdAt
@@ -41,6 +45,7 @@ struct BackupInfo: Codable, Sendable, Equatable {
         self.trackCount = trackCount
         self.databaseSizeBytes = databaseSizeBytes
         self.isComplete = isComplete
+        self.libraryId = libraryId
     }
 
     init(from decoder: Decoder) throws {
@@ -53,6 +58,7 @@ struct BackupInfo: Codable, Sendable, Equatable {
         self.trackCount = try c.decodeIfPresent(Int.self, forKey: .trackCount)
         self.databaseSizeBytes = try c.decodeIfPresent(Int64.self, forKey: .databaseSizeBytes)
         self.isComplete = try c.decode(Bool.self, forKey: .isComplete)
+        self.libraryId = try c.decodeIfPresent(String.self, forKey: .libraryId)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -64,6 +70,7 @@ struct BackupInfo: Codable, Sendable, Equatable {
         try c.encodeIfPresent(trackCount, forKey: .trackCount)
         try c.encodeIfPresent(databaseSizeBytes, forKey: .databaseSizeBytes)
         try c.encode(isComplete, forKey: .isComplete)
+        try c.encodeIfPresent(libraryId, forKey: .libraryId)
     }
 }
 
@@ -76,6 +83,8 @@ enum BackupError: Error, Equatable {
     case restoreSafetyBackupFailed
     /// The live pool was already closed when the file swap failed: the app must relaunch.
     case restoreSwapFailed(String)
+    /// The bundle belongs to another library. Restores never cross libraries.
+    case wrongLibrary
 }
 
 /// Creates, lists, prunes, and restores timestamped backup bundles of the music library.
@@ -84,19 +93,28 @@ final class BackupService: Sendable {
     private let databasePath: URL
     private let coversDirectory: URL?
     private let configRepository: ConfigRepository
+    /// Parent of the per-library default folders (injected by tests).
+    private let defaultBackupsRoot: URL
     private let fileManager: FileManager
     private let now: @Sendable () -> Date
     /// Optional closure to close the live database pool before a restore swap.
     private let poolCloser: (@Sendable () throws -> Void)?
 
-    /// Default destination: `~/Library/Application Support/com.musiclibrary.app/backups/`.
-    static let defaultDestination: URL = {
+    /// Root of the default backup folders: `~/Library/Application Support/com.musiclibrary.app/backups/`.
+    /// Bundles made before A3 sit directly in it; since A3 each library uses `<root>/<library_id>/`.
+    static let defaultBackupsRoot: URL = {
         let appSupport = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return appSupport
             .appendingPathComponent("com.musiclibrary.app")
             .appendingPathComponent("backups")
     }()
+
+    /// Default folder for a library's backups: `<root>/<library_id>/`, or the root itself
+    /// for a database without a library id.
+    static func defaultDestination(forLibraryId libraryId: String, in root: URL = defaultBackupsRoot) -> URL {
+        libraryId.isEmpty ? root : root.appendingPathComponent(libraryId)
+    }
 
     private static let bundlePrefix = "mlm-backup-"
     private static let tempPrefix = ".tmp-"
@@ -118,6 +136,7 @@ final class BackupService: Sendable {
         databasePath: URL,
         coversDirectory: URL?,
         configRepository: ConfigRepository,
+        defaultBackupsRoot: URL = BackupService.defaultBackupsRoot,
         fileManager: FileManager = .default,
         now: @Sendable @escaping () -> Date = { Date() },
         poolCloser: (@Sendable () throws -> Void)? = nil
@@ -126,6 +145,7 @@ final class BackupService: Sendable {
         self.databasePath = databasePath
         self.coversDirectory = coversDirectory
         self.configRepository = configRepository
+        self.defaultBackupsRoot = defaultBackupsRoot
         self.fileManager = fileManager
         self.now = now
         self.poolCloser = poolCloser
@@ -134,13 +154,23 @@ final class BackupService: Sendable {
     // MARK: - Destination
 
     /// Resolved destination directory: `app_config["backup_destination"]` if set,
-    /// otherwise the default Application Support path.
+    /// otherwise this library's default folder.
     func destinationDirectory() async -> URL {
-        if let override = try? await configRepository.getBackupDestination(),
-           !override.isEmpty {
-            return URL(fileURLWithPath: override)
-        }
-        return Self.defaultDestination
+        await scope().destination
+    }
+
+    /// `library_id` of the open library (`""` when the database has none).
+    private func activeLibraryId() async -> String {
+        ((try? await configRepository.get(key: "library_id")) ?? nil) ?? ""
+    }
+
+    private func scope() async -> BundleScope {
+        let custom = try? await configRepository.getBackupDestination()
+        return BundleScope(
+            libraryId: await activeLibraryId(),
+            customDestination: custom ?? nil,
+            defaultBackupsRoot: defaultBackupsRoot
+        )
     }
 
     // MARK: - List
@@ -149,8 +179,10 @@ final class BackupService: Sendable {
     ///
     /// - Ignores `.tmp-*` scratch directories.
     /// - Bundles missing `backup.json` or `music_library.db` are returned with `isComplete == false`.
+    /// Only bundles of the open library are listed (A3): a shared folder may hold bundles
+    /// of several libraries.
     func listBackups() async throws -> [BackupInfo] {
-        try Self.listBundles(in: await destinationDirectory(), fileManager: fileManager)
+        try Self.listBundles(in: await scope(), fileManager: fileManager)
     }
 
     // MARK: - Create
@@ -177,8 +209,9 @@ final class BackupService: Sendable {
     }
 
     private func makeBackup(reason: BackupReason, prune: Bool) async throws -> BackupInfo {
-        let destination = await destinationDirectory()
-        let libraryId = (try? await configRepository.get(key: "library_id")) ?? ""
+        let scope = await scope()
+        let destination = scope.destination
+        let libraryId = scope.libraryId
         let info = try Self.writeBundle(
             database: database,
             databasePath: databasePath,
@@ -191,7 +224,7 @@ final class BackupService: Sendable {
         )
         if prune {
             // Best-effort: a failed prune never fails the backup itself.
-            _ = try? Self.pruneBundles(in: destination, keep: Self.defaultKeep, fileManager: fileManager)
+            _ = try? Self.pruneBundles(in: scope, keep: Self.defaultKeep, fileManager: fileManager)
         }
         return info
     }
@@ -229,6 +262,10 @@ final class BackupService: Sendable {
     /// `.restoreSwapFailed` (pool already closed — relaunch required). After this returns the
     /// database is NOT reopened — the caller must relaunch the app (`relaunchApp()`).
     func prepareRestore(from info: BackupInfo) async throws {
+        let bundleLibraryId = Self.describeBundle(at: info.url, fileManager: fileManager).libraryId
+        if let bundleLibraryId, bundleLibraryId != (await activeLibraryId()) {
+            throw BackupError.wrongLibrary
+        }
         try validateForRestore(info)
 
         do {
@@ -348,6 +385,7 @@ final class BackupService: Sendable {
         databasePath: URL,
         coversDirectory: URL? = nil,
         destinationOverride: URL? = nil,
+        backupsRoot: URL = defaultBackupsRoot,
         fileManager: FileManager = .default
     ) throws -> URL? {
         let migrator = DatabaseManager.buildMigrator()
@@ -362,18 +400,15 @@ final class BackupService: Sendable {
         let configuredDestination = (try? pool.read { db in
             try String.fetchOne(db, sql: "SELECT value FROM app_config WHERE key = 'backup_destination'")
         }) ?? nil
-        let destination: URL
-        if let destinationOverride {
-            destination = destinationOverride
-        } else if let configuredDestination, !configuredDestination.isEmpty {
-            destination = URL(fileURLWithPath: configuredDestination)
-        } else {
-            destination = defaultDestination
-        }
-
         let libraryId = (try? pool.read { db in
             try String.fetchOne(db, sql: "SELECT value FROM app_config WHERE key = 'library_id'")
         }) ?? nil
+        let scope = BundleScope(
+            libraryId: libraryId ?? "",
+            customDestination: destinationOverride?.path ?? configuredDestination,
+            defaultBackupsRoot: backupsRoot
+        )
+        let destination = scope.destination
 
         let info = try writeBundle(
             database: pool,
@@ -386,7 +421,7 @@ final class BackupService: Sendable {
             now: { Date() }
         )
         // Best-effort: a failed prune never aborts startup.
-        _ = try? pruneBundles(in: destination, keep: defaultKeep, fileManager: fileManager)
+        _ = try? pruneBundles(in: scope, keep: defaultKeep, fileManager: fileManager)
         return info.url
     }
 
@@ -398,7 +433,7 @@ final class BackupService: Sendable {
     /// Returns the URLs of removed bundles.
     @discardableResult
     func pruneBackups(keep: Int = 10) async throws -> [URL] {
-        try Self.pruneBundles(in: await destinationDirectory(), keep: keep, fileManager: fileManager)
+        try Self.pruneBundles(in: await scope(), keep: keep, fileManager: fileManager)
     }
 
     // MARK: - Internals
@@ -484,6 +519,21 @@ final class BackupService: Sendable {
         }
     }
 
+    /// Bundles of `scope`'s library: every bundle in the destination tagged with its id or
+    /// without a readable manifest, plus — for the default folder — the library's bundles
+    /// that were written into the shared root before A3.
+    private static func listBundles(in scope: BundleScope, fileManager: FileManager) throws -> [BackupInfo] {
+        var infos = try listBundles(in: scope.destination, fileManager: fileManager).filter {
+            $0.libraryId == nil || $0.libraryId == scope.libraryId
+        }
+        if let legacyRoot = scope.legacyRoot {
+            infos += try listBundles(in: legacyRoot, fileManager: fileManager).filter {
+                $0.libraryId == scope.libraryId
+            }
+        }
+        return infos.sorted { $0.createdAt > $1.createdAt }
+    }
+
     private static func listBundles(in destination: URL, fileManager: FileManager) throws -> [BackupInfo] {
         guard fileManager.fileExists(atPath: destination.path) else { return [] }
 
@@ -509,8 +559,8 @@ final class BackupService: Sendable {
         return infos.sorted { $0.createdAt > $1.createdAt }
     }
 
-    private static func pruneBundles(in destination: URL, keep: Int, fileManager: FileManager) throws -> [URL] {
-        let all = try listBundles(in: destination, fileManager: fileManager)
+    private static func pruneBundles(in scope: BundleScope, keep: Int, fileManager: FileManager) throws -> [URL] {
+        let all = try listBundles(in: scope, fileManager: fileManager)
         guard all.count > keep else { return [] }
 
         // Split into incomplete (oldest first) and complete (oldest first).
@@ -561,7 +611,8 @@ final class BackupService: Sendable {
                 schemaVersion: manifest.schemaVersion,
                 trackCount: manifest.trackCount,
                 databaseSizeBytes: manifest.databaseSizeBytes,
-                isComplete: isComplete
+                isComplete: isComplete,
+                libraryId: manifest.libraryId
             )
         }
 
@@ -702,6 +753,29 @@ final class BackupService: Sendable {
         } else {
             try fileManager.moveItem(at: staged, to: target)
         }
+    }
+}
+
+/// Which folder(s) and which library a backup operation works on.
+private struct BundleScope {
+    let libraryId: String
+    let customDestination: String?
+    let defaultBackupsRoot: URL
+
+    init(libraryId: String, customDestination: String?, defaultBackupsRoot: URL) {
+        self.libraryId = libraryId
+        self.customDestination = (customDestination?.isEmpty ?? true) ? nil : customDestination
+        self.defaultBackupsRoot = defaultBackupsRoot
+    }
+
+    var destination: URL {
+        if let customDestination { return URL(fileURLWithPath: customDestination) }
+        return BackupService.defaultDestination(forLibraryId: libraryId, in: defaultBackupsRoot)
+    }
+
+    /// The shared pre-A3 root, when the destination is a per-library default folder.
+    var legacyRoot: URL? {
+        customDestination == nil && !libraryId.isEmpty ? defaultBackupsRoot : nil
     }
 }
 

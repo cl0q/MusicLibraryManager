@@ -21,7 +21,7 @@ final class SnapshotsTests: XCTestCase {
                 paths.insert(String(url.path.dropFirst(root.path.count + 1)))
             }
         }
-        XCTAssertEqual(paths.count, 64, "Re-audit inventory changes explicitly.")
+        XCTAssertEqual(paths.count, 65, "Re-audit inventory changes explicitly.")
         XCTAssertEqual(Set(SnapshotFixtures.inventory.map(\.path)), paths)
         XCTAssertEqual(SnapshotFixtures.inventory.count, paths.count)
         XCTAssertFalse(SnapshotFixtures.inventory.contains { $0.disposition.isEmpty })
@@ -30,7 +30,7 @@ final class SnapshotsTests: XCTestCase {
         XCTAssertEqual(SnapshotFixtures.fixtures.count, 30)
         XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 24)
         XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 8)
-        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 32)
+        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 33)
         for fixture in SnapshotFixtures.fixtures where fixture.expectedTableRows != nil {
             if case .swiftUI = fixture.backend {
                 XCTFail("\(fixture.id): table readiness requires the AppKit backend.")

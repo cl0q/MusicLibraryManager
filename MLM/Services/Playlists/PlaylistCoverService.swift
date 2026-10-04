@@ -77,7 +77,7 @@ final class PlaylistCoverService {
         playlistRepository: PlaylistRepository,
         trackRepository: TrackRepository,
         configRepository: ConfigRepository,
-        coversDirectory: URL = DatabaseManager.defaultPlaylistCoversDirectory
+        coversDirectory: URL
     ) {
         self.database = database
         self.playlistRepository = playlistRepository
