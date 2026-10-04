@@ -261,7 +261,7 @@ struct GrooveView: View {
                 Task { await handleRejectDiscovery(track: track) }
             }
         } message: {
-            Text("Delete this file from disk?")
+            Text("The file will be moved to the Trash.")
         }
     }
 

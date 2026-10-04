@@ -96,7 +96,7 @@ struct DiscoveryInboxView: View {
                 Task { await rejectTrack(track) }
             }
         } message: {
-            Text("Delete this file from disk?")
+            Text("The file will be moved to the Trash.")
         }
         .task {
             await loadInboxItems()
