@@ -208,7 +208,8 @@ struct LibraryView: View {
               let configRepo = container.configRepository else { return }
         importViewModel = ImportViewModel(
             importService: importService,
-            configRepository: configRepo
+            configRepository: configRepo,
+            activityViewModel: container.activityViewModel
         )
     }
 

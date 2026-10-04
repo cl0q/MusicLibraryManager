@@ -1,6 +1,14 @@
 import Foundation
 import GRDB
 
+/// Protocol seam for the import service, allowing test fakes.
+protocol ImportServicing: Sendable {
+    func importDirectory(
+        _ directory: URL,
+        onProgress: (@Sendable (ImportService.ImportProgress) -> Void)?
+    ) async throws -> ImportService.ImportResult
+}
+
 /// Recursive directory scanner and batch importer.
 ///
 /// Scans a directory tree for audio files, extracts metadata from each,
@@ -378,6 +386,8 @@ final class ImportService: Sendable {
         }
     }
 }
+
+extension ImportService: ImportServicing {}
 
 // MARK: - Array Chunking Extension
 

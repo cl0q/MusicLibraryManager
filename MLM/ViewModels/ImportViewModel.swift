@@ -27,16 +27,33 @@ final class ImportViewModel {
     /// Whether the library root has been configured.
     var hasLibraryRoot: Bool { libraryRoot != nil }
 
+    /// ID of the currently registered Activity operation (if any).
+    private(set) var currentOperationID: UUID?
+
     // MARK: - Dependencies
 
-    private let importService: ImportService
+    private let importService: ImportServicing
     private let configRepository: ConfigRepository
+    private let activityViewModel: ActivityViewModel?
+
+    /// Box so the `@Sendable` cancellation closure can reference a Task
+    /// that does not yet exist at closure-creation time.
+    private final class TaskBox: @unchecked Sendable {
+        var task: Task<Void, Never>?
+    }
+
+    private var importTaskBox = TaskBox()
 
     // MARK: - Init
 
-    init(importService: ImportService, configRepository: ConfigRepository) {
+    init(
+        importService: ImportServicing,
+        configRepository: ConfigRepository,
+        activityViewModel: ActivityViewModel? = nil
+    ) {
         self.importService = importService
         self.configRepository = configRepository
+        self.activityViewModel = activityViewModel
     }
 
     // MARK: - Library Root
@@ -75,10 +92,6 @@ final class ImportViewModel {
     // MARK: - Import
 
     /// Import all audio files from the library root directory.
-    ///
-    /// Scans recursively, extracts metadata, and saves to database.
-    /// Progress is reported via the `progress` property.
-    /// Posts `.libraryDidImport` notification on success.
     @MainActor
     func importLibrary() async {
         guard let root = libraryRoot else {
@@ -93,88 +106,26 @@ final class ImportViewModel {
             return
         }
 
-        isImporting = true
-        errorMessage = nil
-        lastResult = nil
-        progress = nil
-
-        do {
-            let result = try await importService.importDirectory(rootURL) { [weak self] progress in
-                Task { @MainActor in
-                    self?.progress = progress
-                }
-            }
-
-            lastResult = result
-            progress = nil
-
-            if result.failed > 0 {
-                errorMessage = "\(result.failed) file(s) failed to import"
-            }
-
-            // Notify other views that library data has changed
-            NotificationCenter.default.post(
-                name: .libraryDidImport,
-                object: nil,
-                userInfo: [
-                    "succeeded": result.succeeded,
-                    "skipped": result.skipped
-                ]
-            )
-        } catch {
-            if error is CancellationError {
-                errorMessage = nil
-            } else {
-                errorMessage = error.localizedDescription
-            }
-        }
-
-        isImporting = false
+        await runImport(
+            directory: rootURL,
+            title: "Rescan library",
+            detail: "Scanning \(URL(fileURLWithPath: root).lastPathComponent)…"
+        )
     }
 
     /// Import from a specific directory (for manual folder selection).
-    ///
-    /// - Parameter directory: Directory to scan and import from
-    /// Posts `.libraryDidImport` notification on success.
     @MainActor
     func importFromDirectory(_ directory: URL) async {
-        isImporting = true
-        errorMessage = nil
-        lastResult = nil
-        progress = nil
+        await runImport(
+            directory: directory,
+            title: "Import: \(directory.lastPathComponent)",
+            detail: "Scanning \(directory.lastPathComponent)…"
+        )
+    }
 
-        do {
-            let result = try await importService.importDirectory(directory) { [weak self] progress in
-                Task { @MainActor in
-                    self?.progress = progress
-                }
-            }
-
-            lastResult = result
-            progress = nil
-
-            if result.failed > 0 {
-                errorMessage = "\(result.failed) file(s) failed to import"
-            }
-
-            // Notify other views that library data has changed
-            NotificationCenter.default.post(
-                name: .libraryDidImport,
-                object: nil,
-                userInfo: [
-                    "succeeded": result.succeeded,
-                    "skipped": result.skipped
-                ]
-            )
-        } catch {
-            if error is CancellationError {
-                errorMessage = nil
-            } else {
-                errorMessage = error.localizedDescription
-            }
-        }
-
-        isImporting = false
+    /// Cancel the in-flight import (used by Settings-side Cancel and Activity panel).
+    func cancelImport() {
+        importTaskBox.task?.cancel()
     }
 
     /// Clear the last result and error state.
@@ -182,5 +133,96 @@ final class ImportViewModel {
     func clearResult() {
         lastResult = nil
         errorMessage = nil
+    }
+
+    // MARK: - Private
+
+    @MainActor
+    private func runImport(directory: URL, title: String, detail: String) async {
+        isImporting = true
+        errorMessage = nil
+        lastResult = nil
+        progress = nil
+
+        let opID = activityViewModel?.startOperation(
+            type: .import,
+            title: title,
+            detail: detail
+        )
+        currentOperationID = opID
+
+        let box = importTaskBox
+        let task = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let result = try await self.importService.importDirectory(directory) { [weak self] progress in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        self.progress = progress
+                        if let opID {
+                            self.activityViewModel?.updateProgress(
+                                id: opID,
+                                progress: progress.fraction,
+                                detail: progress.currentFile ?? progress.phase
+                            )
+                        }
+                    }
+                }
+
+                await MainActor.run {
+                    self.lastResult = result
+                    self.progress = nil
+
+                    if result.cancelled {
+                        if let opID {
+                            self.activityViewModel?.cancelOperation(id: opID, detail: "Cancelled")
+                        }
+                    } else {
+                        let summary = "\(result.succeeded) imported, \(result.skipped) skipped"
+                        if let opID {
+                            self.activityViewModel?.completeOperation(id: opID, detail: summary)
+                        }
+                        if result.failed > 0 {
+                            self.errorMessage = "\(result.failed) file(s) failed to import"
+                        }
+                        NotificationCenter.default.post(
+                            name: .libraryDidImport,
+                            object: nil,
+                            userInfo: [
+                                "succeeded": result.succeeded,
+                                "skipped": result.skipped
+                            ]
+                        )
+                    }
+                    self.isImporting = false
+                    self.currentOperationID = nil
+                }
+            } catch {
+                await MainActor.run {
+                    self.progress = nil
+                    if error is CancellationError {
+                        if let opID {
+                            self.activityViewModel?.cancelOperation(id: opID, detail: "Cancelled")
+                        }
+                    } else {
+                        if let opID {
+                            self.activityViewModel?.failOperation(id: opID, error: error.localizedDescription)
+                        }
+                        self.errorMessage = error.localizedDescription
+                    }
+                    self.isImporting = false
+                    self.currentOperationID = nil
+                }
+            }
+        }
+        box.task = task
+
+        if let opID {
+            activityViewModel?.registerCancellationToken(id: opID) { [weak self] in
+                self?.cancelImport()
+            }
+        }
+
+        await task.value
     }
 }

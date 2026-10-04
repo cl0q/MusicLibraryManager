@@ -182,6 +182,17 @@ struct LibrarySetupView: View {
                         ProgressView()
                             .controlSize(.small)
                     }
+
+                    HStack {
+                        Spacer()
+                        Button {
+                            vm.cancelImport()
+                        } label: {
+                            Label("Cancel", systemImage: "xmark.circle")
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.mlmError)
+                    }
                 }
             } else {
                 // Import actions
@@ -258,7 +269,8 @@ struct LibrarySetupView: View {
               let configRepo = container.configRepository else { return }
         viewModel = ImportViewModel(
             importService: importService,
-            configRepository: configRepo
+            configRepository: configRepo,
+            activityViewModel: container.activityViewModel
         )
     }
 

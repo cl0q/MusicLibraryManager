@@ -327,7 +327,8 @@ struct FirstRunWizard: View {
               let configRepo = container.configRepository else { return }
         viewModel = ImportViewModel(
             importService: importService,
-            configRepository: configRepo
+            configRepository: configRepo,
+            activityViewModel: container.activityViewModel
         )
     }
 
