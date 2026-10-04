@@ -316,17 +316,67 @@ final class PlaylistViewModel {
         return downloadStatusesByID[playlistID]
     }
 
+    // MARK: - Source Filter
+
+    /// Filter for which playlist sources to show in the grid.
+    enum PlaylistSourceFilter: Equatable {
+        case all
+        case local
+        case identity(PlaylistSourceIdentity)
+    }
+
+    /// Current source filter applied to the grid.
+    var sourceFilter: PlaylistSourceFilter = .all {
+        didSet { applyFilter() }
+    }
+
+    /// When true, only playlists with incomplete downloads (failed tracks) are shown.
+    var incompleteOnly: Bool = false {
+        didSet { applyFilter() }
+    }
+
+    /// Source identities present in the current playlist set, sorted by displayName.
+    var availableSourceIdentities: [PlaylistSourceIdentity] {
+        var seen = Set<String>()
+        var result: [PlaylistSourceIdentity] = []
+        for playlist in playlists {
+            guard let identity = source(for: playlist)?.playlistSourceIdentity else { continue }
+            let key = identity.displayName
+            if seen.insert(key).inserted {
+                result.append(identity)
+            }
+        }
+        return result.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
     // MARK: - Filtering
 
-    /// Apply the search filter to the playlist list.
+    /// Apply the search, source, and incomplete filters to the playlist list.
     private func applyFilter() {
-        if searchQuery.isEmpty {
-            displayedPlaylists = playlists
-        } else {
-            let query = searchQuery.lowercased()
-            displayedPlaylists = playlists.filter {
-                $0.name.lowercased().contains(query)
+        displayedPlaylists = playlists.filter { playlist in
+            // Name search predicate
+            if !searchQuery.isEmpty {
+                let query = searchQuery.lowercased()
+                guard playlist.name.lowercased().contains(query) else { return false }
             }
+
+            // Source predicate
+            switch sourceFilter {
+            case .all:
+                break
+            case .local:
+                guard source(for: playlist) == nil else { return false }
+            case .identity(let target):
+                guard source(for: playlist)?.playlistSourceIdentity == target else { return false }
+            }
+
+            // Incomplete predicate: when filtering, require a status row AND isIncomplete.
+            // A playlist with no status row is treated as not-incomplete (excluded).
+            if incompleteOnly {
+                guard let status = downloadStatus(for: playlist), status.isIncomplete else { return false }
+            }
+
+            return true
         }
     }
 

@@ -169,6 +169,29 @@ struct PlaylistsView: View {
 
             Spacer()
 
+            // Source filter picker
+            sourceFilterPicker(viewModel)
+
+            // Incomplete toggle
+            Button {
+                viewModel.incompleteOnly.toggle()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: viewModel.incompleteOnly ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 11))
+                    Text("Incomplete")
+                        .font(MLMFont.body)
+                }
+                .foregroundColor(viewModel.incompleteOnly ? .mlmAccent : .mlmInkSecondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(Color.mlmRaised)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("playlist_incomplete_filter")
+            .accessibilityLabel("playlist_incomplete_filter")
+
             // Search field
             HStack(spacing: 4) {
                 Image(systemName: "magnifyingglass")
@@ -226,6 +249,57 @@ struct PlaylistsView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+
+    // MARK: - Source Filter Picker
+
+    private func sourceFilterPicker(_ viewModel: PlaylistViewModel) -> some View {
+        Menu {
+            Button {
+                viewModel.sourceFilter = .all
+            } label: {
+                if case .all = viewModel.sourceFilter { Label("All", systemImage: "checkmark") } else { Text("All") }
+            }
+            Button {
+                viewModel.sourceFilter = .local
+            } label: {
+                if case .local = viewModel.sourceFilter { Label("Local", systemImage: "checkmark") } else { Text("Local") }
+            }
+            ForEach(viewModel.availableSourceIdentities, id: \.self) { identity in
+                Button {
+                    viewModel.sourceFilter = .identity(identity)
+                } label: {
+                    if case .identity(identity) = viewModel.sourceFilter {
+                        Label(identity.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(identity.displayName)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "line.3.horizontal.decrease.circle")
+                    .font(.system(size: 11))
+                Text(sourceFilterLabel(viewModel))
+                    .font(MLMFont.body)
+            }
+            .foregroundColor(.mlmInkSecondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(Color.mlmRaised)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .menuStyle(.borderlessButton)
+        .accessibilityIdentifier("playlist_source_filter")
+        .accessibilityLabel("playlist_source_filter")
+    }
+
+    private func sourceFilterLabel(_ viewModel: PlaylistViewModel) -> String {
+        switch viewModel.sourceFilter {
+        case .all: return "All"
+        case .local: return "Local"
+        case .identity(let id): return id.displayName
+        }
     }
 
     // MARK: - New Playlist Popover
@@ -307,7 +381,7 @@ struct PlaylistsView: View {
                 .font(.system(size: 48))
                 .foregroundColor(.mlmInkMuted)
 
-            if viewModel.searchQuery.isEmpty {
+            if viewModel.playlists.isEmpty {
                 Text("No Playlists Yet")
                     .font(MLMFont.sectionHeader)
                     .foregroundColor(.mlmInk)
@@ -317,6 +391,16 @@ struct PlaylistsView: View {
                     .foregroundColor(.mlmInkSecondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 60)
+            } else if !viewModel.searchQuery.isEmpty
+                        || viewModel.sourceFilter != .all
+                        || viewModel.incompleteOnly {
+                Text("No Playlists Match Your Filters")
+                    .font(MLMFont.sectionHeader)
+                    .foregroundColor(.mlmInk)
+
+                Text("Try clearing or adjusting your filters.")
+                    .font(MLMFont.body)
+                    .foregroundColor(.mlmInkSecondary)
             } else {
                 Text("No matching playlists")
                     .font(MLMFont.sectionHeader)
