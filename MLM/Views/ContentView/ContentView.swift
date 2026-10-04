@@ -94,6 +94,18 @@ struct ContentView: View {
                 }
             } else if let error = container.initializationError {
                 errorView(error)
+            } else if launch.screen == .offerAdoption {
+                // Pre-A3 install found: offer the library file before anything opens.
+                Color.mlmBase
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .sheet(isPresented: .constant(true)) {
+                        LibraryAdoptionSheet(
+                            state: launch.adoptionState,
+                            onCreate: { name in Task { await launch.adoptLegacyLibrary(named: name) } },
+                            onNotNow: { Task { await launch.declineAdoption() } },
+                            onDone: { Task { await launch.finishAdoption() } }
+                        )
+                    }
             } else if launch.screen != .resolving, launch.screen != .opened {
                 // No library open yet (A3): first run, picker placeholder, or a problem.
                 LibraryLaunchStateView(

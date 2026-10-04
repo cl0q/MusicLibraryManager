@@ -17,6 +17,7 @@ struct LibraryLaunchCoordinatorTests {
         let root: URL
         let store: LibraryRegistryStore
         let legacyURL: URL
+        let adoption: LibraryAdoption
         var opened: [LibraryLocation] = []
         var failures: [String] = []
         var relaunches = 0
@@ -32,9 +33,16 @@ struct LibraryLaunchCoordinatorTests {
                 fileURL: root.appendingPathComponent("libraries.json"),
                 librariesDirectory: root.appendingPathComponent("libraries"))
             legacyURL = root.appendingPathComponent("music_library.db")
+            adoption = LibraryAdoption(
+                environment: .init(
+                    legacyDatabaseURL: legacyURL,
+                    registryStore: store,
+                    backupsRoot: root.appendingPathComponent("backups"),
+                    pathMigrationsDirectory: root.appendingPathComponent("PathMigrations")),
+                now: { now })
             coordinator = LibraryLaunchCoordinator(
                 store: store,
-                legacyDatabaseURL: legacyURL,
+                adoption: adoption,
                 now: { now },
                 pendingOpen: .init(
                     take: { [unowned self] in defer { self.pendingPath = nil }; return self.pendingPath },
@@ -49,6 +57,19 @@ struct LibraryLaunchCoordinatorTests {
         }
 
         func registry() throws -> LibraryRegistry { try store.load().registry }
+
+        /// A pre-A3 install: loose database with a library id and one track.
+        func makeLegacy() throws {
+            let manager = try DatabaseManager(path: legacyURL)
+            try manager.pool.write { db in
+                try db.execute(sql: "INSERT INTO app_config (key, value) VALUES ('library_id', 'legacy-id')")
+                try db.execute(sql: """
+                    INSERT INTO tracks (id, artist, album_artist, album, title, format, original_path)
+                    VALUES (1, 'A', 'A', 'B', 'T', 'mp3', '/tmp/1.mp3')
+                    """)
+            }
+            try manager.pool.close()
+        }
 
         /// File URLs of existing directories carry a trailing slash; the app's don't.
         func canonical(_ url: URL) -> URL {
@@ -71,13 +92,84 @@ struct LibraryLaunchCoordinatorTests {
 
     // MARK: - Launch
 
-    @Test func legacyInstallOpensTheLegacyDatabaseUntilAdoptionExists() async throws {
+    @Test func legacyInstallIsOfferedAdoptionAndNothingOpens() async throws {
         let f = try Fixture(now: fixedNow)
-        _ = try DatabaseManager(path: f.legacyURL)
+        try f.makeLegacy()
         await f.coordinator.start()
+        #expect(f.coordinator.screen == .offerAdoption)
+        #expect(f.opened.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: f.store.fileURL.path))
+    }
+
+    @Test func notNowOpensTheLegacyDatabase() async throws {
+        let f = try Fixture(now: fixedNow)
+        try f.makeLegacy()
+        await f.coordinator.start()
+        await f.coordinator.declineAdoption()
         #expect(f.opened == [.legacy(f.legacyURL)])
         #expect(f.coordinator.screen == .opened)
-        #expect(!FileManager.default.fileExists(atPath: f.store.fileURL.path))
+    }
+
+    @Test func adoptionSucceedsThenOpensTheLibraryFileOnDone() async throws {
+        let f = try Fixture(now: fixedNow)
+        try f.makeLegacy()
+        await f.coordinator.start()
+        await f.coordinator.adoptLegacyLibrary(named: "Main Library")
+
+        guard case .succeeded(let result) = f.coordinator.adoptionState else {
+            Issue.record("expected succeeded, got \(f.coordinator.adoptionState)")
+            return
+        }
+        #expect(f.opened.isEmpty) // the success message is shown first
+        #expect(try f.registry().lastActiveLibraryId == "legacy-id")
+        await f.coordinator.finishAdoption()
+        #expect(f.opened == [.package(f.canonical(result.packageURL))])
+        #expect(f.coordinator.screen == .opened)
+    }
+
+    @Test func failedAdoptionKeepsTheLegacyLayout() async throws {
+        let f = try Fixture(now: fixedNow)
+        try f.makeLegacy()
+        try FileManager.default.createDirectory(at: f.store.librariesDirectory, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: f.store.librariesDirectory.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: f.store.librariesDirectory.path) }
+
+        await f.coordinator.start()
+        await f.coordinator.adoptLegacyLibrary(named: "Main Library")
+        guard case .failed = f.coordinator.adoptionState else {
+            Issue.record("expected failed, got \(f.coordinator.adoptionState)")
+            return
+        }
+        #expect(FileManager.default.fileExists(atPath: f.legacyURL.path))
+        #expect(!f.adoption.isInProgress)
+        await f.coordinator.declineAdoption()
+        #expect(f.opened == [.legacy(f.legacyURL)])
+    }
+
+    @Test func interruptedAdoptionPastTheRenameIsFinishedAtLaunch() async throws {
+        let f = try Fixture(now: fixedNow)
+        try f.makeLegacy()
+        try f.adoption.begin(named: "Main Library")
+        try f.adoption.advance(through: .registered)
+
+        await f.coordinator.start()
+        let package = f.store.librariesDirectory.appendingPathComponent("Main Library.mlibm")
+        #expect(f.opened == [.package(f.canonical(package))])
+        #expect(!f.adoption.isInProgress)
+        #expect(!FileManager.default.fileExists(atPath: f.legacyURL.path))
+    }
+
+    @Test func interruptedAdoptionBeforeTheRenameIsUndoneAndOfferedAgain() async throws {
+        let f = try Fixture(now: fixedNow)
+        try f.makeLegacy()
+        try f.adoption.begin(named: "Main Library")
+        try f.adoption.advance(through: .staged)
+
+        await f.coordinator.start()
+        #expect(f.coordinator.screen == .offerAdoption)
+        #expect(f.opened.isEmpty)
+        #expect(!f.adoption.isInProgress)
+        #expect(FileManager.default.fileExists(atPath: f.legacyURL.path))
     }
 
     @Test func nothingAnywhereAsksForTheFirstLibrary() async throws {

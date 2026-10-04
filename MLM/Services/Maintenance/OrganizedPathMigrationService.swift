@@ -712,7 +712,36 @@ final class OrganizedPathMigrationService {
             && manifestLibraryRoot == libraryRoot.path
     }
 
-    private static func defaultArtifactsDirectory() -> URL {
+    /// Points manifests recorded against `oldDatabase` at `newDatabase` after the database
+    /// moved into a library file (A3 adoption), so their rollback stays available. Only the
+    /// `databasePath` field changes. Returns the number of manifests updated.
+    @discardableResult
+    static func repointManifests(
+        in directory: URL,
+        fromDatabase oldDatabase: URL,
+        to newDatabase: URL,
+        fileManager: FileManager = .default
+    ) throws -> Int {
+        guard fileManager.fileExists(atPath: directory.path) else { return 0 }
+        let old = oldDatabase.standardizedFileURL.resolvingSymlinksInPath().path
+        var updated = 0
+        for url in try fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        where url.lastPathComponent.hasPrefix("organized-path-migration-") && url.pathExtension == "json" {
+            guard let data = try? Data(contentsOf: url),
+                  var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let path = json["databasePath"] as? String,
+                  URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().path == old
+            else { continue }
+            json["databasePath"] = newDatabase.path
+            let encoded = try JSONSerialization.data(
+                withJSONObject: json, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+            try encoded.write(to: url, options: .atomic)
+            updated += 1
+        }
+        return updated
+    }
+
+    static func defaultArtifactsDirectory() -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return appSupport
             .appendingPathComponent("com.musiclibrary.app", isDirectory: true)

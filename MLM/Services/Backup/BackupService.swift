@@ -8,6 +8,8 @@ enum BackupReason: String, Codable, Sendable {
     case preMigration
     case manual
     case preRestore
+    /// Before the pre-A3 install is moved into a library file.
+    case preAdoption
 }
 
 /// Metadata for a single backup bundle.
@@ -397,18 +399,9 @@ final class BackupService: Sendable {
             return nil
         }
 
-        let configuredDestination = (try? pool.read { db in
-            try String.fetchOne(db, sql: "SELECT value FROM app_config WHERE key = 'backup_destination'")
-        }) ?? nil
-        let libraryId = (try? pool.read { db in
-            try String.fetchOne(db, sql: "SELECT value FROM app_config WHERE key = 'library_id'")
-        }) ?? nil
-        let scope = BundleScope(
-            libraryId: libraryId ?? "",
-            customDestination: destinationOverride?.path ?? configuredDestination,
-            defaultBackupsRoot: backupsRoot
-        )
+        let scope = scope(of: pool, destinationOverride: destinationOverride, backupsRoot: backupsRoot)
         let destination = scope.destination
+        let libraryId: String? = scope.libraryId
 
         let info = try writeBundle(
             database: pool,
@@ -423,6 +416,85 @@ final class BackupService: Sendable {
         // Best-effort: a failed prune never aborts startup.
         _ = try? pruneBundles(in: scope, keep: defaultKeep, fileManager: fileManager)
         return info.url
+    }
+
+    // MARK: - Backup without a container (library adoption)
+
+    /// Synchronous backup of `database` for callers that run before the app has a library
+    /// open. Destination and library id come from the database itself, like the
+    /// pre-migration hook; old bundles are pruned as after any backup.
+    static func createBundle(
+        database: any DatabaseWriter,
+        databasePath: URL,
+        coversDirectory: URL?,
+        reason: BackupReason,
+        backupsRoot: URL = defaultBackupsRoot,
+        fileManager: FileManager = .default,
+        now: () -> Date = { Date() }
+    ) throws -> BackupInfo {
+        let scope = scope(of: database, destinationOverride: nil, backupsRoot: backupsRoot)
+        let info = try writeBundle(
+            database: database,
+            databasePath: databasePath,
+            coversDirectory: coversDirectory,
+            destination: scope.destination,
+            reason: reason,
+            libraryId: scope.libraryId,
+            fileManager: fileManager,
+            now: now
+        )
+        _ = try? pruneBundles(in: scope, keep: defaultKeep, fileManager: fileManager)
+        return info
+    }
+
+    /// Gives bundles made from `sourceDatabasePath` while it had no library id to the library
+    /// that now owns that database (adoption), so they stay listable and restorable.
+    /// Returns the number of bundles claimed.
+    @discardableResult
+    static func claimUnassignedBundles(
+        in directory: URL,
+        sourceDatabasePath: URL,
+        libraryId: String,
+        fileManager: FileManager = .default
+    ) throws -> Int {
+        guard fileManager.fileExists(atPath: directory.path) else { return 0 }
+        let source = sourceDatabasePath.standardizedFileURL.path
+        var claimed = 0
+        for bundle in try fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        where bundle.lastPathComponent.hasPrefix(bundlePrefix) {
+            let manifestURL = bundle.appendingPathComponent(manifestName)
+            guard let data = try? Data(contentsOf: manifestURL),
+                  var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  (json["library_id"] as? String)?.isEmpty == true,
+                  let path = json["source_database_path"] as? String,
+                  URL(fileURLWithPath: path).standardizedFileURL.path == source
+            else { continue }
+            json["library_id"] = libraryId
+            let updated = try JSONSerialization.data(
+                withJSONObject: json, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+            try updated.write(to: manifestURL, options: .atomic)
+            claimed += 1
+        }
+        return claimed
+    }
+
+    /// Backup scope read straight from a database's `app_config`.
+    private static func scope(
+        of database: any DatabaseReader,
+        destinationOverride: URL?,
+        backupsRoot: URL
+    ) -> BundleScope {
+        let configuredDestination = (try? database.read { db in
+            try String.fetchOne(db, sql: "SELECT value FROM app_config WHERE key = 'backup_destination'")
+        }) ?? nil
+        let libraryId = (try? database.read { db in
+            try String.fetchOne(db, sql: "SELECT value FROM app_config WHERE key = 'library_id'")
+        }) ?? nil
+        return BundleScope(
+            libraryId: libraryId ?? "",
+            customDestination: destinationOverride?.path ?? configuredDestination,
+            defaultBackupsRoot: backupsRoot
+        )
     }
 
     // MARK: - Prune

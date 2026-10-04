@@ -192,6 +192,7 @@ final class BackupSettingsViewModel {
         case .preMigration: return "Before update"
         case .manual: return "Manual"
         case .preRestore: return "Before restore"
+        case .preAdoption: return "Before library file setup"
         case nil: return "Unknown"
         }
     }

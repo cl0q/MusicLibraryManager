@@ -19,12 +19,23 @@ final class LibraryLaunchCoordinator {
         case noLibrary
         /// First run: `New Library` sheet with "Main Library", then the first-run wizard.
         case createFirstLibrary
+        /// `Set up your library file` — the pre-A3 install can be adopted.
+        case offerAdoption
         /// `"‹name›" can't be opened` — not found / not connected.
         case unavailable(LibraryRegistry.Entry, LibraryAvailability)
         /// `"‹name›" can't be opened` — identity differs from its database or the registry.
         case mismatch(name: String, packageURL: URL)
         /// `"‹name›" isn't a valid library file.`
         case invalid(name: String)
+    }
+
+    /// Progress of the adoption sheet.
+    enum AdoptionState: Equatable {
+        case idle
+        case running(LibraryAdoption.Phase)
+        case succeeded(LibraryAdoption.Result)
+        /// Nothing changed; `details` goes behind the `Details` disclosure.
+        case failed(details: String)
     }
 
     enum SwitchOutcome: Equatable {
@@ -53,9 +64,11 @@ final class LibraryLaunchCoordinator {
     }
 
     private(set) var screen: Screen = .resolving
+    private(set) var adoptionState: AdoptionState = .idle
 
     let store: LibraryRegistryStore
-    private let legacyDatabaseURL: URL
+    private let adoption: LibraryAdoption
+    private var legacyDatabaseURL: URL { adoption.environment.legacyDatabaseURL }
     private let now: () -> Date
     private let pendingOpen: PendingOpenStore
     private let openLibrary: (LibraryLocation) async throws -> Void
@@ -64,7 +77,7 @@ final class LibraryLaunchCoordinator {
 
     init(
         store: LibraryRegistryStore = LibraryRegistryStore(),
-        legacyDatabaseURL: URL = DatabaseManager.legacyDatabaseURL,
+        adoption: LibraryAdoption,
         now: @escaping () -> Date = { Date() },
         pendingOpen: PendingOpenStore = .userDefaults,
         openLibrary: @escaping (LibraryLocation) async throws -> Void,
@@ -72,7 +85,7 @@ final class LibraryLaunchCoordinator {
         relaunch: @escaping () -> Void
     ) {
         self.store = store
-        self.legacyDatabaseURL = legacyDatabaseURL
+        self.adoption = adoption
         self.now = now
         self.pendingOpen = pendingOpen
         self.openLibrary = openLibrary
@@ -82,6 +95,7 @@ final class LibraryLaunchCoordinator {
 
     /// The app's coordinator: opens libraries into `DependencyContainer.shared`.
     static let shared = LibraryLaunchCoordinator(
+        adoption: LibraryAdoption(),
         openLibrary: { location in try await DependencyContainer.shared.initialize(location: location) },
         reportFailure: { error in DependencyContainer.shared.reportInitializationFailure(error) },
         relaunch: { BackupService.relaunchApp() }
@@ -106,7 +120,7 @@ final class LibraryLaunchCoordinator {
         let decision = LibraryLaunchResolver.resolve(.init(
             registry: registry,
             legacyDatabaseExists: FileManager.default.fileExists(atPath: legacyDatabaseURL.path),
-            adoptionInProgress: false,
+            adoptionInProgress: adoption.isInProgress,
             openedFileURL: openedFileURL ?? pending,
             availability: { LibraryRegistry.availability(of: $0) }
         ))
@@ -114,9 +128,11 @@ final class LibraryLaunchCoordinator {
         switch decision {
         case .openPackage(let url, _):
             await open(packageAt: url)
-        case .offerAdoption, .resumeAdoption:
-            // Adoption arrives in A3 Wave 3; until then the legacy layout keeps working.
-            await finishOpening(.legacy(legacyDatabaseURL))
+        case .offerAdoption:
+            adoptionState = .idle
+            screen = .offerAdoption
+        case .resumeAdoption:
+            await resumeAdoption()
         case .createFirstLibrary:
             screen = .createFirstLibrary
         case .noLibrary:
@@ -160,6 +176,71 @@ final class LibraryLaunchCoordinator {
             await open(packageAt: package)
         } catch {
             reportFailure(error)
+        }
+    }
+
+    // MARK: - Adoption (A0 D7)
+
+    /// `Create library file`. Runs off the main thread; the legacy database is not open.
+    func adoptLegacyLibrary(named name: String) async {
+        adoptionState = .running(.backingUp)
+        let adoption = self.adoption
+        do {
+            let result = try await Task.detached(priority: .userInitiated) {
+                try adoption.adopt(named: name) { phase in
+                    Task { @MainActor in self.updateAdoptionPhase(phase) }
+                }
+            }.value
+            adoptionState = .succeeded(result)
+        } catch {
+            AppLogger.shared.error("Library file setup failed: \(error)", source: "Library")
+            if let package = adoption.installedPackageURL() {
+                // Past the point of no return: the library file is complete. Open it; the
+                // remaining steps finish at the next launch.
+                await finishOpening(.package(package))
+            } else {
+                adoptionState = .failed(details: String(describing: error))
+            }
+        }
+    }
+
+    /// `Done` on the success message.
+    func finishAdoption() async {
+        guard case .succeeded(let result) = adoptionState else { return }
+        adoptionState = .idle
+        await finishOpening(.package(Self.canonical(result.packageURL)))
+    }
+
+    /// `Not now` — the old layout keeps working; MLM asks again at the next launch.
+    func declineAdoption() async {
+        adoptionState = .idle
+        await finishOpening(.legacy(legacyDatabaseURL))
+    }
+
+    private func updateAdoptionPhase(_ phase: LibraryAdoption.Phase) {
+        if case .running = adoptionState { adoptionState = .running(phase) }
+    }
+
+    /// An adoption was interrupted: finish it (past the rename) or undo it and ask again.
+    private func resumeAdoption() async {
+        let adoption = self.adoption
+        do {
+            let outcome = try await Task.detached(priority: .userInitiated) { try adoption.resume() }.value
+            switch outcome {
+            case .completed(let result):
+                AppLogger.shared.info("Finished interrupted library file setup: \(result.packageURL.path)", source: "Library")
+                await finishOpening(.package(Self.canonical(result.packageURL)))
+            case .rolledBack:
+                AppLogger.shared.info("Undid interrupted library file setup", source: "Library")
+                await start()
+            }
+        } catch {
+            AppLogger.shared.error("Resuming library file setup failed: \(error)", source: "Library")
+            if let package = adoption.installedPackageURL() {
+                await finishOpening(.package(package))
+            } else {
+                reportFailure(error)
+            }
         }
     }
 
