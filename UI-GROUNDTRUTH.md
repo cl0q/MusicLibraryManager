@@ -116,7 +116,8 @@ No other font sizes. No emoji in UI copy (removes `"Groove Studio 🚀"`, `Metad
 
 | Term | Meaning | Never called |
 |---|---|---|
-| **Library** | The local track collection | — |
+| **Library** | A collection of tracks, playlists and their settings, stored in one library file. MLM has one library open at a time; the sidebar item `Library` shows its tracks. | "Database", "Profile", "Workspace" |
+| **Library file** | The single file (`.mlibm`) that holds a library's database, playlist covers and settings. It can be moved like any file. States when it can't be opened: `Not found` (not at its last known location) · `Not connected` (on a disk that isn't connected). | "Package", "Bundle", "Database file", "Library folder" |
 | **Playlist** | Any playlist; may be local or linked | "synced playlist" |
 | **Linked to ‹Source›** | Playlist/track originates from an external source | "Synced", cloud icon |
 | **Not downloaded** | Remote track, never fetched | "Stream" |
@@ -135,6 +136,11 @@ No other font sizes. No emoji in UI copy (removes `"Groove Studio 🚀"`, `Metad
 | **Background processing** | Concurrency preference: Conservative / Standard / Fast | "Turbo", "CPU-Leistung" |
 | **Managed by MLM** | App-owned folders/files | "00_Artists", "01_SoundCloud" |
 | **Activity** | The background work panel | — |
+| **Backup** | A saved copy of the library database and playlist covers. Never contains audio files or account credentials. | "Snapshot", "Export" |
+| **Restore** | Replace the current library database and playlist covers with a backup; MLM saves a copy of the current state first and relaunches. | "Rollback" (reserved for the organized-path migration), "Import" |
+| **Storage Location** | Settings tab showing where MLM keeps its files on this Mac | "Storage" alone (collides with "Storage layout"), "Data", "Locations" |
+| **Library folder** | The folder containing your music files (the library root) | "Audio library", "Music root" |
+| **Credentials file** | The file holding the client IDs for source sign-in; MLM shows its location, never its contents | "env file", "Secrets" |
 
 Banned from all user-facing strings: `Turbo`, `Swarm`, `Vector Gravity`, `Warp Embeddings`, `Drop-Fokus`, `kept_higher_quality`, `flagged`, `fingerprint_dedup`, raw track IDs (`Track #123`), any German UI string.
 
@@ -336,7 +342,7 @@ Expanded (150–700 pt, drag-resizable — keep):
 | Menu | Items |
 |---|---|
 | MLM | About MLM · Settings… ⌘, · Quit MLM ⌘Q |
-| File | New Playlist ⌘N · Import from Folder… ⌘⇧I |
+| File | New Playlist ⌘N · — · New Library… · Open Library… ⌘O · Open Recent ▸ (the other registered libraries, most recently opened first; unavailable ones disabled as `‹name› — Not found` / `‹name› — Not connected`; no `Clear Menu` — removing libraries belongs to the library picker, B1) · Import from Folder… ⌘⇧I |
 | Edit | (standard) |
 | Playback | Play/Pause ␣ · Stop ⌘. · Skip Back 10 s ⌘← · Skip Forward 10 s ⌘→ |
 | Navigate | Library ⌘1 · Playlists ⌘2 · Folders ⌘3 · Sync ⌘4 · Sources ⌘5 · Review ⌘6 · Discover ⌘7 |
@@ -387,7 +393,7 @@ Schema for every screen: **Purpose · Wireframe · Anatomy · States · Interact
 **Interactions**
 - Double-click row: play (if playable) — else show the state-appropriate action menu
 - ⌘I / double-click: inspector (§3.10)
-- Context menu (full list): `Play` · `Add to Playlist ▸` (existing playlists + `New Playlist…`) · `Add to Sync Profile ▸` · — · `Download` / `Download n tracks` / **`Download missing tracks`** (always offered when any selection is remote; replaces the all-remote-only rule, `TrackContextMenu.swift:29–31,163`) · `Retry download` (failed only) · — · `Reveal in Finder` (local only) · `Copy File Path` · — · `Remove from Library…` (confirm dialog, English)
+- Context menu (full list): `Play` · `Add to Playlist ▸` (existing playlists + `New Playlist…`) · `Add to Sync Profile ▸` · — · `Download` / `Download n tracks` / **`Download missing tracks`** (always offered when any selection is remote; replaces the all-remote-only rule, `TrackContextMenu.swift:29–31,163`) · `Retry download` (failed only) · — · `Show in Finder` (local only) · `Copy File Path` · — · `Remove from Library…` (confirm dialog, English)
 - Column sort: click header; reorder-only-in-default-sort rule for playlist tables documented there (§3.3)
 
 **Edge Cases** — 10k+ tracks (virtualized table, keep); remote-only scope with disconnected source (rows show `Not downloaded`, source banner points to Settings); mixed selection for Download (menu shows `Download 12 missing of 30 selected`).
@@ -668,13 +674,13 @@ Schema for every screen: **Purpose · Wireframe · Anatomy · States · Interact
 | Space check | Amber banner when tight: `Not enough space on device — need ≈4.2 GB, 1.0 GB available` |
 | During sync | Inline determinate progress **in the detail view** + `Pause` + `Cancel` (today: only a redirect line to the collapsed Activity panel, `SyncProfileDetailView.swift:65,80–85`) |
 | Current item | `Copying:` vs `Transcoding:` prefix — the distinction exists in code, surface it |
-| Failures | `Failed tracks (n)` disclosure: aligned rows with **Title Artist** + reason + album, per-row context menu (Play, Play Next, Show Details, Retry Sync, Reveal in Finder, Copy File Path), double-click plays + opens detail inspector, Retry button (`SyncFailedDisclosure.swift`) |
+| Failures | `Failed tracks (n)` disclosure: aligned rows with **Title Artist** + reason + album, per-row context menu (Play, Play Next, Show Details, Retry Sync, Show in Finder, Copy File Path), double-click plays + opens detail inspector, Retry button (`SyncFailedDisclosure.swift`) |
 
 **Settings section (English, collapsed by default — keep pattern):** `Playlists (create .m3u8 files for Rockbox or Doppi)` · `Format & app (Rockbox / Doppi)` · `Transcode mode (Originals / AAC 248k / AAC 320k)` · `Normalize volume (−14 LUFS, AAC modes only)` · `Compatible paths (FAT32-safe)` · `Clean up (remove deleted tracks from destination)` · **`Background processing: Conservative / Standard / Fast`** — the renamed, relocated ex-Turbo setting (§2.1).
 
 **States** — No device / Preview fresh / Preview stale (auto-refreshing in background) / Syncing / Paused / Completed / Completed with failures / Error (English strings only — today raw English tech strings mix with German UI, e.g. `TranscodeCache.swift:410`).
 
-**Interactions** — Toggle settings freely: changes save instantly (keep) but mark the preview stale and trigger **debounced background recompute** (never a blocking spinner) · ⌘R manual refresh · stat cards expand · per-file context: `Reveal in destination`, `Exclude from sync`.
+**Interactions** — Toggle settings freely: changes save instantly (keep) but mark the preview stale and trigger **debounced background recompute** (never a blocking spinner) · ⌘R manual refresh · stat cards expand · per-file context: `Show in Finder`, `Exclude from sync`.
 
 **Edge Cases** — Device unplugged mid-sync: state `Device disconnected`, partial results kept, resume offered · transcode cache pre-warmed: sync shows `Copying (pre-converted)` and finishes fast · settings changed during sync: applies to next run, note shown.
 
@@ -882,12 +888,13 @@ Schema for every screen: **Purpose · Wireframe · Anatomy · States · Interact
 
 ## 3.14 Settings — Window, Library, Sources
 
-**Window** — `Settings` (window title, English; today `"MLM Einstellungen"`, `AppDelegate.swift:62–79`). Tabs: **Library · Sources · Maintenance · Advanced**. Selection persistence (existing `@AppStorage`) stays.
+**Window** — `Settings` (window title, English; today `"MLM Einstellungen"`, `AppDelegate.swift:62–79`). Tabs: **Library · Sources · Maintenance · Backup · Storage Location · Playback · Advanced**. Selection persistence (existing `@AppStorage`) stays.
 
 ### Library tab
 
 | Section | Content |
 |---|---|
+| Library file | Library name + path (mono, middle-truncated) + `Show in Finder`. Toggle `Open the last library at launch`; footer: `When off, MLM asks which library to open at launch.` |
 | Library root | Path (mono, middle-truncated) + `Change…`; footer: `The root folder containing your music files. MLM scans it recursively for audio files.` |
 | Storage layout (new) | Explains the managed folders: `MLM creates these folders inside your library:` — `Downloads (SoundCloud)`, `Downloads (YouTube)`, `Transcode originals` — each with a one-line purpose. This is the in-app answer to "what are these 00_ folders?" |
 | Statistics | Tracks in library · Library path + `Show in Finder` |
@@ -897,6 +904,33 @@ Schema for every screen: **Purpose · Wireframe · Anatomy · States · Interact
 ### Sources tab
 
 Per-source connection rows (mirrors §3.5 cards: status, reconnect, disconnect) **plus** the Squid/Qobuz cookie field — moved here from its orphaned position, English copy, honest helper text: `Open qobuz.squid.wtf, complete one download (this passes the captcha), then copy the value of the 'captcha_verified_at' cookie from your browser's developer tools and paste it here.` Status: `Not configured` / `Expired — renew` / `Active` (persisted timestamp, so the status survives relaunch — today `savedAt` is session-only, `SourcesSetupView.swift:57`).
+
+### Backup tab
+
+| Section | Content |
+|---|---|
+| Status | `Backup folder`: path (mono, middle-truncated) + `Change…` · `Use default` (only when a custom folder is set) · `Show in Finder`; muted `Default location` line when the default is used. `Last backup` ‹date› / `Never` · `Backups` ‹n› · `Total size` ‹size›. Footer: `Each backup contains the library database and playlist covers. Audio files and account credentials are never included.` |
+| Backups | One row per backup: date (body), muted line `‹Reason› · 12,935 tracks · 124.8 MB`; schema version only as hover help (`Database version: …`). Row actions `Restore…` · `Show in Finder`. Incomplete backups: symbol + `Incomplete — can't be restored`, no `Restore…`. Empty: `No backups yet. MLM backs up automatically at launch, at most once a day.` Reasons: `Automatic` · `Before update` · `Manual` · `Before restore` · `Before library file setup` · `Unknown`. Only backups of the open library are listed (default folder: one subfolder per library; backups made before library files existed count as the adopted library's). |
+| Actions | `Back up now` (small progress + `Backing up…` while running, button disabled); result line `Backup created` (symbol + text, `mlmSuccess`). Footer: `The 10 most recent backups are kept. MLM also backs up at launch (at most once a day) and before updating the library database.` |
+
+Restore confirms in two steps (alert → blocking `Restoring…` / `Relaunching…` state with all other controls disabled): title `Restore backup from ‹date›?`, message `MLM first saves a copy of your current library, then replaces the library database and playlist covers with this backup and relaunches. Audio files are not changed. Finish active downloads and syncs first. To undo, restore the "Before restore" backup.`, buttons `Restore and relaunch` (destructive) · `Cancel`. Before the library has loaded the tab shows `Backups are available once the library has loaded.`
+
+### Storage Location tab
+
+Shows where MLM keeps its files. Transparency only: no `Change…`/move actions here (backup folder → Backup tab, transcode cache → Maintenance tab). Every filesystem row: path (mono, middle-truncated, selectable) + `Show in Finder`; the button is disabled when the location is unavailable, and the reason is shown in words next to it (symbol **plus** text, `mlmInkSecondary`, no status hue): `Not found` · `Not connected` (volume not mounted).
+
+| Section | Row | Content |
+|---|---|---|
+| Library data | `Library file` | Path of the `.mlibm` file · total size. The `Database` and `Playlist covers` rows below point inside it. |
+| | `Database` | Path · `‹total› · database file ‹size› · recent changes ‹size›` (total includes the `-shm` file). Hover help: `Recent changes are kept in a separate file (-wal) and merged into the database automatically.` |
+| | `Playlist covers` | Path · `‹n› files · ‹size›` |
+| | `Backups` | Path (from the Backup tab) · `‹n› backups · ‹size›` · `Last backup` ‹date› / `Never` · muted `Change the backup folder in the Backup tab.` |
+| | `Credentials file` | Path · size, or `Not found`. Contents are never read or shown. |
+| Music | `Library folder` | Path · `‹n› tracks` (from the library database) · stored size `‹size› · calculated ‹date›` or `Size not calculated` · `Calculate size` (while running: small progress + `Calculating…` + `Cancel`). The size is only measured on request, stored, and shown until the next calculation; it is discarded when the library folder changes. A cancelled or failed calculation keeps the previous value. No library root: `No library folder set — choose one in the Library tab.` |
+| | `Transcode cache` | Path · size · muted `Change the location in the Maintenance tab.` |
+| Sign-in | `Sign-in tokens` | `Stored in the macOS Keychain` (text only, no path, no button) |
+
+Footer: `Library files and the credentials file remain on your Mac if you delete the app. Audio files are never moved by this tab.` Before the library has loaded the tab shows `Storage locations are shown once the library has loaded.` Size error: `The size couldn't be calculated. Check that the drive is connected and try again.`
 
 ## 3.15 Settings — Maintenance & Advanced (Genre Workshop)
 
@@ -928,6 +962,8 @@ The former sidebar "Groove Studio" (`GrooveStudioView.swift`) moves here unchang
 
 ## 3.16 First-Run Wizard
 
+**Before the wizard (A3):** when there is neither a registered library nor an old-style library to set up, MLM first shows the `New Library` sheet (§3.17) with the name `Main Library` prefilled; the wizard below then runs inside the new library.
+
 Keep the 4-step structure (welcome → folder → scanning → done, `FirstRunWizard.swift`) — it's solid — with these fixes:
 
 1. Scanning step gains **`Cancel`** (today none) — cancels to the folder step, partial imports are fine (resumable).
@@ -950,6 +986,14 @@ Keep the 4-step structure (welcome → folder → scanning → done, `FirstRunWi
 | Delete sync profile | Sync list | Confirm (new — today none) |
 | Import result | Remote import | §3.6 step 3 |
 | Error banner (in-screen) | any | Plain cause + action + `Details` disclosure linking to Logs |
+| Set up your library file | Launch, when an old-style library (loose database, pre-A3) is found | Title `Set up your library file`. Text `MLM now keeps your library — tracks, playlists, settings and playlist covers — in a single library file that you can move and back up as one item. MLM backs up first, then copies your library into the new file. Audio files are not moved.` Field `Name` (prefilled `Main Library`), muted line `Saved as "‹name›.mlibm" in MLM's folder in your user Library.` Buttons `Not now` (keeps the old layout working; asked again at the next launch) · `Create library file` (default). Progress: `Backing up…` → `Creating library file…` → `Checking…`. Success: `Your library is now stored in "‹name›.mlibm". The previous files were moved to a folder named "legacy-adopted-…" — you can delete it once everything looks right.` + `Show in Finder` · `Done`. Failure: `The library file couldn't be created. Your library was not changed.` + `Details` · `Try again` · `Not now` |
+| New Library | File → New Library…, first run | Title `New Library`. Field `Name` (`Main Library` on first run, otherwise `New Library`). Text `A library keeps its own tracks, playlists and settings. Audio files stay where they are.` Buttons `Create` · `Cancel`. Always created in the default location; move it in Finder afterwards |
+| Switch library | Open Library… / Open Recent / double-click a library file while another library is open | Title `Switch to "‹name›"?` Message `MLM relaunches to open this library. Finish active downloads and syncs first.` Buttons `Relaunch` · `Cancel` |
+| No library open | Launch with no library to open (or "Open the last library at launch" off) | Window content, SF Symbol `opticaldisc` + text: `No library open` / `Create a new library or open an existing library file.` / `New Library…` · `Open Library…`. Minimal placeholder — the real library picker is B1 |
+| Library can't be opened | The last or chosen library file is unavailable | Title `"‹name›" can't be opened`. Not found: `The library file isn't where MLM last found it. Open it from its new location, or create a new library.` Not connected: `The library file is on a disk that isn't connected. Connect the disk, then try again.` Buttons `Try again` (not connected only) · `Open Library…` · `New Library…` |
+| Library doesn't match | Library file's identity differs from its database or MLM's records | Title `"‹name›" can't be opened`. Message `The library file and its database don't belong together. This can happen when files inside a library file were replaced. MLM didn't change anything.` Buttons `Show in Finder` · `OK` |
+| Library file is a copy | Opening a library file whose identity belongs to another library file that still exists (Finder copy) | Title `"‹name›" is a copy of "‹original›"`. Message `To open it, MLM makes the copy a separate library. "‹original›" is not changed.` Buttons `Open as separate library` · `Cancel` |
+| Not a library file | Opened `.mlibm` without a database | `"‹name›" isn't a valid library file.` · `OK`. A missing description file inside a valid library file is repaired silently and noted in the Logs tab only |
 
 Pattern rules: **every destructive action confirms**; every confirmation states the consequence and the escape (Trash/Undo); no alert ever contains a raw error code, a database ID, or an internal token.
 
@@ -1040,6 +1084,14 @@ The canonical strings. Anything in the app not listed here follows the same voic
 ## 5.6 Settings
 
 `Background processing` · `Conservative — keeps the Mac responsive` · `Standard` · `Fast — uses all cores, fans may spin up` · `Storage layout` · `MLM creates these folders inside your library:` · `Find duplicates & conflicts` (opens Review) · `Managed by MLM` · `Show in Finder` (all Finder actions; replaces `In Finder anzeigen`)
+
+Backup tab: `Backup folder` · `Default location` · `Change…` · `Use default` · `Last backup` · `Never` · `Backups` · `Total size` · `Back up now` · `Backing up…` · `Backup created` · `Restore…` · `Restore backup from ‹date›?` · `Restore and relaunch` · `Restoring…` · `Relaunching…` · `Incomplete — can't be restored` · `Automatic` / `Before update` / `Manual` / `Before restore` / `Before library file setup` / `Unknown` · `Backups are available once the library has loaded.`
+
+Backup errors (main line; technical text only behind `Details`): `MLM can't write to the backup folder. Choose another folder.` · `The backup couldn't be created. Try again.` · `The backup copy failed its integrity check and was discarded. Try again.` · `This backup is damaged and can't be restored. Choose another backup.` · `This backup is incomplete and can't be restored. Choose another backup.` · `MLM couldn't save a copy of your current library, so nothing was restored. Check the backup folder and try again.` · `Something went wrong. Try again.` · alert `Restore didn't finish` / `MLM couldn't replace the library files and needs to relaunch. If your library looks wrong afterwards, restore the "Before restore" backup.` / `Relaunch`
+
+Storage Location tab: `Storage Location` · `Library data` · `Music` · `Sign-in` · `Database` · `database file` · `recent changes` · `Playlist covers` · `Backups` · `Last backup` · `Never` · `Credentials file` · `Library folder` · `Transcode cache` · `Sign-in tokens` · `Stored in the macOS Keychain` · `Show in Finder` · `Not found` · `Not connected` · `Calculate size` · `Calculating…` · `Cancel` · `Size not calculated` · `calculated ‹date›` · `No library folder set — choose one in the Library tab.` · `Change the backup folder in the Backup tab.` · `Change the location in the Maintenance tab.` · `Recent changes are kept in a separate file (-wal) and merged into the database automatically.` · `Storage locations are shown once the library has loaded.` · `The size couldn't be calculated. Check that the drive is connected and try again.` · `Library file` · footer `Library files and the credentials file remain on your Mac if you delete the app. Audio files are never moved by this tab.`
+
+Library files (A3): Finder kind of `.mlibm` files `MLM Library File` · menu `New Library…` · `Open Library…` · `Open Recent` · `‹name› — Not found` · `‹name› — Not connected` · Library tab `Library file` · `Open the last library at launch` · `When off, MLM asks which library to open at launch.` · sheets and alerts exactly as in §3.17 (`Set up your library file`, `New Library`, `Switch to "‹name›"?`, `No library open`, `"‹name›" can't be opened`, `"‹name›" isn't a valid library file.`, `"‹name›" is a copy of "‹original›"`, `To open it, MLM makes the copy a separate library. "‹original›" is not changed.`) · buttons `Open as separate library` · `Not now` · `Create library file` · `Create` · `Relaunch` · `Try again` · `Done` · `OK` · progress `Backing up…` · `Creating library file…` · `Checking…`
 
 ## 5.7 Discover
 
