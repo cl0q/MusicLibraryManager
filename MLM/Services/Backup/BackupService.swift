@@ -74,6 +74,8 @@ enum BackupError: Error, Equatable {
     case integrityCheckFailed(String)
     case bundleIncomplete(URL)
     case restoreSafetyBackupFailed
+    /// The live pool was already closed when the file swap failed: the app must relaunch.
+    case restoreSwapFailed(String)
 }
 
 /// Creates, lists, prunes, and restores timestamped backup bundles of the music library.
@@ -223,7 +225,8 @@ final class BackupService: Sendable {
     /// 5. Remove the live `-wal` / `-shm` sidecars, then swap the staged snapshot in.
     /// 6. Swap the staged covers in, if the bundle has any and a covers directory is configured.
     ///
-    /// Steps 1–4 leave the live database untouched on failure. After this returns the
+    /// Steps 1–4 leave the live database untouched on failure; failures in steps 5–6 throw
+    /// `.restoreSwapFailed` (pool already closed — relaunch required). After this returns the
     /// database is NOT reopened — the caller must relaunch the app (`relaunchApp()`).
     func prepareRestore(from info: BackupInfo) async throws {
         try validateForRestore(info)
@@ -265,18 +268,24 @@ final class BackupService: Sendable {
             throw error
         }
 
-        // SQLite sidecars are `<db>-wal` / `<db>-shm` (suffix, not path extension).
-        // A stale WAL left next to the restored file would be replayed onto it.
-        for suffix in ["-wal", "-shm"] {
-            let sidecar = URL(fileURLWithPath: databasePath.path + suffix)
-            if fileManager.fileExists(atPath: sidecar.path) {
-                try fileManager.removeItem(at: sidecar)
+        // From here on the pool is closed: any failure leaves the app unusable until it
+        // relaunches, so it surfaces as `.restoreSwapFailed` rather than a raw error.
+        do {
+            // SQLite sidecars are `<db>-wal` / `<db>-shm` (suffix, not path extension).
+            // A stale WAL left next to the restored file would be replayed onto it.
+            for suffix in ["-wal", "-shm"] {
+                let sidecar = URL(fileURLWithPath: databasePath.path + suffix)
+                if fileManager.fileExists(atPath: sidecar.path) {
+                    try fileManager.removeItem(at: sidecar)
+                }
             }
-        }
-        try Self.swapItem(at: databasePath, with: stagedDatabase, fileManager: fileManager)
+            try Self.swapItem(at: databasePath, with: stagedDatabase, fileManager: fileManager)
 
-        if let coversDirectory, let stagedCovers {
-            try Self.swapItem(at: coversDirectory, with: stagedCovers, fileManager: fileManager)
+            if let coversDirectory, let stagedCovers {
+                try Self.swapItem(at: coversDirectory, with: stagedCovers, fileManager: fileManager)
+            }
+        } catch {
+            throw BackupError.restoreSwapFailed(String(describing: error))
         }
     }
 

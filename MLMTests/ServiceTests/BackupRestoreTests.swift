@@ -262,4 +262,31 @@ struct BackupRestoreTests {
         #expect(try fixture.coverText("cover1.png") == "PNG")
         #expect(try fixture.stagedLeftovers().isEmpty)
     }
+
+    /// Once the pool is closed, a failed file swap must be reported as `.restoreSwapFailed`
+    /// (relaunch required), not as a raw Foundation error.
+    @Test func prepareRestoreReportsSwapFailureAfterPoolClosed() async throws {
+        let fixture = try await Fixture()
+        defer { fixture.cleanup() }
+
+        try await fixture.insertTrack(id: 1)
+        let pool = fixture.manager.pool
+        let directory = fixture.dbPath.deletingLastPathComponent().path
+        let service = fixture.makeService(poolCloser: {
+            try pool.close()
+            try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory)
+        })
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory)
+        }
+        let backup = try await service.createBackup(reason: .manual)
+
+        let error = await #expect(throws: BackupError.self) {
+            try await service.prepareRestore(from: backup)
+        }
+        guard case .restoreSwapFailed? = error else {
+            Issue.record("expected .restoreSwapFailed, got \(String(describing: error))")
+            return
+        }
+    }
 }

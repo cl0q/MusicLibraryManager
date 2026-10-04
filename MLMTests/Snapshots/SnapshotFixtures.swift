@@ -362,6 +362,7 @@ enum SnapshotFixtures {
         "Playlists/PlaylistsView.swift": "Deferred: live playlist/cover loading and root view state need a preloaded composition.",
         "ReelsInbox/ReelsInboxView.swift": "Deferred: AVKit/Shazam/Vision work and detached tasks require service/clock seams.",
         "Search/GlobalSearchPresentationView.swift": "Deferred: constructs search services from container; inject a preloaded presentation model.",
+        "Settings/BackupSettingsView.swift": "Deferred: container-backed backup service and folder/Finder panels require an inert backup model.",
         "Settings/LibrarySetupView.swift": "Deferred: import/filesystem state and folder panels require inert import model.",
         "Settings/MaintenanceView.swift": "Deferred: reads shared BatchControl/maintenance queues and paths; inject passive state.",
         "Settings/SettingsView.swift": "Deferred: AppStorage selection and PlaybackSettings read real defaults; inject preference store.",
@@ -412,6 +413,7 @@ ReelsInbox/ReelsInboxView.swift
 ReviewQueue/ReviewQueueView.swift
 Search/GlobalSearchPresentationView.swift
 Search/UniversalSearchView.swift
+Settings/BackupSettingsView.swift
 Settings/LibrarySetupView.swift
 Settings/MaintenanceView.swift
 Settings/SettingsView.swift

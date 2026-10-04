@@ -28,6 +28,12 @@ struct SettingsView: View {
                 }
                 .tag("maintenance")
 
+            BackupSettingsView()
+                .tabItem {
+                    Label("Backup", systemImage: "externaldrive.badge.timemachine")
+                }
+                .tag("backup")
+
             PlaybackSettingsView()
                 .tabItem {
                     Label("Playback", systemImage: "play.circle")
