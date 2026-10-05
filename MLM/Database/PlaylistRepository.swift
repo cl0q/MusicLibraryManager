@@ -90,14 +90,20 @@ final class PlaylistRepository: Sendable {
             if let playlist = try Playlist.fetchOne(db, id: id), playlist.isLiked == 1 {
                 throw PlaylistRepositoryError.cannotDeleteLikedPlaylist
             }
-            // Foreign-key enforcement is disabled for compatibility with the
-            // shared database, so declared cascades do not execute.
-            try db.execute(sql: "DELETE FROM playlist_tracks WHERE playlist_id = ?", arguments: [id])
-            try db.execute(sql: "DELETE FROM playlist_tags WHERE playlist_id = ?", arguments: [id])
-            try db.execute(sql: "DELETE FROM sync_profile_playlists WHERE playlist_id = ?", arguments: [id])
-            try db.execute(sql: "DELETE FROM playlist_sync_snapshots WHERE playlist_id = ?", arguments: [id])
-            try Playlist.deleteOne(db, id: id)
+            try Self.deleteWithDependents(db, id: id)
         }
+    }
+
+    /// Every table that refers to `playlists.id`. Foreign-key enforcement is disabled for
+    /// compatibility with the shared database, so declared cascades do not execute: a
+    /// delete removes these rows itself, and `snapshot` / `restore` carry them.
+    static let dependentTables = ["playlist_tracks", "playlist_tags", "sync_profile_playlists", "playlist_sync_snapshots"]
+
+    private static func deleteWithDependents(_ db: Database, id: Int64) throws {
+        for table in dependentTables {
+            try db.execute(sql: "DELETE FROM \(table) WHERE playlist_id = ?", arguments: [id])
+        }
+        try Playlist.deleteOne(db, id: id)
     }
 
     /// Toggle pin status.
@@ -271,13 +277,19 @@ final class PlaylistRepository: Sendable {
     /// transaction. Callers supply display order; duplicate IDs retain their
     /// existing membership and do not consume a new position.
     func appendTracks(playlistId: Int64, trackIds: [Int64]) async throws {
+        _ = try await appendTracksReturningEntries(playlistId: playlistId, trackIds: trackIds)
+    }
+
+    /// `appendTracks`, reporting exactly which rows it inserted (so Undo removes those and
+    /// never a row that was already there) and how many tracks were already in the playlist.
+    func appendTracksReturningEntries(playlistId: Int64, trackIds: [Int64]) async throws -> PlaylistAppendResult {
         let orderedIDs = trackIds.reduce(into: [Int64]()) { result, id in
             if !result.contains(id) { result.append(id) }
         }
-        guard !orderedIDs.isEmpty else { return }
+        guard !orderedIDs.isEmpty else { return PlaylistAppendResult(entries: [], alreadyPresent: 0) }
 
-        try await database.write { db in
-            var tail = try String.fetchOne(db, sql: """
+        return try await database.write { db in
+            let tail = try String.fetchOne(db, sql: """
                 SELECT position FROM playlist_tracks
                 WHERE playlist_id = ?
                 ORDER BY position DESC, added_at DESC
@@ -289,19 +301,30 @@ final class PlaylistRepository: Sendable {
             """, arguments: [playlistId])
             let existingIDs = Set(existingRows)
 
-            for trackId in orderedIDs where !existingIDs.contains(trackId) {
-                let position = FractionalIndexer.positionBetween(left: tail, right: nil)
-                var entry = PlaylistTrack(
-                    id: nil,
-                    playlistId: playlistId,
-                    trackId: trackId,
-                    position: position,
-                    addedAt: Self.addedAtFormatter.string(from: Date())
-                )
-                try entry.insert(db)
-                tail = position
-            }
+            let newIDs = orderedIDs.filter { !existingIDs.contains($0) }
+            let entries = try Self.insertEntries(db, playlistId: playlistId, trackIds: newIDs, after: tail)
+            return PlaylistAppendResult(entries: entries, alreadyPresent: orderedIDs.count - newIDs.count)
         }
+    }
+
+    /// Insert `trackIds` in order after `tail` (fractional positions), returning the rows.
+    private static func insertEntries(_ db: Database, playlistId: Int64, trackIds: [Int64], after tail: String?) throws -> [PlaylistTrack] {
+        var tail = tail
+        var inserted: [PlaylistTrack] = []
+        for trackId in trackIds {
+            let position = FractionalIndexer.positionBetween(left: tail, right: nil)
+            var entry = PlaylistTrack(
+                id: nil,
+                playlistId: playlistId,
+                trackId: trackId,
+                position: position,
+                addedAt: addedAtFormatter.string(from: Date())
+            )
+            try entry.insert(db)
+            inserted.append(entry)
+            tail = position
+        }
+        return inserted
     }
 
     /// Remove a track from a playlist.
@@ -662,6 +685,214 @@ final class PlaylistRepository: Sendable {
         }
     }
 
+    // MARK: - Undo support (W2-F): numbered create, snapshot / restore, exact rows
+
+    /// `base`, or `base 2`, `base 3`, … — the first name not in `taken` (lower-cased names).
+    /// The sidebar shows one flat name space, so callers pass the names of every playlist.
+    static func numberedName(base: String, taken: Set<String>) -> String {
+        guard taken.contains(base.lowercased()) else { return base }
+        var n = 2
+        while taken.contains("\(base) \(n)".lowercased()) { n += 1 }
+        return "\(base) \(n)"
+    }
+
+    /// Create a native playlist named `baseName` (numbered when the name is taken) holding
+    /// `trackIds` in that order, in one transaction — New Playlist and New Playlist from
+    /// Selection are one step each (UC-UNDO-08).
+    func createNumbered(baseName: String, trackIds: [Int64] = []) async throws -> Playlist {
+        let orderedIDs = trackIds.reduce(into: [Int64]()) { result, id in
+            if !result.contains(id) { result.append(id) }
+        }
+        return try await database.write { db in
+            let taken = Set(try String.fetchAll(db, sql: "SELECT name FROM playlists").map { $0.lowercased() })
+            var playlist = Playlist.createNative(name: Self.numberedName(base: baseName, taken: taken))
+            try playlist.insert(db)
+            if let id = playlist.id {
+                _ = try Self.insertEntries(db, playlistId: id, trackIds: orderedIDs, after: nil)
+            }
+            return playlist
+        }
+    }
+
+    /// Everything that belongs to one playlist, read in one transaction: the row (incl. source
+    /// link, cover reference, `mlm_uuid`) and the rows of every table in `dependentTables`.
+    func snapshot(id: Int64) async throws -> PlaylistSnapshot? {
+        try await database.read { db in try Self.snapshot(db, id: id) }
+    }
+
+    /// Delete a playlist and return its snapshot (DEC-049: restorable with Undo until quit).
+    func deleteReturningSnapshot(id: Int64) async throws -> PlaylistSnapshot {
+        try await database.write { db in
+            guard let snapshot = try Self.snapshot(db, id: id) else {
+                throw PlaylistRepositoryError.playlistNotFound
+            }
+            if snapshot.playlist.isLiked == 1 {
+                throw PlaylistRepositoryError.cannotDeleteLikedPlaylist
+            }
+            try Self.deleteWithDependents(db, id: id)
+            return snapshot
+        }
+    }
+
+    /// Put a deleted playlist back from its snapshot, in one transaction.
+    ///
+    /// - Same playlist id (so sync profile links, routes and the cover file `‹id›.png` still
+    ///   match) unless that id is in use; then a new id, and an auto cover named after the
+    ///   old id is dropped (it is regenerated).
+    /// - Same name unless another playlist took it meanwhile; then the first free numbered name.
+    /// - Track rows keep their position, `added_at` and row id (when free); rows whose track
+    ///   left the library meanwhile are skipped and counted. Tags come back; sync profile
+    ///   links and sync snapshots come back for profiles that still exist.
+    func restore(_ snapshot: PlaylistSnapshot) async throws -> PlaylistRestoreResult {
+        try await database.write { db in
+            var playlist = snapshot.playlist
+            let originalID = playlist.id
+            if let originalID, try Self.exists(db, table: "playlists", id: originalID) {
+                playlist.id = nil
+                let autoCover = "\(DatabaseManager.playlistCoversFolderName)/\(originalID).png"
+                if playlist.coverImagePath == autoCover {
+                    playlist.coverImagePath = nil
+                    playlist.coverIsCustom = 0
+                }
+            }
+            let nameTaken = try Bool.fetchOne(db, sql: """
+                SELECT EXISTS(SELECT 1 FROM playlists WHERE name = ? AND category = ?)
+            """, arguments: [playlist.name, playlist.category]) ?? false
+            if nameTaken {
+                let taken = Set(try String.fetchAll(db, sql: "SELECT name FROM playlists").map { $0.lowercased() })
+                playlist.name = Self.numberedName(base: playlist.name, taken: taken)
+            }
+            try playlist.insert(db)
+            guard let id = playlist.id else { throw PlaylistRepositoryError.playlistNotFound }
+
+            var droppedTracks = 0
+            for var entry in snapshot.entries {
+                guard try Self.exists(db, table: "tracks", id: entry.trackId) else {
+                    droppedTracks += 1
+                    continue
+                }
+                entry.playlistId = id
+                if let rowID = entry.id, try Self.exists(db, table: "playlist_tracks", id: rowID) {
+                    entry.id = nil
+                }
+                try entry.insert(db, onConflict: .ignore)
+            }
+            for tag in snapshot.tags {
+                try db.execute(sql: "INSERT OR IGNORE INTO playlist_tags (playlist_id, tag) VALUES (?, ?)", arguments: [id, tag])
+            }
+            for profileID in snapshot.syncProfileIDs {
+                guard try Self.exists(db, table: "sync_profiles", id: profileID) else { continue }
+                try db.execute(
+                    sql: "INSERT OR IGNORE INTO sync_profile_playlists (profile_id, playlist_id) VALUES (?, ?)",
+                    arguments: [profileID, id]
+                )
+            }
+            for row in snapshot.syncSnapshots {
+                guard try Self.exists(db, table: "sync_profiles", id: row.profileID) else { continue }
+                let rowID: Int64? = try Self.exists(db, table: "playlist_sync_snapshots", id: row.id) ? nil : row.id
+                try db.execute(sql: """
+                    INSERT INTO playlist_sync_snapshots (id, profile_id, playlist_id, playlist_uuid, snapshot_json, written_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, arguments: [rowID, row.profileID, id, row.playlistUUID, row.snapshotJSON, row.writtenAt])
+            }
+            return PlaylistRestoreResult(playlist: playlist, droppedTrackCount: droppedTracks, wasRenamed: nameTaken)
+        }
+    }
+
+    /// What deleting a playlist touches, for the confirmation (A-PL-DELETE).
+    func deletionImpact(id: Int64) async throws -> PlaylistDeletionImpact {
+        try await database.read { db in
+            let trackCount = try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM playlist_tracks pt
+                INNER JOIN tracks t ON pt.track_id = t.id
+                WHERE pt.playlist_id = ?
+            """, arguments: [id]) ?? 0
+            let profiles = try String.fetchAll(db, sql: """
+                SELECT sp.name FROM sync_profiles sp
+                INNER JOIN sync_profile_playlists spp ON spp.profile_id = sp.id
+                WHERE spp.playlist_id = ?
+                ORDER BY sp.name
+            """, arguments: [id])
+            return PlaylistDeletionImpact(trackCount: trackCount, syncProfileNames: profiles)
+        }
+    }
+
+    /// Remove exactly these rows (matched by row id, playlist and track — never another row
+    /// of the same track) and return them as they were just before, for `restoreEntries`.
+    /// Rows that are already gone are skipped.
+    func removeEntries(_ entries: [PlaylistTrack]) async throws -> [PlaylistTrack] {
+        try await database.write { db in
+            var removed: [PlaylistTrack] = []
+            for entry in entries {
+                guard let rowID = entry.id,
+                      let current = try PlaylistTrack.fetchOne(db, sql: """
+                          SELECT * FROM playlist_tracks WHERE id = ? AND playlist_id = ? AND track_id = ?
+                      """, arguments: [rowID, entry.playlistId, entry.trackId])
+                else { continue }
+                try db.execute(sql: "DELETE FROM playlist_tracks WHERE id = ?", arguments: [rowID])
+                removed.append(current)
+            }
+            return removed
+        }
+    }
+
+    /// Put removed rows back exactly: same position and `added_at`, same row id when it is
+    /// free. A row is skipped when its playlist or track is gone or the track is in the
+    /// playlist again. Returns the rows as inserted (for the next `removeEntries`).
+    func restoreEntries(_ entries: [PlaylistTrack]) async throws -> [PlaylistTrack] {
+        try await database.write { db in
+            var restored: [PlaylistTrack] = []
+            for var entry in entries {
+                guard try Self.exists(db, table: "playlists", id: entry.playlistId),
+                      try Self.exists(db, table: "tracks", id: entry.trackId),
+                      try !(Bool.fetchOne(db, sql: """
+                          SELECT EXISTS(SELECT 1 FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?)
+                      """, arguments: [entry.playlistId, entry.trackId]) ?? false)
+                else { continue }
+                if let rowID = entry.id, try Self.exists(db, table: "playlist_tracks", id: rowID) {
+                    entry.id = nil
+                }
+                try entry.insert(db)
+                restored.append(entry)
+            }
+            return restored
+        }
+    }
+
+    private static func snapshot(_ db: Database, id: Int64) throws -> PlaylistSnapshot? {
+        guard let playlist = try Playlist.fetchOne(db, id: id) else { return nil }
+        let entries = try PlaylistTrack.fetchAll(db, sql: """
+            SELECT * FROM playlist_tracks WHERE playlist_id = ? ORDER BY position, added_at, id
+        """, arguments: [id])
+        let tags = try String.fetchAll(db, sql: "SELECT tag FROM playlist_tags WHERE playlist_id = ? ORDER BY tag", arguments: [id])
+        let profileIDs = try Int64.fetchAll(db, sql: """
+            SELECT profile_id FROM sync_profile_playlists WHERE playlist_id = ? ORDER BY profile_id
+        """, arguments: [id])
+        let syncSnapshots = try Row.fetchAll(db, sql: """
+            SELECT id, profile_id, playlist_uuid, snapshot_json, written_at
+            FROM playlist_sync_snapshots WHERE playlist_id = ? ORDER BY id
+        """, arguments: [id]).map { row in
+            PlaylistSyncSnapshotRow(
+                id: row["id"],
+                profileID: row["profile_id"],
+                playlistUUID: row["playlist_uuid"],
+                snapshotJSON: row["snapshot_json"],
+                writtenAt: row["written_at"]
+            )
+        }
+        return PlaylistSnapshot(
+            playlist: playlist,
+            entries: entries,
+            tags: tags,
+            syncProfileIDs: profileIDs,
+            syncSnapshots: syncSnapshots
+        )
+    }
+
+    private static func exists(_ db: Database, table: String, id: Int64) throws -> Bool {
+        try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM \(table) WHERE id = ?)", arguments: [id]) ?? false
+    }
+
     // MARK: - iOS Sidecar Ingest Helpers (WP3)
 
     /// Find a playlist by its stable `mlm_uuid`.
@@ -683,9 +914,10 @@ final class PlaylistRepository: Sendable {
     }
 }
 
-enum PlaylistRepositoryError: LocalizedError {
+enum PlaylistRepositoryError: LocalizedError, PlainCauseError {
     case cannotDeleteLikedPlaylist
     case noUniquePlaylistNameAvailable(String)
+    case playlistNotFound
 
     var errorDescription: String? {
         switch self {
@@ -693,6 +925,62 @@ enum PlaylistRepositoryError: LocalizedError {
             return "Cannot delete a synchronized 'Liked' playlist."
         case .noUniquePlaylistNameAvailable(let baseName):
             return "Could not find a free playlist name derived from '\(baseName)' after 499 suffixed attempts."
+        case .playlistNotFound:
+            return "The playlist does not exist."
         }
     }
+
+    var plainCause: String {
+        switch self {
+        case .cannotDeleteLikedPlaylist: "a Liked playlist stays while its source is linked"
+        case .noUniquePlaylistNameAvailable: "every numbered name is taken"
+        case .playlistNotFound: "the playlist no longer exists"
+        }
+    }
+}
+
+// MARK: - Undo values
+
+/// Inserted rows of an append, and how many of the tracks were already in the playlist.
+struct PlaylistAppendResult: Sendable {
+    let entries: [PlaylistTrack]
+    let alreadyPresent: Int
+}
+
+/// A playlist and every row that refers to it (see `PlaylistRepository.dependentTables`).
+struct PlaylistSnapshot: Sendable {
+    /// The `playlists` row as it was: id, name, category, source link, cover path and lock,
+    /// pin, `mlm_uuid`, creation date.
+    let playlist: Playlist
+    /// `playlist_tracks` rows in playlist order, with row ids, positions and `added_at`.
+    let entries: [PlaylistTrack]
+    /// `playlist_tags`.
+    let tags: [String]
+    /// `sync_profile_playlists`: the profiles that sync this playlist.
+    let syncProfileIDs: [Int64]
+    /// `playlist_sync_snapshots`: the last exported track list per sync profile (device ingest).
+    let syncSnapshots: [PlaylistSyncSnapshotRow]
+}
+
+/// One `playlist_sync_snapshots` row, kept verbatim.
+struct PlaylistSyncSnapshotRow: Sendable, Equatable {
+    let id: Int64
+    let profileID: Int64
+    let playlistUUID: String?
+    let snapshotJSON: String
+    let writtenAt: DatabaseValue
+}
+
+struct PlaylistRestoreResult: Sendable {
+    /// The restored row (its id differs from the snapshot's only if that id was in use).
+    let playlist: Playlist
+    /// Track rows not restored because the track left the library meanwhile.
+    let droppedTrackCount: Int
+    /// The old name was taken meanwhile; `playlist.name` is a numbered one.
+    let wasRenamed: Bool
+}
+
+struct PlaylistDeletionImpact: Sendable, Equatable {
+    let trackCount: Int
+    let syncProfileNames: [String]
 }
