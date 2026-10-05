@@ -224,7 +224,7 @@ final class TagWriteQueue {
                 guard isReachable(root) else { report.outcome = .rootLost; return report }
                 guard let track = try? await repository.fetchTracks(ids: [pending.trackID]).first else { continue }
                 guard let organized = track.organizedPath, !organized.isEmpty else {
-                    // No file any more (Download Again demoted it): nothing to write.
+                    // The track has no file (any more): nothing to write.
                     _ = try? await repository.completeWrite(trackID: pending.trackID, revision: pending.revision)
                     continue
                 }

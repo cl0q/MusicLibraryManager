@@ -247,10 +247,6 @@ enum SnapshotFixtures {
         Fixture(id: "new-sync-profile-sheet", size: .init(width: 460, height: 400), makeView: { _ in
             AnyView(NewSyncProfileFromSelectionSheet(trackIds: [1, 4]))
         }),
-        Fixture(id: "debug-no-local-file", size: .init(width: 400, height: 160), makeView: { store in
-            let track = try require(store.tracks().first(where: { $0.title == "Offline File" }), named: "missing-file track")
-            return AnyView(DebugTabView(track: track, preloadedMissingLocalFile: true).padding(16))
-        }),
         Fixture(id: "track-table-empty", size: .init(width: 900, height: 400), makeView: { _ in
             let model = TrackListModel(sortOrder: nil)
             model.setTracksNow([])
@@ -314,7 +310,7 @@ enum SnapshotFixtures {
         "Shared/TrackCoverView.swift", "Shared/SpringLoadableHover.swift", "Shared/FirstRunWizard.swift",
         "Shared/TrackMetadataPresentation.swift", "Sync/DeviceIngestResultsView.swift",
         "Sync/IngestPreviewView.swift", "Sync/SyncToast.swift",
-        "TrackDetail/WaveformView.swift", "TrackDetail/DebugTabView.swift", "Search/UniversalSearchView.swift",
+        "TrackDetail/WaveformView.swift", "Search/UniversalSearchView.swift",
     ]
 
     private static let exclusions: [String: String] = [
@@ -370,7 +366,14 @@ enum SnapshotFixtures {
         "Shell/ContentScaffold.swift": "Deferred: shell scaffold reads the status-bar centre and mount state from the environment; re-recorded per wave.",
         "Shell/ShellToolbar.swift": "Deferred: toolbar content needs a window toolbar host and the live playback VM.",
         "Shell/DestinationView.swift": "Deferred: routes to container-backed destination views; needs application-level fixture composition.",
-        "Shell/TrailingColumnView.swift": "Deferred: hosts TrackDetailView and PlaybackQueueView, which need live playback state.",
+        "Shell/TrailingColumnView.swift": "Deferred: hosts InspectorView and PlaybackQueueView, which need live playback state.",
+        "Inspector/InspectorModel.swift": "Non-view: Info's selection-keyed edit model (W2-E).",
+        "Inspector/InspectorFileStatus.swift": "Non-view: availability sentence and fix per state (W2-E).",
+        "Inspector/InspectorAnalysis.swift": "Non-view: single-track analysis runs (W2-E).",
+        "Inspector/InspectorView.swift": "Deferred: Info reads the database, undo center and shell environment; re-recorded with wave 2.",
+        "Inspector/InspectorDetailsTab.swift": "Deferred: tag fields and playlist membership read the database and shell actions.",
+        "Inspector/InspectorAudioTab.swift": "Deferred: waveform extraction, analysis and similarity read files and the database.",
+        "Inspector/InspectorFileTab.swift": "Deferred: file location, size and diagnostics read the disk and the database.",
         "Sync/NewSyncProfileSheet.swift": "Deferred: concrete SyncViewModel and device detection; needs passive sync model.",
         "Sources/RemotePlaylistsView.swift": "Deferred: concrete remote providers fetch on presentation; inject provider clients.",
         "Sources/SourcesView.swift": "Deferred: source model requires OAuth/token clients; needs inert account-status composition.",
@@ -382,8 +385,6 @@ enum SnapshotFixtures {
         "Sync/SyncView.swift": "Deferred: profile/device/preview lifecycle needs inert sync coordinator.",
         "TrackDetail/GrooveStudioView.swift": "Deferred: audio players, model/export services and placeholder randomness need passive deck state.",
         "TrackDetail/GrooveView.swift": "Deferred: preview audio, recommendations and random placeholders require controlled provider/player state.",
-        "TrackDetail/MetadataPanel.swift": "Deferred: multiple track-scoped tasks, defaults and shared analysis state need preloaded tab model.",
-        "TrackDetail/TrackDetailView.swift": "Deferred: composes playback/waveform/metadata lifecycles; only safe child fixtures captured.",
     ]
 
     private static let inventoryPaths = """
@@ -399,6 +400,13 @@ Discover/DiscoverView.swift
 DiscoveryInbox/DiscoveryInboxView.swift
 Folders/FoldersView.swift
 Folders/FolderTreeView.swift
+Inspector/InspectorAnalysis.swift
+Inspector/InspectorAudioTab.swift
+Inspector/InspectorDetailsTab.swift
+Inspector/InspectorFileStatus.swift
+Inspector/InspectorFileTab.swift
+Inspector/InspectorModel.swift
+Inspector/InspectorView.swift
 Library/DanceabilitySteps.swift
 Library/EnergyBars.swift
 Library/LibraryView.swift
@@ -460,11 +468,8 @@ Sync/SyncProfileDetailView.swift
 Sync/SyncSettingsForm.swift
 Sync/SyncToast.swift
 Sync/SyncView.swift
-TrackDetail/DebugTabView.swift
 TrackDetail/GrooveStudioView.swift
 TrackDetail/GrooveView.swift
-TrackDetail/MetadataPanel.swift
-TrackDetail/TrackDetailView.swift
 TrackDetail/WaveformHelpers.swift
 TrackDetail/WaveformView.swift
 TrackList/TrackCell.swift
