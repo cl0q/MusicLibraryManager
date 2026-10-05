@@ -155,14 +155,31 @@ final class SidebarModel {
 
     // MARK: New playlist name (UC §23 C5)
 
-    /// `Untitled Playlist`, or `Untitled Playlist 2`, `3`, … when the name is taken.
+    /// `Untitled Playlist`, or `Untitled Playlist 2`, `3`, … when the name is taken. The
+    /// repository applies the same rule when it creates the playlist (`createNumbered`).
     static func untitledPlaylistName(existing names: [String]) -> String {
-        let base = "Untitled Playlist"
-        let taken = Set(names.map { $0.lowercased() })
-        guard taken.contains(base.lowercased()) else { return base }
-        var n = 2
-        while taken.contains("\(base) \(n)".lowercased()) { n += 1 }
-        return "\(base) \(n)"
+        PlaylistRepository.numberedName(
+            base: ShellEdits.untitledPlaylistName,
+            taken: Set(names.map { $0.lowercased() })
+        )
+    }
+
+    // MARK: Name a new playlist inline (S-PL-NEWPLAYLIST, S-SEL-NEWPLAYLIST)
+
+    /// A new playlist whose sidebar name should go into edit mode as soon as its row is listed.
+    private(set) var renameRequest: Int64?
+
+    /// Ask the sidebar to edit the name of a playlist just created; opens the Playlists section.
+    func requestRename(playlist id: Int64) {
+        renameRequest = id
+        setExpanded(.playlists, true)
+    }
+
+    /// The requested playlist, once it is among the listed rows; clears the request.
+    func takeRenameRequest() -> Playlist? {
+        guard let id = renameRequest, let playlist = playlists.first(where: { $0.id == id }) else { return nil }
+        renameRequest = nil
+        return playlist
     }
 }
 

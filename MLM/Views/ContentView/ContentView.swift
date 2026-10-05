@@ -10,6 +10,7 @@ final class ShellState {
     let navigation = NavigationModel()
     let trailing = TrailingColumnState()
     let statusBar = StatusBarCenter()
+    let undo: UndoCenter
     let sidebar = SidebarModel()
     let drivePlayback = DriveLossPlayback()
     let search: ToolbarSearchModel
@@ -17,11 +18,13 @@ final class ShellState {
 
     init(container: DependencyContainer) {
         search = ToolbarSearchModel(coordinator: container.searchCoordinator)
+        undo = UndoCenter(statusBar: statusBar)
         actions = ShellActions(
             container: container,
             navigation: navigation,
             sidebar: sidebar,
-            statusBar: statusBar
+            statusBar: statusBar,
+            undo: undo
         )
     }
 }
@@ -48,8 +51,7 @@ struct ContentView: View {
     @State private var selectedTrackForDetail: Track?
     @State private var reviewFocusTrackID: Int64?
 
-    /// Selection-based sheet states
-    @State private var playlistSelectionContainer: TrackSelectionContainer? = nil
+    /// Selection-based sheet state
     @State private var syncProfileSelectionContainer: TrackSelectionContainer? = nil
 
     /// Bottom Activity panel, shown while expanded (until W3-ACT, see `ActivityPanelHosting`).
@@ -75,6 +77,8 @@ struct ContentView: View {
                 // Edit ▸ Find (⌘F, main window only) and Go ▸ Playlists (W1-2).
                 .focusedSceneValue(\.toolbarSearch, container.isInitialized ? shell.search : nil)
                 .focusedSceneValue(\.sidebarModel, container.isInitialized ? shell.sidebar : nil)
+                .modifier(UndoCenterInstallation(center: shell.undo, isLibraryOpen: container.isInitialized,
+                                                 libraryID: container.activeLibrary?.libraryId))
         )
     }
 
@@ -145,8 +149,9 @@ struct ContentView: View {
                 libraryDriveDidMount()
             }
             .onReceive(NotificationCenter.default.publisher(for: .triggerNewPlaylistFromSelection)) { notification in
+                // Track context menus (until they call TrackCommandActions): no sheet, one undo step.
                 if let trackIds = extractTrackIds(from: notification.userInfo) {
-                    playlistSelectionContainer = TrackSelectionContainer(trackIds: Set(trackIds))
+                    shell.actions.newPlaylistFromSelection(trackIDs: trackIds)
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .triggerNewSyncProfileFromSelection)) { notification in
@@ -180,9 +185,6 @@ struct ContentView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .openTrackDetailForTrack)) { notification in
                 openTrackDetail(notification.userInfo)
-            }
-            .sheet(item: $playlistSelectionContainer) { selection in
-                NewPlaylistFromSelectionSheet(trackIds: selection.trackIds)
             }
             .sheet(item: $syncProfileSelectionContainer) { selection in
                 NewSyncProfileFromSelectionSheet(trackIds: selection.trackIds)
@@ -451,6 +453,24 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.mlmBase)
+    }
+}
+
+// MARK: - Undo
+
+/// The window's `UndoCenter` in the environment and as a focused value, attached to the
+/// window's `UndoManager`; its steps end with the window or when another library opens
+/// (UC-UNDO-01, W2-F).
+private struct UndoCenterInstallation: ViewModifier {
+    let center: UndoCenter
+    let isLibraryOpen: Bool
+    let libraryID: String?
+
+    func body(content: Content) -> some View {
+        content
+            .environment(center)
+            .focusedSceneValue(\.undoCenter, isLibraryOpen ? center : nil)
+            .undoCenter(center, scope: libraryID)
     }
 }
 

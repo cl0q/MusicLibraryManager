@@ -112,9 +112,6 @@ enum SnapshotFixtures {
                 preview: preview, sourceFileName: "fixture.m3u8", onApply: {}, onCancel: {}
             ))
         }),
-        Fixture(id: "new-playlist-sheet", size: .init(width: 440, height: 260), makeView: { _ in
-            AnyView(NewPlaylistFromSelectionSheet(trackIds: [1, 2]))
-        }),
         Fixture(id: "discovery-inbox-empty", size: .init(width: 800, height: 560), makeView: { _ in
             AnyView(DiscoveryInboxView())
         }),
@@ -381,6 +378,8 @@ enum SnapshotFixtures {
         "Shell/Spacing.swift": "Non-view: layout constants.",
         "Shell/SidebarModel.swift": "Non-view: sidebar data and sync row state.",
         "Shell/ShellActions.swift": "Non-view: window-level command actions.",
+        "Shell/ShellEdits.swift": "Non-view: undoable playlist and sync-profile edits (W2-F).",
+        "Shell/UndoCenter.swift": "Non-view: window undo center; its confirmations render in ContentScaffold's status bar.",
         "Shell/ShellSearch.swift": "Deferred: attaches .searchable to the window shell; needs application-level fixture composition.",
         "Shell/ContentScaffold.swift": "Deferred: shell scaffold reads the status-bar centre and mount state from the environment; re-recorded per wave.",
         "Shell/ShellToolbar.swift": "Deferred: toolbar content needs a window toolbar host and the live playback VM.",
@@ -454,6 +453,7 @@ Shell/ContentScaffold.swift
 Shell/DestinationView.swift
 Shell/NavigationModel.swift
 Shell/ShellActions.swift
+Shell/ShellEdits.swift
 Shell/ShellSearch.swift
 Shell/ShellToolbar.swift
 Shell/SidebarModel.swift
@@ -461,6 +461,7 @@ Shell/Spacing.swift
 Shell/StatusBarCenter.swift
 Shell/TrailingColumnState.swift
 Shell/TrailingColumnView.swift
+Shell/UndoCenter.swift
 Sidebar/LibraryFooter.swift
 Sidebar/SidebarView.swift
 Sources/RemotePlaylistsView.swift

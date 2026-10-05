@@ -21,16 +21,27 @@ final class ShellActions {
     @ObservationIgnored private let statusBar: StatusBarCenter
     @ObservationIgnored private var importViewModel: ImportViewModel?
 
+    /// The undoable playlist and sync-profile edits (W2-F), on the window's `UndoCenter`.
+    @ObservationIgnored let edits: ShellEdits
+
     init(
         container: DependencyContainer,
         navigation: NavigationModel,
         sidebar: SidebarModel,
-        statusBar: StatusBarCenter
+        statusBar: StatusBarCenter,
+        undo: UndoCenter
     ) {
         self.container = container
         self.navigation = navigation
         self.sidebar = sidebar
         self.statusBar = statusBar
+        edits = ShellEdits(
+            dependencies: .live(container),
+            undo: undo,
+            statusBar: statusBar,
+            navigation: navigation,
+            sidebar: sidebar
+        )
     }
 
     var hasLibrary: Bool { container.isInitialized }
@@ -42,26 +53,23 @@ final class ShellActions {
 
     // MARK: New
 
-    /// `New Playlist` ⌘N: creates `Untitled Playlist` (numbered when taken) and selects its
-    /// sidebar row. Inline rename on creation arrives with W3-PL.
+    /// `New Playlist` ⌘N (File menu, sidebar ＋, Add menu): creates `Untitled Playlist`
+    /// (numbered when taken), opens it and puts its sidebar name into edit mode. Undoable.
     func newPlaylist() {
-        guard let repository = container.playlistRepository else { return }
-        let existing = sidebar.playlists.map(\.name)
-        Task {
-            do {
-                let created = try await repository.create(
-                    name: SidebarModel.untitledPlaylistName(existing: existing)
-                )
-                await sidebar.reloadPlaylists(repository)
-                NotificationCenter.default.post(name: .playlistDidChange, object: nil)
-                if let id = created.id {
-                    navigation.select(.playlist(id))
-                }
-            } catch {
-                AppLogger.shared.error("Creating a playlist failed: \(error.localizedDescription)", source: "Shell")
-                statusBar.post("Couldn’t create the playlist — the library file didn’t accept the change")
-            }
-        }
+        Task { await edits.newPlaylist() }
+    }
+
+    /// `New Playlist from Selection` ⇧⌘N / Add to Playlist ▸ New Playlist…: one undoable
+    /// step, tracks in the order given (S-SEL-NEWPLAYLIST: no sheet, no navigation).
+    func newPlaylistFromSelection(trackIDs: [Int64]) {
+        guard !trackIDs.isEmpty else { return }
+        Task { await edits.newPlaylist(fromTrackIDs: trackIDs) }
+    }
+
+    /// `Add to Playlist ▸ ‹playlist›`: appends the tracks; undoable.
+    func addToPlaylist(_ playlistID: Int64, trackIDs: [Int64]) {
+        guard !trackIDs.isEmpty else { return }
+        Task { await edits.addTracks(trackIDs, toPlaylist: playlistID) }
     }
 
     /// `New Sync Profile…` (Sync section ＋, track and playlist menus).

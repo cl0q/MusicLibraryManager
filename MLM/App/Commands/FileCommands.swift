@@ -17,8 +17,8 @@ struct FileCommands: Commands {
             CommandButton(.newPlaylist, enabled: shellActions != nil) {
                 shellActions?.newPlaylist()
             }
-            CommandButton(.newPlaylistFromSelection, enabled: hasSelection) {
-                TrackCommandActions.newPlaylistFromSelection(selection?.selectedTracks ?? [])
+            CommandButton(.newPlaylistFromSelection, enabled: hasSelection && shellActions != nil) {
+                TrackCommandActions.newPlaylistFromSelection(selection?.selectedTracks ?? [], shell: shellActions)
             }
             CommandButton(.newPlaylistFolder)
             // With a selection, the selection becomes the new profile's first content (M-FILE.N03).
