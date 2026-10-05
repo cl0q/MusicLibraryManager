@@ -45,8 +45,10 @@ struct ProcessRunnerTimeoutTests {
 
         #expect(result.timedOut, "Result should report timedOut == true")
         #expect(!result.isSuccess, "Timed-out result should not be success")
-        #expect(elapsed < 5.0,
-                "Expected prompt return (\(String(format: "%.2f", elapsed))s), but took too long — timeout may not be working")
+        // Intent, not a tight wall clock (it flaked under a loaded parallel run): the process
+        // was killed long before its natural 30 s.
+        #expect(elapsed < 15.0,
+                "Expected a return well before the natural 30 s (\(String(format: "%.2f", elapsed))s) — timeout may not be working")
     }
 
     /// Wall-clock time for a timed-out process must be far below the

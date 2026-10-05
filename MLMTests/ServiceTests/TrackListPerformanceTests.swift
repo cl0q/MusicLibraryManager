@@ -3,15 +3,37 @@ import GRDB
 import Testing
 @testable import MLM
 
-/// 15,000 synthetic tracks in a temporary database: the track table's data path must stay
-/// fast (W2-A). Bounds are generous so CI doesn't flake; the measured numbers are printed
-/// (`PERF …`) for the report.
+/// The track table's data path with synthetic tracks in a temporary database (W2-A).
+///
+/// - Always on: `smallLibraryDataPath` — 1,500 rows, correctness only, no wall-clock bounds.
+/// - Opt-in: `fifteenThousandRowsStayFast` — 15,000 rows with generous time bounds and the
+///   measured numbers printed (`PERF …`). Run it with `MLM_PERF_TESTS=1 swift test --filter
+///   TrackListPerformanceTests`; it is off by default so a loaded parallel run can't flake.
 @Suite("TrackListPerformanceTests", .serialized)
 @MainActor
 struct TrackListPerformanceTests {
-    static let trackCount = 15_000
+    nonisolated static let trackCount = 15_000
+    nonisolated static var perfEnabled: Bool { ProcessInfo.processInfo.environment["MLM_PERF_TESTS"] == "1" }
 
-    private static func makeDatabase() throws -> DatabaseQueue {
+    @Test func smallLibraryDataPath() async throws {
+        let db = try Self.makeDatabase(count: 1_500)
+        let repository = TrackRepository(database: db)
+        let tracks = try await repository.fetchTracks(scope: .all)
+        #expect(tracks.count == 1_500)
+        let counts = try await repository.availabilityCounts()
+        #expect(counts.local + counts.notDownloaded + counts.failed + counts.fileMissing == 1_500)
+        let model = TrackListModel(sortOrder: TrackSortOrder(column: .added, ascending: false))
+        await model.setTracks(tracks)
+        #expect(model.rows.count == 1_500)
+        for column in TrackColumnID.allCases {
+            await model.setSortOrder(TrackSortOrder(column: column, ascending: false))
+            #expect(model.rows.count == 1_500)
+        }
+        model.selection = Set(model.rows.map(\.id))
+        #expect(TrackSelectionSummary(rows: model.selectedRows(), container: .library, live: .idle).count == 1_500)
+    }
+
+    private static func makeDatabase(count: Int = trackCount) throws -> DatabaseQueue {
         let db = try DatabaseManager.inMemory()
         let failure = try TrackDownloadFailure(reason: "Source timed out", date: Date(timeIntervalSince1970: 1_720_000_000), attempts: 1).encodedJSON()
         try db.write { db in
@@ -22,7 +44,7 @@ struct TrackListPerformanceTests {
                                     search_text, file_missing_since)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'm4a', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """)
-            for index in 0..<trackCount {
+            for index in 0..<count {
                 let artist = "Artist \(index % 900)"
                 let title = "Track \(String(index * 7919 % 100_003, radix: 36)) \(index)"
                 let album = index % 2 == 0 ? "unknown album" : "Album \(index % 1600)"
@@ -49,7 +71,8 @@ struct TrackListPerformanceTests {
         return (value, ms)
     }
 
-    @Test func fifteenThousandRowsStayFast() async throws {
+    @Test(.enabled(if: TrackListPerformanceTests.perfEnabled, "Set MLM_PERF_TESTS=1 to measure 15,000 rows."))
+    func fifteenThousandRowsStayFast() async throws {
         let db = try Self.makeDatabase()
         let repository = TrackRepository(database: db)
 
