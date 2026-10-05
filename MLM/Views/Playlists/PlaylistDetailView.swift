@@ -26,11 +26,10 @@ struct PlaylistDetailView: View {
 
     @Environment(\.container) private var container
     @Environment(\.openSettings) private var openSettings
+    @Environment(UndoCenter.self) private var undo: UndoCenter?
     @State private var viewModel: PlaylistDetailViewModel?
     @State private var showM3UImporter = false
     @State private var showAddFromLibrary = false
-    @State private var tracksPendingRemoval: Set<Int64> = []
-    @State private var showingRemoveTracksConfirmation = false
     @State private var failureDisclosureExpanded = false
 
     @State private var availablePlaylists: [Playlist] = []
@@ -177,16 +176,6 @@ struct PlaylistDetailView: View {
                     applyError: ingestVM.errorMessage
                 )
             }
-        }
-        .alert("Remove tracks", isPresented: $showingRemoveTracksConfirmation) {
-            Button("Cancel", role: .cancel) {}
-            Button("Remove", role: .destructive) {
-                viewModel?.selectedTrackIDs = tracksPendingRemoval
-                tracksPendingRemoval = []
-                Task { await viewModel?.removeSelectedTracks() }
-            }
-        } message: {
-            Text("Remove \(tracksPendingRemoval.count) tracks from this playlist? This does not delete any files.")
         }
         .alert("Import Complete", isPresented: Binding(
             get: { ingestSuccessMessage != nil },
@@ -477,25 +466,29 @@ struct PlaylistDetailView: View {
     private func actionButtons(_ viewModel: PlaylistDetailViewModel) -> some View {
         HStack(spacing: 8) {
             if let firstLocalTrack = viewModel.playableTracks.first {
+                // Nothing plays while the library's disk is away (§15.5, W2-A review S7).
+                let cantPlay = TrackTableLiveState.drive(container).cantPlayReason
                 Button {
                     onTrackDoubleClick?(firstLocalTrack, viewModel.displayedTracks)
                 } label: {
                     Label("Play", systemImage: "play.fill")
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(cantPlay != nil)
+                .help(cantPlay ?? "")
 
                 Button {
                     Task {
                         if let pvm = container.playbackViewModel {
-                            await pvm.playShuffled(viewModel.displayedTracks)
+                            await pvm.playShuffled(viewModel.playableTracks)
                         }
                     }
                 } label: {
                     Label("Shuffle", systemImage: "shuffle")
                 }
                 .buttonStyle(.borderedProminent)
-                .help("Shuffle play playlist")
-                .disabled(viewModel.displayedTracks.isEmpty)
+                .help(cantPlay ?? "Shuffle play playlist")
+                .disabled(viewModel.displayedTracks.isEmpty || cantPlay != nil)
                 .accessibilityIdentifier("playlist_shuffle_button")
             }
 
@@ -724,18 +717,11 @@ struct PlaylistDetailView: View {
         }
     }
 
+    /// Removing from the playlist is one undo step, without a question (UC-UNDO-06): the
+    /// same `PlaylistTrackRemoval` as ⌫ and the context menu (W2-A review).
     private func requestTrackRemoval(_ trackIDs: Set<Int64>, using viewModel: PlaylistDetailViewModel) {
-        guard !trackIDs.isEmpty else { return }
-
-        guard trackIDs.count > 1 else {
-            if let trackID = trackIDs.first {
-                Task { await viewModel.removeTrack(trackID) }
-            }
-            return
-        }
-
-        tracksPendingRemoval = trackIDs
-        showingRemoveTracksConfirmation = true
+        guard !trackIDs.isEmpty, let playlistID = viewModel.playlist.id else { return }
+        PlaylistTrackRemoval.remove(trackIDs, fromPlaylist: playlistID, name: viewModel.playlist.name, undo: undo)
     }
 
     private func downloadMissingTracks(_ viewModel: PlaylistDetailViewModel) async {

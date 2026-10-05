@@ -16,6 +16,20 @@ struct TrackTableLiveState: Equatable, Sendable {
     var offlineVolumeName: String?
 
     static let idle = TrackTableLiveState()
+
+    /// Only the drive part, read now (for commands outside a table).
+    @MainActor
+    static func drive(_ container: DependencyContainer) -> TrackTableLiveState {
+        let drive = LibraryDriveState.current(container)
+        guard drive.isOffline else { return .idle }
+        return TrackTableLiveState(offlineVolumePath: container.mountObserver?.libraryVolumePath,
+                                   offlineVolumeName: drive.volumeName)
+    }
+
+    /// Help of Play / Shuffle disabled because the library's disk is away (§15.2, §15.5).
+    var cantPlayReason: String? {
+        offlineVolumeName.map(TrackPrimaryAction.driveNotConnectedHelp)
+    }
 }
 
 extension EnvironmentValues {

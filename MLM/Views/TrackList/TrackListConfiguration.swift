@@ -28,8 +28,12 @@ import SwiftUI
 struct TrackListConfiguration {
     /// What the list is for the menu bar (`TrackSelection`): container, Play/Shuffle name.
     var listContext: TrackListContext
-    /// Key of the persisted column customization and sort (`@SceneStorage`).
+    /// Key of the persisted column customization (`@SceneStorage`), shared by every list of
+    /// one kind (all playlists show the same columns).
     var persistenceKey: String
+    /// Key of the persisted sort; `nil` = `persistenceKey`. Playlists sort per playlist
+    /// (`playlist.‹id›`, default `#`).
+    var sortPersistenceKey: String? = nil
     /// Columns that exist in this context, in table order.
     var columns: [TrackColumnID] = TrackColumnID.allCases.filter { $0 != .number }
     /// The container has its own order: `#` column, `Playlist Order` in Sort By, the
@@ -96,6 +100,7 @@ extension TrackListConfiguration {
         TrackListConfiguration(
             listContext: .playlist(id: id, name: name),
             persistenceKey: "playlist",
+            sortPersistenceKey: "playlist.\(id)",
             columns: TrackColumnID.allCases,
             hasContainerOrder: true,
             defaultSort: TrackSortOrder(column: .number, ascending: true),

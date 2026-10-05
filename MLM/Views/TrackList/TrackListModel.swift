@@ -30,8 +30,10 @@ final class TrackListModel {
     @ObservationIgnored private(set) var indexByID: [Int64: Int] = [:]
     /// Changes whenever the rows or their order change (`TrackSelection.rowsToken`).
     @ObservationIgnored private(set) var rowsToken = 0
-    /// Some row has a local file (Playback ▸ Play / Shuffle ‹view›).
+    /// Some row has a local file (persisted; ignores the drive — see `hasPlayableRows(live:)`).
     @ObservationIgnored private(set) var hasPlayableRows = false
+    /// Where the local rows' files are (a handful of values: library folder, other volumes).
+    @ObservationIgnored private(set) var localFileLocations: Set<TrackFileLocation> = []
     /// Sum of the rows' durations in seconds (status bar without SQL totals).
     @ObservationIgnored private(set) var totalDuration = 0
     @ObservationIgnored private var generation = 0
@@ -45,65 +47,121 @@ final class TrackListModel {
 
     // MARK: - Loading
 
+    /// What the rows are made from: the latest tracks (and how to build them) or rows. A sort
+    /// or a removal always re-prepares from the **latest** input, so a sort while a big load is
+    /// still being prepared re-sorts the new rows instead of dropping them (W2-A review S2).
+    enum Input: Sendable {
+        case tracks([Track], TrackRowBuildContext, visibleIDs: Set<Int64>?)
+        case rows([TrackRow])
+
+        var count: Int {
+            switch self {
+            case .tracks(let tracks, _, _): tracks.count
+            case .rows(let rows): rows.count
+            }
+        }
+
+        func buildRows() -> [TrackRow] {
+            switch self {
+            case .tracks(let tracks, let context, let visibleIDs):
+                let rows = TrackRowBuilder.build(tracks, context: context)
+                guard let visibleIDs else { return rows }
+                return rows.filter { visibleIDs.contains($0.id) }
+            case .rows(let rows):
+                return rows
+            }
+        }
+
+        func removing(_ ids: Set<Int64>) -> Input {
+            switch self {
+            case .tracks(let tracks, let context, let visibleIDs):
+                .tracks(tracks.filter { !($0.id.map(ids.contains) ?? false) }, context, visibleIDs: visibleIDs)
+            case .rows(let rows):
+                .rows(rows.filter { !ids.contains($0.id) })
+            }
+        }
+    }
+
+    /// The newest input; `nil` until the first `setTracks` / `setRows`.
+    @ObservationIgnored private var latestInput: Input? {
+        didSet { inputVersion += 1 }
+    }
+    @ObservationIgnored private var inputVersion = 0
+
     /// Replace the rows with `tracks` (natural order). Small lists commit before the first
     /// suspension point; big ones are prepared in the background and committed unless a newer
-    /// load superseded them.
+    /// input or sort superseded them (then the newer one commits).
     ///
     /// - Parameter visibleIDs: show only these (a filter that keeps container positions —
     ///   a searched playlist still shows each track's playlist `#`, UC-TABLE-05).
     func setTracks(_ tracks: [Track], context: TrackRowBuildContext = .library, visibleIDs: Set<Int64>? = nil) async {
-        generation += 1
-        let token = generation
-        let order = sortOrder
-        let make: @Sendable () -> Prepared = {
-            var rows = TrackRowBuilder.build(tracks, context: context)
-            if let visibleIDs { rows = rows.filter { visibleIDs.contains($0.id) } }
-            return Prepared.make(rows, order: order)
-        }
-        if tracks.count <= Self.backgroundThreshold {
-            commit(make())
-            return
-        }
-        let prepared = await Task.detached(priority: .userInitiated) { make() }.value
-        guard token == generation else { return }
-        commit(prepared)
+        latestInput = .tracks(tracks, context, visibleIDs: visibleIDs)
+        await prepareLatest()
     }
 
-    /// Replace the rows at once (small lists only: menus built on the fly, tests).
+    /// Replace the rows at once (small lists only: menus built on the fly, fixtures).
     func setTracksNow(_ tracks: [Track], context: TrackRowBuildContext = .library) {
+        let input = Input.tracks(tracks, context, visibleIDs: nil)
+        latestInput = input
         generation += 1
-        commit(Prepared.make(TrackRowBuilder.build(tracks, context: context), order: sortOrder))
+        commit(Prepared.make(input.buildRows(), order: sortOrder))
     }
 
     /// Replace the rows with prebuilt rows (natural order).
     func setRows(_ newRows: [TrackRow]) async {
-        generation += 1
-        let token = generation
-        let order = sortOrder
-        if newRows.count <= Self.backgroundThreshold {
-            commit(Prepared.make(newRows, order: order))
-            return
-        }
-        let prepared = await Task.detached(priority: .userInitiated) { Prepared.make(newRows, order: order) }.value
-        guard token == generation else { return }
-        commit(prepared)
+        latestInput = .rows(newRows)
+        await prepareLatest()
     }
 
-    /// Change the sort; re-sorts the current rows (no reload).
+    /// Change the sort and re-sort the latest input. Before the first load only the order is
+    /// stored — nothing is committed, so the table keeps its placeholder rows (no false
+    /// empty state).
     func setSortOrder(_ order: TrackSortOrder?) async {
         guard order != sortOrder else { return }
         sortOrder = order
-        await setRows(sourceRows)
+        guard latestInput != nil else { return }
+        await prepareLatest()
     }
 
-    /// Remove rows in place (tracks deleted from the library or the container).
+    /// Remove rows in place (tracks deleted from the library or the container), also from a
+    /// load still being prepared.
     func remove(ids: Set<Int64>) {
         guard !ids.isEmpty else { return }
         selection.subtract(ids)
-        let kept = sourceRows.filter { !ids.contains($0.id) }
-        guard kept.count != sourceRows.count else { return }
+        guard let input = latestInput else { return }
+        latestInput = input.removing(ids)
+        guard isLoaded else { return }  // the pending load picks the removal up
+        if input.count <= Self.backgroundThreshold {
+            generation += 1
+            commit(Prepared.make(latestInput?.buildRows() ?? [], order: sortOrder))
+        } else {
+            Task { await prepareLatest() }
+        }
+    }
+
+    private func prepareLatest() async {
+        guard let input = latestInput else { return }
+        let version = inputVersion
         generation += 1
-        commit(Prepared.make(kept, order: sortOrder))
+        let token = generation
+        let order = sortOrder
+        let prepared: Prepared
+        if input.count <= Self.backgroundThreshold {
+            prepared = Prepared.make(input.buildRows(), order: order)
+        } else {
+            prepared = await Task.detached(priority: .userInitiated) {
+                Prepared.make(input.buildRows(), order: order)
+            }.value
+            guard token == generation else { return }
+        }
+        commit(prepared)
+        if version == inputVersion {
+            // Later sorts reuse the built rows.
+            latestInput = .rows(prepared.source)
+        } else {
+            // The input changed while this was prepared (a removal): prepare the newest.
+            await prepareLatest()
+        }
     }
 
     private func commit(_ prepared: Prepared) {
@@ -111,10 +169,18 @@ final class TrackListModel {
         indexByID = prepared.indexByID
         rowsToken = prepared.token
         hasPlayableRows = prepared.hasPlayableRows
+        localFileLocations = prepared.localFileLocations
         totalDuration = prepared.totalDuration
         rows = prepared.rows
         tracks = prepared.tracks
         isLoaded = true
+    }
+
+    /// Some row can play **now**: a local file not on the library's disk while it is away
+    /// (Playback ▸ Play / Shuffle ‹view›, S7).
+    func hasPlayableRows(live: TrackTableLiveState) -> Bool {
+        guard let offline = live.offlineVolumePath else { return hasPlayableRows }
+        return localFileLocations.contains { !$0.isOnVolume(offline) }
     }
 
     // MARK: - Selection (cost ∝ selection)
@@ -142,6 +208,7 @@ final class TrackListModel {
         let indexByID: [Int64: Int]
         let token: Int
         let hasPlayableRows: Bool
+        let localFileLocations: Set<TrackFileLocation>
         let totalDuration: Int
 
         static func make(_ source: [TrackRow], order: TrackSortOrder?) -> Prepared {
@@ -151,11 +218,15 @@ final class TrackListModel {
             var hasher = Hasher()
             hasher.combine(rows.count)
             var playable = false
+            var locations: Set<TrackFileLocation> = []
             var duration = 0
             for (index, row) in rows.enumerated() {
                 indexByID[row.id] = index
                 hasher.combine(row.id)
-                if !playable, row.availability == .local { playable = true }
+                if row.availability == .local {
+                    playable = true
+                    locations.insert(row.fileLocation)
+                }
                 duration += max(row.track.duration ?? 0, 0)
             }
             return Prepared(
@@ -165,6 +236,7 @@ final class TrackListModel {
                 indexByID: indexByID,
                 token: hasher.finalize(),
                 hasPlayableRows: playable,
+                localFileLocations: locations,
                 totalDuration: duration
             )
         }

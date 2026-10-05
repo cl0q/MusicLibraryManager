@@ -106,9 +106,9 @@ struct TrackListStructureTests {
     /// The context menu shows keys (UC-CM-06); each is the menu bar's key for the same command
     /// or the focused list's own ↩ / ⌫ — never a new shortcut (UC-KEY-39).
     @Test func contextMenuKeysMirrorTheMenuBar() throws {
+        // No plain ↩ or ⌫: while the menu is open they could fire Play / Remove instead of the
+        // highlighted item (W2-A review). Only modified keys that mirror menu-bar items.
         let allowed: [String: MenuShortcut?] = [
-            ".keyboardShortcut(.return, modifiers: [])": nil,  // ↩ primary action of the focused list
-            ".keyboardShortcut(.delete, modifiers: [])": nil,  // ⌫ onDeleteCommand (IMP-014)
             ".keyboardShortcut(.return, modifiers: .option)": MenuCommand.playNext.shortcut,
             ".keyboardShortcut(\"n\", modifiers: [.command, .shift])": MenuCommand.newPlaylistFromSelection.shortcut,
             ".keyboardShortcut(\"i\", modifiers: .command)": MenuCommand.toggleInfo.shortcut,
@@ -127,6 +127,15 @@ struct TrackListStructureTests {
             let call = line.trimmingCharacters(in: .whitespaces)
             #expect(allowed.keys.contains(call), "\(call) is not a key of the menu bar or the focused list")
         }
+        #expect(!menu.contains(".keyboardShortcut(.return, modifiers: [])"))
+        #expect(!menu.contains(".keyboardShortcut(.delete, modifiers: [])"))
+        // Enabled items carry no empty help.
+        #expect(!menu.contains(".help(\"\")") && !menu.contains("? \"\" :"))
+        // ⌫ in the table and Track ▸ Remove from ‹Container› act on the shown selection (S5).
+        let table = try source("MLM/Views/TrackList/TrackListTable.swift")
+        #expect(table.contains("{ remove(Set(model.selectedRows().map(\\.id))) }"))
+        #expect(table.contains("{ ids in remove(Set(model.selectedRows(ids).map(\\.id))) }"))
+        #expect(table.contains(".focusedValue(\\.trackSelection, visible ? selection(summary: summary) : nil)"))
     }
 
     @Test func playlistRemovalIsUndoableAndAddToPlaylistGoesThroughTheShell() throws {

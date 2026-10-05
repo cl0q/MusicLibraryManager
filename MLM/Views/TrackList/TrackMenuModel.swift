@@ -174,11 +174,18 @@ enum TrackLinks {
         return url
     }
 
-    /// The track came from a source (a URL or a source id, not an imported file), so the
-    /// download pipeline can fetch it again (`Download Again`, §15.4).
+    /// Source identifiers the importers write into `original_path` (`soundcloud://123`,
+    /// `spotify://track/…`, `RemoteTrackMaterializer`'s `‹source›://‹id›`).
+    static let sourceSchemes: Set<String> = ["soundcloud", "spotify", "youtube", "dab", "qobuz", "applemusic", "apple-music", "deezer", "tidal"]
+
+    /// The track came from a real remote source — a web URL or a known source identifier — so
+    /// the download pipeline can fetch it again (`Download Again`, §15.4). Imported files,
+    /// Reels (`reels://`) and anything unknown don't qualify.
     static func hasSource(_ track: Track) -> Bool {
-        let raw = track.originalPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else { return false }
-        return !(raw.hasPrefix("/") || raw.hasPrefix("~"))
+        if sourceURL(track) != nil { return true }
+        let raw = track.originalPath.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard let range = raw.range(of: "://"), range.lowerBound > raw.startIndex,
+              raw[range.upperBound...].contains(where: { !$0.isWhitespace }) else { return false }
+        return sourceSchemes.contains(String(raw[..<range.lowerBound]))
     }
 }

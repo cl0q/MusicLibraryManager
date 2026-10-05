@@ -117,7 +117,8 @@ enum TrackAvailability: Codable, Equatable, Hashable, Sendable {
             if let fileMissingSince, !fileMissingSince.isEmpty { return .fileMissing }
             return .local
         }
-        let status = downloadStatus?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        // Trims spaces only, like SQL `TRIM` in `TrackAvailabilitySQL`.
+        let status = downloadStatus?.trimmingCharacters(in: CharacterSet(charactersIn: " ")).lowercased() ?? ""
         // A retry keeps the prior failure record until it succeeds or fails again, but the
         // running download is the truthful state.
         if activeDownloadStatuses.contains(status) { return .downloading }

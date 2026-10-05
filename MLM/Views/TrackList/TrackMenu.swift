@@ -11,8 +11,9 @@ struct TrackMenu: View {
     /// Playlists offered in Add to Playlist ▸ (the current one already left out, UC-CM-08).
     let playlists: [Playlist]
     let syncProfiles: [SyncProfile]
-    /// Help of the items disabled while the library's disk is away (UC-CM-05).
-    let offlineHelp: String?
+    /// The library's disk while it is away — the reason of the disabled file actions
+    /// (UC-CM-05, UC-COPY-13); `nil` while connected.
+    let offlineVolumeName: String?
 
     var body: some View {
         ForEach(Array(model.sections.enumerated()), id: \.offset) { _, section in
@@ -37,9 +38,7 @@ struct TrackMenu: View {
             } label: {
                 Label("Play", systemImage: "play.fill")
             }
-            .keyboardShortcut(.return, modifiers: [])
-            .disabled(!enabled)
-            .help(enabled ? "" : (offlineHelp ?? ""))
+            .disabled(!enabled, reason: offlineVolumeName.map(TrackPrimaryAction.driveNotConnectedHelp))
         case .playNext:
             Button("Play Next") { actions.playNext(rows) }
                 .keyboardShortcut(.return, modifiers: .option)
@@ -79,8 +78,7 @@ struct TrackMenu: View {
         case .showInFinder(let enabled):
             Button("Show in Finder") { actions.showInFinder(rows) }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
-                .disabled(!enabled)
-                .help(enabled ? "" : (offlineHelp ?? ""))
+                .disabled(!enabled, reason: offlineVolumeName.map(TrackMenu.notConnectedHelp))
         case .copy(let filePath, let link):
             Menu("Copy") {
                 Button("Title — Artist") { actions.copyTitleAndArtist(rows) }
@@ -92,13 +90,33 @@ struct TrackMenu: View {
                 }
             }
         case .removeFromContainer(let title):
+            // Shown without a key: a plain ⌫ equivalent could fire while the menu is open
+            // instead of the highlighted item; ⌫ belongs to the focused list (IMP-014).
             Button(title) { actions.removeFromContainer(rows) }
-                .keyboardShortcut(.delete, modifiers: [])
         case .removeFromLibrary(let enabled):
             Button("Remove from Library…", role: .destructive) { actions.removeFromLibrary(rows) }
                 .keyboardShortcut(.delete, modifiers: .command)
-                .disabled(!enabled)
-                .help(enabled ? "" : (offlineHelp ?? ""))
+                .disabled(!enabled, reason: offlineVolumeName.map(TrackMenu.notConnectedHelp))
+        }
+    }
+}
+
+extension TrackMenu {
+    /// Help of file actions (other than playback) disabled while the disk is away:
+    /// `“Lexxar” is not connected`.
+    static func notConnectedHelp(_ volumeName: String) -> String {
+        "“\(volumeName)” is not connected"
+    }
+}
+
+private extension View {
+    /// Disabled with its reason as help text; enabled items carry no help.
+    @ViewBuilder
+    func disabled(_ isDisabled: Bool, reason: String?) -> some View {
+        if isDisabled, let reason {
+            self.disabled(true).help(reason)
+        } else {
+            self.disabled(isDisabled)
         }
     }
 }
