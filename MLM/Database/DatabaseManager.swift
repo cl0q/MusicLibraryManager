@@ -1195,6 +1195,45 @@ final class DatabaseManager: Sendable {
             """)
         }
 
+        // ──────────────────────────────────────────────────────────────
+        // Migration v46_activity_operations (W3-ACT, DEC-044, UC-JOB-02):
+        // finished / failed / cancelled Activity operations of this library
+        // and their results (counts, failures grouped by cause, per-item
+        // outcomes as one JSON column), kept across relaunch. Retention: the
+        // last 200 finished operations or 30 days, whichever is smaller;
+        // undismissed failures stay until dismissed or fixed. Running rows
+        // are closed as interrupted at the next launch. Per-track failure
+        // state stays in `tracks.download_failure`. No foreign keys (they
+        // stay disabled): missing subjects are flagged by
+        // `ActivityOperationRepository.markMissingSubjects`.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v46_activity_operations") { db in
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS activity_operations (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    kind TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    subject_kind TEXT NOT NULL DEFAULT 'none',
+                    subject_id INTEGER,
+                    subject_name TEXT,
+                    subject_detail TEXT,
+                    subject_track_ids TEXT,
+                    subject_missing INTEGER NOT NULL DEFAULT 0,
+                    state TEXT NOT NULL,
+                    is_automatic INTEGER NOT NULL DEFAULT 0,
+                    started_at TEXT NOT NULL,
+                    ended_at TEXT,
+                    result TEXT,
+                    needs_attention INTEGER NOT NULL DEFAULT 0,
+                    dismissed_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_activity_operations_ended_at
+                    ON activity_operations(ended_at);
+                CREATE INDEX IF NOT EXISTS idx_activity_operations_attention
+                    ON activity_operations(needs_attention) WHERE needs_attention = 1;
+            """)
+        }
+
         return migrator
     }
 
