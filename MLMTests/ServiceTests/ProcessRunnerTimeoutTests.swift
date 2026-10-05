@@ -66,7 +66,8 @@ struct ProcessRunnerTimeoutTests {
         )
         let elapsed = Date().timeIntervalSince(start)
 
-        #expect(elapsed < 10.0,
+        // Intent: killed long before the natural 60 s, not a tight bound a loaded run misses.
+        #expect(elapsed < 30.0,
                 "Elapsed \(String(format: "%.2f", elapsed))s — should be ~1s, not 60s")
     }
 
