@@ -41,6 +41,9 @@ final class SnapshotsTests: XCTestCase {
         // W2-D replaced Queue/PlaybackQueueView.swift (rendered) by Queue/QueuePanel.swift
         // (rendered: the unavailable state), Queue/{QueuePanelModel,QueueEditCommands}.swift
         // (non-view) and Queue/SaveQueueAsPlaylistPopover.swift (deferred).
+        // W3-ACT replaced the bottom panel (ActivityPanel, OperationsTab, LogsTab deferred; ActivityFeed,
+        // ActivityFeedAdapters non-view) by ActivityToolbarItem, ActivityWindow, ActivityLogsView
+        // (deferred) and ActivityRouter, ActivityJobTracking (non-view): counts unchanged.
         // W2-H replaced Shared/SpringLoadableHover.swift (rendered) by DragDrop/DropTargetModifier.swift
         // (rendered: the resting drop target); its payloads and rules live in MLM/Services/DragDrop.
         XCTAssertEqual(paths.count, 112, "Re-audit inventory changes explicitly.")

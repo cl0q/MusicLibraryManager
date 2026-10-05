@@ -64,6 +64,22 @@ struct DropStructureTests {
         #expect(sidebar.contains(".dropTarget(.syncProfile(id: id, name: profile.name))"))
         #expect(sidebar.contains(".dropTarget(destination == .allPlaylists ? .playlistsSection : .fixedRow)"))
         #expect(sidebar.contains(".draggable(PlaylistDragItem("))
+        // A new playlist only from the Playlists header, All Playlists and the empty area below
+        // the last row — never from the Library, Inbox or Sync headers (coordinator decision f).
+        #expect(sidebar.components(separatedBy: ".dropTarget(.playlistsSection)").count - 1 == 2,
+                "the Playlists header and the empty area")
+        #expect(sidebar.contains("SidebarEmptyDropArea()"))
+        #expect(!sidebar.contains(".listStyle(.sidebar)\n        // The empty area"), "no List-wide target")
+    }
+
+    @Test func thePlayerCoverDragsAndStillOpensTheLargeCover() throws {
+        // Coordinator decision (a): UC-TB-06 — draggable as the track, the click keeps the popover.
+        let player = try source("MLM/Views/Player/PlayerBar.swift")
+        let cover = try #require(player.components(separatedBy: "private struct PlayerCover: View {").last)
+            .components(separatedBy: "private struct LargeCoverPopover").first ?? ""
+        #expect(cover.contains("showsLargeCover.toggle()"))
+        #expect(cover.contains(".draggable(item)"))
+        #expect(cover.contains(".popover(isPresented: $showsLargeCover"))
     }
 
     // MARK: Loader

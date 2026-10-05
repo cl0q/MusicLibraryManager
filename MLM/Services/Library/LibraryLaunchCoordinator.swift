@@ -339,6 +339,10 @@ final class LibraryLaunchCoordinator {
     func adoptLegacyLibrary(named name: String) async {
         adoptionState = .running(.backingUp)
         let adoption = self.adoption
+        // Activity (W3-ACT): app-level `Create library file “‹name›”` (no library is open yet);
+        // the phases show in the adoption sheet; no Cancel while it runs.
+        let job = ActivityCenter.shared.begin(.libraryAdoption, title: "Create library file “\(name)”",
+                                              subject: .libraryFile, appLevel: true)
         do {
             let result = try await Task.detached(priority: .userInitiated) {
                 try adoption.adopt(named: name) { phase in
@@ -346,8 +350,10 @@ final class LibraryLaunchCoordinator {
                 }
             }.value
             adoptionState = .succeeded(result)
+            job.finish(ActivityResult(summary: "Old install adopted · backup “Before library file setup”"))
         } catch {
             AppLogger.shared.error("Library file setup failed: \(error)", source: "Library")
+            job.fail(cause: "The library file couldn’t be created — your music and the old library are not affected")
             if let package = adoption.installedPackageURL() {
                 // Past the point of no return: the library file is complete. Open it; the
                 // remaining steps finish at the next launch.

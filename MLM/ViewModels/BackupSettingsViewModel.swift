@@ -109,11 +109,15 @@ final class BackupSettingsViewModel {
         guard phase == .idle else { return }
         phase = .backingUp
         clearMessages()
+        // Activity (W3-ACT): `Back Up Now` — no Cancel (it has none).
+        let job = ActivityCenter.shared.begin(.backup, title: "Back Up Now", subject: .settings(.backup))
         do {
-            _ = try await service.createBackup(reason: .manual)
+            let info = try await service.createBackup(reason: .manual)
             lastResult = Copy.backupCreated
+            job.finish(.backup(info))
         } catch {
             present(error, context: .backup)
+            job.fail(cause: errorMessage ?? error.localizedDescription, fix: .runAgain)
         }
         phase = .idle
         await refresh()
@@ -163,17 +167,26 @@ final class BackupSettingsViewModel {
         }
 
         phase = .restoring(info)
+        // Activity (W3-ACT): app-level — the library file is replaced by the restore.
+        let job = ActivityCenter.shared.begin(
+            .restore, title: "Restore backup of \(info.createdAt.formatted(date: .abbreviated, time: .shortened))",
+            subject: .settings(.backup), appLevel: true)
         do {
             try await service.prepareRestore(from: info)
+            job.finish(ActivityResult(summary: "Relaunching with the restored library"))
+            await ActivityCenter.shared.flushPersistence()
             phase = .relaunching
             relaunch()
         } catch BackupError.restoreSwapFailed(let detail) {
+            job.fail(cause: "Restore didn’t finish — MLM relaunches to recover")
+            await ActivityCenter.shared.flushPersistence()
             phase = .relaunching
             errorDetails = detail
             isRelaunchRequired = true
         } catch {
             phase = .idle
             present(error, context: .restore)
+            job.fail(cause: errorMessage ?? error.localizedDescription)
             await refresh()
         }
     }

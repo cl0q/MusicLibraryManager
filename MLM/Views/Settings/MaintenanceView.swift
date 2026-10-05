@@ -29,6 +29,14 @@ struct MaintenanceView: View {
     }
 
     var body: some View {
+        maintenanceForm
+            // Every job of this pane is an Activity operation (W3-ACT, DEC-044); the rows below
+            // keep their inline progress until W3-SET rebuilds the pane.
+            .modifier(MaintenanceActivityTracking(running: isRunning, progress: progressState,
+                                                  result: resultMessage, cancel: { runningTask?.cancel() }))
+    }
+
+    private var maintenanceForm: some View {
         Form {
             Section("Background processing") {
                 Picker("Background processing", selection: $backgroundProcessing) {

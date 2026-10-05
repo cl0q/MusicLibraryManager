@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+@testable import MLM
 
 /// Source-scan tests locking A11.4 — the stuck-spinner root fix in SyncService.swift.
 ///
@@ -42,11 +43,12 @@ struct SyncOperationTerminalisationTests {
         // Anchor on the helper's existence first so a missing helper fails loudly,
         // not with a misleading "failOperation not found" (it exists elsewhere already).
         guard src.contains("finalisingOperationOnThrow") else {
-            Issue.record("SyncService does not contain finalisingOperationOnThrow — cannot verify it calls failOperation")
+            Issue.record("SyncService does not contain finalisingOperationOnThrow — cannot verify it fails the operation")
             return
         }
-        #expect(src.contains("failOperation"),
-                "finalisingOperationOnThrow must call failOperation to terminalise the operation on throw")
+        // W3-ACT: the Activity handle's `fail(cause:)` ends the operation.
+        #expect(src.contains("operationId?.fail(cause:"),
+                "finalisingOperationOnThrow must fail the Activity operation on throw")
     }
 
     // MARK: - A11.4: Three throw sites are wrapped
@@ -87,31 +89,35 @@ struct SyncOperationTerminalisationTests {
                 "SyncService must still contain generateManifest( — the wrap must not delete the work")
     }
 
-    // MARK: - A11.4: Sync retry recipe registered at startOperation
+    // MARK: - W3-ACT: one operation per sync with honest controls (PP-ACTIVITY-01)
 
     @Test
-    func syncService_registersRetryRecipe() throws {
+    func syncService_registersOneOperationWithRealControls() throws {
         let src = try readSource("MLM/Services/Sync/SyncService.swift")
-        // The startOperation call in the executeSync region must register a retry: closure.
-        // Assert the file contains `retry:` — this is sufficient because the only
-        // startOperation call with a `retry:` argument is in executeSync.
-        guard src.contains("executeSync") else {
-            Issue.record("SyncService does not contain executeSync — cannot verify retry: registration")
-            return
-        }
-        #expect(src.contains("retry:"),
-                "SyncService executeSync must register a retry: recipe at startOperation — A11.4")
+        #expect(src.contains(".sync, title: \"Sync “"), "one Activity operation per sync")
+        #expect(src.contains("cancel: { [weak self] in Task { @MainActor in self?.cancelSync() } }"))
+        #expect(src.contains("pause: { [weak self] in Task { @MainActor in self?.pauseSync() } }"))
+        #expect(src.contains("operationId.cancelled(activityResult)"),
+                "a cancelled sync must end its operation (PP-ACTIVITY-01)")
     }
 
     // MARK: - A11.6: Guard against re-indentation / reformatting of the dirty file
 
     @Test
-    func syncService_finalisationSummaryStringPreserved() throws {
-        let src = try readSource("MLM/Services/Sync/SyncService.swift")
-        // The existing finalisation summary string "synced · " from
-        // "\(result.syncedCount) synced · \(result.failedCount) failed" must survive.
-        // A careless rewrite that mangles the finalisation block would lose this.
-        #expect(src.contains("synced · "),
-                "SyncService must still contain the finalisation summary string 'synced · ' — A11.6 forbids reformatting the dirty file")
+    func syncService_resultWordsAndGroupedFailures() throws {
+        var result = SyncService.SyncResult()
+        result.syncedCount = 86
+        result.failedCount = 3
+        result.failedTracks = [
+            SyncService.SyncFailure(trackId: 1, title: "A", artist: "X", reason: "File missing"),
+            SyncService.SyncFailure(trackId: 2, title: "B", artist: "X", reason: "File missing"),
+            SyncService.SyncFailure(trackId: 3, title: "C", artist: "X", reason: "Disk full"),
+        ]
+        let activity = SyncService.activityResult(result)
+        #expect(activity.sentence == "86 synced · 3 failed")
+        #expect(activity.failureGroups.map(\.cause) == ["File missing", "Disk full"])
+        #expect(activity.failureGroups.map(\.count) == [2, 1])
+        #expect(activity.failedTrackIDs.isEmpty, "sync failures are not download failures")
+        #expect(activity.items.count == 3)
     }
 }

@@ -327,4 +327,18 @@ struct ProcessRunnerTimeoutTests {
             // Expected — runBinary throws on timeout
         }
     }
+
+    /// 5 MB of stdout must be captured completely (read to EOF, never truncated).
+    @Test
+    func largeOutputIsCapturedCompletely() async throws {
+        try #require(Self.shAvailable, "/bin/sh required")
+
+        let result = try await ProcessRunner.run(
+            shPath,
+            arguments: ["-c", "head -c 5000000 /dev/zero | tr '\\0' 'a'"]
+        )
+
+        #expect(result.exitCode == 0)
+        #expect(result.stdout.utf8.count == 5_000_000)
+    }
 }

@@ -310,7 +310,7 @@ struct LibrarySetupView: View {
         viewModel = ImportViewModel(
             importService: importService,
             configRepository: configRepo,
-            activityViewModel: container.activityViewModel
+            activity: ActivityCenter.shared
         )
     }
 

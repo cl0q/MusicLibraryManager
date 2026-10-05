@@ -1,4 +1,5 @@
 import Foundation
+import Testing
 @testable import MLM
 
 // MARK: - Fakes shared by the W2-C view-model tests
@@ -130,9 +131,13 @@ final class PlaybackTestEnvironment {
 }
 
 @MainActor
-func waitUntil(_ condition: @MainActor () -> Bool) async {
-    // Condition-based (not a fixed sleep): generous ceiling, returns as soon as it holds.
+func waitUntil(_ condition: @MainActor () -> Bool, sourceLocation: SourceLocation = #_sourceLocation) async {
+    // Condition-based (not a fixed sleep): generous ceiling, returns as soon as it holds. A
+    // condition that never holds fails the test where it was awaited (W2-D review).
     for _ in 0..<500 where !condition() {
         try? await Task.sleep(for: .milliseconds(10))
+    }
+    if !condition() {
+        Issue.record("waitUntil timed out: the condition never held", sourceLocation: sourceLocation)
     }
 }

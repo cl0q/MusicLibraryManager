@@ -17,18 +17,29 @@ import AppKit
 @Suite("ArtworkBackfillService (Phase 37)", .serialized)
 struct ArtworkBackfillServiceTests {
 
-    private func makeService() async throws -> (DatabaseQueue, ArtworkBackfillService) {
+    private func makeService() async throws -> (DatabaseQueue, ArtworkBackfillService, NotificationCenter) {
         let db = try DatabaseManager.inMemory()
         let trRepo = TrackRepository(database: db)
         let aRepo = AnalysisRepository(database: db)
         let cfRepo = ConfigRepository(database: db)
+        let center = NotificationCenter()
         let svc = ArtworkBackfillService(
             database: db,
             trackRepository: trRepo,
             analysisRepository: aRepo,
-            configRepository: cfRepo
+            configRepository: cfRepo,
+            notificationCenter: center
         )
-        return (db, svc)
+        return (db, svc, center)
+    }
+
+    private func eventually(timeout: Duration = .seconds(5), _ condition: @escaping () async -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if await condition() { return true }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return await condition()
     }
 
     private func waitUntil(
@@ -45,7 +56,7 @@ struct ArtworkBackfillServiceTests {
     }
 
     @Test func testObservesLibraryDidImport() async throws {
-        let (db, svc) = try await makeService()
+        let (db, svc, center) = try await makeService()
         try await db.write { db in
             var track = Track(
                 artist: "Artist",
@@ -60,7 +71,7 @@ struct ArtworkBackfillServiceTests {
         // Initially not backfilling
         #expect(svc.isBackfilling == false)
         // Posting libraryDidImport starts and completes a background backfill.
-        NotificationCenter.default.post(name: .libraryDidImport, object: nil)
+        center.post(name: .libraryDidImport, object: nil)
         #expect(await waitUntil { svc.progress.total == 1 })
         #expect(await waitUntil { !svc.isBackfilling }, "Backfill should return to idle")
     }
@@ -68,25 +79,29 @@ struct ArtworkBackfillServiceTests {
     @Test func testConcurrencyLimit() async throws {
         // Verify service is initialized with maxConcurrentTasks: 4
         // This is a structural test — the service's TaskGroup limit is fixed in code
-        let (_, svc) = try await makeService()
+        let (_, svc, _) = try await makeService()
         #expect(svc.maxConcurrentTasks == 4)
     }
 
     @Test func testCoalescesDuplicateRequests() async throws {
-        let (_, svc) = try await makeService()
+        let (_, svc, center) = try await makeService()
         // Rapid double-post should not cause double backfill
-        NotificationCenter.default.post(name: .libraryDidImport, object: nil)
-        NotificationCenter.default.post(name: .libraryDidImport, object: nil)
-        try await Task.sleep(for: .milliseconds(100))
+        center.post(name: .libraryDidImport, object: nil)
+        center.post(name: .libraryDidImport, object: nil)
+        // Wait for idle, then confirm it stays idle (no second backfill started).
+        let idle = await eventually { svc.isBackfilling == false }
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(idle)
         #expect(svc.isBackfilling == false)
     }
 
     @Test func testNotificationPosting() async throws {
         // When extractForTrack succeeds, .trackArtworkDidChange fires with trackId + artworkPath
         // We verify the userInfo schema matches D-03
+        let center = NotificationCenter()
         var receivedTrackId: Int64? = nil
         var receivedPath: String? = nil
-        let observer = NotificationCenter.default.addObserver(
+        let observer = center.addObserver(
             forName: .trackArtworkDidChange,
             object: nil,
             queue: .main
@@ -94,10 +109,10 @@ struct ArtworkBackfillServiceTests {
             receivedTrackId = note.userInfo?["trackId"] as? Int64
             receivedPath = note.userInfo?["artworkPath"] as? String
         }
-        defer { NotificationCenter.default.removeObserver(observer) }
+        defer { center.removeObserver(observer) }
 
         // Post a notification with the expected userInfo schema (as the service would)
-        NotificationCenter.default.post(
+        center.post(
             name: .trackArtworkDidChange,
             object: nil,
             userInfo: ["trackId": Int64(42), "artworkPath": "/some/path/42_1200.jpg"]
@@ -125,7 +140,7 @@ struct ArtworkBackfillServiceTests {
     /// still double-counts, `current` will exceed `total` (e.g. 10/5) instead of
     /// topping out at exactly `total` (5/5).
     @Test func testProgressNeverExceedsTotalAndEndsExact() async throws {
-        let (db, svc) = try await makeService()
+        let (db, svc, center) = try await makeService()
         let trackCount = 5
         try await db.write { db in
             for i in 1...trackCount {

@@ -106,10 +106,13 @@ struct SidebarView: View {
                     .accessibilityLabel("New Sync Profile")
                 }
             }
+
+            // The empty area below the last row: a new playlist from the drop
+            // (D-PL-SELECTION-TO-NEW). Only here, the Playlists header and All Playlists — the
+            // Library, Inbox and Sync headers take no tracks.
+            SidebarEmptyDropArea()
         }
         .listStyle(.sidebar)
-        // The empty area below the rows: a new playlist from the drop (D-PL-SELECTION-TO-NEW).
-        .dropTarget(.playlistsSection)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             LibraryFooter()
         }
@@ -515,6 +518,23 @@ struct SidebarView: View {
 private struct PendingPlaylistDeletion {
     let playlist: Playlist
     let confirmation: PlaylistDeletionConfirmation
+}
+
+/// The space below the sidebar's last row as a drop target (new playlist). Not a row: it can't
+/// be selected, has no background and is hidden from VoiceOver (New Playlist from Selection
+/// ⇧⌘N is the same without dragging).
+private struct SidebarEmptyDropArea: View {
+    static let height: CGFloat = 60
+
+    var body: some View {
+        Color.clear
+            .frame(maxWidth: .infinity, minHeight: Self.height)
+            .contentShape(Rectangle())
+            .dropTarget(.playlistsSection)
+            .selectionDisabled()
+            .listRowBackground(Color.clear)
+            .accessibilityHidden(true)
+    }
 }
 
 /// System section header with a ＋ that appears on hover (UC-SIDE-03). The header text stays

@@ -525,11 +525,14 @@ enum DropWords {
     static let setCoverActionName = "Set Cover"
     static func coverSetMessage(_ playlist: String) -> String { "Set the cover of “\(playlist)”" }
 
-    /// Import by drop (UC-JOB-08 start shape; IMP-008).
-    static func importStarted(files: Int, folderName: String?, playlist: String?) -> String {
-        if let playlist { return "Importing \(StatusBarText.count(files, "file", "files")) into “\(playlist)”…" }
-        if let folderName { return "Import started — “\(folderName)”" }
-        return "Import started — \(StatusBarText.count(files, "file", "files"))"
+    /// The Activity title of an import by drop — the folder import's `Scan “‹folder›”` shape.
+    /// Activity says the start and the end in the status bar (`Import started — 4 files`).
+    static func importTitle(files: Int, folderName: String?, playlist: String?) -> String {
+        if let folderName {
+            return playlist.map { "Scan “\(folderName)” into “\($0)”" } ?? "Scan “\(folderName)”"
+        }
+        let counted = StatusBarText.count(files, "file", "files")
+        return playlist.map { "Import \(counted) into “\($0)”" } ?? "Import \(counted)"
     }
 
     /// Several files dropped with a library file: the first library opens (D-LIBFILE-OPEN).

@@ -56,8 +56,9 @@ struct ShellLayoutTests {
         #expect(!src.contains("addLocalMonitorForEvents"), "the app-wide ⌘F monitor is gone")
         #expect(src.contains(".focusedSceneValue(\\.toolbarSearch"), "Edit ▸ Find reaches the main window's field")
         let edit = try readSource("MLM/App/Commands/EditCommands.swift")
-        #expect(edit.contains("CommandButton(.search, enabled: search != nil)"))
-        #expect(edit.contains("search?.focus(scope: .thisView)"))
+        // W3-ACT: in the Activity window ⌘F focuses the log search (UC-KEY-25).
+        #expect(edit.contains("CommandButton(.search, enabled: search != nil || logSearch != nil)"))
+        #expect(edit.contains("search.focus(scope: .thisView)"))
         #expect(edit.contains("search?.focus(scope: .library)"), "⌥⌘F searches the library (W2-I)")
     }
 
@@ -91,7 +92,7 @@ struct ShellLayoutTests {
         let content = try readSource("MLM/Views/ContentView/ContentView.swift")
         #expect(content.contains(".toolbar(id: \"mlm.main\")"))
         let toolbar = try readSource("MLM/Views/Shell/ShellToolbar.swift")
-        for item in ["BackForwardButtons()", "AddMenu()", "ActivityToolbarButton()", "InfoToggleButton()"] {
+        for item in ["BackForwardButtons()", "AddMenu()", "ActivityToolbarItem()", "InfoToggleButton()"] {
             #expect(toolbar.contains(item), "toolbar misses \(item)")
         }
         let library = try readSource("MLM/Views/Library/LibraryView.swift")

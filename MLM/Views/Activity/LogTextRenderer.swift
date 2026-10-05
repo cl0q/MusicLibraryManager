@@ -4,11 +4,12 @@ import AppKit
 // MARK: - Column layout
 
 enum LogColumnLayout {
-    static let timestampWidth: CGFloat = 84
-    static let levelWidth: CGFloat = 42
-    static let sourceWidth: CGFloat = 84
-    static let messageOriginX: CGFloat = 210 // 84 + 42 + 84
-    static let tabStopXPositions: [CGFloat] = [84, 126, 210]
+    // Sized for the system body size of the monospaced font (UC-TYPE `.body.monospaced()`).
+    static let timestampWidth: CGFloat = 104
+    static let levelWidth: CGFloat = 52
+    static let sourceWidth: CGFloat = 112
+    static let messageOriginX: CGFloat = 268 // 104 + 52 + 112
+    static let tabStopXPositions: [CGFloat] = [104, 156, 268]
     static let maxSourceCharacters: Int = 12
     static let truncationEllipsis: String = "…"
 }
@@ -81,12 +82,14 @@ enum LogTextRenderer {
 
     // MARK: level color
 
+    /// Semantic colours only; the level word is always written (never colour alone,
+    /// UC-COLOR-06). Only warnings and errors tint their word.
     static func levelColor(_ level: AppLogger.Level) -> NSColor {
         switch level {
-        case .info:    return .systemBlue
+        case .info:    return .secondaryLabelColor
         case .warning: return .systemOrange
         case .error:   return .systemRed
-        case .debug:   return .systemGray
+        case .debug:   return .tertiaryLabelColor
         }
     }
 
@@ -95,9 +98,11 @@ enum LogTextRenderer {
     static func attributedString(for entries: [AppLogger.LogEntry], wrap: Bool) -> NSAttributedString {
         let result = NSMutableAttributedString()
         let para = paragraphStyle(wrap: wrap)
-        let mono = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
-        let monoBold = NSFont.monospacedSystemFont(ofSize: 9, weight: .bold)
-        let monoMedium = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
+        // The system body size (UC-TYPE-01: no point sizes of our own).
+        let size = NSFont.systemFontSize
+        let mono = NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        let monoBold = NSFont.monospacedSystemFont(ofSize: size, weight: .semibold)
+        let monoMedium = NSFont.monospacedSystemFont(ofSize: size, weight: .medium)
 
         for (index, entry) in entries.enumerated() {
             if index > 0 {
@@ -107,6 +112,13 @@ enum LogTextRenderer {
             result.append(line)
         }
         return result
+    }
+
+    /// One entry as plain text (`Copy`, `Export…`): `time · level · source · message`.
+    static func plainLine(_ entry: AppLogger.LogEntry) -> String {
+        [entry.formattedTime, entry.level.rawValue, entry.source ?? "", entry.message]
+            .filter { !$0.isEmpty }
+            .joined(separator: "  ")
     }
 
     // MARK: plan
@@ -163,7 +175,7 @@ enum LogTextRenderer {
         // Source column — always emitted, even for nil source (ragged-column fix)
         let sourceAttrs: [NSAttributedString.Key: Any] = [
             .font: monoMedium,
-            .foregroundColor: NSColor.controlAccentColor,
+            .foregroundColor: NSColor.secondaryLabelColor,
             .paragraphStyle: para
         ]
         line.append(NSAttributedString(string: sourceCellText(entry.source) + "\t", attributes: sourceAttrs))

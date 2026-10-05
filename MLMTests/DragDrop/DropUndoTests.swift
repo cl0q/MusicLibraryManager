@@ -41,7 +41,9 @@ struct DropUndoTests {
             .appendingPathComponent("DropUndoTests-\(UUID().uuidString)")
             .appendingPathComponent("playlist-covers")
         let covers = PlaylistCoverService(database: db, playlistRepository: playlists, trackRepository: tracks,
-                                          configRepository: ConfigRepository(database: db), coversDirectory: coversDir)
+                                          configRepository: ConfigRepository(database: db), coversDirectory: coversDir,
+                                          // Its own center: other suites' posts never reach it.
+                                          notificationCenter: NotificationCenter())
         let edits = ShellEdits(
             dependencies: ShellEdits.Dependencies(
                 playlists: { playlists },

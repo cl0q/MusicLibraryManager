@@ -49,7 +49,7 @@ final class PlaybackQueueRepository: PlaybackQueueStoring, Sendable {
         }
         try insert(queue.playNext.map { ($0.id, $0.trackID) }, lane: .playNext)
         try insert(queue.context.map { ($0.id, $0.trackID) }, lane: .context)
-        try insert(queue.cycle.map { (UUID(), $0) }, lane: .cycle)
+        try insert(queue.cycle.map { ($0.id, $0.trackID) }, lane: .cycle)
         try insert(queue.history.map { ($0.id, $0.trackID) }, lane: .history)
         try db.execute(sql: """
             INSERT OR REPLACE INTO playback_queue_state (id, current_entry_id, position, origin, saved_at)
@@ -98,7 +98,7 @@ final class PlaybackQueueRepository: PlaybackQueueStoring, Sendable {
             switch lane {
             case .playNext: queue.playNext.append(.init(id: id, trackID: trackID))
             case .context: queue.context.append(.init(id: id, trackID: trackID))
-            case .cycle: queue.cycle.append(trackID)
+            case .cycle: queue.cycle.append(.init(id: id, trackID: trackID))
             case .history: queue.history.append(.init(id: id, trackID: trackID))
             }
         }

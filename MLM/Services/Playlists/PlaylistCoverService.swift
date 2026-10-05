@@ -60,6 +60,7 @@ final class PlaylistCoverService {
     private let configRepository: ConfigRepository
     /// Where cover PNGs are written; stored cover paths stay relative (`playlist-covers/<id>.png`).
     private let coversDirectory: URL
+    private let notificationCenter: NotificationCenter
 
     /// Serializes auto, custom, and reset mutations sharing one playlist PNG.
     private let operationGate = PlaylistCoverOperationGate()
@@ -77,13 +78,15 @@ final class PlaylistCoverService {
         playlistRepository: PlaylistRepository,
         trackRepository: TrackRepository,
         configRepository: ConfigRepository,
-        coversDirectory: URL
+        coversDirectory: URL,
+        notificationCenter: NotificationCenter = .default
     ) {
         self.database = database
         self.playlistRepository = playlistRepository
         self.trackRepository = trackRepository
         self.configRepository = configRepository
         self.coversDirectory = coversDirectory
+        self.notificationCenter = notificationCenter
         startObserving()
     }
 
@@ -91,12 +94,13 @@ final class PlaylistCoverService {
         // `deinit` is nonisolated; read the MainActor-isolated token via the
         // safe escape hatch. The observer token is a stable opaque value once
         // assigned in `init`, so concurrent mutation isn't a real concern.
+        let center = notificationCenter
         let tokens = MainActor.assumeIsolated({ [playlistObserverToken, trackArtworkObserverToken] })
-        tokens.compactMap { $0 }.forEach { NotificationCenter.default.removeObserver($0) }
+        tokens.compactMap { $0 }.forEach { center.removeObserver($0) }
     }
 
     private func startObserving() {
-        playlistObserverToken = NotificationCenter.default.addObserver(
+        playlistObserverToken = notificationCenter.addObserver(
             forName: .playlistDidChange,
             object: nil,
             queue: .main
@@ -116,7 +120,7 @@ final class PlaylistCoverService {
             }
         }
 
-        trackArtworkObserverToken = NotificationCenter.default.addObserver(
+        trackArtworkObserverToken = notificationCenter.addObserver(
             forName: .trackArtworkDidChange,
             object: nil,
             queue: .main
@@ -223,7 +227,7 @@ final class PlaylistCoverService {
             )
 
             // 7. Tagged completion notification (origin guard prevents self-trigger).
-            NotificationCenter.default.post(
+            notificationCenter.post(
                 name: .playlistDidChange,
                 object: nil,
                 userInfo: ["origin": "coverService", "playlistId": playlistId]
@@ -266,7 +270,7 @@ final class PlaylistCoverService {
                 path: "\(DatabaseManager.playlistCoversFolderName)/\(playlistId).png",
                 isCustom: true   // D-05 sticky-lock
             )
-            NotificationCenter.default.post(
+            notificationCenter.post(
                 name: .playlistDidChange,
                 object: nil,
                 userInfo: ["origin": "coverService", "playlistId": playlistId]
@@ -350,7 +354,7 @@ final class PlaylistCoverService {
                 try? FileManager.default.removeItem(at: file)
             }
             try await playlistRepository.setCoverPath(id: playlistId, path: state.path, isCustom: state.isCustom)
-            NotificationCenter.default.post(
+            notificationCenter.post(
                 name: .playlistDidChange,
                 object: nil,
                 userInfo: ["origin": "coverService", "playlistId": playlistId]
@@ -372,7 +376,7 @@ final class PlaylistCoverService {
                 path: "\(DatabaseManager.playlistCoversFolderName)/\(playlistId).png",
                 isCustom: true
             )
-            NotificationCenter.default.post(
+            notificationCenter.post(
                 name: .playlistDidChange,
                 object: nil,
                 userInfo: ["origin": "coverService", "playlistId": playlistId]

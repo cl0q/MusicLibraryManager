@@ -24,6 +24,48 @@ final class ProcessRunner {
         }
     }
 
+    /// Reads one pipe to end-of-file on its own background queue. Output is
+    /// accumulated in order; `finished` is left once EOF has been reached.
+    private final class StreamReader: @unchecked Sendable {
+        private let handle: FileHandle
+        private let buffer = OutputBuffer()
+        private let group = DispatchGroup()
+        private let onChunk: ((String) -> Void)?
+
+        init(handle: FileHandle, onChunk: ((String) -> Void)? = nil) {
+            self.handle = handle
+            self.onChunk = onChunk
+        }
+
+        func start() {
+            group.enter()
+            DispatchQueue.global().async { [self] in
+                while true {
+                    // Empty `availableData` means EOF.
+                    let data = handle.availableData
+                    if data.isEmpty { break }
+                    buffer.append(data)
+                    if let onChunk, let line = String(data: data, encoding: .utf8) {
+                        onChunk(line)
+                    }
+                }
+                group.leave()
+            }
+        }
+
+        /// Suspends until EOF was reached or `timeout` seconds passed.
+        func waitForEOF(timeout: TimeInterval) async {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                DispatchQueue.global().async { [group] in
+                    _ = group.wait(timeout: .now() + timeout)
+                    continuation.resume()
+                }
+            }
+        }
+
+        var data: Data { buffer.data }
+    }
+
     /// Coordinates termination and continuation resumption across process
     /// completion, task cancellation, and timeout racing on different threads.
     private final class ProcessCompletion: @unchecked Sendable {
@@ -150,54 +192,19 @@ final class ProcessRunner {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
-        let stdoutBuffer = OutputBuffer()
-        let stderrBuffer = OutputBuffer()
+        // Each stream is read to EOF on its own queue, started before the
+        // process runs. stdout/stderr are only returned once both hit EOF.
+        let stdoutReader = StreamReader(handle: stdoutPipe.fileHandleForReading, onChunk: onOutput)
+        let stderrReader = StreamReader(handle: stderrPipe.fileHandleForReading, onChunk: onStderr)
+        stdoutReader.start()
+        stderrReader.start()
 
-        // Stream stdout — collect all data in thread-safe buffer
-        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            if !data.isEmpty {
-                stdoutBuffer.append(data)
-                if let onOutput = onOutput, let line = String(data: data, encoding: .utf8) {
-                    onOutput(line)
-                }
-            }
+        let didTimeout = try await waitForExit(process, timeout: timeout) {
+            closeWriteEnds(stdoutPipe, stderrPipe)
         }
-
-        // Stream stderr similarly — yt-dlp writes [download] progress here.
-        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            if !data.isEmpty {
-                stderrBuffer.append(data)
-                if let onStderr = onStderr, let line = String(data: data, encoding: .utf8) {
-                    onStderr(line)
-                }
-            }
-        }
-
-        let didTimeout = try await waitForExit(process, timeout: timeout)
-
-        // Disable readability handlers
-        stdoutPipe.fileHandleForReading.readabilityHandler = nil
-        stderrPipe.fileHandleForReading.readabilityHandler = nil
-
-        // Flush any remaining data in the pipes — preserves partial output
-        // captured before a timeout kill.
-        let remainingStdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        if !remainingStdout.isEmpty {
-            stdoutBuffer.append(remainingStdout)
-            if let onOutput = onOutput, let line = String(data: remainingStdout, encoding: .utf8) {
-                onOutput(line)
-            }
-        }
-
-        let remainingStderr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-        if !remainingStderr.isEmpty {
-            stderrBuffer.append(remainingStderr)
-            if let onStderr = onStderr, let line = String(data: remainingStderr, encoding: .utf8) {
-                onStderr(line)
-            }
-        }
+        let eofBound: TimeInterval = didTimeout ? 2 : 30
+        await stdoutReader.waitForEOF(timeout: eofBound)
+        await stderrReader.waitForEOF(timeout: eofBound)
 
         if didTimeout, let t = timeout {
             let exeName = URL(fileURLWithPath: executable).lastPathComponent
@@ -210,8 +217,8 @@ final class ProcessRunner {
 
         return ProcessResult(
             exitCode: process.terminationStatus,
-            stdout: String(data: stdoutBuffer.data, encoding: .utf8) ?? "",
-            stderr: String(data: stderrBuffer.data, encoding: .utf8) ?? "",
+            stdout: String(data: stdoutReader.data, encoding: .utf8) ?? "",
+            stderr: String(data: stderrReader.data, encoding: .utf8) ?? "",
             timedOut: didTimeout,
             processIdentifier: process.processIdentifier
         )
@@ -243,38 +250,17 @@ final class ProcessRunner {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
-        let stdoutBuffer = OutputBuffer()
-        let stderrBuffer = OutputBuffer()
+        let stdoutReader = StreamReader(handle: stdoutPipe.fileHandleForReading)
+        let stderrReader = StreamReader(handle: stderrPipe.fileHandleForReading)
+        stdoutReader.start()
+        stderrReader.start()
 
-        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            if !data.isEmpty {
-                stdoutBuffer.append(data)
-            }
+        let didTimeout = try await waitForExit(process, timeout: timeout) {
+            closeWriteEnds(stdoutPipe, stderrPipe)
         }
-
-        // Drain/collect stderr to prevent blocking/deadlocks when the OS buffer fills up (finite capacity)
-        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            if !data.isEmpty {
-                stderrBuffer.append(data)
-            }
-        }
-
-        let didTimeout = try await waitForExit(process, timeout: timeout)
-
-        stdoutPipe.fileHandleForReading.readabilityHandler = nil
-        stderrPipe.fileHandleForReading.readabilityHandler = nil
-
-        let remainingStdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        if !remainingStdout.isEmpty {
-            stdoutBuffer.append(remainingStdout)
-        }
-
-        let remainingStderr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-        if !remainingStderr.isEmpty {
-            stderrBuffer.append(remainingStderr)
-        }
+        let eofBound: TimeInterval = didTimeout ? 2 : 30
+        await stdoutReader.waitForEOF(timeout: eofBound)
+        await stderrReader.waitForEOF(timeout: eofBound)
 
         if didTimeout, let t = timeout {
             let exeName = URL(fileURLWithPath: executable).lastPathComponent
@@ -283,7 +269,7 @@ final class ProcessRunner {
                 level: .error,
                 source: "ProcessRunner"
             )
-            let stderrString = String(data: stderrBuffer.data, encoding: .utf8) ?? ""
+            let stderrString = String(data: stderrReader.data, encoding: .utf8) ?? ""
             throw NSError(
                 domain: "ProcessRunner",
                 code: -1,
@@ -296,7 +282,7 @@ final class ProcessRunner {
 
         let exitCode = process.terminationStatus
         if exitCode != 0 {
-            let stderrString = String(data: stderrBuffer.data, encoding: .utf8) ?? ""
+            let stderrString = String(data: stderrReader.data, encoding: .utf8) ?? ""
             AppLogger.shared.log("Binary '\(executable)' failed with exit code \(exitCode). stderr: \(stderrString)", level: .error, source: "ProcessRunner")
             throw NSError(
                 domain: "ProcessRunner",
@@ -308,14 +294,20 @@ final class ProcessRunner {
             )
         }
 
-        return stdoutBuffer.data
+        return stdoutReader.data
+    }
+
+    /// Close the parent's write ends of the output pipes (after launch).
+    private static func closeWriteEnds(_ pipes: Pipe...) {
+        for pipe in pipes { try? pipe.fileHandleForWriting.close() }
     }
 
     /// Wait for a process while ensuring cancellation and timeout only ever
     /// resume the continuation through the process termination handler.
     private static func waitForExit(
         _ process: Process,
-        timeout: TimeInterval?
+        timeout: TimeInterval?,
+        afterLaunch: @escaping () -> Void = {}
     ) async throws -> Bool {
         let completion = ProcessCompletion(process: process)
         try await withTaskCancellationHandler {
@@ -326,8 +318,11 @@ final class ProcessRunner {
                 }
                 do {
                     try process.run()
+                    // Drop the parent's copies of the write ends so readers see EOF.
+                    afterLaunch()
                     completion.didStart()
                 } catch {
+                    afterLaunch()
                     process.terminationHandler = nil
                     completion.finish(throwing: error)
                     return

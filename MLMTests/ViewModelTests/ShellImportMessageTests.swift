@@ -14,22 +14,25 @@ struct ShellImportMessageTests {
         )
     }
 
+    /// W3-ACT: the import's start/end messages come from Activity; the words stay (ported
+    /// from the W1-1 review round's `ShellActions.importMessage`).
     @Test func importMessagesNeverShowRawErrorsOrClaimACancelledImportFinished() {
-        let finished = ShellActions.importMessage(folder: "Sets", result: result(imported: 35, failed: 2, skipped: 3))
-        #expect(finished.text == "Import finished — 35 imported, 2 failed, 3 already in the library")
-        #expect(finished.offersShow)
-
-        let clean = ShellActions.importMessage(folder: "Sets", result: result(imported: 4))
-        #expect(clean.text == "Import finished — 4 imported")
-        #expect(!clean.offersShow)
-
-        let cancelled = ShellActions.importMessage(folder: "Sets", result: result(imported: 10, cancelled: true, committed: 6))
-        #expect(cancelled.text == "Import of “Sets” cancelled — 6 imported")
-
-        let failed = ShellActions.importMessage(folder: "Sets", result: nil)
-        #expect(failed.text == "Couldn’t import “Sets” — the details are in Activity")
-        #expect(failed.offersShow)
-
+        func message(_ result: ImportService.ImportResult, state: ActivityState) -> String {
+            let op = ActivityOperation(
+                id: UUID(), kind: .folderScan, title: "Scan “Sets”", subject: .folder(URL(fileURLWithPath: "/tmp/Sets")),
+                state: state, wait: nil, progress: .indeterminate, result: ImportViewModel.activityResult(for: result),
+                startedAt: Date(), endedAt: Date(), isAutomatic: false, libraryID: nil, needsAttention: false,
+                dismissedAt: nil, itemNoun: .file, messageName: ActivityKind.folderScan.messageName, controls: .none,
+                isFromHistory: false)
+            return ActivityPresentation.endMessage(op)
+        }
+        #expect(message(result(imported: 35, failed: 2, skipped: 3), state: .completed)
+                == "Import finished — 35 imported, 2 failed, 3 already in the library")
+        #expect(message(result(imported: 4), state: .completed) == "Import finished — 4 imported")
+        #expect(message(result(imported: 10, cancelled: true, committed: 6), state: .cancelled)
+                == "Import cancelled — 6 imported")
+        #expect(ImportViewModel.plainCause(CocoaError(.fileReadUnknown), folder: URL(fileURLWithPath: "/nonexistent-\(UUID())/Sets"))
+                == "“Sets” isn’t reachable")
         #expect(ShellActions.importUnavailableMessage(folder: "Sets") == "Couldn’t import “Sets” — the library isn’t ready yet")
     }
 }

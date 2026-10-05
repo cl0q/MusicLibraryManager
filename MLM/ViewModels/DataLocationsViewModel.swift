@@ -204,6 +204,10 @@ final class DataLocationsViewModel {
         let measure = measureLibrary
         let task = Task.detached { measure(root) }
         librarySizeTask = task
+        // Activity (W3-ACT): `Calculate storage sizes`, shown when slower than ~2 s; Cancel is real.
+        let job = ActivityCenter.shared.begin(
+            .storageSize, title: "Calculate storage sizes", subject: .settings(.storage),
+            controls: ActivityControls(cancel: { task.cancel() }), graceful: true)
         let result = await task.value
         librarySizeTask = nil
         isCalculatingLibrarySize = false
@@ -214,13 +218,16 @@ final class DataLocationsViewModel {
             do {
                 try await sizeStore.save(record)
                 librarySize = record
+                job.finish(ActivityResult(summary: "Library folder \(bytes.formatted(.byteCount(style: .file)))"))
             } catch {
                 errorMessage = Copy.sizeFailed
+                job.fail(cause: Copy.sizeFailed)
             }
         case .cancelled:
-            break
+            job.cancelled()
         case .failed:
             errorMessage = Copy.sizeFailed
+            job.fail(cause: Copy.sizeFailed)
         }
     }
 

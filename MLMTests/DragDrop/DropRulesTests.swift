@@ -229,7 +229,7 @@ struct DropRulesTests {
             DropWords.reorderedMessage(count: 3, position: 1, playlist: "Warm-up"), DropWords.coverSetMessage("Warm-up"),
             DropWords.addedToProfile(tracks: 3, alreadyPresent: 1, profile: "iPod Classic"),
             DropWords.addedPlaylistsToProfile(names: ["Warm-up"], profile: "iPod Classic"),
-            DropWords.importStarted(files: 4, folderName: nil, playlist: "Road trip 2026"),
+            DropWords.importTitle(files: 4, folderName: nil, playlist: "Road trip 2026"),
             DropWords.cantCopyOffline("Lexxar"),
         ]
         for sentence in sentences {
@@ -240,7 +240,8 @@ struct DropRulesTests {
         #expect(DropWords.reorderedMessage(count: 3, position: 1, playlist: "Warm-up") == "Moved 3 tracks to position 1 in “Warm-up”")
         #expect(DropWords.addedToProfile(tracks: 3, alreadyPresent: 0, profile: "iPod Classic") == "Added 3 tracks to “iPod Classic”")
         #expect(DropWords.addedPlaylistsToProfile(names: ["Warm-up"], profile: "iPod Classic") == "Added “Warm-up” to “iPod Classic”")
-        #expect(DropWords.importStarted(files: 4, folderName: nil, playlist: "Road trip 2026") == "Importing 4 files into “Road trip 2026”…")
+        #expect(DropWords.importTitle(files: 4, folderName: nil, playlist: "Road trip 2026") == "Import 4 files into “Road trip 2026”")
+        #expect(DropWords.importTitle(files: 9, folderName: "Sets", playlist: nil) == "Scan “Sets”")
         #expect(DropWords.reorderActionName("Warm-up") == "Reorder “Warm-up”")
         #expect(DropWords.addActionName("Warm-up") == "Add to “Warm-up”")
         #expect(DropWords.cantCopyOffline("Lexxar") == "Can’t copy files — “Lexxar” is not connected")

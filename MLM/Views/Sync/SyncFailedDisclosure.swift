@@ -148,8 +148,9 @@ struct SyncFailedDisclosure: View {
         .disabled(track == nil || track?.isLocal == false)
 
         Button {
+            // The shared Play Next: confirmation with Undo, only tracks with a file (W2-D).
             if let track {
-                container.playbackViewModel?.insertPlayNext([track])
+                TrackCommandActions.playNext([track], container: container)
             }
         } label: {
             Label("Play Next", systemImage: "forward.end.fill")

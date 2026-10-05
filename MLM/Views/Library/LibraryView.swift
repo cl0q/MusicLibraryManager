@@ -226,8 +226,8 @@ private struct LibraryLoadErrorView: View {
         } actions: {
             Button("Try Again", action: retry)
             Button("Show Logs") {
-                UserDefaults.standard.set("Logs", forKey: "activity.selectedTab")
-                UserDefaults.standard.set(true, forKey: ActivityPanelHosting.expandedKey)
+                ActivityRouter.shared.showLogs(for: nil)
+                ActivityRouter.shared.requestWindow(tab: .logs)
             }
             DisclosureGroup("Details") {
                 Text(details)

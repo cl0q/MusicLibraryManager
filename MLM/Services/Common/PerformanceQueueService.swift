@@ -139,6 +139,51 @@ final class PerformanceQueueService: Sendable {
             await actor.clearQueue()
         }
     }
+
+    /// `Clear Waiting…` (A-OPS-CLEARQUEUE): drops the waiting analyses only — queued downloads
+    /// stay, so nothing is dropped silently. The track being analysed now finishes.
+    func clearWaitingAnalyses() {
+        Task {
+            await actor.clearAnalyses()
+        }
+    }
+
+    // MARK: - Activity (W3-ACT)
+
+    /// The standing automatic operation `Analyse new tracks` while analyses wait or run.
+    @ObservationIgnored private var analysisJob: ActivityOperationHandle?
+    @ObservationIgnored private var analysedAtStart = 0
+    /// Where the operation registers; the app's center (tests may swap it).
+    @ObservationIgnored var activity: ActivityCenter = .shared
+
+    /// One operation per run of the queue: `Analyse new tracks` with `212 waiting`, the track
+    /// in work, `Waiting — paused while downloads run` while it yields, `Clear Waiting…` — no
+    /// Cancel for the current track (seconds). Ends with `38 analysed` when the queue drains.
+    private func syncActivity(pendingAnalyses: Int, activeAnalysis: String?, analysed: Int, suspended: Bool) {
+        let busy = pendingAnalyses > 0 || activeAnalysis != nil
+        if busy, analysisJob == nil {
+            analysedAtStart = analysed
+            analysisJob = activity.begin(
+                .analysisQueue, title: "Analyse new tracks", subject: .settings(.maintenance),
+                progress: ActivityProgress(waiting: pendingAnalyses), itemNoun: .analysis,
+                controls: ActivityControls(clearWaiting: { Task { @MainActor in PerformanceQueueService.shared.clearWaitingAnalyses() } }),
+                automatic: true)
+        }
+        guard let job = analysisJob else { return }
+        if busy {
+            job.update(ActivityProgress(completed: analysed - analysedAtStart, currentItem: activeAnalysis,
+                                        waiting: pendingAnalyses))
+            if suspended && activeAnalysis == nil {
+                job.setState(.paused, wait: .suspendedWhileDownloads)
+            } else {
+                job.setState(.running)
+            }
+        } else {
+            let done = analysed - analysedAtStart
+            job.finish(ActivityResult(counts: [ActivityCount(.done, done, "analysed")]))
+            analysisJob = nil
+        }
+    }
     
     // MARK: - MainActor State Synchronization
     
@@ -148,13 +193,17 @@ final class PerformanceQueueService: Sendable {
         pendingAnalyses: Int,
         activeJobDesc: String?,
         downloadActive: Bool,
-        syncPreviewActive: Bool
+        syncPreviewActive: Bool,
+        activeAnalysis: String? = nil,
+        analysed: Int = 0
     ) {
         self.pendingDownloadsCount = pendingDownloads
         self.pendingAnalysesCount = pendingAnalyses
         self.activeJobDescription = activeJobDesc
         self.isDownloadActive = downloadActive
         self.isSyncPreviewActive = syncPreviewActive
+        syncActivity(pendingAnalyses: pendingAnalyses, activeAnalysis: activeAnalysis, analysed: analysed,
+                     suspended: downloadActive || syncPreviewActive)
     }
 }
 
@@ -170,6 +219,8 @@ actor PerformanceQueueActor {
     private var isExternalSyncPreviewActive = false
     private var activeDownloadsCount = 0
     private var isWorkerRunning = false
+    /// Analyses finished since launch (Activity's `‹n› analysed`).
+    private var analysedCount = 0
     
     // Shared analyzers
     private let replayGainAnalyzer = ReplayGainAnalyzer()
@@ -221,6 +272,11 @@ actor PerformanceQueueActor {
         queue.removeAll()
         await updateServiceState()
     }
+
+    func clearAnalyses() async {
+        queue.removeAll { $0.type == .analysis }
+        await updateServiceState()
+    }
     
     // MARK: - Worker Engine
     
@@ -256,6 +312,8 @@ actor PerformanceQueueActor {
             
             if nextJob.type == .download {
                 activeDownloadsCount = max(0, activeDownloadsCount - 1)
+            } else {
+                analysedCount += 1
             }
             activeJob = nil
             await updateServiceState()
@@ -309,12 +367,15 @@ actor PerformanceQueueActor {
         
         let dlActive = isDownloadActive
         
+        let activeAnalysis = activeJob.flatMap { $0.type == .analysis ? "\($0.track.artist) — \($0.track.title)" : nil }
         await service?.updateState(
             pendingDownloads: downloads,
             pendingAnalyses: analyses,
             activeJobDesc: activeDesc,
             downloadActive: dlActive,
-            syncPreviewActive: isExternalSyncPreviewActive
+            syncPreviewActive: isExternalSyncPreviewActive,
+            activeAnalysis: activeAnalysis,
+            analysed: analysedCount
         )
     }
     
@@ -338,8 +399,10 @@ actor PerformanceQueueActor {
                 AppLogger.shared.log("PerformanceQueue: DownloadViewModel not ready.", level: .warning, source: "PerformanceQueue")
                 return
             }
-            // Execute the single download via DownloadViewModel
-            await downloadVM.downloadTracks([track])
+            // Execute the single download via DownloadViewModel — queued behind running batches
+            // in Activity instead of being dropped (PP-ACTIVITY-05).
+            await downloadVM.downloadTracks([track], context: DownloadActivityContext(
+                kind: .reelsDownload, title: "Download “\(track.title)”", subject: .reels))
             
         case .analysis:
             AppLogger.shared.info("PerformanceQueue: Running low-priority analysis pipeline for \(track.artist) - \(track.title)", source: "PerformanceQueue")

@@ -561,7 +561,8 @@ private struct PlaylistsGridCard: View {
                 let missingTracks = tracks.filter { $0.availability() == .notDownloaded }
                 await downloadViewModel.downloadTracks(
                     missingTracks,
-                    preferredSource: viewModel.source(for: playlist)?.playlistSourceIdentity.downloadPin ?? .auto
+                    preferredSource: viewModel.source(for: playlist)?.playlistSourceIdentity.downloadPin ?? .auto,
+                    context: .playlist(playlistID, name: playlist.name)  // W3-ACT
                 )
             },
             onShowFailedTracks: {

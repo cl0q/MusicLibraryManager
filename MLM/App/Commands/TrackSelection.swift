@@ -59,6 +59,9 @@ struct TrackCommandTarget {
     /// Track ▸ Play Next done by the list itself (the Queue panel moves its own rows to the top,
     /// W2-D); `nil`: the shared Play Next queues the selected tracks.
     var playNext: (() -> Void)?
+    /// Track ▸ Add to Queue can't act on this selection (rows already in the Queue panel's
+    /// Next, W2-D review S9); the reason is its help text.
+    var addToQueueDisabledReason: String?
 }
 
 /// The focused track list as the menu bar sees it — cheap to publish and to compare.

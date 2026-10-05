@@ -4,6 +4,7 @@ import Foundation
 /// (DEC-041, UC-UNDO-08) with its status-bar confirmation and `Undo` (DEC-016) — never a
 /// confirmation alert (DEC-050). Every route goes through here: the Track menu, the track
 /// context menu, the selection bar, the Queue panel, drops on the panel and on the player.
+/// An edit applies and registers its undo step in the same call, so a quick ⌘Z undoes it.
 @MainActor
 enum QueueEditCommands {
     enum Adding: Equatable {
@@ -23,23 +24,19 @@ enum QueueEditCommands {
             if !candidates.isEmpty { undo.statusBar.post(QueueWords.nothingToQueue(count: candidates.count)) }
             return
         }
-        Task {
-            let receipt = switch adding {
-            case .playNext: await playback.playNext(queueable)
-            case .addToQueue: await playback.addToQueue(queueable)
-            }
-            record(receipt, playback: playback, undo: undo, suffix: leftOut > 0 ? QueueWords.leftOutSuffix(leftOut) : "")
+        let receipt = switch adding {
+        case .playNext: playback.playNext(queueable)
+        case .addToQueue: playback.addToQueue(queueable)
         }
+        record(receipt, playback: playback, undo: undo, suffix: leftOut > 0 ? QueueWords.leftOutSuffix(leftOut) : "")
     }
 
     // MARK: From the Queue panel
 
-    /// Run a panel edit and register it.
-    static func perform(_ edit: @escaping @MainActor (PlaybackViewModel) async -> QueueEditReceipt?,
+    /// Run a panel edit and register it (at once).
+    static func perform(_ edit: @MainActor (PlaybackViewModel) -> QueueEditReceipt?,
                         playback: PlaybackViewModel, undo: UndoCenter) {
-        Task {
-            record(await edit(playback), playback: playback, undo: undo)
-        }
+        record(edit(playback), playback: playback, undo: undo)
     }
 
     /// One undo step for an edit that already happened (`UndoCenter.record`): undo and redo
@@ -52,13 +49,13 @@ enum QueueEditCommands {
             message: QueueWords.message(receipt) + suffix,
             done: receipt,
             undo: { [weak playback] receipt in
-                guard let playback, await playback.revertQueueEdit(receipt) else {
+                guard let playback, playback.revertQueueEdit(receipt) else {
                     throw UndoNothingLeft(note: QueueWords.nothingLeftToUndo)
                 }
                 return receipt
             },
             redo: { [weak playback] receipt in
-                guard let playback, await playback.reapplyQueueEdit(receipt) else {
+                guard let playback, playback.reapplyQueueEdit(receipt) else {
                     throw UndoNothingLeft(note: QueueWords.nothingLeftToRedo)
                 }
                 return receipt
@@ -68,35 +65,51 @@ enum QueueEditCommands {
 
     // MARK: Drops (UC-DND matrix: Player / Queue column)
 
-    /// Tracks or Queue rows dropped at `position` of Next: rows of Next move there (reorder);
-    /// tracks (and History rows) are queued there — `.top` is Play Next, anywhere else Add to
-    /// Queue at that place.
+    /// Tracks or Queue rows dropped at `position` of Next (kept for callers that name a lane
+    /// and index; the panel names the row the line sits next to, `QueueDropTarget`).
     static func drop(_ items: [QueueRowDrag], at position: QueuePosition, playback: PlaybackViewModel,
                      undo: UndoCenter, container: DependencyContainer = .shared) {
-        guard !items.isEmpty else { return }
+        drop(items, at: .position(position), playback: playback, undo: undo, container: container)
+    }
+
+    /// Tracks or Queue rows dropped on Next: rows of Next move there (reorder); tracks (and
+    /// History rows) are queued there — at the top it is Play Next, anywhere else Add to Queue
+    /// at that place. Both together are one step: the rows move, the others follow them
+    /// (W2-D review S6). The target is resolved against the queue when the drop applies.
+    static func drop(_ items: [QueueRowDrag], at target: QueueDropTarget, playback: PlaybackViewModel,
+                     undo: UndoCenter, container: DependencyContainer = .shared) {
+        drop(items, at: target, playback: playback, undo: undo, tracks: { await orderedTracks($0, container: container) })
+    }
+
+    /// `drop`, with the library rows of dragged track ids from `tracks` (tests).
+    @discardableResult
+    static func drop(_ items: [QueueRowDrag], at target: QueueDropTarget, playback: PlaybackViewModel,
+                     undo: UndoCenter, tracks fetch: @escaping @MainActor ([Int64]) async -> [Track]) -> Task<Void, Never>? {
+        guard !items.isEmpty else { return nil }
         let queued = Set(playback.queueSnapshot.upcomingEntries.map(\.id))
         let moving = items.compactMap(\.queueEntryId).filter(queued.contains)
-        if !moving.isEmpty, moving.count == items.count {
-            perform({ await $0.moveEntries(moving, to: position) }, playback: playback, undo: undo)
-            return
+        let others = items.filter { item in !(item.queueEntryId.map(queued.contains) ?? false) }
+        if others.isEmpty {
+            perform({ $0.moveEntries(moving, to: target) }, playback: playback, undo: undo)
+            return nil
         }
-        let ids = items.map(\.trackId)
-        Task {
-            let tracks = await orderedTracks(ids, container: container)
+        let ids = others.map(\.trackId)
+        return Task {
+            let tracks = await fetch(ids)
             let queueable = tracks.filter(\.isLocal)
             let leftOut = tracks.count - queueable.count
-            guard !queueable.isEmpty else {
+            guard !queueable.isEmpty || !moving.isEmpty else {
                 if !tracks.isEmpty { undo.statusBar.post(QueueWords.nothingToQueue(count: tracks.count)) }
                 return
             }
-            let receipt = await playback.insert(queueable, at: position)
+            let receipt = playback.drop(moving: moving, adding: queueable, at: target)
             record(receipt, playback: playback, undo: undo, suffix: leftOut > 0 ? QueueWords.leftOutSuffix(leftOut) : "")
         }
     }
 
     /// Tracks dropped on the toolbar player: Play Next (UC-TB-08); rows of Next move to the top.
     static func dropOnPlayer(_ items: [QueueRowDrag], playback: PlaybackViewModel, undo: UndoCenter) {
-        drop(items, at: .top, playback: playback, undo: undo)
+        drop(items, at: .position(.top), playback: playback, undo: undo)
     }
 
     /// The library rows of `ids`, in that order.
