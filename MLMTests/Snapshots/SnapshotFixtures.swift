@@ -306,8 +306,7 @@ enum SnapshotFixtures {
     ]
 
     private static let exclusions: [String: String] = [
-        "Activity/ActivityFeed.swift": "Non-view: feed value model.",
-        "Activity/ActivityFeedAdapters.swift": "Non-view: model adapters.",
+        "Activity/ActivityRouter.swift": "Non-view: popover/window routing and subject navigation.",
         "Activity/LogFeed.swift": "Non-view: log query model.",
         "Activity/LogTextRenderer.swift": "Non-view: attributed-text helper.",
         "Shared/DownloadRetryBudget.swift": "Non-view: retry helper.",
@@ -321,9 +320,9 @@ enum SnapshotFixtures {
         "TrackList/TrackMenu.swift": "Deferred: menus require interactive presentation; current bitmap hosts do not open them.",
         "Sync/Pickers/PlaylistPickerModel.swift": "Non-view: selection model.",
         "TrackDetail/WaveformHelpers.swift": "Non-view: waveform math; production WaveformView is captured.",
-        "Activity/ActivityPanel.swift": "Deferred: persisted AppStorage and live global operation state need injected preferences/feed.",
-        "Activity/LogsTab.swift": "Deferred: global logger and AppKit text representable need fixed attributed-log input.",
-        "Activity/OperationsTab.swift": "Deferred: directly reads shared performance/download queues; needs immutable feed injection.",
+        "Activity/ActivityLogsView.swift": "Deferred: global logger and AppKit text representable need fixed attributed-log input.",
+        "Activity/ActivityToolbarItem.swift": "Deferred: toolbar item and popover read the shared ActivityCenter; inject a fixture center.",
+        "Activity/ActivityWindow.swift": "Deferred: window reads the shared ActivityCenter and container; inject a fixture center.",
         "ContentView/ContentView.swift": "Deferred: real shell, startup/router/toolbar lifecycle; needs application-level fixture composition.",
         "Folders/FolderTreeView.swift": "Deferred: NSOutlineView delegate/expansion lifecycle requires hosted outline readiness contract.",
         "Library/TrackContextMenu.swift": "Deferred: menus require interactive presentation; current bitmap hosts do not open them.",
@@ -395,13 +394,12 @@ enum SnapshotFixtures {
     ]
 
     private static let inventoryPaths = """
-Activity/ActivityFeed.swift
-Activity/ActivityFeedAdapters.swift
-Activity/ActivityPanel.swift
+Activity/ActivityLogsView.swift
+Activity/ActivityRouter.swift
+Activity/ActivityToolbarItem.swift
+Activity/ActivityWindow.swift
 Activity/LogFeed.swift
-Activity/LogsTab.swift
 Activity/LogTextRenderer.swift
-Activity/OperationsTab.swift
 ContentView/ContentView.swift
 Discover/DiscoverView.swift
 DiscoveryInbox/DiscoveryInboxView.swift

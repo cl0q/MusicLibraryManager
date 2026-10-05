@@ -397,7 +397,10 @@ struct ActivityFailureGroup: Codable, Equatable, Hashable, Sendable {
     var cause: String
     var count: Int
     var fix: ActivityFix?
-    /// Tracks of the group (downloads, analyses) — what `Retry All` and `Show Tracks` act on.
+    /// **Failed downloads only**: tracks whose `tracks.download_failure` the registry checks
+    /// live (`ActivityFailureSource`) — what `Retry All` and `Show Tracks` act on and what the
+    /// toolbar's `‹n› failed` counts. Other failures (sync, analysis) leave it empty and count
+    /// by `count`; their tracks are in `ActivityResult.items`.
     var trackIDs: [Int64]
     /// Whether retrying can help (sign-in expired yes after Reconnect; removed / DRM no).
     var isRetryable: Bool
@@ -584,5 +587,17 @@ struct ActivityNoun: Codable, Hashable, Sendable {
 
     func counted(_ count: Int) -> String {
         "\(count.formatted(.number)) \(count == 1 ? singular : plural)"
+    }
+}
+
+// MARK: - Result helpers of other areas
+
+extension ActivityResult {
+    /// `12,935 tracks · 48 MB` — a backup's result (P-ACTIVITY-OPS.N10).
+    static func backup(_ info: BackupInfo) -> ActivityResult {
+        var parts: [String] = []
+        if let tracks = info.trackCount { parts.append(ActivityNoun.track.counted(tracks)) }
+        if let bytes = info.databaseSizeBytes { parts.append(bytes.formatted(.byteCount(style: .file))) }
+        return ActivityResult(summary: parts.isEmpty ? nil : parts.joined(separator: " · "))
     }
 }

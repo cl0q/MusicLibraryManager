@@ -86,8 +86,8 @@ struct LogTextRendererTests {
 
     @Test
     func tabStopXPositions_areExact() {
-        #expect(LogColumnLayout.tabStopXPositions == [84, 126, 210],
-                "tab stops must be at 84, 126, 210 to align timestamp, level, source, and message columns")
+        #expect(LogColumnLayout.tabStopXPositions == [104, 156, 268],
+                "tab stops align timestamp, level, source and message at the body size")
     }
 
     @Test
@@ -103,7 +103,7 @@ struct LogTextRendererTests {
     func paragraphStyle_wrapFalse_hasCorrectTabStops() {
         let style = LogTextRenderer.paragraphStyle(wrap: false)
         let xs = style.tabStops.map { $0.location }
-        #expect(xs == [84, 126, 210],
+        #expect(xs == [104, 156, 268],
                 "paragraphStyle tab stops must match LogColumnLayout.tabStopXPositions")
     }
 
@@ -111,7 +111,7 @@ struct LogTextRendererTests {
     func paragraphStyle_wrapTrue_hasCorrectTabStops() {
         let style = LogTextRenderer.paragraphStyle(wrap: true)
         let xs = style.tabStops.map { $0.location }
-        #expect(xs == [84, 126, 210],
+        #expect(xs == [104, 156, 268],
                 "wrap-true paragraph style must also have tab stops at 84, 126, 210")
     }
 
@@ -188,9 +188,9 @@ struct LogTextRendererTests {
     // MARK: - Behavior 6: level colors
 
     @Test
-    func levelColor_info_isSystemBlue() {
-        #expect(LogTextRenderer.levelColor(.info) == .systemBlue,
-                "info level must use systemBlue")
+    func levelColor_info_isSecondaryLabel() {
+        // W3-ACT: no blue text for an ordinary level (UC-COLOR-04/06); the word carries it.
+        #expect(LogTextRenderer.levelColor(.info) == .secondaryLabelColor)
     }
 
     @Test
@@ -206,9 +206,8 @@ struct LogTextRendererTests {
     }
 
     @Test
-    func levelColor_debug_isSystemGray() {
-        #expect(LogTextRenderer.levelColor(.debug) == .systemGray,
-                "debug level must use systemGray")
+    func levelColor_debug_isTertiaryLabel() {
+        #expect(LogTextRenderer.levelColor(.debug) == .tertiaryLabelColor)
     }
 
     // MARK: - Behavior 7: plan — the stale-render fix

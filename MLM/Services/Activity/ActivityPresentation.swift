@@ -249,7 +249,7 @@ enum ActivityPresentation {
                         buckets[key]?.tracks.append(id)
                     }
                 } else {
-                    buckets[key]?.otherCount += 1
+                    buckets[key]?.otherCount += max(group.count, 1)
                 }
             }
         }
@@ -262,9 +262,13 @@ enum ActivityPresentation {
             if bucket.isDownload {
                 headline = ActivityFailureGrouping.headline(for: ActivityFailureGroup(cause: bucket.cause, count: count))
             } else if let newest {
-                headline = bucket.ops.count == 1
-                    ? "\(newest.title) failed — \(bucket.cause)"
-                    : "\(bucket.ops.count.formatted(.number)) operations failed — \(bucket.cause)"
+                if bucket.ops.count > 1 {
+                    headline = "\(bucket.ops.count.formatted(.number)) operations failed — \(bucket.cause)"
+                } else if count > 1 {
+                    headline = "\(count.formatted(.number)) failed in \(newest.title) — \(bucket.cause)"
+                } else {
+                    headline = "\(newest.title) failed — \(bucket.cause)"
+                }
             } else {
                 headline = bucket.cause
             }

@@ -38,7 +38,10 @@ final class SnapshotsTests: XCTestCase {
         // W2-I removed Search/{GlobalSearchPresentationView,UniversalSearchView}.swift (and the
         // universal-search fixture) and added Search/{SearchResultsView,OnlineSearchResultsView,
         // SearchSuggestionList}.swift (deferred) and Search/SearchFocusHandoff.swift (non-view).
-        XCTAssertEqual(paths.count, 109, "Re-audit inventory changes explicitly.")
+        // W3-ACT replaced the bottom panel (ActivityPanel, OperationsTab, LogsTab deferred; ActivityFeed,
+        // ActivityFeedAdapters non-view) by ActivityToolbarItem, ActivityWindow, ActivityLogsView
+        // (deferred) and ActivityRouter (non-view).
+        XCTAssertEqual(paths.count, 108, "Re-audit inventory changes explicitly.")
         XCTAssertEqual(Set(SnapshotFixtures.inventory.map(\.path)), paths)
         XCTAssertEqual(SnapshotFixtures.inventory.count, paths.count)
         XCTAssertFalse(SnapshotFixtures.inventory.contains { $0.disposition.isEmpty })
@@ -46,7 +49,7 @@ final class SnapshotsTests: XCTestCase {
         XCTAssertFalse(SnapshotFixtures.fixtures.isEmpty)
         XCTAssertEqual(SnapshotFixtures.fixtures.count, 27)
         XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 23)
-        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 34)
+        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 33)
         XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 52)
         for fixture in SnapshotFixtures.fixtures where fixture.expectedTableRows != nil {
             if case .swiftUI = fixture.backend {

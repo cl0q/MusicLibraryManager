@@ -327,7 +327,10 @@ final class ActivityCenter {
     }
 
     fileprivate func applyControls(_ id: UUID, _ controls: ActivityControls) {
-        update(id) { $0.controls = controls }
+        // A finished operation keeps only `Run Again` — never a Cancel that can't cancel.
+        update(id) { operation in
+            operation.controls = operation.state.isActive ? controls : ActivityControls(runAgain: controls.runAgain)
+        }
     }
 
     fileprivate func applyTitle(_ id: UUID, _ title: String, subject: ActivitySubject?) {
@@ -372,10 +375,26 @@ final class ActivityCenter {
         if announce.contains(id) || (wasHidden && !quiet.contains(id) && !ended.isAutomatic) {
             postEnd(ended)
         }
-        if needsAttention { refreshFailing(ids: [id]) }
+        if needsAttention { scheduleFailingRefresh(ids: [id]) }
         finishNotifier?.operationDidFinish(ended)
         forget(id)
         trimSessionOperations()
+    }
+
+    /// Removes an operation that turned out to do nothing (a scheduled backup that wasn't due):
+    /// no result, no history row, no message.
+    fileprivate func discard(_ id: UUID) {
+        guard let current = operation(id: id) ?? hidden[id], current.state.isActive else { return }
+        let wasPersisted = persistent.contains(id) && hidden[id] == nil
+        pendingProgress[id] = nil
+        leaveLane(id, title: current.title)
+        if let waiter = turnWaiters.removeValue(forKey: id) { waiter.resume(returning: false) }
+        hidden[id] = nil
+        operations.removeAll { $0.id == id }
+        if wasPersisted {
+            enqueueWrite(for: current.libraryID) { store in try await store.delete(id: id) }
+        }
+        forget(id)
     }
 
     private func forget(_ id: UUID) {
@@ -588,8 +607,9 @@ final class ActivityCenter {
 
     /// Asks the failure source which named tracks still fail (call after downloads and edits).
     /// An operation whose tracks were all fixed leaves Needs attention for good.
-    func refreshFailing(ids: [UUID]? = nil) {
-        Task { await refreshFailing(ids: ids) }
+    /// Schedules `refreshFailing` from any thread (after a download batch, an edit).
+    nonisolated func scheduleFailingRefresh(ids: [UUID]? = nil) {
+        perform { center in Task { await center.refreshFailing(ids: ids) } }
     }
 
     func refreshFailing(ids: [UUID]? = nil) async {
@@ -764,6 +784,12 @@ struct ActivityOperationHandle: Sendable, Hashable {
     /// Cancelled by the user (or stopped by a quit / a disconnect); done work is kept.
     func cancelled(_ result: ActivityResult = .empty) {
         end(.cancelled, result)
+    }
+
+    /// The job turned out to have nothing to do: the operation disappears without a trace.
+    func discard() {
+        let id = id
+        center.perform { center in center.whenKnown(id) { $0.discard(id) } }
     }
 
     private func end(_ state: ActivityState, _ result: ActivityResult) {

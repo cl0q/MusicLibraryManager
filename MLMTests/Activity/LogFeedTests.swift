@@ -473,13 +473,11 @@ struct LogFeedTests {
     func levelFilter_labels() {
         #expect(LogLevelFilter.all.label == "All",
                 ".all label must be \"All\"")
-        #expect(LogLevelFilter.infoPlus.label == "Info+",
-                ".infoPlus label must be \"Info+\"")
-        #expect(LogLevelFilter.warnPlus.label == "Warn+",
-                ".warnPlus label must be \"Warn+\"")
+        // UC-JOB-06 words (W3-ACT).
+        #expect(LogLevelFilter.infoPlus.label == "Info and above")
+        #expect(LogLevelFilter.warnPlus.label == "Warnings and above")
         #expect(LogLevelFilter.errors.label == "Errors",
                 ".errors label must be \"Errors\"")
-        #expect(LogLevelFilter.debugOnly.label == "Debug",
-                ".debugOnly label must be \"Debug\"")
+        #expect(LogLevelFilter.debugOnly.label == "Debug only")
     }
 }

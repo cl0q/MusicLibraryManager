@@ -112,6 +112,8 @@ final class DownloadViewModel {
     // MARK: - Dependencies
 
     private var orchestrator: DownloadOrchestrator?
+    /// The Activity registry (W3-ACT). Every batch is one operation in the `.downloads` lane.
+    let activity: ActivityCenter
     private let trackRepository: TrackRepository?
     private let sourceRepository: SourceRepository?
 
@@ -158,8 +160,10 @@ final class DownloadViewModel {
     init(
         trackRepository: TrackRepository? = nil,
         sourceRepository: SourceRepository? = nil,
-        trackPersister: (any DownloadTrackPersisting)? = nil
+        trackPersister: (any DownloadTrackPersisting)? = nil,
+        activity: ActivityCenter = ActivityCenter()
     ) {
+        self.activity = activity
         self.trackRepository = trackRepository
         self.sourceRepository = sourceRepository
         self.trackPersisterOverride = trackPersister
@@ -183,7 +187,8 @@ final class DownloadViewModel {
     func downloadTracks(
         _ tracks: [Track],
         preferredSource: DownloadOrchestrator.PreferredSource = .auto,
-        artworkURL: String? = nil
+        artworkURL: String? = nil,
+        context: DownloadActivityContext? = nil
     ) async {
         guard let runner = activeBatchRunner else {
             AppLogger.shared.log("Download orchestrator not configured", level: .error, source: "Download")
@@ -192,8 +197,25 @@ final class DownloadViewModel {
 
         let remoteTracks = tracks.filter { $0.isRemote }
         guard !remoteTracks.isEmpty else { return }
-        guard !isDownloading else {
-            AppLogger.shared.log("Download batch rejected because another batch is active", level: .warning, source: "Download")
+
+        // Activity (W3-ACT): one operation per batch. A second batch waits for its turn instead
+        // of being rejected (fixes PP-ACTIVITY-05); Cancel says the truth — it stops after the
+        // current track.
+        let control = DownloadBatchControl()
+        let job = activity.begin(
+            context?.kind ?? .download,
+            title: context?.title ?? Self.batchTitle(count: remoteTracks.count),
+            subject: context?.subject ?? .tracks(remoteTracks.compactMap(\.id)),
+            progress: ActivityProgress(total: remoteTracks.count),
+            itemNoun: .track,
+            messageName: context?.messageName ?? "Download",
+            controls: batchControls(control),
+            lane: .downloads
+        )
+        guard await job.waitForTurn() else { return }
+        // Work that needs the drive waits while it is away and says so (UC-JOB-10).
+        guard await waitForLibraryFolder(job: job, control: control) else {
+            job.cancelled(ActivityResult(counts: [ActivityCount(.done, 0, "downloaded")]))
             return
         }
         let batchID = UUID()
@@ -255,10 +277,11 @@ final class DownloadViewModel {
             )
         }
 
-        let result = terminalResult(
-            await runner.downloadBatch(
+        control.setRunning(true)
+        let rawResult = await runner.downloadBatch(
                 requests,
                 onProgress: { [weak self] index, total, current in
+                    job.update(completed: index, total: total, currentItem: current)
                     guard let self, self.activeBatchID == batchID else { return }
                     self.currentTrack = current
                     self.currentTrackProgress = 0
@@ -275,10 +298,15 @@ final class DownloadViewModel {
                     // Combined: completed tracks plus the running fraction of
                     // the in-flight track, normalized by total batch size.
                     self.progress = (Double(self.completedCount) + fraction) / Double(self.totalCount)
+                    job.update(completed: self.completedCount, total: self.totalCount,
+                               currentItem: self.currentTrack, currentFraction: fraction)
                 }
-            ),
-            requests: requests
-        )
+            )
+        control.setRunning(false)
+        // A track that failed only because the drive went away is not a failure (UC-JOB-10):
+        // it stays Not downloaded and the batch waits for the drive to download it.
+        let (driveFree, driveWaiting) = Self.separatingDriveWaits(rawResult)
+        let result = terminalResult(driveFree, requests: requests.filter { !driveWaiting.contains($0.trackId) })
 
         // Persist the four download columns together for each succeeded
         // track: organized_path + format + bitrate + download_status.
@@ -305,6 +333,8 @@ final class DownloadViewModel {
                 .union(persistenceFailures)
         )
 
+        await clearDownloadsInProgress(trackIds: driveWaiting)
+
         let finalResult = resultAfterPersistence(
             result,
             persistenceFailures: persistenceFailures
@@ -314,14 +344,132 @@ final class DownloadViewModel {
             persistenceFailures: persistenceFailures
         )
         finishBatch(finalResult, batchID: batchID)
+
+        // Downloads the drive interrupted run again once it is back (same operation).
+        if !driveWaiting.isEmpty, !control.isCancelled {
+            let waiting = remoteTracks.filter { $0.id.map(driveWaiting.contains) ?? false }
+            job.update(completed: finalResult.succeeded, total: remoteTracks.count)
+            if await waitForLibraryFolder(job: job, control: control) {
+                job.finish(Self.activityResult(finalResult, tracks: remoteTracks, wasCancelled: false))
+                await downloadTracks(waiting, preferredSource: preferredSource, artworkURL: artworkURL, context: context)
+                return
+            }
+        }
+        let activityResult = Self.activityResult(finalResult, tracks: remoteTracks,
+                                                 wasCancelled: control.isCancelled)
+        if control.isCancelled || !finalResult.cancelledTrackIds.isEmpty {
+            job.cancelled(activityResult)
+        } else {
+            job.finish(activityResult)
+        }
+        activity.scheduleFailingRefresh()
+    }
+
+    // MARK: - Activity (W3-ACT)
+
+    /// `Download 3 tracks` / `Download “‹title›”`.
+    static func batchTitle(count: Int) -> String {
+        "Download \(ActivityNoun.track.counted(count))"
+    }
+
+    /// Cancel After This Track (the running scdl/yt-dlp finishes), Retry of the failed tracks.
+    private func batchControls(_ control: DownloadBatchControl) -> ActivityControls {
+        ActivityControls(
+            cancelStyle: .afterThisTrack,
+            cancel: { [weak self] in
+                control.cancel()
+                if control.isRunning { self?.cancel() }
+            },
+            retry: { [weak self] ids in Task { await self?.retryAllFailed(trackIds: ids) } }
+        )
+    }
+
+    /// Splits the failures caused by an unreachable library folder (`“Lexxar” not connected`)
+    /// off a batch result: they are waits, not failures (UC-JOB-10).
+    static func separatingDriveWaits(_ result: DownloadOrchestrator.BatchResult) -> (DownloadOrchestrator.BatchResult, Set<Int64>) {
+        var waiting: Set<Int64> = []
+        for id in result.failedTrackIds {
+            // Only a named drive that is away waits; an unwritable folder on a present disk fails.
+            if case .libraryFolderUnavailable(let volume?) = DownloadFailureReasonText.classify(result.failureReasons[id] ?? "").0,
+               !volume.isEmpty {
+                waiting.insert(id)
+            }
+        }
+        guard !waiting.isEmpty else { return (result, []) }
+        var cleaned = result
+        cleaned.failedTrackIds.subtract(waiting)
+        cleaned.failed = max(0, cleaned.failed - waiting.count)
+        for id in waiting { cleaned.failureReasons[id] = nil }
+        return (cleaned, waiting)
+    }
+
+    /// The batch's result in Activity: `35 downloaded · 9 failed · 2 skipped`, failures grouped
+    /// by their plain cause (`DownloadFailureReasonText`, IMP-029) and every track's outcome.
+    static func activityResult(_ result: DownloadOrchestrator.BatchResult, tracks: [Track],
+                               wasCancelled: Bool) -> ActivityResult {
+        let failures = result.failedTrackIds.sorted().map { id -> ActivityFailureGrouping.DownloadFailure in
+            let track = tracks.first { $0.id == id }
+            return .init(trackID: id, reason: result.failureReasons[id] ?? "",
+                         sourceHint: track.flatMap(DownloadFailureReasonText.sourceHint(for:)))
+        }
+        let items = tracks.compactMap { track -> ActivityItemOutcome? in
+            guard let id = track.id else { return nil }
+            let title = "\(track.artist) — \(track.title)"
+            if result.downloadedPaths[id] != nil {
+                return ActivityItemOutcome(word: "Downloaded", title: title, trackID: id,
+                                           reason: result.downloadedMetadata[id].map { $0.format.uppercased() })
+            }
+            if result.failedTrackIds.contains(id) {
+                return ActivityItemOutcome(word: "Download failed", title: title, trackID: id,
+                                           reason: DownloadFailureReasonText.plain(result.failureReasons[id] ?? "",
+                                                                                   sourceHint: DownloadFailureReasonText.sourceHint(for: track)),
+                                           isFailure: true)
+            }
+            if result.skippedTrackIds.contains(id) {
+                return ActivityItemOutcome(word: "Skipped — already downloaded", title: title, trackID: id)
+            }
+            return ActivityItemOutcome(word: wasCancelled || result.cancelledTrackIds.contains(id) ? "Not downloaded" : "Queued",
+                                       title: title, trackID: id)
+        }
+        return ActivityResult(
+            counts: [ActivityCount(.done, result.succeeded, "downloaded"),
+                     ActivityCount(.failed, result.failed, "failed"),
+                     ActivityCount(.skipped, result.skipped, "skipped")],
+            failureGroups: ActivityFailureGrouping.groupDownloads(failures),
+            items: items
+        )
+    }
+
+    /// While the library folder's drive is not connected the operation waits with
+    /// `Waiting for “‹volume›”` (re-checked every few seconds and on mount); `false` when the
+    /// user cancelled meanwhile. A folder on the Mac's own disk never waits.
+    private func waitForLibraryFolder(job: ActivityOperationHandle, control: DownloadBatchControl) async -> Bool {
+        guard !libraryRoot.isEmpty, let volume = MountObserver.extractVolumePath(from: libraryRoot) else { return true }
+        let name = URL(fileURLWithPath: volume).lastPathComponent
+        var waited = false
+        while !FileManager.default.fileExists(atPath: volume) {
+            if control.isCancelled { return false }
+            if !waited {
+                job.setWaiting(.drive(volumeName: name))
+                AppLogger.shared.info("Downloads wait for “\(name)” to be connected", source: "Download")
+                waited = true
+            }
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+        }
+        if waited { job.setWaiting(nil) }
+        return !control.isCancelled
     }
 
     /// Retry failed downloads from the queue.
     func retryFailed() async {
-        guard !isDownloading else { return }
         guard let retryRunner = activeRetryRunner else { return }
+        guard !retryRunner.pendingRetryRequests().isEmpty else { return }
+        let job = activity.begin(.download, title: "Retry failed downloads", itemNoun: .track,
+                                 controls: ActivityControls(cancelStyle: .afterThisTrack, cancel: { [weak self] in self?.cancel() }),
+                                 lane: .downloads)
+        guard await job.waitForTurn() else { return }
         let requests = retryRunner.pendingRetryRequests()
-        guard !requests.isEmpty else { return }
+        guard !requests.isEmpty else { job.discard(); return }
         let batchID = UUID()
         activeBatchID = batchID
         isDownloading = true
@@ -402,6 +550,13 @@ final class DownloadViewModel {
             persistenceFailures: persistenceFailures
         )
         finishBatch(finalResult, batchID: batchID)
+        job.finish(ActivityResult(
+            counts: [ActivityCount(.done, finalResult.succeeded, "downloaded"),
+                     ActivityCount(.failed, finalResult.failed, "failed")],
+            failureGroups: ActivityFailureGrouping.groupDownloads(finalResult.failedTrackIds.sorted().map {
+                .init(trackID: $0, reason: finalResult.failureReasons[$0] ?? "")
+            })))
+        activity.scheduleFailingRefresh()
     }
 
     private func resultAfterPersistence(
@@ -602,7 +757,6 @@ final class DownloadViewModel {
     /// download path. This does not pretend that the legacy queue's global
     /// retry operation can safely target a single row.
     func retryDownload(trackId: Int64) async {
-        guard !isDownloading else { return }
         guard let trackRepository else {
             AppLogger.shared.error(
                 "Cannot retry download because the track repository is unavailable",
@@ -628,7 +782,6 @@ final class DownloadViewModel {
     /// Fetches each track and hands them to the normal download path so
     /// the orchestrator re-runs its source chain per track.
     func retryAllFailed(trackIds: [Int64]) async {
-        guard !isDownloading else { return }
         guard let trackRepository else {
             AppLogger.shared.error(
                 "Cannot retry downloads because the track repository is unavailable",
@@ -644,7 +797,12 @@ final class DownloadViewModel {
             }
         }
         guard !tracks.isEmpty else { return }
-        await downloadTracks(tracks)
+        // Each track keeps its own source link (pinned SoundCloud / YouTube downloads).
+        let groups = Dictionary(grouping: tracks, by: preferredSource(for:))
+        for (source, group) in groups.sorted(by: { $0.value.count > $1.value.count }) {
+            await downloadTracks(group, preferredSource: source,
+                                 context: DownloadActivityContext(title: "Retry \(ActivityNoun.track.counted(group.count))"))
+        }
     }
 
     /// Download a recommended swarm track, extract its metadata, insert it in the DB, and register in track_discovery_log as 'new'.
@@ -710,6 +868,25 @@ final class DownloadViewModel {
         while !discoveryQueue.isEmpty {
             let request = discoveryQueue.removeFirst()
             let key = request.soundcloudURL ?? "\(request.artist) - \(request.title)"
+            // Activity (W3-ACT): one operation per recommendation, queued behind running batches.
+            // No Cancel: the single download can't be stopped half-way.
+            let job = activity.begin(.recommendationDownload,
+                                     title: "Download recommendation “\(request.title)”",
+                                     subject: .discover, progress: ActivityProgress(total: 1),
+                                     itemNoun: .track, lane: .downloads)
+            guard await job.waitForTurn() else {
+                await MainActor.run { self.discoveryStatuses[key] = .failed }
+                continue
+            }
+            var outcome: (word: String, reason: String?) = ("Download failed", "Reason unknown")
+            defer {
+                if outcome.word == "Downloaded" {
+                    job.finish(ActivityResult(counts: [ActivityCount(.done, 1, "downloaded")],
+                                              items: [ActivityItemOutcome(word: "Downloaded", title: "\(request.artist) — \(request.title)")]))
+                } else {
+                    job.fail(cause: outcome.reason ?? "Reason unknown")
+                }
+            }
             
             await MainActor.run {
                 self.discoveryStatuses[key] = .downloading
@@ -741,6 +918,7 @@ final class DownloadViewModel {
                 )
                 
                 guard let fileURL = fileURL else {
+                    outcome.reason = "No match found on any source"
                     await MainActor.run {
                         self.discoveryStatuses[key] = .failed
                     }
@@ -796,6 +974,7 @@ final class DownloadViewModel {
                     status: "new"
                 )
                 
+                outcome = ("Downloaded", nil)
                 await MainActor.run {
                     self.discoveryStatuses[key] = .downloaded
                 }
@@ -811,6 +990,8 @@ final class DownloadViewModel {
                 )
             } catch {
                 AppLogger.shared.log("Discovery download error for \(request.title): \(error)", level: .error, source: "Download")
+                outcome.reason = DownloadFailureReasonText.plain(
+                    DownloadOrchestrator.DownloadFailureReason.failureReason(for: error).userFacingText)
                 await MainActor.run {
                     self.discoveryStatuses[key] = .failed
                 }
@@ -1056,4 +1237,40 @@ final class DownloadViewModel {
         }
         return path
     }
+}
+
+// MARK: - Activity context
+
+/// What a download batch is for, so Activity names it (`Import “Dekmantel 2024”`) and links its
+/// subject. Callers without one get `Download ‹n› tracks` with the tracks as subject.
+struct DownloadActivityContext: Sendable {
+    var kind: ActivityKind = .download
+    var title: String
+    var subject: ActivitySubject?
+    var messageName: String = "Download"
+
+    init(kind: ActivityKind = .download, title: String, subject: ActivitySubject? = nil, messageName: String = "Download") {
+        self.kind = kind
+        self.title = title
+        self.subject = subject
+        self.messageName = messageName
+    }
+
+    /// `Import “‹playlist›”` — a playlist's tracks.
+    static func playlist(_ id: Int64, name: String) -> DownloadActivityContext {
+        DownloadActivityContext(title: "Import “\(name)”", subject: .playlist(id, name: name), messageName: "Import")
+    }
+}
+
+/// Cancel state of one batch: before the run (queued, waiting for the drive) only this flag;
+/// during the run also the orchestrator's stop-after-this-track.
+final class DownloadBatchControl: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    private var running = false
+
+    func cancel() { lock.lock(); cancelled = true; lock.unlock() }
+    var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
+    func setRunning(_ value: Bool) { lock.lock(); running = value; lock.unlock() }
+    var isRunning: Bool { lock.lock(); defer { lock.unlock() }; return running }
 }

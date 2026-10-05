@@ -131,10 +131,12 @@ final class SyncService {
     func pauseSync() {
         guard isRunning else { return }
         isPaused = true
+        activityJob?.setState(.paused, wait: .user)
     }
 
     func resumeSync() {
         isPaused = false
+        activityJob?.setState(.running)
     }
 
     func cachedPreview(profileId: Int64) -> CachedPreview? {
@@ -162,10 +164,11 @@ final class SyncService {
     private let configRepository: ConfigRepository
     private let transcodeCache: TranscodeCache
 
-    /// Optional bridge to the global Operations panel.
-    /// When set, executeSync registers itself as an ActivityViewModel.Operation
-    /// so the Operations tab can render a live row.
-    var activityViewModel: ActivityViewModel?
+    /// The Activity registry (W3-ACT): each `executeSync` is **one** operation `Sync “‹profile›”`
+    /// with honest Pause / Resume / Cancel that always ends (fixes PP-ACTIVITY-01).
+    var activity: ActivityCenter?
+    /// The running sync's operation, so Pause / Resume from the profile page show in Activity.
+    private var activityJob: ActivityOperationHandle?
 
     /// Space buffer: require 50MB free beyond needed space.
     private static let spaceBuffer: Int64 = 50_000_000
@@ -474,31 +477,19 @@ final class SyncService {
         case failed(Int64, String) // trackId, error description
     }
 
-    private func incrementProcessed(currentFile: String, operationId: UUID?) async {
+    private func incrementProcessed(currentFile: String, operationId: ActivityOperationHandle?) async {
         await MainActor.run {
             self.processed += 1
             self.currentFile = currentFile
             self.progress = Double(self.processed) / Double(max(self.total, 1))
-            if let operationId {
-                self.activityViewModel?.updateProgress(
-                    id: operationId,
-                    progress: self.progress,
-                    detail: "\(self.processed) / \(self.total) — \(currentFile)"
-                )
-            }
+            operationId?.update(completed: self.processed, total: self.total, currentItem: currentFile)
         }
     }
 
-    private func reportCurrentFile(_ currentFile: String, operationId: UUID?) async {
+    private func reportCurrentFile(_ currentFile: String, operationId: ActivityOperationHandle?) async {
         await MainActor.run {
             self.currentFile = currentFile
-            if let operationId {
-                self.activityViewModel?.updateProgress(
-                    id: operationId,
-                    progress: self.progress,
-                    detail: "\(self.processed) / \(self.total) — \(currentFile)"
-                )
-            }
+            operationId?.update(completed: self.processed, total: self.total, currentItem: currentFile)
         }
     }
 
@@ -521,7 +512,7 @@ final class SyncService {
         profileId: Int64,
         profile: SyncProfile,
         libraryRoot: String,
-        operationId: UUID?
+        operationId: ActivityOperationHandle?
     ) async throws -> FileSyncOutcome {
         try await waitForSyncPermission()
         let trackName = "\(file.artist) – \(file.title)"
@@ -739,16 +730,19 @@ final class SyncService {
             source: "Sync"
         )
 
-        // Register with global Operations panel (Task 1 — Sync-Progress moved
-        // from SyncView into Operations-Tab).
-        let operationId: UUID? = await MainActor.run {
-            activityViewModel?.startOperation(
-                type: .sync,
-                title: "Sync: \(profile.name)",
-                detail: "0 / \(total)",
-                retry: { [weak self] in _ = try? await self?.executeSync(profileId: profileId) }
+        // Activity (W3-ACT): one operation per sync. Cancel stops the running transcodes and
+        // the queue; Pause holds before the next file.
+        let operationId: ActivityOperationHandle? = activity?.begin(
+            .sync, title: "Sync “\(profile.name)”", subject: .syncProfile(profileId, name: profile.name),
+            progress: ActivityProgress(total: total), itemNoun: .file,
+            controls: ActivityControls(
+                cancel: { [weak self] in Task { @MainActor in self?.cancelSync() } },
+                pause: { [weak self] in Task { @MainActor in self?.pauseSync() } },
+                resume: { [weak self] in Task { @MainActor in self?.resumeSync() } }
             )
-        }
+        )
+        activityJob = operationId
+        defer { activityJob = nil }
 
         // 1. Remove stale files (cleanup-deletion branch — D-04 / SYNC-v2-05)
         for file in preview.filesToRemove {
@@ -892,19 +886,13 @@ final class SyncService {
         currentFile = ""
         progress = 1.0
 
-        // Finalise the Operations-tab row.
+        // End the Activity operation — always, also when cancelled (PP-ACTIVITY-01).
         if let operationId {
-            let summary = "\(result.syncedCount) synced · \(result.failedCount) failed"
-            let wasCancelled = result.wasCancelled || cancellationRequested
-            let onlyFailures = result.failedCount > 0 && result.syncedCount == 0
-            await MainActor.run {
-                if wasCancelled {
-                    activityViewModel?.cancelOperation(id: operationId, detail: "Cancelled — \(summary)")
-                } else if onlyFailures {
-                    activityViewModel?.failOperation(id: operationId, error: summary)
-                } else {
-                    activityViewModel?.completeOperation(id: operationId, detail: summary)
-                }
+            let activityResult = Self.activityResult(result)
+            if result.wasCancelled || cancellationRequested {
+                operationId.cancelled(activityResult)
+            } else {
+                operationId.finish(activityResult)
             }
         }
 
@@ -915,18 +903,34 @@ final class SyncService {
     /// registration and the finalisation block leaves the row permanently `.running` — the caller cannot
     /// terminalise it because `operationId` is local to `executeSync`.
     private func finalisingOperationOnThrow<T>(
-        _ operationId: UUID?,
+        _ operationId: ActivityOperationHandle?,
         _ work: () async throws -> T
     ) async rethrows -> T {
         do { return try await work() }
         catch {
-            if let operationId {
-                await MainActor.run {
-                    self.activityViewModel?.failOperation(id: operationId, error: error.localizedDescription)
-                }
-            }
+            operationId?.fail(cause: error.localizedDescription, fix: .runAgain)
             throw error
         }
+    }
+
+    /// `214 synced · 3 failed · 9 skipped`, failures grouped by their reason (the tracks are
+    /// in the per-item list; they are not download failures).
+    static func activityResult(_ result: SyncResult) -> ActivityResult {
+        var order: [String] = []
+        var byReason: [String: Int] = [:]
+        for failure in result.failedTracks {
+            if byReason[failure.reason] == nil { order.append(failure.reason) }
+            byReason[failure.reason, default: 0] += 1
+        }
+        return ActivityResult(
+            counts: [ActivityCount(.done, result.syncedCount, "synced"),
+                     ActivityCount(.failed, result.failedCount, "failed"),
+                     ActivityCount(.skipped, result.skippedCount, "skipped")],
+            failureGroups: order.map { ActivityFailureGroup(cause: $0, count: byReason[$0] ?? 1, fix: .runAgain, isRetryable: true) },
+            items: result.failedTracks.map {
+                ActivityItemOutcome(word: "Failed", title: "\($0.artist) — \($0.title)", trackID: $0.trackId,
+                                    reason: $0.reason, isFailure: true)
+            })
     }
 
     // MARK: - Single-Track Retry (D-13 / SYNC-v2-17)

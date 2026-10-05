@@ -1975,8 +1975,8 @@ struct GrooveStudioView: View {
         exportCancelRequested = false
         
         exportTask = Task { [transcodeCache, configRepository, backgroundProcessing] in
-            let activityVM = container.activityViewModel
-            var operationId: UUID? = nil
+            // Activity (W3-ACT): `Export Create ML training set`, with the sheet's real Cancel.
+            var operationId: ActivityOperationHandle? = nil
             
             do {
                 // 1. Fetch all tracks with genre
@@ -2008,10 +2008,10 @@ struct GrooveStudioView: View {
                 }
                 
                 // Start background operation
-                operationId = activityVM?.startOperation(
-                    type: .createMLExport,
-                    title: "CreateML Export: \(destURL.lastPathComponent)",
-                    detail: "Starting export of \(total) tracks..."
+                operationId = ActivityCenter.shared.begin(
+                    .createMLExport, title: "Export Create ML training set",
+                    subject: .genres, progress: ActivityProgress(total: total), itemNoun: .track,
+                    controls: ActivityControls(cancel: { Task { @MainActor in self.cancelExport() } })
                 )
                 AppLogger.shared.info("CreateML: Starting export of \(total) tracks to \(destURL.lastPathComponent)", source: "CreateML")
                 
@@ -2126,9 +2126,7 @@ struct GrooveStudioView: View {
                         }
                         
                         // Update background operation
-                        if let opId = operationId {
-                            activityVM?.updateProgress(id: opId, progress: currentProgress, detail: "[\(completedCount)/\(total)] tracks exported...")
-                        }
+                        operationId?.update(completed: completedCount, total: total)
                     }
                 }
                 
@@ -2137,25 +2135,20 @@ struct GrooveStudioView: View {
                     if exportCancelRequested {
                         self.exportProgressText = "Export cancelled."
                         self.exportProgress = 0.0
-                        if let opId = operationId {
-                            activityVM?.failOperation(id: opId, error: "Cancelled by user")
-                        }
+                        // A user cancel is Cancelled, not Failed (job-kind map).
+                        operationId?.cancelled()
                         AppLogger.shared.info("CreateML: Export cancelled.", source: "CreateML")
                     } else {
                         self.exportProgressText = "Exported \(total) tracks into genre folders."
                         self.exportProgress = 1.0
-                        if let opId = operationId {
-                            activityVM?.completeOperation(id: opId, detail: "\(total) tracks exported")
-                        }
+                        operationId?.finish(ActivityResult(counts: [ActivityCount(.done, total, "exported")]))
                         AppLogger.shared.info("CreateML: Export complete. \(total) tracks exported to '\(destURL.lastPathComponent)'.", source: "CreateML")
                     }
                 }
                 
             } catch {
                 AppLogger.shared.error("CreateML: Export failed: \(error.localizedDescription)", source: "CreateML")
-                if let opId = operationId {
-                    activityVM?.failOperation(id: opId, error: error.localizedDescription)
-                }
+                operationId?.fail(cause: error.localizedDescription)
                 await MainActor.run {
                     self.isExporting = false
                     self.exportProgressText = "Export failed: \(error.localizedDescription)"
