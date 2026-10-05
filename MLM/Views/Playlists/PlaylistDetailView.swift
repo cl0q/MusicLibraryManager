@@ -66,6 +66,8 @@ struct PlaylistDetailView: View {
                     }
                 }
                 .background(Color.mlmBase)
+                // Track ▸ Refresh from ‹Source› ⌘R for a linked playlist (W1-2, UC-KEY-15).
+                .focusedSceneValue(\.playlistSourceRefresh, sourceRefresh)
             } else {
                 ProgressView("Loading…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -457,6 +459,17 @@ struct PlaylistDetailView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+
+    /// The page's `Sync` (refresh from the linked source) for the menu bar's ⌘R.
+    private var sourceRefresh: PlaylistSourceRefresh? {
+        guard let viewModel, viewModel.canSync, let id = playlist.id else { return nil }
+        return PlaylistSourceRefresh(
+            playlistID: id,
+            sourceName: viewModel.source?.playlistSourceIdentity.displayName,
+            isRunning: viewModel.isSyncingSource,
+            perform: { Task { await viewModel.syncSource() } }
+        )
     }
 
     // MARK: - Action Buttons

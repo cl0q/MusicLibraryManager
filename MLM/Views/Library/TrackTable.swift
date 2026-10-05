@@ -47,6 +47,8 @@ struct TrackTable: View {
     var isLoading: Bool = false
     var errorMessage: String? = nil
     var contextMenuAllowsLibraryActions: Bool = true
+    /// What this list is for the menu bar's track commands (`TrackSelection`, W1-2).
+    var listContext: TrackListContext = .unnamed
     private let emptyContent: AnyView
 
     var accessibilityID: String = "track_table"
@@ -73,9 +75,11 @@ struct TrackTable: View {
         isLoading: Bool = false,
         errorMessage: String? = nil,
         contextMenuAllowsLibraryActions: Bool = true,
+        listContext: TrackListContext = .unnamed,
         @ViewBuilder emptyContent: @escaping () -> EmptyContent,
         accessibilityID: String = "track_table"
     ) {
+        self.listContext = listContext
         self.rows = rows
         self._selection = selection
         self.initialSortOrder = initialSortOrder
@@ -264,6 +268,27 @@ struct TrackTable: View {
         }
         .accessibilityIdentifier(accessibilityID)
         .accessibilityLabel(accessibilityID)
+        // The menu bar's Track commands act on this list while it has focus (UC-SEL-02).
+        .focusedValue(\.trackSelection, menuSelection)
+    }
+
+    /// This list as the Track menu sees it (`TrackSelection`, W1-2).
+    private var menuSelection: TrackSelection {
+        let selection = $selection
+        let rows = self.rows
+        return TrackSelection(
+            selectedIDs: selection.wrappedValue,
+            rows: { rows.map(\.track) },
+            context: listContext,
+            target: TrackCommandTarget(
+                activate: onDoubleClick,
+                removeFromContainer: onRemoveFromPlaylist,
+                deselectAll: { selection.wrappedValue = [] },
+                playlists: availablePlaylists.filter { $0.id != playlist?.id },
+                syncProfiles: availableSyncProfiles,
+                addToSyncProfile: addToSyncProfile
+            )
+        )
     }
 
     // MARK: - States

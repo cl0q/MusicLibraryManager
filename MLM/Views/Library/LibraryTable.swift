@@ -46,6 +46,7 @@ struct LibraryTable: View {
             },
             isLoading: viewModel.isLoading,
             errorMessage: viewModel.errorMessage,
+            listContext: .allTracks,
             emptyContent: {
                 if viewModel.searchQuery.isEmpty {
                     ContentUnavailableView {

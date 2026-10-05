@@ -196,130 +196,11 @@ struct TrackContextMenu: View {
 
     // MARK: - Removal
 
-    /// Capture the selection (the context menu is rebuilt every right-
-    /// click so `selectedTracks` is only valid synchronously) and decide
-    /// whether to prompt before proceeding.
+    /// Remove from Library…: the shared confirmation and Trash flow (`TrackLibraryRemoval`,
+    /// also used by Track ▸ Remove from Library…). The selection is captured now — the
+    /// context menu is rebuilt on every right-click.
     private func handleRemoveTapped() {
-        let snapshot = selectedTracks
-        let ids = snapshot.compactMap(\.id)
-        guard !ids.isEmpty else { return }
-        let needsConfirm = snapshot.contains { $0.isLocal }
-        if needsConfirm {
-            // Defer to the next runloop tick so the context menu has
-            // finished dismissing before the alert tries to attach itself
-            // to the key window — otherwise the modal can land behind the
-            // menu's dimmed layer and feel like nothing happened.
-            DispatchQueue.main.async {
-                if confirmRemovalAlert(count: snapshot.count) {
-                    performRemoval(snapshot: snapshot, ids: ids)
-                }
-            }
-        } else {
-            performRemoval(snapshot: snapshot, ids: ids)
-        }
-    }
-
-    /// Native NSAlert is synchronous and survives the context menu
-    /// teardown that breaks SwiftUI's `.confirmationDialog` here.
-    private func confirmRemovalAlert(count: Int) -> Bool {
-        let alert = NSAlert()
-        alert.messageText = count > 1
-            ? "Remove \(count) tracks from Library?"
-            : "Remove track from Library?"
-        alert.informativeText = "This moves local files to the Trash. You can restore them from there. Remote links are removed from the Library."
-        alert.alertStyle = .warning
-        let trash = alert.addButton(withTitle: "Move to Trash")
-        trash.hasDestructiveAction = true
-        alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn
-    }
-
-    private func performRemoval(snapshot: [Track], ids: [Int64]) {
-        removeSelectedTracks(snapshot: snapshot, ids: ids)
-    }
-
-    /// Trash any local files, then drop the track rows from the DB.
-    ///
-    /// - Local tracks → `FileManager.trashItem(at:)` so the file lands in
-    ///   the user's Trash (recoverable) before the DB row is removed.
-    /// - Remote tracks → DB row only.
-    /// - Posts `.libraryDidDeleteTracks` so Library/Folders/Playlists views
-    ///   refresh.
-    private func removeSelectedTracks(snapshot: [Track], ids: [Int64]) {
-        guard let trackRepo = container.trackRepository else { return }
-        Task {
-            var removableIDs = Set(snapshot.filter(\.isRemote).compactMap(\.id))
-            var failures: [String] = []
-            var trashedItems: [(original: URL, trash: URL?)] = []
-
-            // A local row is removable only after its corresponding file
-            // successfully reaches Trash. Keep the returned Trash URL until
-            // the database mutation succeeds so a failed mutation remains
-            // recoverable.
-            for track in snapshot where track.isLocal {
-                guard let id = track.id else { continue }
-                guard let url = await resolveLocalURL(for: track) else {
-                    failures.append("\(track.artist) — \(track.title): file could not be located")
-                    continue
-                }
-                do {
-                    var trashed: NSURL?
-                    try FileManager.default.trashItem(at: url, resultingItemURL: &trashed)
-                    removableIDs.insert(id)
-                    trashedItems.append((url, trashed as URL?))
-                } catch {
-                    failures.append("\(track.artist) — \(track.title): \(error.localizedDescription)")
-                }
-            }
-
-            let deletableIDs = ids.filter { removableIDs.contains($0) }
-            do {
-                if !deletableIDs.isEmpty {
-                    try await trackRepo.delete(ids: deletableIDs)
-                }
-                AppLogger.shared.log(
-                    "Removed \(deletableIDs.count) track(s) from library",
-                    level: .info,
-                    source: "Library"
-                )
-                if !deletableIDs.isEmpty {
-                    NotificationCenter.default.post(
-                        name: .libraryDidDeleteTracks,
-                        object: nil,
-                        userInfo: ["removedIds": deletableIDs]
-                    )
-                }
-                if !failures.isEmpty {
-                    await presentRemovalFailure(
-                        "Some tracks were kept in the Library because they could not be moved to Trash.",
-                        details: failures.joined(separator: "\n")
-                    )
-                }
-            } catch {
-                let recovery = trashedItems.map { item in
-                    "\(item.original.lastPathComponent) (Trash: \(item.trash?.path ?? "unknown location"))"
-                }.joined(separator: "\n")
-                AppLogger.shared.log(
-                    "Failed to remove tracks after trashing files: \(error). Recovery: \(recovery)",
-                    level: .error,
-                    source: "Library"
-                )
-                await presentRemovalFailure(
-                    "The Library database could not be updated. The moved files remain in Trash and can be restored.",
-                    details: recovery.isEmpty ? error.localizedDescription : recovery
-                )
-            }
-        }
-    }
-
-    @MainActor
-    private func presentRemovalFailure(_ message: String, details: String) {
-        let alert = NSAlert()
-        alert.messageText = "Could Not Remove All Tracks"
-        alert.informativeText = "\(message)\n\n\(details)"
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
+        TrackLibraryRemoval.request(selectedTracks, container: container)
     }
 
     // MARK: - Actions
@@ -381,24 +262,9 @@ struct TrackContextMenu: View {
         }
     }
 
-    /// Resolve a track to an on-disk URL using library root + organized_path,
-    /// with `original_path` as a filesystem fallback. Returns nil if no
-    /// resolvable file exists.
+    /// The track's file, if it can be found (`TrackFileLocator`).
     private func resolveLocalURL(for track: Track) async -> URL? {
-        let root = (try? await container.configRepository?.getLibraryRoot()) ?? nil
-        if let root, let organized = track.organizedPath, !organized.isEmpty {
-            let url = URL(fileURLWithPath: root).appendingPathComponent(organized)
-            if FileManager.default.fileExists(atPath: url.path) { return url }
-        }
-        // Fallback: original_path, only when it looks like a real filesystem path
-        let raw = track.originalPath
-        if raw.hasPrefix("/") || raw.hasPrefix("~") {
-            let expanded = (raw as NSString).expandingTildeInPath
-            if FileManager.default.fileExists(atPath: expanded) {
-                return URL(fileURLWithPath: expanded)
-            }
-        }
-        return nil
+        await TrackFileLocator.localURL(for: track, container: container)
     }
 
     private func addToPlaylist(_ playlist: Playlist) {

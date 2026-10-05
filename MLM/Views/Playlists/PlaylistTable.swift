@@ -151,6 +151,8 @@ struct PlaylistTable: View {
                     onTrackDoubleClick?(track, viewModel.displayedTracks)
                 }
             }
+            // The menu bar's Track commands act on this playlist while it has focus (W1-2).
+            .focusedValue(\.trackSelection, menuSelection)
         }
         .task {
             updateCachedRows()
@@ -164,6 +166,33 @@ struct PlaylistTable: View {
         .onChange(of: sortOrder) {
             updateCachedRows()
         }
+    }
+
+    /// This playlist as the Track menu sees it (`TrackSelection`): rows in the order shown,
+    /// `Remove from “‹name›”` through the page's removal flow.
+    private var menuSelection: TrackSelection {
+        let viewModel = self.viewModel
+        let rows = cachedRows
+        let onRemoveTracks = self.onRemoveTracks
+        let container = self.container
+        return TrackSelection(
+            selectedIDs: viewModel.selectedTrackIDs,
+            rows: { rows.map(\.track) },
+            context: playlist.id.map { .playlist(id: $0, name: playlist.name) } ?? .unnamed,
+            target: TrackCommandTarget(
+                activate: onTrackDoubleClick,
+                removeFromContainer: { ids in Task { await onRemoveTracks(ids) } },
+                deselectAll: { viewModel.selectedTrackIDs = [] },
+                playlists: availablePlaylists.filter { $0.id != playlist.id },
+                syncProfiles: availableSyncProfiles,
+                addToSyncProfile: { profile, ids in
+                    Task {
+                        container.syncViewModel?.selectedProfile = profile
+                        await container.syncViewModel?.addTracks(Array(ids))
+                    }
+                }
+            )
+        )
     }
 
     // MARK: - Insert Handling
