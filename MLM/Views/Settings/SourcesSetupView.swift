@@ -8,6 +8,7 @@ import SwiftUI
 /// in on every launch. Empty value clears the entry.
 struct SourcesSetupView: View {
     @Environment(\.container) private var container
+    @Environment(\.openSettings) private var openSettings
     @State private var squidCookie: String = ""
     @State private var savedAt: Date?
     @State private var pendingDisconnect: TokenStorage.Service?
@@ -142,7 +143,7 @@ struct SourcesSetupView: View {
                 }
             } else {
                 Button("Reconnect") {
-                    AppDelegate.shared?.showSettingsWindow()
+                    openSettings(tab: .sources)
                 }
             }
         }

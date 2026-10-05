@@ -371,6 +371,8 @@ enum SnapshotFixtures {
         "Settings/MaintenanceView.swift": "Deferred: reads shared BatchControl/maintenance queues and paths; inject passive state.",
         "Settings/SettingsView.swift": "Deferred: AppStorage selection and PlaybackSettings read real defaults; inject preference store.",
         "Settings/SourcesSetupView.swift": "Deferred: AppStorage cookie and credential state require isolated preferences and auth provider.",
+        "Settings/GeneralSettingsView.swift": "Deferred: reads the shared library launch coordinator's registry setting; inject a registry store.",
+        "Settings/SettingsTab.swift": "Non-view: settings tab enum and router.",
         "Sidebar/LibraryFooter.swift": "Deferred: reads the launch coordinator singleton and live library counts; needs injected library identity.",
         "Sidebar/SidebarView.swift": "Deferred: composes shell environment (navigation, sidebar model, actions) and live sync state; needs a shell fixture.",
         "Shell/NavigationModel.swift": "Non-view: navigation state (destinations, pushed routes, history).",
@@ -431,8 +433,10 @@ Search/GlobalSearchPresentationView.swift
 Search/UniversalSearchView.swift
 Settings/BackupSettingsView.swift
 Settings/DataLocationsView.swift
+Settings/GeneralSettingsView.swift
 Settings/LibrarySetupView.swift
 Settings/MaintenanceView.swift
+Settings/SettingsTab.swift
 Settings/SettingsView.swift
 Settings/SourcesSetupView.swift
 Shared/DownloadRetryBudget.swift

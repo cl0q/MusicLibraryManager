@@ -32,17 +32,17 @@ struct BackupSettingsViewTests {
         }
     }
 
-    @Test func backupTabFollowsMaintenance() throws {
+    /// UC-WIN-03 order (W1-2): Backup sits between Sources and Storage Location and hosts the
+    /// existing pane.
+    @Test func backupTabSitsBetweenSourcesAndStorageLocation() throws {
+        let tabs = SettingsTab.allCases
+        let backup = try #require(tabs.firstIndex(of: .backup))
+        #expect(tabs[backup - 1] == .sources)
+        #expect(tabs[backup + 1] == .storage)
+        #expect(SettingsTab.backup.title == "Backup")
+        #expect(SettingsTab.backup.systemImage == "externaldrive.badge.timemachine")
         let src = try source("MLM/Views/Settings/SettingsView.swift")
-        let maintenance = try #require(src.range(of: ".tag(\"maintenance\")"))
-        let backup = try #require(src.range(of: ".tag(\"backup\")"))
-        #expect(maintenance.upperBound <= backup.lowerBound)
-        #expect(src.contains("BackupSettingsView()"))
-        #expect(src.contains("Label(\"Backup\", systemImage: \"externaldrive.badge.timemachine\")"))
-
-        // Backup comes directly after Maintenance, before the next tab.
-        let playback = try #require(src.range(of: ".tag(\"playback\")"))
-        #expect(backup.upperBound <= playback.lowerBound)
+        #expect(src.contains("pane(.backup) { BackupSettingsView() }"))
     }
 
     @Test func paneUsesGroupedFormAndContainer() throws {

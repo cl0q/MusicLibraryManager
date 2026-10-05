@@ -87,13 +87,23 @@ struct LibraryFinderIntegrationTests {
 
     @Test func fileMenuHasTheLibraryItems() throws {
         let src = try source("MLM/App/LibraryCommands.swift")
-        for string in ["New Library…", "Open Library…", "Open Recent", " — Not found", " — Not connected"] {
+        for string in [" — Not found", " — Not connected"] {
             #expect(src.contains(string), "missing menu copy: \(string)")
         }
-        #expect(src.contains(".keyboardShortcut(\"o\")"))
-        #expect(!src.contains("Clear Menu"))
-        let app = try source("MLM/App/MLMApp.swift")
-        #expect(app.contains("LibraryCommands("))
+        for item in ["CommandButton(.newLibrary", "CommandButton(.openLibrary", "CommandSubmenu(.openRecent",
+                     "CommandButton(.showLibraryFileInFinder"] {
+            #expect(src.contains(item), "missing File menu item: \(item)")
+        }
+        let catalog = try source("MLM/App/Commands/MenuCatalog.swift")
+        for string in ["\"New Library…\"", "\"Open Library…\", shortcut: .cmd(\"o\")", "\"Open Recent\"",
+                       "\"Show Library File in Finder\""] {
+            #expect(catalog.contains(string), "missing catalog entry: \(string)")
+        }
+        // Clear Menu exists (UC-MENU-05) but stays disabled until W3-LAUNCH can remove libraries.
+        #expect(src.contains("CommandButton(.clearRecentLibraries)"))
+        #expect(catalog.contains("title: \"Clear Menu\""))
+        let file = try source("MLM/App/Commands/FileCommands.swift")
+        #expect(file.contains("LibraryCommands(launch: launch)"))
     }
 
     @Test func switchAlertUsesApprovedCopy() throws {
@@ -108,11 +118,16 @@ struct LibraryFinderIntegrationTests {
 
     @Test func libraryTabShowsTheLibraryFileSection() throws {
         let src = try source("MLM/Views/Settings/LibrarySetupView.swift")
-        for string in [
-            "Library file", "Show in Finder", "Open the last library at launch",
-            "When off, MLM asks which library to open at launch.",
-        ] {
+        for string in ["Library file", "Show in Finder"] {
             #expect(src.contains(string), "missing Library tab copy: \(string)")
+        }
+        // The launch choice is about MLM, not one library: Settings ▸ General (W1-2, UC-WIN-04).
+        #expect(!src.contains("\"Open the last library at launch\""))
+        let general = try source("MLM/Views/Settings/GeneralSettingsView.swift")
+        for string in [
+            "Open the last library at launch", "When off, MLM asks which library to open at launch.",
+        ] {
+            #expect(general.contains(string), "missing General tab copy: \(string)")
         }
     }
 

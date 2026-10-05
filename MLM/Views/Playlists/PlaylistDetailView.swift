@@ -25,6 +25,7 @@ struct PlaylistDetailView: View {
     var onTrackDoubleClick: ((Track, [Track]) -> Void)?
 
     @Environment(\.container) private var container
+    @Environment(\.openSettings) private var openSettings
     @State private var viewModel: PlaylistDetailViewModel?
     @State private var showM3UImporter = false
     @State private var showAddFromLibrary = false
@@ -65,6 +66,8 @@ struct PlaylistDetailView: View {
                     }
                 }
                 .background(Color.mlmBase)
+                // Track ▸ Refresh from ‹Source› ⌘R for a linked playlist (W1-2, UC-KEY-15).
+                .focusedSceneValue(\.playlistSourceRefresh, sourceRefresh)
             } else {
                 ProgressView("Loading…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -458,6 +461,17 @@ struct PlaylistDetailView: View {
         .padding(.vertical, 12)
     }
 
+    /// The page's `Sync` (refresh from the linked source) for the menu bar's ⌘R.
+    private var sourceRefresh: PlaylistSourceRefresh? {
+        guard let viewModel, viewModel.canSync, let id = playlist.id else { return nil }
+        return PlaylistSourceRefresh(
+            playlistID: id,
+            sourceName: viewModel.source?.playlistSourceIdentity.displayName,
+            isRunning: viewModel.isSyncingSource,
+            perform: { Task { await viewModel.syncSource() } }
+        )
+    }
+
     // MARK: - Action Buttons
 
     private func actionButtons(_ viewModel: PlaylistDetailViewModel) -> some View {
@@ -622,7 +636,7 @@ struct PlaylistDetailView: View {
                         Spacer()
                         if track.downloadFailureRecord?.reason.localizedCaseInsensitiveContains("open Settings") == true {
                             Button("Open Settings") {
-                                Task { @MainActor in AppDelegate.shared?.showSettingsWindow() }
+                                openSettings(tab: .sources)
                             }
                         }
                         if track.id != nil {

@@ -21,18 +21,11 @@ struct LibrarySetupView: View {
         Form {
             // MARK: - Library File Section (A3)
             if let package = container.activeLibrary?.packageURL {
+                // `Open the last library at launch` moved to Settings ▸ General (W1-2, ST-LIB.E04).
                 Section {
                     libraryFileRow(package)
-                    Toggle("Open the last library at launch", isOn: Binding(
-                        get: { LibraryLaunchCoordinator.shared.rememberLastLibrary },
-                        set: { LibraryLaunchCoordinator.shared.setRememberLastLibrary($0) }
-                    ))
                 } header: {
                     Label("Library file", systemImage: "opticaldisc")
-                } footer: {
-                    Text("When off, MLM asks which library to open at launch.")
-                        .font(MLMFont.muted)
-                        .foregroundColor(.mlmInkMuted)
                 }
             }
 

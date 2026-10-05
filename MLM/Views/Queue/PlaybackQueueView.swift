@@ -76,6 +76,7 @@ struct PlaybackQueueView: View {
                 guard let playbackVM = container.playbackViewModel else { return }
                 Task { await playbackVM.playTrack(track) }
             },
+            listContext: .queue,
             emptyContent: {
                 emptyState("No history yet", icon: "clock")
             },
@@ -99,6 +100,7 @@ struct PlaybackQueueView: View {
                 guard let playbackVM = container.playbackViewModel else { return }
                 Task { await playbackVM.playTrack(track) }
             },
+            listContext: .queue,
             emptyContent: {
                 emptyState("Nothing playing", icon: "pause.circle")
             },
@@ -122,6 +124,7 @@ struct PlaybackQueueView: View {
                 guard let playbackVM = container.playbackViewModel else { return }
                 Task { await playbackVM.playFromQueue(track: track) }
             },
+            listContext: .queue,
             emptyContent: {
                 emptyState("Queue is empty", icon: "list.number")
             },

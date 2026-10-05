@@ -101,9 +101,12 @@ struct PlaybackQueueViewTests {
     func queueOpensFromThePlayerAndTheMenu() throws {
         let player = try readSource("MLM/Views/Player/PlayerBar.swift")
         #expect(player.contains("toggle(.queue)"), "The player's queue button toggles the Queue column")
-        let app = try readSource("MLM/App/MLMApp.swift")
-        #expect(app.contains(".keyboardShortcut(\"u\", modifiers: [.command, .option])"), "⌥⌘U toggles the Queue")
-        #expect(!app.contains(".keyboardShortcut(\"8\")"), "⌘8 is gone")
+        let view = try readSource("MLM/App/Commands/ViewCommands.swift")
+        #expect(view.contains("CommandButton(.toggleQueue"), "View ▸ Show Queue toggles the Queue")
+        let catalog = try readSource("MLM/App/Commands/MenuCatalog.swift")
+        #expect(catalog.contains("case .toggleQueue: Entry(menu: .view, title: \"Show Queue\", shortcut: .cmd(\"u\", .option)"),
+                "⌥⌘U toggles the Queue")
+        #expect(!catalog.contains(".cmd(\"8\""), "⌘8 is gone")
     }
 
     // MARK: - SettingsView

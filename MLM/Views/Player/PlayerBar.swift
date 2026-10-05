@@ -10,23 +10,37 @@ struct PlayerBar: View {
 
     @State private var isSeeking = false
     @State private var seekFraction: Double = 0
-    @State private var volume: Double = 1.0
     @State private var showLargeCover = false
 
     var body: some View {
+        // Narrow windows give way in a fixed order (UC-TB-03): the title / artist column goes
+        // first; transport, scrubber, volume and the queue button stay.
+        ViewThatFits(in: .horizontal) {
+            playerRow(showsTrackInfo: true)
+            playerRow(showsTrackInfo: false)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .frame(minWidth: Self.minimumWidth, idealWidth: 620, maxWidth: 800)
+        // No background of its own: the toolbar's system glass is the player's surface
+        // (UC-TB-06, UC-GLASS-01/08).
+    }
+
+    /// Width below which the toolbar moves items to its overflow instead of squeezing the
+    /// player further (transport + cover + scrubber + volume + queue button).
+    static let minimumWidth: CGFloat = 340
+
+    private func playerRow(showsTrackInfo: Bool) -> some View {
         HStack(spacing: 10) {
             transportCluster
             coverThumbnail
-            trackInfoColumn
+            if showsTrackInfo {
+                trackInfoColumn
+            }
             scrubberSection
             volumeSection
             queueButton
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .frame(minWidth: 440, idealWidth: 620, maxWidth: 800)
-        // No background of its own: the toolbar's system glass is the player's surface
-        // (UC-TB-06, UC-GLASS-01/08).
     }
 
     // MARK: - Queue button (UC-TB-06)
@@ -239,11 +253,9 @@ struct PlayerBar: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 14)
 
-            Slider(value: $volume, in: 0...1)
+            // One volume for the slider and Playback ▸ Volume Up / Down (⌘↑ / ⌘↓).
+            Slider(value: Binding(get: { viewModel.volume }, set: { viewModel.setVolume($0) }), in: 0...1)
                 .frame(width: 76)
-                .onChange(of: volume) { _, newValue in
-                    viewModel.setVolume(newValue)
-                }
                 .accessibilityIdentifier("volume_slider")
                 .accessibilityLabel("volume_slider")
         }
@@ -259,6 +271,7 @@ struct PlayerBar: View {
     }
 
     private var volumeIcon: String {
+        let volume = viewModel.volume
         if volume < 0.01 { return "speaker.slash.fill" }
         if volume < 0.4 { return "speaker.fill" }
         return "speaker.wave.2.fill"

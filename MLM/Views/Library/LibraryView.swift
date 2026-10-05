@@ -11,10 +11,8 @@ struct LibraryView: View {
     var onTrackDoubleClick: ((Track, [Track]) -> Void)?
 
     @State private var viewModel: LibraryViewModel?
-    @State private var importViewModel: ImportViewModel?
     @State private var availablePlaylists: [Playlist] = []
     @State private var availableSyncProfiles: [SyncProfile] = []
-    @State private var isRescanning = false
     private let usesPreloadedModel: Bool
 
     init(
@@ -122,9 +120,7 @@ struct LibraryView: View {
             .disabled(viewModel.displayedTracks.isEmpty)
             .accessibilityIdentifier("library_shuffle_button")
 
-            ScanLibraryFolderButton(isRescanning: isRescanning) {
-                Task { await rescan() }
-            }
+            ScanLibraryFolderButton()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -138,20 +134,6 @@ struct LibraryView: View {
     }
 
     // MARK: - Actions
-
-    private func rescan() async {
-        guard !isRescanning else { return }
-        ensureImportViewModel()
-        guard let importVM = importViewModel else { return }
-
-        isRescanning = true
-        // The import view model only knows the library folder after loading it; without
-        // this the scan always stopped with "No library root configured".
-        await importVM.loadLibraryRoot()
-        await importVM.importLibrary()
-        await viewModel?.refresh()
-        isRescanning = false
-    }
 
     private func reloadPlaylists() async {
         guard let repo = container.playlistRepository else { return }
@@ -174,36 +156,27 @@ struct LibraryView: View {
         viewModel = container.libraryViewModel
     }
 
-    private func ensureImportViewModel() {
-        guard importViewModel == nil,
-              let importService = container.importService,
-              let configRepo = container.configRepository else { return }
-        importViewModel = ImportViewModel(
-            importService: importService,
-            configRepository: configRepo,
-            activityViewModel: container.activityViewModel
-        )
-    }
-
 }
 
-/// `Scan Library Folder` ⌘R. All Tracks stays alive while hidden, so the button is enabled
-/// only while All Tracks is the visible place (no other destination, nothing pushed over it,
-/// no search pane); only this small view reads that, so switching places doesn't re-render
-/// the table.
+/// `Scan Library Folder` — the shell's scan (`ShellActions.scanLibraryFolder()`), also in the
+/// Library menu and on ⌘R (Track ▸ Refresh from Source, the only ⌘R; UC-KEY-15/39). All Tracks
+/// stays alive while hidden, so the button is enabled only while All Tracks is the visible
+/// place; only this small view reads that, so switching places doesn't re-render the table.
 private struct ScanLibraryFolderButton: View {
-    let isRescanning: Bool
-    let action: () -> Void
-
     @Environment(\.container) private var container
     @Environment(NavigationModel.self) private var navigation: NavigationModel?
+    @Environment(ShellActions.self) private var actions: ShellActions?
+
+    private var isRescanning: Bool { actions?.isScanningLibraryFolder ?? false }
 
     private var isVisiblePlace: Bool {
         (navigation?.isAllTracksVisible ?? true) && !container.searchCoordinator.isPresented
     }
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            actions?.scanLibraryFolder()
+        } label: {
             if isRescanning {
                 ProgressView().controlSize(.small)
             } else {
@@ -211,8 +184,7 @@ private struct ScanLibraryFolderButton: View {
             }
         }
         .help("Scan the library folder for changes ⌘R")
-        .keyboardShortcut("r", modifiers: .command)
-        .disabled(isRescanning || !isVisiblePlace)
+        .disabled(actions == nil || isRescanning || !isVisiblePlace)
         .accessibilityIdentifier("rescan_button")
         .accessibilityLabel("rescan_button")
     }

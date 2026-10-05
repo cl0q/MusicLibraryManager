@@ -9,6 +9,7 @@ import SwiftUI
 /// (`LibraryCommands`).
 struct LibraryFooter: View {
     @Environment(\.container) private var container
+    @Environment(\.openSettings) private var openSettings
 
     private var launch: LibraryLaunchCoordinator { LibraryLaunchCoordinator.shared }
 
@@ -42,7 +43,7 @@ struct LibraryFooter: View {
             }
             .disabled(launch.activePackageURL == nil)
             Button("Library Settings…") {
-                Self.openLibrarySettings()
+                openSettings(tab: .library)
             }
         } label: {
             HStack(spacing: Spacing.s) {
@@ -114,12 +115,5 @@ struct LibraryFooter: View {
         case .notFound: return name + " — Not found"
         case .notConnected: return name + " — Not connected"
         }
-    }
-
-    /// `Library Settings…`: Settings on its Library tab (deep links proper arrive with W1-2).
-    @MainActor
-    static func openLibrarySettings() {
-        UserDefaults.standard.set("library", forKey: "settings.selectedTab")
-        AppDelegate.shared?.showSettingsWindow()
     }
 }

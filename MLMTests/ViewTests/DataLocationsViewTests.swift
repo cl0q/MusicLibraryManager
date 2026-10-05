@@ -36,15 +36,16 @@ struct DataLocationsViewTests {
         }
     }
 
-    @Test func storageTabSitsBetweenBackupAndPlayback() throws {
+    /// UC-WIN-03 order (W1-2): Storage Location sits between Backup and Maintenance.
+    @Test func storageTabSitsBetweenBackupAndMaintenance() throws {
+        let tabs = SettingsTab.allCases
+        let storage = try #require(tabs.firstIndex(of: .storage))
+        #expect(tabs[storage - 1] == .backup)
+        #expect(tabs[storage + 1] == .maintenance)
+        #expect(SettingsTab.storage.title == "Storage Location")
+        #expect(SettingsTab.storage.systemImage == "internaldrive")
         let src = try source("MLM/Views/Settings/SettingsView.swift")
-        let backup = try #require(src.range(of: ".tag(\"backup\")"))
-        let storage = try #require(src.range(of: ".tag(\"storage\")"))
-        let playback = try #require(src.range(of: ".tag(\"playback\")"))
-        #expect(backup.upperBound <= storage.lowerBound)
-        #expect(storage.upperBound <= playback.lowerBound)
-        #expect(src.contains("DataLocationsView()"))
-        #expect(src.contains("Label(\"Storage Location\", systemImage: \"internaldrive\")"))
+        #expect(src.contains("pane(.storage) { DataLocationsView() }"))
     }
 
     @Test func paneUsesGroupedFormAndContainer() throws {

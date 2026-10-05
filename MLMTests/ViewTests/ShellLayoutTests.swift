@@ -1,11 +1,12 @@
 import Testing
 import Foundation
+@testable import MLM
 
 /// Source-scan tests verifying the shell layout structure:
 /// - PlayerBar lives in a native ToolbarItem(placement: .principal) of the shell toolbar
 /// - The trailing column is the system `.inspector`, not an HSplitView (W1-1, DEC-007)
 /// - TrackDetailView puts waveform above header
-/// - Cmd+F is wired via NSEvent local monitor
+/// - ⌘F is Edit ▸ Find ▸ Search, not a key monitor (W1-2)
 /// - Search VM uses nonisolated helpers for off-main work
 /// - TrackRepository.search supports a limit parameter
 @Suite("ShellLayoutTests")
@@ -47,11 +48,16 @@ struct ShellLayoutTests {
                 "MLMApp must NOT use .hiddenTitleBar — use the native title bar")
     }
 
+    /// ⌘F is Edit ▸ Find ▸ Search, a menu key of the main window — no app-wide key monitor
+    /// (W1-2, UC-KEY-25/36, PP-SHELL-06).
     @Test
-    func contentView_cmdFMonitor() throws {
+    func cmdF_isTheFindMenuItemNotAKeyMonitor() throws {
         let src = try readSource("MLM/Views/ContentView/ContentView.swift")
-        #expect(src.contains("addLocalMonitorForEvents"),
-                "ContentView must use NSEvent.addLocalMonitorForEvents for Cmd+F")
+        #expect(!src.contains("addLocalMonitorForEvents"), "the app-wide ⌘F monitor is gone")
+        #expect(src.contains(".focusedSceneValue(\\.toolbarSearch"), "Edit ▸ Find reaches the main window's field")
+        let edit = try readSource("MLM/App/Commands/EditCommands.swift")
+        #expect(edit.contains("CommandButton(.search, enabled: search != nil)"))
+        #expect(edit.contains("search?.isPresented = true"))
     }
 
     @Test
@@ -93,15 +99,17 @@ struct ShellLayoutTests {
         #expect(!folders.contains(".toolbar"), "Folders must not add toolbar items (UC-TB-02)")
     }
 
+    @MainActor
     @Test
     func shortcuts_haveOneMeaningEach() throws {
-        let app = try readSource("MLM/App/MLMApp.swift")
-        let source = try #require(app.range(of: "Button(\"Import Playlist from Source…\")"))
-        #expect(String(app[source.upperBound...].prefix(250)).contains(".keyboardShortcut(\"i\", modifiers: [.command, .shift])"),
+        #expect(MenuCommand.importPlaylistFromSource.shortcut == .cmd("i", .shift),
                 "⇧⌘I belongs to Import Playlist from Source… (UC-KEY-22)")
-        #expect(!app.contains("Button(\"Import from Folder…\")"))
-        #expect(app.contains("Button(\"Import Files or Folder…\")"))
-        #expect(!app.contains("Button(\"Sources…\")"), "Sources pushes a page: no ellipsis (UC-COPY-05)")
+        #expect(MenuCommand.importFilesOrFolder.title == "Import Files or Folder…")
+        #expect(MenuCommand.importFilesOrFolder.shortcut == nil)
+        #expect(!MenuCommand.allCases.contains { $0.title == "Import from Folder…" || $0.title == "Sources…" })
+        let file = try readSource("MLM/App/Commands/FileCommands.swift")
+        #expect(file.contains("CommandButton(.importPlaylistFromSource, enabled: shellActions != nil)"))
+        #expect(file.contains("CommandButton(.importFilesOrFolder, enabled: shellActions != nil)"))
         let grid = try readSource("MLM/Views/Playlists/PlaylistsView.swift")
         #expect(!grid.contains(".keyboardShortcut(\"n\""), "File ▸ New Playlist owns ⌘N")
     }
@@ -131,6 +139,22 @@ struct ShellLayoutTests {
         ])
     }
 
+    /// UC-TB-03: the player's title column collapses first, Add goes to the overflow before
+    /// anything else; back/forward, player and Info stay (W1-2).
+    @Test
+    func toolbar_collapsesInTheDesignedOrder() throws {
+        let toolbar = try readSource("MLM/Views/Shell/ShellToolbar.swift")
+        let add = try #require(toolbar.range(of: "AddMenu()"))
+        #expect(String(toolbar[add.upperBound...].prefix(80)).contains(".visibilityPriority(.low)"))
+        for item in ["BackForwardButtons()", "PlayerBar(viewModel: playbackViewModel)", "InfoToggleButton()"] {
+            let range = try #require(toolbar.range(of: item))
+            #expect(String(toolbar[range.upperBound...].prefix(200)).contains(".visibilityPriority(.high)"), "\(item) never collapses")
+        }
+        let player = try readSource("MLM/Views/Player/PlayerBar.swift")
+        #expect(player.contains("ViewThatFits(in: .horizontal)"))
+        #expect(player.contains("playerRow(showsTrackInfo: true)") && player.contains("playerRow(showsTrackInfo: false)"))
+    }
+
     @Test
     func trackDetailView_waveformBeforeHeader() throws {
         let src = try readSource("MLM/Views/TrackDetail/TrackDetailView.swift")
@@ -143,22 +167,14 @@ struct ShellLayoutTests {
                 "waveformSection must appear before headerSection in TrackDetailView body")
     }
 
-    // MARK: - Task 3: Cmd+F via NSEvent monitor (not hidden button)
+    // MARK: - Task 3: ⌘F and ⌥⌘F in Edit ▸ Find (W1-2)
 
+    @MainActor
     @Test
-    func mlmApp_noShortcutOnMenuButton() throws {
-        let src = try readSource("MLM/App/MLMApp.swift")
-        // The Search Library menu button must NOT have .keyboardShortcut("f")
-        let searchButtonRange = src.range(of: "Button(\"Search Library\")")
-        guard let buttonStart = searchButtonRange?.lowerBound else {
-            Issue.record("MLMApp must contain a Search Library menu button")
-            return
-        }
-        // Look at the next ~300 chars after the button declaration
-        let afterButton = src[buttonStart...]
-        let snippet = String(afterButton.prefix(300))
-        #expect(!snippet.contains(".keyboardShortcut(\"f\")"),
-                "MLMApp Search Library menu button must NOT have .keyboardShortcut(\"f\") — the NSEvent monitor owns Cmd+F")
+    func find_searchAndSearchLibraryHaveTheirOwnKeys() throws {
+        #expect(MenuCommand.search.shortcut == .cmd("f"), "Search ⌘F (UC-KEY-25)")
+        #expect(MenuCommand.searchLibrary.shortcut == .cmd("f", .option), "Search Library ⌥⌘F (UC-KEY-25)")
+        #expect(MenuCommand.search.parent == .find && MenuCommand.searchLibrary.parent == .find)
     }
 
     // MARK: - Task 4: Typing latency

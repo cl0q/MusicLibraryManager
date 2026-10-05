@@ -4,6 +4,7 @@ import SwiftUI
 /// NSApplicationDelegate for lifecycle events.
 ///
 /// Handles app-level events like launch, termination, and dock menu.
+@MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
     static private(set) var shared: AppDelegate?
 
@@ -11,12 +12,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         super.init()
         AppDelegate.shared = self
     }
-
-    /// Lazily-created Settings window. We own this directly via AppKit
-    /// because every SwiftUI-native path (Settings scene, Window scene
-    /// + openWindow, sheet via NotificationCenter) failed in practice
-    /// — Apple's auto Settings menu item ignored our actions.
-    private var settingsWindowController: NSWindowController?
 
     /// Reusable window controller for the remote-playlists browser.
     /// Tracks which source it currently shows so we can focus (not rebuild)
@@ -55,33 +50,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Cleanup on termination
     }
 
+    /// Closing the main window (⌘W) does not quit; the Dock icon or Window ▸ MLM brings it back
+    /// (UC-WIN-01, M-FILE.E05).
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        false
     }
 
-    // MARK: - Settings Window
+    // MARK: - Dock menu (UC-DOCK-01)
 
-    /// Open (or focus) the Settings window. Called from the
-    /// CommandGroup(replacing: .appSettings) button in MLMApp.
-    @MainActor
-    func showSettingsWindow() {
-        if settingsWindowController == nil {
-            let hosting = NSHostingController(
-                rootView: SettingsView()
-                    .environment(\.container, DependencyContainer.shared)
-                    .frame(minWidth: 600, minHeight: 500)
-            )
-            let window = NSWindow(contentViewController: hosting)
-            window.title = "Settings"
-            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-            window.setContentSize(NSSize(width: 720, height: 560))
-            window.isReleasedWhenClosed = false
-            window.center()
-            settingsWindowController = NSWindowController(window: window)
-        }
-        NSApp.activate(ignoringOtherApps: true)
-        settingsWindowController?.showWindow(nil)
+    private let dockMenuTarget = DockMenuTarget()
+
+    /// Now playing, Play / Pause, Next, Previous and Open Recent (`DockMenuModel`); the system
+    /// appends its own items.
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        DockMenuBuilder.menu(
+            DockMenuBuilder.model(container: .shared, launch: .shared),
+            target: dockMenuTarget
+        )
     }
+
+    // Settings is the SwiftUI `Settings` scene (MLMApp, DEC-035); deep links go through
+    // `openSettings(tab:)` (`SettingsTab.swift`). The AppKit settings window is gone (UC-WIN-03).
 
     // MARK: - Remote Playlists Window
 

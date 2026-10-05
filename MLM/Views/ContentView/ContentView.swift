@@ -69,6 +69,9 @@ struct ContentView: View {
                 .focusedSceneValue(\.statusBarCenter, container.isInitialized ? shell.statusBar : nil)
                 .focusedSceneValue(\.shellActions, container.isInitialized ? shell.actions : nil)
                 .focusedSceneValue(\.playbackViewModel, container.playbackViewModel)
+                // Edit ▸ Find (⌘F, main window only) and Go ▸ Playlists (W1-2).
+                .focusedSceneValue(\.toolbarSearch, container.isInitialized ? shell.search : nil)
+                .focusedSceneValue(\.sidebarModel, container.isInitialized ? shell.sidebar : nil)
         )
     }
 
@@ -161,9 +164,6 @@ struct ContentView: View {
                         }
                     }
                 }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .searchCommandTriggered)) { _ in
-                shell.search.isPresented = true
             }
             .onReceive(NotificationCenter.default.publisher(for: .showReview)) { notification in
                 if let trackID = notification.userInfo?["trackId"] as? Int64 {
@@ -258,35 +258,8 @@ struct ContentView: View {
                 SearchPlace(navigation).hasLocalTable
             }
             container.searchCoordinator.context = searchPlace.context
-            installCmdFMonitor()
         }
-        .onDisappear { removeCmdFMonitor() }
-    }
-
-    // MARK: - Cmd+F via NSEvent local monitor (removed by W1-2 / W2-C)
-
-    @State private var cmdFMonitor: Any?
-
-    private func installCmdFMonitor() {
-        cmdFMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [search = shell.search] event in
-            let isCmdF = event.modifierFlags.contains(.command) &&
-                !event.modifierFlags.contains(.option) &&
-                !event.modifierFlags.contains(.control) &&
-                !event.modifierFlags.contains(.shift) &&
-                event.charactersIgnoringModifiers == "f"
-            if isCmdF {
-                MainActor.assumeIsolated { search.isPresented = true }
-                return nil
-            }
-            return event
-        }
-    }
-
-    private func removeCmdFMonitor() {
-        if let monitor = cmdFMonitor {
-            NSEvent.removeMonitor(monitor)
-            cmdFMonitor = nil
-        }
+        // ⌘F is Edit ▸ Find ▸ Search, a menu key of this window (W1-2); no app-wide key monitor.
     }
 
     // MARK: - Content column

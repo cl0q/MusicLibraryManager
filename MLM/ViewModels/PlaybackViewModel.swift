@@ -376,10 +376,16 @@ final class PlaybackViewModel {
         seek(to: position)
     }
 
-    /// Set the playback node volume (0.0 – 1.0).
+    /// The player volume (0.0 – 1.0), shared by the toolbar slider and Playback ▸ Volume Up /
+    /// Volume Down (W1-2). Persisting it across launches is W2-C.
+    private(set) var volume: Double = 1.0
+
+    /// Set the playback node volume (0.0 – 1.0, clamped).
     @MainActor
     func setVolume(_ volume: Double) {
-        audioPlayer.setVolume(Float(volume))
+        let clamped = min(max(volume, 0), 1)
+        self.volume = clamped
+        audioPlayer.setVolume(Float(clamped))
     }
 
     // MARK: - Queue Controls
