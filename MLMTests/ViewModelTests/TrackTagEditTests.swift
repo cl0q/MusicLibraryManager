@@ -269,10 +269,10 @@ struct TrackTagEditTests {
         let report = await env.queue.flushNow()
         #expect(report.written == 2)
         #expect(report.missing == 1)
-        #expect(report.failureMessage == "Tags of 1 file couldn’t be written — the file is missing")
-        #expect(env.status.message?.text == "Tags of 1 file couldn’t be written — the file is missing")
+        #expect(report.failureMessage == "Tags of 1 file couldn’t be written — file not found")
+        #expect(env.status.message?.text == "Tags of 1 file couldn’t be written — file not found")
         let waiting = try #require(try await env.repository.pendingWrite(trackID: ids[0]))
-        #expect(!waiting.blocked && waiting.lastError == "the file is missing")
+        #expect(!waiting.blocked && waiting.lastError == "file not found")
         // It is tried again next time; once found, written.
         env.writer.answers["0.mp3"] = nil
         #expect(await env.queue.flushNow().written == 1)
