@@ -45,9 +45,27 @@ struct QueueAdvanceTests {
     @Test func unplayableAtTheStartIsSkipped() {
         let result = QueueAdvance.next(
             queue: queue(context: [2, 3]), current: nil, repeatMode: .off, trigger: .userNext,
-            playability: verdicts([2: .driveNotConnected]))
+            playability: verdicts([2: .notDownloaded]))
         #expect(result.track?.id == 3)
-        #expect(result.skipped.map(\.reason) == [.driveNotConnected])
+        #expect(result.skipped.map(\.reason) == [.notDownloaded])
+        #expect(result.waitingForDrive == nil)
+    }
+
+    /// Review B1 (DEC-014): the disk being away is a wait, never a skip.
+    @Test func aTrackOnADiskThatIsAwayIsAWaitNotASkip() {
+        let q = queue(context: [2, 3, 4], playNext: [9])
+        for trigger in [QueueAdvance.Trigger.userNext, .trackEnded] {
+            // (Repeat One at the end of a track replays the current one — no queue involved.)
+            for mode in PlaybackRepeatMode.allCases where !(mode == .one && trigger == .trackEnded) {
+                let result = QueueAdvance.next(
+                    queue: q, current: track(1), repeatMode: mode, trigger: trigger,
+                    playability: verdicts([9: .notDownloaded, 2: .driveNotConnected]))
+                #expect(result.track == nil, "\(trigger) \(mode)")
+                #expect(result.waitingForDrive?.id == 2)
+                #expect(result.queue == q, "nothing consumed — not even the item passed before it")
+                #expect(result.skipped.isEmpty)
+            }
+        }
     }
 
     @Test func unplayableAtTheEndStopsWithTheSkipsReported() {
@@ -163,8 +181,21 @@ struct QueueAdvanceTests {
 
     @Test func previousPassesOverTracksThatCantPlayNow() {
         let decision = QueueAdvance.previous(history: [track(1), track(2), track(3)], current: track(3), position: 0,
+                                             playability: verdicts([2: .fileMissing]))
+        #expect(decision == .play(track(1), history: [], skipped: [SkippedTrack(track: track(2), reason: .fileMissing)]))
+    }
+
+    @Test func previousWaitsForADiskThatIsAway() {
+        let decision = QueueAdvance.previous(history: [track(1), track(2), track(3)], current: track(3), position: 0,
                                              playability: verdicts([2: .driveNotConnected]))
-        #expect(decision == .play(track(1), history: [], skipped: [SkippedTrack(track: track(2), reason: .driveNotConnected)]))
+        #expect(decision == .waitingForDrive(track(2)))
+    }
+
+    /// Review S9: Previous drops every trailing entry of the current track.
+    @Test func previousDropsTrailingEntriesOfTheCurrentTrack() {
+        let decision = QueueAdvance.previous(history: [track(1), track(2), track(2), track(2)], current: track(2), position: 0,
+                                             playability: verdicts([:]))
+        #expect(decision == .play(track(1), history: [], skipped: []))
     }
 
     @Test func previousWithNothingPlayableRestarts() {

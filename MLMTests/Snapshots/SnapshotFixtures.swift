@@ -337,6 +337,7 @@ enum SnapshotFixtures {
         "Player/PlayerBar.swift": "Deferred: concrete playback VM initializes audio/timer/media state; needs passive transport protocol.",
         "Player/PreviewWaveformScrubber.swift": "Deferred: drawn inside the deferred PlayerBar while previewing (W2-C).",
         "Player/LocateFile.swift": "Deferred: Locate File… is a system file panel; bitmap hosts don't present it (W2-C).",
+        "Player/PlaybackWindowSupport.swift": "Deferred: window-level Esc, status-bar relay and file panel; nothing drawn (W2-C review).",
         "Player/PlayerDisplay.swift": "Non-view: the player's state words, pure (W2-C).",
         "Player/GoToCurrentTrack.swift": "Non-view: Go to Current Track and the table reveal request (W2-C).",
         "TrackList/TrackListPreviewKeys.swift": "Non-view: preview key decisions and the focused table's key handler (W2-C).",
@@ -421,6 +422,7 @@ Library/LibraryView.swift
 Library/TrackContextMenu.swift
 Player/GoToCurrentTrack.swift
 Player/LocateFile.swift
+Player/PlaybackWindowSupport.swift
 Player/PlayerBar.swift
 Player/PlayerDisplay.swift
 Player/PreviewWaveformScrubber.swift

@@ -23,8 +23,8 @@ struct PlayerBar: View {
         .frame(minWidth: Self.minimumWidth, idealWidth: 620, maxWidth: 800)
         // No background of its own: the toolbar's system glass is the player's surface
         // (UC-TB-06, UC-GLASS-01/08).
-        .background { PlayerNoticeRelay(viewModel: viewModel) }
-        .locateFilePanel()
+        // The status-bar notes, the Locate File… panel and window-wide Esc live on the window
+        // content (`PlaybackWindowSupport`): this item can move into the toolbar's overflow.
     }
 
     /// Width below which the toolbar moves items to its overflow instead of squeezing the
@@ -92,7 +92,7 @@ private struct PlayerTransport: View {
 
     var body: some View {
         let hasTrack = viewModel.hasTrack
-        let canPlayPause = hasTrack || viewModel.preview.isActive
+        let canPlayPause = hasTrack || viewModel.preview.isActive || viewModel.canResumeQueue
         let isPlaying = viewModel.isPlaying
         HStack(spacing: Spacing.xxs) {
             Button {
@@ -401,37 +401,5 @@ private struct PlayerVolumeButton: View {
         if volume < 0.34 { return "speaker.wave.1.fill" }
         if volume < 0.67 { return "speaker.wave.2.fill" }
         return "speaker.wave.3.fill"
-    }
-}
-
-// MARK: - Status-bar notes
-
-/// Shows the player's notes (skips, refusals, failures) in this window's status bar, each
-/// with its one action (UC-STATUS-04/05/07). A leaf, so position ticks don't reach it.
-private struct PlayerNoticeRelay: View {
-    let viewModel: PlaybackViewModel
-    @Environment(StatusBarCenter.self) private var statusBar: StatusBarCenter?
-
-    var body: some View {
-        Color.clear
-            .frame(width: 0, height: 0)
-            .accessibilityHidden(true)
-            .onChange(of: viewModel.notice?.id) { _, _ in
-                guard let notice = viewModel.notice else { return }
-                statusBar?.post(notice.text, actions: notice.action.map { [statusAction($0)] } ?? [])
-            }
-    }
-
-    private func statusAction(_ action: PlaybackNotice.Action) -> StatusAction {
-        switch action {
-        case .download(let tracks):
-            StatusAction("Download") { TrackCommandActions.download(tracks) }
-        case .locate(let track):
-            StatusAction("Locate…") { LocateFileRequest.shared.begin(track) }
-        case .showInFinder(let url):
-            StatusAction("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-        case .tryAgain(let track):
-            StatusAction("Try Again") { [viewModel] in Task { await viewModel.playTrack(track) } }
-        }
     }
 }

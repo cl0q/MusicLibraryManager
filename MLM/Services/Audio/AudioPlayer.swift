@@ -4,6 +4,8 @@ import Foundation
 /// Protocol abstraction over AudioPlayer so PlaybackViewModel can be
 /// tested with a fake/stub implementation.
 protocol AudioPlayerControlling: AnyObject {
+    /// Open `url` and make it the loaded file (stopped, at 0). Throws **without touching** the
+    /// file that is loaded now: a file that can't be opened never stops what is playing.
     func loadFile(at url: URL) throws
     func play() throws
     func pause()
@@ -129,21 +131,25 @@ final class AudioPlayer: AudioPlayerControlling, @unchecked Sendable {
     /// - Parameter url: File URL to the audio file
     /// - Throws: `AudioPlayerError` if the file cannot be opened
     func loadFile(at url: URL) throws {
-        // Stop any current playback
-        stop()
-
+        // Open (and probe) the new file first; only a file that opened replaces the current one
+        // (W2-C review S8: a failed explicit play leaves playback as it was).
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw AudioPlayerError.fileNotFound(url.path)
         }
+        let file = try Self.openFile(at: url)
+        stop()
+        audioFile = file
+        audioFormat = file.processingFormat
+        sampleRate = file.processingFormat.sampleRate
+        totalFrames = file.length
+        duration = Double(file.length) / file.processingFormat.sampleRate
+        seekFrameOffset = 0
+    }
 
+    /// Open `url` for reading, with the format-mismatch remediation below.
+    private static func openFile(at url: URL) throws -> AVAudioFile {
         do {
-            let file = try AVAudioFile(forReading: url)
-            self.audioFile = file
-            self.audioFormat = file.processingFormat
-            self.sampleRate = file.processingFormat.sampleRate
-            self.totalFrames = file.length
-            self.duration = Double(file.length) / file.processingFormat.sampleRate
-            self.seekFrameOffset = 0
+            return try AVAudioFile(forReading: url)
         } catch {
             // Two known reasons Apple's ExtAudioFile rejects something
             // ffmpeg / VLC happily play:
@@ -161,13 +167,7 @@ final class AudioPlayer: AudioPlayerControlling, @unchecked Sendable {
             if let cleanedURL = try? Self.rewriteIfFormatMismatch(for: url),
                cleanedURL != url,
                let file = try? AVAudioFile(forReading: cleanedURL) {
-                self.audioFile = file
-                self.audioFormat = file.processingFormat
-                self.sampleRate = file.processingFormat.sampleRate
-                self.totalFrames = file.length
-                self.duration = Double(file.length) / file.processingFormat.sampleRate
-                self.seekFrameOffset = 0
-                return
+                return file
             }
             throw AudioPlayerError.cannotOpenFile(url.path, error.localizedDescription)
         }
@@ -309,6 +309,10 @@ final class AudioPlayer: AudioPlayerControlling, @unchecked Sendable {
            let playerTime = playerNode.playerTime(forNodeTime: nodeTime) {
             seekFrameOffset = seekFrameOffset + playerTime.sampleTime
         }
+        // `AVAudioPlayerNode.stop()` also calls the completion handler of the scheduled
+        // segment; without a new generation that callback would mark the file finished and
+        // reset the position to 0, so Resume would start from the beginning (W2-C review).
+        scheduleGeneration = Self.nextGeneration(after: scheduleGeneration)
         playerNode.stop()
         state = .paused
     }
@@ -321,6 +325,23 @@ final class AudioPlayer: AudioPlayerControlling, @unchecked Sendable {
         case .paused, .stopped:
             try play()
         }
+    }
+
+    /// The generation after `generation`: every stop, pause, seek and schedule takes a new one,
+    /// so only the completion of the segment scheduled last — and only while nothing stopped
+    /// it — counts as the natural end of the file.
+    static func nextGeneration(after generation: Int) -> Int { generation &+ 1 }
+
+    /// Whether a segment completion belongs to the natural end of the current schedule.
+    static func completionIsNaturalEnd(callbackGeneration: Int, currentGeneration: Int) -> Bool {
+        callbackGeneration == currentGeneration
+    }
+
+    /// Stop the audio engine (it keeps the output device busy). The next `play()` starts it
+    /// again. Used for the transient preview player when a preview ends.
+    func shutDownEngine() {
+        stop()
+        if engine.isRunning { engine.stop() }
     }
 
     /// Stop playback and reset to beginning.
@@ -356,7 +377,8 @@ final class AudioPlayer: AudioPlayerControlling, @unchecked Sendable {
 
         let wasPlaying = state == .playing
 
-        // Stop current scheduling
+        // Stop current scheduling (its completion must not count as the end of the file).
+        scheduleGeneration = Self.nextGeneration(after: scheduleGeneration)
         playerNode.stop()
         seekFrameOffset = targetFrame
 
@@ -365,6 +387,9 @@ final class AudioPlayer: AudioPlayerControlling, @unchecked Sendable {
             scheduleFile(file, from: targetFrame)
             playerNode.play()
             state = .playing
+        } else if state == .paused {
+            // Stays paused; the next play() resumes from the new offset.
+            state = .paused
         } else {
             // Just update the offset — will play from here on next play()
             state = .stopped
@@ -540,7 +565,9 @@ final class AudioPlayer: AudioPlayerControlling, @unchecked Sendable {
         ) { [weak self] in
             // Only handle natural end-of-track; ignore callbacks from stopped/seeked segments.
             DispatchQueue.main.async {
-                guard let self, self.scheduleGeneration == generation else { return }
+                guard let self,
+                      Self.completionIsNaturalEnd(callbackGeneration: generation, currentGeneration: self.scheduleGeneration)
+                else { return }
                 self.state = .stopped
                 self.seekFrameOffset = 0
             }

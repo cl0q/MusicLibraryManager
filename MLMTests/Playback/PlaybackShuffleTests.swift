@@ -70,6 +70,8 @@ private final class ShuffleFixtureDir {
 @Suite
 @MainActor
 struct PlaybackShuffleTests {
+    /// Injected defaults and file checks — never the developer's settings (S11).
+    private let env = PlaybackTestEnvironment()
 
     private func makeTrack(id: Int64, path: String) -> Track {
         var t = Track(
@@ -85,7 +87,7 @@ struct PlaybackShuffleTests {
 
     private func makeVM() -> (PlaybackViewModel, ShuffleFakeAudioPlayer, ShuffleFixtureDir) {
         let fake = ShuffleFakeAudioPlayer()
-        let vm = PlaybackViewModel(audioPlayer: fake)
+        let vm = PlaybackViewModel(audioPlayer: fake, environment: env.environment)
         let fixtures = ShuffleFixtureDir()
         return (vm, fake, fixtures)
     }
@@ -140,8 +142,7 @@ struct PlaybackShuffleTests {
     @Test
     func playShuffled_respectsContextCap() async {
         let (vm, _, fx) = makeVM()
-        UserDefaults.standard.set(5, forKey: "playback_context_cap")
-        defer { UserDefaults.standard.removeObject(forKey: "playback_context_cap") }
+        env.defaults.set(5, forKey: "playback_context_cap")
 
         let tracks = (1...150).map { makeTrack(id: Int64($0), path: fx.createFile("\($0).mp3")) }
 

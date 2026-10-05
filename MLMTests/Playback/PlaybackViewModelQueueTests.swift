@@ -95,6 +95,8 @@ private final class FixtureDir {
 @Suite
 @MainActor
 struct PlaybackViewModelQueueTests {
+    /// Injected defaults and file checks — never the developer's settings (S11).
+    private let env = PlaybackTestEnvironment()
 
     // MARK: - Helpers
 
@@ -115,7 +117,7 @@ struct PlaybackViewModelQueueTests {
 
     private func makeVM() -> (PlaybackViewModel, FakeAudioPlayer, FixtureDir) {
         let fake = FakeAudioPlayer()
-        let vm = PlaybackViewModel(audioPlayer: fake)
+        let vm = PlaybackViewModel(audioPlayer: fake, environment: env.environment)
         let fixtures = FixtureDir()
         return (vm, fake, fixtures)
     }
@@ -276,8 +278,7 @@ struct PlaybackViewModelQueueTests {
     func history_isCapped() async {
         let (vm, _, fx) = makeVM()
         // Set a small cap
-        UserDefaults.standard.set(3, forKey: "playback_history_size")
-        defer { UserDefaults.standard.removeObject(forKey: "playback_history_size") }
+        env.defaults.set(3, forKey: "playback_history_size")
 
         for i in 1...5 {
             let t = makeTrack(id: Int64(i), path: fx.createFile("\(i).mp3"), title: "T\(i)")
@@ -315,8 +316,7 @@ struct PlaybackViewModelQueueTests {
     @Test
     func contextCap_isApplied() async {
         let (vm, _, fx) = makeVM()
-        UserDefaults.standard.set(3, forKey: "playback_context_cap")
-        defer { UserDefaults.standard.removeObject(forKey: "playback_context_cap") }
+        env.defaults.set(3, forKey: "playback_context_cap")
 
         let tracks = (1...10).map { makeTrack(id: Int64($0), path: fx.createFile("\($0).mp3"), title: "T\($0)") }
         let first = tracks[0]

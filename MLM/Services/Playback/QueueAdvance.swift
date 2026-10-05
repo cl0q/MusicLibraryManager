@@ -67,6 +67,14 @@ struct SkippedTrack: Equatable, Sendable {
 /// per track (persisted availability + drive state, plus what the caller learned at open
 /// time). It never loops forever: every call consumes each queued item at most once, and
 /// Repeat All restarts the cycle at most once per call.
+///
+/// **The queue rule** (DEC-014, DEC-045):
+/// 1. A track that can't play for a reason of its own (not downloaded, download failed, file
+///    missing, unreadable) is *passed over*: it leaves Next and goes to History behind the
+///    track that plays, where it keeps its state word (the caller moves it). It is never lost.
+/// 2. A track whose disk is away is a **wait, never a skip**: the advance stops without taking
+///    anything out of the queue (`waitingForDrive`), the track stays at the head of Next, and
+///    playback continues from it once the disk is back.
 enum QueueAdvance {
     /// Why the queue is advancing.
     enum Trigger: Equatable, Sendable {
@@ -85,6 +93,9 @@ enum QueueAdvance {
         var skipped: [SkippedTrack]
         /// `track` is the current track again (Repeat One at the end of a track).
         var repeatsCurrent = false
+        /// The next track's disk is away: the advance waits. `queue` is the queue as given
+        /// (nothing consumed, nothing passed over), `track` is `nil`.
+        var waitingForDrive: Track?
     }
 
     /// Next / auto-advance.
@@ -115,6 +126,10 @@ enum QueueAdvance {
             if verdict.isPlayable {
                 return Result(track: candidate, queue: proposed, skipped: skipped)
             }
+            if verdict == .driveNotConnected {
+                // A wait, never a skip: the queue stays exactly as it was.
+                return Result(track: nil, queue: queue, skipped: [], waitingForDrive: candidate)
+            }
             let key = candidate.id ?? Int64.min
             if candidate.id == nil || skippedIDs.insert(key).inserted {
                 skipped.append(SkippedTrack(track: candidate, reason: verdict))
@@ -130,6 +145,8 @@ enum QueueAdvance {
         case restartCurrent(skipped: [SkippedTrack])
         /// Play `track`; `history` is the history without it and without the passed items.
         case play(Track, history: [Track], skipped: [SkippedTrack])
+        /// The previous track's disk is away: nothing changes (a wait, never a skip).
+        case waitingForDrive(Track)
     }
 
     static func previous(
@@ -142,8 +159,16 @@ enum QueueAdvance {
             return .restartCurrent(skipped: [])
         }
         var proposed = history
-        if let current, let index = proposed.lastIndex(where: { $0.id == current.id }) {
-            proposed.remove(at: index)
+        if let current {
+            // The current track's own entries at the end (one per play; Repeat One adds none).
+            var dropped = false
+            while let last = proposed.last, last.id != nil, last.id == current.id {
+                proposed.removeLast()
+                dropped = true
+            }
+            if !dropped, let index = proposed.lastIndex(where: { $0.id != nil && $0.id == current.id }) {
+                proposed.remove(at: index)
+            }
         }
         var skipped: [SkippedTrack] = []
         while let candidate = proposed.popLast() {
@@ -151,6 +176,7 @@ enum QueueAdvance {
             if verdict.isPlayable {
                 return .play(candidate, history: proposed, skipped: skipped)
             }
+            if verdict == .driveNotConnected { return .waitingForDrive(candidate) }
             skipped.append(SkippedTrack(track: candidate, reason: verdict))
         }
         return .restartCurrent(skipped: skipped)

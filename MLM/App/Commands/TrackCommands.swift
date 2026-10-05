@@ -25,7 +25,10 @@ struct TrackCommands: Commands {
             )
 
             CommandButton(.play, enabled: state.canPlay) {
-                if let first = tracks().first, let rows = selection?.rows { target.activate?(first, rows) }
+                if let first = tracks().first, let rows = selection?.rows {
+                    target.recordOrigin?()
+                    target.activate?(first, rows)
+                }
             }
             // The list's Space: starts / ends the preview of the selection (never Play/Pause).
             let previewing = DependencyContainer.shared.playbackViewModel?.preview.isActive == true

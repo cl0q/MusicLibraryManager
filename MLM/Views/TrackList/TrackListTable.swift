@@ -332,8 +332,13 @@ private struct TrackTablePublisher: ViewModifier {
                 actions.previewSelectionDidChange()
             }
             .onChange(of: visible) { _, nowVisible in
-                if !nowVisible { TrackTableVisibility.resignTableFocus() }
+                if !nowVisible {
+                    TrackTableVisibility.resignTableFocus()
+                    // Its preview can't be stopped from a list nobody sees (S4).
+                    actions.previewOwnerGone()
+                }
             }
+            .onDisappear { actions.previewOwnerGone() }
     }
 
     private func selection(summary: TrackSelectionSummary) -> TrackSelection {
@@ -362,7 +367,8 @@ private struct TrackTablePublisher: ViewModifier {
                 addToSyncProfile: { profile, ids in
                     actions.addToSyncProfile(profile, model.selectedRows(ids))
                 },
-                preview: { actions.preview() }
+                preview: { actions.preview() },
+                recordOrigin: { actions.recordPlaybackOrigin(trackID: nil) }
             ),
             rows: { model.tracks }
         )
@@ -447,6 +453,7 @@ enum TrackTableVisibility {
 private struct TrackListRevealTaker: View {
     let model: TrackListModel
     let configuration: TrackListConfiguration
+    @Environment(StatusBarCenter.self) private var statusBar: StatusBarCenter?
 
     var body: some View {
         let request = TrackListReveal.shared.request.flatMap { request in
@@ -456,10 +463,20 @@ private struct TrackListRevealTaker: View {
             .frame(width: 0, height: 0)
             .accessibilityHidden(true)
             .task(id: RevealKey(requestID: request?.id, rowsLoaded: request == nil ? 0 : model.rows.count)) {
-                guard let request, model.isLoaded, model.row(id: request.trackID) != nil else { return }
-                model.selection = [request.trackID]
-                model.scrollTo(request.trackID)
+                guard let request, model.isLoaded else { return }
+                if model.row(id: request.trackID) != nil {
+                    model.selection = [request.trackID]
+                    model.scrollTo(request.trackID)
+                    TrackListReveal.shared.done(request.id)
+                    return
+                }
+                // Loaded without the row: give a scope switch or reload a moment, then say why
+                // and end the request (W2-C review S6). A new row count restarts this task.
+                try? await Task.sleep(for: TrackListReveal.absentGrace)
+                guard !Task.isCancelled, TrackListReveal.shared.request?.id == request.id,
+                      model.row(id: request.trackID) == nil else { return }
                 TrackListReveal.shared.done(request.id)
+                statusBar?.post(TrackListReveal.absentMessage(title: request.title))
             }
     }
 

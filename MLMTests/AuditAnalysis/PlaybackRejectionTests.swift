@@ -23,7 +23,7 @@ private final class RejectionAudioPlayer: AudioPlayerControlling {
 struct PlaybackRejectionTests {
     /// PP-MAIN-01 (fixed in W2-C): Next onto a track whose file is gone no longer stalls on it
     /// and no longer blames "the file" in raw words. The missing file is recorded, the track is
-    /// skipped, history isn't touched, and with nothing playable left the player stops and
+    /// passed over into History, and with nothing playable left the player stops and
     /// names the track and the reason.
     @Test func missingTrackIsSkippedRecordedAndNamed() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -49,8 +49,9 @@ struct PlaybackRejectionTests {
 
         #expect(viewModel.currentTrack == nil)
         #expect(viewModel.cantPlay == CantPlayState(track: b, reason: .fileMissing))
-        #expect(viewModel.history == [a])
-        #expect(viewModel.upcoming.isEmpty, "the missing track is consumed, never retried")
+        #expect(viewModel.history == [a, b], "passed over: it moves to History with its state word")
+        #expect(viewModel.upcoming.isEmpty, "the missing track is passed, never retried")
+        await waitUntil { !env.recordedMissing.isEmpty }
         #expect(env.recordedMissing == [2])
         #expect(viewModel.notice?.text == "Skipped “B” — file missing")
         #expect(!(viewModel.notice?.text.contains("Playback unavailable") ?? true))

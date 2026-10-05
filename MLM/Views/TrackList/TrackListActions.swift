@@ -38,6 +38,20 @@ struct TrackListActions {
         preview.selectionChanged(owner: previewOwner, candidate: previewCandidate())
     }
 
+    /// Record this list as where the next playback comes from (⌘L) — every way it starts:
+    /// Return, the context menu's Play, Track ▸ Play, Play / Shuffle ‹view› (W2-C review S6).
+    func recordPlaybackOrigin(trackID: Int64?) {
+        guard let playback = container.playbackViewModel, let origin = playbackOrigin else { return }
+        playback.willActivate(trackID, from: origin)
+    }
+
+    /// This list stopped being the visible place or went away: a preview it owns ends and the
+    /// main track resumes (W2-C review S4).
+    func previewOwnerGone() {
+        guard let preview = container.playbackViewModel?.preview, preview.owner == previewOwner else { return }
+        preview.ownerGone(previewOwner)
+    }
+
     /// Locate File… (File missing / Download failed, one track).
     func locateFile(_ rows: [TrackRow]) {
         guard rows.count == 1, let row = rows.first else { return }
@@ -71,7 +85,7 @@ struct TrackListActions {
             if let playback {
                 // ⌘L returns to this list (W2-C); Return while previewing plays the previewed
                 // track for real from the previewed position (UC-KEY-06).
-                if let origin = playbackOrigin { playback.willActivate(row.id, from: origin) }
+                recordPlaybackOrigin(trackID: row.id)
                 playback.preview.handOver(row.track)
             }
             configuration.activate?(row.track, model.tracks)
@@ -126,6 +140,7 @@ struct TrackListActions {
                 && !TrackRowPresentation.isUnreachable(availability: row.availability, fileLocation: row.fileLocation, live: live.state)
         }
         guard let first = playable.first else { return }
+        recordPlaybackOrigin(trackID: first.id)
         configuration.activate?(first.track, playable.map(\.track))
     }
 

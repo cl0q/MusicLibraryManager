@@ -26,14 +26,16 @@ struct PlaybackCommands: Commands {
             // With nothing loaded, Play plays the current view (UC-MENU-05).
             CommandButton(.playPause,
                           title: playback?.isPlaying == true ? "Pause" : "Play",
-                          enabled: hasTrack || previewing || list?.canPlay == true) {
-                if let playback, playback.hasTrack || playback.preview.isActive {
+                          enabled: hasTrack || previewing || playback?.canResumeQueue == true || list?.canPlay == true) {
+                // A waiting queue (its disk came back) continues before the view plays.
+                if let playback, playback.hasTrack || playback.preview.isActive || playback.canResumeQueue {
                     playback.togglePlayPause()
                 } else {
                     list?.play()
                 }
             }
-            CommandButton(.stop, enabled: hasTrack || previewing) {
+            // Also clears a `Can’t play — …` line when nothing is loaded (S10).
+            CommandButton(.stop, enabled: hasTrack || previewing || playback?.cantPlay != nil) {
                 guard !KeyEquivalentGuard.stopKeyBelongsElsewhere() else { return }
                 playback?.stop()
             }
@@ -129,6 +131,8 @@ struct PlayableList {
     let rows: () -> [Track]
     let selected: () -> [Track]
     let activate: (Track, [Track]) -> Void
+    /// Records the list as the playing context (⌘L, W2-C).
+    var recordOrigin: () -> Void = {}
 
     /// `Play “Warm-up”` / `Shuffle All Tracks`; the plain verb when no named list is known
     /// (UC-MENU-03).
@@ -141,12 +145,14 @@ struct PlayableList {
     func play() {
         let rows = rows()
         guard let first = selected().first(where: \.isLocal) ?? rows.first(where: \.isLocal) else { return }
+        recordOrigin()
         activate(first, rows)
     }
 
     func shuffle() {
         let playable = rows().filter(\.isLocal)
         guard !playable.isEmpty, let playback = DependencyContainer.shared.playbackViewModel else { return }
+        recordOrigin()
         Task { await playback.playShuffled(playable) }
     }
 
@@ -159,7 +165,8 @@ struct PlayableList {
     ) -> PlayableList? {
         if let selection, let name = selection.context.viewName, let listActivate = selection.target.activate {
             return PlayableList(name: name, canPlay: selection.hasPlayableRows, rows: { selection.rows },
-                                selected: { selection.selectedTracks }, activate: listActivate)
+                                selected: { selection.selectedTracks }, activate: listActivate,
+                                recordOrigin: { selection.target.recordOrigin?() })
         }
         guard let navigation, navigation.isAllTracksVisible,
               !DependencyContainer.shared.searchCoordinator.isPresented,
@@ -173,7 +180,8 @@ struct PlayableList {
             selected: {
                 library.displayedTracks.filter { track in track.id.map(library.selectedTrackIDs.contains) ?? false }
             },
-            activate: activate
+            activate: activate,
+            recordOrigin: { DependencyContainer.shared.playbackViewModel?.willActivate(nil, from: .allTracks) }
         )
     }
 }

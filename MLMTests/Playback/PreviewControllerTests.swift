@@ -386,6 +386,43 @@ struct PreviewControllerTests {
         #expect(!h.port.mainIsPlaying, "main's file is most likely on the same disk")
     }
 
+    // MARK: Review round (S4, S5, Esc)
+
+    @Test func whenTheOwningListGoesAwayThePreviewEnds() {
+        let h = Harness()
+        h.controller.toggle(owner: table, candidate: .previewable(track(5)))
+        h.answerLookup()
+        h.controller.ownerGone("another list")
+        #expect(h.controller.isActive, "only its own list ends it")
+        h.controller.ownerGone(table)
+        #expect(!h.controller.isActive)
+        #expect(h.port.log.last == "restoreMain(true)")
+    }
+
+    @Test func aPauseDuringThePreviewMeansMainStaysPausedAfterIt() {
+        let h = Harness()
+        h.controller.toggle(owner: table, candidate: .previewable(track(5)))
+        h.answerLookup()
+        h.controller.togglePause()   // headphones unplugged, media key, toolbar
+        h.controller.togglePause()   // resumed the preview again
+        h.controller.escape()
+        #expect(h.port.log.last == "restoreMain(false)", "the pause cleared “main was playing”")
+        #expect(!h.port.mainIsPlaying)
+    }
+
+    @Test func aHeldEscThatEndedThePreviewNeverFallsThrough() {
+        let h = Harness()
+        #expect(h.controller.escapeKey(.down) == false, "no preview: Esc is someone else's")
+        h.controller.toggle(owner: table, candidate: .previewable(track(5)))
+        h.answerLookup()
+        #expect(h.controller.escapeKey(.down))
+        #expect(!h.controller.isActive)
+        #expect(h.controller.escapeKey(.repeat), "the repeats of that press stay the preview's")
+        #expect(h.controller.escapeKey(.repeat))
+        #expect(h.controller.escapeKey(.up))
+        #expect(h.controller.escapeKey(.down) == false, "the next press is free again")
+    }
+
     // MARK: Pieces
 
     @Test func hotSpotRule() {

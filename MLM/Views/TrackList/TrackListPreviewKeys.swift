@@ -66,12 +66,19 @@ struct TrackListPreviewKeys: ViewModifier {
                 if press.modifiers.isDisjoint(with: [.command, .control, .option]) { typeSelect.last = Date() }
                 return .ignored
             }
-            .onKeyPress(keys: [.space, .escape, .leftArrow, .rightArrow], phases: [.down, .repeat]) { press in
+            .onKeyPress(keys: [.space, .escape, .leftArrow, .rightArrow], phases: [.down, .repeat, .up]) { press in
                 handle(press)
             }
     }
 
     private func handle(_ press: KeyPress) -> KeyPress.Result {
+        // Esc: the preview's while one runs; a held Esc that ended it stays the preview's.
+        if press.key == .escape {
+            guard press.modifiers.isDisjoint(with: [.command, .control, .option, .shift]),
+                  let preview = container.playbackViewModel?.preview else { return .ignored }
+            return preview.escapeKey(previewKeyPhase(press.phase)) ? .handled : .ignored
+        }
+        guard press.phase != .up else { return .ignored }
         let key: TrackListPreviewKey.Key
         switch press.key {
         case .space: key = .space
@@ -109,5 +116,30 @@ struct TrackListPreviewKeys: ViewModifier {
     /// Reference storage, so recording a key press never re-renders the table.
     final class TypeSelectClock {
         var last: Date?
+    }
+}
+
+/// SwiftUI's key phase as the preview's.
+func previewKeyPhase(_ phase: KeyPress.Phases) -> PreviewController.KeyPhase {
+    if phase == .repeat { return .repeat }
+    if phase == .up { return .up }
+    return .down
+}
+
+// MARK: - Window-wide Esc while previewing (UC-KEY-04, W2-C review S4)
+
+/// Esc ends a running preview from anywhere in the main window (the sidebar, Info, a button),
+/// before anything else gets the key, and a held Esc never falls through afterwards to clear
+/// the search or cancel a sheet. Attached to the window content; active only while a preview
+/// runs (no `NSEvent` monitor).
+struct PreviewEscapeKey: ViewModifier {
+    @Environment(\.container) private var container
+
+    func body(content: Content) -> some View {
+        content.onKeyPress(.escape, phases: [.down, .repeat, .up]) { press in
+            guard let preview = container.playbackViewModel?.preview,
+                  preview.isActive || preview.escapeHeld else { return .ignored }
+            return preview.escapeKey(previewKeyPhase(press.phase)) ? .handled : .ignored
+        }
     }
 }

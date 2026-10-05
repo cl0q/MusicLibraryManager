@@ -100,7 +100,9 @@ struct PreviewMachine: Equatable {
 
     struct Session: Equatable {
         let owner: PreviewOwner
-        let main: MainPlaybackSnapshot
+        /// What to give back to the main playback; a pause during the preview clears
+        /// `wasPlaying` (the user asked for silence, W2-C review S5).
+        var main: MainPlaybackSnapshot
         var phase: Phase
         /// The selection moved; switch when the debounce for `token` settles.
         var pending: Pending?
@@ -134,6 +136,8 @@ struct PreviewMachine: Equatable {
     private var lastToken = 0
 
     var isActive: Bool { session != nil }
+    /// The list the running preview belongs to.
+    var owner: PreviewOwner? { session?.owner }
     var track: Track? { session?.phase.track }
     var isLoading: Bool {
         if case .loading = session?.phase { return true }
@@ -239,10 +243,12 @@ struct PreviewMachine: Equatable {
     }
 
     /// Play/Pause (media key, toolbar, Playback menu, Dock) during a preview pauses or resumes
-    /// the preview audio; the preview stays (IMP-W2C-01).
+    /// the preview audio; the preview stays (IMP-W2C-01). Pausing also means the main track
+    /// stays paused when the preview ends (headphones unplugged, S5).
     mutating func togglePause() -> [Effect] {
         guard var current = session, case .playing(let track, let token, let paused) = current.phase else { return [] }
         current.phase = .playing(track, token: token, isPaused: !paused)
+        if !paused { current.main.wasPlaying = false }
         session = current
         return [paused ? .resumeAudio : .pauseAudio, .changed]
     }
@@ -259,6 +265,13 @@ struct PreviewMachine: Equatable {
         }
         session = nil
         return [.handOver(track, fromPreviewPosition: samePlaying), .changed]
+    }
+
+    /// The owning list stopped being the visible place (another sidebar place, a pushed detail,
+    /// the search pane) or went away: its preview ends, the main track resumes (S4).
+    mutating func ownerGone(_ owner: PreviewOwner) -> [Effect] {
+        guard session?.owner == owner else { return [] }
+        return end()
     }
 
     /// Real playback started elsewhere (Play, Next, Previous, Stop, a queue row): the preview
@@ -282,12 +295,14 @@ struct PreviewMachine: Equatable {
 
 /// Why a preview couldn't start after the candidate looked fine (found at open time).
 enum PreviewResolveFailure: Error, Equatable, Sendable {
+    case notDownloaded
     case fileMissing
     case driveNotConnected(volumeName: String?)
     case unreadable
 
     var refusal: PlaybackWords.PreviewRefusal {
         switch self {
+        case .notDownloaded: .notDownloaded
         case .fileMissing: .fileMissing
         case .driveNotConnected(let name): .driveNotConnected(volumeName: name)
         case .unreadable: .unreadable

@@ -47,12 +47,16 @@ final class PreviewController {
     nonisolated static let settleDelay: Duration = .milliseconds(150)
     /// ← / → while previewing (DEC-047).
     nonisolated static let seekStep: TimeInterval = 5
+    /// How long the transient preview player (its own audio engine) is kept after a preview
+    /// ends, so the next Space starts at once; then it is released (S3).
+    nonisolated static let releaseDelay: Duration = .seconds(10)
 
     private(set) var machine = PreviewMachine()
     /// Where the running preview started (its hot spot).
     private(set) var hotSpot: TimeInterval?
 
     var isActive: Bool { machine.isActive }
+    var owner: PreviewOwner? { machine.owner }
     var track: Track? { machine.track }
     var isLoading: Bool { machine.isLoading }
     var isPaused: Bool { machine.isPaused }
@@ -99,7 +103,31 @@ final class PreviewController {
     func escape() -> Bool {
         let result = machine.escape()
         run(result.effects)
+        if result.handled { escapeHeld = true }
         return result.handled
+    }
+
+    /// Esc wherever it arrives (the focused table, the window): a key press that ended a
+    /// preview keeps the key until it is released, so holding Esc never falls through to clear
+    /// the search or cancel a sheet afterwards (UC-KEY-04). Returns whether the key was used.
+    func escapeKey(_ phase: KeyPhase) -> Bool {
+        switch phase {
+        case .down: return escape()
+        case .repeat: return escapeHeld
+        case .up:
+            defer { escapeHeld = false }
+            return escapeHeld
+        }
+    }
+
+    enum KeyPhase: Sendable { case down, `repeat`, up }
+
+    /// Esc ended a preview and is still held.
+    @ObservationIgnored private(set) var escapeHeld = false
+
+    /// The owning list hid or went away (S4).
+    func ownerGone(_ owner: PreviewOwner) {
+        run(machine.ownerGone(owner))
     }
 
     func selectionChanged(owner: PreviewOwner, candidate: PreviewCandidate) {

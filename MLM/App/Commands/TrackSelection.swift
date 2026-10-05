@@ -54,6 +54,8 @@ struct TrackCommandTarget {
     /// Track ▸ Preview: the list's Space (start / end the preview of its selection, W2-C).
     /// `nil`: the list can't preview.
     var preview: (() -> Void)?
+    /// Records the list as the playing context before a menu command plays from it (⌘L, W2-C).
+    var recordOrigin: (() -> Void)?
 }
 
 /// The focused track list as the menu bar sees it — cheap to publish and to compare.
