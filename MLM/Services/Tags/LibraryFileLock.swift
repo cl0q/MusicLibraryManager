@@ -4,11 +4,14 @@ import Foundation
 /// that rewrites a library file should hold it while it reads, rewrites and swaps the file, so
 /// two rewriters never interleave on one path.
 ///
-/// Today only `TrackTagWriter` takes it. Other rewriters of library files found in the code
-/// (to be routed through it by their owners): `ArtworkService.embedArtwork` (cover embedding),
-/// the download pipeline's replace of an existing file (Download Again / `markAsDownloaded`),
-/// `TranscodeService` when it writes next to a library file, `OrganizedPathMigrationService`
-/// (moves). `SyncService.embedMlmUuid` rewrites device copies, not library files.
+/// Today only `TrackTagWriter` takes it. Other code that rewrites or moves library files (to be
+/// routed through it by its owners): `ArtworkService.embedArtwork` (Services/Analysis, cover
+/// embedding), `DownloadOrchestrator.embedArtworkIfNeeded` and the orchestrator's move of a
+/// finished download into the library folder (also the Download Again replace),
+/// `SoundCloudDownloader` / `SquidWtfClient` / `DownloadQueue` moves, `TranscodeService` when
+/// its output lands in the library, `OrganizedPathMigrationService` (moves) and Remove from
+/// Library (Trash). `SyncService.embedMlmUuid` / `TranscodeCache` rewrite device or cache
+/// copies, not library files.
 actor LibraryFileLock {
     static let shared = LibraryFileLock()
 
