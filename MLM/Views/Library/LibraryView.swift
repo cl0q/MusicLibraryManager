@@ -2,8 +2,8 @@ import SwiftUI
 
 // MARK: Accessibility labels for shotty UI automation (snake_case literals)
 
-/// Library browser container — toolbar with Local/Remote picker, search,
-/// re-scan button, and the sortable `LibraryTable` for the actual rows.
+/// All Tracks — header with the Local/Remote picker, Shuffle and Scan Library Folder, and
+/// the sortable `LibraryTable` for the rows. Hosted in the shell's content scaffold.
 struct LibraryView: View {
     @Environment(\.container) private var container
 
@@ -72,21 +72,10 @@ struct LibraryView: View {
     // MARK: - Content
 
     private func libraryContent(_ viewModel: LibraryViewModel) -> some View {
+        // The drive-not-connected banner is the shell's (ContentScaffold, UC-LAYOUT-02);
+        // the view's own "Library drive is disconnected" strip is gone.
         VStack(spacing: 0) {
             libraryHeader(viewModel)
-            if !container.isLibraryDriveMounted {
-                Label(
-                    "Library drive is disconnected. Local tracks remain visible but cannot be played.",
-                    systemImage: "externaldrive.badge.exclamationmark"
-                )
-                .font(MLMFont.muted)
-                .foregroundColor(.mlmAttention)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color.mlmAttention.opacity(0.12))
-                .accessibilityIdentifier("library_drive_disconnected_banner")
-            }
             Divider()
             LibraryTable(
                 viewModel: viewModel,
@@ -99,50 +88,13 @@ struct LibraryView: View {
             guard q != viewModel.searchQuery else { return }
             viewModel.searchQuery = q
         }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    Task {
-                        if let pvm = container.playbackViewModel {
-                            await pvm.playShuffled(viewModel.displayedTracks)
-                        }
-                    }
-                } label: {
-                    Label("Shuffle", systemImage: "shuffle")
-                }
-                .help("Shuffle play library")
-                .disabled(viewModel.displayedTracks.isEmpty)
-                .accessibilityIdentifier("library_shuffle_button")
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    Task { await rescan() }
-                } label: {
-                    if isRescanning {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Label("Re-scan Library", systemImage: "arrow.clockwise")
-                    }
-                }
-                .help("Re-scan the library folder for changes")
-                .keyboardShortcut("r", modifiers: .command)
-                .disabled(isRescanning)
-                .accessibilityIdentifier("rescan_button")
-                .accessibilityLabel("rescan_button")
-            }
-        }
     }
 
-    /// Detail-pane header: title on the left, then the Local/Remote
-    /// segment control. The window toolbar's `.principal` slot stays
-    /// reserved for the PlayerBar — putting the tab control here keeps
-    /// it associated with the Library view rather than the global player.
+    /// Content header: the Local/Remote segment control, then the view's own actions —
+    /// `Shuffle` and `Scan Library Folder` ⌘R moved here from the window toolbar, which is
+    /// constant in every place (UC-TB-02, DEC-048). The place's name is the window title.
     private func libraryHeader(_ viewModel: LibraryViewModel) -> some View {
         HStack(spacing: 12) {
-            Text("Library")
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(.primary)
-
             Picker("Source", selection: Bindable(viewModel).selectedTab) {
                 ForEach(LibraryTab.allCases) { tab in
                     Text("\(tab.label) (\(countFor(tab, viewModel: viewModel)))")
@@ -156,6 +108,34 @@ struct LibraryView: View {
             .accessibilityLabel("library_source_picker")
 
             Spacer()
+
+            Button {
+                Task {
+                    if let pvm = container.playbackViewModel {
+                        await pvm.playShuffled(viewModel.displayedTracks)
+                    }
+                }
+            } label: {
+                Label("Shuffle", systemImage: "shuffle")
+            }
+            .help("Shuffle play library")
+            .disabled(viewModel.displayedTracks.isEmpty)
+            .accessibilityIdentifier("library_shuffle_button")
+
+            Button {
+                Task { await rescan() }
+            } label: {
+                if isRescanning {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Label("Scan Library Folder", systemImage: "arrow.clockwise")
+                }
+            }
+            .help("Scan the library folder for changes ⌘R")
+            .keyboardShortcut("r", modifiers: .command)
+            .disabled(isRescanning)
+            .accessibilityIdentifier("rescan_button")
+            .accessibilityLabel("rescan_button")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -176,6 +156,9 @@ struct LibraryView: View {
         guard let importVM = importViewModel else { return }
 
         isRescanning = true
+        // The import view model only knows the library folder after loading it; without
+        // this the scan always stopped with "No library root configured".
+        await importVM.loadLibraryRoot()
         await importVM.importLibrary()
         await viewModel?.refresh()
         isRescanning = false

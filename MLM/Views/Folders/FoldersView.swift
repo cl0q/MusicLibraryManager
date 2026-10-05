@@ -70,13 +70,8 @@ struct FoldersView: View {
             }
         }
         .background(Color.mlmBase)
-        .toolbar {
-            ToolbarItem(placement: .automatic) {
-                Text("\(viewModel.folderCount) folders")
-                    .font(MLMFont.muted)
-                    .foregroundColor(.mlmInkMuted)
-            }
-        }
+        // The folder count moved from the window toolbar (P-TOOLBAR.E05) to the status bar.
+        .statusBarText(StatusBarText.folders(viewModel.folderCount))
     }
 
     // MARK: - Header

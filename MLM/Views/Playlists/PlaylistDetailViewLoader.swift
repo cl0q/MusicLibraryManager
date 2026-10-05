@@ -2,11 +2,10 @@ import SwiftUI
 
 /// Sidebar-to-detail routing shim (Plan 36-04, D-09).
 ///
-/// `SidebarSection.playlistDetail(Int64)` flows through `ContentView`'s
-/// routing switch into this view, which lazily fetches the `Playlist` by id
-/// and renders `PlaylistDetailView`. Bypasses the grid intermediary so
-/// clicking a pinned-sidebar playlist lands directly on its detail view
-/// (Apple-Music sidebar behaviour).
+/// `SidebarDestination.playlist(id)` (a sidebar row) and `DetailRoute.playlist(id)`
+/// (pushed from the All Playlists grid) route through `DestinationView` / `RouteView`
+/// into this view, which lazily fetches the `Playlist` by id and renders
+/// `PlaylistDetailView`.
 ///
 /// Why a loader rather than embedding `Playlist` directly in the enum:
 /// the sidebar's pinned-list snapshot can lag behind a rename, delete, or
@@ -17,6 +16,8 @@ import SwiftUI
 /// sidebar re-clicks to *different* pinned playlists without unmounting.
 struct PlaylistDetailViewLoader: View {
     let playlistId: Int64
+    /// Open with the failed-download section expanded (the grid's "show failed" action).
+    var initiallyShowFailedTracks = false
     let onBack: () -> Void
     let onTrackDoubleClick: ((Track, [Track]) -> Void)?
 
@@ -29,6 +30,7 @@ struct PlaylistDetailViewLoader: View {
             if let pl = playlist {
                 PlaylistDetailView(
                     playlist: pl,
+                    initiallyShowFailedTracks: initiallyShowFailedTracks,
                     onBack: onBack,
                     onTrackDoubleClick: onTrackDoubleClick
                 )

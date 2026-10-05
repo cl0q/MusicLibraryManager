@@ -20,18 +20,32 @@ struct PlayerBar: View {
             trackInfoColumn
             scrubberSection
             volumeSection
+            queueButton
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .frame(minWidth: 440, idealWidth: 620, maxWidth: 800)
-        .background {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(.regularMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5)
-                )
+        // No background of its own: the toolbar's system glass is the player's surface
+        // (UC-TB-06, UC-GLASS-01/08).
+    }
+
+    // MARK: - Queue button (UC-TB-06)
+
+    @Environment(TrailingColumnState.self) private var trailingColumn: TrailingColumnState?
+
+    /// Opens / closes the trailing column in Queue mode (⌥⌘U, UC-TRAIL-01).
+    private var queueButton: some View {
+        let showing = trailingColumn?.isShowing(.queue) == true
+        return Button {
+            trailingColumn?.toggle(.queue)
+        } label: {
+            Image(systemName: "list.bullet")
+                .foregroundStyle(showing ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
         }
+        .buttonStyle(.plain)
+        .disabled(trailingColumn == nil)
+        .help(showing ? "Hide Queue ⌥⌘U" : "Show Queue ⌥⌘U")
+        .accessibilityLabel(showing ? "Hide Queue" : "Show Queue")
     }
 
     // MARK: - Transport Cluster
