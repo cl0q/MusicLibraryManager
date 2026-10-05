@@ -13,6 +13,11 @@ struct PreviewWaveformScrubber: View {
     let hotSpot: Double?
     let onSeek: (Double) -> Void
 
+    /// While dragging: the dragged position (drawn at once), seeks at most this often.
+    @State private var dragFraction: Double?
+    @State private var lastDragSeek = Date.distantPast
+    static let dragSeekInterval: TimeInterval = 0.15
+
     static let height: CGFloat = 18
     /// Bars drawn at most (peaks are resampled to fit the width).
     private static let barStride: CGFloat = 2
@@ -20,12 +25,23 @@ struct PreviewWaveformScrubber: View {
     var body: some View {
         GeometryReader { geometry in
             Canvas { context, size in
-                draw(in: &context, size: size)
+                draw(in: &context, size: size, progress: dragFraction ?? progress)
             }
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        guard geometry.size.width > 0 else { return }
+                        let fraction = min(max(value.location.x / geometry.size.width, 0), 1)
+                        dragFraction = fraction
+                        // The audio follows the drag, throttled.
+                        if Date().timeIntervalSince(lastDragSeek) >= Self.dragSeekInterval {
+                            lastDragSeek = Date()
+                            onSeek(fraction)
+                        }
+                    }
                     .onEnded { value in
+                        defer { dragFraction = nil }
                         guard geometry.size.width > 0 else { return }
                         onSeek(min(max(value.location.x / geometry.size.width, 0), 1))
                     }
@@ -45,7 +61,7 @@ struct PreviewWaveformScrubber: View {
         }
     }
 
-    private func draw(in context: inout GraphicsContext, size: CGSize) {
+    private func draw(in context: inout GraphicsContext, size: CGSize, progress: Double) {
         let midY = size.height / 2
         let playedX = size.width * CGFloat(min(max(progress, 0), 1))
         guard !peaks.isEmpty, size.width > 0 else {
