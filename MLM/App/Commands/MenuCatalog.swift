@@ -267,8 +267,7 @@ enum MenuCommand: String, CaseIterable, Sendable {
             Entry(menu: .track, title: "Go to Album", shortcut: nil,
                   wiring: .pending(owner: "W4-2", reason: "Album pages aren’t available yet."))
         case .goToArtist:
-            Entry(menu: .track, title: "Go to Artist", shortcut: nil,
-                  wiring: .pending(owner: "W2-I", reason: "Going to an artist isn’t available yet."))
+            Entry(menu: .track, title: "Go to Artist", shortcut: nil, wiring: .app)
         case .findSimilar:
             Entry(menu: .track, title: "Find Similar", shortcut: nil,
                   wiring: .pending(owner: "W3-DISC", reason: "Similar tracks aren’t available yet."))

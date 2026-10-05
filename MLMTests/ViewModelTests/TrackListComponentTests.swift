@@ -169,10 +169,17 @@ struct TrackListComponentTests {
             [.play(enabled: true), .preview(enabled: true)],
             [.playNext],
             [.addToPlaylist, .addToSyncProfile],
-            [.getInfo],
+            [.getInfo, .goToArtist("Artist")],
             [.showInFinder(enabled: true), .copy(filePath: true, link: true)],
             [.removeFromLibrary(enabled: true)],
         ])
+    }
+
+    /// Go to Artist (W2-I): one track with a real artist; never several, never `Unknown Artist`.
+    @Test func goToArtistNeedsOneTrackWithAnArtist() {
+        #expect(menu([track(1, artist: "Overmono")], library).items.contains(.goToArtist("Overmono")))
+        #expect(!menu([track(1, artist: "Unknown Artist")], library).items.contains { if case .goToArtist = $0 { true } else { false } })
+        #expect(!menu([track(1), track(2)], library).items.contains { if case .goToArtist = $0 { true } else { false } })
     }
 
     @Test func localTrackInAPlaylistHasTheReversibleRemovalFirst() {
@@ -234,11 +241,11 @@ struct TrackListComponentTests {
     }
 
     @Test func noDeadItemsFromLaterPackages() {
-        // Add to Queue, Go to …, Find Similar, Share… don't exist yet (Preview and Locate File…
-        // arrived with W2-C).
+        // Add to Queue, Go to Album, Find Similar, Share… don't exist yet (Preview and Locate
+        // File… arrived with W2-C, Go to Artist with W2-I).
         let all = menu([track(1)], playlist).items + menu([track(2, missing: true)], library).items
         let titles = all.map { "\($0)" }.joined(separator: " ")
-        for absent in ["addToQueue", "goTo", "findSimilar", "share"] {
+        for absent in ["addToQueue", "goToAlbum", "findSimilar", "share"] {
             #expect(!titles.contains(absent))
         }
         #expect(all.contains(.preview(enabled: true)) && all.contains(.locateFile))
