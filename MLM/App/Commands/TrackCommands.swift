@@ -46,13 +46,14 @@ struct TrackCommands: Commands {
             Divider()
 
             CommandSubmenu(.addToPlaylist, enabled: state.canAddTo) {
-                Button("New Playlist…") { TrackCommandActions.newPlaylistFromSelection(tracks(), shell: shellActions) }
-                if !target.playlists.isEmpty { Divider() }
-                ForEach(target.playlists) { playlist in
-                    Button(playlist.name) {
-                        if let id = playlist.id { TrackCommandActions.addToPlaylist(id, tracks: tracks(), shell: shellActions) }
-                    }
-                }
+                // The one CM-SUB-PLAYLIST builder (UC-CM-11); ⇧⌘N is File ▸ New Playlist from
+                // Selection's key, so it isn't shown a second time here.
+                AddToPlaylistMenuItems(
+                    playlists: target.playlists,
+                    showsKeyEquivalents: false,
+                    newPlaylist: { TrackCommandActions.newPlaylistFromSelection(tracks(), shell: shellActions) },
+                    add: { TrackCommandActions.addToPlaylist($0, tracks: tracks(), shell: shellActions) }
+                )
             }
             CommandSubmenu(.addToSyncProfile, enabled: state.canAddTo) {
                 ForEach(target.syncProfiles) { profile in
