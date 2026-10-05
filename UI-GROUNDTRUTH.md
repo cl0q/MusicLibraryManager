@@ -1,3 +1,5 @@
+> **SUPERSEDED — 2026-10-05.** This document is replaced by [`UI-CONVENTIONS.md`](UI-CONVENTIONS.md) as of 2026-10-05 and is kept for history only. Do not use it as a rule source. The glossary (§1.5), state vocabulary (§1.6) and copy rules (§1.7) that still apply are carried forward — with the B1 changes (DEC-002, DEC-014, DEC-023, DEC-051) — in `UI-CONVENTIONS.md` §15–17.
+
 # MLM for macOS — UI Ground Truth
 
 **Status:** Binding design reference for the native macOS app (`macos-app/MLM`).

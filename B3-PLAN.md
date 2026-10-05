@@ -34,7 +34,7 @@ Status words: `planned` · `in progress` · `in review` · `merged` · `blocked`
 |---|---|---|---|
 | W0-1 | Branch `redesign/b3`, commit design packet | coordinator | merged (`c10493f`) |
 | W0-2 | Baseline build + tests recorded (§0) | coordinator | merged |
-| W0-3 | B2: `UI-CONVENTIONS.md`, `CLAUDE.md`, superseded banner on `UI-GROUNDTRUTH.md` | worker (Opus) | in progress |
+| W0-3 | B2: `UI-CONVENTIONS.md`, `CLAUDE.md`, superseded banner on `UI-GROUNDTRUTH.md` | worker (Opus) | merged |
 | W0-4 | Deployment target macOS 27 (`Package.swift`, `scripts/run.sh` `LSMinimumSystemVersion`) | coordinator | merged (`a39fe32`) |
 | W0-5 | Snapshot baselines: old baselines deleted, re-record per wave for finished surfaces | coordinator | merged |
 | W0-6 | This plan | coordinator | merged |
@@ -128,6 +128,7 @@ Latest existing: `v41_remote_provider_identity`. Reserved (a number is only used
 | ID | Question | Choice | Why | Affected |
 |---|---|---|---|---|
 | IMP-001 | Which models run the workers? | Opus 5.5 at most; Sonnet for mechanical packages | Oliver, 2026-10-05 (cost) | all packages |
+| IMP-003 | Conventions the B1 packet left open (`UI-CONVENTIONS.md` §23 C1–C27 resolutions, §24 S1–S29) | Accepted as written by the coordinator after review; Oliver can overturn any of them by ID | Each follows the principles and the more specific/later pattern page; none changes behaviour Oliver approved in §10 | `UI-CONVENTIONS.md` |
 | IMP-002 | Snapshot baselines during B3? | Recommended: delete the 60 old baselines in wave 0, re-record per wave for finished surfaces | They describe the old UI; keeping them makes every snapshot run fail without information | W0-5, W5-5 |
 
 ## 5. Open questions for Oliver (raised at the right moment)
