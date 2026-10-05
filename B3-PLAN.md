@@ -184,6 +184,10 @@ Latest existing: `v41_remote_provider_identity`. Reserved (a number is only used
 
 _(per wave: merged packages with commits, contract file paths, what Oliver should check, feedback by ID)_
 
+### Test hardening (2026-10-05)
+
+- Branch `b3/test-hardening` (Sonnet, step-by-step brief) merged: `PlaylistCoverService` and `ArtworkBackfillService` take an injectable `NotificationCenter` (tests use their own); `ProcessRunner` reads stdout/stderr to end-of-file on dedicated readers before returning (bounded: 2 s after a timeout kill, 30 s otherwise) — fixes truncated ffprobe output under load; `ImportViewModelActivityTests.cancelFromActivity_marksCancelled` waits for the state. Two consecutive full runs on the merge result: Swift Testing 2168 tests / 216 suites passed; XCTest 14 tests, 3 skipped, 0 failures. Still listed as load-sensitive: `ArtworkResizeTests.transcodeWithArtworkResizeProducesSmallCover` (not seen again since).
+
 ### Wave 3
 
 - **W3-ACT** merged (branch `b3/w3-act-activity`). Tests on the merge result: Swift Testing 2147 tests / 215 suites passed; XCTest 14 tests, 3 skipped, 0 failures (123 tests of the removed panel/feed/view model were dropped, their invariants re-implemented per the worker — being checked by the review). Independent review running. Contracts: `MLM/Services/Activity/` — `ActivityCenter.shared.begin(_:title:subject:itemNoun:controls:lane:automatic:graceful:quiet:persists:appLevel:)` → `ActivityOperationHandle` (`update`, `setWaiting(.drive)`, `waitForTurn`, `finish`, `fail`, `cancelled`, `discard`), `echo(for:)` → `ActivityEcho` (`playlistText`, `toolbarText`, `failedCount`, `resultText`) for W3-PL / W3-SYNC / W3-SET, `ActivityOperationRepository.failingTrackIDs(in:)`, table `activity_operations` (v46), `ActivityRetention`. Not registered: pre-migration backup (W3-LAUNCH loading phase), sync preview computation (W3-SYNC), similar computation (W3-DISC). Remaining inline progress UI stays with W3-SYNC, W3-SET, W3-REV, W3-PL, W3-FOLD.
