@@ -73,10 +73,10 @@ Independent review: W2-A (migration), W2-C + W2-D (queue logic), W2-E (tag writi
 
 | ID | Package | Spec | Inventory | Migration | Status |
 |---|---|---|---|---|---|
-| W3-PL | Playlists: sidebar playlists + playlist folders + manual order, All Playlists grid, detail header / More / status sentence / failed scope, `Refresh from ‹Source›`, link + M3U sheets (PP-PLAYLISTS-01) | `playlists.html` | `playlists.md` | `v45_playlist_folders` | planned |
+| W3-PL | Playlists: sidebar playlists + playlist folders + manual order, All Playlists grid, detail header / More / status sentence / failed scope, `Refresh from ‹Source›`, link + M3U sheets (PP-PLAYLISTS-01) | `playlists.html` | `playlists.md` | `v45_playlist_folders` | in progress (Opus, `b3/w3-pl-playlists`) |
 | W3-FOLD | Folders: hierarchical table, path bar, not-in-library files, import as Activity operation | `folders.html` | `library.md`, `main.md` | — | planned |
 | W3-ACT | Activity: one operation registry for every job of inventory §10.1 (DEC-044), toolbar item states, popover, Activity window (Operations + Logs), results persisted; then remove the bottom panel | `activity.html` | `activity.md` | `v46_activity_operations` | in review — merged, independent review running |
-| W3-LAUNCH | Launch & libraries: library picker with per-row states, loading phases, failure actions, adoption sheet, switch alert listing running work, in-window setup; library-file icon (variant A `.icns`, wired in `scripts/run.sh`) | `launch.html`, `library-icon.html` | `shell.md` | — | planned |
+| W3-LAUNCH | Launch & libraries: library picker with per-row states, loading phases, failure actions, adoption sheet, switch alert listing running work, in-window setup; library-file icon (variant A `.icns`, wired in `scripts/run.sh`) | `launch.html`, `library-icon.html` | `shell.md` | — | in progress (Opus, `b3/w3-launch`) |
 | W3-SET | Settings: eight tabs, backup schedule/retention (DEC-036), Sources accounts in place, download-tools status (DEC-037), deep links | `settings.html` | `settings.md` | — | planned |
 | W3-ADD | Add & import: Add menu, Add from Link (⌘U), S-IMPORT sheet replacing the remote-playlists window, `Refresh from Sources`; imports queue instead of being rejected | `import.html` | `sources-review.md`, `main.md` | — | planned |
 | W3-SYNC | Sync: profiles as sidebar rows, detail Content · Plan (incl. Skip) · Options · Last sync, per-profile results (PP-SYNC-01/02), device-removed handling, merged device-changes sheet, Eject | `sync.html` | `sync.md` | `v47_sync_profile_results` | planned |
