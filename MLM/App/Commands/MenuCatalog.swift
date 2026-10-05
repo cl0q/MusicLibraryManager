@@ -245,9 +245,8 @@ enum MenuCommand: String, CaseIterable, Sendable {
         // Driven by the focused track table (`FocusedValues.trackTableViewOptions`, W2-A).
         case .columns: Entry(menu: .view, title: "Columns", shortcut: nil, wiring: .app)
         case .sortBy: Entry(menu: .view, title: "Sort By", shortcut: nil, wiring: .app)
-        case .filter:
-            Entry(menu: .view, title: "Filter", shortcut: nil,
-                  wiring: .pending(owner: "W2-B", reason: "Filters aren’t available yet."))
+        // The visible view's scopes (`FocusedValues.viewScopeMenu`, published by `ScopeBar`, W2-B).
+        case .filter: Entry(menu: .view, title: "Filter", shortcut: nil, wiring: .app)
         case .goToCurrentTrack: Entry(menu: .view, title: "Go to Current Track", shortcut: .cmd("l"), wiring: .app)
         case .enterFullScreen: Entry(menu: .view, title: "Enter Full Screen", shortcut: .cmd("f", .control), wiring: .system)
         case .customizeToolbar: Entry(menu: .view, title: "Customize Toolbar…", shortcut: nil, wiring: .system)

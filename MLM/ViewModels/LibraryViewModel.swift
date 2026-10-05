@@ -18,50 +18,25 @@ struct TrackSortDescriptor: Equatable {
     }
 }
 
-// MARK: - View tab
-
-/// Local vs. Remote tab state (until W2-B's availability scope bar replaces it).
-enum LibraryTab: String, CaseIterable, Identifiable {
-    case local
-    case remote
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .local: "Local"
-        case .remote: "Remote"
-        }
-    }
-}
-
 // MARK: - ViewModel
 
-/// All Tracks: filters in SQL (tab, search), hands the rows to its `TrackListModel`, which
-/// sorts them in memory and keeps the selection. Counts and totals come from SQL aggregates
-/// (UC-TABLE-21). Refreshes update the rows in place — no spinner after the first load
-/// (UC-TABLE-09); availability is persisted (no disk access, UC-TABLE-20).
+/// All Tracks (V-LIB): one table of every track, filtered in SQL by the availability scope
+/// (`All · Local · Not downloaded · Download failed · File missing`, DEC-011) and the
+/// toolbar's in-place text filter. The rows go to its `TrackListModel`, which sorts them in
+/// memory and keeps the selection; counts and totals come from one SQL aggregate
+/// (`TrackScopeSummary`, UC-TABLE-21). Every refresh updates in place — no spinner after the
+/// first load (UC-TABLE-09) — and touches no disk (UC-TABLE-20).
 @MainActor
 @Observable
 final class LibraryViewModel {
     /// The table's rows, sort and selection.
     let list: TrackListModel
 
-    private(set) var localCount = 0
-    private(set) var remoteCount = 0
-    /// Per-availability counts of the whole library for the current search (W2-B's scope bar).
-    private(set) var counts = TrackAvailabilityCounts()
-    /// Count and duration of what the table shows (status bar, UC-STATUS-02).
-    private(set) var totals: TrackListTotals?
-    private(set) var errorMessage: String?
-
-    /// The tracks shown, in display order.
-    var displayedTracks: [Track] { list.tracks }
-
-    /// Changing the tab keeps the selection (UC-TABLE-08: it survives filters).
-    var selectedTab: LibraryTab = .local {
+    /// The availability scope shown. Changing it keeps the selection (UC-TABLE-08: it
+    /// survives filters; rows that leave the scope come back selected).
+    var scope: TrackAvailabilityScope = .all {
         didSet {
-            if oldValue != selectedTab { scheduleRefresh() }
+            if oldValue != scope { scheduleRefresh() }
         }
     }
 
@@ -75,6 +50,30 @@ final class LibraryViewModel {
         }
     }
 
+    /// Scope counts, durations and the library size; `nil` until the first load (the scope
+    /// bar shows its words only).
+    private(set) var summary: TrackScopeSummary?
+    private(set) var errorMessage: String?
+
+    /// Live count per scope for the current search (the scope bar).
+    var counts: TrackAvailabilityCounts? { summary?.counts }
+
+    /// Every track in the library, ignoring scope and search (window subtitle, sidebar footer).
+    var libraryTrackCount: Int { summary?.libraryCount ?? 0 }
+
+    /// Count and duration of what the table shows — the scope and the search (status bar,
+    /// UC-STATUS-02); `nil` falls back to the loaded rows.
+    var totals: TrackListTotals? {
+        guard let summary, summary.durations[scope] != nil else { return nil }
+        return summary.totals(for: scope)
+    }
+
+    /// The library has no tracks at all (UC-EMPTY-01), as of the last load.
+    var isLibraryEmpty: Bool { summary.map { $0.libraryCount == 0 } ?? false }
+
+    /// The tracks shown, in display order — what Playback ▸ Play / Shuffle All Tracks play.
+    var displayedTracks: [Track] { list.tracks }
+
     var selectedTrackIDs: Set<Int64> {
         get { list.selection }
         set { list.selection = newValue }
@@ -85,12 +84,17 @@ final class LibraryViewModel {
     // MARK: - Dependencies
 
     @ObservationIgnored private let trackRepository: TrackRepository
+    @ObservationIgnored private let explicitQueries: TrackScopeQueries?
     @ObservationIgnored private let debouncer = Debouncer(delay: .milliseconds(200))
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
-    @ObservationIgnored private var lastLoaded: (tab: LibraryTab, search: String)?
+    @ObservationIgnored private var summaryTask: Task<Void, Never>?
+    @ObservationIgnored private var lastLoaded: (scope: TrackAvailabilityScope, search: String)?
 
-    init(trackRepository: TrackRepository, configRepository: ConfigRepository) {
+    /// - Parameter scopeQueries: the aggregate queries; `nil` = the open library's
+    ///   (`TrackScopeQueries.current()`). Tests pass their temporary database's.
+    init(trackRepository: TrackRepository, configRepository _: ConfigRepository, scopeQueries: TrackScopeQueries? = nil) {
         self.trackRepository = trackRepository
+        self.explicitQueries = scopeQueries
         self.list = TrackListModel(sortOrder: TrackListConfiguration.allTracks(activate: nil, totals: nil).defaultSort)
     }
 
@@ -99,51 +103,42 @@ final class LibraryViewModel {
         trackRepository: TrackRepository,
         configRepository: ConfigRepository,
         preloadedTracks: [Track],
-        selectedTab: LibraryTab = .local,
-        localCount: Int? = nil,
-        remoteCount: Int? = nil
+        scope: TrackAvailabilityScope = .all
     ) {
         self.init(trackRepository: trackRepository, configRepository: configRepository)
-        self.selectedTab = selectedTab
-        self.localCount = localCount ?? preloadedTracks.filter(\.isLocal).count
-        self.remoteCount = remoteCount ?? preloadedTracks.filter(\.isRemote).count
-        list.setTracksNow(preloadedTracks)
-        lastLoaded = (selectedTab, "")
+        self.scope = scope
+        list.setTracksNow(preloadedTracks.filter { scope.contains($0.availability()) })
+        lastLoaded = (scope, "")
     }
+
+    private var scopeQueries: TrackScopeQueries? { explicitQueries ?? TrackScopeQueries.current() }
 
     // MARK: - Data loading
 
-    /// Cancel any in-flight fetch and start a new one for the current state.
+    /// Cancel any in-flight fetch and start a new one for the current scope and search.
     func scheduleRefresh() {
         refreshTask?.cancel()
-        let tab = selectedTab
+        summaryTask?.cancel()
+        let scope = self.scope
         let search = searchQuery
+        let trimmed = search.trimmingCharacters(in: .whitespacesAndNewlines)
         let repository = trackRepository
+        let queries = scopeQueries
         refreshTask = Task { [weak self] in
             let start = Date()
             do {
-                let trimmed = search.trimmingCharacters(in: .whitespacesAndNewlines)
-                let result = try await repository.fetchForLibrary(
-                    tab: tab,
-                    search: trimmed.isEmpty ? nil : trimmed,
-                    sortBy: .dateAdded,
-                    ascending: false
-                )
+                let filter = trimmed.isEmpty ? nil : trimmed
+                let rows = try await repository.fetchTracks(scope: scope, search: filter)
                 guard !Task.isCancelled else { return }
-                let split = try await repository.countTracksByAvailability()
-                let counts = try await repository.availabilityCounts(search: trimmed.isEmpty ? nil : trimmed)
-                let totals = try await repository.libraryTotals(tab: tab, search: trimmed.isEmpty ? nil : trimmed)
+                let summary = try await Self.loadSummary(queries: queries, repository: repository, search: filter)
                 guard !Task.isCancelled, let self else { return }
-                await self.list.setTracks(result)
+                await self.list.setTracks(rows)
                 guard !Task.isCancelled else { return }
-                self.localCount = split.local
-                self.remoteCount = split.remote
-                self.counts = counts
-                self.totals = totals
+                self.summary = summary
                 self.errorMessage = nil
-                self.lastLoaded = (tab, search)
+                self.lastLoaded = (scope, search)
                 AppLogger.shared.info(
-                    "library refresh: \(result.count) rows in \(Int(Date().timeIntervalSince(start) * 1000))ms (tab=\(tab.rawValue))",
+                    "library refresh: \(rows.count) rows in \(Int(Date().timeIntervalSince(start) * 1000))ms (scope=\(scope.rawValue))",
                     source: "perf"
                 )
             } catch {
@@ -155,9 +150,9 @@ final class LibraryViewModel {
         }
     }
 
-    /// First load (or a no-op when the same tab/search is already loaded).
+    /// First load (or a no-op when the same scope/search is already loaded).
     func loadTracks() async {
-        if let lastLoaded, lastLoaded.tab == selectedTab, lastLoaded.search == searchQuery, list.isLoaded {
+        if let lastLoaded, lastLoaded.scope == scope, lastLoaded.search == searchQuery, list.isLoaded {
             return
         }
         scheduleRefresh()
@@ -170,9 +165,41 @@ final class LibraryViewModel {
         await refreshTask?.value
     }
 
-    /// Remove tracks in place without a SQL refetch.
+    /// Remove tracks in place without a row refetch (the counts follow from SQL).
     func removeTracks(ids: Set<Int64>) {
         list.remove(ids: ids)
+        refreshSummary()
+    }
+
+    /// Re-read only the counts and totals (rows unchanged).
+    private func refreshSummary() {
+        summaryTask?.cancel()
+        let search = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let repository = trackRepository
+        let queries = scopeQueries
+        summaryTask = Task { [weak self] in
+            guard let summary = try? await Self.loadSummary(
+                queries: queries, repository: repository, search: search.isEmpty ? nil : search
+            ), !Task.isCancelled else { return }
+            self?.summary = summary
+        }
+    }
+
+    /// Waits for a counts-only refresh started by `removeTracks` (tests).
+    func waitForSummary() async {
+        await summaryTask?.value
+    }
+
+    /// The scope summary from SQL; without aggregate queries (fixtures) the counts alone.
+    private static func loadSummary(
+        queries: TrackScopeQueries?,
+        repository: TrackRepository,
+        search: String?
+    ) async throws -> TrackScopeSummary {
+        if let queries { return try await queries.scopeSummary(search: search) }
+        let counts = try await repository.availabilityCounts(search: search)
+        let library = search == nil ? counts.all : try await repository.availabilityCounts().all
+        return TrackScopeSummary(counts: counts, durations: [.all: counts.totalDuration], libraryCount: library)
     }
 
     // MARK: - Selection helpers
@@ -182,5 +209,12 @@ final class LibraryViewModel {
 
     var selectedTracks: [Track] {
         list.selectedRows().map(\.track)
+    }
+
+    /// Show `trackID` selected (Go to Current Track ⌘L): keeps the scope when the track is in
+    /// it, else switches to `All` (UC-TABLE-08 — the scope is a filter, not a place).
+    func reveal(trackID: Int64, availability: TrackAvailability) {
+        if !scope.contains(availability) { scope = .all }
+        selectedTrackIDs = [trackID]
     }
 }

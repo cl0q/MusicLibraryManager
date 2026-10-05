@@ -537,10 +537,13 @@ private struct AllTracksHost: View {
     let onTrackActivated: TrackActivation
 
     var body: some View {
-        // The status-bar text (counts, selection) is declared by the track table (W2-A).
+        // The status-bar text (counts, selection) is declared by the track table (W2-A); the
+        // availability scope bar sits in the scaffold's slot (W2-B).
         ContentScaffold(showsDriveBanner: true) {
             LibraryHost(onTrackDoubleClick: onTrackActivated)
                 .equatable()
+        } scopeBar: {
+            AllTracksScopeBar()
         }
         .modifier(WindowTitleModifier())
     }

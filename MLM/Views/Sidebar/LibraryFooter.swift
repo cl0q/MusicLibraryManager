@@ -86,7 +86,7 @@ struct LibraryFooter: View {
             return LibraryDriveState.footerText(volume)
         }
         guard let library = container.libraryViewModel else { return nil }
-        return StatusBarText.tracks(library.localCount + library.remoteCount)
+        return StatusBarText.tracks(library.libraryTrackCount)
     }
 
     private func helpText(name: String) -> String {

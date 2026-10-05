@@ -131,12 +131,12 @@ final class ShellActions {
 
     // MARK: Scan
 
-    /// A `Scan Library Folder` is running (All Tracks header button, Library menu, ⌘R).
+    /// A `Scan Library Folder` is running (Library menu, ⌘R).
     private(set) var isScanningLibraryFolder = false
 
-    /// `Scan Library Folder` (Library menu, ⌘R in All Tracks / Albums / Genres, the All Tracks
-    /// header button): re-reads the library folder through the existing import pipeline, then
-    /// refreshes All Tracks. One scan at a time.
+    /// `Scan Library Folder` (Library menu, ⌘R in All Tracks / Albums / Genres; All Tracks has
+    /// no header buttons, DEC-048): re-reads the library folder through the existing import
+    /// pipeline, then refreshes All Tracks in its current scope. One scan at a time.
     func scanLibraryFolder() {
         guard !isScanningLibraryFolder, let viewModel = makeImportViewModel() else { return }
         isScanningLibraryFolder = true

@@ -424,7 +424,9 @@ final class DownloadOrchestrator {
                 withIntermediateDirectories: true
             )
         } catch {
-            let failureReason = DownloadFailureReason.failureReason(for: error)
+            // The library folder can't be written — mostly its disk is away. Say so instead of
+            // the catch-all `Video unavailable` (W2-B, UC-JOB-10/11).
+            let reason = Self.stagingFailureReason(libraryRoot: aacDir.deletingLastPathComponent())
             AppLogger.shared.error(
                 "Download staging directory is not writable (\(error.localizedDescription)). Library drive offline? root=\(aacDir.deletingLastPathComponent().path)",
                 source: "Download"
@@ -432,8 +434,8 @@ final class DownloadOrchestrator {
             result.failed = total
             result.failedTrackIds = Set(requests.map(\.trackId))
             for req in requests {
-                result.failureReasons[req.trackId] = failureReason.userFacingText
-                enqueueRetry(req, error: failureReason.userFacingText)
+                result.failureReasons[req.trackId] = reason
+                enqueueRetry(req, error: reason)
             }
             return result
         }
@@ -551,6 +553,19 @@ final class DownloadOrchestrator {
 
     func persistedRetryItems() -> [DownloadQueue.QueueItem] {
         retryQueue.items
+    }
+
+    /// The stored reason when the library folder can't take the download: `“Lexxar” not
+    /// connected` while its disk (`/Volumes/<name>`) is not mounted, else `Library folder not
+    /// reachable`. `DownloadFailureReasonText` shows both as they are.
+    static func stagingFailureReason(
+        libraryRoot: URL,
+        isMounted: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> String {
+        if let volumePath = MountObserver.extractVolumePath(from: libraryRoot.path), !isMounted(volumePath) {
+            return "“\(URL(fileURLWithPath: volumePath).lastPathComponent)” not connected"
+        }
+        return "Library folder not reachable"
     }
 
     /// Distinguish a missing yt-dlp binary from an ordinary exhausted search
