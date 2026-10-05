@@ -108,11 +108,16 @@ struct LibraryFinderIntegrationTests {
 
     @Test func libraryTabShowsTheLibraryFileSection() throws {
         let src = try source("MLM/Views/Settings/LibrarySetupView.swift")
-        for string in [
-            "Library file", "Show in Finder", "Open the last library at launch",
-            "When off, MLM asks which library to open at launch.",
-        ] {
+        for string in ["Library file", "Show in Finder"] {
             #expect(src.contains(string), "missing Library tab copy: \(string)")
+        }
+        // The launch choice is about MLM, not one library: Settings ▸ General (W1-2, UC-WIN-04).
+        #expect(!src.contains("\"Open the last library at launch\""))
+        let general = try source("MLM/Views/Settings/GeneralSettingsView.swift")
+        for string in [
+            "Open the last library at launch", "When off, MLM asks which library to open at launch.",
+        ] {
+            #expect(general.contains(string), "missing General tab copy: \(string)")
         }
     }
 

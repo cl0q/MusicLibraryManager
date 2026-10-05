@@ -12,12 +12,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         AppDelegate.shared = self
     }
 
-    /// Lazily-created Settings window. We own this directly via AppKit
-    /// because every SwiftUI-native path (Settings scene, Window scene
-    /// + openWindow, sheet via NotificationCenter) failed in practice
-    /// — Apple's auto Settings menu item ignored our actions.
-    private var settingsWindowController: NSWindowController?
-
     /// Reusable window controller for the remote-playlists browser.
     /// Tracks which source it currently shows so we can focus (not rebuild)
     /// when the same source is requested twice, and replace when a different
@@ -59,29 +53,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
-    // MARK: - Settings Window
-
-    /// Open (or focus) the Settings window. Called from the
-    /// CommandGroup(replacing: .appSettings) button in MLMApp.
-    @MainActor
-    func showSettingsWindow() {
-        if settingsWindowController == nil {
-            let hosting = NSHostingController(
-                rootView: SettingsView()
-                    .environment(\.container, DependencyContainer.shared)
-                    .frame(minWidth: 600, minHeight: 500)
-            )
-            let window = NSWindow(contentViewController: hosting)
-            window.title = "Settings"
-            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-            window.setContentSize(NSSize(width: 720, height: 560))
-            window.isReleasedWhenClosed = false
-            window.center()
-            settingsWindowController = NSWindowController(window: window)
-        }
-        NSApp.activate(ignoringOtherApps: true)
-        settingsWindowController?.showWindow(nil)
-    }
+    // Settings is the SwiftUI `Settings` scene (MLMApp, DEC-035); deep links go through
+    // `openSettings(tab:)` (`SettingsTab.swift`). The AppKit settings window is gone (UC-WIN-03).
 
     // MARK: - Remote Playlists Window
 

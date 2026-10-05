@@ -1,58 +1,94 @@
 import SwiftUI
 
-/// Settings window container.
+/// The `Settings` scene's content (W-SETTINGS, UC-WIN-03/04/05, DEC-035): eight tabs in the
+/// order of `SettingsTab`, each hosting an existing pane unchanged (their redesign is W3-SET).
 ///
-/// Groups all settings sections into a tabbed interface.
+/// - The selection lives in `SettingsRouter.shared`, so deep links (`openSettings(tab:)`) and
+///   ⌘, land on the right tab; the window title is the selected tab's name (system).
+/// - With no library open, the tabs that belong to a library are dimmed and one line at the
+///   top says so, with `Choose Library…` (UC-WIN-05); General, Playback and Sources keep
+///   working.
 struct SettingsView: View {
     @Environment(\.container) private var container
-    @Environment(\.dismiss) private var dismiss
-    @AppStorage("settings.selectedTab") private var selectedTab = "library"
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            LibrarySetupView()
-                .tabItem {
-                    Label("Library", systemImage: "music.note.house")
-                }
-                .tag("library")
-
-            SourcesSetupView()
-                .tabItem {
-                    Label("Sources", systemImage: "antenna.radiowaves.left.and.right")
-                }
-                .tag("sources")
-
-            MaintenanceView()
-                .tabItem {
-                    Label("Maintenance", systemImage: "wrench.and.screwdriver")
-                }
-                .tag("maintenance")
-
-            BackupSettingsView()
-                .tabItem {
-                    Label("Backup", systemImage: "externaldrive.badge.timemachine")
-                }
-                .tag("backup")
-
-            DataLocationsView()
-                .tabItem {
-                    Label("Storage Location", systemImage: "internaldrive")
-                }
-                .tag("storage")
-
-            PlaybackSettingsView()
-                .tabItem {
-                    Label("Playback", systemImage: "play.circle")
-                }
-                .tag("playback")
-
-            GrooveStudioView()
-                .tabItem {
-                    Label("Advanced", systemImage: "slider.horizontal.3")
-                }
-                .tag("advanced")
+        @Bindable var router = SettingsRouter.shared
+        TabView(selection: $router.selectedTab) {
+            pane(.general) { GeneralSettingsView() }
+            pane(.library) { LibrarySetupView() }
+            pane(.playback) { PlaybackSettingsView() }
+            pane(.sources) { SourcesSetupView() }
+            pane(.backup) { BackupSettingsView() }
+            pane(.storage) { DataLocationsView() }
+            pane(.maintenance) { MaintenanceView() }
+            pane(.advanced) { AdvancedSettingsView() }
         }
-        .frame(minWidth: 500, minHeight: 400)
+        .frame(minWidth: 600, idealWidth: 720, maxWidth: .infinity, minHeight: 500, idealHeight: 560, maxHeight: .infinity)
+    }
+
+    /// One tab: the pane, dimmed when it belongs to a library and none is open.
+    private func pane<Content: View>(_ tab: SettingsTab, @ViewBuilder content: () -> Content) -> some View {
+        let hasLibrary = container.isInitialized
+        return content()
+            .disabled(tab.belongsToLibrary && !hasLibrary)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if !hasLibrary {
+                    NoLibraryOpenLine()
+                }
+            }
+            .tabItem {
+                Label(tab.title, systemImage: tab.systemImage)
+            }
+            .tag(tab)
+    }
+}
+
+/// `No library is open. …` with `Choose Library…` (W-SETTINGS.N01, UC-WIN-05).
+private struct NoLibraryOpenLine: View {
+    static let message = "No library is open. Settings that belong to a library are dimmed until you open one."
+
+    var body: some View {
+        HStack(spacing: Spacing.s) {
+            Image(systemName: "info.circle")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text(Self.message)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: Spacing.s)
+            Button("Choose Library…") {
+                if let url = LibraryFilePanel.chooseLibraryFile() {
+                    Task { await LibraryLaunchCoordinator.shared.handleOpen(url) }
+                }
+            }
+        }
+        .padding(.horizontal, Spacing.l)
+        .padding(.vertical, Spacing.s)
+        .background(.background)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+}
+
+// MARK: - Advanced
+
+/// Settings ▸ Advanced. Until W3-GEN builds the Genres destination, it still hosts the genre
+/// tools (formerly the Advanced tab's only content) under a labelled header, so they stay
+/// reachable; W3-SET fills Advanced with its designed content (ST-ADVANCED).
+private struct AdvancedSettingsView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Text("Genres")
+                    .font(.headline)
+                Text("These genre tools move to Genres in the main window’s sidebar.")
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, Spacing.l)
+            .padding(.vertical, Spacing.m)
+            Divider()
+            GrooveStudioView()
+        }
     }
 }
 

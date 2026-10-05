@@ -25,6 +25,7 @@ struct PlaylistDetailView: View {
     var onTrackDoubleClick: ((Track, [Track]) -> Void)?
 
     @Environment(\.container) private var container
+    @Environment(\.openSettings) private var openSettings
     @State private var viewModel: PlaylistDetailViewModel?
     @State private var showM3UImporter = false
     @State private var showAddFromLibrary = false
@@ -622,7 +623,7 @@ struct PlaylistDetailView: View {
                         Spacer()
                         if track.downloadFailureRecord?.reason.localizedCaseInsensitiveContains("open Settings") == true {
                             Button("Open Settings") {
-                                Task { @MainActor in AppDelegate.shared?.showSettingsWindow() }
+                                openSettings(tab: .sources)
                             }
                         }
                         if track.id != nil {

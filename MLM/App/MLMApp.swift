@@ -80,18 +80,6 @@ struct MLMApp: App {
             // Remove default New Document item — single-window app
             CommandGroup(replacing: .newItem) {}
 
-            // Settings via AppDelegate. Only one code path now.
-            CommandGroup(replacing: .appSettings) {
-                Button("Settings\u{2026}") {
-                    guard let delegate = AppDelegate.shared else {
-                        AppLogger.shared.error("AppDelegate.shared is nil — Settings window cannot open", source: "menu")
-                        return
-                    }
-                    delegate.showSettingsWindow()
-                }
-                .keyboardShortcut(",", modifiers: .command)
-            }
-
             // MARK: - File menu additions
             CommandGroup(after: .newItem) {
                 Button("New Playlist") {
@@ -229,6 +217,12 @@ struct MLMApp: App {
             }
         }
 
+        // Settings… ⌘, (the system adds the MLM-menu item), UC-WIN-03.
+        Settings {
+            SettingsView()
+                .environment(\.container, container)
+        }
+        .windowResizability(.contentMinSize)
     }
 
     // MARK: - Arrow-key seek (hold-to-repeat)

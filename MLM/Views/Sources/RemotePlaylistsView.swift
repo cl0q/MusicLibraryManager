@@ -25,6 +25,7 @@ struct RemotePlaylistsView: View {
 
     @Environment(\.container) private var container
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openSettings) private var openSettings
     @State private var viewModel: RemotePlaylistsViewModel?
     @State private var urlInput = ""
     @State private var showsPersistedPlaylist = false
@@ -129,7 +130,7 @@ struct RemotePlaylistsView: View {
                         .foregroundColor(.mlmError)
                     if vm.shouldOfferSettings {
                         Button("Open Settings") {
-                            AppDelegate.shared?.showSettingsWindow()
+                            openSettings(tab: .sources)
                         }
                         .font(MLMFont.muted)
                     }
@@ -202,7 +203,7 @@ struct RemotePlaylistsView: View {
     private func settingsAction(_ vm: RemotePlaylistsViewModel) -> some View {
         if vm.shouldOfferSettings {
             Button("Open Settings") {
-                AppDelegate.shared?.showSettingsWindow()
+                openSettings(tab: .sources)
             }
         }
     }
