@@ -79,35 +79,31 @@ struct PlaybackQueueViewTests {
                 "Queue tables must use the full context menu (no contextMenuAllowsLibraryActions: false)")
     }
 
-    // MARK: - SidebarView
+    // MARK: - SidebarView (W1-1: the Queue is a trailing-column mode, DEC-006)
 
     @Test
-    func sidebarView_rendersQueueAboveSettingsFooter() throws {
+    func sidebarView_hasNoQueueOrSettingsRows() throws {
         let src = try readSource("MLM/Views/Sidebar/SidebarView.swift")
-        // .queue row must appear before settingsFooter in the source
-        guard let queueRange = src.range(of: ".queue"),
-              let settingsRange = src.range(of: "settingsFooter") else {
-            Issue.record("SidebarView must contain .queue and settingsFooter")
-            return
-        }
-        #expect(queueRange.lowerBound < settingsRange.lowerBound,
-                "SidebarView must render .queue above settingsFooter")
+        #expect(!src.contains("queueFooter") && !src.contains("settingsFooter"),
+                "The Queue and Settings footer rows left the sidebar")
+        #expect(!src.contains("\"PLAYBACK\""))
     }
 
     @Test
-    func sidebarView_noPlaybackSectionHeader() throws {
+    func sidebarView_footerIsTheLibraryFooter() throws {
         let src = try readSource("MLM/Views/Sidebar/SidebarView.swift")
-        #expect(!src.contains("\"PLAYBACK\""),
-                "SidebarView must not have a PLAYBACK List section — queue is a footer row")
-    }
-
-    @Test
-    func sidebarView_queueFooterInSafeAreaInset() throws {
-        let src = try readSource("MLM/Views/Sidebar/SidebarView.swift")
-        #expect(src.contains("queueFooter"),
-                "SidebarView must contain a queueFooter in the safeAreaInset")
-        #expect(src.contains("safeAreaInset(edge: .bottom)"),
+        #expect(src.contains("safeAreaInset(edge: .bottom"),
                 "SidebarView must use safeAreaInset(edge: .bottom) for the footer area")
+        #expect(src.contains("LibraryFooter()"))
+    }
+
+    @Test
+    func queueOpensFromThePlayerAndTheMenu() throws {
+        let player = try readSource("MLM/Views/Player/PlayerBar.swift")
+        #expect(player.contains("toggle(.queue)"), "The player's queue button toggles the Queue column")
+        let app = try readSource("MLM/App/MLMApp.swift")
+        #expect(app.contains(".keyboardShortcut(\"u\", modifiers: [.command, .option])"), "⌥⌘U toggles the Queue")
+        #expect(!app.contains(".keyboardShortcut(\"8\")"), "⌘8 is gone")
     }
 
     // MARK: - SettingsView

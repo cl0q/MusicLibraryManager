@@ -17,9 +17,12 @@ import SwiftUI
 /// └──────────────────────────────────────────────────────────────┘
 /// ```
 ///
-/// Navigates to `PlaylistDetailView` when a card is tapped.
+/// Opening a card pushes `DetailRoute.playlist` onto the content column's navigation stack
+/// (Back ⌘[ returns to the grid). Without a shell navigation model (previews, fixtures) it
+/// shows the detail in place as before.
 struct PlaylistsView: View {
     @Environment(\.container) private var container
+    @Environment(NavigationModel.self) private var navigation: NavigationModel?
     @State private var viewModel: PlaylistViewModel?
     @State private var selectedPlaylist: Playlist?
     @State private var showFailedTracksWhenOpened = false
@@ -36,7 +39,7 @@ struct PlaylistsView: View {
 
     var body: some View {
         Group {
-            if let selectedPlaylist, viewModel != nil {
+            if let selectedPlaylist, viewModel != nil, navigation == nil {
                 PlaylistDetailView(
                     playlist: selectedPlaylist,
                     initiallyShowFailedTracks: showFailedTracksWhenOpened,
@@ -58,6 +61,12 @@ struct PlaylistsView: View {
             initializeViewModel()
             await viewModel?.loadPlaylists()
             await reloadSyncProfiles()
+        }
+        .onChange(of: selectedPlaylist?.id) { _, id in
+            guard let navigation, let id else { return }
+            navigation.push(.playlist(id, showFailedTracks: showFailedTracksWhenOpened))
+            selectedPlaylist = nil
+            showFailedTracksWhenOpened = false
         }
         .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { _ in
             Task { await viewModel?.refresh() }

@@ -47,7 +47,7 @@ struct TrackDetailView: View {
             )
         }
         .background(Color.mlmSurface)
-        .frame(minWidth: 320)
+        .frame(minWidth: ShellMetrics.trailingMinWidth)
         .onAppear {
             setupPlaybackVM()
         }

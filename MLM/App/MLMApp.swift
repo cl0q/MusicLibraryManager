@@ -51,8 +51,10 @@ struct MLMApp: App {
     /// Custom hold-to-repeat state for arrow-key seeking.
     @State private var seekHold = SeekHoldState()
 
-    /// Reads the sidebar selection from the focused window via FocusedValues.
-    @FocusedBinding(\.selectedSection) private var selectedSection
+    /// The main window's navigation, trailing column and shared actions (W1-1 shell).
+    @FocusedValue(\.navigationModel) private var navigation
+    @FocusedValue(\.trailingColumn) private var trailingColumn
+    @FocusedValue(\.shellActions) private var shellActions
 
     /// Reads the playback VM from the focused window for global shortcuts.
     @FocusedValue(\.playbackViewModel) private var playbackVM
@@ -93,9 +95,10 @@ struct MLMApp: App {
             // MARK: - File menu additions
             CommandGroup(after: .newItem) {
                 Button("New Playlist") {
-                    createNewPlaylist()
+                    shellActions?.newPlaylist()
                 }
                 .keyboardShortcut("n")
+                .disabled(shellActions == nil)
 
                 Divider()
 
@@ -103,16 +106,46 @@ struct MLMApp: App {
                 LibraryCommands(launch: LibraryLaunchCoordinator.shared)
             }
 
-            // MARK: - Navigate menu (⌘1–⌘7)
-            CommandMenu("Navigate") {
-                ForEach(SidebarSection.topLevelCases) { section in
-                    if let shortcut = section.keyboardShortcut {
-                        Button(section.label) {
-                            selectedSection = section
+            // MARK: - View menu: trailing column (⌘I Info, ⌥⌘U Queue — UC-TRAIL-01)
+            CommandGroup(after: .sidebar) {
+                Button(trailingColumn?.isShowing(.info) == true ? "Hide Info" : "Show Info") {
+                    trailingColumn?.toggle(.info)
+                }
+                .keyboardShortcut("i")
+                .disabled(trailingColumn == nil)
+
+                Button(trailingColumn?.isShowing(.queue) == true ? "Hide Queue" : "Show Queue") {
+                    trailingColumn?.toggle(.queue)
+                }
+                .keyboardShortcut("u", modifiers: [.command, .option])
+                .disabled(trailingColumn == nil)
+            }
+
+            // MARK: - Go menu (⌘1–⌘6, ⌘[ ⌘] — UC-KEY-23/24; ⌘8 Queue is gone)
+            CommandMenu("Go") {
+                ForEach(SidebarDestination.numbered, id: \.self) { destination in
+                    if let key = destination.numberKey {
+                        Button(destination.fixedTitle) {
+                            navigation?.select(destination)
                         }
-                        .keyboardShortcut(shortcut)
+                        .keyboardShortcut(key)
+                        .disabled(navigation == nil)
                     }
                 }
+
+                Divider()
+
+                Button("Back") {
+                    navigation?.goBack()
+                }
+                .keyboardShortcut("[")
+                .disabled(navigation?.canGoBack != true)
+
+                Button("Forward") {
+                    navigation?.goForward()
+                }
+                .keyboardShortcut("]")
+                .disabled(navigation?.canGoForward != true)
             }
 
             // MARK: - Playback menu (⌘., ⌘←, ⌘→)
@@ -171,22 +204,20 @@ struct MLMApp: App {
 
                 Divider()
 
+                // Was posting a notification nobody observed; now runs the shell's import.
                 Button("Import from Folder…") {
-                    NotificationCenter.default.post(
-                        name: .showImportDialog, object: nil
-                    )
+                    shellActions?.chooseImportFolder()
                 }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
+                .disabled(shellActions == nil)
 
-                Divider()
-
-                Button("More Info") {
-                    NotificationCenter.default.post(
-                        name: .showTrackDetail, object: nil
-                    )
+                // Temporary home of the former Sources sidebar section (W3-SET / W3-ADD).
+                Button("Sources…") {
+                    shellActions?.showSources()
                 }
-                .keyboardShortcut("i")
+                .disabled(shellActions == nil)
 
+                // "More Info" ⌘I (a dead item) became View ▸ Show Info ⌘I.
             }
         }
 
@@ -226,18 +257,6 @@ struct MLMApp: App {
             return .handled
         default:
             return .ignored
-        }
-    }
-
-    // MARK: - Menu Actions
-
-    /// Create a new unnamed playlist via the PlaylistRepository.
-    private func createNewPlaylist() {
-        guard let playlistRepo = container.playlistRepository else { return }
-        Task {
-            try? await playlistRepo.create(name: "Untitled Playlist")
-            NotificationCenter.default.post(name: .playlistDidChange, object: nil)
-            selectedSection = .playlists
         }
     }
 }

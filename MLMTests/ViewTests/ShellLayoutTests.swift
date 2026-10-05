@@ -2,8 +2,8 @@ import Testing
 import Foundation
 
 /// Source-scan tests verifying the shell layout structure:
-/// - PlayerBar lives in a native ToolbarItem(placement: .principal)
-/// - Detail pane uses HSplitView, not .inspector
+/// - PlayerBar lives in a native ToolbarItem(placement: .principal) of the shell toolbar
+/// - The trailing column is the system `.inspector`, not an HSplitView (W1-1, DEC-007)
 /// - TrackDetailView puts waveform above header
 /// - Cmd+F is wired via NSEvent local monitor
 /// - Search VM uses nonisolated helpers for off-main work
@@ -28,8 +28,8 @@ struct ShellLayoutTests {
 
     @Test
     func contentView_hasPrincipalToolbarItem() throws {
-        let src = try readSource("MLM/Views/ContentView/ContentView.swift")
-        #expect(src.contains("ToolbarItem(placement: .principal)"),
+        let src = try readSource("MLM/Views/Shell/ShellToolbar.swift")
+        #expect(src.contains("placement: .principal)") && src.contains("PlayerBar(viewModel:"),
                 "PlayerBar must live in a ToolbarItem(placement: .principal) in the native toolbar")
     }
 
@@ -61,20 +61,49 @@ struct ShellLayoutTests {
                 "ContentView must not contain a custom sidebar.leading toggle — native toolbar provides it")
     }
 
-    // MARK: - Task 2: Detail pane via HSplitView, not .inspector
+    // MARK: - Task 2: Trailing column via the system .inspector (UC-TRAIL-01, UC-KIT-36)
 
     @Test
-    func contentView_noInspector() throws {
+    func contentView_usesInspector() throws {
         let src = try readSource("MLM/Views/ContentView/ContentView.swift")
-        #expect(!src.contains(".inspector("),
-                "ContentView must not use .inspector — use HSplitView for the detail pane")
+        #expect(src.contains(".inspector(isPresented:"),
+                "ContentView must host Info / Queue in the system .inspector")
+        #expect(src.contains(".inspectorColumnWidth("),
+                "The trailing column sets its width range")
     }
 
     @Test
-    func contentView_usesHSplitView() throws {
+    func contentView_noHSplitView() throws {
         let src = try readSource("MLM/Views/ContentView/ContentView.swift")
-        #expect(src.contains("HSplitView"),
-                "ContentView must use HSplitView for the trailing detail pane")
+        #expect(!src.contains("HSplitView"),
+                "HSplitView for the inspector is banned (UC-KIT-36)")
+    }
+
+    @Test
+    func toolbar_isCustomizableAndConstant() throws {
+        let content = try readSource("MLM/Views/ContentView/ContentView.swift")
+        #expect(content.contains(".toolbar(id: \"mlm.main\")"))
+        let toolbar = try readSource("MLM/Views/Shell/ShellToolbar.swift")
+        for item in ["BackForwardButtons()", "AddMenu()", "ActivityToolbarButton()", "InfoToggleButton()"] {
+            #expect(toolbar.contains(item), "toolbar misses \(item)")
+        }
+        let library = try readSource("MLM/Views/Library/LibraryView.swift")
+        #expect(!library.contains(".toolbar"), "All Tracks must not add toolbar items (UC-TB-02)")
+        let folders = try readSource("MLM/Views/Folders/FoldersView.swift")
+        #expect(!folders.contains(".toolbar"), "Folders must not add toolbar items (UC-TB-02)")
+    }
+
+    @Test
+    func addMenu_hasExactlyTheDesignedItems() throws {
+        let src = try readSource("MLM/Views/Shell/ShellToolbar.swift")
+        let start = try #require(src.range(of: "struct AddMenu: View"))
+        let end = try #require(src.range(of: "// MARK: - Activity item"))
+        let menu = String(src[start.upperBound..<end.lowerBound])
+        let titles = menu.matches(of: #/Button\("([^"]+)"\)/#).map { String($0.1) }
+        #expect(titles == [
+            "New Playlist", "New Playlist Folder", "Add from Link…", "Import Playlist from Source…",
+            "Import Files or Folder…", "Import M3U…", "Refresh from Sources",
+        ])
     }
 
     @Test
