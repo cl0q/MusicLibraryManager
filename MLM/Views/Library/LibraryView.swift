@@ -52,6 +52,9 @@ struct LibraryView: View {
         .onReceive(NotificationCenter.default.publisher(for: .trackAvailabilityDidChange)) { _ in
             Task { await viewModel?.refresh() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .trackMetadataDidChange)) { _ in
+            Task { await viewModel?.refresh() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .libraryDidDeleteTracks)) { note in
             if let ids = note.userInfo?["removedIds"] as? [Int64] {
                 viewModel?.removeTracks(ids: Set(ids))

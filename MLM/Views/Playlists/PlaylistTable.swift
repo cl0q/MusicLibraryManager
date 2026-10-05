@@ -26,6 +26,10 @@ struct PlaylistTable: View {
         .onReceive(NotificationCenter.default.publisher(for: .trackAvailabilityDidChange)) { _ in
             Task { await viewModel.refresh() }
         }
+        // A tag edit in Info (or its undo) changed track fields: reload in place.
+        .onReceive(NotificationCenter.default.publisher(for: .trackMetadataDidChange)) { _ in
+            Task { await viewModel.refresh() }
+        }
     }
 
     private var configuration: TrackListConfiguration {
