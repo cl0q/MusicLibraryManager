@@ -106,7 +106,7 @@ struct QueuePanelTests {
             [.play(enabled: true), .preview(enabled: true)],
             [.playNext, .moveToEndOfQueue],
             [.addToPlaylist, .addToSyncProfile],
-            [.getInfo, .showInContext(name: "“Warm-up”")],
+            [.getInfo, .goToArtist("Artist 1"), .showInContext(name: "“Warm-up”")],
             [.showInFinder(enabled: true), .copy(filePath: true, link: true)],
             [.removeFromContainer(title: "Remove from Queue")],
         ])

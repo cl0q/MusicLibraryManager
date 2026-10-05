@@ -228,13 +228,6 @@ enum SnapshotFixtures {
                 ).padding(20))
             }
         ),
-        Fixture(
-            id: "universal-search-idle",
-            size: .init(width: 760, height: 540),
-            makeView: { _ in
-                AnyView(UniversalSearchView(onDismiss: {}))
-            }
-        ),
         Fixture(id: "track-cover-placeholder", size: .init(width: 220, height: 220), makeView: { _ in
             AnyView(TrackCoverView(trackId: 1, size: .small).frame(width: 180, height: 180).padding(20))
         }),
@@ -309,7 +302,7 @@ enum SnapshotFixtures {
         "Shared/TrackCoverView.swift", "Shared/SpringLoadableHover.swift", "Shared/FirstRunWizard.swift",
         "Shared/TrackMetadataPresentation.swift", "Sync/DeviceIngestResultsView.swift",
         "Sync/IngestPreviewView.swift", "Sync/SyncToast.swift",
-        "TrackDetail/WaveformView.swift", "Search/UniversalSearchView.swift",
+        "TrackDetail/WaveformView.swift",
     ]
 
     private static let exclusions: [String: String] = [
@@ -348,7 +341,10 @@ enum SnapshotFixtures {
         "Playlists/PlaylistDetailViewLoader.swift": "Deferred: loader async outcomes require controlled ready/not-found/failure injection.",
         "Playlists/PlaylistsView.swift": "Deferred: live playlist/cover loading and root view state need a preloaded composition.",
         "ReelsInbox/ReelsInboxView.swift": "Deferred: AVKit/Shazam/Vision work and detached tasks require service/clock seams.",
-        "Search/GlobalSearchPresentationView.swift": "Deferred: constructs search services from container; inject a preloaded presentation model.",
+        "Search/SearchResultsView.swift": "Deferred: Library-scope results read the open library and the shell environment (W2-I); its model is unit-tested.",
+        "Search/OnlineSearchResultsView.swift": "Deferred: Online-scope results ask live sources (W2-I); OnlineSearchModel is unit-tested with fake sources.",
+        "Search/SearchSuggestionList.swift": "Deferred: search suggestions render only inside the window's toolbar search field (W2-I).",
+        "Search/SearchFocusHandoff.swift": "Non-view: moves focus from the search field to the visible table (AppKit, W2-I).",
         "Settings/BackupSettingsView.swift": "Deferred: container-backed backup service and folder/Finder panels require an inert backup model.",
         "Settings/DataLocationsView.swift": "Deferred: container-backed paths, backup service and filesystem sizes require an inert locations model.",
         "Settings/LibrarySetupView.swift": "Deferred: import/filesystem state and folder panels require inert import model.",
@@ -443,8 +439,10 @@ Queue/QueuePanelModel.swift
 Queue/SaveQueueAsPlaylistPopover.swift
 ReelsInbox/ReelsInboxView.swift
 ReviewQueue/ReviewQueueView.swift
-Search/GlobalSearchPresentationView.swift
-Search/UniversalSearchView.swift
+Search/OnlineSearchResultsView.swift
+Search/SearchFocusHandoff.swift
+Search/SearchResultsView.swift
+Search/SearchSuggestionList.swift
 Settings/BackupSettingsView.swift
 Settings/DataLocationsView.swift
 Settings/GeneralSettingsView.swift

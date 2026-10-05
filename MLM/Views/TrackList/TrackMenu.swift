@@ -20,6 +20,8 @@ struct TrackMenu: View {
     /// would keep them live and take the menu bar's keys — even from a text field (UC-KEY-36).
     var showsKeyEquivalents = true
 
+    @Environment(ToolbarSearchModel.self) private var search: ToolbarSearchModel?
+
     var body: some View {
         ForEach(Array(model.sections.enumerated()), id: \.offset) { _, section in
             Section {
@@ -96,6 +98,10 @@ struct TrackMenu: View {
             } else {
                 item
             }
+        case .goToArtist(let artist):
+            // Navigates (the verb says so, UC-CM-09): All Tracks with `artist: ‹name›` (W2-I).
+            Button("Go to Artist") { search?.goToArtist(artist) }
+                .disabled(search == nil)
         case .download(let title):
             let item = Button {
                 actions.download(rows)

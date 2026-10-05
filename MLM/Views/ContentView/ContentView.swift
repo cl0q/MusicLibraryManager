@@ -14,6 +14,9 @@ final class ShellState {
     let sidebar = SidebarModel()
     let drivePlayback = DriveLossPlayback()
     let search: ToolbarSearchModel
+    /// The `Library` and `Online` scopes' results (W2-I); kept while the window lives.
+    let libraryResults = LibrarySearchModel()
+    let onlineResults = OnlineSearchModel()
     let actions: ShellActions
 
     init(container: DependencyContainer) {
@@ -67,6 +70,7 @@ struct ContentView: View {
                 .environment(shell.statusBar)
                 .environment(shell.sidebar)
                 .environment(shell.actions)
+                .environment(shell.search)
                 .focusedSceneValue(\.navigationModel, container.isInitialized ? shell.navigation : nil)
                 .focusedSceneValue(\.trailingColumn, container.isInitialized ? shell.trailing : nil)
                 .focusedSceneValue(\.statusBarCenter, container.isInitialized ? shell.statusBar : nil)
@@ -176,10 +180,9 @@ struct ContentView: View {
             .sheet(item: $syncProfileSelectionContainer) { selection in
                 NewSyncProfileFromSelectionSheet(trackIds: selection.trackIds)
             }
-            .onChange(of: searchPlace) { _, place in
-                // Leaving a place ends its search and tells the coordinator what is visible.
-                shell.search.reset()
-                container.searchCoordinator.context = place.context
+            .onChange(of: searchPlace) { _, _ in
+                // The query belongs to the view: keep the outgoing place's, restore this one's.
+                shell.search.placeDidChange()
             }
     }
 
@@ -248,10 +251,7 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            shell.search.hasLocalTable = { [navigation = shell.navigation] in
-                SearchPlace(navigation).hasLocalTable
-            }
-            container.searchCoordinator.context = searchPlace.context
+            configureSearch()
             shell.actions.activateTrack = handleTrackDoubleClick
         }
         // ⌘F is Edit ▸ Find ▸ Search, a menu key of this window (W1-2); no app-wide key monitor.
@@ -259,21 +259,65 @@ struct ContentView: View {
 
     // MARK: - Content column
 
-    /// The visible place as the search coordinator sees it.
-    private var searchPlace: SearchPlace { SearchPlace(shell.navigation) }
+    /// The visible place as search sees it (its key; the name follows).
+    private var searchPlace: SearchPlaceKey { SearchPlace(shell.navigation).key }
+
+    /// Wires the toolbar search field, its scopes' results and the link hand-off (W2-I).
+    private func configureSearch() {
+        let search = shell.search
+        let navigation = shell.navigation
+        let sidebar = shell.sidebar
+        let statusBar = shell.statusBar
+        search.navigation = navigation
+        search.placeProvider = {
+            SearchPlace(navigation, names: PlaceNames(playlist: { sidebar.playlistName($0) }))
+        }
+        search.suggestionProvider = LiveSearchSuggestionProvider()
+        search.recentStore = RecentSearchStore(libraryID: { DependencyContainer.shared.activeLibrary?.libraryId })
+        search.moveFocusToResults = { SearchFocusHandoff.moveToResults() }
+        search.openLink = { [weak search] link in
+            QuickAddRouter.shared.open(link, lookup: search?.linkLookup)
+        }
+        search.postHint = { statusBar.post($0) }
+        search.placeDidChange()
+
+        shell.libraryResults.trackSearch = { filter, limit in
+            guard let queries = await TrackSearchQueries.current() else { return ([], 0) }
+            return try await queries.matchingTracks(filter: filter, limit: limit)
+        }
+        shell.libraryResults.playlists = { sidebar.playlists }
+        shell.libraryResults.folderSearch = { text in await LibraryFolderSearch.folders(matching: text) }
+        shell.onlineResults.providers = { LiveOnlineSearchProviders.make() }
+        shell.onlineResults.libraryMatches = { results in
+            guard let queries = await TrackSearchQueries.current() else { return [:] }
+            return (try? await queries.libraryTrackIDs(for: results)) ?? [:]
+        }
+
+        QuickAddRouter.shared.interim = QuickAddRouter.Interim(
+            lookUp: { link in await LiveSearchSuggestionProvider().lookUp(link) },
+            download: { link, metadata in
+                guard let service = SearchDownloadService.live() else { return .failed("no library is open") }
+                return await service.download(link, metadata: metadata)
+            },
+            revealInLibrary: { [weak search] id in
+                if let search { SearchReveal.showInAllTracks(id, search: search) }
+            },
+            importPlaylist: { source, url in
+                let remote: RemotePlaylistSource = switch source {
+                case .youtube: .youtube
+                case .soundcloud: .soundcloud
+                case .spotify: .spotify
+                }
+                if source != .spotify { RemotePlaylistLinkRequest.shared.request(url, source: source) }
+                AppDelegate.shared?.showRemotePlaylistsWindow(source: remote)
+                return source != .spotify
+            },
+            post: { statusBar.post($0) }
+        )
+    }
 
     private var isAllTracks: Bool {
         shell.navigation.selection == .allTracks
-    }
-
-    /// Maps the coordinator's search context onto the merger context so the
-    /// pane ranks the current section's tracks first.
-    private var searchMergerContext: SearchResultsMerger.Context {
-        switch container.searchCoordinator.context {
-        case .library: .library
-        case .playlist(let id): .playlist(id)
-        case .other: .other
-        }
     }
 
     /// The content column: the destination's `NavigationStack`, with the search results pane
@@ -287,14 +331,14 @@ struct ContentView: View {
                 .accessibilityHidden(searching)
 
             if searching {
-                ContentScaffold(showsDriveBanner: shell.navigation.currentPlaceListsTracks) {
-                    GlobalSearchPresentationView(
-                        query: Bindable(container.searchCoordinator).query,
-                        onExit: {
-                            shell.search.reset()
-                        },
-                        context: searchMergerContext,
-                        onTrackDoubleClick: handleTrackDoubleClick
+                // `Library` / `Online` results, only on request (UC-SEARCH-02); `This view`
+                // filters the place below in place.
+                ContentScaffold(showsDriveBanner: container.searchCoordinator.scope == .library) {
+                    SearchResultsView(
+                        search: shell.search,
+                        library: shell.libraryResults,
+                        online: shell.onlineResults,
+                        onTrackActivated: handleTrackDoubleClick
                     )
                 } selectionBar: {
                     TrackSelectionBar(host: .searchResults)
@@ -475,35 +519,6 @@ private struct UndoCenterInstallation: ViewModifier {
             .onAppear {
                 ShellWindowModels.main.use(navigation: shell.navigation, sidebar: shell.sidebar, statusBar: shell.statusBar)
             }
-    }
-}
-
-// MARK: - Search place
-
-/// What the search coordinator needs to know about the visible place.
-private struct SearchPlace: Equatable {
-    let context: SearchCoordinator.SearchContext
-
-    @MainActor
-    init(_ navigation: NavigationModel) {
-        if case .playlist(let id, _) = navigation.currentRoute {
-            context = .playlist(id)
-        } else if navigation.currentRoute != nil {
-            context = .other
-        } else {
-            switch navigation.selection {
-            case .allTracks: context = .library
-            case .playlist(let id): context = .playlist(id)
-            default: context = .other
-            }
-        }
-    }
-
-    var hasLocalTable: Bool {
-        switch context {
-        case .library, .playlist: true
-        case .other: false
-        }
     }
 }
 

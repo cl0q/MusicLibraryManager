@@ -9,6 +9,7 @@ import SwiftUI
 struct LibraryView: View {
     @Environment(\.container) private var container
     @Environment(ShellActions.self) private var shell: ShellActions?
+    @Environment(ToolbarSearchModel.self) private var search: ToolbarSearchModel?
 
     /// Play a track with the visible rows as queue context (the window's activation).
     var onTrackDoubleClick: ((Track, [Track]) -> Void)?
@@ -37,7 +38,7 @@ struct LibraryView: View {
         .task {
             guard !usesPreloadedModel else { return }
             if viewModel == nil { viewModel = container.libraryViewModel }
-            viewModel?.searchQuery = container.searchCoordinator.query
+            viewModel?.searchFilter = container.searchCoordinator.filter(for: .allTracks)
             await viewModel?.loadTracks()
         }
         .onReceive(NotificationCenter.default.publisher(for: .libraryDidImport)) { _ in
@@ -81,9 +82,10 @@ struct LibraryView: View {
                 }
             }
         }
-        .onChange(of: container.searchCoordinator.query) { _, q in
-            guard q != viewModel.searchQuery else { return }
-            viewModel.searchQuery = q
+        // In-place filter (W2-I): All Tracks applies its own place's filter, text and tokens.
+        .onChange(of: container.searchCoordinator.filter(for: .allTracks)) { _, filter in
+            guard filter != viewModel.searchFilter else { return }
+            viewModel.searchFilter = filter
         }
     }
 
@@ -100,7 +102,7 @@ struct LibraryView: View {
     /// `Clear Filters`; an empty scope → what that scope means. The scope bar stays above.
     @ViewBuilder
     private func emptyState(_ viewModel: LibraryViewModel) -> some View {
-        let query = viewModel.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let query = viewModel.searchFilter.displayText
         if viewModel.isLibraryEmpty {
             ContentUnavailableView {
                 Label("No tracks yet", systemImage: "music.note")
@@ -117,6 +119,9 @@ struct LibraryView: View {
                 Text("Check the spelling or try a new search.")
             } actions: {
                 Button("Clear Filters") { clearFilters() }
+                // UC-SEARCH-07: the two ways to look further (same as the scope bar).
+                Button("Search the Library") { search?.focus(scope: .library) }
+                Button("Search Online") { search?.focus(scope: .online) }
             }
         } else if let empty = AllTracksScopeEmptyState(scope: viewModel.scope) {
             ContentUnavailableView {
@@ -127,10 +132,14 @@ struct LibraryView: View {
         }
     }
 
-    /// `Clear Filters`: empties the toolbar filter (and its tokens, W2-I); the scope stays.
+    /// `Clear Filters`: empties the toolbar field (text and tokens, W2-I); the scope stays.
     private func clearFilters() {
-        container.searchCoordinator.query = ""
-        viewModel?.searchQuery = ""
+        if let search, search.place.key == .allTracks {
+            search.clear()
+        } else {
+            container.searchCoordinator.commit(.empty, for: .allTracks)
+        }
+        viewModel?.searchFilter = SearchFilter()
     }
 }
 

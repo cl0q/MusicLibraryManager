@@ -12,6 +12,7 @@ struct TrackCommands: Commands {
     @FocusedValue(\.shellActions) private var shellActions
     @FocusedValue(\.playlistSourceRefresh) private var playlistRefresh
     @FocusedValue(\.undoCenter) private var undoCenter
+    @FocusedValue(\.toolbarSearch) private var search
 
     var body: some Commands {
         CommandMenu(MenuBarMenu.track.rawValue) {
@@ -89,7 +90,12 @@ struct TrackCommands: Commands {
                 trailingColumn?.toggle(.info)
             }
             CommandButton(.goToAlbum)
-            CommandButton(.goToArtist)
+            // All Tracks filtered by the token `artist: ‹name›` (W2-I).
+            let artist = GoToArtist.artist(of: selection)
+            CommandButton(.goToArtist, enabled: artist != nil && search != nil,
+                          disabledReason: GoToArtist.disabledReason) {
+                if let artist { search?.goToArtist(artist) }
+            }
             CommandButton(.findSimilar)
 
             Divider()

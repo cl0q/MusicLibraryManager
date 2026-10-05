@@ -1,7 +1,9 @@
 import Foundation
 
-/// Materializes remote search results into persisted Track rows.
+/// Materializes online search results into persisted Track rows — called only for an explicit
+/// `Download` on a result (W2-I: a search itself never writes, PP-MAIN-04).
 /// Follows the same convention as remote-playlist persistence:
+/// - album stays empty: the source name is never written as album (DEC-013, UC-TABLE-11)
 /// - organizedPath is nil (track.isRemote == true)
 /// - format stores the source name (e.g. "youtube", "soundcloud")
 /// - originalPath stores the sourceURL or a synthetic "source://externalId" URI
@@ -39,7 +41,7 @@ final class RemoteTrackMaterializer: Sendable {
 
             var newTrack = Track(
                 artist: result.artist,
-                album: result.source.rawValue,
+                album: "",
                 title: result.title,
                 format: sourceName,
                 originalPath: result.sourceURL ?? "\(sourceName)://\(externalId)"
