@@ -74,8 +74,9 @@ enum GoToCurrentTrack {
 
     /// The recorded place, if it still exists — a deleted playlist or sync profile falls back to
     /// All Tracks (W2-C review S6).
-    static func validated(_ origin: PlaybackOrigin?, sources: TrackMenuSources = .shared) -> PlaybackOrigin {
+    static func validated(_ origin: PlaybackOrigin?, sources: TrackMenuSources? = nil) -> PlaybackOrigin {
         guard let origin else { return .allTracks }
+        let sources = sources ?? .shared
         let playlistIDs = Set(sources.playlists.compactMap(\.id))
         let profileIDs = Set(sources.syncProfiles.compactMap(\.id))
         func exists(_ destination: SidebarDestination) -> Bool {
