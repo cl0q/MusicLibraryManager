@@ -402,6 +402,9 @@ final class DependencyContainer {
             }
         }
 
+        // Tag writes waiting for the library folder (W2-E): flush on open, mount, folder change.
+        await MainActor.run { TagWriteQueue.shared.start(.live()) }
+
         // Reconfigure the download pipeline whenever the library root is
         // changed at runtime (e.g. from the First-Run Wizard or Settings).
         libraryRootObserver = NotificationCenter.default.addObserver(
