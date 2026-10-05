@@ -190,8 +190,9 @@ struct PlaybackQueueTests {
     // MARK: - backRestartThreshold
 
     @Test
-    func backRestartThreshold_is7() {
-        #expect(PlaybackQueue.backRestartThreshold == 7.0)
+    func backRestartThreshold_is3() {
+        // UC-TB-09: Previous restarts after more than 3 s (was 7 s before W2-C).
+        #expect(PlaybackQueue.backRestartThreshold == 3.0)
     }
 
     // MARK: - Equatable

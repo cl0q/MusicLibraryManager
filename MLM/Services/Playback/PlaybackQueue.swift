@@ -33,15 +33,19 @@ struct PlaybackQueue: Equatable {
     /// Hard-capped; appended AFTER all playNext items.
     private(set) var context: [Track] = []
 
+    /// One pass of the context as it was started — the started track and the rows after it
+    /// (capped). Repeat All (`PlaybackRepeatMode.all`) plays it again from the top when the
+    /// queue runs out. Play Next items are not part of it.
+    private(set) var cycle: [Track] = []
+
     /// Ordered upcoming tracks: playNext first, then context.
     var upcoming: [Track] { playNext + context }
 
     // MARK: - Threshold
 
-    /// Back-button threshold in seconds. When the current position exceeds
-    /// this value, pressing back restarts the current track instead of
-    /// going to the previous one.
-    static let backRestartThreshold: TimeInterval = 7
+    /// Previous restarts the current track when more than this many seconds have played,
+    /// else it goes to the previous track (UC-TB-09: 3 s, like Music).
+    static let backRestartThreshold: TimeInterval = 3
 
     // MARK: - Init
 
@@ -77,6 +81,27 @@ struct PlaybackQueue: Equatable {
             return !playNextIDs.contains(id)
         }
         context = Array(deduped.prefix(cap))
+        cycle = []
+    }
+
+    /// Start a context: `started` plays now, `following` (capped) come after it. Keeps
+    /// playNext; one pass (`started` + context) becomes the Repeat All cycle.
+    mutating func startContext(_ started: Track, following: [Track], cap: Int) {
+        replaceContext(following, cap: cap)
+        cycle = [started] + context
+    }
+
+    /// Repeat All: put the whole cycle back as the context (playNext stays first). Returns
+    /// whether there was a cycle to restart.
+    @discardableResult
+    mutating func restartCycle() -> Bool {
+        guard !cycle.isEmpty else { return false }
+        let playNextIDs = Set(playNext.compactMap(\.id))
+        context = cycle.filter { track in
+            guard let id = track.id else { return true }
+            return !playNextIDs.contains(id)
+        }
+        return true
     }
 
     /// Insert tracks into the playNext lane.
