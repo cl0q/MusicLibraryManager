@@ -485,14 +485,9 @@ final class PlaylistRepository: Sendable {
     /// runs `replaceTrackList` right after this merge call).
     func mergePlaylists(survivorId: Int64, victimId: Int64) async throws {
         try await database.write { db in
-            try db.execute(
-                sql: "DELETE FROM playlist_tracks WHERE playlist_id = ?",
-                arguments: [victimId]
-            )
-            try db.execute(
-                sql: "DELETE FROM playlists WHERE id = ?",
-                arguments: [victimId]
-            )
+            // Same manual cascade as `delete`: tags, sync profile links and device-ingest
+            // snapshots of the merged-away playlist used to be left behind.
+            try Self.deleteWithDependents(db, id: victimId)
         }
     }
 
@@ -739,7 +734,11 @@ final class PlaylistRepository: Sendable {
     /// - Same playlist id (so sync profile links, routes and the cover file `‹id›.png` still
     ///   match) unless that id is in use; then a new id, and an auto cover named after the
     ///   old id is dropped (it is regenerated).
-    /// - Same name unless another playlist took it meanwhile; then the first free numbered name.
+    /// - Same name unless another playlist took it meanwhile (any category, any letter case —
+    ///   the sidebar is one name space); then the first free numbered name.
+    /// - Still linked to its source unless another playlist was imported from the same source
+    ///   playlist meanwhile; then this copy comes back unlinked, so the next refresh has one
+    ///   target (`unlinked`).
     /// - Track rows keep their position, `added_at` and row id (when free); rows whose track
     ///   left the library meanwhile are skipped and counted. Tags come back; sync profile
     ///   links and sync snapshots come back for profiles that still exist.
@@ -755,9 +754,21 @@ final class PlaylistRepository: Sendable {
                     playlist.coverIsCustom = 0
                 }
             }
+            var unlinked: PlaylistRestoreResult.Unlink?
+            if let sourceID = playlist.sourceId, let externalID = playlist.externalId,
+               let other = try Playlist
+                   .filter(Playlist.Columns.sourceId == sourceID)
+                   .filter(sql: "external_id = ?", arguments: [externalID])
+                   .filter(Playlist.Columns.isLiked == 0)
+                   .fetchOne(db) {
+                let sourceName = try String.fetchOne(db, sql: "SELECT name FROM sources WHERE id = ?", arguments: [sourceID])
+                unlinked = .init(otherPlaylistName: other.name, sourceName: sourceName ?? "its source")
+                playlist.sourceId = nil
+                playlist.externalId = nil
+            }
             let nameTaken = try Bool.fetchOne(db, sql: """
-                SELECT EXISTS(SELECT 1 FROM playlists WHERE name = ? AND category = ?)
-            """, arguments: [playlist.name, playlist.category]) ?? false
+                SELECT EXISTS(SELECT 1 FROM playlists WHERE LOWER(name) = LOWER(?))
+            """, arguments: [playlist.name]) ?? false
             if nameTaken {
                 let taken = Set(try String.fetchAll(db, sql: "SELECT name FROM playlists").map { $0.lowercased() })
                 playlist.name = Self.numberedName(base: playlist.name, taken: taken)
@@ -780,8 +791,12 @@ final class PlaylistRepository: Sendable {
             for tag in snapshot.tags {
                 try db.execute(sql: "INSERT OR IGNORE INTO playlist_tags (playlist_id, tag) VALUES (?, ?)", arguments: [id, tag])
             }
+            var droppedProfiles = 0
             for profileID in snapshot.syncProfileIDs {
-                guard try Self.exists(db, table: "sync_profiles", id: profileID) else { continue }
+                guard try Self.exists(db, table: "sync_profiles", id: profileID) else {
+                    droppedProfiles += 1
+                    continue
+                }
                 try db.execute(
                     sql: "INSERT OR IGNORE INTO sync_profile_playlists (profile_id, playlist_id) VALUES (?, ?)",
                     arguments: [profileID, id]
@@ -795,7 +810,13 @@ final class PlaylistRepository: Sendable {
                     VALUES (?, ?, ?, ?, ?, ?)
                 """, arguments: [rowID, row.profileID, id, row.playlistUUID, row.snapshotJSON, row.writtenAt])
             }
-            return PlaylistRestoreResult(playlist: playlist, droppedTrackCount: droppedTracks, wasRenamed: nameTaken)
+            return PlaylistRestoreResult(
+                playlist: playlist,
+                droppedTrackCount: droppedTracks,
+                wasRenamed: nameTaken,
+                droppedSyncProfileCount: droppedProfiles,
+                unlinked: unlinked
+            )
         }
     }
 
@@ -978,6 +999,18 @@ struct PlaylistRestoreResult: Sendable {
     let droppedTrackCount: Int
     /// The old name was taken meanwhile; `playlist.name` is a numbered one.
     let wasRenamed: Bool
+    /// Sync profile links not restored because the profile was deleted meanwhile.
+    var droppedSyncProfileCount = 0
+    /// Set when another playlist was imported from the same source playlist meanwhile: this
+    /// copy came back without its source link.
+    var unlinked: Unlink?
+
+    struct Unlink: Sendable, Equatable {
+        /// Name of the playlist that now holds the link.
+        let otherPlaylistName: String
+        /// Stored source name (`soundcloud`).
+        let sourceName: String
+    }
 }
 
 struct PlaylistDeletionImpact: Sendable, Equatable {
