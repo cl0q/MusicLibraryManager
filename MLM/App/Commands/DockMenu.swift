@@ -116,7 +116,7 @@ final class DockMenuTarget: NSObject {
         case .previous:
             Task { await playback?.back() }
         case .openLibrary(let url):
-            Task { await LibraryLaunchCoordinator.shared.handleOpen(url) }
+            MainWindowPresenter.shared.openLibrary(url, launch: .shared)
         }
     }
 }

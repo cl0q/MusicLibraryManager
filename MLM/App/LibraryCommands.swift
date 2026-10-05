@@ -9,13 +9,14 @@ struct LibraryCommands: View {
     let launch: LibraryLaunchCoordinator
 
     var body: some View {
+        // Each brings the main window forward first (UC-WIN-01): the sheet and alerts live there.
         CommandButton(.newLibrary, enabled: true) {
-            launch.requestNewLibrary()
+            MainWindowPresenter.shared.requestNewLibrary(launch: launch)
         }
 
         CommandButton(.openLibrary, enabled: true) {
             if let url = LibraryFilePanel.chooseLibraryFile() {
-                Task { await launch.handleOpen(url) }
+                MainWindowPresenter.shared.openLibrary(url, launch: launch)
             }
         }
 
@@ -28,7 +29,7 @@ struct LibraryCommands: View {
             }
             ForEach(launch.recentLibraries) { recent in
                 Button(title(for: recent)) {
-                    Task { await launch.handleOpen(recent.entry.url) }
+                    MainWindowPresenter.shared.openLibrary(recent.entry.url, launch: launch)
                 }
                 .disabled(recent.availability != .available)
             }

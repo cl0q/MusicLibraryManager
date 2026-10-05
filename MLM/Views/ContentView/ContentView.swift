@@ -59,6 +59,7 @@ struct ContentView: View {
         notificationHandlers(
             rootContent
                 .modifier(LibraryFilePresentation(launch: launch))
+                .installsMainWindowPresenter()
                 .environment(shell.navigation)
                 .environment(shell.trailing)
                 .environment(shell.statusBar)
