@@ -31,7 +31,7 @@ struct PlaybackCommands: Commands {
                 }
             }
             CommandButton(.stop, enabled: hasTrack) {
-                guard !KeyEquivalentGuard.keyCancelsSheet() else { return }
+                guard !KeyEquivalentGuard.stopKeyBelongsElsewhere() else { return }
                 playback?.stop()
             }
 

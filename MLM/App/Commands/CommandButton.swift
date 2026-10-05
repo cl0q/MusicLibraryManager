@@ -90,35 +90,95 @@ extension CommandSubmenu where Content == EmptyView {
 ///   (line start / end, document start / end, delete to line start) and ⌥⌘← / ⌥⌘→ / ⌥↩ do
 ///   nothing — playback and track keys never fire while typing (UC-KEY-07, UC-KEY-20,
 ///   UC-KEY-38).
-/// - In a sheet, ⌘. cancels the sheet instead of stopping playback (UC-KEY-10, UC-KEY-34).
+/// - ⌘. (Stop) belongs to a sheet whenever one is up — it cancels it, and never stops playback,
+///   even when the sheet has no Cancel button — and to an editing text field (`cancelOperation:`)
+///   (UC-KEY-10, UC-KEY-34, UC-KEY-38).
 ///
-/// Only key presses are intercepted; choosing the item with the mouse always runs it.
+/// Only key presses are intercepted; choosing the item with the mouse always runs it. The
+/// decision is pure (`decide`) and unit-tested; `KeyEquivalentGuard` only reads AppKit's state.
+enum KeyEquivalentDecision: Equatable, Sendable {
+    /// Run the menu command.
+    case runCommand
+    /// Hand the key to the editing text: perform this text command, or nothing.
+    case handToText(String?)
+    /// Hand the key to the sheet as Cancel.
+    case handToSheet
+
+    /// What a key equivalent does, given where the key press went.
+    /// - Parameters:
+    ///   - isKeyPress: the command came from the keyboard (a mouse choice always runs it).
+    ///   - editingText: an editable text field or text view has keyboard focus.
+    ///   - sheetIsUp: the key window is a sheet.
+    ///   - textMeaning: the selector the key means in text (`nil`: none), or `nil` meaning when
+    ///     the key doesn't belong to text at all.
+    ///   - sheetKeepsKey: the key belongs to a sheet (⌘.).
+    static func decide(
+        isKeyPress: Bool,
+        editingText: Bool,
+        sheetIsUp: Bool,
+        textMeaning: String??,
+        sheetKeepsKey: Bool
+    ) -> KeyEquivalentDecision {
+        guard isKeyPress else { return .runCommand }
+        if sheetKeepsKey, sheetIsUp { return .handToSheet }
+        if editingText, let meaning = textMeaning { return .handToText(meaning) }
+        return .runCommand
+    }
+}
+
 @MainActor
 enum KeyEquivalentGuard {
     /// What the key means while a text field is editing.
     enum TextMeaning {
         case textCommand(Selector)
         case nothing
+
+        var selectorName: String? {
+            switch self {
+            case .textCommand(let selector): NSStringFromSelector(selector)
+            case .nothing: nil
+            }
+        }
     }
 
     /// `true` when the key press was handed to the editing text (the caller must not act).
     static func keyBelongsToText(_ meaning: TextMeaning) -> Bool {
-        guard isKeyPress, let textView = NSApp.keyWindow?.firstResponder as? NSTextView, textView.isEditable else {
+        perform(decision(textMeaning: .some(meaning.selectorName), sheetKeepsKey: false))
+    }
+
+    /// ⌘. Stop: `true` when the key press went to a sheet (Cancel) or to an editing text field
+    /// (`cancelOperation:`); the caller must not stop playback.
+    static func stopKeyBelongsElsewhere() -> Bool {
+        perform(decision(textMeaning: .some(NSStringFromSelector(#selector(NSResponder.cancelOperation(_:)))),
+                         sheetKeepsKey: true))
+    }
+
+    private static func decision(textMeaning: String??, sheetKeepsKey: Bool) -> KeyEquivalentDecision {
+        let keyWindow = NSApp.keyWindow
+        let editingText = (keyWindow?.firstResponder as? NSTextView)?.isEditable == true
+        return KeyEquivalentDecision.decide(
+            isKeyPress: NSApp.currentEvent?.type == .keyDown,
+            editingText: editingText,
+            sheetIsUp: keyWindow?.sheetParent != nil,
+            textMeaning: textMeaning,
+            sheetKeepsKey: sheetKeepsKey
+        )
+    }
+
+    /// Carries out a decision; `true` when the key was handed away.
+    private static func perform(_ decision: KeyEquivalentDecision) -> Bool {
+        switch decision {
+        case .runCommand:
             return false
+        case .handToText(let selectorName):
+            if let selectorName, let textView = NSApp.keyWindow?.firstResponder as? NSTextView {
+                textView.doCommand(by: NSSelectorFromString(selectorName))
+            }
+            return true
+        case .handToSheet:
+            // Cancel if the sheet has one; either way the key never stops playback.
+            NSApp.sendAction(#selector(NSResponder.cancelOperation(_:)), to: nil, from: nil)
+            return true
         }
-        if case .textCommand(let selector) = meaning {
-            textView.doCommand(by: selector)
-        }
-        return true
-    }
-
-    /// `true` when the key press was handed to a sheet as Cancel (the caller must not act).
-    static func keyCancelsSheet() -> Bool {
-        guard isKeyPress, let window = NSApp.keyWindow, window.sheetParent != nil else { return false }
-        return NSApp.sendAction(#selector(NSResponder.cancelOperation(_:)), to: nil, from: nil)
-    }
-
-    private static var isKeyPress: Bool {
-        NSApp.currentEvent?.type == .keyDown
     }
 }
