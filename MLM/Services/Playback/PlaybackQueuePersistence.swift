@@ -6,7 +6,7 @@ import Foundation
 // own database (`v43_playback_queue`, `PlaybackQueueRepository`), so each library keeps its
 // own queue and a library switch (a relaunch) never mixes them.
 //
-// What is saved: Next (both lanes with entry identities), the Repeat All cycle, History (capped
+// What is saved: Next (both lanes with entry identities), the Repeat All cycle (identities), History (capped
 // by `playback_history_size`), the playing entry and its position, and where the context came
 // from (`PlaybackOrigin`, for the `From “‹context›”` link and ⌘L).
 // When: after any change of the queue, History, the playing track or the playback state
@@ -23,8 +23,8 @@ struct SavedPlaybackQueue: Equatable, Sendable {
 
     var playNext: [Entry] = []
     var context: [Entry] = []
-    /// Track ids of the Repeat All cycle, in order.
-    var cycle: [Int64] = []
+    /// The Repeat All cycle, in order (entries still queued in the context share their ids).
+    var cycle: [Entry] = []
     /// Oldest first; the last one is the playing track's entry while one is loaded.
     var history: [Entry] = []
     /// The playing entry (in `history`) or, when it couldn't be loaded, the waiting one at the
@@ -41,7 +41,7 @@ struct SavedPlaybackQueue: Equatable, Sendable {
 
     /// Every track id the saved queue refers to.
     var trackIDs: Set<Int64> {
-        Set(playNext.map(\.trackID) + context.map(\.trackID) + cycle + history.map(\.trackID))
+        Set(playNext.map(\.trackID) + context.map(\.trackID) + cycle.map(\.trackID) + history.map(\.trackID))
     }
 }
 
@@ -197,7 +197,7 @@ extension PlaybackQueuePersister {
         let saved = (try? await store.load()) ?? nil
         if let saved, !saved.isEmpty {
             let found = await tracks(saved.trackIDs)
-            await playback.restoreQueue(saved, tracks: found)
+            playback.restoreQueue(saved, tracks: found)
         }
         let persister = PlaybackQueuePersister(
             store: store,

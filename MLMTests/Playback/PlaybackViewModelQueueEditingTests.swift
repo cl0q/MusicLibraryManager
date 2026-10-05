@@ -47,9 +47,9 @@ struct PlaybackViewModelQueueEditingTests {
         let r = rig()
         let a = local(1, r), b = local(2, r), c = local(3, r), x = local(8, r), y = local(9, r)
         await r.vm.playTrack(a, queue: [a, b, c])
-        let added = await r.vm.addToQueue([x])
+        let added = r.vm.addToQueue([x])
         #expect(added?.kind == .addToQueue)
-        await r.vm.playNext([y])
+        r.vm.playNext([y])
         #expect(r.vm.queueSnapshot.playNext.map(\.id) == [9, 8])
         #expect(r.vm.queueSnapshot.context.map(\.id) == [2, 3])
         await r.vm.next()
@@ -64,11 +64,11 @@ struct PlaybackViewModelQueueEditingTests {
         let r = rig()
         let a = local(1, r), b = local(2, r)
         await r.vm.playTrack(a, queue: [a, b])
-        await r.vm.playNext([b])
+        r.vm.playNext([b])
         let entries = r.vm.queueSnapshot.upcomingEntries
         #expect(entries.map(\.track.id) == [2, 2])
         #expect(entries[0].id != entries[1].id)
-        await r.vm.removeEntries([entries[1].id])
+        r.vm.removeEntries([entries[1].id])
         #expect(r.vm.queueSnapshot.upcomingEntries.map(\.id) == [entries[0].id])
         // Played twice: two History rows with their own ids.
         await r.vm.playTrack(a)
@@ -76,28 +76,27 @@ struct PlaybackViewModelQueueEditingTests {
         #expect(Set(r.vm.historyEntries.map(\.id)).count == 2)
     }
 
-    // MARK: Serialised with the transport chain
+    // MARK: Edits never wait behind an advance (W2-D review: transport stalls)
 
-    @Test func anEditWaitsForTheAdvanceInFlightAndIsNotOverwritten() async {
+    @Test func anEditAppliesAtOnceWhileAnAdvanceWaitsAndSurvivesItsCommit() async {
         let r = rig()
         let a = local(1, r), b = local(2, r), c = local(3, r), d = local(4, r), e = local(5, r)
         await r.vm.playTrack(a, queue: [a, b, c, d])
         r.env.freshGate.close()
         let advancing = Task { await r.vm.next() }
         await waitUntil { r.env.freshGate.waiting == 1 }
-        // The advance computed nothing yet; the edit must queue behind it.
-        let editing = Task { await r.vm.playNext([e]) }
-        await Task.yield()
-        #expect(nextIDs(r.vm) == [2, 3, 4], "the edit waits on the transport chain")
+        // The advance waits (a slow lookup); the edit doesn't wait for it.
+        let receipt = r.vm.playNext([e])
+        #expect(receipt != nil)
+        #expect(nextIDs(r.vm) == [5, 2, 3, 4], "applied at once")
         r.env.freshGate.open()
         await advancing.value
-        let receipt = await editing.value
-        #expect(receipt != nil)
-        #expect(r.vm.currentTrack?.id == 2, "the advance played the next track")
-        #expect(nextIDs(r.vm) == [5, 3, 4], "and the edit applied to its result — nothing lost")
+        // The advance took the head it had chosen (2) and rebased: the edit stays.
+        #expect(r.vm.currentTrack?.id == 2)
+        #expect(nextIDs(r.vm) == [5, 3, 4], "nothing lost")
     }
 
-    @Test func aRemoveRacingAnAdvanceRemovesFromTheAdvancedQueue() async {
+    @Test func aRemoveRacingAnAdvanceStaysRemoved() async {
         let r = rig()
         let a = local(1, r), b = local(2, r), c = local(3, r), d = local(4, r)
         await r.vm.playTrack(a, queue: [a, b, c, d])
@@ -105,12 +104,47 @@ struct PlaybackViewModelQueueEditingTests {
         r.env.freshGate.close()
         let advancing = Task { await r.vm.next() }
         await waitUntil { r.env.freshGate.waiting == 1 }
-        let removing = Task { await r.vm.removeEntries([cEntry]) }
+        r.vm.removeEntries([cEntry])
+        #expect(nextIDs(r.vm) == [2, 4])
         r.env.freshGate.open()
         await advancing.value
-        _ = await removing.value
         #expect(r.vm.currentTrack?.id == 2)
         #expect(nextIDs(r.vm) == [4])
+    }
+
+    @Test func undoAndRedoDontWaitBehindAStuckAdvance() async {
+        let r = rig()
+        let a = local(1, r), b = local(2, r), x = local(9, r)
+        await r.vm.playTrack(a, queue: [a, b])
+        r.env.freshGate.close()
+        let advancing = Task { await r.vm.next() }
+        await waitUntil { r.env.freshGate.waiting == 1 }
+        let receipt = r.vm.playNext([x])!
+        #expect(r.vm.revertQueueEdit(receipt))
+        #expect(nextIDs(r.vm) == [2])
+        #expect(r.vm.reapplyQueueEdit(receipt))
+        #expect(nextIDs(r.vm) == [9, 2])
+        r.env.freshGate.open()
+        await advancing.value
+        #expect(r.vm.currentTrack?.id == 2)
+        #expect(nextIDs(r.vm) == [9])
+    }
+
+    @Test func theRebaseKeepsEveryEditAndOnlyTakesWhatTheAdvanceTook() {
+        func entry(_ id: Int64) -> QueueEntry {
+            var t = Track(artist: "A", album: "B", title: "T\(id)", format: "m4a", originalPath: "x://\(id)")
+            t.id = id
+            return QueueEntry(track: t)
+        }
+        let e1 = entry(1), e2 = entry(2), e3 = entry(3), x = entry(9)
+        let start = PlaybackQueue(playNext: [], context: [e1, e2, e3])
+        let target = PlaybackQueue(playNext: [], context: [e2, e3])  // the advance took e1
+        // Meanwhile: Play Next x, and e3 removed.
+        let current = PlaybackQueue(playNext: [x], context: [e1, e2])
+        let rebased = PlaybackQueue.rebase(current, from: start, to: target)
+        #expect(rebased.playNextEntries == [x])
+        #expect(rebased.contextEntries == [e2])
+        #expect(PlaybackQueue.rebase(start, from: start, to: target) == target, "nothing edited: exactly the target")
     }
 
     // MARK: IMP-033 with edits
@@ -119,7 +153,7 @@ struct PlaybackViewModelQueueEditingTests {
         let r = rig()
         let a = local(1, r), b = local(2, r), missing = notDownloaded(7)
         await r.vm.playTrack(a, queue: [a, b])
-        await r.vm.playNext([missing])
+        r.vm.playNext([missing])
         await r.vm.next()
         #expect(r.vm.currentTrack?.id == 2)
         #expect(r.vm.history.map(\.id) == [1, 7, 2], "passed over into History, before the one that plays")
@@ -138,7 +172,7 @@ struct PlaybackViewModelQueueEditingTests {
         await r.vm.next()
         #expect(r.vm.currentTrack?.id == 1, "a wait, never a skip")
         #expect(nextIDs(r.vm) == [2, 3])
-        await r.vm.addToQueue([local(9, r)])
+        r.vm.addToQueue([local(9, r)])
         #expect(nextIDs(r.vm) == [9, 2, 3], "editing the queue still works while it waits")
     }
 
@@ -159,7 +193,7 @@ struct PlaybackViewModelQueueEditingTests {
         let r = rig()
         let a = local(1, r), b = local(2, r), c = local(3, r), d = local(4, r), x = local(9, r)
         await r.vm.playTrack(a, queue: [a, b, c, d])
-        await r.vm.addToQueue([x])
+        r.vm.addToQueue([x])
         // Next = [9 | 2, 3, 4]; jump to 3.
         let three = r.vm.queueSnapshot.contextEntries[1].id
         await r.vm.playQueueEntry(three)
@@ -173,7 +207,7 @@ struct PlaybackViewModelQueueEditingTests {
         let r = rig()
         let a = local(1, r), b = local(2, r), x = local(8, r), y = local(9, r)
         await r.vm.playTrack(a, queue: [a, b])
-        await r.vm.addToQueue([x, y])
+        r.vm.addToQueue([x, y])
         let eight = r.vm.queueSnapshot.playNextEntries[0].id
         await r.vm.playQueueEntry(eight)
         #expect(r.vm.queueSnapshot.playNext.map(\.id) == [9], "Play Next items after it stay Play Next items")
@@ -198,7 +232,7 @@ struct PlaybackViewModelQueueEditingTests {
         let r = rig()
         let a = local(1, r), b = local(2, r)
         await r.vm.playTrack(a, queue: [a, b])
-        await r.vm.addToQueue([notDownloaded(7)])
+        r.vm.addToQueue([notDownloaded(7)])
         let before = r.vm.queueSnapshot
         await r.vm.playQueueEntry(before.playNextEntries[0].id)
         #expect(r.vm.currentTrack?.id == 1)
@@ -212,7 +246,7 @@ struct PlaybackViewModelQueueEditingTests {
         await r.vm.playTrack(a, queue: [a, b])
         await r.vm.next()
         let current = r.vm.currentEntryID
-        #expect(await r.vm.clearHistory() != nil)
+        #expect(r.vm.clearHistory() != nil)
         #expect(r.vm.historyEntries.map(\.id) == [current].compactMap { $0 })
     }
 
@@ -223,14 +257,14 @@ struct PlaybackViewModelQueueEditingTests {
         let a = local(1, r), b = local(2, r), c = local(3, r), d = local(4, r)
         await r.vm.playTrack(a, queue: [a, b, c, d])
         let cEntry = r.vm.queueSnapshot.contextEntries[1].id
-        let receipt = await r.vm.removeEntries([cEntry])
+        let receipt = r.vm.removeEntries([cEntry])
         #expect(nextIDs(r.vm) == [2, 4])
         await r.vm.next()
         #expect(nextIDs(r.vm) == [4])
-        #expect(await r.vm.revertQueueEdit(receipt!))
+        #expect(r.vm.revertQueueEdit(receipt!))
         #expect(r.vm.queueSnapshot.upcomingEntries.map(\.id) == [cEntry, r.vm.queueSnapshot.upcomingEntries[1].id])
         #expect(nextIDs(r.vm) == [3, 4])
-        #expect(await r.vm.reapplyQueueEdit(receipt!))
+        #expect(r.vm.reapplyQueueEdit(receipt!))
         #expect(nextIDs(r.vm) == [4])
     }
 
@@ -240,11 +274,11 @@ struct PlaybackViewModelQueueEditingTests {
         r.vm.setRepeatMode(.all)
         await r.vm.playTrack(a, queue: [a, b, c])
         let before = r.vm.queueSnapshot
-        let receipt = await r.vm.clearNext()
+        let receipt = r.vm.clearNext()
         #expect(r.vm.queueSnapshot.isEmpty)
         #expect(r.vm.queueSnapshot.cycle.isEmpty)
         #expect(r.vm.currentTrack?.id == 1, "the playing track continues")
-        #expect(await r.vm.revertQueueEdit(receipt!))
+        #expect(r.vm.revertQueueEdit(receipt!))
         #expect(r.vm.queueSnapshot == before)
     }
 
@@ -271,7 +305,7 @@ struct PlaybackViewModelQueueEditingTests {
         let a = local(1, r), b = local(2, r), c = local(3, r)
         await r.vm.playTrack(a, queue: [a, b, c])
         await r.vm.next()
-        await r.vm.playNext([a])
+        r.vm.playNext([a])
         await r.vm.removeTracksFromQueue([1, 3])
         #expect(nextIDs(r.vm).isEmpty)
         #expect(r.vm.queueSnapshot.cycle.map(\.id) == [2])
@@ -286,7 +320,7 @@ struct PlaybackViewModelQueueEditingTests {
         let r = rig()
         let a = local(1, r), b = local(2, r), c = local(3, r), p = local(9, r)
         await r.vm.playTrack(a, queue: [a, b, c])
-        await r.vm.addToQueue([b])
+        r.vm.addToQueue([b])
         let queueBefore = r.vm.queueSnapshot
         let historyBefore = r.vm.historyEntries
         let currentBefore = r.vm.currentEntryID

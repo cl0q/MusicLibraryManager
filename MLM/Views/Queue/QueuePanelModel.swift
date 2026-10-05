@@ -58,9 +58,24 @@ struct QueuePanelContent: Equatable {
     var contextName: String?
     /// Seconds of Next that can play now (unplayable rows are not counted, P-QUEUE.N09).
     var playableSeconds: Int
+    /// Nothing plays after the playing track: Next is empty and Repeat All has no pass to play
+    /// again (W2-D review S1).
+    var playbackStopsAfterCurrent = false
 
     static let empty = QueuePanelContent(nowPlaying: nil, playNext: [], context: [], history: [], origin: nil,
                                          contextName: nil, playableSeconds: 0)
+
+    /// The current names of the lists a context can come from (a playlist renamed since it
+    /// started playing shows its new name).
+    struct ListNames {
+        var playlists: [Int64: String] = [:]
+        var syncProfiles: [Int64: String] = [:]
+
+        init(playlists: [Playlist] = [], syncProfiles: [SyncProfile] = []) {
+            for playlist in playlists { if let id = playlist.id { self.playlists[id] = playlist.name } }
+            for profile in syncProfiles { if let id = profile.id { self.syncProfiles[id] = profile.name } }
+        }
+    }
 
     /// - Parameters:
     ///   - origin: where the context was played from (`PlaybackViewModel.playingOrigin`), already
@@ -71,7 +86,9 @@ struct QueuePanelContent: Equatable {
         queue: PlaybackQueue,
         history: [QueueEntry],
         origin: PlaybackOrigin?,
-        live: TrackTableLiveState
+        live: TrackTableLiveState,
+        repeatsAll: Bool = false,
+        listNames: ListNames = ListNames()
     ) -> QueuePanelContent {
         func row(_ entry: QueueEntry, _ place: QueuePanelRow.Place, position: Int) -> QueuePanelRow? {
             guard let id = entry.track.id else { return nil }
@@ -94,9 +111,11 @@ struct QueuePanelContent: Equatable {
         let seconds = (playNext + context).reduce(0) { total, item in
             Self.canPlayNow(item.row, live: live) ? total + max(item.track.duration ?? 0, 0) : total
         }
-        return QueuePanelContent(nowPlaying: nowPlaying, playNext: playNext, context: context, history: historyRows,
-                                 origin: origin, contextName: origin.flatMap(Self.name(of:)),
-                                 playableSeconds: seconds)
+        var content = QueuePanelContent(nowPlaying: nowPlaying, playNext: playNext, context: context, history: historyRows,
+                                        origin: origin, contextName: origin.flatMap { Self.name(of: $0, names: listNames) },
+                                        playableSeconds: seconds)
+        content.playbackStopsAfterCurrent = nowPlaying != nil && queue.isEmpty && !(repeatsAll && !queue.cycleEntries.isEmpty)
+        return content
     }
 
     /// The Now playing row of a file without a History entry (a loaded file that isn't a
@@ -109,11 +128,12 @@ struct QueuePanelContent: Equatable {
             && !TrackRowPresentation.isUnreachable(availability: row.availability, fileLocation: row.fileLocation, live: live)
     }
 
-    /// The name of the list a context came from: `“Warm-up”`, `All Tracks`.
-    static func name(of origin: PlaybackOrigin) -> String? {
+    /// The name of the list a context came from, as it is called now: `“Warm-up”`, `All Tracks`.
+    static func name(of origin: PlaybackOrigin, names: ListNames = ListNames()) -> String? {
         switch origin.container {
         case .library: "All Tracks"
-        case .playlist(_, let name), .syncProfile(_, let name): "“\(name)”"
+        case .playlist(let id, let name): "“\(names.playlists[id] ?? name)”"
+        case .syncProfile(let id, let name): "“\(names.syncProfiles[id] ?? name)”"
         case .queue, .none: nil
         }
     }
@@ -140,6 +160,19 @@ struct QueuePanelContent: Equatable {
     func position(forDropAt offset: Int) -> QueuePosition {
         if isNextEmpty { return .top }
         return QueuePosition.forDisplayOffset(offset, playNextCount: playNext.count, hasDivider: !context.isEmpty)
+    }
+
+    /// A drop at `offset` in `nextItems`, named by what the insertion line sits next to — the
+    /// row below it, the divider, or the end — so it is resolved against the queue when the
+    /// drop applies, not against this (possibly older) list.
+    func dropTarget(forDropAt offset: Int) -> QueueDropTarget {
+        let items = nextItems
+        guard offset < items.count else { return .end }
+        switch items[max(offset, 0)] {
+        case .entry(let row): return .before(row.id, fallback: position(forDropAt: offset))
+        case .divider: return .endOfPlayNext
+        case .empty: return .position(.top)
+        }
     }
 
     /// Tracks Save as Playlist… keeps: Now playing + Next, in queue order (P-QUEUE.N15).
@@ -199,7 +232,7 @@ enum QueuePanelWords {
     static let saveDisabledHelp = "Nothing is playing or queued."
 
     // Save Queue as Playlist popover (P-QUEUE.N15, UC-SHEET-10, §23 C8)
-    static let saveTitle = "Save queue as playlist"
+    static let saveTitle = "Save Queue as Playlist"
     static let saveCreate = "Create"
     static let saveCancel = "Cancel"
 
