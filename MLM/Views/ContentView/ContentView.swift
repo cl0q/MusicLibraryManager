@@ -59,6 +59,8 @@ struct ContentView: View {
         notificationHandlers(
             rootContent
                 .modifier(LibraryFilePresentation(launch: launch))
+                // Remove from Library… — one confirmation for the Track menu and context menus.
+                .modifier(LibraryRemovalAlert())
                 .installsMainWindowPresenter()
                 .environment(shell.navigation)
                 .environment(shell.trailing)
