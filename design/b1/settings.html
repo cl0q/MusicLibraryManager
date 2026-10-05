@@ -1,0 +1,496 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Settings — MLM B1</title>
+<link rel="stylesheet" href="assets/mlm.css"><script src="assets/app.js"></script>
+<style>
+  /* Page-local layout only. Colours come from the mlm.css variables. */
+  .tabs { display: flex; justify-content: center; gap: 2px; padding: 6px 10px 8px; background: var(--glass-strong); border-bottom: .5px solid var(--sep); flex: none; }
+  .tab { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 5px 8px 4px; min-width: 62px; border: 0; background: none; border-radius: 7px; font-size: 11px; color: var(--text2); white-space: nowrap; }
+  .tab:hover { background: var(--fill); } .tab.on { background: var(--fill2); color: var(--accent-text); }
+  .sbody { padding: 16px 20px 22px; background: var(--under); }
+  .sbody .form { gap: 18px; }
+  .path { font: 11px ui-monospace, Menlo, monospace; color: var(--text2); user-select: text; overflow-wrap: anywhere; }
+  .frow .ctl { display: flex; gap: 6px; align-items: center; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+  .frow.top { align-items: flex-start; }
+  .scopetag { font-size: 10px; color: var(--text2); font-weight: 400; margin-left: 6px; }
+  .nolib { display: flex; gap: 8px; align-items: center; padding: 7px 14px; background: var(--fill); border-bottom: .5px solid var(--sep); font-size: 12px; }
+  body[data-state="no-library"] .perlib { opacity: .42; pointer-events: none; }
+  body[data-state="drive-off"] .needs-drive .btn[data-run], body[data-state="drive-off"] .btn.needs-drive { opacity: .45; pointer-events: none; }
+  .job:not(.running) .jr { display: none !important; } .job.running .ji { display: none !important; }
+  .job .progress { margin-top: 5px; max-width: 320px; }
+  .mock { max-width: 1320px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 12px; border: 1px dashed var(--sep-strong); border-radius: 8px; background: var(--glass-strong); font-size: 11px; color: var(--text2); }
+  .mock b { color: var(--text); }
+  .stack { display: flex; height: 12px; border-radius: 4px; overflow: hidden; background: var(--fill2); }
+  .stack i { display: block; height: 100%; background: var(--accent); }
+  .o1 { opacity: .95; } .o2 { opacity: .7; } .o3 { opacity: .5; } .o4 { opacity: .34; } .o5 { opacity: .2; }
+  .stack i.other { background: var(--text2); opacity: .45; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11px; color: var(--text2); margin-top: 6px; }
+  .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: var(--accent); margin-right: 4px; }
+  .legend i.other { background: var(--text2); }
+  .stepper { display: inline-flex; flex-direction: column; font-size: 7px; line-height: 8px; color: var(--text2); background: var(--control); border-radius: 5px; box-shadow: 0 0 0 .5px var(--sep-strong); padding: 2px 4px; }
+  details { font-size: 11px; color: var(--text2); } details pre { font: 11px ui-monospace, Menlo, monospace; white-space: pre-wrap; background: var(--fill); border-radius: 6px; padding: 8px; margin: 6px 0 0; user-select: text; }
+  .chg { padding: 6px 0; border-top: .5px solid var(--sep); } .chg:first-child { border-top: 0; }
+  .alert ul { margin: 4px 0 0; padding: 0 0 0 16px; font-size: 11px; text-align: left; }
+  .sheet p { margin: 0 0 10px; }
+</style></head>
+<body data-shell="plain" data-screen="W-SETTINGS" data-title="Settings" data-states="default,no-library,drive-off">
+
+<div class="note">
+  <h3>Settings — Tier 2</h3>
+  <p><b>Try:</b> the tab strip (each tab deep-links: <code>settings.html#sources</code>, <code>#library</code>, <code>#backup</code>, <code>#storage</code>, <code>#maintenance</code>, <code>#general</code>, <code>#playback</code>, <code>#advanced</code>) · State <b>No library</b> (per-library settings dimmed, one line says why) and <b>Drive off</b> (library folder not connected) · Library ▸ <b>Change…</b> (consequences sheet) and <b>Scan Library Folder</b> · Sources ▸ <b>Reconnect</b>, <b>Disconnect</b>, <b>How to Install</b> · Backup ▸ <b>Back Up Now</b>, <b>Restore…</b> · Maintenance ▸ <b>Run</b>, <b>Preview Changes</b>, <b>Apply…</b>, <b>Roll Back…</b>. Dashed strips are mockup controls.</p>
+  <p>SwiftUI <code>Settings</code> scene with eight tabs; preferences and locations only — the Genre Workshop moved to <a href="genres.html">genres.html</a>. THOUGHTS §7.16 · DEC-035, DEC-036, DEC-037, DEC-044 (also DEC-009, DEC-025) · flows F-16, F-19, F-20, F-22. Folder choosers (S-SET-*) are system panels, catalogued in <a href="patterns-sheets-alerts.html">patterns-sheets-alerts.html</a>.</p>
+</div>
+
+<!-- Mockup controls, one strip per tab -->
+<div class="mock" data-for="library" hidden><b>Mockup · import</b>
+  <span class="seg" data-group="im"><button class="on" data-p="idle">Idle, last result</button><button data-p="run">Scanning</button><button data-p="fail">Last scan had failures</button></span>
+</div>
+<div class="mock" data-for="sources" hidden><b>Mockup · Qobuz cookie</b>
+  <span class="seg" data-group="qc"><button class="on" data-p="active">Active</button><button data-p="expired">Expired — renew</button><button data-p="none">Not configured</button><button data-p="env">Set in credentials file</button></span>
+  <b>Credentials file</b>
+  <span class="seg" data-group="cr"><button class="on" data-p="ok">Found</button><button data-p="missing">Missing</button></span>
+</div>
+<div class="mock" data-for="backup" hidden><b>Mockup · destination</b>
+  <span class="seg" data-group="bd"><button class="on" data-p="default">Default</button><button data-p="custom">Custom folder</button><button data-p="off">Custom — not connected</button></span>
+  <b>List</b><span class="seg" data-group="bl"><button class="on" data-p="list">10 backups</button><button data-p="empty">No backups yet</button></span>
+  <b>Error</b><span class="seg" data-group="be"><button class="on" data-p="none">None</button><button data-p="write">Can’t write</button></span>
+  <button class="btn" data-open="a-restorefailed">A-SET-RESTOREFAILED</button>
+</div>
+<div class="mock" data-for="storage" hidden><b>Mockup · library folder size</b>
+  <span class="seg" data-group="sz"><button class="on" data-p="done">Calculated</button><button data-p="run">Calculating</button><button data-p="none">Not calculated</button><button data-p="err">Failed</button></span>
+</div>
+<div class="mock" data-for="maintenance" hidden><b>Mockup · organized paths</b>
+  <span class="seg" data-group="pm"><button class="on" data-p="idle">Idle</button><button data-p="preview">Preview ready</button><button data-p="applied">Applied</button><button data-p="blocked">Blocked by downloads</button></span>
+</div>
+
+<!-- ═════════ Settings window ═════════ -->
+<div class="window auto w720" id="win" data-fb-id="W-SETTINGS" data-fb-label="Settings window" data-fb-note="A standard SwiftUI Settings scene instead of the hand-built AppKit window: toolbar-style tabs, remembered position, opens on a requested tab (“Open Settings ▸ Sources” lands on Sources). Works without a library." data-fb-dec="DEC-035" data-fb-api="Settings { TabView(selection:) } + openSettings with a tab binding">
+  <div class="titlebar" data-fb-id="W-SETTINGS.E02" data-fb-label="Title bar" data-fb-note="Standard Settings title bar: close only is meaningful; the window is not resizable and sizes itself to the tab." data-fb-api="Settings scene (system)"><div class="traffic"><i></i><i></i><i></i></div>
+    <div class="wtitle" id="wtitle" data-fb-id="W-SETTINGS.E01" data-fb-label="Window title" data-fb-note="System behaviour of a Settings scene: the title is the selected tab’s name (was a fixed “Settings”). The Window menu lists it as “Settings”." data-fb-api="Settings scene (system)">General</div></div>
+  <div class="tabs" data-fb-id="W-SETTINGS.E03" data-fb-label="Tab strip" data-fb-note="Eight tabs, icon + label. Order: everyday preferences first, then library, sources, safety, housekeeping. Was 7 tabs starting with Library; Advanced no longer hosts the Genre Workshop." data-fb-dec="DEC-035" data-fb-api="TabView + .tabItem { Label(_, systemImage:) }">
+    <button class="tab on" data-goto="general"><i data-i="gear" class="l"></i>General</button>
+    <button class="tab" data-goto="library"><i data-i="note" class="l"></i>Library</button>
+    <button class="tab" data-goto="playback"><i data-i="play" class="l"></i>Playback</button>
+    <button class="tab" data-goto="sources"><i data-i="cloud" class="l"></i>Sources</button>
+    <button class="tab" data-goto="backup"><i data-i="clock" class="l"></i>Backup</button>
+    <button class="tab" data-goto="storage"><i data-i="drive" class="l"></i>Storage Location</button>
+    <button class="tab" data-goto="maintenance"><i data-i="wave" class="l"></i>Maintenance</button>
+    <button class="tab" data-goto="advanced"><i data-i="filter" class="l"></i>Advanced</button>
+  </div>
+  <div class="nolib" data-show="no-library" data-fb-id="W-SETTINGS.N01" data-fb-label="No library open line" data-fb-note="One explanatory line instead of controls that silently do nothing. Settings that belong to a library are dimmed; everything for this Mac (General, Playback, accounts, tools) keeps working." data-fb-dec="DEC-035" data-fb-api="safeAreaInset(edge: .top) + .disabled(library == nil)">
+    <i data-i="info"></i><span class="grow">No library is open. Settings that belong to a library are dimmed until you open one.</span><a class="btn" href="launch.html">Choose Library…</a>
+  </div>
+
+  <div class="sbody">
+
+  <!-- ───────── General ───────── -->
+  <div data-view="general" data-view-group="st" data-fb-id="ST-GENERAL" data-fb-label="General tab (new)" data-fb-note="New tab for the three app-wide choices. All of it applies to this Mac, not to one library." data-fb-dec="DEC-035" data-fb-api="Form.formStyle(.grouped)">
+    <div class="form">
+      <div><div class="gtitle">Launch</div><div class="group">
+        <div class="frow" data-fb-id="ST-LIB.E04" data-fb-label="Open the last library at launch" data-fb-note="Moved here from the Library tab: it is about MLM, not about one library. Same setting as the checkbox in the library picker. A save failure is shown, not swallowed." data-fb-dec="DEC-031" data-fb-api="Toggle bound to the registry setting"><span class="fl">Open the last library at launch<small data-fb-id="ST-LIB.E05" data-fb-label="Footer">When off, MLM asks which library to open at launch.</small></span><span class="toggle on"></span></div>
+      </div></div>
+      <div><div class="gtitle">Space bar</div><div class="group" data-fb-id="ST-GENERAL.N01" data-fb-label="Space bar behaviour" data-fb-note="The one behavioural choice of the redesign. Default: preview." data-fb-dec="DEC-009" data-fb-api="Picker(.radioGroup) + @AppStorage">
+        <div class="frow"><span class="check radio on" data-name="space">Preview the selected track</span></div>
+        <div class="frow"><span class="check radio" data-name="space">Play or pause</span></div>
+      </div><div class="ghelp">Preview plays the selected track from its most interesting part. Space again or Esc ends it and resumes what was playing. With nothing selected, Space is Play/Pause either way.</div></div>
+      <div><div class="gtitle">Notifications</div><div class="group" data-fb-id="ST-GENERAL.N02" data-fb-label="Notifications (opt-in)" data-fb-note="Off by default. Only for work that finishes while MLM is in the background." data-fb-api="Toggle + UNUserNotificationCenter.requestAuthorization">
+        <div class="frow"><span class="fl">Notify me when background work finishes<small>Only while MLM is not the front app.</small></span><span class="toggle"></span></div>
+        <div class="frow"><span class="fl t2">Imports and downloads</span><span class="check"></span></div>
+        <div class="frow"><span class="fl t2">Sync to a device</span><span class="check"></span></div>
+        <div class="frow"><span class="fl t2">A backup that failed</span><span class="check on"></span></div>
+      </div></div>
+    </div>
+  </div>
+
+  <!-- ───────── Library ───────── -->
+  <div data-view="library" data-view-group="st" hidden data-fb-id="ST-LIB" data-fb-label="Library tab" data-fb-note="Which library file is open, where the music is, importing, and whether tag edits are written to files. Everything here belongs to the open library." data-fb-dec="DEC-035" data-fb-api="Form.formStyle(.grouped)">
+    <div class="form perlib">
+      <div><div class="gtitle" data-fb-id="ST-LIB.E01" data-fb-label="Section: Library file">Library file</div><div class="group">
+        <div class="frow" data-fb-id="ST-LIB.E02" data-fb-label="Library name and location" data-fb-note="Name plus full path, selectable."><span class="fl">Main Library<small class="path">~/Library/Application Support/com.musiclibrary.app/libraries/Main Library.mlibm</small></span>
+          <span class="ctl"><button class="btn" data-fb-id="ST-LIB.E03" data-fb-label="Show in Finder">Show in Finder</button><button class="btn" data-open="s-rename" data-fb-id="ST-LIB.N01" data-fb-label="Rename…" data-fb-note="New: renames file, manifest and list entry together (A0 D1).">Rename…</button></span></div>
+        <div class="frow"><span class="fl t2">Open or create another library</span><a class="btn" href="launch.html" data-fb-id="ST-LIB.N02" data-fb-label="Choose Library…" data-fb-note="New entry point to the library picker; switching relaunches MLM.">Choose Library…</a></div>
+      </div></div>
+
+      <div><div class="gtitle" data-fb-id="ST-LIB.E06" data-fb-label="Section: Library folder" data-fb-note="Was “Library Root”; the glossary word is Library folder. Also a drop target for a folder from Finder (D-SET-FOLDER-TO-LIBROOT)." data-fb-api="LabeledContent + .dropDestination(for: URL.self)">Library folder</div><div class="group">
+        <div class="frow"><span class="fl"><span class="path">/Volumes/Lexxar/Music</span>
+            <small data-hide="drive-off"><span class="status ok"><i data-i="check" class="s"></i>Connected</span> · on “Lexxar”</small>
+            <small data-show="drive-off" data-fb-id="ST-LIB.N03" data-fb-label="Library folder — not connected" data-fb-note="New: the Library tab now says what Storage Location already said. Same words everywhere." data-fb-dec="DEC-014"><span class="status failed"><i data-i="drive" class="s"></i>Not connected — on “Lexxar”</span> · playback and file actions are paused</small></span>
+          <span class="ctl"><button class="btn needs-drive" data-fb-id="ST-LIB.E09" data-fb-label="Show in Finder (library folder)" data-fb-note="The second path row and its second reveal button are merged into this row.">Show in Finder</button><button class="btn" data-open="s-libfolder" data-fb-id="ST-LIB.N04" data-fb-label="Change…" data-fb-note="Opens the consequences sheet first, then the system folder panel (S-SET-LIBROOT). Today the folder changes silently.">Change…</button></span></div>
+        <div class="frow" data-fb-id="ST-LIB.E08" data-fb-label="Statistics" data-fb-note="Was its own section. One row: tracks in the library and how many have a file in this folder."><span class="fl">Tracks</span><span class="t2 num">12,935 in the library · 8,902 with a file in this folder</span></div>
+      </div><div class="ghelp" data-fb-id="ST-LIB.E07" data-fb-label="Footer">The folder that contains your music files. MLM scans it and its subfolders for audio files. Track locations are stored relative to this folder.</div></div>
+
+      <div><div class="gtitle" data-fb-id="ST-LIB.E10" data-fb-label="Section: Managed folders" data-fb-note="Was “Storage layout”. Each row can be revealed.">Folders MLM creates inside the library folder</div><div class="group">
+        <div class="frow"><span class="fl"><span class="path">Downloads (SoundCloud)</span><small>Music downloaded from SoundCloud.</small></span><span class="t2 small">Managed by MLM</span></div>
+        <div class="frow"><span class="fl"><span class="path">Downloads (YouTube)</span><small>Music downloaded from YouTube and fallback sources.</small></span><span class="t2 small">Managed by MLM</span></div>
+        <div class="frow"><span class="fl"><span class="path">Transcode originals</span><small>Original files kept while MLM creates a transcode.</small></span><span class="t2 small">Managed by MLM</span></div>
+      </div></div>
+
+      <div><div class="gtitle">Import</div><div class="group needs-drive">
+        <div class="frow" data-pane="im:idle"><span class="fl">Scan the library folder for new files<small data-fb-id="ST-LIB.E14" data-fb-label="Last result" data-fb-note="Counts in words with a link to the full result in Activity (which files, why).">Last scan 28 Sep 2026 — 212 imported · 8,690 already in the library · <a href="activity.html">Show</a></small></span>
+          <span class="ctl"><button class="btn" data-run data-mock="im:run" data-fb-id="ST-LIB.E11" data-fb-label="Scan Library Folder" data-fb-note="Was “Re-scan Library”. An Activity operation; this row only echoes it." data-fb-dec="DEC-044">Scan Library Folder</button><button class="btn" data-popover="p-panel" data-fb-id="ST-LIB.E12" data-fb-label="Import Files or Folder…" data-fb-note="Was “Import Folder...”. Same command as in the Add menu. Opens the system panel (S-SET-IMPORTFOLDER); files outside the library folder are copied in.">Import Files or Folder…</button></span></div>
+        <div class="frow" data-pane="im:run" hidden data-fb-id="ST-LIB.E13" data-fb-label="Import in progress" data-fb-note="Echo of the Activity operation: same words, same numbers."><span class="fl">Scanning “Music”… <span class="t2 num">4,318 of 12,935 files</span><div class="progress" style="margin-top:6px;max-width:340px"><i style="width:33%"></i></div><small><a href="activity.html">Show in Activity</a></small></span><button class="btn" data-mock="im:idle">Cancel</button></div>
+        <div class="frow" data-pane="im:fail" hidden data-fb-id="ST-LIB.E15" data-fb-label="Result with failures" data-fb-note="Was a red raw string. A sentence, the count, and where to see the files."><span class="fl">Scan the library folder for new files<small><span class="status failed"><i data-i="warn" class="s"></i>Last scan 28 Sep 2026 — 212 imported · 3 failed</span> · <a href="activity.html">Show failed files</a></small></span><button class="btn" data-mock="im:run">Scan Library Folder</button></div>
+        <div class="frow" data-show="drive-off"><span class="fl t2"><i data-i="drive" class="s"></i> Can’t scan — “Lexxar” is not connected.</span></div>
+        <div class="frow" data-fb-id="ST-LIB.E16" data-fb-label="Supported formats" data-fb-note="Was a badge grid in its own section; one line is enough."><span class="fl">Supported formats</span><span class="t2">MP3 · FLAC · AAC · M4A · OGG · WAV · AIFF · ALAC</span></div>
+      </div></div>
+
+      <div><div class="gtitle">Tags</div><div class="group">
+        <div class="frow" data-fb-id="ST-LIB.N05" data-fb-label="Write tag changes to files" data-fb-note="New. On by default so shared and synced copies carry the corrected tags; the source is never written. While the drive is away, changes wait in Activity." data-fb-api="Toggle + app_config"><span class="fl">Write tag changes to files<small data-hide="drive-off">Edits in Info are also saved into the audio files. The source of a track is never written.</small><small data-show="drive-off">3 tag changes are waiting for “Lexxar” · <a href="activity.html">Show</a></small></span><span class="toggle on"></span></div>
+      </div></div>
+    </div>
+  </div>
+
+  <!-- ───────── Playback ───────── -->
+  <div data-view="playback" data-view-group="st" hidden data-fb-id="ST-PLAYBACK" data-fb-label="Playback tab" data-fb-note="Loudness normalisation with its dependency explained; the two tuning numbers move under Advanced and get plain names. Applies to this Mac." data-fb-dec="DEC-035" data-fb-api="Form.formStyle(.grouped) + @AppStorage">
+    <div class="form">
+      <div><div class="gtitle">Audio</div><div class="group">
+        <div class="frow" data-fb-id="ST-PLAYBACK.E03" data-fb-label="Normalize loudness" data-fb-note="Was “Normalize loudness (LUFS)” with no explanation. Says what it needs and how much of the library has it."><span class="fl">Normalize loudness<small>Plays tracks at a similar volume. Takes effect with the next track.</small><small class="perlib">Works for analysed tracks — 9,412 of 12,935 analysed · <a data-goto="maintenance">Run loudness analysis…</a></small></span><span class="toggle"></span></div>
+      </div></div>
+      <div><div class="gtitle">Space bar</div><div class="group"><div class="frow"><span class="fl t2">Preview or Play/Pause is chosen in General.</span><a class="btn plain" data-goto="general">Open General</a></div></div></div>
+      <div><div class="gtitle">Advanced</div><div class="group">
+        <div class="frow" data-fb-id="ST-PLAYBACK.E01" data-fb-label="History length" data-fb-note="Was “History size” on a stepper from 10 to 500. Field plus stepper, plain label."><span class="fl">Keep the last played tracks<small>Shown under History in the Queue.</small></span><input class="field num" style="width:54px;text-align:right" value="50"><span class="stepper">▲<br>▼</span></div>
+        <div class="frow" data-fb-id="ST-PLAYBACK.E02" data-fb-label="Queue length from a list" data-fb-note="Was “Queue cap”."><span class="fl">When playing from a list, queue up to<small>The rows after the track you play become the queue.</small></span><input class="field num" style="width:54px;text-align:right" value="100"><span class="stepper">▲<br>▼</span><span class="t2">tracks</span></div>
+      </div><div class="ghelp">Playback settings apply to every library on this Mac.</div></div>
+    </div>
+  </div>
+
+  <!-- ───────── Sources ───────── -->
+  <div data-view="sources" data-view-group="st" hidden data-fb-id="ST-SRC" data-fb-label="Sources tab" data-fb-note="The single place for accounts (the Sources sidebar section is gone), the refresh schedule, the download tools and the Qobuz cookie. Accounts and tools belong to this Mac, so the tab works without a library." data-fb-dec="DEC-004" data-fb-api="Form.formStyle(.grouped)">
+    <div class="form">
+      <div><div class="gtitle" data-fb-id="ST-SRC.E01" data-fb-label="Accounts" data-fb-note="Was “Connected sources”. Three states only: Connected, Disconnected, Sign-in expired — each with the one action that fits. “Token inaccessible” is shown as Sign-in expired with its own sentence. Brand = a 6 pt dot." data-fb-dec="DEC-043">Accounts <span class="scopetag">This Mac</span></div><div class="group">
+        <div class="frow"><span class="fl"><span class="srcdot sc"></span> SoundCloud<small><span class="status ok"><i data-i="check" class="s"></i>Connected</span> · as ollirec · last refreshed today, 09:14</small></span><button class="btn destructive" data-open="a-disconnect" data-fb-id="ST-SRC.E02" data-fb-label="Disconnect">Disconnect</button></div>
+        <div class="frow" id="sp-exp"><span class="fl"><span class="srcdot sp"></span> Spotify<small><span class="status failed"><i data-i="warn" class="s"></i>Sign-in expired</span> · imports and refreshes from Spotify are paused</small></span><span class="ctl"><button class="btn primary" data-swap="sp-exp>sp-ok" data-fb-id="ST-SRC.E03" data-fb-label="Reconnect" data-fb-note="Starts a real sign-in in the browser sheet and returns here. Was a keychain re-read that often did nothing." data-fb-dec="DEC-004" data-fb-api="ASWebAuthenticationSession">Reconnect</button><button class="btn destructive" data-open="a-disconnect">Disconnect</button></span></div>
+        <div class="frow" id="sp-ok" hidden><span class="fl"><span class="srcdot sp"></span> Spotify<small><span class="status ok"><i data-i="check" class="s"></i>Connected</span> · as oliver.ilczuk · just now</small></span><button class="btn destructive" data-open="a-disconnect">Disconnect</button></div>
+        <div class="frow" id="yt-off"><span class="fl"><span class="srcdot yt"></span> YouTube<small><span class="status">Disconnected</span> · public playlists and links work without an account</small></span><button class="btn" data-swap="yt-off>yt-ok" data-fb-id="ST-SRC.E04" data-fb-label="Connect… (YouTube)" data-fb-note="Was a “Reconnect” that re-focused this window. Optional sign-in for private playlists; the row says what works without it.">Connect…</button></div>
+        <div class="frow" id="yt-ok" hidden><span class="fl"><span class="srcdot yt"></span> YouTube<small><span class="status ok"><i data-i="check" class="s"></i>Connected</span> · as Oliver I.</small></span><button class="btn destructive" data-open="a-disconnect">Disconnect</button></div>
+        <div class="frow" data-fb-id="ST-SRC.N01" data-fb-label="Apple Music — not available yet" data-fb-note="Listed so its absence is not a mystery; no button."><span class="fl t2"><span class="srcdot am"></span> Apple Music<small>Not available yet</small></span></div>
+        <div class="frow" data-pane="cr:missing" hidden data-fb-id="ST-SRC.N02" data-fb-label="Credentials file missing" data-fb-note="New: when the credentials file is missing, connecting can’t work — said here with a link to where it goes."><span class="fl"><span class="status failed"><i data-i="warn" class="s"></i>Credentials file not found</span><small>SoundCloud and Spotify can’t be connected without it.</small></span><a class="btn" data-goto="advanced">Show Where It Goes</a></div>
+        <div data-pane="cr:ok" hidden></div>
+      </div></div>
+
+      <div><div class="gtitle">Refresh from sources <span class="scopetag">This library</span></div><div class="group perlib" data-fb-id="ST-SRC.N03" data-fb-label="Refresh schedule" data-fb-note="New: optional automatic refresh of linked playlists, replacing the manual trip to the Sources section." data-fb-dec="DEC-004" data-fb-api="Picker(.menu) + Toggle; runs as an Activity operation">
+        <div class="frow"><span class="fl">Refresh linked playlists<small>Last refresh today, 09:14 — 3 new tracks</small></span><span class="popup">Every day</span><button class="btn" data-run>Refresh Now</button></div>
+        <div class="frow"><span class="fl">Download new tracks automatically</span><span class="toggle on"></span></div>
+      </div></div>
+
+      <div><div class="gtitle">Download tools <span class="scopetag">This Mac</span></div><div class="group" data-fb-id="ST-SRC.N04" data-fb-label="Download tools" data-fb-note="New: where “yt-dlp not found” finally points. Each tool: found with version and location, or Not found with how to install and what stops working." data-fb-dec="DEC-037" data-fb-api="LabeledContent rows; Process lookup on appear and on Check Again">
+        <div class="frow"><span class="fl">yt-dlp<small><span class="status ok"><i data-i="check" class="s"></i>Found</span> — 2026.09.12 at <span class="path">/opt/homebrew/bin/yt-dlp</span></small></span><span class="t2 small">YouTube downloads</span></div>
+        <div class="frow"><span class="fl">ffmpeg<small><span class="status ok"><i data-i="check" class="s"></i>Found</span> — 7.1 at <span class="path">/opt/homebrew/bin/ffmpeg</span></small></span><span class="t2 small">Transcoding, artwork, analysis</span></div>
+        <div class="frow" id="fp-missing" data-fb-id="ST-SRC.N05" data-fb-label="Tool not found" data-fb-note="Text state plus the fix. Jobs that need it are disabled with a link to this row."><span class="fl">fpcalc<small><span class="status failed"><i data-i="warn" class="s"></i>Not found</span> · fingerprint analysis can’t run</small></span><button class="btn" data-popover="p-install">How to Install</button></div>
+        <div class="frow"><span class="fl">scdl<small><span class="status ok"><i data-i="check" class="s"></i>Found</span> — 3.0.0 at <span class="path">~/.local/bin/scdl</span></small></span><span class="t2 small">SoundCloud downloads</span></div>
+        <div class="frow"><span class="fl t2">Checked today, 09:14</span><button class="btn">Check Again</button></div>
+      </div></div>
+
+      <div><div class="gtitle" data-fb-id="ST-SRC.E05" data-fb-label="Section: Qobuz cookie" data-fb-note="Was “Squid.wtf (Qobuz Mirror)” / “captcha_verified_at Cookie”. Named by what it is for.">Lossless downloads (Qobuz) <span class="scopetag">This Mac</span></div><div class="group">
+        <div class="frow"><span class="fl">Access cookie
+            <small data-fb-id="ST-SRC.E08" data-fb-label="Cookie status" data-fb-note="Words kept: Active · Expired — renew · Not configured. New: says when the value comes from the credentials file.">
+              <span data-pane="qc:active"><span class="status ok"><i data-i="check" class="s"></i>Active</span> · <span data-fb-id="ST-SRC.E11" data-fb-label="Saved time">saved 3 hours ago</span></span>
+              <span data-pane="qc:expired" hidden><span class="status failed"><i data-i="warn" class="s"></i>Expired — renew</span> · lossless downloads fall back to other sources</span>
+              <span data-pane="qc:none" hidden><span class="status">Not configured</span> · lossless downloads are skipped</span>
+              <span data-pane="qc:env" hidden><span class="status ok"><i data-i="check" class="s"></i>Active</span> · set in the credentials file, which takes precedence over this field</span>
+            </small></span>
+          <span class="ctl"><input class="field" style="width:150px" placeholder="For example: 1779157770721" value="1791157770721" data-fb-id="ST-SRC.E06" data-fb-label="Cookie field" data-fb-note="Return saves (K-SET-COOKIE-RETURN) — but no longer saves an empty value."><button class="btn" data-fb-id="ST-SRC.E09" data-fb-label="Save">Save</button><button class="btn destructive" data-open="a-cookieclear" data-fb-id="ST-SRC.E10" data-fb-label="Clear…" data-fb-note="Now asks first (was immediate).">Clear…</button></span></div>
+        <div class="frow"><details data-fb-id="ST-SRC.E07" data-fb-label="How to get the cookie" data-fb-note="The developer-tools procedure stays, behind a disclosure."><summary>How to get the cookie</summary><div style="margin-top:6px;max-width:560px">Open qobuz.squid.wtf, complete one download (this passes the captcha), then copy the value of the “captcha_verified_at” cookie from your browser’s developer tools and paste it here.</div></details></div>
+      </div></div>
+    </div>
+  </div>
+
+  <!-- ───────── Backup ───────── -->
+  <div data-view="backup" data-view-group="st" hidden data-menu="cm-backup" data-fb-id="ST-BACKUP" data-fb-label="Backup tab" data-fb-note="Is my library safe, how often, how many, where — and a restore that says exactly what happens. Backups belong to the open library." data-fb-dec="DEC-036" data-fb-api="Form.formStyle(.grouped)">
+    <div class="form perlib">
+      <div class="group" data-pane="be:write" hidden data-fb-id="ST-BACKUP.E03" data-fb-label="Error section" data-fb-note="Plain message, technical text behind Details. Messages as approved in the copy deck."><div class="frow top"><span class="fl"><span class="status error"><i data-i="warn" class="s"></i>MLM can’t write to the backup folder. Choose another folder.</span><details style="margin-top:4px"><summary>Details</summary><pre>NSCocoaErrorDomain 513: You don’t have permission to save in the folder “MLM Backups”.</pre></details></span><a class="btn" href="activity.html#logs">Show Logs</a></div></div>
+      <div data-pane="be:none"></div>
+      <div class="group" id="bk-busy" hidden data-fb-id="ST-BACKUP.E02" data-fb-label="Restoring… / Relaunching…" data-fb-note="Blocking state after confirming a restore; every other control is disabled."><div class="frow"><span class="spinner"></span><span class="fl">Restoring…<small>MLM quits and reopens in the restored “Main Library”.</small></span></div></div>
+
+      <div><div class="gtitle" data-fb-id="ST-BACKUP.E11" data-fb-label="Section: Status">Status</div><div class="group">
+        <div class="frow" data-fb-id="ST-BACKUP.E08" data-fb-label="Last backup" data-fb-note="Date plus reason; “Never” when there is none."><span class="fl">Last backup<small id="bk-last">Today, 09:14 · Automatic</small></span>
+          <span class="ctl"><span class="t2 small" id="bk-state" hidden><span class="spinner"></span> Backing up…</span><button class="btn" id="bk-now" data-fb-id="ST-BACKUP.E16" data-fb-label="Back Up Now" data-fb-note="Was in its own Actions section. Shows Backing up… then Backup created; also an Activity operation." data-fb-dec="DEC-044">Back Up Now</button></span></div>
+      </div><div class="ghelp">Each backup contains the library database and playlist covers. Audio files and account credentials are never included.</div></div>
+
+      <div><div class="gtitle">Schedule</div><div class="group">
+        <div class="frow" data-fb-id="ST-BACKUP.N01" data-fb-label="Back up automatically" data-fb-note="New. Was fixed: at launch, at most once a day." data-fb-dec="DEC-036" data-fb-api="Picker(.segmented) or .menu"><span class="fl">Back up automatically</span><span class="seg"><button>Off</button><button class="on">Daily</button><button>Weekly</button><button>On quit</button></span></div>
+        <div class="frow" data-fb-id="ST-BACKUP.N02" data-fb-label="Keep" data-fb-note="New. Was fixed at 10." data-fb-dec="DEC-036"><span class="fl">Keep<small>Older backups are removed after a new one succeeds.</small></span><span class="seg"><button>Last 5</button><button class="on">Last 10</button><button>Last 30</button><button>All</button></span></div>
+      </div><div class="ghelp" data-fb-id="ST-BACKUP.E17" data-fb-label="Footer" data-fb-note="Was “The 10 most recent backups are kept…”. The fixed rules became the two controls above; this says what happens regardless.">MLM also backs up before updating the library database, before a restore and before library file setup, whatever the schedule.</div></div>
+
+      <div><div class="gtitle">Backup folder</div><div class="group">
+        <div class="frow top" data-fb-id="ST-BACKUP.E04" data-fb-label="Backup folder" data-fb-note="Path, Default location label, and now its reachability. Also accepts a folder dropped from Finder (D-SET-FOLDER-TO-DESTINATION)."><span class="fl">
+            <span data-pane="bd:default"><span class="path">~/Library/Application Support/com.musiclibrary.app/backups/Main Library</span><small>Default location</small></span>
+            <span data-pane="bd:custom" hidden><span class="path">/Volumes/Tresor/MLM Backups</span><small><span class="status ok"><i data-i="check" class="s"></i>Connected</span> · on “Tresor”</small></span>
+            <span data-pane="bd:off" hidden data-fb-id="ST-BACKUP.N03" data-fb-label="Backup folder — not connected" data-fb-note="New: an unreachable backup folder is said here, not only in Storage Location."><span class="path">/Volumes/Tresor/MLM Backups</span><small><span class="status failed"><i data-i="drive" class="s"></i>Not connected — on “Tresor”</span> · automatic backups are skipped until it is connected; the backups stored there are not listed</small></span></span>
+          <span class="ctl"><button class="btn" data-popover="p-panel" data-fb-id="ST-BACKUP.E05" data-fb-label="Change…" data-fb-note="System folder panel (S-SET-BACKUPFOLDER). Afterwards MLM offers to move the existing backups instead of silently stranding them.">Change…</button><button class="btn" data-mock="bd:default" data-fb-id="ST-BACKUP.E06" data-fb-label="Use Default">Use Default</button><button class="btn" data-fb-id="ST-BACKUP.E07" data-fb-label="Show in Finder">Show in Finder</button></span></div>
+      </div></div>
+
+      <div><div class="gtitle">Backups of “Main Library” <span class="scopetag" data-fb-id="ST-BACKUP.E09" data-fb-label="Count">10 backups</span> <span class="scopetag" data-fb-id="ST-BACKUP.E10" data-fb-label="Total size">1.24 GB</span></div>
+        <div class="group" data-pane="bl:list" data-fb-id="ST-BACKUP.E12" data-fb-label="Backup list" data-fb-note="Newest first. Date, then reason in words, track count and size — enough to pick the right one. Database version only as help text. Right-click a row: Restore…, Show in Finder." data-fb-api="List rows + contextMenu">
+          <div class="frow" title="Database version: 47"><span class="fl">Today, 09:14<small>Automatic · 12,935 tracks · 124.8 MB</small></span><span class="ctl"><button class="btn" data-open="a-restore" data-fb-id="ST-BACKUP.E13" data-fb-label="Restore…">Restore…</button><button class="btn" data-fb-id="ST-BACKUP.E14" data-fb-label="Show in Finder (backup)">Show in Finder</button></span></div>
+          <div class="frow" title="Database version: 47"><span class="fl">4 Oct 2026, 08:57<small>Automatic · 12,921 tracks · 124.6 MB</small></span><span class="ctl"><button class="btn" data-open="a-restore">Restore…</button><button class="btn">Show in Finder</button></span></div>
+          <div class="frow" title="Database version: 47"><span class="fl">3 Oct 2026, 22:31<small>Manual · 12,921 tracks · 124.6 MB</small></span><span class="ctl"><button class="btn" data-open="a-restore">Restore…</button><button class="btn">Show in Finder</button></span></div>
+          <div class="frow" title="Database version: 47"><span class="fl">3 Oct 2026, 22:30<small>Before restore · 12,918 tracks · 124.6 MB</small></span><span class="ctl"><button class="btn" data-open="a-restore">Restore…</button><button class="btn">Show in Finder</button></span></div>
+          <div class="frow" title="Database version: 47"><span class="fl">2 Oct 2026, 19:05<small>Before library file setup · 12,902 tracks · 124.3 MB</small></span><span class="ctl"><button class="btn" data-open="a-restore">Restore…</button><button class="btn">Show in Finder</button></span></div>
+          <div class="frow" title="Database version: 46"><span class="fl">28 Sep 2026, 18:02<small>Before update · 12,790 tracks · 123.9 MB</small></span><span class="ctl"><button class="btn" data-open="a-restore">Restore…</button><button class="btn">Show in Finder</button></span></div>
+          <div class="frow" title="Database version: 46"><span class="fl">27 Sep 2026, 09:40<small>Automatic · 12,790 tracks · <span class="status failed"><i data-i="warn" class="s"></i>Incomplete — can’t be restored</span></small></span><span class="ctl"><button class="btn">Show in Finder</button></span></div>
+          <div class="frow"><span class="fl t2">3 older backups</span><a class="btn plain">Show All</a></div>
+        </div>
+        <div class="group" data-pane="bl:empty" hidden data-fb-id="ST-BACKUP.E15" data-fb-label="No backups yet" data-fb-note="Was “No backups yet. MLM backs up automatically at launch, at most once a day.” Now follows the schedule."><div class="frow"><span class="fl t2">No backups yet. With the schedule set to Daily, the first one is made the next time MLM opens this library.</span></div></div>
+        <div class="ghelp" data-fb-id="ST-BACKUP.E01" data-fb-label="Placeholder without a library" data-fb-note="Was “Backups are available once the library has loaded.” Replaced by the window-level line in the No library state.">Only backups of the open library are listed. Restoring never crosses libraries.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ───────── Storage Location ───────── -->
+  <div data-view="storage" data-view-group="st" hidden data-fb-id="ST-STORAGE" data-fb-label="Storage Location tab" data-fb-note="Where MLM keeps things, how big, reachable or not. Transparency only — nothing is moved here; each hint is a link to the tab that changes it. Grouped by what moves with the library file, what lives with the music, and what stays on this Mac." data-fb-dec="DEC-035" data-fb-api="Form.formStyle(.grouped) + Swift Charts (BarMark)">
+    <div class="form">
+      <div class="group" data-fb-id="ST-STORAGE.N01" data-fb-label="Sizes chart" data-fb-note="New: one stacked bar for what MLM itself stores on this Mac and one for the music drive. The only chart in Settings." data-fb-api="Chart { BarMark } (stacked, one row); Gauge(.accessoryLinearCapacity) for the drive">
+        <div class="frow top" style="flex-direction:column;align-items:stretch;gap:4px;padding:10px 12px">
+          <div class="row"><span class="grow" style="font-weight:500">On this Mac</span><span class="t2 num">2.2 GB</span></div>
+          <div class="stack"><i class="o1" style="width:6%"></i><i class="o2" style="width:57%"></i><i class="o3" style="width:19%"></i><i class="o4" style="width:12%"></i><i class="o5" style="width:6%"></i></div>
+          <div class="legend"><span><i class="o1"></i>Library file 131 MB</span><span><i class="o2"></i>Backups 1.24 GB</span><span><i class="o3"></i>Caches 406 MB</span><span><i class="o4"></i>Path migration backups 262 MB</span><span><i class="o5"></i>Previous install and logs 143 MB</span></div>
+          <div class="row" style="margin-top:10px"><span class="grow" style="font-weight:500">On “Lexxar”</span><span class="t2 num" data-hide="drive-off">430 GB of 2 TB · 1.2 TB free</span><span class="t2" data-show="drive-off">Not connected — last known sizes</span></div>
+          <div class="stack"><i class="o1" style="width:20.6%"></i><i class="o3" style="width:1%"></i><i class="other" style="width:18.4%"></i></div>
+          <div class="legend"><span><i class="o1"></i>Library folder 412 GB</span><span><i class="o3"></i>Transcode cache 18.2 GB</span><span><i class="other"></i>Other files 370 GB</span></div>
+        </div>
+      </div>
+
+      <div class="perlib"><div class="gtitle">In this library file <span class="scopetag">Moves with the file</span></div><div class="group">
+        <div class="frow" data-fb-id="ST-STORAGE.E02" data-fb-label="Library file"><span class="fl">Library file<small class="path">~/Library/Application Support/com.musiclibrary.app/libraries/Main Library.mlibm</small></span><span class="t2 num">131 MB</span><button class="btn" data-fb-id="ST-STORAGE.E13" data-fb-label="Show in Finder (per row)" data-fb-note="Every row has one; disabled with the reason beside it when the location can’t be reached.">Show in Finder</button></div>
+        <div class="frow" data-fb-id="ST-STORAGE.E03" data-fb-label="Database" title="Recent changes are kept in a separate file (-wal) and merged into the database automatically."><span class="fl">Database<small>Inside the library file · database file 124.8 MB · recent changes 4.1 MB</small></span><span class="t2 num">128.9 MB</span></div>
+        <div class="frow" data-fb-id="ST-STORAGE.E04" data-fb-label="Playlist covers"><span class="fl">Playlist covers<small>Inside the library file · 36 files</small></span><span class="t2 num">2.3 MB</span></div>
+      </div></div>
+
+      <div class="perlib"><div class="gtitle">Library folder <span class="scopetag">This library</span></div><div class="group">
+        <div class="frow top" data-fb-id="ST-STORAGE.E08" data-fb-label="Library folder" data-fb-note="Path, state, tracks, stored size with its date, Calculate Size on request (walks ~13,000 files on the external disk)."><span class="fl">Library folder<small class="path">/Volumes/Lexxar/Music</small>
+            <small data-show="drive-off" data-fb-id="ST-STORAGE.E12" data-fb-label="State line" data-fb-note="Words plus symbol, secondary colour: Not found · Not connected · No library folder set. Updates live when the drive appears."><span class="status failed"><i data-i="drive" class="s"></i>Not connected</span> — on “Lexxar”</small>
+            <small>8,902 tracks ·
+              <span data-pane="sz:done">412 GB · calculated 28 Sep 2026</span>
+              <span data-pane="sz:run" hidden><span class="spinner"></span> Calculating… <a data-mock="sz:done">Cancel</a></span>
+              <span data-pane="sz:none" hidden>Size not calculated</span>
+              <span data-pane="sz:err" hidden><span class="status failed">The size couldn’t be calculated. Check that the drive is connected and try again.</span></span></small>
+            <small><a data-goto="library">Change the library folder in Library</a></small></span>
+          <span class="ctl"><button class="btn needs-drive" data-mock="sz:run">Calculate Size</button><button class="btn needs-drive">Show in Finder</button></span></div>
+        <div class="frow top" data-fb-id="ST-STORAGE.E09" data-fb-label="Transcode cache"><span class="fl">Transcode cache<small class="path">/Volumes/Lexxar/MLM Transcode Cache</small><small data-show="drive-off"><span class="status failed"><i data-i="drive" class="s"></i>Not connected</span> — on “Lexxar”</small><small>2,140 files · <a data-goto="maintenance">Change the location or clear it in Maintenance</a></small></span><span class="t2 num">18.2 GB</span><button class="btn needs-drive">Show in Finder</button></div>
+      </div></div>
+
+      <div><div class="gtitle">On this Mac <span class="scopetag">Stays when a library file is moved</span></div><div class="group">
+        <div class="frow top perlib" data-fb-id="ST-STORAGE.E05" data-fb-label="Backups"><span class="fl">Backups <span class="scopetag">This library</span><small class="path">~/Library/Application Support/com.musiclibrary.app/backups/Main Library</small><small>10 backups · <span data-fb-id="ST-STORAGE.E06" data-fb-label="Last backup">last backup today, 09:14</span> · <a data-goto="backup">Change the backup folder in Backup</a></small></span><span class="t2 num">1.24 GB</span><button class="btn">Show in Finder</button></div>
+        <div class="frow top" data-fb-id="ST-STORAGE.N02" data-fb-label="List of libraries" data-fb-note="New row: the registry of known libraries was missing from “every location”."><span class="fl">List of libraries <span class="scopetag">All libraries</span><small class="path">~/Library/Application Support/com.musiclibrary.app/libraries.json</small></span><span class="t2 num">2 KB</span><button class="btn">Show in Finder</button></div>
+        <div class="frow top" data-fb-id="ST-STORAGE.E07" data-fb-label="Credentials file" data-fb-note="Path and size, or Not found. Contents are never read or shown."><span class="fl">Credentials file <span class="scopetag">All libraries</span><small class="path">~/Library/Application Support/MLM/.env</small></span><span class="t2 num">412 bytes</span><button class="btn">Show in Finder</button></div>
+        <div class="frow" data-fb-id="ST-STORAGE.E10" data-fb-label="Sign-in tokens"><span class="fl">Sign-in tokens <span class="scopetag">All libraries</span><small>Stored in the macOS Keychain</small></span></div>
+        <div class="frow top" data-fb-id="ST-STORAGE.N03" data-fb-label="Caches, logs, migration backups, previous install" data-fb-note="New rows for the locations the tab used to omit: artwork and waveform caches, logs, path-migration backups, and the legacy-adopted folder (which may be deleted)."><span class="fl">Artwork and waveform caches <span class="scopetag">Can be rebuilt</span><small class="path">~/Library/Caches/com.mlm.artwork_cache</small></span><span class="t2 num">406 MB</span><button class="btn">Show in Finder</button></div>
+        <div class="frow top"><span class="fl">Path migration backups<small class="path">~/Library/Application Support/com.musiclibrary.app/PathMigrations</small></span><span class="t2 num">262 MB</span><button class="btn">Show in Finder</button></div>
+        <div class="frow top"><span class="fl">Logs<small class="path">~/Library/Logs/MLM/mlm.log</small></span><span class="t2 num">12 MB</span><button class="btn">Show in Finder</button></div>
+        <div class="frow top"><span class="fl">Previous install <span class="scopetag">Can be deleted</span><small class="path">~/Library/Application Support/com.musiclibrary.app/legacy-adopted-2026-10-02</small><small>Kept after library file setup until you delete it.</small></span><span class="t2 num">131 MB</span><button class="btn">Show in Finder</button></div>
+      </div><div class="ghelp" data-fb-id="ST-STORAGE.E11" data-fb-label="Footer">Library files and the credentials file remain on your Mac if you delete the app. Audio files are never moved by this tab. <span data-fb-id="ST-STORAGE.E01" data-fb-label="Placeholder without a library" data-fb-note="Was “Storage locations are shown once the library has loaded.” In the No library state the per-library groups are dimmed and the rows for this Mac stay usable.">Sizes refresh when this tab opens and when a drive is connected.</span></div></div>
+    </div>
+  </div>
+
+  <!-- ───────── Maintenance ───────── -->
+  <div data-view="maintenance" data-view-group="st" hidden data-fb-id="ST-MAINT" data-fb-label="Maintenance tab" data-fb-note="Jobs as rows: what is covered, when it last ran with its own result, Run. Running a job makes it an Activity operation; the row is only its echo. No shared result line (E18 removed), no “one job at a time” lock — jobs queue." data-fb-dec="DEC-044" data-fb-api="Form.formStyle(.grouped)">
+    <div class="form perlib">
+      <div class="banner" data-show="drive-off" style="border-radius:8px;border:.5px solid var(--banner-edge)" data-fb-id="ST-MAINT.N01" data-fb-label="Drive not connected line" data-fb-note="New: jobs that read audio files are disabled with the reason, instead of running and counting every file as failed." data-fb-dec="DEC-014"><i data-i="drive"></i><span>“Lexxar” is not connected. Jobs that read audio files can’t run until it is.</span></div>
+
+      <div><div class="gtitle">Background processing</div><div class="group">
+        <div class="frow" data-fb-id="ST-MAINT.E01" data-fb-label="Background processing" data-fb-note="One setting for analysis, transcoding and sync. Captions under the control instead of inside the segments." data-fb-api="Picker(.segmented)"><span class="fl">How hard background work may push this Mac<small>Conservative keeps the Mac responsive · Fast uses all cores, fans may spin up. Applies to the next job.</small></span><span class="seg"><button>Conservative</button><button class="on">Standard</button><button>Fast</button></span></div>
+      </div></div>
+
+      <div><div class="gtitle" data-fb-id="ST-MAINT.E13" data-fb-label="Job row pattern" data-fb-note="Title, what it is for, coverage (“n of m”), last run with its own result, Run. While running: counts, Show in Activity, Cancel (stops after the current track — said in Activity). Results are kept per job.">Analysis</div><div class="group needs-drive">
+        <div class="frow top job" data-fb-id="ST-MAINT.E07" data-fb-label="Fingerprint all tracks" data-fb-note="Shown here in the tool-missing state: the reason and the link to Settings ▸ Sources, Run disabled." data-fb-dec="DEC-037"><span class="fl">Fingerprint all tracks<small>Finds duplicates by sound.</small><small>7,880 of 8,902 analysed · <span class="status failed"><i data-i="warn" class="s"></i>fpcalc not found</span> · <a data-goto="sources">Open Sources ▸ Download tools</a></small></span><button class="btn" disabled>Run</button></div>
+        <div class="frow top job" data-fb-id="ST-MAINT.E08" data-fb-label="ReplayGain analysis"><span class="fl">ReplayGain analysis<small>Loudness for Normalize loudness and the Energy column.</small><small class="ji">9,412 of 12,935 analysed · last run 28 Sep 2026 — 3,204 analysed, 12 failed · <a href="activity.html">Show</a></small><small class="jr">Running — 1,204 of 3,523 · <a href="activity.html">Show in Activity</a></small><div class="progress jr"><i style="width:34%"></i></div></span><button class="btn ji" data-run>Run</button><button class="btn jr" data-stop>Cancel</button></div>
+        <div class="frow top job" data-fb-id="ST-MAINT.E09" data-fb-label="Danceability analysis"><span class="fl">Danceability analysis<small>Beat regularity for the Dance column.</small><small class="ji">8,902 of 8,902 analysed · last run 28 Sep 2026 — 310 analysed</small><small class="jr">Running — 0 of 0 · nothing left to analyse</small></span><button class="btn ji" data-run>Run</button><button class="btn jr" data-stop>Cancel</button></div>
+        <div class="frow top job" data-fb-id="ST-MAINT.E10" data-fb-label="Similarity analysis"><span class="fl">Similarity analysis<small>On-device analysis for Similar and for genre suggestions.</small><small class="ji">6,120 of 8,902 analysed · never finished — cancelled 21 Sep 2026 at 6,120</small><small class="jr">Running — 48 of 2,782 · <a href="activity.html">Show in Activity</a></small><div class="progress jr"><i style="width:2%"></i></div></span><button class="btn ji" data-run>Run</button><button class="btn jr" data-stop>Cancel</button></div>
+      </div></div>
+
+      <div><div class="gtitle">Artwork and tags</div><div class="group">
+        <div class="frow top job needs-drive" data-fb-id="ST-MAINT.E11" data-fb-label="Refresh embedded artwork"><span class="fl">Refresh embedded artwork<small>Reads cover art from the audio files. No network.</small><small class="ji">7,455 of 8,902 tracks have artwork · last run 28 Sep 2026 — completed</small><small class="jr">Running — 2,010 of 8,902 · <a href="activity.html">Show in Activity</a></small></span><button class="btn ji" data-run>Run</button><button class="btn jr" data-stop>Cancel</button></div>
+        <div class="frow top job" data-fb-id="ST-MAINT.E12" data-fb-label="Fetch artwork from MusicBrainz" data-fb-note="Was “Fetch from MusicBrainz”; says what it fetches."><span class="fl">Fetch artwork from MusicBrainz<small>Downloads missing album covers. Slow on purpose (rate-limited).</small><small class="ji">1,447 tracks without artwork · last run 14 Sep 2026 — 212 fetched, 96 not found</small><small class="jr">Running — 31 of 1,447 · <a href="activity.html">Show in Activity</a></small></span><button class="btn ji" data-run>Run</button><button class="btn jr" data-stop>Cancel</button></div>
+        <div class="frow top job needs-drive" data-fb-id="ST-MAINT.E15" data-fb-label="Reread tags from files" data-fb-note="Was “Rescan metadata” in a section called Library."><span class="fl">Reread tags from files<small>Use after editing tags in another app.</small><small class="ji">Last run 2 Aug 2026 — 8,640 updated, 4 failed · <a href="activity.html">Show</a></small><small class="jr">Running — 512 of 8,902 · <a href="activity.html">Show in Activity</a></small></span><button class="btn ji" data-run>Run</button><button class="btn jr" data-stop>Cancel</button></div>
+      </div></div>
+
+      <div><div class="gtitle">Duplicates and linked playlists</div><div class="group">
+        <div class="frow" data-fb-id="ST-MAINT.E14" data-fb-label="Find duplicates and conflicts" data-fb-note="Opens Review in the main window and starts the scan there."><span class="fl">Find duplicates and conflicts<small>Runs in Review, where progress, decisions and Undo stay together.</small></span><a class="btn" href="review.html">Open Review</a></div>
+        <div class="frow" data-fb-id="ST-MAINT.E17" data-fb-label="Recreate linked playlist" data-fb-note="Was a section with a one-option picker. One row; the result is a status-bar message in the main window plus the playlist itself."><span class="fl">Recreate the “Liked on SoundCloud” playlist<small>Creates it again, or links the existing one, if it was deleted.</small></span><button class="btn" data-run>Recreate</button></div>
+      </div></div>
+
+      <div><div class="gtitle">Transcode cache</div><div class="group">
+        <div class="frow top" data-fb-id="ST-MAINT.E02" data-fb-label="Transcode cache location" data-fb-note="Path, state, size, Change… (system panel S-SET-CACHEFOLDER, then a confirmation that the files will be moved) and the missing Clear Cache…. The label refreshes after a move."><span class="fl"><span class="path">/Volumes/Lexxar/MLM Transcode Cache</span><small data-hide="drive-off">2,140 files · 18.2 GB</small><small data-show="drive-off"><span class="status failed"><i data-i="drive" class="s"></i>Not connected</span> — on “Lexxar”</small></span>
+          <span class="ctl"><button class="btn needs-drive" data-popover="p-panel">Change…</button><button class="btn needs-drive" data-open="a-cacheclear" data-fb-id="ST-MAINT.N02" data-fb-label="Clear Cache…" data-fb-note="New, with confirmation.">Clear Cache…</button></span></div>
+      </div><div class="ghelp" data-fb-id="ST-MAINT.E03" data-fb-label="Helper">Transcoded copies made for syncing. Changing the location moves the existing files in the background (shown in Activity) and removes the old copies.</div></div>
+
+      <div><div class="gtitle">Organized paths</div><div class="group needs-drive" data-fb-id="ST-MAINT.E16" data-fb-label="Organized-path migration" data-fb-note="The audit → preview → confirm → rollback flow is kept. The report loses raw track IDs, internal reason codes and all-caps badges; results stay on this block instead of the shared line.">
+        <div class="frow top"><span class="fl">Repair track locations that no longer match the files<small>Read only until you apply. MLM backs up first and can roll the last migration back.</small>
+            <small data-pane="pm:idle">Last migration 28 Sep 2026 — 187 organized paths updated</small>
+            <small data-pane="pm:preview" hidden>12,935 reviewed · 12,611 already valid · 301 can be fixed · 23 unclear · 13,402 audio files found</small>
+            <small data-pane="pm:applied" hidden><span class="status ok"><i data-i="check" class="s"></i>301 organized paths updated</span> · 23 unclear entries unchanged · <a data-goto="storage">backup and record in Storage Location</a></small>
+            <small data-pane="pm:blocked" hidden><span class="status failed"><i data-i="warn" class="s"></i>Not started — 2 downloads are running</span> · <a href="activity.html">Show in Activity</a></small></span>
+          <span class="ctl"><button class="btn" data-mock="pm:preview">Preview Changes</button><button class="btn" data-open="a-pathrollback">Roll Back Last Migration…</button></span></div>
+        <div class="frow top" data-pane="pm:preview" hidden><span class="fl"><details open><summary>Changes (301 can be fixed, 23 unclear)</summary>
+            <div style="margin-top:6px">
+              <div class="chg"><b style="color:var(--text)">Skee Mask — Rev8617</b> · can be fixed<br><span class="path">Before  Downloads (SoundCloud)/Skee Mask - Rev8617.m4a</span><br><span class="path">After   Skee Mask/Compro/07 Rev8617.m4a</span><br>The same file was found in exactly one place.</div>
+              <div class="chg"><b style="color:var(--text)">DJ Koze — Pick Up (12" Extended Disco Version)</b> · can be fixed<br><span class="path">Before  00_Artists/DJ Koze/Pick Up.flac</span><br><span class="path">After   DJ Koze/Knock Knock/11 Pick Up (12" Extended Disco Version).flac</span><br>The same file was found in exactly one place.</div>
+              <div class="chg"><b style="color:var(--text)">Unknown artist — Track 03</b> · <span class="status failed">unclear</span><br><span class="path">Before  Downloads (YouTube)/Track 03.m4a</span><br>Two files could be this track: <span class="path">Mixes/Track 03.m4a</span> and <span class="path">Old/Track 03.m4a</span>. Left unchanged.</div>
+              <div class="chg t2">…298 more can be fixed, 22 more unclear</div>
+            </div></details></span>
+          <button class="btn primary" data-open="a-pathapply">Apply 301 Changes…</button></div>
+      </div></div>
+    </div>
+  </div>
+
+  <!-- ───────── Advanced ───────── -->
+  <div data-view="advanced" data-view-group="st" hidden data-fb-id="ST-ADVANCED" data-fb-label="Advanced tab (new content)" data-fb-note="Was the Genre Workshop (ST-ADV), which moved to the Genres section of the main window. Advanced is now what the name says: the credentials file, diagnostics, caches, tips." data-fb-dec="DEC-025" data-fb-api="Form.formStyle(.grouped)">
+    <div class="form">
+      <div class="group"><div class="frow"><i data-i="tag"></i><span class="fl">Looking for the Genre Workshop?<small>Genres, suggested tracks, merging and the Create ML export now live in Genres in the main window.</small></span><a class="btn" href="genres.html">Open Genres</a></div></div>
+
+      <div><div class="gtitle">Credentials file <span class="scopetag">This Mac</span></div><div class="group" data-fb-id="ST-ADVANCED.N01" data-fb-label="Credentials file" data-fb-note="Shows where the file is and whether it was found — never its contents. This is where “Show Where It Goes” in Sources lands.">
+        <div class="frow top"><span class="fl"><span class="path">~/Library/Application Support/MLM/.env</span>
+            <small data-pane="cr:ok"><span class="status ok"><i data-i="check" class="s"></i>Found</span> · contains the app keys for SoundCloud and Spotify</small>
+            <small data-pane="cr:missing" hidden><span class="status failed"><i data-i="warn" class="s"></i>Not found</span> · put the file at this location, then press Check Again</small></span>
+          <span class="ctl"><button class="btn">Show in Finder</button><button class="btn">Check Again</button></span></div>
+      </div><div class="ghelp">MLM reads the keys it needs and never shows the contents. The file is not part of any library file or backup. Values set in it take precedence over fields in Settings.</div></div>
+
+      <div><div class="gtitle">Diagnostics</div><div class="group" data-fb-id="ST-ADVANCED.N02" data-fb-label="Diagnostics" data-fb-api="Picker(.menu) + openWindow(id: activity)">
+        <div class="frow"><span class="fl">Log detail<small>Detailed logs help when reporting a problem; they grow faster.</small></span><span class="popup">Normal</span></div>
+        <div class="frow"><span class="fl">Logs</span><span class="ctl"><a class="btn" href="activity.html#logs">Open Activity ▸ Logs</a><button class="btn">Show Log File in Finder</button></span></div>
+        <div class="frow"><span class="fl">Diagnostic summary<small>Versions, tool locations and library counts — no titles, no credentials.</small></span><button class="btn">Copy</button></div>
+      </div></div>
+
+      <div><div class="gtitle">Lists</div><div class="group">
+        <div class="frow" data-fb-id="ST-MAINT.E06" data-fb-label="Recently opened playlists kept ready" data-fb-note="Was “Table Cache · Cached playlists” in Maintenance. Moved here and worded for what it does; 0 turns it off."><span class="fl">Keep recently opened playlists ready<small data-fb-id="ST-MAINT.E04" data-fb-label="Memory in use">Makes reopening instant. In use now: about 26 MB — All Tracks and <span data-fb-id="ST-MAINT.E05" data-fb-label="Cached playlists">3 playlists (Warm-up, Liked on SoundCloud, Closing)</span>.</small></span><input class="field num" style="width:44px;text-align:right" value="5"><span class="stepper">▲<br>▼</span></div>
+      </div></div>
+
+      <div><div class="gtitle">Tips</div><div class="group" data-fb-id="ST-ADVANCED.N03" data-fb-label="Reset tips" data-fb-api="Tips.resetDatastore()">
+        <div class="frow"><span class="fl">Show the three tips again<small>Space-bar preview, dropping on sidebar playlists, and ⌘I.</small></span><button class="btn">Reset Tips</button></div>
+      </div></div>
+    </div>
+  </div>
+
+  </div>
+</div>
+
+<!-- ═════════ Overlays ═════════ -->
+<div class="menu" id="cm-backup" hidden data-fb-id="ST-BACKUP.N04" data-fb-label="Backup row context menu" data-fb-note="New (expected, missing in the inventory)." data-fb-dec="DEC-039" data-fb-api="contextMenu">
+  <a class="mi" data-open="a-restore">Restore…</a><hr><a class="mi">Show in Finder</a>
+</div>
+
+<div class="popover" id="p-install" hidden style="width:320px" data-fb-id="ST-SRC.N06" data-fb-label="How to Install" data-fb-note="The command, a Copy button, and what the tool is needed for. Replaces one-line results like “fpcalc not found. Install via: brew install chromaprint”." data-fb-dec="DEC-037" data-fb-api=".popover">
+  <div style="font-weight:600;margin-bottom:4px">Install fpcalc</div>
+  <div class="caption">fpcalc is part of Chromaprint. In Terminal:</div>
+  <div class="row" style="margin:6px 0"><code class="path grow" style="background:var(--fill);padding:4px 6px;border-radius:5px">brew install chromaprint</code><button class="btn">Copy</button></div>
+  <div class="caption">Then press Check Again. Needed for: Fingerprint all tracks.</div>
+</div>
+<div class="popover" id="p-panel" hidden style="width:300px" data-fb-id="W-SETTINGS.N02" data-fb-label="System folder panel" data-fb-note="S-SET-LIBROOT, S-SET-IMPORTFOLDER, S-SET-CACHEFOLDER and S-SET-BACKUPFOLDER are system panels with a message line; they are catalogued on the sheets and alerts pattern page." data-fb-api=".fileImporter + .fileDialogMessage">
+  <div style="font-weight:600;margin-bottom:4px">System folder panel</div>
+  <div class="caption">Opens the standard macOS panel with a one-line message. See <a href="patterns-sheets-alerts.html">patterns-sheets-alerts.html</a>. Path rows also accept a folder dropped from Finder (<a href="patterns-dnd.html">patterns-dnd.html</a>).</div>
+</div>
+
+<!-- Change library folder -->
+<div class="sheet" id="s-libfolder" hidden style="width:500px" data-fb-id="S-SET-LIBFOLDER" data-fb-label="Change library folder (consequences)" data-fb-note="New. Changing the folder changes where every track is looked for, so the sheet says so, checks the chosen folder, and offers the scan. Nothing is saved until Change Folder." data-fb-dec="DEC-035" data-fb-api=".sheet + .fileImporter(folders)">
+  <div class="sh"><h2>Change the library folder?</h2></div>
+  <div class="sb">
+    <p>MLM looks for every track’s file inside the library folder. After the change it looks for the same 8,902 files in the new folder. No files are moved or deleted.</p>
+    <div class="kv"><label>Now</label><span class="path val">/Volumes/Lexxar/Music</span>
+      <label>New</label><div class="row"><span class="path grow" id="lf-new">Not chosen</span><button class="btn" id="lf-choose" data-fb-id="S-SET-LIBROOT" data-fb-label="Choose… (system panel)" data-fb-note="Message: “Choose the folder that contains your music.” Folders only.">Choose…</button></div></div>
+    <div id="lf-check" hidden style="margin-top:10px" data-fb-id="S-SET-LIBFOLDER.N01" data-fb-label="Check of the chosen folder" data-fb-note="A quick comparison before saving: how many known files are found there.">
+      <p><span class="status ok"><i data-i="check" class="s"></i>Connected</span> · 8,640 of 8,902 files found in the new folder.</p>
+      <p class="t2">262 tracks will show <b>File missing</b> until their files are there. You can change back at any time.</p>
+      <span class="check on">Scan the new folder for more files afterwards</span>
+    </div>
+    <p class="caption" data-show="drive-off" style="margin-top:10px">“Lexxar” is not connected, so the current folder can’t be compared.</p>
+  </div>
+  <div class="sf"><button class="btn" data-close>Cancel</button><button class="btn primary" id="lf-go" disabled data-close>Change Folder</button></div>
+</div>
+
+<!-- Rename library -->
+<div class="sheet" id="s-rename" hidden style="width:420px" data-fb-id="S-SET-RENAMELIB" data-fb-label="Rename library" data-fb-note="New. Renames the library, its file and its entry in the list together." data-fb-api=".sheet + TextField">
+  <div class="sh"><h2>Rename library</h2></div>
+  <div class="sb"><div class="kv"><label>Name</label><input class="field" value="Main Library"></div><div class="caption" style="margin:6px 0 0 102px">The library file becomes “Main Library.mlibm”. Its location doesn’t change.</div></div>
+  <div class="sf"><button class="btn" data-close>Cancel</button><button class="btn primary" data-close>Rename</button></div>
+</div>
+
+<div class="alert" id="a-disconnect" hidden style="width:290px" data-fb-id="A-SET-DISCONNECT" data-fb-label="Disconnect source" data-fb-note="Says that it applies to all libraries and what stops (refreshing, not “Syncing”)." data-fb-dec="DEC-023" data-fb-api=".confirmationDialog / .alert with a destructive action">
+  <div class="aic"><i data-i="cloud" class="l"></i></div>
+  <h2>Disconnect SoundCloud?</h2>
+  <p>This removes the saved SoundCloud sign-in from this Mac, for all libraries. Linked playlists stay in your library but can’t be refreshed until you connect again.</p>
+  <div class="ab"><button class="btn destructive" data-close>Disconnect</button><button class="btn" data-close>Cancel</button></div>
+</div>
+
+<div class="alert" id="a-cookieclear" hidden style="width:290px" data-fb-id="A-SET-COOKIECLEAR" data-fb-label="Clear Qobuz cookie" data-fb-note="New confirmation (the inventory lists it as missing)." data-fb-api=".alert">
+  <div class="aic"><i data-i="key" class="l"></i></div>
+  <h2>Clear the Qobuz access cookie?</h2>
+  <p>Lossless downloads are skipped until you paste a new one.</p>
+  <div class="ab"><button class="btn destructive" data-close data-mock="qc:none">Clear</button><button class="btn" data-close>Cancel</button></div>
+</div>
+
+<div class="alert" id="a-restore" hidden style="width:310px" data-fb-id="A-SET-RESTORE" data-fb-label="Restore backup" data-fb-note="Consequence first: MLM quits and reopens, and lands in the restored library even when “Open the last library at launch” is off. Running work is listed instead of asking the user to finish it." data-fb-dec="DEC-036" data-fb-api=".alert with a destructive action">
+  <div class="aic"><i data-i="clock" class="l"></i></div>
+  <h2>Restore the backup from 4 Oct 2026, 08:57?</h2>
+  <p>MLM first saves a copy of the current library (“Before restore”), then replaces the library database and playlist covers with this backup. MLM quits and reopens in the restored “Main Library”. Audio files are not changed.</p>
+  <ul><li>14 tracks added since this backup leave the library; their files stay in the library folder.</li><li>1 download is running and will stop.</li></ul>
+  <p style="margin-top:6px">To undo, restore the “Before restore” backup.</p>
+  <div class="ab"><button class="btn destructive" id="rs-go" data-close>Restore and Relaunch</button><button class="btn" data-close>Cancel</button></div>
+</div>
+
+<div class="alert" id="a-restorefailed" hidden style="width:290px" data-fb-id="A-SET-RESTOREFAILED" data-fb-label="Restore didn’t finish" data-fb-note="Approved copy kept; one button." data-fb-api=".alert">
+  <div class="aic"><i data-i="warn" class="l"></i></div>
+  <h2>Restore didn’t finish</h2>
+  <p>MLM couldn’t replace the library files and needs to relaunch. If your library looks wrong afterwards, restore the “Before restore” backup.</p>
+  <div class="ab"><a class="btn primary" href="launch.html#loading">Relaunch</a></div>
+</div>
+
+<div class="alert" id="a-pathapply" hidden style="width:300px" data-fb-id="A-SET-PATHAPPLY" data-fb-label="Update organized paths?" data-fb-note="Title kept. The message states the count and the safety net in plain words; if downloads are running the button is replaced by the reason (no failing afterwards)." data-fb-api=".confirmationDialog with a destructive action">
+  <div class="aic"><i data-i="folder" class="l"></i></div>
+  <h2>Update organized paths?</h2>
+  <p>301 track locations confirmed in the preview will be updated; the 23 unclear entries stay as they are. MLM backs up the library first and records every change so it can be rolled back. No files are moved.</p>
+  <div class="ab"><button class="btn destructive" data-close data-mock="pm:applied">Apply 301 Changes</button><button class="btn" data-close>Cancel</button></div>
+</div>
+
+<div class="alert" id="a-pathrollback" hidden style="width:300px" data-fb-id="A-SET-PATHROLLBACK" data-fb-label="Roll back last path migration?" data-fb-note="Title kept. Names the migration that will be undone; the command is disabled when there is none." data-fb-api=".confirmationDialog with a destructive action">
+  <div class="aic"><i data-i="retry" class="l"></i></div>
+  <h2>Roll back last path migration?</h2>
+  <p>The 187 organized paths changed on 28 Sep 2026 will be restored. MLM backs up the library again before the rollback. No files are moved.</p>
+  <div class="ab"><button class="btn destructive" data-close data-mock="pm:idle">Roll Back</button><button class="btn" data-close>Cancel</button></div>
+</div>
+
+<div class="alert" id="a-cacheclear" hidden style="width:290px" data-fb-id="A-SET-CACHECLEAR" data-fb-label="Clear transcode cache" data-fb-note="New confirmation for the new Clear Cache… command." data-fb-api=".alert with a destructive action">
+  <div class="aic"><i data-i="trash" class="l"></i></div>
+  <h2>Clear the transcode cache?</h2>
+  <p>2,140 transcoded copies (18.2 GB) will be deleted. Your music files are not touched. The next sync creates the copies it needs again, which takes time.</p>
+  <div class="ab"><button class="btn destructive" data-close>Clear Cache</button><button class="btn" data-close>Cancel</button></div>
+</div>
+
+<script>
+(function () {
+  const $ = (s, r) => (r || document).querySelector(s), $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const TITLES = { general: 'General', library: 'Library', playback: 'Playback', sources: 'Sources', backup: 'Backup', storage: 'Storage Location', maintenance: 'Maintenance', advanced: 'Advanced' };
+  function showTab(name) {
+    if (!TITLES[name]) return;
+    $$('.tab').forEach(t => t.classList.toggle('on', t.dataset.goto === name));
+    $('#wtitle').textContent = TITLES[name];
+    $$('.mock[data-for]').forEach(m => { m.hidden = m.dataset.for !== name; });
+  }
+  document.addEventListener('mlm:view', e => showTab(e.detail));
+  window.addEventListener('hashchange', () => { const h = decodeURIComponent(location.hash.slice(1)); if (TITLES[h] && window.MLM) MLM.goto(h); });
+  document.addEventListener('mlm:ready', () => { const h = decodeURIComponent(location.hash.slice(1)); showTab(TITLES[h] ? h : 'general'); });
+
+  document.addEventListener('click', e => {
+    const t = e.target;
+    /* exclusive radios (framework toggles .check) */
+    const r = t.closest('.radio[data-name]'); if (r) $$('.radio[data-name="' + r.dataset.name + '"]').forEach(x => x.classList.toggle('on', x === r));
+    /* data-mock="group:pane" presses the matching mockup segment */
+    const m = t.closest('[data-mock]'); if (m) { const [g, p] = m.dataset.mock.split(':'); const b = $('.seg[data-group="' + g + '"] [data-p="' + p + '"]'); if (b) b.click(); }
+    /* data-swap="hideId>showId" */
+    const s = t.closest('[data-swap]'); if (s) { const [a, b] = s.dataset.swap.split('>'); $('#' + a).hidden = true; $('#' + b).hidden = false; }
+    /* maintenance job rows */
+    const run = t.closest('.job [data-run]'); if (run) run.closest('.job').classList.add('running');
+    const stop = t.closest('.job [data-stop]'); if (stop) stop.closest('.job').classList.remove('running');
+  });
+
+  /* Back Up Now */
+  $('#bk-now').addEventListener('click', () => {
+    const st = $('#bk-state'), btn = $('#bk-now'); st.hidden = false; st.innerHTML = '<span class="spinner"></span> Backing up…'; btn.disabled = true;
+    setTimeout(() => { st.textContent = 'Backup created'; btn.disabled = false; $('#bk-last').textContent = 'Just now · Manual'; }, 1500);
+  });
+  /* Restore → blocking state */
+  $('#rs-go').addEventListener('click', () => { const b = $('#bk-busy'); b.hidden = false; setTimeout(() => { $('.fl', b).innerHTML = 'Relaunching…<small>MLM quits now. Mockup: <a href="launch.html#loading">continue to the relaunch</a>.</small>'; }, 1500); });
+  /* Change library folder sheet */
+  $('#lf-choose').addEventListener('click', () => { $('#lf-new').textContent = '/Volumes/Lexxar/Music Library 2026'; $('#lf-check').hidden = false; $('#lf-go').disabled = false; });
+})();
+</script>
+</body></html>

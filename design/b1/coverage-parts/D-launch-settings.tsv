@@ -1,0 +1,74 @@
+W-MAIN	mocked	launch.html	Launch states, title/subtitle naming the library and the picker are mocked here; the working layout (sidebar, toolbar, columns) is shell.html (DEC-031)
+W-SETTINGS	mocked	settings.html	SwiftUI Settings scene with 8 deep-linkable tabs (DEC-035)
+V-LAUNCH-NOLIB	merged	launch.html	Replaced by the library picker V-PICKER (states picker, picker-empty); element IDs E01-E04 reused (DEC-031)
+V-LAUNCH-CANTOPEN	merged	launch.html	No separate screen: state cant-open = V-PICKER with the affected row selected, explaining Not connected / Not found / identity mismatch with its actions (DEC-031)
+V-LAUNCH-INVALID	mocked	launch.html	State invalid: cause sentence, Choose Another Library, Show in Finder (DEC-031)
+V-LAUNCH-LOADING	mocked	launch.html	State loading: names the library, phase line, determinate backup phase, finishing library file setup (DEC-031, DEC-044)
+V-LAUNCH-FAILED	mocked	launch.html	State failed: sentence, Details, Try Again, Choose Another Library, Restore from Backup…, Show Logs (DEC-031)
+ST-LIB	mocked	settings.html#library	E04/E05 moved to General; E08/E09 merged into the Library folder row; consequences sheet for Change… (DEC-035)
+ST-SRC	mocked	settings.html#sources	Accounts with Connect/Reconnect/Disconnect in place, refresh schedule, Download tools, Qobuz cookie (DEC-004, DEC-037)
+ST-MAINT	mocked	settings.html#maintenance	Jobs as rows with coverage and own result, run as Activity operations; E18 shared result removed; E04-E06 table cache moved to Advanced (DEC-044)
+ST-BACKUP	mocked	settings.html#backup	Adds schedule, keep-last and destination reachability (DEC-036)
+ST-STORAGE	mocked	settings.html#storage	Grouped In this library file / Library folder / On this Mac, sizes chart, missing locations added (DEC-035)
+ST-PLAYBACK	mocked	settings.html#playback	Normalisation with its dependency explained; history and queue length under Advanced with plain labels (DEC-035)
+S-LIBFILE-OPEN	pattern	patterns-sheets-alerts.html	System open panel; triggers (Open Other…, Locate…) are mocked in launch.html
+S-WIZ-FOLDER	pattern	patterns-sheets-alerts.html	System folder panel; trigger and drop target mocked in launch.html state setup-2
+S-ADOPT	mocked	launch.html	State adopt: sheet over the picker with clickable phases, success and failure (DEC-031)
+S-NEWLIB	mocked	launch.html	State new: name + location with default-location rationale; same fields are step 1 of V-SETUP (DEC-034)
+S-WIZARD	merged	launch.html	Replaced by the in-window setup V-SETUP (states setup-1, setup-2, setup-3, setup-done); the Welcome step is folded into step 1; element IDs reused (DEC-034)
+A-LIB-SWITCH	mocked	launch.html	State switch: lists running work, Switch and Relaunch / Cancel (DEC-032)
+A-LIB-COPY	mocked	launch.html	State copy: one alert form, also used over the picker (DEC-031)
+A-LIBFILE-CANTOPEN	mocked	launch.html	State open-alerts: three causes, Try Again added for Not connected (DEC-031)
+A-LIBFILE-INVALID	mocked	launch.html	State open-alerts: with cause and Show in Finder; a failed New Library gets its own message (DEC-031)
+S-SET-LIBROOT	pattern	patterns-sheets-alerts.html	System folder panel; preceded by the new consequences sheet S-SET-LIBFOLDER mocked in settings.html#library
+S-SET-IMPORTFOLDER	pattern	patterns-sheets-alerts.html	System panel behind Import Files or Folder… (settings.html#library and the Add menu)
+S-SET-CACHEFOLDER	pattern	patterns-sheets-alerts.html	System folder panel behind Transcode cache Change… (settings.html#maintenance)
+S-SET-BACKUPFOLDER	pattern	patterns-sheets-alerts.html	System folder panel behind Backup folder Change… (settings.html#backup)
+A-SET-DISCONNECT	mocked	settings.html#sources	Says it applies to all libraries and that refreshing stops (DEC-023)
+A-SET-RESTORE	mocked	settings.html#backup	States that MLM quits and reopens in the restored library; lists running work (DEC-036)
+A-SET-RESTOREFAILED	mocked	settings.html#backup	Approved copy kept; opened from the mockup strip
+A-SET-PATHAPPLY	mocked	settings.html#maintenance	Title kept, plain consequence text
+A-SET-PATHROLLBACK	mocked	settings.html#maintenance	Title kept, names the migration that is undone
+M-APP	pattern	patterns-menus-shortcuts.html	Application menu; Settings… opens the Settings scene (DEC-038)
+M-FILE	pattern	patterns-menus-shortcuts.html	File menu (DEC-038); Open Recent with states is additionally shown as an exhibit in launch.html
+M-EDIT	pattern	patterns-menus-shortcuts.html	Edit menu gains named Undo/Redo (DEC-038, DEC-041)
+M-VIEW	pattern	patterns-menus-shortcuts.html	View menu with sidebar, Info, Queue, columns (DEC-038)
+M-NAVIGATE	merged	patterns-menus-shortcuts.html	Renamed and rebuilt as the Go menu: All Tracks, Albums, Genres, Folders, Discover, Review, Back/Forward (DEC-038, THOUGHTS §4.2)
+M-PLAYBACK	pattern	patterns-menus-shortcuts.html	Playback menu with shortcuts for Play/Pause, Next, Previous, seek, volume (DEC-038, THOUGHTS §4.2)
+M-LIBRARY	pattern	patterns-menus-shortcuts.html	Library menu kept with working items; selection commands move to the new Track menu (DEC-038)
+M-WINDOW	pattern	patterns-menus-shortcuts.html	System Window menu plus Activity ⌥⌘0 (DEC-038, DEC-005)
+M-HELP	pattern	patterns-menus-shortcuts.html	System Help menu (DEC-038)
+M-DOCK	pattern	patterns-menus-shortcuts.html	New small Dock menu: Play/Pause, Next, Previous, current title, Open Recent library (THOUGHTS §6)
+K-APP-SETTINGS	pattern	patterns-menus-shortcuts.html	⌘, unchanged
+K-FILE-NEWPLAYLIST	pattern	patterns-menus-shortcuts.html	⌘N keeps one meaning: new playlist with inline rename in the sidebar (THOUGHTS §4.2)
+K-FILE-OPENLIB	pattern	patterns-menus-shortcuts.html	⌘O Open Library… unchanged; leads to the picker / A-LIB-SWITCH
+K-NAV-LIBRARY	pattern	patterns-menus-shortcuts.html	⌘1 now All Tracks (DEC-002)
+K-NAV-PLAYLISTS	removed	patterns-menus-shortcuts.html	Playlists are sidebar rows, not one destination; ⌘2 is reassigned to Albums (DEC-003, THOUGHTS §4.2)
+K-NAV-FOLDERS	pattern	patterns-menus-shortcuts.html	Folders moves from ⌘3 to ⌘4 (THOUGHTS §4.2)
+K-NAV-SYNC	removed	patterns-menus-shortcuts.html	Sync profiles are sidebar rows, there is no single Sync destination; ⌘4 is reassigned to Folders (DEC-027, THOUGHTS §4.2)
+K-NAV-SOURCES	removed	patterns-menus-shortcuts.html	Sources is no longer a destination; accounts live in Settings ▸ Sources, importing in the Add menu; ⌘5 is reassigned to Discover (DEC-004, THOUGHTS §4.2)
+K-NAV-REVIEW	pattern	patterns-menus-shortcuts.html	⌘6 Review unchanged
+K-NAV-DISCOVER	pattern	patterns-menus-shortcuts.html	Discover moves from ⌘7 to ⌘5 (THOUGHTS §4.2)
+K-NAV-QUEUE	merged	patterns-menus-shortcuts.html	⌘8 is gone; the Queue is a mode of the trailing column toggled with ⌥⌘U (DEC-006, THOUGHTS §4.2)
+K-PLAYBACK-STOP	pattern	patterns-menus-shortcuts.html	⌘. Stop unchanged
+K-PLAYBACK-SKIPBACK	merged	patterns-menus-shortcuts.html	⌘← becomes Previous Track; seeking back 10 s moves to ⌥⌘← (DEC-047, THOUGHTS §4.2)
+K-PLAYBACK-SKIPFWD	merged	patterns-menus-shortcuts.html	⌘→ becomes Next Track; seeking forward 10 s moves to ⌥⌘→ (DEC-047, THOUGHTS §4.2)
+K-LIBRARY-IMPORT	merged	patterns-menus-shortcuts.html	The dead Import from Folder… item is replaced by Import Files or Folder… (Add menu / File menu, no shortcut); ⇧⌘I now means Import Playlist from Source… (DEC-026, THOUGHTS §4.2)
+K-LIBRARY-MOREINFO	pattern	patterns-menus-shortcuts.html	⌘I now works: show/hide Info for the selection (DEC-007)
+K-WIN-SEEKBACK	merged	patterns-menus-shortcuts.html	Bare ← seeks only while previewing (±5 s); otherwise the key belongs to the focused control and seeking is ⌥⌘← (DEC-047, THOUGHTS §4.2)
+K-WIN-SEEKFWD	merged	patterns-menus-shortcuts.html	Bare → seeks only while previewing (±5 s); otherwise seeking is ⌥⌘→ (DEC-047, THOUGHTS §4.2)
+K-SET-COOKIE-RETURN	pattern	patterns-menus-shortcuts.html	Return in the Qobuz cookie field saves, but no longer saves an empty value; field mocked in settings.html#sources
+D-LIBFILE-OPEN	pattern	patterns-dnd.html	Finder open / Dock drop of a library file; exhibit and queue-during-S-ADOPT note in launch.html (DEC-040)
+D-LIBFILE-WINDOWDROP	mocked	launch.html	Now exists: drop a .mlibm on the picker / window; drop hint with highlight in state picker (DEC-040)
+D-WIZ-FOLDERDROP	mocked	launch.html	Now exists: folder drop target in state setup-2 (DEC-040)
+D-SET-FOLDER-TO-LIBROOT	pattern	patterns-dnd.html	Now exists: path rows accept a folder from Finder; annotated on the Library folder group in settings.html#library (DEC-040)
+D-SET-FOLDER-TO-DESTINATION	pattern	patterns-dnd.html	Now exists for the backup folder and transcode cache rows; annotated in settings.html#backup (DEC-040)
+V-PICKER	mocked	launch.html	New: library picker (DEC-031)
+V-SETUP	mocked	launch.html	New: in-window first-run setup, states setup-1 … setup-done (DEC-034)
+S-LAUNCH-RESTORE	mocked	launch.html	New: Restore from Backup sheet reachable from the failed state and from a mismatched row (DEC-031)
+ST-GENERAL	mocked	settings.html#general	New tab: launch behaviour, space bar, notifications (DEC-035, DEC-009)
+ST-ADVANCED	mocked	settings.html#advanced	New content of the Advanced tab: credentials file, diagnostics, list cache, tips; replaces ST-ADV, whose Genre Workshop moved to genres.html (DEC-025)
+S-SET-LIBFOLDER	mocked	settings.html#library	New: change-library-folder consequences sheet (DEC-035)
+S-SET-RENAMELIB	mocked	settings.html#library	New: rename library sheet
+A-SET-COOKIECLEAR	mocked	settings.html#sources	New: confirmation for clearing the Qobuz cookie
+A-SET-CACHECLEAR	mocked	settings.html#maintenance	New: confirmation for Clear Cache…

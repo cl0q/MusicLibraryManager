@@ -1,0 +1,68 @@
+F-01	mocked	launch.html#setup-1	
+F-02	mocked	launch.html#adopt	
+F-03	mocked	library.html · player.html · queue.html	
+F-04	mocked	search.html	
+F-05	mocked	import.html → playlists.html#detail → activity.html	
+F-06	mocked	import.html#quickadd · search.html (state link)	
+F-07	mocked	library.html (scope Download failed) · playlists.html#detail · activity.html	
+F-08	mocked	playlists.html · library.html (selection bar) · patterns-dnd.html	
+F-09	mocked	folders.html	
+F-10	mocked	sync.html	
+F-11	mocked	sync.html (Read Playlist Changes from Device sheet)	
+F-12	mocked	review.html	
+F-13	mocked	inspector.html	
+F-14	mocked	discover.html · discover.html#similar	
+F-15	mocked	discover.html#reels	
+F-16	mocked	settings.html#backup	
+F-17	mocked	launch.html (picker, switch, new, copy)	
+F-18	mocked	every main-window page via the Drive switch · patterns-states.html	
+F-19	mocked	settings.html	
+F-20	mocked	settings.html#sources · import.html · activity.html	
+F-21	mocked	genres.html	
+F-22	mocked	settings.html#maintenance · activity.html	
+F-23	mocked	playlists.html#detail (Link Source, Import M3U sheets)	
+F-24	mocked	albums.html · review.html#albums	
+G-LIB-RESOLVING	mocked	launch.html (state loading)	
+G-LIB-LOADING	mocked	launch.html (state loading)	
+G-LIB-FAILED	mocked	launch.html (state failed)	
+G-LIB-NONE	mocked	launch.html (state picker)	
+G-LIB-NOTFOUND	mocked	launch.html (picker row state; state cant-open)	
+G-LIB-NOTCONNECTED	mocked	launch.html (picker row state; state cant-open)	
+G-LIB-MISMATCH	mocked	launch.html (state cant-open)	
+G-LIB-INVALID	mocked	launch.html (state invalid)	
+G-LIB-COPY	mocked	launch.html (state copy)	
+G-LIB-ADOPT-PENDING	mocked	launch.html (state adopt; picker row “needs setup”)	
+G-LIB-ADOPT-INTERRUPTED	mocked	launch.html (state loading, phase “Finishing library file setup…”)	
+G-LIB-LEGACY	mocked	launch.html (picker row “needs setup”)	
+G-LIB-SWITCH-PENDING	mocked	launch.html (state switch)	
+G-LIB-CURRENT	mocked	shell.html (window subtitle, library footer)	
+G-ROOT-NONE	mocked	launch.html (setup-2) · folders.html (state empty) · settings.html#library	
+G-DRIVE-OFFLINE	mocked	every main-window page (Drive switch) · patterns-states.html	
+G-DRIVE-BOOT	mocked	patterns-states.html	
+G-DEVICE-OFFLINE	mocked	sync.html (state not-connected)	
+G-SRC-CONNECTED	mocked	settings.html#sources	
+G-SRC-DISCONNECTED	mocked	settings.html#sources	
+G-SRC-EXPIRED	mocked	settings.html#sources · import.html · activity.html	
+G-SRC-KEYCHAIN	mocked	settings.html#sources	
+G-SRC-CREDS-MISSING	mocked	settings.html#sources	
+G-SRC-APPLEMUSIC	mocked	settings.html#sources (“Not available yet”)	
+G-SRC-QOBUZ-COOKIE	mocked	settings.html#sources	
+G-TRK-LOCAL	mocked	library.html	
+G-TRK-DOWNLOADING	mocked	library.html	
+G-TRK-NOTDOWNLOADED	mocked	library.html	
+G-TRK-FAILED	mocked	library.html (scope Download failed) · inspector.html	
+G-TRK-MISSING	mocked	library.html · inspector.html	
+G-TRK-PLACEHOLDER	mocked	library.html (Album column “—”, DEC-013)	
+G-TRK-DUPLICATE	mocked	inspector.html (File tab) · review.html	
+G-PL-LOCAL	mocked	playlists.html	
+G-PL-LINKED	mocked	playlists.html	
+G-PL-IMPORTING	mocked	playlists.html#detail	
+G-PL-INCOMPLETE	mocked	playlists.html#detail	
+G-PL-NOTDOWNLOADED	mocked	playlists.html#detail (new state word, DEC-023)	
+G-PL-SRC-DISCONNECTED	mocked	playlists.html#detail	
+G-PL-DRIVE-OFFLINE	mocked	playlists.html (Drive switch)	
+G-BG-ACTIVE	mocked	activity.html · shell.html (Activity item)	
+G-JOB-STATUS	mocked	activity.html	
+G-JOB-SILENT	mocked	activity.html (every job is an operation, DEC-044)	
+G-TOOL-MISSING	mocked	settings.html#sources (Download tools) · activity.html	
+G-PLAYBACK-ERROR	mocked	player.html	

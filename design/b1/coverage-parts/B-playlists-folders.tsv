@@ -1,0 +1,45 @@
+V-PL	mocked	playlists.html	DEC-003: becomes "All Playlists" (cover grid of what the sidebar lists); sort control, scope bar incl. Needs attention, folder groups, states default/empty/loading/error/filtered-empty
+V-PLD	mocked	playlists.html#detail	DEC-022/DEC-023: 160 pt cover header, editable title, Play/Shuffle/More, one status sentence, scope All · Download failed, undoable removal; states healthy/importing/incomplete/not downloaded/sign-in expired/empty/loading/error/not found
+V-FOLD	mocked	folders.html	DEC-024: variant A one hierarchical table + path bar (recommended), variant B tree + table; states default/importing/imported/empty/loading/error + drive-off hint
+CM-PL-CARD	mocked	playlists.html	DEC-039 order; Pin/Unpin removed (DEC-003); "Sync to" becomes "Add to Sync Profile"; "Show failed tracks" opens the Download failed scope
+CM-FOLD-TREE	mocked	folders.html	DEC-039: the one folder context menu (Open, Play, Play Next, Add to Queue, Add to Playlist, Add to Sync Profile, Scan This Folder, Import n Files, Show in Finder, Copy Path)
+CM-FOLD-SUBFOLDER	merged	folders.html	DEC-024: the Subfolders table no longer exists; its rows are folder rows of the one outline table and use CM-FOLD-TREE
+CM-FOLD-SEARCHRESULT	merged	folders.html	DEC-024/DEC-017: search filters the outline in place, there is no results table; rows use CM-FOLD-TREE
+S-PL-NEWPLAYLIST	merged	playlists.html	DEC-003 / THOUGHTS §4.2: no naming popover; New Playlist creates "Untitled Playlist" and puts the name into inline edit (card V-PL.E11 or sidebar row P-PINNED.E04)
+A-PL-DELETE	mocked	playlists.html	DEC-041: one alert for grid, sidebar and detail; states the consequence and that Undo works until quit
+S-PL-BANNER-PINLIMIT	removed	playlists.html	DEC-003: pinning and its limit of 8 no longer exist; every playlist is a sidebar row
+S-PL-BANNER-COVERDROP	mocked	playlists.html	Reworked as an inline error sentence on the card that refused the drop (also shown for non-image files), no grid-pushing banner
+S-PLD-LINK	mocked	playlists.html#detail	DEC-023: Link Source sheet with inline check results (same tracks, different tracks, not a playlist link, sign-in expired)
+A-PLD-LINKMISMATCH	merged	playlists.html#detail	Merged into S-PLD-LINK: the difference and its consequence are an inline result, the primary button stays "Link Playlist"
+A-PLD-LINKDONE	merged	playlists.html#detail	DEC-016: replaced by the status-bar message "Linked … to SoundCloud" with Undo
+S-PLD-M3U-OPEN	unchanged	playlists.html#detail	System open panel (.fileImporter for .m3u/.m3u8); only its message now names the target playlist; not mocked, the More item opens the preview directly
+S-PLD-M3U-PREVIEW	mocked	playlists.html#detail	Imports into the open playlist: states where tracks go, lists will be added / already in playlist / not found
+A-PLD-IMPORTDONE	merged	playlists.html#detail	DEC-016: replaced by the status-bar message "Added 38 tracks to ‹playlist› · 4 already there · 6 not found" with Undo
+A-PLD-REMOVE	removed	playlists.html#detail	DEC-041/DEC-016: removal from a playlist is immediate and undoable for any count (⌫, context menu); status-bar message with Undo replaces the alert
+K-PL-NEW	merged	playlists.html	THOUGHTS §4.2: ⌘N has one meaning app-wide (new playlist with inline rename); full map in patterns-menus-shortcuts.html
+K-PL-NEWPOPOVER-ESC	merged	playlists.html	Popover removed (see S-PL-NEWPLAYLIST); Esc in the inline rename keeps the default name (K-PL-RENAME)
+K-PL-NEWPOPOVER-RETURN	merged	playlists.html	Popover removed (see S-PL-NEWPLAYLIST); Return in the inline rename commits (K-PL-RENAME)
+K-PL-RENAME	mocked	playlists.html	Inline rename on card, sidebar row and detail title: Return commits, Esc cancels, click-away commits
+D-PL-TRACKS-TO-CARD	mocked	playlists.html	DEC-040: simulated ("Tracks → card"): accent ring, appended, status-bar confirmation with Undo
+D-PL-COVER-TO-CARD	mocked	playlists.html	DEC-040: simulated ("Image → card cover"), incl. the rejected drop as inline error
+D-PL-SPRINGLOAD-CARD	pattern	patterns-dnd.html	DEC-040: spring-loading stays as system behaviour but is never required (cards and sidebar rows accept drops directly)
+D-PLD-REORDER	mocked	playlists.html#detail	Insertion line illustrated (tr.drop-before); reorder hint line when sorted by another column
+D-PLD-INSERT	mocked	playlists.html#detail	Simulated ("Tracks → between rows"): insertion line + status-bar text
+D-PLD-ROWS-OUT	pattern	patterns-dnd.html	DEC-040: rows are Transferable (IDs + file URLs); dropping on another playlist adds
+D-FOLD-TRACKS-OUT	pattern	patterns-dnd.html	DEC-040: unchanged behaviour, track rows of the outline are draggable; noted on folders.html
+D-PL-TRACKS-TO-PINNED	mocked	playlists.html	DEC-003/DEC-040: now exists — every sidebar playlist row accepts dropped tracks (simulated "Tracks → sidebar playlist")
+D-PL-SELECTION-TO-NEW	pattern	patterns-dnd.html	DEC-040: drop on the Playlists header or empty sidebar area creates a playlist from the selection (inline name)
+D-PL-PLAYLIST-TO-FOLDER	mocked	playlists.html	DEC-003/DEC-040: now exists — playlist folders accept dropped playlists (simulated "Playlist → playlist folder"); also Move to Folder in the menus
+D-PL-CARD-REORDER	pattern	patterns-dnd.html	DEC-003: Manual order = sidebar order; rows and cards reorder by drag (described on V-PL.E08, not animated)
+D-PLD-COVER-TO-HEADER	mocked	playlists.html#detail	DEC-040: now exists — the 160 pt header cover is a drop target (simulated "Image → detail cover")
+D-PLD-M3U-FROM-FINDER	pattern	patterns-dnd.html	DEC-040: .m3u dropped on the Playlists section imports as playlist; on an open playlist it opens S-PLD-M3U-PREVIEW
+D-FOLD-FOLDER-TO-PLAYLIST	pattern	patterns-dnd.html	DEC-040: folder rows are draggable onto playlists and sync profiles; menu equivalent Add to Playlist is mocked on folders.html
+D-FOLD-FILES-FROM-FINDER	pattern	patterns-dnd.html	DEC-040: audio files dropped on a folder row import there (Activity operation); noted on V-FOLD.E04
+D-PLD-ROWS-TO-FINDER	pattern	patterns-dnd.html	DEC-040: public.file-url representation for local tracks
+P-PINNED	merged	playlists.html	DEC-003: replaced by the sidebar Playlists section (all playlists, playlist folders, state words, drop targets); rows rebuilt on playlists.html, shell in shell.html
+CM-SIDEBAR-PINNED	mocked	playlists.html	DEC-039: sidebar playlist row menu (Play, Play Next, Add to Sync Profile, Rename, Move to Folder, Download n Missing, Refresh from ‹Source›, Show in All Playlists, Delete Playlist…); Unpin removed
+CM-SIDEBAR-PINNEDRENAME	removed	playlists.html	The one-item "Cancel" menu is dropped; the inline rename field shows the standard text-field menu, Esc cancels
+A-SIDEBAR-DELETEPL	merged	playlists.html	Merged into A-PL-DELETE (one delete confirmation everywhere)
+A-SIDEBAR-RENAMEFAIL	merged	playlists.html	DEC-016: the alert becomes an inline error under the still-open rename field; the typed name is kept (simulated "Rename fails")
+K-SIDEBAR-RENAME	mocked	playlists.html	Return commits, Esc cancels in the sidebar inline rename (same rule as K-PL-RENAME)
+S-PLFOLDER-NEW	mocked	playlists.html	New (DEC-003): new playlist folder as inline rename in the sidebar (⌥⌘N, section ＋, Add menu)

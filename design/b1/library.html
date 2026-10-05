@@ -1,0 +1,77 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>All Tracks — MLM B1</title>
+<link rel="stylesheet" href="assets/mlm.css"><script src="assets/app.js"></script></head>
+<body data-screen="V-LIB" data-title="All Tracks" data-nav="tracks" data-states="default,empty,loading,error,huge">
+
+<div class="note">
+  <h3>All Tracks (was “Library”) — Tier 1</h3>
+  <p><b>Try:</b> click a row, then ↑/↓ · <kbd>Space</kbd> = preview in the toolbar player (↑/↓ moves the preview, Space or Esc ends it) · <kbd>Return</kbd> / double-click = play (on a “Not downloaded” row it starts the download instead) · ⌘-click or ⇧-click several rows → selection bar and multi-edit in Info · <kbd>⌘I</kbd> or ⓘ = Info · right-click a row = context menu · right-click a column header = columns · click a header to sort · the scope bar filters by availability · type in Search to filter in place · switch <b>Drive → Not connected</b> in the review bar.</p>
+  <p>The mockup shows 600 demo rows (state “Huge”: 6,000). The real library has 12,935. Decisions: DEC-002, DEC-008…016, DEC-046.</p>
+</div>
+
+<div id="content">
+  <div class="view" data-show="default huge">
+    <div class="vhead">
+      <h1 data-fb-id="V-LIB.E01" data-fb-label="View title" data-fb-note="“All Tracks” under the sidebar section “Library”. Also the window title; the subtitle names the open library." data-fb-dec="DEC-002" data-fb-api=".navigationTitle / .navigationSubtitle">All Tracks</h1>
+      <span class="sub" data-fb-id="W-MAIN.E01" data-fb-label="Library name (window subtitle)" data-fb-note="The open library is always named." data-fb-dec="DEC-031">Main Library</span>
+    </div>
+    <div class="scopebar" data-fb-id="V-LIB.E02" data-fb-label="Availability scope bar" data-fb-note="Replaces the Local / Remote tabs. Uses the glossary states, with live counts that follow the search. Status is also a sortable column." data-fb-dec="DEC-011" data-fb-api="Picker(.segmented) or scope buttons in a safeAreaInset(edge: .top)">
+      <button class="scope on" data-status-filter="">All<span class="n" data-n="all"></span></button>
+      <button class="scope" data-status-filter="local">Local<span class="n" data-n="local"></span></button>
+      <button class="scope" data-status-filter="notdl,downloading">Not downloaded<span class="n" data-n="notdl"></span></button>
+      <button class="scope" data-status-filter="failed" data-fb-id="V-LIB.N01" data-fb-label="Scope: Download failed" data-fb-note="Lists every failed download; each row shows the reason and attempts left on a second line, and ⌘D retries the selection." data-fb-dec="DEC-011">Download failed<span class="n" data-n="failed"></span></button>
+      <button class="scope" data-status-filter="missing">File missing<span class="n" data-n="missing"></span></button>
+      <span class="grow"></span>
+      <span class="token" data-fb-id="V-LIB.N02" data-fb-label="Filter token (example)" data-fb-note="Search tokens such as genre:, artist:, bpm:, is: no album appear here while active." data-fb-dec="DEC-017" data-fb-api=".searchable(text:tokens:)" hidden>genre: Techno ✕</span>
+    </div>
+    <div id="tbl" data-fb-id="V-LIB.E06" data-fb-label="Track table" data-fb-note="Native table. Selection is the argument of every command. Rows update in place — no full-table spinner on refresh." data-fb-dec="DEC-012" data-fb-api="Table(selection: Set<Track.ID>, sortOrder:, columnCustomization:)"></div>
+  </div>
+
+  <div class="empty" data-show="empty" data-fb-id="V-LIB.E22" data-fb-label="Empty library" data-fb-note="One sentence, the actions that fill it. Dropping files or folders here imports them." data-fb-api="ContentUnavailableView + .dropDestination">
+    <i data-i="note" class="xl"></i><h2>No tracks yet</h2>
+    <p>Import music from a folder, or import a playlist from SoundCloud, YouTube or Spotify. You can also drop files here.</p>
+    <div class="acts"><button class="btn lg primary">Import Files or Folder…</button><a class="btn lg" href="import.html">Import Playlist from Source…</a></div>
+  </div>
+
+  <div class="view" data-show="loading" data-fb-id="V-LIB.E20" data-fb-label="First load" data-fb-note="Only the very first load shows placeholder rows. Later refreshes keep the rows and show a small spinner in the status bar." data-fb-api=".redacted(reason: .placeholder)">
+    <div class="vhead"><h1>All Tracks</h1><span class="sub">Main Library</span></div>
+    <div class="scopebar"><button class="scope on">All</button><button class="scope">Local</button><button class="scope">Not downloaded</button><button class="scope">Download failed</button><button class="scope">File missing</button></div>
+    <div class="table"><table><thead><tr><th>Title</th><th style="width:150px">Artist</th><th style="width:160px">Album</th><th style="width:52px">Time</th><th style="width:100px">Genre</th><th style="width:96px">Added</th><th style="width:132px">Status</th></tr></thead><tbody id="skel"></tbody></table></div>
+  </div>
+
+  <div class="empty" data-show="error" data-fb-id="V-LIB.E21" data-fb-label="Load error" data-fb-note="Plain-language cause + one action; raw text behind Details; link to the log lines.">
+    <i data-i="warn" class="xl"></i><h2>Can’t load the tracks</h2>
+    <p>The library database didn’t answer. Your music and your library file are not affected.</p>
+    <div class="acts"><button class="btn lg primary">Try Again</button><a class="btn lg" href="activity.html#logs">Show Logs</a></div>
+    <p class="caption" style="margin-top:8px">▸ Details</p>
+  </div>
+</div>
+
+<script>
+document.addEventListener('mlm:ready', () => {
+  const ids = { title: 'V-LIB.E07', artist: 'V-LIB.E08', album: 'V-LIB.E09', time: 'V-LIB.E10', format: 'V-LIB.E11', status: 'V-LIB.E12', kbps: 'V-LIB.E13', genre: 'V-LIB.E14', year: 'V-LIB.E15', energy: 'V-LIB.E16', dance: 'V-LIB.E17', bpm: 'V-LIB.E18', added: 'V-LIB.E19' };
+  const notes = {
+    title: 'Cover + title; the playing track is marked by accent colour and a speaker glyph. Tracks without a file show a neutral placeholder cover.',
+    album: 'No album is shown as “—”. “unknown album” and source names (SoundCloud, YouTube…) are never displayed as albums (DEC-013). Click = Go to Album.',
+    energy: 'Number plus a quiet 5-step bar, sortable. No custom colour (DEC-046).',
+    added: 'Always with the year.',
+    status: 'Words, sortable. Empty for a local track. With the drive not connected the column stays empty and the banner speaks (DEC-014).',
+    bpm: 'Shown by default (set building). Dance, Year, Format, kbps are available via the header menu.'
+  };
+  let rows = MLM.tracks(600, 7);
+  const t = MLM.table('#tbl', { rows, ids, notes, sort: 'addedSort', desc: true });
+  const count = () => { const c = { all: rows.length, local: 0, notdl: 0, failed: 0, missing: 0 }; rows.forEach(r => { const k = r.status === 'downloading' ? 'notdl' : r.status; c[k]++; }); document.querySelectorAll('[data-n]').forEach(n => n.textContent = c[n.dataset.n].toLocaleString('en-US')); };
+  count();
+  document.addEventListener('mlm:scope', e => {
+    const failed = e.detail === 'failed';
+    t.opts.subline = failed ? (r => MLM.esc(r.reason) + ' · ' + (3 - r.attempts) + ' attempts left') : null;
+    t.opts.rowClass = failed ? (() => 'tall') : null; t.draw();
+  });
+  document.addEventListener('mlm:state', e => {
+    if (e.detail === 'huge') { rows = MLM.tracks(6000, 11); t.setRows(rows); count(); }
+    else if (e.detail === 'default' && rows.length !== 600) { rows = MLM.tracks(600, 7); t.setRows(rows); count(); }
+  });
+  document.getElementById('skel').innerHTML = Array.from({ length: 24 }, (_, i) => '<tr class="skel">' + [62, 40, 48, 30, 36, 50, 0].map(w => '<td>' + (w ? '<span style="width:' + (w + (i * 13) % 30) + '%"></span>' : '') + '</td>').join('') + '</tr>').join('');
+});
+</script>
+</body></html>

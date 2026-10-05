@@ -1,0 +1,385 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Folders — MLM B1</title>
+<link rel="stylesheet" href="assets/mlm.css"><script src="assets/app.js"></script>
+<style>
+  /* Page-local: hierarchical table (DisclosureTableRow stand-in). Existing variables only. */
+  #ftbl tbody tr:nth-child(even) td { background: transparent; }
+  #ftbl tbody tr.alt td { background: var(--content-alt); }
+  #ftbl tr.clps, #ftbl tr.fhide, #btree tr.clps { display: none; }
+  #ftbl .tw, #btree .tw { width: 12px; flex: none; font-size: 9px; color: var(--text2); text-align: center; }
+  #ftbl tr.fold .ttl, #btree .ttl { font-weight: 500; }
+  #ftbl tr.fold svg.i, #btree svg.i { color: var(--accent-text); }
+  #ftbl .mg, #btree .mg { font-size: 11px; color: var(--text2); flex: none; overflow: visible !important; }
+  #ftbl tr.nil td, #ftbl tr.more td { color: var(--text3); }
+  #ftbl tr.nil svg.i { color: var(--text3); }
+  #ftbl tr.playing .ttl { color: var(--accent-text); }
+  :root[data-drive="off"] #ftbl tr.trk td { color: var(--text3); }
+  :root[data-drive="off"] #ftbl tr.trk .cov { opacity: .45; }
+  .strip { height: 26px; }
+  .pathbar span { display: inline-flex; align-items: center; gap: 4px; padding: 1px 3px; border-radius: 4px; }
+  .pathbar span[data-pid]:hover, .pathbar span[data-root]:hover { background: var(--fill); }
+  .split { flex: 1; min-height: 0; display: flex; }
+  .split > .left { width: 270px; flex: none; border-right: .5px solid var(--sep); display: flex; flex-direction: column; }
+  .split > .right { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .subs { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 20px; border-bottom: .5px solid var(--sep); }
+</style></head>
+<body data-screen="V-FOLD" data-title="Folders" data-nav="folders"
+      data-states="default,importing,imported,empty,loading,error" data-variants="A,B" data-variant-rec="A" data-variant-dec="DEC-024">
+
+<div class="note">
+  <h3>Folders (V-FOLD) — Tier 1 · one hierarchical table like Finder’s list view (variant A, recommended) vs. tree + table (variant B)</h3>
+  <p><b>Try (A):</b> click a triangle or double-click a folder to expand it · ↑/↓ move, → expands, ← collapses or jumps to the parent · click a track, then <kbd>Space</kbd> = preview, <kbd>Return</kbd> / double-click = play · ⌘-click several tracks → selection bar · right-click a folder, a track, or a dimmed <code>Not in library</code> file · press <code>Import</code> in the line under the title and watch it run and finish (states <b>Importing</b> / <b>Imported</b> show the two phases statically) · type in Search: it finds folders <i>and</i> tracks (try <code>dek</code> or <code>aphex</code>) · click a segment of the path bar at the bottom · context menu ▸ <code>Open</code> makes a folder the root.</p>
+  <p><b>Drive → Not connected:</b> the folders are still there (from the database, as last scanned), files that aren’t in the library can’t be listed, and a line says so. Folders here are real directories under the library folder — playlist folders are a different thing and live in the sidebar. Decisions: DEC-024, DEC-008, DEC-014, DEC-039, DEC-044. Flow F-09.</p>
+</div>
+
+<div id="content" data-fb-id="V-FOLD" data-fb-label="Folders" data-fb-note="The library folder as it is laid out on disk. Variant A: one outline table — folders with disclosure triangles and counts, tracks inside with the All Tracks columns, a path bar at the bottom. Replaces the tree, the Subfolders table, the Tracks table, the search-results table and the breadcrumb bar." data-fb-dec="DEC-024" data-fb-api="Table(of:) { DisclosureTableRow } with lazily loaded children">
+
+  <div class="view" data-show="default importing imported">
+    <div class="vhead">
+      <h1 id="f-title" data-fb-id="V-FOLD.E01" data-fb-label="Title" data-fb-note="“Folders”, or the folder’s name after Open (⌘↓) made it the root. The two “n folders” counters (title capsule and toolbar item, V-FOLD.E03) are gone; totals are in the status bar." data-fb-api=".navigationTitle">Folders</h1>
+      <span class="sub" id="f-sub">Library folder “Music” on Lexxar</span>
+    </div>
+
+    <div data-variant="A"><div class="drive-on">
+      <div class="statusline" id="uline" data-fb-id="V-FOLD.E08" data-fb-label="Files not in the library" data-fb-note="One line for the selected folder (or the whole library folder when nothing is selected). The count and the import cover the same thing: this folder including its subfolders — today the count was direct files only while Import was recursive. Import is an Activity operation; this line is its echo." data-fb-dec="DEC-044" data-fb-api="HStack in safeAreaInset(edge: .top)"></div>
+    </div></div>
+    <div class="statusline drive-off" data-fb-id="V-FOLD.N06" data-fb-label="Drive not connected — folders from the database" data-fb-note="With the drive away the outline is built from the library database, so every folder that holds library tracks is still browsable (today: a full-pane “Drive not connected”). What can’t be known offline is said once here: files that aren’t in the library. Scan, Import and Show in Finder are disabled with this reason." data-fb-dec="DEC-014" data-fb-api="same Table, source = stored relative paths">
+      <i data-i="drive" class="s"></i><span>Showing the folders as last scanned on Oct 3, 2026. Files that aren’t in the library can’t be listed until “Lexxar” is connected.</span>
+    </div>
+    <div class="statusline" id="fline" hidden data-fb-id="V-FOLD.E02" data-fb-label="Filter result line" data-fb-note="The toolbar search (scope “This view”) replaces the separate “Filter folders…” field. It finds folders and tracks, keeps them in their hierarchy, and has no silent cap of 200. Double-click works as usual; nothing clears the search by surprise." data-fb-dec="DEC-017" data-fb-api=".searchable + filtered outline"></div>
+
+    <!-- Variant A -->
+    <div class="view" data-variant="A">
+      <div class="table" id="ftbl" tabindex="0" data-fb-id="V-FOLD.E04" data-fb-label="Outline table (folders and tracks)" data-fb-note="Folders first, then tracks, then files that aren’t in the library. Sortable by any column within each folder. Selection, Space, Return, ⌫-free, drag out (tracks and whole folders onto playlists and sync profiles) behave as in every track table. Dropping audio files from Finder on a folder imports them there." data-fb-dec="DEC-024" data-fb-api="Table + DisclosureTableRow; children loaded on expand; .draggable / .dropDestination">
+        <table><thead><tr>
+          <th class="sorted" data-fb-id="V-FOLD.E05" data-fb-label="Name column" data-fb-note="Folder: triangle, folder symbol, name, and “Managed by MLM” for app-owned folders. Track: cover and title. File not in the library: its file name." data-fb-api="TableColumn">Name<span class="arr">▲</span></th>
+          <th style="width:150px">Artist</th><th style="width:160px">Album</th><th class="r" style="width:52px">Time</th><th class="r" style="width:48px">BPM</th><th style="width:70px">Energy</th><th style="width:100px">Genre</th><th style="width:104px">Added</th>
+          <th style="width:160px" data-fb-id="V-FOLD.N03" data-fb-label="Status column" data-fb-note="Track: the usual availability words (empty when local). Folder: “n not in library” or “Can’t read this folder”. File: “Not in library”." data-fb-api="TableColumn">Status</th>
+        </tr></thead><tbody id="frows"></tbody></table>
+        <div class="empty" id="fempty" hidden style="height:60%"></div>
+      </div>
+    </div>
+
+    <!-- Variant B -->
+    <div class="split" data-variant="B" data-fb-id="V-FOLD/B" data-fb-label="Variant B: tree + table" data-fb-note="Today’s layout, restyled: folder tree with counts on the left, the selected folder’s subfolders and tracks on the right. Kept for comparison. It needs two panes and two selections, hides tracks until a folder is chosen, and can’t show files of different folders side by side." data-fb-dec="DEC-024" data-fb-api="HSplitView { List(children:) ; Table }">
+      <div class="left"><div class="table" id="btree"><table><thead><tr><th>Folder</th><th class="r" style="width:74px">Tracks</th></tr></thead><tbody id="brows"></tbody></table></div></div>
+      <div class="right">
+        <div class="subs" id="bsubs"></div>
+        <div id="btbl"></div>
+      </div>
+    </div>
+
+    <div class="statusbar strip" data-variant="A" data-fb-id="V-FOLD.E07" data-fb-label="Path bar" data-fb-note="Was the breadcrumb bar at the top. Shows where the selection is, from the drive down. Click a segment to jump there; segments accept dropped tracks. Show in Finder is in the context menu and the File menu (⇧⌘R), no longer an unlabeled icon." data-fb-api="safeAreaInset(edge: .bottom) { path control }">
+      <div class="pathbar" id="fpath"></div>
+    </div>
+  </div>
+
+  <div class="empty" data-show="empty" data-fb-id="V-FOLD.E12" data-fb-label="No library folder" data-fb-note="Says what is missing and where to set it. Today this read “No folders — Import music…”, which was the wrong advice." data-fb-api="ContentUnavailableView">
+    <i data-i="folder" class="xl"></i><h2>No library folder</h2>
+    <p>This library has no library folder yet, so there are no folders to show. Choose one in Settings ▸ Library.</p>
+    <div class="acts"><a class="btn lg primary" href="settings.html#library">Open Settings ▸ Library</a></div>
+  </div>
+
+  <div class="view" data-show="loading" data-fb-id="V-FOLD.E12/loading" data-fb-label="Scanning (first load)" data-fb-note="Only the first read of a library folder shows placeholders, with a line that counts. Later scans keep the outline; the scanned folder shows a spinner in its Status cell and the result is a status-bar sentence.">
+    <div class="vhead"><h1>Folders</h1><span class="sub">Library folder “Music” on Lexxar</span></div>
+    <div class="statusline"><span class="status"><span class="spinner"></span>Scanning “Music”… 312 folders read</span><div class="progress" style="width:160px"><i style="width:26%"></i></div><span class="grow"></span><a class="btn plain" href="activity.html">Show in Activity</a></div>
+    <div class="table"><table><thead><tr><th>Name</th><th style="width:150px">Artist</th><th style="width:160px">Album</th><th style="width:52px">Time</th><th style="width:100px">Genre</th><th style="width:104px">Added</th><th style="width:160px">Status</th></tr></thead><tbody id="fskel"></tbody></table></div>
+  </div>
+
+  <div class="empty" data-show="error" data-fb-id="V-FOLD.N08" data-fb-label="Can’t read the library folder" data-fb-note="Today a failed scan looked exactly like an empty folder. A whole-folder failure is this pane; a single unreadable folder is a row with “Can’t read this folder” in its Status cell.">
+    <i data-i="warn" class="xl"></i><h2>Can’t read the library folder</h2>
+    <p>macOS didn’t let MLM read “/Volumes/Lexxar/Music”. The drive is connected; the folder’s permissions may have changed.</p>
+    <div class="acts"><button class="btn lg primary" data-set-state="default">Try Again</button><button class="btn lg" data-fsay="Show in Finder reveals “Music” on Lexxar.">Show in Finder</button><a class="btn lg" href="activity.html#logs">Show Logs</a></div>
+    <p class="caption" style="margin-top:8px">▸ Details</p>
+  </div>
+</div>
+
+<!-- ═════════ Menus ═════════ -->
+<div class="menu" id="cm-fold" hidden data-fb-id="CM-FOLD-TREE" data-fb-label="Folder context menu" data-fb-note="One menu for every folder row (was three one-item menus: tree, Subfolders table, search results — each only “Show in Finder”). Groups in the one order: Primary · Queue · Add to · Fix · Locate. Everything acts on the folder including its subfolders. Moving or renaming folders stays in Finder." data-fb-dec="DEC-039" data-fb-api="contextMenu(forSelectionType:)">
+  <div class="mi hdr drive-off">“Lexxar” is not connected</div>
+  <a class="mi" data-fcmd="open" data-fb-id="CM-FOLD-TREE.N01" data-fb-label="Open" data-fb-note="Makes this folder the root of the outline (⌘↓); the path bar leads back.">Open<span class="k">⌘↓</span></a>
+  <a class="mi" data-fcmd="play" data-fb-id="CM-FOLD-TREE.N02">Play</a><hr>
+  <a class="mi" data-fcmd="playnext" data-fb-id="CM-FOLD-TREE.N03">Play Next</a><a class="mi" data-fcmd="addqueue">Add to Queue</a><hr>
+  <a class="mi sub" data-fcmd="addpl" data-fb-id="CM-FOLD-TREE.N04" data-fb-label="Add to Playlist ▸" data-fb-note="Submenu: New Playlist from Folder, then the playlists (recent first). Adds every track of the folder; confirms in the status bar with Undo.">Add to Playlist</a>
+  <a class="mi sub" data-fcmd="addsync" data-fb-id="CM-FOLD-TREE.N05">Add to Sync Profile</a><hr>
+  <a class="mi" data-fcmd="scan" data-off="1" data-fb-id="CM-FOLD-TREE.N06" data-fb-label="Scan This Folder" data-fb-note="⌘R = re-read from outside, here: this folder. Finds new, moved and deleted files without waiting for the next visit.">Scan This Folder<span class="k">⌘R</span></a>
+  <a class="mi" data-fcmd="import" data-off="1" data-r="import" data-fb-id="CM-FOLD-TREE.N07">Import Files</a><hr>
+  <a class="mi" data-fcmd="finder" data-off="1" data-fb-id="CM-FOLD-TREE.E01">Show in Finder<span class="k">⇧⌘R</span></a>
+  <a class="mi" data-fcmd="copy" data-fb-id="CM-FOLD-TREE.N08">Copy Path</a>
+</div>
+
+<div class="menu" id="cm-fold-file" hidden data-fb-id="V-FOLD.N02/menu" data-fb-label="Menu of a file that is not in the library">
+  <div class="mi hdr" data-xcount></div>
+  <a class="mi" data-xcmd="import" data-r="ximport">Import File</a><hr>
+  <a class="mi" data-xcmd="finder">Show in Finder<span class="k">⇧⌘R</span></a><a class="mi" data-xcmd="copy">Copy Path</a>
+</div>
+
+<script>
+document.addEventListener('mlm:ready', () => {
+  const $ = (s, r) => (r || document).querySelector(s), $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const esc = MLM.esc, ic = MLM.icon, C = MLM.COLS, num = n => n.toLocaleString('en-US');
+  const plural = (n, w) => num(n) + ' ' + w + (n === 1 ? '' : 's');
+  const driveOff = () => document.documentElement.dataset.drive === 'off';
+  const commenting = () => document.body.classList.contains('commenting');
+  const host = $('#ftbl'), tbody = $('#frows');
+
+  /* ───── The library folder: /Volumes/Lexxar/Music (12,935 tracks) ───── */
+  const F = (name, o) => Object.assign({ name }, o || {});
+  const TREE = [
+    F('Downloads (SoundCloud)', { managed: 1, count: 4812, rows: 22, seed: 21, fb: 'managed' }),
+    F('Downloads (YouTube)', { managed: 1, count: 2306, rows: 16, seed: 22 }),
+    F('Transcode originals', { managed: 1, count: 1127, rows: 10, seed: 23 }),
+    F('2026', { count: 48, open: 1, rows: 13, direct: 13, seed: 30, missing: 4, fb: 'folder', files: ['2026-09-27 kitchen jam.wav', 'Jonas - untitled 4 (rough mix).aiff', 'voice memo 0412.m4a'], bad: [2], kids: [
+      F('Bandcamp Friday June', { count: 23, rows: 23, seed: 31 }),
+      F('Dekmantel recordings', { count: 12, rows: 12, seed: 32 }),
+      F('New from Jonas', { count: 0, nodb: 1, bad: [7], files: ['01 Intro (Jonas edit).flac', '02 Low Tide.flac', '03 Paper Engine.flac', '04 Northern Loop (feat. Mira).flac', '05 Static Garden.flac', '06 Second Weather.flac', '07 Hollow Hours — a very long working title that still needs a real name.flac', '08 damaged export.flac', '09 Quiet Return.flac', '10 Velvet Dust.flac', '11 Outro.flac'] })
+    ] }),
+    F('Albums', { count: 3412, kids: [
+      F('Aphex Twin', { count: 41, kids: [F('Drukqs', { count: 16, rows: 16, seed: 43, artist: 'Aphex Twin', album: 'Drukqs' }), F('Selected Ambient Works 85–92', { count: 13, rows: 13, seed: 41, artist: 'Aphex Twin', album: 'Selected Ambient Works 85–92' }), F('Syro', { count: 12, rows: 12, seed: 42, artist: 'Aphex Twin', album: 'Syro' })] }),
+      F('Boards of Canada', { count: 58, rows: 10, seed: 44, artist: 'Boards of Canada' }), F('Burial', { count: 27, rows: 10, seed: 45, artist: 'Burial' }),
+      F('DJ Koze', { count: 64, rows: 10, seed: 46, artist: 'DJ Koze' }), F('Four Tet', { count: 96, rows: 10, seed: 47, artist: 'Four Tet' }), F('Skee Mask', { count: 39, rows: 10, seed: 48, artist: 'Skee Mask' }),
+      F('Various Artists — compilations, label samplers and things that never had a proper artist folder', { count: 3087, rows: 12, seed: 49 })
+    ] }),
+    F('DJ Tools', { count: 265, rows: 10, seed: 51 }),
+    F('Old iTunes library', { count: 548, err: 1, fb: 'err' }),
+    F('Sets', { count: 318, kids: [F('2024', { count: 121, rows: 10, seed: 52 }), F('2025', { count: 143, rows: 10, seed: 53 }), F('2026', { count: 54, rows: 10, seed: 54 })] }),
+    F('Vinyl rips', { count: 96, rows: 12, seed: 55 }),
+    F('_Inbox', { count: 0, nodb: 1, files: ['Bicep - Glue (live at Printworks).mp3', 'ID - ID (rip from set).mp3', 'Overmono - unreleased dub.wav', 'Peggy Gou - promo 2026.aiff', 'radio rip 2026-09-30.m4a', 'Roza Terenzi - white label A1.wav', 'Roza Terenzi - white label B1.wav', 'Shazam 2026-10-01 23.14.m4a', 'unknown - track 07.mp3'] })
+  ];
+  const nodes = []; let nid = 0;
+  const mk = o => { o.id = 'n' + (nid++); nodes.push(o); return o; };
+  function build(list, depth, parent) {
+    list.forEach(f => {
+      const n = mk({ type: 'f', depth, parent, f, name: f.name, open: !!f.open, count: f.count }); const before = nodes.length;
+      if (f.kids) build(f.kids, depth + 1, n);
+      const k = f.rows != null ? f.rows : 0;
+      if (k) {
+        const tr = MLM.tracks(k, f.seed, { allLocal: true });
+        tr.forEach(t => { if (f.artist) t.artist = f.artist; if (f.album) t.album = f.album; }); if (f.missing != null) tr[f.missing].status = 'missing';
+        tr.sort((a, b) => a.title.localeCompare(b.title)).forEach(t => mk({ type: 't', depth: depth + 1, parent: n, t, name: t.title }));
+        const direct = f.direct != null ? f.direct : f.count; if (direct > k) mk({ type: 'm', depth: depth + 1, parent: n, text: num(direct - k) + ' more tracks — rows load as you scroll' });
+      }
+      (f.files || []).forEach((x, i) => mk({ type: 'x', depth: depth + 1, parent: n, name: x, bad: (f.bad || []).includes(i) }));
+      if (f.err) mk({ type: 'm', depth: depth + 1, parent: n, text: 'MLM couldn’t read this folder (permission denied). Choose Scan This Folder to try again.' });
+      else if (nodes.length === before) mk({ type: 'm', depth: depth + 1, parent: n, text: 'No tracks in this folder' });
+    });
+  }
+  build(TREE, 0, null);
+  MLM.tracks(3, 60, { allLocal: true }).sort((a, b) => a.title.localeCompare(b.title)).forEach((t, i) => mk({ type: 't', depth: 0, parent: null, t, name: t.title, fb: i === 0 ? 'root' : '' }));
+  const byId = {}; nodes.forEach(n => { byId[n.id] = n; });
+  const isIn = (n, anc) => { for (let a = n.parent; a; a = a.parent) if (a === anc) return true; return false; };
+  const desc = n => nodes.filter(x => isIn(x, n));
+  const unidx = n => (n ? desc(n) : nodes).filter(x => x.type === 'x' && !x.tried).length;
+  const path = n => { const p = []; for (let a = n; a; a = a.parent) p.unshift(a); return p; };
+  const nearFolder = n => !n ? null : n.type === 'f' ? n : n.parent;
+
+  /* ───── Rows ───── */
+  const FB = {
+    managed: ' data-fb-id="V-FOLD.N01" data-fb-label="Managed by MLM" data-fb-note="A quiet secondary label on the folders MLM creates and maintains (downloads, transcode originals), with a different symbol. A label on the row instead of a separate “MANAGED BY MLM” section, so managed and personal folders stay in one alphabetical list." data-fb-dec="DEC-024"',
+    folder: ' data-fb-id="V-FOLD.E09" data-fb-label="Folder row" data-fb-note="Triangle, name, and the number of tracks inside including subfolders (new). Double-click or →/← expands and collapses; ⌘↓ opens it as the root. The separate Subfolders table — with its wrong “1” counts — is gone." data-fb-dec="DEC-024" data-fb-api="DisclosureTableRow"',
+    err: ' data-fb-id="V-FOLD.N09" data-fb-label="Folder that can’t be read" data-fb-note="One unreadable folder is stated on its row; it no longer looks empty."',
+    track: ' data-fb-id="V-FOLD.E10" data-fb-label="Track row" data-fb-note="A library track where its file is. Same cells, same keys and the same context menu as in All Tracks. Return / double-click plays with the visible rows after it as the queue context; a File missing row says so in the status bar instead of trying to play." data-fb-dec="DEC-008"',
+    nil: ' data-fb-id="V-FOLD.N02" data-fb-label="File not in the library" data-fb-note="Audio files found on disk that the library doesn’t know: listed inline where they are, dimmed, Status “Not in library”. Select some and choose Import, or import the whole folder from the line above. Hidden while the drive is not connected." data-fb-dec="DEC-024"',
+    root: ' data-fb-id="V-FOLD.N07" data-fb-label="File directly in the library folder" data-fb-note="Tracks that lie in the library folder itself are rows at the top level. Today they were unreachable because only subfolders were shown."',
+    more: ' data-fb-id="V-FOLD.N10" data-fb-label="Lazy rows" data-fb-note="Mockup shorthand. The real table loads the children of big folders (thousands of tracks in the download folders) lazily; there is no “show more” row."'
+  };
+  const fbUsed = {};
+  const fbFor = (n, k) => { if (!k) return ''; n._fb = n._fb || {}; if (n._fb[k]) return FB[k]; if (fbUsed[k]) return ''; fbUsed[k] = 1; n._fb[k] = 1; return FB[k]; };
+  const pad = (n, px) => 'style="padding-left:calc((' + n.depth + ' - var(--d0, 0)) * 18px + ' + (px || 0) + 'px)"';
+  const dashes = n => Array.from({ length: n }, () => '<td class="dim"><span class="t3">—</span></td>').join('');
+  function rowHTML(n) {
+    if (n.type === 'f') { const f = n.f, u = unidx(n);
+      return '<tr class="fold' + (f.nodb ? ' drive-on' : '') + '" data-id="' + n.id + '"' + fbFor(n, f.fb === 'err' ? 'err' : f.fb === 'folder' ? 'folder' : '') + '><td><div class="cellt" ' + pad(n) + '><span class="tw">' + (n.open ? '▾' : '▸') + '</span>' + ic(f.managed ? 'download' : 'folder') + '<span class="ttl" title="' + esc(n.name) + '">' + esc(n.name) + '</span></div></td>' +
+        '<td colspan="7" class="dim num">' + plural(n.count, 'track') + (f.kids ? ' · ' + plural(f.kids.length, 'folder') : '') + (f.managed ? ' · <span class="mg"' + fbFor(n, f.fb === 'managed' ? 'managed' : '') + '>Managed by MLM</span>' : '') + '</td><td>' + (n.scanning ? '<span class="status"><span class="spinner"></span>Scanning…</span>' : f.err ? '<span class="status error">' + ic('warn', 's') + 'Can’t read this folder</span>' : u ? '<span class="status drive-on">' + num(u) + ' not in library</span>' : '') + '</td></tr>'; }
+    if (n.type === 't') { const t = n.t;
+      return '<tr class="trk' + (MLM.shell.current === t ? ' playing' : '') + '" data-id="' + n.id + '"' + fbFor(n, n.fb === 'root' ? 'root' : (n.parent && n.parent.f.fb === 'folder') ? 'track' : '') + '><td>' + C.title.render(t).replace('<div class="cellt">', '<div class="cellt" ' + pad(n, 20) + '>') + '</td>' +
+        ['artist', 'album', 'time', 'bpm', 'energy', 'genre', 'added'].map(k => '<td class="' + (C[k].cls || '') + '">' + C[k].render(t) + '</td>').join('') + '<td>' + (t.status === 'missing' && driveOff() ? '' : (MLM.STATUS[t.status] || '')) + '</td></tr>'; }
+    if (n.type === 'x') return '<tr class="nil drive-on" data-id="' + n.id + '"' + fbFor(n, (n.parent && n.parent.f.fb === 'folder') ? 'nil' : '') + '><td><div class="cellt" ' + pad(n, 20) + '>' + ic('doc') + '<span class="ttl">' + esc(n.name) + '</span></div></td>' + dashes(7) + '<td>' + (n.bad && n.tried ? '<span class="status failed">' + ic('warn', 's') + 'Can’t import — unreadable</span>' : MLM.STATUS.notinlib) + '</td></tr>';
+    return '<tr class="more" data-id="' + n.id + '"' + fbFor(n, n.text.includes('more tracks') ? 'more' : '') + '><td colspan="9"><div class="cellt" ' + pad(n, 20) + '><span>' + esc(n.text) + '</span></div></td></tr>';
+  }
+  const applyDrive = root => { const off = driveOff(); $$('.drive-on', root).forEach(x => { x.hidden = off; }); $$('.drive-off', root).forEach(x => { x.hidden = !off; }); if (root.classList && root.classList.contains('drive-on')) root.hidden = off; };
+  tbody.innerHTML = nodes.map(rowHTML).join(''); nodes.forEach((n, i) => { n.el = tbody.children[i]; }); applyDrive(tbody);
+  function redraw(n) { const was = n.el, sel = was.classList.contains('sel'); const e = MLM.el('<table><tbody>' + rowHTML(n) + '</tbody></table>').querySelector('tr'); was.replaceWith(e); n.el = e; if (sel) e.classList.add('sel'); applyDrive(e); }
+
+  /* ───── Visibility: expand/collapse, root, filter ───── */
+  let root = null, q = '', matches = null, matchedFolders = null;
+  function visibleNow(n) {
+    if (root && !isIn(n, root)) return false;
+    if (matches) { if (matches.has(n)) return true; for (let a = n.parent; a; a = a.parent) { if (!a.open) return false; if (matchedFolders.has(a)) return true; } return false; }
+    for (let a = n.parent; a && a !== root; a = a.parent) if (!a.open) return false;
+    return true;
+  }
+  const shown = () => nodes.filter(n => !n.el.classList.contains('clps') && !n.el.hidden);
+  function refresh() {
+    host.style.setProperty('--d0', root ? root.depth + 1 : 0);
+    nodes.forEach(n => { n.el.classList.toggle('clps', !visibleNow(n)); if (n.type === 'f') { const forced = matches && matches.has(n) && !matchedFolders.has(n); $('.tw', n.el).textContent = (n.open || forced) ? '▾' : '▸'; } });
+    let i = 0; shown().forEach(n => n.el.classList.toggle('alt', (i++) % 2 === 1));
+    $('#f-title').textContent = root ? root.name : 'Folders';
+    $('#f-sub').textContent = root ? plural(root.count, 'track') + (root.f.managed ? ' · Managed by MLM' : '') : 'Library folder “Music” on Lexxar';
+    const none = !shown().length; $('#fempty').hidden = !none;
+    if (none) $('#fempty').innerHTML = ic('search', 'xl') + '<h2>No results</h2><p>No folder or track ' + (root ? 'in “' + esc(root.name) + '” ' : '') + 'matches “' + esc(q) + '”.</p><div class="acts"><button class="btn" data-fclear>Clear Search</button></div>';
+    MLM.refreshBadges();
+  }
+  function toggle(n, open) { if (n.type !== 'f') return; n.open = open == null ? !n.open : open; refresh(); }
+  function setRoot(n) { root = n; if (n) n.open = true; sel.clear(); primary = null; paint(); refresh(); host.scrollTop = 0; }
+  function setFilter(text) {
+    q = text.trim(); const w = q.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!w.length) { matches = matchedFolders = null; $('#fline').hidden = true; refresh(); return; }
+    matches = new Set(); matchedFolders = new Set(); let nf = 0, nt = 0;
+    nodes.forEach(n => { if (n.type === 'm' || (root && !isIn(n, root))) return; const hay = (n.type === 't' ? n.t.title + ' ' + n.t.artist + ' ' + n.t.album + ' ' + n.t.genre : n.name).toLowerCase();
+      if (w.every(x => hay.includes(x))) { matches.add(n); if (n.type === 'f') { matchedFolders.add(n); nf++; } else nt++; for (let a = n.parent; a; a = a.parent) matches.add(a); } });
+    $('#fline').hidden = false; $('#fline').innerHTML = ic('search', 's') + '<span>' + (nf + nt ? '<b>' + plural(nf, 'folder') + ' and ' + plural(nt, 'track') + '</b> match “' + esc(q) + '”' : 'Nothing matches “' + esc(q) + '”') + (root ? ' in “' + esc(root.name) + '”' : ' in the library folder') + '</span><span class="grow"></span><button class="btn" data-fclear>Clear Search</button>';
+    refresh();
+  }
+  document.addEventListener('input', e => { if (e.target.classList.contains('search')) setFilter(e.target.value); });
+
+  /* ───── Selection, keyboard, mouse ───── */
+  const sel = new Set(); let anchor = null, primary = null;
+  const selNodes = () => nodes.filter(n => sel.has(n.id));
+  function paint() {
+    nodes.forEach(n => n.el.classList.toggle('sel', sel.has(n.id)));
+    const tr = selNodes().filter(n => n.type === 't').map(n => n.t), all = nodes.filter(n => n.type === 't').map(n => n.t);
+    host.dispatchEvent(new CustomEvent('mlm:select', { bubbles: true, detail: { rows: tr, total: all, table: null } }));
+    drawPath(); drawLine(); setDef();
+  }
+  function pick(n, ev) {
+    if (!n || n.type === 'm') return; const vis = shown().filter(x => x.type !== 'm');
+    if (ev && ev.shiftKey && anchor) { const a = vis.indexOf(anchor), b = vis.indexOf(n); if (a >= 0 && b >= 0) { if (!(ev.metaKey || ev.ctrlKey)) sel.clear(); for (let k = Math.min(a, b); k <= Math.max(a, b); k++) sel.add(vis[k].id); } }
+    else if (ev && (ev.metaKey || ev.ctrlKey)) { sel.has(n.id) ? sel.delete(n.id) : sel.add(n.id); anchor = n; }
+    else { sel.clear(); sel.add(n.id); anchor = n; }
+    primary = n; paint(); n.el.scrollIntoView({ block: 'nearest' });
+  }
+  const nodeOf = e => { const tr = e.target.closest('tbody tr'); return tr ? byId[tr.dataset.id] : null; };
+  function activate(n) {
+    if (n.type === 'f') toggle(n);
+    else if (n.type === 't') { MLM.shell.play(n.t, null); nodes.forEach(x => { if (x.type === 't') x.el.classList.toggle('playing', MLM.shell.current === x.t); }); }
+    else if (n.type === 'x') MLM.say('“' + esc(n.name) + '” isn’t in the library yet. <a class="btn plain" style="height:16px" data-ximport>Import</a>');
+  }
+  host.addEventListener('mousedown', e => {
+    const n = nodeOf(e); if (!n) return;
+    if (e.target.closest('.tw') && e.button === 0) { toggle(n); return; }
+    if (e.button === 2 && sel.has(n.id)) return; pick(n, e.button === 2 ? null : e);
+  });
+  host.addEventListener('dblclick', e => { const n = nodeOf(e); if (n && !e.target.closest('.tw')) activate(n); });
+  host.addEventListener('keydown', e => {
+    const vis = shown().filter(x => x.type !== 'm'), i = vis.indexOf(primary);
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (e.metaKey && e.key === 'ArrowDown' && primary && primary.type === 'f') { setRoot(primary); return; } const n = vis[Math.max(0, Math.min(vis.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))]; pick(n, e.shiftKey ? { shiftKey: true } : null); if (!e.shiftKey) anchor = n; if (MLM.shell.previewing && n && n.type === 't') MLM.shell.preview(n.t); }
+    else if (e.key === 'ArrowRight' && primary && primary.type === 'f') { e.preventDefault(); if (!primary.open) toggle(primary, true); }
+    else if (e.key === 'ArrowLeft' && primary) { e.preventDefault(); if (primary.type === 'f' && primary.open) toggle(primary, false); else if (primary.parent && primary.parent !== root) pick(primary.parent); }
+    else if (e.key === ' ') { e.preventDefault(); const s = selNodes(); if (MLM.shell.previewing) MLM.shell.endPreview(); else if (s.length === 1 && s[0].type === 't') MLM.shell.preview(s[0].t); else MLM.say('Space previews one selected track.'); }
+    else if (e.key === 'Enter' && primary) { e.preventDefault(); activate(primary); }
+    else if (e.key === 'a' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); vis.forEach(n => sel.add(n.id)); paint(); }
+    else if (e.key === 'Escape') { if (MLM.shell.previewing) MLM.shell.endPreview(); else { sel.clear(); primary = null; paint(); } }
+  });
+  let menuNode = null;
+  host.addEventListener('contextmenu', e => {
+    const n = nodeOf(e); if (!n || n.type === 'm') return; e.preventDefault(); menuNode = n;
+    if (n.type === 'f') { const u = unidx(n), off = driveOff(), m = $('#cm-fold'); $$('[data-off]', m).forEach(x => x.classList.toggle('dis', off)); const im = $('[data-r="import"]', m); im.hidden = !u || off; im.textContent = 'Import ' + plural(u, 'File'); MLM.openMenu('cm-fold', e.clientX, e.clientY); }
+    else if (n.type === 't') MLM.openMenu('cm-track', e.clientX, e.clientY, { rows: selNodes().filter(x => x.type === 't').map(x => x.t) });
+    else { const k = selNodes().filter(x => x.type === 'x').length || 1, m = $('#cm-fold-file'); $('[data-xcount]', m).hidden = k < 2; $('[data-xcount]', m).textContent = k + ' files'; $('[data-r="ximport"]', m).textContent = k > 1 ? 'Import ' + k + ' Files' : 'Import File'; MLM.openMenu('cm-fold-file', e.clientX, e.clientY); }
+  });
+
+  /* ───── Path bar, status bar, “not in the library” line + import ───── */
+  function drawPath() {
+    const p = primary ? path(primary) : root ? path(root) : [];
+    $('#fpath').innerHTML = '<span>' + ic('drive', 's') + 'Lexxar</span><span data-root="1">' + ic('folder', 's') + 'Music</span>' + p.map(n => '<span' + (n.type === 'f' ? ' data-pid="' + n.id + '"' : '') + '>' + (n.type === 'f' ? ic(n.f.managed ? 'download' : 'folder', 's') : n.type === 't' ? ic('note', 's') : ic('doc', 's')) + '<span class="trunc" style="max-width:260px">' + esc(n.name) + '</span></span>').join('');
+  }
+  function setDef() {
+    const d = $('.statusbar .def'); if (!d || document.body.dataset.variant === 'B') return; const s = selNodes(), tr = s.filter(n => n.type === 't'), u = unidx(null);
+    let h;
+    if (!s.length) h = '12,935 tracks in 1,208 folders' + (!driveOff() && u ? ' · ' + plural(u, 'file') + ' not in the library' : '');
+    else if (s.length === 1 && s[0].type === 'f') h = '“' + esc(s[0].name) + '” · ' + plural(s[0].count, 'track') + (s[0].f.kids ? ' · ' + plural(s[0].f.kids.length, 'folder') : '');
+    else if (tr.length === s.length) h = tr.length + ' selected · ' + MLM.fmtDur(tr.reduce((a, n) => a + n.t.time, 0));
+    else h = s.length + ' items selected';
+    document.body.dataset.status = h.replace(/<[^>]+>/g, ''); d.innerHTML = h;
+  }
+  const imp = { phase: 'idle', k: 0, n: 0, node: null, timer: 0 };
+  function drawLine() {
+    const el = $('#uline');
+    if (imp.phase === 'run') { el.hidden = false; el.innerHTML = '<span class="status" data-fb-id="V-FOLD.N04" data-fb-label="Import running" data-fb-note="The same numbers as the Activity operation. The button is gone while it runs (today it stayed enabled); Stop ends it after the current file."><span class="spinner"></span><b>Importing ' + plural(imp.n, 'file') + ' from “' + esc(imp.name) + '” · ' + imp.k + ' of ' + imp.n + '</b></span><div class="progress" style="width:180px"><i style="width:' + Math.round(100 * imp.k / imp.n) + '%"></i></div><span class="grow"></span><a class="btn plain" href="activity.html">Show in Activity</a><button class="btn" data-imp="stop">Stop</button>'; return; }
+    if (imp.phase === 'done') { el.hidden = false; el.innerHTML = '<span class="status ok" data-fb-id="V-FOLD.N05" data-fb-label="Import result" data-fb-note="The result stays until dismissed and is also kept in Activity ▸ Recent. Files that couldn’t be imported are counted, stay in the outline with the reason, and Show selects them.">' + ic('check', 's') + '</span><span><b>Imported ' + imp.ok + ' of ' + plural(imp.n, 'file') + ' from “' + esc(imp.name) + '”</b>' + (imp.n - imp.ok ? ' · ' + (imp.n - imp.ok) + ' couldn’t be read' : '') + '</span><span class="grow"></span>' + (imp.n - imp.ok ? '<button class="btn" data-imp="showbad">Show</button>' : '') + '<button class="btn plain" data-imp="dismiss">Dismiss</button>'; return; }
+    const f = nearFolder(primary), ctx = f || root, u = unidx(ctx);
+    el.hidden = !u; if (!u) return;
+    el.innerHTML = ic('doc', 's') + '<span><b>' + plural(u, 'file') + '</b> in ' + (ctx ? 'this folder' : 'the library folder') + ' ' + (u === 1 ? 'isn’t' : 'aren’t') + ' in the library</span><span class="t2 trunc">' + (ctx ? '“' + esc(ctx.name) + '”' + (ctx.f.kids ? ' and its subfolders' : '') : 'all folders') + '</span><span class="grow"></span><button class="btn plain" data-imp="show">Show</button><button class="btn" data-imp="go">Import</button>';
+  }
+  const impFiles = ctx => (ctx ? desc(ctx) : nodes).filter(x => x.type === 'x' && !x.tried);
+  function finishImport() {
+    clearInterval(imp.timer); const files = imp.files; let ok = 0;
+    files.forEach((x, i) => { if (x.bad) { x.tried = true; redraw(x); return; } ok++;
+      const t = MLM.tracks(1, 700 + i, { allLocal: true })[0]; t.title = x.name.replace(/\.[a-z0-9]+$/i, '').replace(/^\d+\s+/, ''); t.album = ''; t.genre = ''; t.bpm = t.energy = t.dance = null; t.added = 'Oct 5, 2026';
+      x.type = 't'; x.t = t; x.name = t.title; for (let a = x.parent; a; a = a.parent) a.count++; redraw(x); });
+    nodes.filter(n => n.type === 'f').forEach(redraw); imp.ok = ok; imp.phase = 'done'; refresh(); paint();
+    MLM.say('Import finished — ' + ok + ' added to the library' + (files.length - ok ? ', ' + (files.length - ok) + ' couldn’t be read' : '') + ' · <a class="btn plain" style="height:16px" href="activity.html">Show</a>');
+  }
+  function startImport(ctx, files, instant) {
+    if (driveOff()) { MLM.say(ic('drive', 's') + ' Can’t import — “Lexxar” is not connected.'); return; }
+    files = files || impFiles(ctx); if (!files.length || imp.phase === 'run') return;
+    Object.assign(imp, { phase: 'run', k: 0, n: files.length, files, name: ctx ? ctx.name : 'Music' }); drawLine();
+    if (instant) return; MLM.say('Import started — ' + plural(files.length, 'file') + ' from “' + esc(imp.name) + '”');
+    imp.timer = setInterval(() => { imp.k++; if (imp.k >= imp.n) finishImport(); else drawLine(); }, 320);
+  }
+  const f2026 = nodes.find(n => n.type === 'f' && n.name === '2026' && n.depth === 0);
+  document.addEventListener('click', e => {
+    if (commenting()) return;
+    const b = e.target.closest('[data-imp]');
+    if (b) { const k = b.dataset.imp, ctx = nearFolder(primary) || root;
+      if (k === 'go') startImport(ctx);
+      else if (k === 'show') { const fs = impFiles(ctx); fs.forEach(x => { for (let a = x.parent; a; a = a.parent) a.open = true; }); refresh(); sel.clear(); fs.forEach(x => sel.add(x.id)); primary = fs[0]; anchor = fs[0]; paint(); if (fs[0]) fs[0].el.scrollIntoView({ block: 'center' }); host.focus(); }
+      else if (k === 'stop') { clearInterval(imp.timer); imp.phase = 'idle'; drawLine(); MLM.say('Import stopped after ' + imp.k + ' of ' + plural(imp.n, 'file') + '.'); }
+      else if (k === 'dismiss') { imp.phase = 'idle'; drawLine(); }
+      else if (k === 'showbad') { const fs = nodes.filter(x => x.type === 'x' && x.tried); fs.forEach(x => { for (let a = x.parent; a; a = a.parent) a.open = true; }); refresh(); sel.clear(); fs.forEach(x => sel.add(x.id)); primary = fs[0]; paint(); if (fs[0]) fs[0].el.scrollIntoView({ block: 'center' }); }
+      return; }
+    if (e.target.closest('[data-ximport]')) { const fs = selNodes().filter(x => x.type === 'x'); if (fs.length) startImport(fs[0].parent, fs); return; }
+    if (e.target.closest('[data-fclear]')) { const s = $('.search'); if (s) s.value = ''; setFilter(''); return; }
+    const fs = e.target.closest('[data-fsay]'); if (fs) { MLM.say(fs.dataset.fsay); return; }
+    const seg = e.target.closest('#fpath span[data-pid], #fpath span[data-root]');
+    if (seg) { if (seg.dataset.root) { if (root) setRoot(null); else { sel.clear(); primary = null; paint(); host.scrollTop = 0; } } else { const n = byId[seg.dataset.pid]; if (root && root !== n && !isIn(n, root)) setRoot(null); for (let a = n.parent; a; a = a.parent) a.open = true; refresh(); pick(n); host.focus(); } return; }
+    const mi = e.target.closest('#cm-fold .mi[data-fcmd]');
+    if (mi && menuNode) { const n = menuNode, nm = '“' + esc(n.name) + '”', c = mi.dataset.fcmd, tracksTxt = plural(n.count, 'track');
+      if (c === 'open') setRoot(n);
+      else if (c === 'play') MLM.say(driveOff() ? ic('drive', 's') + ' Can’t play — “Lexxar” is not connected.' : n.count ? 'Playing ' + nm + ' — ' + tracksTxt : nm + ' has no tracks in the library yet.');
+      else if (c === 'playnext') MLM.say('Playing next: ' + nm + ' — ' + tracksTxt, true);
+      else if (c === 'addqueue') MLM.say('Added ' + nm + ' to the queue — ' + tracksTxt, true);
+      else if (c === 'addpl') MLM.say('Added ' + tracksTxt + ' from ' + nm + ' to “Warm-up”', true);
+      else if (c === 'addsync') MLM.say('Added the folder ' + nm + ' to the sync profile “iPod Classic”', true);
+      else if (c === 'scan') { n.scanning = true; redraw(n); refresh(); setTimeout(() => { n.scanning = false; redraw(n); refresh(); MLM.say('Scan finished — ' + nm + ': ' + tracksTxt + (unidx(n) ? ', ' + plural(unidx(n), 'file') + ' not in the library' : ', nothing new')); }, 1500); }
+      else if (c === 'import') startImport(n);
+      else if (c === 'finder') MLM.say('Show in Finder reveals ' + nm + ' in Finder.');
+      else if (c === 'copy') MLM.say('Copied /Volumes/Lexxar/Music/' + esc(path(n).map(x => x.name).join('/')));
+      return; }
+    const xm = e.target.closest('#cm-fold-file .mi[data-xcmd]');
+    if (xm && menuNode) { const fs = selNodes().filter(x => x.type === 'x'), c = xm.dataset.xcmd; if (!fs.length) fs.push(menuNode);
+      if (c === 'import') startImport(fs[0].parent, fs); else if (c === 'finder') MLM.say('Show in Finder reveals “' + esc(menuNode.name) + '” in Finder.'); else MLM.say('Copied /Volumes/Lexxar/Music/' + esc(path(menuNode).map(x => x.name).join('/')));
+      return; }
+    if (e.target.closest('.reviewbar [data-drive], [data-drive-on]')) setTimeout(() => { nodes.forEach(n => { if (n.type === 't' && n.t.status === 'missing') redraw(n); }); refresh(); drawLine(); setDef(); }, 0);
+  });
+  document.addEventListener('mlm:state', e => {
+    const s = e.detail; clearInterval(imp.timer);
+    if (s === 'importing') { imp.phase = 'idle'; pick(f2026); startImport(f2026, null, true); if (imp.phase === 'run') { imp.k = Math.min(5, imp.n - 1); drawLine(); } else MLM.say('The files of “2026” are already imported — reload the page to see the running state.'); }
+    else if (s === 'imported') { pick(f2026); if (impFiles(f2026).length) { imp.phase = 'idle'; startImport(f2026, null, true); finishImport(); } else { imp.phase = 'done'; drawLine(); } }
+    else if (s === 'default' && imp.phase === 'run') { imp.phase = 'idle'; drawLine(); }
+  });
+
+  /* ───── Variant B: tree + table (comparison) ───── */
+  let bt = null, bsel = f2026;
+  function drawB() {
+    const fo = nodes.filter(n => n.type === 'f' && !(driveOff() && n.f.nodb));
+    $('#brows').innerHTML = fo.map(n => { let vis = true; for (let a = n.parent; a; a = a.parent) if (!a.bopen) vis = false;
+      return '<tr class="' + (vis ? '' : 'clps ') + (n === bsel ? 'sel' : '') + '" data-id="' + n.id + '"><td><div class="cellt" style="padding-left:' + n.depth * 16 + 'px"><span class="tw">' + (n.f.kids ? (n.bopen ? '▾' : '▸') : '') + '</span>' + ic(n.f.managed ? 'download' : 'folder') + '<span class="ttl" style="font-weight:400">' + esc(n.name) + '</span>' + (n.f.managed ? '<span class="mg">Managed</span>' : '') + '</div></td><td class="r num dim">' + num(n.count) + '</td></tr>'; }).join('');
+    const kids = fo.filter(n => n.parent === bsel);
+    $('#bsubs').innerHTML = '<span class="pathbar grow" style="flex-basis:100%">' + ['Lexxar', 'Music'].concat(path(bsel).map(n => n.name)).map(x => '<span>' + esc(x) + '</span>').join('') + '</span>' + (kids.length ? kids.map(k => '<button class="btn" data-bgo="' + k.id + '">' + ic('folder', 's') + esc(k.name) + ' <span class="t2">' + num(k.count) + '</span></button>').join('') : '<span class="caption">No subfolders</span>') + (unidx(bsel) && !driveOff() ? '<span class="caption" style="flex-basis:100%">' + plural(unidx(bsel), 'file') + ' in this folder aren’t in the library · <a>Import</a></span>' : '');
+    const rows = nodes.filter(n => n.type === 't' && n.parent === bsel).map(n => n.t);
+    if (!bt) bt = MLM.table('#btbl', { rows, sort: 'title', cols: ['title', 'artist', 'album', 'time', 'bpm', 'energy', 'genre', 'added', 'status'], empty: '<div class="empty" style="height:60%">' + ic('folder', 'xl') + '<h2>No tracks directly in this folder</h2><p>Choose a subfolder on the left.</p></div>' }); else bt.setRows(rows);
+  }
+  $('#btree').addEventListener('click', e => { const tr = e.target.closest('tbody tr'); if (!tr) return; const n = byId[tr.dataset.id]; if (e.target.closest('.tw')) n.bopen = !n.bopen; else { bsel = n; n.bopen = true; } drawB(); });
+  $('#bsubs').addEventListener('click', e => { const b = e.target.closest('[data-bgo]'); if (b) { bsel = byId[b.dataset.bgo]; for (let a = bsel; a; a = a.parent) a.bopen = true; drawB(); } });
+  document.addEventListener('mlm:variant', e => { if (e.detail === 'B') { for (let a = bsel; a; a = a.parent) a.bopen = true; delete document.body.dataset.status; drawB(); } else { paint(); } });
+
+  /* ───── First paint ───── */
+  $('#fskel').innerHTML = Array.from({ length: 22 }, (_, i) => '<tr class="skel">' + [50, 40, 46, 30, 36, 50, 0].map(w => '<td>' + (w ? '<span style="width:' + (w + (i * 13) % 30) + '%"></span>' : '') + '</td>').join('') + '</tr>').join('');
+  refresh(); sel.add(f2026.id); primary = anchor = f2026; paint();
+  const st = document.body.dataset.state; if (st === 'importing' || st === 'imported') document.dispatchEvent(new CustomEvent('mlm:state', { detail: st }));
+  if (document.body.dataset.variant === 'B') { for (let a = bsel; a; a = a.parent) a.bopen = true; delete document.body.dataset.status; drawB(); }
+});
+</script>
+</body></html>

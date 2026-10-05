@@ -1,0 +1,493 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Genres — MLM B1</title>
+<link rel="stylesheet" href="assets/mlm.css"><script src="assets/app.js"></script>
+<style>
+  /* page-local helpers; existing variables only */
+  #gl, #sugg-h { outline: none; }
+  .footline { display: flex; align-items: center; gap: 8px; padding: 6px 20px; font-size: 12px; color: var(--text2); border-top: .5px solid var(--sep); flex: none; }
+  .table:focus tr.sel td .btn:not(.plain) { color: var(--text) !important; }
+  .sugg { flex: none; display: flex; flex-direction: column; border-top: .5px solid var(--sep-strong); }
+  .sugg .statusline { border-top: 0; }
+  .sugg-ctl { display: flex; align-items: center; gap: 14px; padding: 7px 20px; flex-wrap: wrap; font-size: 12px; }
+  .sugg-msg { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; padding: 26px 30px 30px; color: var(--text2); }
+  .sugg-msg h2 { margin: 0; font-size: 15px; color: var(--text); } .sugg-msg p { margin: 0; max-width: 460px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+  .chip { background: var(--fill); border-radius: 5px; padding: 1px 7px; font-size: 11px; color: var(--text2); }
+  .skl { display: inline-block; height: 9px; border-radius: 4px; background: var(--fill2); }
+  .sumgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .sumgrid .group { padding: 8px 12px; }
+  .sumgrid b { font-size: 15px; }
+</style></head>
+<body data-screen="V-GENRES" data-title="Genres" data-nav="genres" data-home="list" data-search-manual="1"
+      data-states="default,empty,loading,error,no-reference,not-analysed">
+
+<div class="note">
+  <h3>Genres — the new home of the Genre Workshop — Tier 2 · V-GENRES list → V-GENRED detail</h3>
+  <p><b>List:</b> click, ⌘-click or ⇧-click genres · with two or more selected <b>Merge Genres…</b> is enabled (try <code>Hip-Hop</code> + <code>Hip Hop</code> + <code>HipHop</code>, or the <b>Merge…</b> link in a “Looks like …” hint) · click the Genre / Tracks headers to sort · <kbd>Return</kbd> / double-click opens a genre · right-click a row · <b>More ▸ Export Create ML Training Set…</b> (setup → progress → result) · search filters the list.</p>
+  <p><b>Detail:</b> the genre’s tracks (Space = preview, Return = play, as everywhere) and, docked below, <b>Suggested tracks</b>: <b>Add to Genre</b> stages a row, <b>Not This Genre</b> removes it, the bar <b>Save n Changes / Discard</b> appears; staged changes survive going back to the list. Collapse the section with its header. States <b>No reference</b> and <b>Not analysed</b> (review bar) show the two situations in which there is nothing to suggest yet.</p>
+  <p>Decisions: DEC-025 (leaves Settings ▸ Advanced), DEC-039, DEC-041 (merge and save are undoable), DEC-044 (export is an Activity operation). Inventory: ST-ADV, ST-STUDIO-GRID / -GENRE / -MERGE / -EXPORT, flow F-21. The two mini players of today are gone: previews use the space bar and the toolbar player like every other list (DEC-009/010).</p>
+</div>
+
+<div id="content">
+
+  <!-- ═════════ V-GENRES · list ═════════ -->
+  <div class="view" data-view="list" data-fb-id="V-GENRES" data-fb-label="Genres (list)" data-fb-note="New sidebar destination. Replaces the Genre Workshop grid in Settings ▸ Advanced (ST-ADV / ST-STUDIO-GRID): browsing by genre is a weekly need, cleaning genres a rare one — both live here." data-fb-dec="DEC-025" data-fb-api="NavigationStack root · Table(selection: Set<Genre.ID>, sortOrder:)">
+
+    <div class="view" data-show="default no-reference not-analysed">
+      <div class="vhead">
+        <h1 data-fb-id="ST-STUDIO-GRID.E01" data-fb-label="View title (was “Genre Workshop”)" data-fb-note="The view is called Genres. The workshop subtitle is gone — the tools are commands of this view." data-fb-dec="DEC-025" data-fb-api=".navigationTitle">Genres</h1>
+        <span class="sub">Main Library</span>
+        <span class="grow"></span>
+        <button class="btn" id="btn-merge" disabled data-open="s-merge" title="Select two or more genres to merge them" data-fb-id="ST-STUDIO-GRID.E02" data-fb-label="Merge Genres… (was “Consolidate genres”)" data-fb-note="Acts on the selection: enabled with two or more genres selected, otherwise disabled with the reason in its help text. Opens the merge sheet instead of a separate screen. Also in the context menu and the Library menu." data-fb-dec="DEC-025" data-fb-api="Button(…).disabled(selection.count < 2).help(…)">Merge Genres…</button>
+        <button class="btn" data-menu-click="m-genres-more" data-fb-id="V-GENRES.N01" data-fb-label="More" data-fb-note="Rare commands of this view. Holds the Create ML export, which is File ▸ Export ▸ Create ML Training Set… in the menu bar." data-fb-dec="DEC-039" data-fb-api="Menu"><i data-i="more" class="s"></i>More</button>
+      </div>
+      <div class="table" id="gl" tabindex="0" data-fb-id="ST-STUDIO-GRID.E04" data-fb-label="Genre list (was the card grid)" data-fb-note="A native table instead of gradient cards: genre, track count, total time, and a hint column. Multi-selection is the argument of Merge Genres…. Default order: most tracks first, as today. “Tracks”, never “Songs”. Rows are drop targets: dropping tracks on a genre sets their genre (undoable)." data-fb-dec="DEC-040" data-fb-api="Table(selection:sortOrder:) + contextMenu(forSelectionType:menu:primaryAction:) + .dropDestination(for: Track.self)">
+        <table id="gl-table"></table>
+      </div>
+      <div class="footline" data-fb-id="V-GENRES.N04" data-fb-label="Tracks without a genre (footer line)" data-fb-note="Handled like tracks without an album: not a fake “No genre” genre in the list, but one quiet line with the count and the way to see them (All Tracks filtered by is: no genre). From there a multi-selection gets its genre in Info, or by dragging onto a genre here." data-fb-dec="DEC-021" data-fb-api="safeAreaInset(edge: .bottom)">
+        <span id="nogenre">1,968 tracks have no genre</span>
+        <a class="btn plain" href="library.html" data-fb-id="V-GENRES.N05" data-fb-label="Show" data-fb-note="Opens All Tracks with the token is: no genre." data-fb-dec="DEC-017">Show</a>
+      </div>
+    </div>
+
+    <div class="empty" data-show="empty" data-fb-id="V-GENRES.N06" data-fb-label="Empty: no genres" data-fb-note="Replaces “No genres in your library yet / Tag some tracks to use the workshop.” One sentence, one action. With no library open this view isn’t reachable at all, so the empty state can no longer be a disguised error." data-fb-api="ContentUnavailableView">
+      <i data-i="tag" class="xl"></i><h2>No genres yet</h2>
+      <p>Genres come from the tags of imported files, or from the Genre field in Info. No track in this library has a genre.</p>
+      <div class="acts"><a class="btn lg primary" href="library.html">Show All Tracks</a></div>
+    </div>
+
+    <div class="view" data-show="loading" data-fb-id="V-GENRES.N07" data-fb-label="First load" data-fb-note="Placeholder rows on the very first load only; never a full-pane “Loading genres...” spinner." data-fb-api=".redacted(reason: .placeholder)">
+      <div class="vhead"><h1>Genres</h1><span class="sub">Main Library</span></div>
+      <div class="table"><table><thead><tr><th>Genre</th><th class="r" style="width:90px">Tracks</th><th class="r" style="width:90px">Time</th><th style="width:300px"></th></tr></thead><tbody id="g-skel"></tbody></table></div>
+    </div>
+
+    <div class="empty" data-show="error" data-fb-id="V-GENRES.N08" data-fb-label="Load error" data-fb-note="Today a load error is silently shown as “no genres”. Now it is an error: sentence, cause, one action, link to the log lines.">
+      <i data-i="warn" class="xl"></i><h2>Can’t load the genres</h2>
+      <p>The library database didn’t answer. Your music and your library file are not affected.</p>
+      <div class="acts"><button class="btn lg primary">Try Again</button><a class="btn lg" href="activity.html#logs">Show Logs</a></div>
+      <p class="caption" style="margin-top:8px">▸ Details</p>
+    </div>
+  </div>
+
+  <!-- ═════════ V-GENRED · genre detail ═════════ -->
+  <div class="view" data-view="detail" hidden data-fb-id="V-GENRED" data-fb-label="Genre detail" data-fb-note="Pushed from the list (toolbar Back / ⌘[ — replaces the in-screen “‹ Genres” button, and going back no longer discards anything). The genre’s tracks as the standard track table, with the Suggested tracks section docked below." data-fb-dec="DEC-025" data-fb-api="NavigationStack destination · VSplitView-like VStack { Table; DisclosureGroup }">
+    <div class="vhead" data-fb-id="ST-STUDIO-GENRE.E01" data-fb-label="Header (genre name; Save moved to the staging bar)" data-fb-note="Genre name as the title with count and duration. Play and Shuffle act on the genre. The purple “Save (N)” button and the green transient message became the staging bar and a status-bar confirmation with Undo." data-fb-dec="DEC-016" data-fb-api=".navigationTitle + header HStack">
+      <h1 id="g-name">Techno</h1><span class="sub num" id="g-sub">1,612 tracks · 6 days</span>
+      <span class="grow"></span>
+      <button class="btn primary" id="g-play" data-fb-id="V-GENRED.N01" data-fb-label="Play" data-fb-api="Button(.borderedProminent)"><i data-i="play" class="s"></i>Play</button>
+      <button class="btn" id="g-shuffle" data-fb-id="V-GENRED.N02" data-fb-label="Shuffle"><i data-i="shuffle" class="s"></i>Shuffle</button>
+      <button class="btn" data-menu-click="m-genred-more" data-fb-id="V-GENRED.N03" data-fb-label="More" data-fb-dec="DEC-039" data-fb-api="Menu"><i data-i="more" class="s"></i>More</button>
+    </div>
+
+    <div id="g-tbl" data-fb-id="ST-STUDIO-GENRE.E05" data-fb-label="Tracks in this genre" data-fb-note="The standard track table (sortable, multi-select, Space preview, Return play, drag out to playlists, ⌘I) instead of a bare list with a private mini player. A track becomes the reference through its context menu or the Use Selected Track button — no more hidden “double-click the first time = reference, afterwards = preview”. ⌫ removes the selection from the genre (undoable)." data-fb-dec="DEC-008" data-fb-api="Table(selection:sortOrder:) + contextMenu(forSelectionType:menu:primaryAction:)"></div>
+
+    <div class="sugg" id="sugg" data-fb-id="V-GENRED.N04" data-fb-label="Suggested tracks section" data-fb-note="Collapsible, docked under the track table; collapsed by default in the app (shown open here), state remembered. This is the Genre Workshop’s tagging tool: tracks that sound like a reference track of the genre and don’t carry the genre yet." data-fb-dec="DEC-025" data-fb-api="DisclosureGroup(isExpanded: $showSuggestions) in safeAreaInset(edge: .bottom)">
+      <div class="statusline" id="sugg-h" tabindex="0">
+        <span id="sugg-chev" class="t2" style="width:10px;font-size:10px">▾</span><b>Suggested tracks</b>
+        <span class="t2">Tracks that sound like the reference and aren’t in this genre. Nothing changes until you save.</span>
+        <span class="grow"></span><span class="token" id="staged-token" hidden>3 staged</span>
+      </div>
+      <div id="sugg-body">
+        <div data-show="default empty loading error">
+          <div class="sugg-ctl">
+            <span class="row" data-fb-id="V-GENRED.N05" data-fb-label="Reference track" data-fb-note="Always visible while suggestions are shown: cover, title, artist. Change… picks another (the selected track above, or a typical one); ✕ clears it. Replaces the purple reference card and the dashed placeholder." data-fb-api="LabeledContent(&quot;Reference&quot;) { TrackLabel; Button }">
+              <span class="t2">Reference</span><span class="cov c3" id="ref-cov"></span><b id="ref-title" class="trunc" style="max-width:260px">Inner Circuit</b><span class="t2 trunc" id="ref-artist" style="max-width:150px">Skee Mask</span>
+              <button class="btn plain" id="ref-change">Change…</button>
+            </span>
+            <span class="grow"></span>
+            <span class="row" data-fb-id="ST-STUDIO-GENRE.E03" data-fb-label="Suggestion controls" data-fb-note="“Temperature 0.0–1.0” becomes three words: Close (only near matches), Balanced, Wide (more adventurous, lower match). 10 / 20 stays. “Only tracks without a genre” is on by default, so a save never silently overwrites an existing genre. Settings are remembered." data-fb-api="Picker(.segmented) ×2 + Toggle(.checkbox)">
+              <span class="t2">Match</span><div class="seg" id="seg-match"><button data-m="84">Close</button><button class="on" data-m="68">Balanced</button><button data-m="0">Wide</button></div>
+              <span class="t2">Show</span><div class="seg" id="seg-count"><button class="on" data-c="10">10</button><button data-c="20">20</button></div>
+              <span class="check on" id="chk-untagged">Only tracks without a genre</span>
+            </span>
+          </div>
+          <div id="s-tbl" style="flex:none;height:206px;border-top:.5px solid var(--sep)" data-fb-id="ST-STUDIO-GENRE.E04" data-fb-label="Suggestion rows" data-fb-note="A normal track table: Space previews in the toolbar player (the two mini players ST-STUDIO-GENRE.E02 are removed), Return plays, right-click has the full track menu. Match is a plain number (no green/amber badge). Add to Genre stages the row (thumbs-up); Not This Genre stores “don’t suggest again” and removes the row (thumbs-down) — now with Undo and a list of hidden suggestions. Rows can also be dragged onto the track table above to stage them (D-STUDIO-TRACK-TO-GENRE) or onto a sidebar playlist." data-fb-dec="DEC-009" data-fb-api="Table + Button(&quot;Add to Genre&quot;) / Button(&quot;Not This Genre&quot;) cells; .draggable(Track)"></div>
+          <div class="caption drive-off" hidden style="padding:5px 20px">Previews are paused — “Lexxar” is not connected. You can still stage and save; file tags are written when the drive returns.</div>
+        </div>
+
+        <div class="sugg-msg" data-show="no-reference" data-fb-id="V-GENRED.N06" data-fb-label="State: no reference track" data-fb-note="Replaces “Choose a reference track / Double-click a track on the right…”. Two explicit ways to get one. In the app this is the first state of a genre that was never worked on." data-fb-api="ContentUnavailableView with actions">
+          <h2>Choose a reference track</h2>
+          <p>Suggestions are tracks that sound like one track of this genre. Select a typical track in the list above, or let MLM pick one.</p>
+          <div class="row" style="margin-top:6px"><button class="btn" id="ref-use">Use Selected Track</button><button class="btn" id="ref-auto">Pick a Typical Track</button></div>
+        </div>
+
+        <div class="sugg-msg" data-show="not-analysed" data-fb-id="V-GENRED.N07" data-fb-label="State: reference track not analysed" data-fb-note="Today this case shows “No suggestions found — Adjust the temperature or remove filters”, which misleads. Now it names the cause and the two fixes; the analysis runs as an Activity operation and the suggestions appear when it ends." data-fb-dec="DEC-044" data-fb-api="ContentUnavailableView with actions">
+          <h2>“<span id="na-title">Hollow Engine (Club Edit)</span>” hasn’t been analysed</h2>
+          <p>Suggestions compare how tracks sound, and that needs the similarity analysis of the reference track. 9,412 of 12,935 tracks are analysed.</p>
+          <div class="row" style="margin-top:6px"><button class="btn primary" id="na-analyze">Analyze This Track</button><button class="btn" id="na-other">Choose Another Track</button><a class="btn plain" href="settings.html#maintenance">Settings ▸ Maintenance</a></div>
+          <p class="caption drive-off" hidden>Analysis needs the file — “Lexxar” is not connected.</p>
+        </div>
+      </div>
+
+      <div class="statusline" id="save-bar" hidden data-fb-id="V-GENRED.N08" data-fb-label="Staging bar: Save n Changes / Discard" data-fb-note="Appears while changes are staged. Says what saving does and where: the genre is set in the library database and written to the files’ tags (Settings ▸ Library ▸ Write tags to files; queued in Activity while the drive is away). Saving is one undo step. Staged changes are kept when you leave the view — the list shows “n changes not saved” on the genre — and are only dropped by Discard. ⌘S saves." data-fb-dec="DEC-041" data-fb-api="safeAreaInset(edge: .bottom) { HStack { Text; Button(&quot;Discard&quot;); Button(&quot;Save n Changes&quot;).keyboardShortcut(&quot;s&quot;) } }">
+        <b id="save-txt">3 tracks staged for “Techno”</b>
+        <span class="t2 drive-on">Saving sets their genre in the library and in the files’ tags.</span>
+        <span class="t2 drive-off" hidden>Saving sets their genre in the library now; the files’ tags are written when “Lexxar” is connected.</span>
+        <span class="grow"></span>
+        <a class="btn plain" id="hidden-sugg" data-fb-id="V-GENRED.N09" data-fb-label="Hidden suggestions" data-fb-note="“Not This Genre” used to be permanent and invisible. This opens the list of hidden suggestions for the genre so one can be brought back.">Hidden suggestions (4)</a>
+        <button class="btn" id="btn-discard">Discard</button>
+        <button class="btn primary" id="btn-save">Save 3 Changes</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════ menus ═════════ -->
+<div class="menu" id="m-genres-more" hidden data-fb-id="V-GENRES.N02" data-fb-label="More menu (list)" data-fb-api="Menu">
+  <a class="mi" data-open="s-export" data-fb-id="ST-STUDIO-GRID.E03" data-fb-label="Export Create ML Training Set… (was a header button)" data-fb-note="A command, not a screen: File ▸ Export ▸ Create ML Training Set… and this menu open the same sheet." data-fb-dec="DEC-025"><i data-i="share"></i>Export Create ML Training Set…</a>
+</div>
+
+<div class="menu" id="cm-genre-row" hidden data-fb-id="CM-GENRE-ROW" data-fb-label="Genre row context menu" data-fb-note="New (the inventory lists it as expected and missing). Same group order as every context menu; Merge Genres… appears only with two or more selected." data-fb-dec="DEC-039" data-fb-api="contextMenu(forSelectionType: Genre.ID.self, menu:, primaryAction:)">
+  <div class="mi hdr" id="cmg-count" hidden>3 genres</div>
+  <a class="mi" data-g-act="open">Open<span class="k">↩</span></a><a class="mi" data-g-say="Playing {g}"><i data-i="play"></i>Play</a><hr>
+  <a class="mi" data-g-say="Playing next: {g}">Play Next</a><a class="mi" data-g-say="Added {g} to the queue">Add to Queue</a><hr>
+  <a class="mi sub">Add to Playlist</a><a class="mi sub">Add to Sync Profile</a><hr>
+  <a class="mi" id="cmg-rename" data-g-say="Rename {g}: the name becomes editable in the row">Rename Genre…</a>
+  <a class="mi" id="cmg-merge" data-open="s-merge">Merge Genres…</a>
+</div>
+
+<div class="menu" id="m-genred-more" hidden data-fb-id="CM-GENRED-MORE" data-fb-label="Genre More menu" data-fb-note="Same order rule. Play and Shuffle are header buttons." data-fb-dec="DEC-039" data-fb-api="Menu">
+  <a class="mi" data-g-say="Playing next: {g}">Play Next</a><a class="mi" data-g-say="Added {g} to the queue">Add to Queue</a><hr>
+  <a class="mi sub">Add to Playlist</a><a class="mi sub">Add to Sync Profile</a><hr>
+  <a class="mi" data-g-say="Rename {g}: the title becomes editable">Rename Genre…</a>
+  <a class="mi" data-g-act="merge-this" data-goto="list">Merge with Another Genre…</a>
+</div>
+
+<div class="menu" id="cm-genre-track" hidden data-fb-id="CM-STUDIO-GENRETRACK" data-fb-label="Context menu: track of the genre" data-fb-note="The shared track menu (CM-TRACK) in the one order, plus two lines that belong to this container: Use as Reference for Suggestions and Remove from ‹Genre›. “Sync to ▸” is “Add to Sync Profile ▸” and no longer changes the Sync view’s selection." data-fb-dec="DEC-039" data-fb-api="contextMenu(forSelectionType:menu:primaryAction:)">
+  <div class="mi hdr" data-cm-count></div>
+  <a class="mi"><i data-i="play"></i>Play<span class="k">↩</span></a><a class="mi"><i data-i="wave"></i>Preview<span class="k">Space</span></a><hr>
+  <a class="mi">Play Next<span class="k">⌥↩</span></a><a class="mi">Add to Queue<span class="k">⌥⇧↩</span></a><hr>
+  <a class="mi sub">Add to Playlist</a><a class="mi sub">Add to Sync Profile</a><hr>
+  <a class="mi" data-act="info-open">Get Info<span class="k">⌘I</span></a><a class="mi" href="albums.html#detail">Go to Album</a><a class="mi">Go to Artist</a><a class="mi" href="discover.html#similar">Find Similar</a>
+  <a class="mi" id="cm-use-ref" data-fb-id="CM-STUDIO-GENRETRACK.N01" data-fb-label="Use as Reference for Suggestions" data-fb-note="The explicit replacement for “double-click a track to make it the reference”.">Use as Reference for Suggestions</a><hr>
+  <a class="mi"><i data-i="download"></i>Download<span class="k">⌘D</span></a><hr>
+  <a class="mi">Show in Finder<span class="k">⇧⌘R</span></a><a class="mi sub">Copy</a><hr>
+  <a class="mi" id="cm-rm-genre" data-fb-id="CM-STUDIO-GENRETRACK.N02" data-fb-label="Remove from ‹Genre›" data-fb-note="Clears the genre of the selection (⌫). Undoable.">Remove from “Techno”<span class="k">⌫</span></a>
+  <a class="mi destr" data-open="a-track-remove">Remove from Library…<span class="k">⌘⌫</span></a>
+</div>
+
+<div class="menu" id="cm-genre-sugg" hidden data-fb-id="CM-STUDIO-SUGGESTION" data-fb-label="Context menu: suggestion row" data-fb-note="The shared track menu plus the two verdicts as menu items, so they work on a multi-selection and from the keyboard: Add to ‹Genre› sits in the Add-to group, Not This Genre in the Remove group." data-fb-dec="DEC-039" data-fb-api="contextMenu(forSelectionType:menu:primaryAction:)">
+  <div class="mi hdr" data-cm-count></div>
+  <a class="mi"><i data-i="play"></i>Play<span class="k">↩</span></a><a class="mi"><i data-i="wave"></i>Preview<span class="k">Space</span></a><hr>
+  <a class="mi">Play Next<span class="k">⌥↩</span></a><a class="mi">Add to Queue<span class="k">⌥⇧↩</span></a><hr>
+  <a class="mi" id="cm-s-add" data-fb-id="CM-STUDIO-SUGGESTION.N01" data-fb-label="Add to ‹Genre›">Add to “Techno”</a><a class="mi sub">Add to Playlist</a><a class="mi sub">Add to Sync Profile</a><hr>
+  <a class="mi" data-act="info-open">Get Info<span class="k">⌘I</span></a><a class="mi" href="albums.html#detail">Go to Album</a><a class="mi">Go to Artist</a><a class="mi" href="discover.html#similar">Find Similar</a><hr>
+  <a class="mi"><i data-i="download"></i>Download<span class="k">⌘D</span></a><hr>
+  <a class="mi">Show in Finder<span class="k">⇧⌘R</span></a><a class="mi sub">Copy</a><hr>
+  <a class="mi" id="cm-s-not" data-fb-id="CM-STUDIO-SUGGESTION.N02" data-fb-label="Not This Genre">Not This Genre</a>
+  <a class="mi destr" data-open="a-track-remove">Remove from Library…<span class="k">⌘⌫</span></a>
+</div>
+
+<!-- ═════════ Merge Genres… ═════════ -->
+<div class="sheet wide" id="s-merge" hidden data-fb-id="ST-STUDIO-MERGE" data-fb-label="Merge Genres sheet (was the “Consolidate genres” screen)" data-fb-note="A task with a beginning and an end on the genres that are already selected, so it is a sheet. It fixes the three faults of today: the German label, no statement of what will change, and an instant irreversible update — the merge is now previewed, counted and undoable." data-fb-dec="DEC-041" data-fb-api=".sheet { Form + Table } ; UndoManager.registerUndo">
+  <div class="sh"><h2 id="mg-title" data-fb-id="ST-STUDIO-MERGE.E01" data-fb-label="Title" data-fb-note="Names the task with the count. Cancel / Esc replaces the Back button.">Merge 3 Genres</h2></div>
+  <div class="sb">
+    <div class="row gap16" style="align-items:flex-start;margin-top:4px">
+      <div style="width:250px;flex:none">
+        <p class="gtitle">Genres to merge</p>
+        <div class="group" id="mg-list" data-fb-id="ST-STUDIO-MERGE.E04" data-fb-label="Selected genres" data-fb-note="The genres chosen in the list, with their counts; one can be unticked here. The long “SELECT” list is gone — choosing happens in the genre list with normal multi-selection." data-fb-api="List of Toggle(.checkbox)"></div>
+      </div>
+      <div class="grow">
+        <p class="gtitle">Merge into</p>
+        <div class="row" data-fb-id="ST-STUDIO-MERGE.E05" data-fb-label="Canonical name field (“Merge into”)" data-fb-note="English label (was “Neuer kanonischer Genre-Name:”). Prefilled with the largest selected genre; any name can be typed, including a new one. An empty name disables the button and says why.">
+          <input class="field grow" id="mg-name" value="Hip-Hop" placeholder="Genre name, e.g. Hip-Hop">
+        </div>
+        <div class="inline-err" id="mg-err" hidden style="margin-top:6px"><i data-i="warn" class="s"></i>Enter the name of the genre to merge into.</div>
+        <p class="ghelp" id="mg-cons" style="margin-top:10px" data-fb-id="ST-STUDIO-MERGE.E02" data-fb-label="Consequence text" data-fb-note="Replaces the intro “Tracks update immediately in the database.” Says how many tracks change, which genres disappear, that file tags are written too, and that it can be undone." data-fb-dec="DEC-041"></p>
+      </div>
+    </div>
+    <p class="gtitle" id="mg-prev-h" style="margin-top:14px">Tracks that change</p>
+    <div id="merge-tbl" style="height:200px;flex:none;box-shadow:inset 0 0 0 .5px var(--sep);border-radius:6px" data-fb-id="ST-STUDIO-MERGE.E06" data-fb-label="Preview table" data-fb-note="Shows the tracks whose genre will change, with their current genre — the result of the merge, not one genre at a time. Standard track table: Space previews, Return / double-click plays (K-STUDIO-MERGE-PRIMARY; the caption “Double-click to preview” that contradicted the behaviour is gone), right-click = track menu (CM-STUDIO-MERGETABLE)." data-fb-dec="DEC-008" data-fb-api="Table(selection:) + contextMenu(forSelectionType:menu:primaryAction:)"></div>
+    <p class="caption" id="mg-prev-n" style="margin:6px 2px 0">Showing 46 of 46 tracks.</p>
+  </div>
+  <div class="sf" data-fb-id="ST-STUDIO-MERGE.E03" data-fb-label="Result and errors" data-fb-note="Errors appear inline above the buttons. Success is a status-bar line with Undo (“Merged 3 genres into “Hip-Hop” — 46 tracks changed”), not a green banner." data-fb-dec="DEC-016">
+    <span class="left caption">Undo with ⌘Z after merging</span>
+    <button class="btn" data-close>Cancel</button><button class="btn primary" data-close id="mg-go">Merge 3 Genres</button>
+  </div>
+</div>
+
+<!-- ═════════ Export Create ML Training Set… ═════════ -->
+<div class="sheet" id="s-export" hidden style="width:580px" data-fb-id="ST-STUDIO-EXPORT" data-fb-label="Export Create ML Training Set sheet" data-fb-note="Kept as a small, honest tool: what qualifies, where it goes, how long it runs, and what was skipped or failed. The export itself is an Activity operation, so the sheet can be closed while it runs." data-fb-dec="DEC-044" data-fb-api=".sheet { Form(.grouped) } → Activity operation">
+  <div class="sh"><h2 data-fb-id="ST-STUDIO-EXPORT.E01" data-fb-label="Title">Export Create ML Training Set</h2></div>
+
+  <div class="sb" data-view="exp-setup" data-view-group="exp">
+    <p class="ghelp" style="margin:0 0 12px" data-fb-id="ST-STUDIO-EXPORT.E02" data-fb-label="Intro">Copies the tracks of every genre that is large enough into one folder per genre — <span class="num">‹Genre›/‹Artist› - ‹Title›.m4a</span> — ready to train a sound classifier in Apple’s Create ML.</p>
+    <div class="form">
+      <div class="group">
+        <div class="frow" data-fb-id="ST-STUDIO-EXPORT.E06" data-fb-label="Destination" data-fb-note="Remembered between exports. Choose… opens the system folder dialog (S-STUDIO-EXPORTFOLDER / S-SET-EXPORTFOLDER); a folder can also be dropped on the row. Free space and existing content are checked before the export starts." data-fb-api=".fileImporter(allowedContentTypes: [.folder]) + .dropDestination(for: URL.self)">
+          <div class="fl">Destination<small id="ex-path">~/Documents/MLM Training Set · 212 GB free</small></div>
+          <button class="btn" id="ex-choose" data-fb-id="S-STUDIO-EXPORTFOLDER" data-fb-label="Choose… (system folder dialog)" data-fb-note="Folder-only dialog, prompt “Choose”, message “Choose a folder for the Create ML training set”." data-fb-api=".fileImporter + .fileDialogMessage">Choose…</button>
+        </div>
+        <div class="frow" data-fb-id="V-GENRES.N09" data-fb-label="Minimum tracks per genre" data-fb-note="Was a fixed 50 (with comments saying 10). Now a setting of the export; the two numbers below follow it live.">
+          <div class="fl">Minimum tracks per genre<small>Smaller genres are left out — a classifier needs enough examples of each.</small></div>
+          <input class="field num" id="ex-min" value="50" style="width:56px;text-align:right">
+        </div>
+        <div class="frow" data-fb-id="ST-STUDIO-EXPORT.E04" data-fb-label="Format">
+          <div class="fl">Format</div><span class="t2">AAC 248 kbps (.m4a)</span>
+        </div>
+        <div class="frow" data-fb-id="V-GENRES.N10" data-fb-label="Speed (background processing)" data-fb-note="The export silently borrowed the Sync “background processing” level. Now it says so and links to the setting.">
+          <div class="fl">Speed<small>4 files at a time — the Background processing setting.</small></div><a class="btn plain" href="settings.html#maintenance">Change…</a>
+        </div>
+      </div>
+      <div class="sumgrid" data-fb-id="ST-STUDIO-EXPORT.E03" data-fb-label="Included / left out" data-fb-note="Two plain summaries instead of the all-caps cards “READY FOR EXPORT” / “EXCLUDED”.">
+        <div class="group"><div class="caption">Included</div><b class="num" id="ex-in">14 genres · 9,208 tracks</b></div>
+        <div class="group"><div class="caption">Left out</div><b class="num" id="ex-out">36 genres · 1,759 tracks</b></div>
+      </div>
+      <div data-fb-id="ST-STUDIO-EXPORT.E05" data-fb-label="Left-out genres" data-fb-note="Disclosure with the genres below the minimum and their counts. Wrapping chips instead of a horizontal scroller; the advice names the command as it is now called.">
+        <a class="btn plain" id="ex-disc">▸ Show left-out genres</a>
+        <div id="ex-chips-wrap" hidden><p class="ghelp">These genres have too few tracks. Merge Genres… can combine spelling variants so they qualify.</p><div class="chips" id="ex-chips"></div></div>
+      </div>
+      <p class="ghelp" id="ex-warn" data-fb-id="V-GENRES.N11" data-fb-label="What will be skipped" data-fb-note="Said before the export starts, not discovered afterwards in the logs.">312 of these tracks are not downloaded and will be skipped. The export needs about 61 GB.</p>
+      <div class="inline-err drive-off" hidden><i data-i="drive" class="s"></i>Can’t export now — “Lexxar” is not connected.</div>
+    </div>
+  </div>
+
+  <div class="sb" data-view="exp-run" data-view-group="exp" hidden>
+    <div data-fb-id="ST-STUDIO-EXPORT.E07" data-fb-label="Progress → Activity" data-fb-note="Same words and numbers as the Activity operation “Create ML export · ‹folder›”. The sheet can be closed; the toolbar Activity item keeps showing it. Cancel is honest: it stops after the files that are being converted.">
+      <p style="margin:6px 0 6px"><b>Exporting · <span class="num" id="ex-prog">1,204 of 9,208</span></b></p>
+      <div class="progress"><i style="width:13%"></i></div>
+      <p class="ghelp">Now: Techno — about 38 minutes left. You can close this sheet; the export continues and stays visible in Activity.</p>
+      <p class="caption" style="margin-top:14px">Mockup: <a data-goto="exp-done">jump to the result</a></p>
+    </div>
+  </div>
+
+  <div class="sb" data-view="exp-done" data-view-group="exp" hidden>
+    <div data-fb-id="V-GENRES.N12" data-fb-label="Result with skipped and failed counts" data-fb-note="Counts successes, not attempts: exported · skipped (with the reason) · failed (with a way to see which). The same result stays in Activity ▸ Recent after the sheet is closed." data-fb-dec="DEC-044">
+      <p style="margin:6px 0 10px"><b>Export finished</b></p>
+      <div class="kv" style="grid-template-columns:150px 1fr">
+        <label>Exported</label><span class="val num" id="ex-r-ok">8,871 tracks in 14 genre folders</span>
+        <label>Skipped</label><span class="val num" id="ex-r-skip">312 — not downloaded</span>
+        <label>Failed</label><span class="val"><span class="status failed"><i data-i="warn" class="s"></i>25</span> — 22 could not be converted, 3 files missing <a class="btn plain" href="activity.html#logs">Show Failed Tracks</a></span>
+        <label>Destination</label><span class="val">~/Documents/MLM Training Set <a class="btn plain">Show in Finder</a></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="sf">
+    <span data-view="exp-setup-f" data-view-group="expf" class="row" style="margin-left:auto"><button class="btn" data-close>Cancel</button><button class="btn primary" id="ex-go" data-goto="exp-run">Export 9,208 Tracks</button></span>
+    <span data-view="exp-run-f" data-view-group="expf" class="row" hidden style="margin-left:auto"><button class="btn destructive" data-close id="ex-cancel">Cancel Export</button><button class="btn primary" data-close>Continue in Background</button></span>
+    <span data-view="exp-done-f" data-view-group="expf" class="row" hidden style="margin-left:auto"><button class="btn primary" data-close>Done</button></span>
+  </div>
+</div>
+
+<script>
+document.addEventListener('mlm:ready', () => {
+  const $ = (s, r) => (r || document).querySelector(s), $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const esc = MLM.esc, ic = MLM.icon, nf = n => n.toLocaleString('en-US');
+  const setDef = h => { document.body.dataset.status = h; const d = $('.statusbar .def'); if (d) d.innerHTML = h; };
+  const setState = s => { const b = $('.reviewbar [data-set-state="' + s + '"]'); if (b) b.click(); };
+  const dur = n => { const h = n * 5.1 / 60; return h >= 48 ? Math.round(h / 24) + ' days' : h >= 1.5 ? Math.round(h) + ' h' : Math.round(h * 60) + ' min'; };
+  const seed = s => Array.from(s).reduce((a, c) => a + c.charCodeAt(0), 0);
+  const TOTAL = 12935;
+
+  /* Workaround (framework gap): app.js matches <html data-drive> for every otherwise unhandled click, so plain menu items and outside clicks never close an open menu. */
+  document.addEventListener('click', e => { if (e.target.closest('[data-menu-click],[data-popover]')) return; if (e.target.closest('.menu .mi') || !e.target.closest('.menu,.popover')) document.querySelectorAll('.menu.open,.popover.open').forEach(m => { m.classList.remove('open'); m.hidden = true; }); });
+
+  let G = [['House', 1804], ['Techno', 1612], ['Deep House', 742], ['UK Garage', 688], ['Breaks', 590], ['Ambient', 571], ['Electro', 498], ['Hip-Hop', 412], ['IDM', 402], ['Jungle', 377], ['Dub Techno', 341], ['Downtempo', 318], ['Disco', 296], ['Drum & Bass', 274], ['Trance', 251], ['Minimal', 198], ['Tech House', 187], ['Acid', 164], ['Dubstep', 152], ['Footwork', 121], ['Italo Disco', 96], ['Experimental', 88], ['Bass', 84], ['Garage House', 73], ['Soul', 66], ['Funk', 61], ['R&B', 58], ['Jazz', 52], ['Pop', 49], ['Hardcore', 47], ['Hip Hop', 37], ['Balearic', 33], ['Indie Dance', 31], ['Leftfield', 29], ['Krautrock', 24], ['Reggae', 22], ['Dancehall', 19], ['New Wave', 17], ['house', 14], ['Drum and Bass', 12], ['Synth-pop', 11], ['HipHop', 9], ['Electronica', 8], ['Post-Punk', 7], ['Rap', 6], ['DnB', 5], ['Soundtrack', 4], ['Elektro', 3], ['Other', 2], ['tech-house', 2]].map(g => ({ name: g[0], n: g[1] }));
+  const LIKE = { 'Hip Hop': 'Hip-Hop', 'HipHop': 'Hip-Hop', 'house': 'House', 'Drum and Bass': 'Drum & Bass', 'DnB': 'Drum & Bass', 'Elektro': 'Electro', 'tech-house': 'Tech House' };
+  const byName = n => G.find(g => g.name === n);
+  const cache = {}; /* suggestions per genre — staged changes survive navigation */
+  const stagedOf = n => (cache[n] || []).filter(t => t.staged).length;
+
+  /* ═════════ list ═════════ */
+  const gl = $('#gl'), glt = $('#gl-table');
+  let gsort = 'n', gdesc = true, gsel = new Set(), ganchor = -1, q = [], gview = [], curView = $('[data-view="detail"]').hidden ? 'list' : 'detail';
+  function drawList() {
+    gview = G.filter(g => q.every(w => g.name.toLowerCase().includes(w)));
+    gview.sort((a, b) => { const c = gsort === 'name' ? a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }) || (a.name < b.name ? -1 : 1) : a.n - b.n; return gdesc ? -c : c; });
+    const arr = k => gsort === k ? '<span class="arr">' + (gdesc ? '▼' : '▲') + '</span>' : '';
+    let fbL = true, fbS = true;
+    glt.innerHTML = '<thead><tr><th data-gs="name" class="' + (gsort === 'name' ? 'sorted' : '') + '" data-fb-id="V-GENRES.N13" data-fb-label="Genre column (sortable)" data-fb-api="TableColumn(&quot;Genre&quot;, value: \\.name)">Genre' + arr('name') + '</th>' +
+      '<th data-gs="n" class="r ' + (gsort === 'n' ? 'sorted' : '') + '" style="width:90px" data-fb-id="V-GENRES.N14" data-fb-label="Tracks column (sortable)" data-fb-note="Count of tracks, thousands separators. Default sort, largest first." data-fb-api="TableColumn(&quot;Tracks&quot;, value: \\.count)">Tracks' + arr('n') + '</th>' +
+      '<th class="r" style="width:90px">Time</th><th style="width:330px"></th></tr></thead><tbody>' +
+      gview.map((g, i) => {
+        const st = stagedOf(g.name), like = LIKE[g.name] && byName(LIKE[g.name]);
+        let hint = '';
+        if (st) { hint = '<span class="t2"' + (fbS ? ' data-fb-id="V-GENRES.N15" data-fb-label="“n changes not saved” hint" data-fb-note="Staged suggestions of a genre are kept when you leave it; the list says so in words."' : '') + '>' + st + ' change' + (st === 1 ? '' : 's') + ' not saved</span>'; fbS = false; }
+        else if (like) { hint = '<span class="t2"' + (fbL ? ' data-fb-id="V-GENRES.N03" data-fb-label="“Looks like …” hint" data-fb-note="Spelling variants are pointed out (case, hyphen, &amp; / and, abbreviations): house / House are two genres today because matching is case-sensitive. Merge… selects both and opens the merge sheet. A hint, never an automatic change." data-fb-dec="DEC-025"' : '') + '>Looks like “' + esc(LIKE[g.name]) + '”</span> <button class="btn plain" data-like>Merge…</button>'; fbL = false; }
+        return '<tr data-g="' + i + '" class="' + (gsel.has(g.name) ? 'sel' : '') + '"><td><div class="cellt">' + ic('tag', 's') + '<span class="ttl">' + esc(g.name) + '</span></div></td><td class="r num">' + nf(g.n) + '</td><td class="r num dim">' + dur(g.n) + '</td><td>' + hint + '</td></tr>';
+      }).join('') + (gview.length ? '' : '<tr><td colspan="4" class="dim" style="text-align:center;height:80px">No genre matches the search.</td></tr>') + '</tbody>';
+    listStatus(); MLM.refreshBadges();
+  }
+  function listStatus() {
+    const picked = G.filter(g => gsel.has(g.name)), sum = l => l.reduce((s, g) => s + g.n, 0);
+    $('#btn-merge').disabled = picked.length < 2;
+    $('#nogenre').textContent = nf(TOTAL - sum(G)) + ' tracks have no genre';
+    if (curView !== 'list') return;
+    setDef(picked.length ? picked.length + ' genre' + (picked.length === 1 ? '' : 's') + ' selected · ' + nf(sum(picked)) + ' tracks' : nf(G.length) + ' genres · ' + nf(sum(G)) + ' tracks with a genre');
+  }
+  function gpick(i, ev) {
+    if (i < 0 || i >= gview.length) return;
+    if (ev && ev.shiftKey && ganchor >= 0) { const a = Math.min(ganchor, i), b = Math.max(ganchor, i); if (!(ev.metaKey || ev.ctrlKey)) gsel.clear(); for (let k = a; k <= b; k++) gsel.add(gview[k].name); }
+    else if (ev && (ev.metaKey || ev.ctrlKey)) { const n = gview[i].name; gsel.has(n) ? gsel.delete(n) : gsel.add(n); ganchor = i; }
+    else { gsel.clear(); gsel.add(gview[i].name); ganchor = i; }
+    $$('tr[data-g]', glt).forEach(tr => tr.classList.toggle('sel', gsel.has(gview[+tr.dataset.g].name))); listStatus();
+    const tr = $('tr[data-g="' + i + '"]', glt); if (tr && tr.scrollIntoView) tr.scrollIntoView({ block: 'nearest' });
+  }
+  const gi = node => { const tr = node.closest('tr[data-g]'); return tr ? +tr.dataset.g : -1; };
+  gl.addEventListener('mousedown', e => {
+    const th = e.target.closest('th[data-gs]');
+    if (th && e.button === 0 && !document.body.classList.contains('commenting')) { if (gsort === th.dataset.gs) gdesc = !gdesc; else { gsort = th.dataset.gs; gdesc = gsort === 'n'; } return drawList(); }
+    const i = gi(e.target); if (i < 0 || e.target.closest('[data-like]')) return; if (e.button === 2 && gsel.has(gview[i].name)) return; gpick(i, e.button === 2 ? null : e);
+  });
+  gl.addEventListener('click', e => { if (!e.target.closest('[data-like]')) return; const g = gview[gi(e.target)]; gsel = new Set([g.name, LIKE[g.name]]); Object.keys(LIKE).forEach(k => { if (LIKE[k] === LIKE[g.name] && byName(k)) gsel.add(k); }); drawList(); fillMerge(); MLM.openSheet('s-merge'); });
+  gl.addEventListener('dblclick', e => { const i = gi(e.target); if (i >= 0 && !e.target.closest('[data-like]')) openGenre(gview[i]); });
+  gl.addEventListener('contextmenu', e => {
+    const i = gi(e.target); if (i < 0) return; e.preventDefault(); const n = gsel.size;
+    $('#cmg-count').hidden = n < 2; $('#cmg-count').textContent = n + ' genres'; $('#cmg-merge').hidden = n < 2; $('#cmg-rename').hidden = n > 1; $('[data-g-act="open"]').hidden = n > 1;
+    MLM.openMenu('cm-genre-row', e.clientX, e.clientY);
+  });
+  gl.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const n = Math.max(0, Math.min(gview.length - 1, ganchor + (e.key === 'ArrowDown' ? 1 : -1))); gpick(n, e.shiftKey ? { shiftKey: true } : null); if (!e.shiftKey) ganchor = n; }
+    else if (e.key === 'Enter' && gsel.size === 1) { e.preventDefault(); openGenre(byName([...gsel][0])); }
+    else if (e.key === 'a' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); gview.forEach(g => gsel.add(g.name)); drawList(); }
+    else if (e.key === 'Escape') { gsel.clear(); drawList(); }
+  });
+  $('#g-skel').innerHTML = Array.from({ length: 22 }, (_, i) => '<tr><td><span class="skl" style="width:' + (18 + (i * 13) % 30) + '%"></span></td><td class="r"><span class="skl" style="width:40px"></span></td><td class="r"><span class="skl" style="width:34px"></span></td><td></td></tr>').join('');
+
+  /* ═════════ detail ═════════ */
+  let cur = byName('Techno'), ref = null, limit = 10, minMatch = 68;
+  MLM.COLS.match = { label: 'Match', w: 66, cls: 'r num', render: t => t.match + ' %', sort: 'match', note: 'How close the track sounds to the reference.' };
+  MLM.COLS.gnow = { label: 'Genre', w: 120, cls: 'dim', render: t => t.staged ? '<span class="token">' + esc(cur.name) + '</span>' : (t.genre ? esc(t.genre) : '<span class="t3">—</span>') };
+  MLM.COLS.gact = { label: '', w: 232, render: t => t.staged ? '<span class="t2">Staged</span> <button class="btn plain" data-s="unstage">Remove</button>' : '<button class="btn" data-s="add">Add to Genre</button> <button class="btn plain" data-s="not">Not This Genre</button>' };
+  const gt = MLM.table('#g-tbl', { rows: [], cols: ['title', 'artist', 'album', 'time', 'bpm', 'energy', 'added', 'status'], menu: 'cm-genre-track', sort: 'addedSort', desc: true,
+    onDelete: rows => { if (rows.length) MLM.say('Removed ' + rows.length + ' track' + (rows.length === 1 ? '' : 's') + ' from “' + esc(cur.name) + '”', true); } });
+  const stb = MLM.table('#s-tbl', { rows: [], cols: ['title', 'artist', 'gnow', 'time', 'match', 'gact'], menu: 'cm-genre-sugg', sort: 'match', desc: true,
+    ids: { match: 'V-GENRED.N10', gnow: 'V-GENRED.N11' }, notes: { match: 'Plain percentage, sortable. Replaces the green / amber “NN% Match” badge.', gnow: 'The track’s current genre (— when it has none). A staged row shows the new genre as a token.' },
+    empty: '<div class="sugg-msg"><h2>No more suggestions</h2><p>Try Match: Wide, show 20, or include tracks that already have a genre.</p></div>' });
+  const mtb = MLM.table('#merge-tbl', { rows: [], cols: ['title', 'artist', 'gnow', 'time'], menu: 'cm-track' });
+
+  function suggFor(name) {
+    if (!cache[name]) {
+      const others = G.filter(g => g.name !== name).slice(0, 6);
+      cache[name] = MLM.tracks(34, seed(name) + 500).filter(t => t.status !== 'missing' && t.status !== 'downloading').slice(0, 26).map((t, i) => { t.match = 97 - i * 2 - (i % 3 === 2 ? 1 : 0); t.genre = i % 4 === 3 ? others[i % others.length].name : ''; t.staged = false; return t; });
+    }
+    return cache[name];
+  }
+  function drawSugg() {
+    const only = $('#chk-untagged').classList.contains('on');
+    stb.setRows(suggFor(cur.name).filter(t => t.staged || ((!only || !t.genre) && t.match >= minMatch)).slice(0, limit));
+    updateSave();
+  }
+  function updateSave() {
+    const n = stagedOf(cur.name);
+    $('#save-bar').hidden = !n; $('#staged-token').hidden = !n; $('#staged-token').textContent = n + ' staged';
+    $('#save-txt').textContent = n + ' track' + (n === 1 ? '' : 's') + ' staged for “' + cur.name + '”'; $('#btn-save').textContent = 'Save ' + n + ' Change' + (n === 1 ? '' : 's');
+    MLM.refreshBadges();
+  }
+  function setRef(t) { ref = t; $('#ref-title').textContent = t.title; $('#ref-artist').textContent = t.artist; $('#ref-cov').className = 'cov c' + t.c; }
+  function openGenre(g, silent) {
+    cur = g; $('#g-name').textContent = g.name; $('#g-sub').textContent = nf(g.n) + ' tracks · ' + dur(g.n);
+    $('#cm-rm-genre').firstChild.textContent = 'Remove from “' + g.name + '”'; $('#cm-s-add').textContent = 'Add to “' + g.name + '”';
+    const rows = MLM.tracks(Math.min(g.n, 160), seed(g.name)).map(t => { t.genre = g.name; return t; });
+    document.body.dataset.status = nf(g.n) + ' tracks · ' + dur(g.n);
+    gt.setRows(rows); setRef(rows.find(t => t.status === 'local' && t.bpm) || rows[0]); $('#na-title').textContent = (rows.find(t => t.status === 'local' && !t.bpm) || rows[0]).title;
+    drawSugg(); if (!silent) MLM.goto('detail');
+  }
+  $('#s-tbl').addEventListener('click', e => {
+    const b = e.target.closest('[data-s]'); if (!b) return; const t = stb.view()[+b.closest('tr').dataset.i]; verdict(b.dataset.s, [t]);
+  });
+  function verdict(kind, rows) {
+    if (!rows.length) return;
+    if (kind === 'add') rows.forEach(t => { t.staged = true; }); else if (kind === 'unstage') rows.forEach(t => { t.staged = false; });
+    else { cache[cur.name] = suggFor(cur.name).filter(t => !rows.includes(t)); MLM.say((rows.length === 1 ? '“' + esc(rows[0].title) + '”' : rows.length + ' tracks') + ' won’t be suggested for “' + esc(cur.name) + '” again', true); }
+    drawSugg();
+  }
+  $('#cm-s-add').addEventListener('click', () => verdict('add', stb.selection()));
+  $('#cm-s-not').addEventListener('click', () => verdict('not', stb.selection()));
+  $('#cm-use-ref').addEventListener('click', () => { const s = gt.selection(); if (s.length) { setRef(s[0]); setState('default'); MLM.say('Reference: “' + esc(s[0].title) + '” — suggestions updated'); } });
+  $('#cm-rm-genre').addEventListener('click', () => { const n = gt.selection().length || 1; MLM.say('Removed ' + n + ' track' + (n === 1 ? '' : 's') + ' from “' + esc(cur.name) + '”', true); });
+  $('#btn-save').addEventListener('click', () => {
+    const st = suggFor(cur.name).filter(t => t.staged), n = st.length; cache[cur.name] = suggFor(cur.name).filter(t => !t.staged);
+    st.forEach(t => { t.staged = false; t.genre = cur.name; }); cur.n += n; gt.setRows(st.concat(gt.all())); $('#g-sub').textContent = nf(cur.n) + ' tracks · ' + dur(cur.n);
+    drawSugg(); MLM.say('Saved — ' + n + ' track' + (n === 1 ? ' is' : 's are') + ' now “' + esc(cur.name) + '”' + (document.documentElement.dataset.drive === 'off' ? ' · file tags wait for “Lexxar”' : ''), true);
+  });
+  $('#btn-discard').addEventListener('click', () => { const n = stagedOf(cur.name); suggFor(cur.name).forEach(t => { t.staged = false; }); drawSugg(); MLM.say('Discarded ' + n + ' staged change' + (n === 1 ? '' : 's'), true); });
+  $('#hidden-sugg').addEventListener('click', () => MLM.say('Hidden suggestions for “' + esc(cur.name) + '”: 4 tracks — each can be brought back.'));
+  $('#seg-match').addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (b) { minMatch = +b.dataset.m; drawSugg(); } });
+  $('#seg-count').addEventListener('click', e => { const b = e.target.closest('[data-c]'); if (b) { limit = +b.dataset.c; drawSugg(); } });
+  $('#chk-untagged').addEventListener('click', () => setTimeout(drawSugg, 0));
+  $('#ref-change').addEventListener('click', () => setState('no-reference'));
+  $('#ref-use').addEventListener('click', () => { const s = gt.selection(); if (s.length !== 1) return MLM.say('Select one track in the list above first.'); setRef(s[0]); setState(s[0].bpm ? 'default' : 'not-analysed'); if (!s[0].bpm) $('#na-title').textContent = s[0].title; });
+  $('#ref-auto').addEventListener('click', () => { const t = gt.all().find(x => x.status === 'local' && x.bpm); if (t) setRef(t); setState('default'); });
+  $('#na-analyze').addEventListener('click', () => { MLM.say('Analysing “' + esc($('#na-title').textContent) + '” — suggestions appear when it’s done.'); setState('default'); });
+  $('#na-other').addEventListener('click', () => setState('no-reference'));
+  $('#sugg-h').addEventListener('click', () => { const b = $('#sugg-body'); b.hidden = !b.hidden; $('#sugg-chev').textContent = b.hidden ? '▸' : '▾'; MLM.refreshBadges(); });
+  $('#g-play').addEventListener('click', () => { const t = gt.view().find(x => x.status === 'local'); if (t) MLM.shell.play(t, gt); });
+  $('#g-shuffle').addEventListener('click', () => { const l = gt.view().filter(x => x.status === 'local'); if (l.length) MLM.shell.play(l[(l.length * 0.37) | 0], gt); });
+
+  /* ═════════ merge ═════════ */
+  let mset = [];
+  function fillMerge() {
+    mset = G.filter(g => gsel.has(g.name)).sort((a, b) => b.n - a.n);
+    $('#mg-name').value = mset.length ? mset[0].name : '';
+    $('#mg-list').innerHTML = mset.map(g => '<div class="frow"><span class="check on" data-mg="' + esc(g.name) + '">' + esc(g.name) + '</span><span class="grow"></span><span class="t2 num">' + nf(g.n) + ' tracks</span></div>').join('');
+    mergePreview();
+  }
+  function mergePreview() {
+    const name = $('#mg-name').value.trim(), inc = mset.filter(g => { const c = $('[data-mg="' + g.name.replace(/"/g, '\\"') + '"]'); return !c || c.classList.contains('on'); });
+    const chg = inc.filter(g => g.name !== name), count = chg.reduce((s, g) => s + g.n, 0), ok = !!name && inc.length >= 2;
+    $('#mg-title').textContent = 'Merge ' + inc.length + ' Genres'; $('#mg-go').textContent = 'Merge ' + inc.length + ' Genres'; $('#mg-go').disabled = !ok; $('#mg-err').hidden = !!name;
+    $('#mg-cons').innerHTML = !ok ? (name ? 'Tick at least two genres to merge.' : '') : '<b>' + nf(count) + ' tracks</b> get the genre “' + esc(name) + '”. ' + chg.map(g => '“' + esc(g.name) + '”').join(', ') + (chg.length === 1 ? ' disappears' : ' disappear') + ' from Genres. The change is saved in the library and written to the files’ tags' + (document.documentElement.dataset.drive === 'off' ? ' when “Lexxar” is connected' : '') + '. Nothing else about the tracks changes, and you can undo the merge.';
+    let rows = []; chg.forEach(g => { rows = rows.concat(MLM.tracks(Math.min(g.n, 30), seed(g.name) + 9, { allLocal: g.n < 20 }).map(t => { t.genre = g.name; return t; })); });
+    rows = rows.slice(0, 50); mtb.setRows(rows);
+    $('#mg-prev-n').textContent = 'Showing ' + rows.length + ' of ' + nf(count) + ' tracks. Their current genre is in the Genre column.';
+    mergePreview.result = { name, inc, chg, count, ok };
+  }
+  $('#mg-name').addEventListener('input', mergePreview);
+  $('#mg-list').addEventListener('click', () => setTimeout(mergePreview, 0));
+  $('#mg-go').addEventListener('click', () => {
+    const r = mergePreview.result; if (!r || !r.ok) return;
+    let target = byName(r.name); if (!target) { target = { name: r.name, n: 0 }; G.push(target); }
+    r.inc.forEach(g => { if (g !== target) { target.n += g.n; delete cache[g.name]; } }); G = G.filter(g => g === target || !r.inc.includes(g));
+    gsel = new Set([target.name]); drawList(); MLM.say('Merged ' + r.inc.length + ' genres into “' + esc(r.name) + '” — ' + nf(r.count) + ' tracks changed', true);
+  });
+
+  /* ═════════ export ═════════ */
+  function exportSummary() {
+    const min = Math.max(1, parseInt($('#ex-min').value, 10) || 1), inn = G.filter(g => g.n >= min), out = G.filter(g => g.n < min), sum = l => l.reduce((s, g) => s + g.n, 0);
+    const n = sum(inn), skip = Math.round(n * 0.034), fail = Math.min(25, n);
+    $('#ex-in').textContent = inn.length + ' genres · ' + nf(n) + ' tracks'; $('#ex-out').textContent = out.length + ' genres · ' + nf(sum(out)) + ' tracks';
+    $('#ex-disc').textContent = ($('#ex-chips-wrap').hidden ? '▸ Show' : '▾ Hide') + ' left-out genres (' + out.length + ')';
+    $('#ex-chips').innerHTML = out.map(g => '<span class="chip">' + esc(g.name) + ' <span class="num">' + g.n + '</span></span>').join('');
+    $('#ex-go').textContent = 'Export ' + nf(n) + ' Tracks'; $('#ex-go').disabled = !n || document.documentElement.dataset.drive === 'off';
+    $('#ex-warn').textContent = n ? nf(skip) + ' of these tracks are not downloaded and will be skipped. The export needs about ' + Math.max(1, Math.round(n * 0.0066)) + ' GB.' : 'No genre has that many tracks. Lower the minimum.';
+    $('#ex-prog').textContent = nf(Math.round(n * 0.13)) + ' of ' + nf(n);
+    $('#ex-r-ok').textContent = nf(Math.max(0, n - skip - fail)) + ' tracks in ' + inn.length + ' genre folders'; $('#ex-r-skip').textContent = nf(skip) + ' — not downloaded';
+  }
+  $('#ex-min').addEventListener('input', exportSummary);
+  $('#ex-disc').addEventListener('click', () => { const w = $('#ex-chips-wrap'); w.hidden = !w.hidden; exportSummary(); });
+  $('#ex-choose').addEventListener('click', () => { const p = $('#ex-path'); p.textContent = p.textContent.includes('Documents') ? '/Volumes/Scratch/CreateML/genres · 96 GB free' : '~/Documents/MLM Training Set · 212 GB free'; });
+  $('#ex-cancel').addEventListener('click', () => MLM.say('Create ML export cancelled — 1,204 tracks were already exported. <a class="btn plain" style="height:16px">Show in Finder</a>'));
+
+  /* ═════════ shared wiring ═════════ */
+  document.addEventListener('click', e => {
+    const t = e.target;
+    if (t.closest('[data-open="s-merge"]')) fillMerge();
+    if (t.closest('[data-open="s-export"]')) { MLM.goto('exp-setup'); MLM.goto('exp-setup-f'); exportSummary(); }
+    const say = t.closest('[data-g-say]'); if (say) { const names = curView === 'detail' ? [cur.name] : [...gsel]; MLM.say(say.dataset.gSay.replace('{g}', names.length === 1 ? '“' + esc(names[0]) + '”' : names.length + ' genres'), /next|queue/.test(say.dataset.gSay)); }
+    if (t.closest('[data-g-act="open"]') && gsel.size) openGenre(byName([...gsel][0]));
+    if (t.closest('[data-g-act="merge-this"]')) { gsel = new Set([cur.name]); Object.keys(LIKE).forEach(k => { if (LIKE[k] === cur.name && byName(k)) gsel.add(k); }); drawList(); MLM.say('Select the other genres to merge with “' + esc(cur.name) + '”, then choose Merge Genres…'); }
+  });
+  document.addEventListener('mlm:view', e => {
+    const v = e.detail; if (/^exp-/.test(v)) { if (!/-f$/.test(v)) MLM.goto(v + '-f'); return; }
+    if (v !== 'list' && v !== 'detail') return; curView = v;
+    if (v === 'list') { drawList(); gt.select([]); stb.select([]); listStatus(); } else { document.body.dataset.status = nf(cur.n) + ' tracks · ' + dur(cur.n); gt.draw(); }
+  });
+  document.addEventListener('mlm:state', e => {
+    const s = e.detail;
+    if (s === 'empty' || s === 'loading' || s === 'error') { if (curView !== 'list') MLM.goto('list'); }
+    else if (s === 'no-reference' || s === 'not-analysed') { $('#sugg-body').hidden = false; $('#sugg-chev').textContent = '▾'; if (curView !== 'detail') MLM.goto('detail'); }
+  });
+  document.addEventListener('input', e => {
+    if (!e.target.classList.contains('search')) return; q = e.target.value.toLowerCase().split(/\s+/).filter(Boolean);
+    if (curView === 'list') drawList(); else gt.setFilter(q.length ? (t => q.every(w => (t.title + ' ' + t.artist + ' ' + t.album).toLowerCase().includes(w))) : null);
+  });
+
+  /* init */
+  openGenre(cur, true);
+  suggFor('Techno').slice(0, 3).forEach(t => { if (!t.genre) t.staged = true; }); drawSugg();
+  drawList(); if (curView === 'detail') { document.body.dataset.status = nf(cur.n) + ' tracks · ' + dur(cur.n); gt.draw(); } else { gt.select([]); listStatus(); }
+});
+</script>
+</body></html>

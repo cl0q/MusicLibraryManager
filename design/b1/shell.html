@@ -1,0 +1,330 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Shell: window, sidebar, toolbar — MLM B1</title>
+<link rel="stylesheet" href="assets/mlm.css"><script src="assets/app.js"></script>
+<style>
+  .ex-wide { grid-column: 1 / -1; }
+  .spec .demo.left { justify-content: flex-start; }
+  .spec .demo.colx { flex-direction: column; align-items: center; gap: 10px; }
+  .sbx { margin: 0; width: 232px; height: auto; }
+  .sbx .sb-scroll { overflow: visible; padding-top: 6px; }
+  .sbx .sb-foot { margin-top: 0; }
+  .sbx .sb-h .add { opacity: 1; }
+  .sbx .sb-h .disc { width: 10px; font-size: 9px; margin-right: 3px; }
+  .sbx .sb-h .cnt { margin-left: auto; font-weight: 400; }
+  .tbx { border-radius: 10px; flex: none; }
+  .tbx::after { display: none; }
+  .tbx .player { min-width: 0; } .tbx .player .time { white-space: nowrap; }
+  .ring { width: 14px; height: 14px; border-radius: 50%; flex: none; background: conic-gradient(var(--accent) var(--p, 27%), var(--fill2) 0);
+    -webkit-mask: radial-gradient(circle, transparent 4px, black 4.6px); mask: radial-gradient(circle, transparent 4px, black 4.6px); }
+  .wlabel { font-size: 11px; color: var(--text2); align-self: flex-start; }
+  .trx { height: 330px; border-radius: 10px; border: 0; box-shadow: 0 0 0 .5px var(--sep-strong); overflow: hidden; }
+  .tipx { position: static; }
+  .tipx b { display: block; margin-bottom: 2px; } .tipx .x { float: right; color: var(--text2); }
+  .ghost { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 6px; background: var(--sel); color: var(--on-accent); font-size: 12px; box-shadow: var(--pop-shadow); }
+  .ghost .n { background: var(--red); color: var(--on-accent); border-radius: 8px; padding: 0 5px; font-size: 10px; font-weight: 600; }
+</style></head>
+<body data-screen="V-MAIN-LAYOUT" data-title="Shell: window, sidebar, toolbar" data-nav="tracks">
+
+<div class="note">
+  <h3>Shell — window, sidebar, toolbar, trailing column — Tier 1</h3>
+  <p><b>Try in the window:</b> the sidebar toggle (or ⌃⌘S) · the <b>＋</b> Add menu · the Activity item (popover) · ⓘ or <kbd>⌘I</kbd> = Info column, the queue button in the player = Queue column (same column, two modes) · click the library footer at the bottom of the sidebar (library menu) · switch <b>Drive → Not connected</b> in the review bar: one banner, the footer says it in words, rows dim · select rows and press <kbd>Space</kbd> / <kbd>Return</kbd>.</p>
+  <p><b>Below the window:</b> exhibits of every chrome state that the live window can’t show at once — sidebar rows in their states, the toolbar at three window widths, the Activity item, the Add menu, the trailing column, the window title, and the three tips. Press <kbd>A</kbd> to see IDs and notes.</p>
+  <p>Decisions: DEC-001…006 (sidebar, Activity, Queue), DEC-014 (drive), DEC-031 (library name + footer), DEC-048 (constant toolbar). The no-library and loading states of the window are on <a href="launch.html">launch.html</a>.</p>
+</div>
+
+<div id="content">
+  <div class="vhead">
+    <h1 data-fb-id="V-LIB.E01" data-fb-label="View title = window title" data-fb-note="The current place. It is the window title; in the Window menu and Mission Control the window reads “All Tracks — Main Library”." data-fb-dec="DEC-002" data-fb-api=".navigationTitle">All Tracks</h1>
+    <span class="sub" data-fb-id="W-MAIN.E01" data-fb-label="Library name (window subtitle)" data-fb-note="The open library is always named: here, in the sidebar footer and in the Window menu." data-fb-dec="DEC-031" data-fb-api=".navigationSubtitle">Main Library</span>
+  </div>
+  <div class="scopebar">
+    <button class="scope on" data-status-filter="">All</button><button class="scope" data-status-filter="local">Local</button><button class="scope" data-status-filter="notdl,downloading">Not downloaded</button><button class="scope" data-status-filter="failed">Download failed</button><button class="scope" data-status-filter="missing">File missing</button>
+  </div>
+  <div id="tbl" data-fb-id="V-MAIN-LAYOUT.E02" data-fb-label="Content column" data-fb-note="Shows what the sidebar selection points to. Order inside the column is always: window-level banner, scope bar, the list, selection bar, status bar. Search filters this column in place; it never replaces it with a results pane." data-fb-dec="DEC-017" data-fb-api="NavigationSplitView detail + NavigationStack"></div>
+</div>
+
+<!-- ───────────── Exhibits: sidebar ───────────── -->
+<h2 class="cat-h">Sidebar — rows and their states</h2>
+<div class="cat">
+
+  <div class="spec">
+    <h4>Sections and what moved <code>P-SIDEBAR</code></h4>
+    <p>Four sections (DEC-001). System section headers, no hand-styled captions. Each header collapses on click of its chevron; the state is remembered. Only <b>Playlists</b> and <b>Sync</b> have a ＋ on hover.</p>
+    <table class="plain">
+      <tr><th>Today</th><th>After</th></tr>
+      <tr data-fb-id="P-SIDEBAR.E01" data-fb-label="Section header Library" data-fb-note="Stays, as a system Section header (sentence case, not uppercase)." data-fb-dec="DEC-001" data-fb-api="Section(&quot;Library&quot;)"><td><code>LIBRARY</code> header</td><td><b>Library</b>: All Tracks, Albums, Genres, Folders</td></tr>
+      <tr data-fb-id="P-SIDEBAR.E02" data-fb-label="Row All Tracks (was Library)" data-fb-note="Renamed. The red 7 pt drive dot is gone: the drive state is one banner plus the footer text." data-fb-dec="DEC-002"><td>Row <code>Library</code> + red dot</td><td>Row <b>All Tracks</b>; drive state in the banner and footer (DEC-014)</td></tr>
+      <tr data-fb-id="P-SIDEBAR.E03" data-fb-label="Playlists (was a row, now a section)" data-fb-note="Every playlist is a row; folders group them; no pin limit." data-fb-dec="DEC-003"><td>Row <code>Playlists</code> + 8 pinned</td><td>Section <b>Playlists</b> with every playlist</td></tr>
+      <tr data-fb-id="P-SIDEBAR.E05" data-fb-label="Sync (was a row, now a section)" data-fb-note="One row per sync profile with its state in words instead of one spinner for all." data-fb-dec="DEC-027"><td>Row <code>Sync</code> + spinner</td><td>Section <b>Sync</b>, one row per profile</td></tr>
+      <tr data-fb-id="P-SIDEBAR.E06" data-fb-label="Sources row (removed)" data-fb-note="Accounts live in Settings ▸ Sources; importing starts from the Add menu. “Sign-in expired” appears where it blocks something (Activity, the import sheet)." data-fb-dec="DEC-004"><td>Row <code>Sources</code> + amber dot</td><td>Removed → Settings ▸ Sources, Add menu</td></tr>
+      <tr data-fb-id="P-SIDEBAR.E07" data-fb-label="Section header Inbox (was WORK)" data-fb-note="Things waiting for a verdict." data-fb-dec="DEC-001"><td><code>WORK</code> header</td><td><b>Inbox</b>: Discover, Review</td></tr>
+      <tr data-fb-id="P-SIDEBAR.E10" data-fb-label="Queue footer row (removed)" data-fb-note="The queue is a mode of the trailing column, opened from the player or with ⌥⌘U. ⌘8 is gone." data-fb-dec="DEC-006"><td>Footer <code>Queue</code> ⌘8</td><td>Removed → Queue column (⌥⌘U)</td></tr>
+      <tr data-fb-id="P-SIDEBAR.E11" data-fb-label="Settings footer row (removed)" data-fb-note="Settings is ⌘, and the app menu, like every Mac app. The footer now names the library." data-fb-dec="DEC-031"><td>Footer <code>Settings</code></td><td>Removed → ⌘, · footer = library switcher</td></tr>
+    </table>
+  </div>
+
+  <div class="spec">
+    <h4>Playlist rows that are not healthy <code>P-SIDEBAR.N04</code></h4>
+    <p>A healthy playlist is one line. A playlist that is importing, incomplete or not downloaded says so on a second line, in the same words as its header and Activity (DEC-023, DEC-044). Never a dot.</p>
+    <div class="demo"><div class="sidebar sbx"><div class="sb-scroll">
+      <div class="sb-h">Playlists<span class="add"><i data-i="plus" class="s"></i></span></div>
+      <div class="sb-row"><i data-i="list"></i><span class="lbl trunc">Warm-up</span></div>
+      <div class="sb-row two" data-fb-id="P-SIDEBAR.N04" data-fb-label="Playlist row: Importing" data-fb-note="Second line appears only while the playlist is not healthy. Same words and numbers as the playlist header and the Activity operation." data-fb-dec="DEC-023" data-fb-api="Label + Text(.secondary) in a sidebar row"><i data-i="heart"></i><span class="lbl trunc">Liked on SoundCloud<small>Importing · 12 of 44</small></span></div>
+      <div class="sb-row two" data-fb-id="P-SIDEBAR.N12" data-fb-label="Playlist row: Incomplete" data-fb-note="Stays until the failed tracks are retried, removed or dismissed in the playlist." data-fb-dec="DEC-023"><i data-i="list"></i><span class="lbl trunc">Boiler Room picks<small>Incomplete · 9 failed</small></span></div>
+      <div class="sb-row two" data-fb-id="P-SIDEBAR.N13" data-fb-label="Playlist row: Not downloaded" data-fb-note="A linked playlist that was imported without downloading." data-fb-dec="DEC-023"><i data-i="list"></i><span class="lbl trunc">Dekmantel 2026 — everything I heard on Saturday<small>Not downloaded · 61 tracks</small></span></div>
+      <div class="sb-row"><i data-i="list"></i><span class="lbl trunc">Ambient for work</span></div>
+    </div></div></div>
+  </div>
+
+  <div class="spec">
+    <h4>Sync profile rows <code>P-SIDEBAR.N05</code></h4>
+    <p>One row per sync profile. The second line is the profile’s state in words; it replaces the single spinner on today’s <code>Sync</code> row (P-SIDEBAR.E05).</p>
+    <div class="demo"><div class="sidebar sbx"><div class="sb-scroll">
+      <div class="sb-h">Sync<span class="add"><i data-i="plus" class="s"></i></span></div>
+      <div class="sb-row two" data-fb-id="P-SIDEBAR.N05" data-fb-label="Sync profile: Not connected" data-fb-note="The device or destination folder isn’t reachable. Opening the row still shows content and plan." data-fb-dec="DEC-027" data-fb-api="List row + .dropDestination"><i data-i="device"></i><span class="lbl trunc">iPod Classic<small>Not connected</small></span></div>
+      <div class="sb-row two" data-fb-id="P-SIDEBAR.N06" data-fb-label="Sync profile: n to add" data-fb-note="Connected and out of date: the plan’s headline number." data-fb-dec="DEC-027"><i data-i="drive"></i><span class="lbl trunc">Car USB stick<small>12 to add</small></span></div>
+      <div class="sb-row two" data-fb-id="P-SIDEBAR.N07" data-fb-label="Sync profile: Syncing n of m" data-fb-note="Same numbers as the profile header and Activity. A thin determinate bar under the text; no spinner on a section header." data-fb-dec="DEC-044" data-fb-api="ProgressView(value:total:).progressViewStyle(.linear)"><i data-i="device"></i><span class="lbl trunc">Rekordbox export<small>Syncing 86 of 214</small><span class="progress" style="display:block;margin-top:3px"><i style="width:40%"></i></span></span></div>
+      <div class="sb-row two" data-fb-id="P-SIDEBAR.N08" data-fb-label="Sync profile: Synced" data-fb-note="Up to date; relative time of the last successful sync." data-fb-dec="DEC-027"><i data-i="drive"></i><span class="lbl trunc">Kitchen speaker SD<small>Synced 2 h ago</small></span></div>
+      <div class="sb-row two" data-fb-id="P-SIDEBAR.N14" data-fb-label="Sync profile: last sync had failures" data-fb-note="Result of this profile only; opens its Last sync section."><i data-i="device"></i><span class="lbl trunc">Old Nano<small>Synced yesterday · 3 failed</small></span></div>
+    </div></div></div>
+  </div>
+
+  <div class="spec">
+    <h4>Inbox badges <code>P-SIDEBAR.E08</code> <code>P-SIDEBAR.E09</code></h4>
+    <p>Badges count decisions that are waiting. Plain secondary numbers (system <code>.badge</code>), no amber capsule, no <code>14 dup · 3 conf</code>. Zero shows nothing.</p>
+    <div class="demo"><div class="sidebar sbx"><div class="sb-scroll">
+      <div class="sb-h">Inbox</div>
+      <div class="sb-row" data-fb-id="P-SIDEBAR.E09" data-fb-label="Discover row + badge" data-fb-note="Count = recommendations and reels waiting for a verdict (today: recommendations only)." data-fb-dec="DEC-029" data-fb-api=".badge(7)"><i data-i="sparkles"></i><span class="lbl trunc">Discover</span><span class="badge">7</span></div>
+      <div class="sb-row" data-fb-id="P-SIDEBAR.E08" data-fb-label="Review row + badge" data-fb-note="Count = groups waiting: duplicates + conflicts + album suggestions. The split is shown by the tabs inside Review." data-fb-dec="DEC-028" data-fb-api=".badge(14)"><i data-i="review"></i><span class="lbl trunc">Review</span><span class="badge">14</span></div>
+      <div class="sb-h">Inbox — nothing waiting</div>
+      <div class="sb-row"><i data-i="sparkles"></i><span class="lbl trunc">Discover</span></div>
+      <div class="sb-row"><i data-i="review"></i><span class="lbl trunc">Review</span></div>
+      <div class="sb-h">Inbox — large numbers</div>
+      <div class="sb-row"><i data-i="sparkles"></i><span class="lbl trunc">Discover</span><span class="badge">128</span></div>
+      <div class="sb-row"><i data-i="review"></i><span class="lbl trunc">Review</span><span class="badge">1,204</span></div>
+    </div></div></div>
+  </div>
+
+  <div class="spec">
+    <h4>Collapsed sections <code>P-SIDEBAR.N09</code></h4>
+    <p>60+ playlists would push Sync out of sight, so sections and playlist folders collapse and remember it. A collapsed section still accepts drops (it springs open after a moment).</p>
+    <div class="demo"><div class="sidebar sbx"><div class="sb-scroll">
+      <div class="sb-h">Library</div>
+      <div class="sb-row active"><i data-i="note"></i><span class="lbl trunc">All Tracks</span></div>
+      <div class="sb-row"><i data-i="album"></i><span class="lbl trunc">Albums</span></div>
+      <div class="sb-h" data-fb-id="P-SIDEBAR.N09" data-fb-label="Collapsed section header" data-fb-note="System behaviour of a collapsible sidebar Section; expansion state persists per library." data-fb-dec="DEC-001" data-fb-api="Section(isExpanded:) + @SceneStorage"><span class="disc">▸</span>Inbox<span class="cnt t2">21</span></div>
+      <div class="sb-h"><span class="disc">▸</span>Playlists<span class="cnt t2">64</span></div>
+      <div class="sb-h"><span class="disc">▾</span>Sync</div>
+      <div class="sb-row two"><i data-i="device"></i><span class="lbl trunc">iPod Classic<small>Not connected</small></span></div>
+      <div class="sb-h" style="margin-top:6px">Playlist folder, collapsed and open</div>
+      <div class="sb-row" data-fb-id="P-SIDEBAR.N03" data-fb-label="Playlist folder" data-fb-note="Groups playlists; drop target; ⌥⌘N creates one." data-fb-dec="DEC-003" data-fb-api="DisclosureGroup"><span class="disc">▸</span><i data-i="folder"></i><span class="lbl trunc">Sets</span><span class="badge">3</span></div>
+      <div class="sb-row"><span class="disc">▾</span><i data-i="folder"></i><span class="lbl trunc">Archive</span></div>
+      <div class="sb-row indent"><i data-i="list"></i><span class="lbl trunc">2019 — Berlin</span></div>
+    </div></div></div>
+  </div>
+
+  <div class="spec">
+    <h4>Rows as drop targets <code>D-SIDEBAR-SPRINGLOAD</code> <code>D-LIB-TO-SIDEBAR-NEWPL</code> <code>D-LIB-TO-SYNC</code></h4>
+    <p>Today a dragged track only makes the row pulse and then navigates. Now the row <b>accepts the drop</b>: playlist = append, sync profile = add to the profile, the <b>Playlists</b> header = new playlist from the selection. Spring-loading stays as the system does it, but is never needed.</p>
+    <div class="demo"><div class="sidebar sbx"><div class="sb-scroll">
+      <div class="sb-h" data-fb-id="P-SIDEBAR.N11" data-fb-label="Drop on the Playlists header" data-fb-note="Creates a playlist from the dragged tracks and puts its name into inline rename. Status bar: Created “New Playlist” with 3 tracks · Undo." data-fb-dec="DEC-040" data-fb-api=".dropDestination(for: TrackRef.self)">Playlists<span class="add"><i data-i="plus" class="s"></i></span></div>
+      <div class="sb-row"><span class="disc">▾</span><i data-i="folder"></i><span class="lbl trunc">Sets</span></div>
+      <div class="sb-row indent drop" data-fb-id="P-SIDEBAR.N10" data-fb-label="Playlist row as drop target" data-fb-note="Accent ring while a drag hovers. Dropping appends; the status bar confirms “Added 3 tracks to “Warm-up” · Undo”. The view does not change." data-fb-dec="DEC-040" data-fb-api="List row .dropDestination; isTargeted highlight"><i data-i="list"></i><span class="lbl trunc">Warm-up</span></div>
+      <div class="sb-row indent"><i data-i="list"></i><span class="lbl trunc">Peak time</span></div>
+      <div style="display:flex;justify-content:flex-end;margin:-12px 6px 4px 0;position:relative"><span class="ghost"><i data-i="note" class="s"></i>Glass Circuit (Overmono Remix)<span class="n">3</span></span></div>
+      <div class="sb-h">Sync</div>
+      <div class="sb-row two drop" data-fb-id="P-SIDEBAR.N15" data-fb-label="Sync profile row as drop target" data-fb-note="Tracks, albums and playlists can be dropped on a profile. Confirmation in the status bar with Undo; the plan updates." data-fb-dec="DEC-027"><i data-i="device"></i><span class="lbl trunc">iPod Classic<small>Not connected</small></span></div>
+      <div class="sb-h">Rows that don’t take tracks</div>
+      <div class="sb-row" style="opacity:.5"><i data-i="sparkles"></i><span class="lbl trunc">Discover</span></div>
+    </div></div></div>
+    <p>Rows that can’t take the drag (All Tracks, Inbox rows) show no ring and the system “not allowed” cursor. A linked playlist that is importing takes drops like any other.</p>
+  </div>
+
+  <div class="spec">
+    <h4>Inline rename <code>P-PINNED.E04</code> <code>K-SIDEBAR-RENAME</code></h4>
+    <p><kbd>⌘N</kbd> or ＋ adds a row already in rename mode. <kbd>Return</kbd> commits, <kbd>Esc</kbd> cancels (a brand-new unnamed playlist is discarded on Esc). A failed rename keeps the field open with the reason under it — no alert, the typed name is not lost.</p>
+    <div class="demo"><div class="sidebar sbx"><div class="sb-scroll">
+      <div class="sb-h">Playlists<span class="add"><i data-i="plus" class="s"></i></span></div>
+      <div class="sb-row"><i data-i="list"></i><span class="lbl trunc">Warm-up</span></div>
+      <div class="sb-row" data-fb-id="P-PINNED.E04" data-fb-label="Inline rename field" data-fb-note="System inline editing of a sidebar row: select + Return, or Rename in the context menu. Used for new playlists, playlist folders and sync profiles alike." data-fb-dec="DEC-003" data-fb-api="TextField in List row + @FocusState; .onSubmit / .onExitCommand"><i data-i="list"></i><input class="field grow" value="New Playlist" style="height:20px"></div>
+      <div class="sb-row"><i data-i="list"></i><span class="lbl trunc">Road trip 2026</span></div>
+      <div class="sb-h">Rename failed</div>
+      <div class="sb-row"><i data-i="list"></i><input class="field grow" value="Warm-up" style="height:20px"></div>
+      <div class="inline-err" style="padding:2px 8px 4px 31px;white-space:normal" data-fb-id="P-SIDEBAR.N16" data-fb-label="Rename error, inline" data-fb-note="Replaces the “Could not rename playlist” alert with raw text. The field stays open with the typed name.">A playlist named “Warm-up” already exists in “Sets”.</div>
+    </div></div></div>
+  </div>
+
+  <div class="spec">
+    <h4>Library footer <code>P-LIBFOOTER</code></h4>
+    <p>Names the open library and says the drive state in words. It is the library switcher. With the drive away the second line turns into the state; the count returns when the drive does.</p>
+    <div class="demo colx">
+      <div class="sidebar sbx"><div class="sb-foot" style="margin-top:8px;border-top:0" data-fb-id="P-LIBFOOTER" data-fb-label="Library footer: normal" data-fb-note="Library name + track count. Click opens the library menu." data-fb-dec="DEC-031" data-fb-api="safeAreaInset(edge: .bottom) { Menu { … } label: { … } }"><i data-i="disc"></i><span class="lbl trunc">Main Library<small>12,935 tracks</small></span><span class="t2"><i data-i="chevd" class="s"></i></span></div></div>
+      <div class="sidebar sbx"><div class="sb-foot" style="margin-top:8px;border-top:0" data-fb-id="P-LIBFOOTER.N02" data-fb-label="Library footer: drive not connected" data-fb-note="Two words that repeat the banner. Replaces the red dot on the Library row (P-SIDEBAR.E02)." data-fb-dec="DEC-014"><i data-i="disc"></i><span class="lbl trunc">Main Library<small class="warn">“Lexxar” — not connected</small></span><span class="t2"><i data-i="chevd" class="s"></i></span></div></div>
+      <div class="sidebar sbx"><div class="sb-foot" style="margin-top:8px;border-top:0" data-fb-id="P-LIBFOOTER.N03" data-fb-label="Library footer: long name" data-fb-note="Truncates in the middle; full name and the library file’s path in the help tag."><i data-i="disc"></i><span class="lbl trunc">Olli — DJ sets and everything since 2014<small>12,935 tracks</small></span><span class="t2"><i data-i="chevd" class="s"></i></span></div></div>
+      <div class="menu static" data-fb-id="P-LIBFOOTER.N01" data-fb-label="Library menu" data-fb-note="Open Recent lists known libraries with their state in words; an unreachable one is disabled with the reason. Switching relaunches after a confirmation that lists running work (DEC-032)." data-fb-dec="DEC-031" data-fb-api="Menu; same items as File ▸ Open Recent">
+        <div class="mi hdr">Open Recent</div><a class="mi chk">Main Library</a><a class="mi nochk" href="launch.html#switch">Laptop Subset</a><a class="mi nochk dis">Archive 2019 — Not connected</a><hr>
+        <a class="mi" href="launch.html">Open Library…<span class="k">⌘O</span></a><a class="mi" href="launch.html#new">New Library…</a><hr>
+        <a class="mi">Show Library File in Finder</a><a class="mi" href="settings.html#library">Library Settings…</a></div>
+    </div>
+  </div>
+
+  <div class="spec">
+    <h4>Go to a section from the keyboard <code>K-SIDEBAR-NAV</code> <code>K-SIDEBAR-QUEUE8</code></h4>
+    <p>⌘1…⌘6 follow the fixed rows top to bottom (Go menu). Playlists and sync profiles have no numbers; type-to-select works in the focused sidebar. ⌘8 for Queue is removed.</p>
+    <table class="plain" data-fb-id="K-SIDEBAR-NAV" data-fb-label="⌘1…⌘6" data-fb-note="One binding each, shown in the Go menu. ⌘7 and ⌘8 are free again." data-fb-dec="DEC-038" data-fb-api=".commands { CommandMenu(&quot;Go&quot;) } + .keyboardShortcut">
+      <tr><th>Key</th><th>Goes to</th><th>Today</th></tr>
+      <tr><td><kbd>⌘1</kbd></td><td>All Tracks</td><td>Library</td></tr>
+      <tr><td><kbd>⌘2</kbd></td><td>Albums</td><td>Playlists</td></tr>
+      <tr><td><kbd>⌘3</kbd></td><td>Genres</td><td>Folders</td></tr>
+      <tr><td><kbd>⌘4</kbd></td><td>Folders</td><td>Sync</td></tr>
+      <tr><td><kbd>⌘5</kbd></td><td>Discover</td><td>Sources</td></tr>
+      <tr><td><kbd>⌘6</kbd></td><td>Review</td><td>Review</td></tr>
+      <tr data-fb-id="K-SIDEBAR-QUEUE8" data-fb-label="⌘8 Queue (removed)" data-fb-note="Was bound twice. The queue opens with ⌥⌘U or the player’s queue button." data-fb-dec="DEC-006"><td><kbd>⌥⌘U</kbd></td><td>Show/hide Queue column</td><td>⌘8 (bound twice)</td></tr>
+      <tr><td><kbd>⌘I</kbd></td><td>Show/hide Info column</td><td>dead menu item</td></tr>
+      <tr><td><kbd>⌃⌘S</kbd></td><td>Show/hide sidebar</td><td>system</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ───────────── Exhibits: toolbar ───────────── -->
+<h2 class="cat-h">Toolbar — constant in every section</h2>
+<div class="cat">
+  <div class="spec ex-wide">
+    <h4>The toolbar at three window widths <code>P-TOOLBAR</code></h4>
+    <p>The items never change with the section (DEC-048): sidebar toggle · back/forward · Add · player · Activity · Info · search. When the window gets narrow, things give way in a fixed order: <b>1.</b> the player’s title/artist column, <b>2.</b> the Activity text, <b>3.</b> the Add button (moves into the overflow menu »). Transport, scrubber, queue button, Info and search never collapse. Widths below are the toolbar beside a 240 pt sidebar.</p>
+    <div class="demo colx" id="tb-widths"></div>
+    <p><code>P-TOOLBAR.E04</code> (Shuffle, Re-scan Library) and <code>P-TOOLBAR.E05</code> (<code>n folders</code>) are gone from the toolbar: Shuffle is Playback ▸ Shuffle All Tracks, ⌘R refreshes the current view, counts are in the status bar.</p>
+  </div>
+
+  <div class="spec">
+    <h4>Activity item <code>P-ACTIVITY</code></h4>
+    <p>Three states, never only a colour (DEC-005, DEC-044). The text is the operation’s own short line; with several jobs it is the one that started first plus <code>+2</code>.</p>
+    <div class="demo colx" id="act-states"></div>
+    <p>Click = popover; <kbd>⌥⌘0</kbd> = Activity window. Full design: <a href="activity.html">activity.html</a>.</p>
+  </div>
+
+  <div class="spec">
+    <h4>Add menu <code>P-ADDMENU</code></h4>
+    <p>The one entry point for everything that brings music or playlists in (DEC-004, DEC-026). The same items are in the File menu. Sheets: <a href="import.html">import.html</a>.</p>
+    <div class="demo"><div class="menu static" data-fb-id="P-ADDMENU.N01" data-fb-label="Add menu items" data-fb-note="New things first, then bringing music in, then pulling from sources. “Refresh from Sources” pulls likes and linked playlists from every connected account as one Activity operation." data-fb-dec="DEC-026" data-fb-api="ToolbarItem { Menu { … } label: { Image(systemName: &quot;plus&quot;) } }">
+      <a class="mi" href="playlists.html"><i data-i="list"></i>New Playlist<span class="k">⌘N</span></a><a class="mi"><i data-i="folder"></i>New Playlist Folder<span class="k">⌥⌘N</span></a><hr>
+      <a class="mi" href="import.html#quickadd"><i data-i="link"></i>Add from Link…<span class="k">⌘U</span></a><a class="mi" href="import.html"><i data-i="download"></i>Import Playlist from Source…<span class="k">⇧⌘I</span></a><a class="mi"><i data-i="folder"></i>Import Files or Folder…</a><a class="mi"><i data-i="doc"></i>Import M3U…</a><hr>
+      <a class="mi"><i data-i="retry"></i>Refresh from Sources</a></div></div>
+    <p>With no source connected, <code>Import Playlist from Source…</code> still opens (paste a link or connect in place); <code>Refresh from Sources</code> is disabled with the help tag “No source is connected”.</p>
+  </div>
+
+  <div class="spec">
+    <h4>Window title and subtitle <code>W-MAIN.E01</code></h4>
+    <p>Title = the current place, subtitle = the open library. Outside the window (Window menu, Mission Control, Dock menu) it reads as one line.</p>
+    <div class="demo colx">
+      <div class="spec" style="width:100%;box-shadow:none"><div class="vhead" style="padding:0"><h1>All Tracks</h1><span class="sub">Main Library</span></div></div>
+      <div class="menu static"><div class="mi hdr">Window</div><a class="mi">Minimize<span class="k">⌘M</span></a><a class="mi">Zoom</a><hr><a class="mi">Activity<span class="k">⌥⌘0</span></a><hr><a class="mi chk" data-fb-id="V-MAIN-LAYOUT.N04" data-fb-label="Window title in the Window menu" data-fb-note="“‹Place› — ‹Library name›”. Pushed details use their own name: “Compro — Main Library”." data-fb-dec="DEC-031" data-fb-api=".navigationTitle + .navigationSubtitle">All Tracks — Main Library</a></div>
+    </div>
+    <p>Other places: <code>Warm-up — Main Library</code>, <code>Compro — Main Library</code>, <code>Similar to “Glass Circuit” — Main Library</code>. No library open: <code>MLM</code>.</p>
+  </div>
+</div>
+
+<!-- ───────────── Exhibits: trailing column ───────────── -->
+<h2 class="cat-h">Trailing column — Info and Queue</h2>
+<div class="cat">
+  <div class="spec">
+    <h4>Info mode <code>P-INSPECTOR</code></h4>
+    <p><kbd>⌘I</kbd> or ⓘ. Follows the selection, never opens on its own (DEC-007). Full design: <a href="inspector.html">inspector.html</a>.</p>
+    <div class="demo"><aside class="trailing trx" data-fb-id="V-MAIN-LAYOUT.E03" data-fb-label="Trailing column (system inspector)" data-fb-note="One system inspector with two modes. Replaces the HSplitView pane that opened on double-click and followed the playing track. Width 280–360 pt, resizable, state remembered." data-fb-dec="DEC-007" data-fb-api=".inspector(isPresented:) + .inspectorColumnWidth(min: 280, ideal: 300, max: 360)">
+      <div class="tr-head"><div class="seg"><button class="on">Info</button><button>Queue</button></div></div>
+      <div class="tr-body">
+        <div class="row gap12" style="margin-bottom:12px"><span class="cov c3" style="width:54px;height:54px;border-radius:7px"></span><div class="grow"><div style="font-weight:600;white-space:normal">Glass Circuit (Overmono Remix)</div><div class="t2 trunc">Skee Mask</div></div></div>
+        <div class="row" style="justify-content:center;margin-bottom:12px"><div class="seg"><button class="on">Details</button><button>Audio</button><button>File</button></div></div>
+        <div class="kv"><label>Title</label><input class="field" value="Glass Circuit (Overmono Remix)"><label>Artist</label><input class="field" value="Skee Mask"><label>Album</label><input class="field" value="Compro"><label>Genre</label><input class="field" value="Techno"><label>Year</label><input class="field" value="2018"></div>
+      </div></aside></div>
+  </div>
+  <div class="spec">
+    <h4>Queue mode <code>P-QUEUE</code></h4>
+    <p><kbd>⌥⌘U</kbd> or the queue button in the player. Same column, so Info and Queue are never both visible (accepted, as in Music). Full design: <a href="queue.html">queue.html</a>.</p>
+    <div class="demo"><aside class="trailing trx">
+      <div class="tr-head"><div class="seg" data-fb-id="V-MAIN-LAYOUT.N05" data-fb-label="Info | Queue switch" data-fb-note="Segmented control at the top of the column. The toolbar’s ⓘ and the player’s queue button open the column directly in their mode and close it when pressed again." data-fb-dec="DEC-006" data-fb-api="Picker(.segmented) inside the inspector"><button>Info</button><button class="on">Queue</button></div></div>
+      <div class="tr-body" id="q-mini"></div></aside></div>
+  </div>
+  <div class="spec">
+    <h4>What fills the window <code>V-MAIN-LAYOUT</code></h4>
+    <p>How today’s nine layout elements map to the new shell.</p>
+    <table class="plain">
+      <tr><th>Today</th><th>After</th></tr>
+      <tr data-fb-id="V-MAIN-LAYOUT.E01" data-fb-label="Sidebar column"><td>E01 Sidebar column</td><td>Stays; min 200, ideal 232 pt</td></tr>
+      <tr><td>E02 Detail column</td><td>Content column; search filters in place</td></tr>
+      <tr><td>E03 Inspector (HSplitView)</td><td>System inspector: Info / Queue</td></tr>
+      <tr data-fb-id="V-MAIN-LAYOUT.E04" data-fb-label="Toolbar"><td>E04 Toolbar</td><td>Stays, constant items</td></tr>
+      <tr data-fb-id="V-MAIN-LAYOUT.E05" data-fb-label="Bottom Activity strip (removed)" data-fb-note="Replaced by the toolbar Activity item, its popover and the Activity window. The freed 36 pt go to the status bar (24 pt) and content." data-fb-dec="DEC-005"><td>E05 Activity strip</td><td>Removed → toolbar item; status bar instead</td></tr>
+      <tr data-fb-id="V-MAIN-LAYOUT.E06" data-fb-label="First-run scrim (removed)" data-fb-dec="DEC-034"><td>E06 First-run scrim</td><td>In-window setup → <a href="launch.html">launch.html</a></td></tr>
+      <tr data-fb-id="V-MAIN-LAYOUT.E07" data-fb-label="Loading state" data-fb-dec="DEC-031"><td>E07 <code>Loading Library...</code></td><td><code>Opening “Main Library”…</code> + phase → launch.html</td></tr>
+      <tr data-fb-id="V-MAIN-LAYOUT.E08" data-fb-label="Start-up failure" data-fb-dec="DEC-031"><td>E08 <code>Failed to Initialize</code></td><td>Sentence + actions → launch.html</td></tr>
+      <tr data-fb-id="V-MAIN-LAYOUT.E09" data-fb-label="Pre-library states" data-fb-dec="DEC-031"><td>E09 No library / can’t open</td><td>Library picker → launch.html</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ───────────── Exhibits: tips ───────────── -->
+<h2 class="cat-h">Tips — three, one at a time</h2>
+<div class="cat">
+  <div class="spec">
+    <h4>Space preview <code>V-MAIN-LAYOUT.N01</code></h4>
+    <p>Shown once, anchored to the first selected row the first time a track list has focus.</p>
+    <div class="demo"><div class="tip tipx" data-fb-id="V-MAIN-LAYOUT.N01" data-fb-label="Tip: Space preview" data-fb-note="Teaches the centre of the daily loop. Invalidated the first time the user presses Space on a row." data-fb-dec="DEC-009" data-fb-api="TipKit: .popoverTip(SpacePreviewTip()); Tips.configure(.displayFrequency(.daily))"><span class="x"><i data-i="x" class="s"></i></span><b>Press Space to preview</b>Select a track and press <kbd>Space</kbd> to hear it from its best part. Press Space again to go back to what was playing. <kbd>Return</kbd> plays it for real.</div></div>
+  </div>
+  <div class="spec">
+    <h4>Drop on sidebar playlists <code>V-MAIN-LAYOUT.N02</code></h4>
+    <p>Shown once, anchored to the Playlists header, after the user has added tracks to a playlist through a menu twice.</p>
+    <div class="demo"><div class="tip tipx" data-fb-id="V-MAIN-LAYOUT.N02" data-fb-label="Tip: drop on sidebar playlists" data-fb-note="Rule-based: appears only after two menu-based adds, so it teaches the faster way to someone who needs it." data-fb-dec="DEC-040" data-fb-api="TipKit: Tip with #Rule(Self.$menuAdds) { $0 >= 2 }"><span class="x"><i data-i="x" class="s"></i></span><b>Drag tracks onto a playlist</b>Drop the selection on any playlist in the sidebar to add it. Drop on “Playlists” to make a new playlist.</div></div>
+  </div>
+  <div class="spec">
+    <h4>⌘I <code>V-MAIN-LAYOUT.N03</code></h4>
+    <p>Shown once, anchored to the ⓘ toolbar button, the first time two or more tracks are selected.</p>
+    <div class="demo"><div class="tip tipx" data-fb-id="V-MAIN-LAYOUT.N03" data-fb-label="Tip: ⌘I" data-fb-note="Points at batch editing, the feature that didn’t exist. Invalidated when Info is opened." data-fb-dec="DEC-007" data-fb-api="TipKit: .popoverTip(InfoTip(), arrowEdge: .top)"><span class="x"><i data-i="x" class="s"></i></span><b>Edit several tracks at once</b>Press <kbd>⌘I</kbd> to show Info for the selection. With several tracks selected, what you type applies to all of them.</div></div>
+  </div>
+  <div class="spec">
+    <h4>Rules for tips</h4>
+    <p>Never more than one tip on screen. A dismissed tip never returns; using the feature dismisses its tip. No tip appears while a sheet is open or a preview is playing. <code>Reset Tips</code> is in Settings ▸ Advanced. No other tips are planned.</p>
+  </div>
+</div>
+
+<script>
+document.addEventListener('mlm:ready', () => {
+  const I = MLM.icon;
+  MLM.table('#tbl', { rows: MLM.tracks(240, 7), sort: 'addedSort', desc: true });
+
+  /* Static toolbars at three widths */
+  const grp = h => '<div class="tb-group">' + h + '</div>';
+  const b = (ic, dis) => '<button class="tb-btn"' + (dis ? ' disabled' : '') + '>' + I(ic) + '</button>';
+  function toolbar(w, o) {
+    const meta = '<div class="meta">' + (o.text ? '<div class="ti trunc">Glass Circuit (Overmono Remix)</div><div class="ar trunc">Skee Mask — Compro</div>' : '') + '<div class="scrub"' + (o.text ? '' : ' style="margin-top:0"') + '><i></i></div></div>';
+    return '<div class="toolbar tbx" style="width:' + w + 'px">' + grp(b('sidebar')) + grp(b('chevl') + b('chevr', true)) + (o.add ? grp(b('plus')) : '') +
+      '<div class="tb-space"></div><div class="player" style="flex:0 1 ' + (o.text ? 520 : 330) + 'px">' + b('prev') + b('pause') + b('next') + '<span class="cover cov c3"></span>' + meta + '<span class="time">1:12 / 6:12</span>' + b('speaker') + b('queue') + '</div><div class="tb-space"></div>' +
+      grp('<button class="tb-btn"><span class="ring"></span>' + (o.act ? '<span class="txt">Downloading 12 of 44</span>' : '') + '</button>') + grp(b('info')) +
+      '<div class="search-wrap">' + I('search', 's') + '<input class="search" placeholder="Search" style="width:' + o.search + 'px"></div>' + (o.add ? '' : grp('<button class="tb-btn" title="More toolbar items: Add">»</button>')) + '</div>';
+  }
+  const rows = [
+    [1080, 1320, { text: 1, act: 1, add: 1, search: 190 }, 'Everything shown.', 'P-TOOLBAR.N03'],
+    [760, 1000, { text: 0, act: 1, add: 1, search: 150 }, 'The player’s title/artist column is gone (the cover’s help tag and the Queue column still name the track). Transport, scrubber and time stay.', 'P-TOOLBAR.N04'],
+    [660, 900, { text: 0, act: 0, add: 0, search: 130 }, 'Minimum window width. Activity is the ring alone (its help tag carries the text; “needs attention” keeps its text). Add has moved into the overflow menu ».', 'P-TOOLBAR.N05']
+  ];
+  document.getElementById('tb-widths').innerHTML = rows.map(r => '<span class="wlabel"><b>Window ' + r[1].toLocaleString('en-US') + ' pt</b> — ' + r[3] + '</span><div data-fb-id="' + r[4] + '" data-fb-label="Toolbar at ' + r[1] + ' pt" data-fb-note="' + MLM.esc(r[3]) + ' Collapse order: player text, Activity text, Add." data-fb-dec="DEC-048" data-fb-api="ToolbarItem visibility priority; ViewThatFits inside the .principal player; customizable toolbar overflow" style="max-width:100%;overflow:auto">' + toolbar(r[0], r[2]) + '</div>').join('');
+
+  /* Activity item states */
+  const act = [
+    ['Idle', 'P-ACTIVITY.N01', I('activity'), 'Nothing is running and nothing needs attention: the plain icon.'],
+    ['Running', 'P-ACTIVITY.N02', '<span class="ring"></span><span class="txt">Downloading 12 of 44</span>', 'Determinate ring + the operation’s short text. Indeterminate jobs show a spinner instead of the ring.'],
+    ['Running, several jobs', 'P-ACTIVITY.N03', '<span class="ring" style="--p:62%"></span><span class="txt">Syncing 86 of 214 +2</span>', 'The oldest job’s text plus the number of other jobs.'],
+    ['Needs attention', 'P-ACTIVITY.N04', I('warn') + '<span class="txt attn">9 failed</span>', 'Stays until dismissed or fixed. Words, not just the orange symbol.'],
+    ['Running and needs attention', 'P-ACTIVITY.N05', '<span class="ring"></span><span class="txt">Downloading 12 of 44</span><span class="txt attn">· 9 failed</span>', 'Both at once, as in the live window above.'],
+    ['Waiting for the drive', 'P-ACTIVITY.N06', I('drive') + '<span class="txt">14 waiting for “Lexxar”</span>', 'Queued downloads and tag changes wait; nothing fails.']
+  ];
+  document.getElementById('act-states').innerHTML = act.map(a => '<div class="row" style="width:100%"><span class="caption" style="width:118px;white-space:normal">' + a[0] + '</span><div class="tb-group" data-fb-id="' + a[1] + '" data-fb-label="Activity item: ' + a[0] + '" data-fb-note="' + MLM.esc(a[3]) + '" data-fb-dec="DEC-044" data-fb-api="ToolbarItem { Button { ProgressView(value:).progressViewStyle(.circular); Text } }.popover; .symbolEffect(.bounce) when a job ends"><button class="tb-btn">' + a[2] + '</button></div></div>').join('');
+
+  /* Mini queue for the trailing-column exhibit */
+  const q = MLM.tracks(6, 99, { allLocal: true });
+  const qr = t => '<div class="row" style="height:36px"><span class="cov c' + t.c + '" style="width:26px;height:26px"></span><div class="grow" style="line-height:1.2"><div class="trunc">' + MLM.esc(t.title) + '</div><div class="t2 small trunc">' + MLM.esc(t.artist) + '</div></div><span class="t2 small num">' + MLM.fmtTime(t.time) + '</span></div>';
+  document.getElementById('q-mini').innerHTML = '<div class="caption" style="font-weight:600">Now playing</div>' + qr(q[0]) + '<div class="row" style="margin-top:10px"><span class="caption grow" style="font-weight:600">Next</span><a class="btn plain small">Clear</a></div>' + q.slice(1, 3).map(qr).join('') + '<div class="caption" style="margin:8px 0 2px">From “Warm-up”</div>' + q.slice(3).map(qr).join('');
+  MLM.refreshBadges();
+});
+</script>
+</body></html>

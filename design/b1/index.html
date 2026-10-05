@@ -1,0 +1,68 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>MLM B1 — design packet</title>
+<link rel="stylesheet" href="assets/mlm.css"><script src="assets/app.js"></script></head>
+<body data-shell="plain" data-screen="B1" data-title="MLM B1 — design packet">
+<div class="idx">
+  <h1>MLM — B1 design packet</h1>
+  <p>Every screen, flow and interaction of MLM, rethought. Read <a href="THOUGHTS.md">THOUGHTS.md</a> first (principles, information architecture, interaction model, decision log, questions), then walk the mockups. Start with <a href="library.html">All Tracks</a> — the sidebar of every main-window page navigates to the others.</p>
+
+  <h2>How to review</h2>
+  <table class="plain">
+    <tr><th style="width:150px">Do</th><th>How</th></tr>
+    <tr><td>See what an element is and why</td><td>Press <kbd>A</kbd> (Annotate). Every annotated element gets its ID badge; hover shows what it is, the decision behind it (<code>DEC-…</code> → THOUGHTS.md §8) and the SwiftUI API that would build it.</td></tr>
+    <tr><td>Leave a note on an element</td><td>Press <kbd>C</kbd> (Comment), click the element, type, Save (<kbd>⌘↩</kbd>). Notes are kept in this browser per page. Elements with a note get an orange badge.</td></tr>
+    <tr><td>Review your notes</td><td>Press <kbd>N</kbd> for the notes panel of the page. <b>Export feedback</b> copies and downloads Markdown grouped by screen → element ID.</td></tr>
+    <tr><td>Export everything</td><td><button class="btn primary" data-act="export-all" data-fb-id="B1.N01" data-fb-label="Export all feedback">Export All Feedback</button> collects the notes of every page into one Markdown file (clipboard + download). Send me that file — or fill in <a href="FEEDBACK.md">FEEDBACK.md</a> by hand.</td></tr>
+    <tr><td>Switch states and variants</td><td>The bar at the top of each page: <b>State</b> (empty, loading, error…), <b>Variant</b> (<code>V-FOLD/A</code>, ★ = recommended), <b>Drive</b> (walk the whole app with “Lexxar” not connected), Light/Dark.</td></tr>
+    <tr><td>Use the mock like the app</td><td>Tables: click, ⇧/⌘-click, ↑↓, <kbd>Space</kbd> = preview, <kbd>Return</kbd>/double-click = play, <kbd>⌘I</kbd> = Info, right-click = context menu. Sidebar, toolbar buttons, menus, sheets and alerts are clickable.</td></tr>
+  </table>
+  <p style="margin-top:8px">Glass is approximated with <code>backdrop-filter</code>; icons are simple stand-ins for SF Symbols. See <a href="README.md">README.md</a> for all known approximations and <a href="COVERAGE.md">COVERAGE.md</a> for the inventory-ID → mockup map.</p>
+
+  <h2>Tier 1 — high fidelity: the daily loop</h2>
+  <div class="links">
+    <a class="lk" href="shell.html"><b>Shell</b><small>Window, sidebar, toolbar, footer, tips</small><code>W-MAIN · P-SIDEBAR · P-TOOLBAR</code></a>
+    <a class="lk" href="library.html"><b>All Tracks</b><small>Table, scopes, selection bar, states</small><code>V-LIB · V-TRACK-TABLE · CM-TRACK</code></a>
+    <a class="lk" href="albums.html"><b>Albums (new)</b><small>Grid, detail, track order, editions</small><code>V-ALB · V-ALBD</code></a>
+    <a class="lk" href="folders.html"><b>Folders</b><small>Disk folders as one hierarchical table</small><code>V-FOLD</code></a>
+    <a class="lk" href="playlists.html"><b>Playlists</b><small>All Playlists grid and playlist detail</small><code>V-PL · V-PLD</code></a>
+    <a class="lk" href="queue.html"><b>Queue</b><small>Trailing-column mode</small><code>P-QUEUE (V-QUEUE)</code></a>
+    <a class="lk" href="player.html"><b>Player &amp; space-bar preview</b><small>All player states, preview variants</small><code>P-PLAYER · P-PREVIEW</code></a>
+    <a class="lk" href="search.html"><b>Search</b><small>Filter in place, scopes, tokens, links</small><code>V-SEARCH · S-QUICKADD</code></a>
+    <a class="lk" href="inspector.html"><b>Track inspector</b><small>Details · Audio · File, multi-edit</small><code>P-INSPECTOR</code></a>
+    <a class="lk" href="launch.html"><b>Library picker &amp; launch</b><small>Picker, loading, failures, switching, first run</small><code>V-PICKER · V-LAUNCH-* · V-SETUP</code></a>
+  </div>
+
+  <h2>Tier 2 — mid fidelity: the chores</h2>
+  <div class="links">
+    <a class="lk" href="import.html"><b>Add &amp; import</b><small>Add menu, add from link, import from source</small><code>S-IMPORT · S-QUICKADD (V-SRC, W-REMOTE)</code></a>
+    <a class="lk" href="activity.html"><b>Activity</b><small>Toolbar item, popover, window, logs</small><code>P-ACTIVITY · W-ACTIVITY</code></a>
+    <a class="lk" href="review.html"><b>Review</b><small>Duplicates, conflicts, album suggestions</small><code>V-REV</code></a>
+    <a class="lk" href="discover.html"><b>Discover</b><small>Recommendations, reels, similar tracks</small><code>V-DISC · V-INBOX · V-REELS · V-SIMILAR</code></a>
+    <a class="lk" href="sync.html"><b>Sync</b><small>Profile detail, plan, device changes</small><code>V-SYNC · V-SYNC-DETAIL</code></a>
+    <a class="lk" href="genres.html"><b>Genres</b><small>Browse by genre; Genre Workshop tools</small><code>V-GENRES (ST-ADV)</code></a>
+    <a class="lk" href="settings.html"><b>Settings</b><small>All eight tabs</small><code>W-SETTINGS · ST-*</code></a>
+    <a class="lk" href="launch.html#setup-1"><b>First-run setup</b><small>In-window, three steps, skippable</small><code>V-SETUP (S-WIZARD)</code></a>
+    <a class="lk" href="library-icon.html"><b>Library-file icon</b><small>Three concepts for <code>.mlibm</code></small><code>ICON-MLIBM</code></a>
+  </div>
+
+  <h2>Tier 3 — pattern catalogues</h2>
+  <div class="links">
+    <a class="lk" href="patterns-sheets-alerts.html"><b>Sheets &amp; alerts</b><small>Every sheet, popover, panel and alert</small><code>S-* · A-*</code></a>
+    <a class="lk" href="patterns-context-menus.html"><b>Context menus</b><small>All of them, one order rule</small><code>CM-*</code></a>
+    <a class="lk" href="patterns-menus-shortcuts.html"><b>Menu bar &amp; shortcuts</b><small>Complete menus and key map</small><code>M-* · K-*</code></a>
+    <a class="lk" href="patterns-states.html"><b>States</b><small>Empty, loading, error, offline, global states</small><code>G-*</code></a>
+    <a class="lk" href="patterns-dnd.html"><b>Drag &amp; drop</b><small>What can be dragged where</small><code>D-*</code></a>
+  </div>
+
+  <h2>Documents</h2>
+  <div class="links">
+    <a class="lk" href="THOUGHTS.md"><b>THOUGHTS.md</b><small>§1 What MLM is for · §2 Principles · §3 IA · §4 Interaction · §5 Liquid Glass · §6 Toolkit · §7 Per-area concepts · §8 Decision log · §9 Questions</small></a>
+    <a class="lk" href="FEEDBACK.md"><b>FEEDBACK.md</b><small>Fallback template: answer in plain Markdown by ID</small></a>
+    <a class="lk" href="COVERAGE.md"><b>COVERAGE.md</b><small>Every inventory ID → where it is mocked, merged or removed</small></a>
+    <a class="lk" href="README.md"><b>README.md</b><small>What’s where, fidelity, approximations</small></a>
+  </div>
+
+  <h2>The questions I need you for</h2>
+  <p>THOUGHTS.md §9 — space bar (Q1), Activity without the bottom strip (Q2), Sources leaving the sidebar (Q3), Review touching files (Q4), recommendations held outside the library (Q5), albums for YouTube mixes (Q6), writing tags to files (Q7), library-file icon (Q8), Genres in the sidebar (Q9), deployment target (Q10), card click behaviour (Q11), Keep on online suggestions (Q12), Eject in the sync menu (Q13).</p>
+</div>
+</body></html>

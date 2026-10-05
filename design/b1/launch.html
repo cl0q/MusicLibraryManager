@@ -1,0 +1,593 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Library picker, launch &amp; first run — MLM B1</title>
+<link rel="stylesheet" href="assets/mlm.css"><script src="assets/app.js"></script>
+<style>
+  /* Page-local layout only. Colours come from the mlm.css variables. */
+  .lbg { background: var(--under); }
+  .lwrap { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; overflow: auto; padding: 30px 24px 18px; }
+  .lcol { width: 660px; max-width: 100%; display: flex; flex-direction: column; gap: 14px; }
+  .lcol.narrow { width: 540px; }
+  .lhead h1 { font-size: 22px; font-weight: 700; margin: 0 0 3px; letter-spacing: -.2px; }
+  .lhead p { margin: 0; color: var(--text2); }
+  .liblist { background: var(--content); border-radius: 8px; box-shadow: inset 0 0 0 .5px var(--sep-strong); overflow: hidden; }
+  .liblist.dropping { box-shadow: inset 0 0 0 2px var(--accent); }
+  .lrow { display: flex; gap: 12px; align-items: center; padding: 9px 12px; border-top: .5px solid var(--sep); }
+  .liblist > .lrow:first-child { border-top: 0; }
+  .lrow.sel, .lrow.sel + .lx { background: var(--sel-inactive); }
+  .lrow .nm { font-weight: 600; }
+  .lrow .meta { text-align: right; font-size: 11px; color: var(--text2); flex: none; }
+  .lrow .acts, .lx .acts { display: flex; gap: 6px; flex: none; }
+  .lx { padding: 0 12px 12px 56px; font-size: 12px; }
+  .lx p { margin: 0 0 8px; max-width: 520px; }
+  .path { font: 11px ui-monospace, Menlo, monospace; color: var(--text2); user-select: text; }
+  .crate { width: 32px; height: 32px; flex: none; color: var(--text2); fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; stroke-linecap: round; }
+  .crate.big { width: 56px; height: 56px; stroke-width: 1.1; color: var(--text3); }
+  .crate.sm { width: 16px; height: 16px; stroke-width: 2; }
+  .lfoot { display: flex; gap: 8px; align-items: center; }
+  .center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; padding: 30px; }
+  .center h2 { margin: 6px 0 0; font-size: 17px; }
+  .center p { margin: 0; max-width: 440px; color: var(--text2); }
+  .center .acts { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; justify-content: center; }
+  .center details, .lx details, .sheet details { font-size: 11px; color: var(--text2); text-align: left; }
+  .center details pre, .lx details pre, .sheet details pre { font: 11px ui-monospace, Menlo, monospace; white-space: pre-wrap; background: var(--fill); border-radius: 6px; padding: 8px; margin: 6px 0 0; max-width: 520px; user-select: text; }
+  .phase { display: flex; gap: 8px; align-items: center; padding: 3px 0; color: var(--text3); }
+  .phase .slot { width: 14px; display: inline-flex; justify-content: center; }
+  .phase .spinner, .phase svg { display: none; }
+  .phase.run { color: var(--text); } .phase.run .spinner { display: inline-block; }
+  .phase.done { color: var(--text2); } .phase.done svg { display: inline-block; }
+  .dropzone { border: 1.5px dashed var(--sep-strong); border-radius: 10px; padding: 22px; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; background: var(--content); }
+  .mock { max-width: 1320px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 12px; border: 1px dashed var(--sep-strong); border-radius: 8px; background: var(--glass-strong); font-size: 11px; color: var(--text2); }
+  .mock b { color: var(--text); }
+  .tbar-right { margin-left: auto; padding-right: 10px; display: flex; gap: 4px; position: relative; z-index: 2; }
+  .sheet p { margin: 0 0 10px; }
+  .alert ul { margin: 4px 0 0; padding: 0 0 0 16px; font-size: 11px; text-align: left; }
+  .steps { font-size: 11px; color: var(--text2); font-weight: 600; text-transform: none; }
+</style></head>
+<body data-shell="plain" data-screen="V-PICKER" data-title="Library picker, launch & first run"
+      data-states="picker,picker-empty,loading,cant-open,invalid,failed,adopt,new,switch,copy,open-alerts,setup-1,setup-2,setup-3,setup-done">
+
+<svg style="position:absolute;width:0;height:0" aria-hidden="true"><symbol id="crate" viewBox="0 0 32 32"><path d="M10 6.5h12M8 9.5h16M6.5 12.5h19"/><rect x="4.5" y="15" width="23" height="13" rx="2"/><circle cx="16" cy="21.5" r="3.2"/><path d="M16 21.4v.2"/></symbol></svg>
+
+<div class="note">
+  <h3>Library picker, launch states, library switching and first run — Tier 1</h3>
+  <p><b>Try:</b> the <b>State</b> switcher walks through every launch surface. In <code>picker</code>: click a row (problem rows explain themselves and carry their own actions), double-click an available library or press <b>Open</b>, right-click a row, click the drop hint. <code>cant-open</code> is the same picker with the affected row selected. <code>adopt</code>: press <b>Create Library File</b> — the phases advance on their own, or click a phase. <code>new</code> → <b>Create</b> continues in the in-window setup (<code>setup-1…done</code>). <code>switch</code>, <code>copy</code>, <code>open-alerts</code> show the alerts over an open library. The dashed strips are mockup controls, not part of the design.</p>
+  <p>Replaces V-LAUNCH-NOLIB / -CANTOPEN / -INVALID / -FAILED / -LOADING and the S-WIZARD scrim. THOUGHTS §7.17, §7.18 · DEC-031, DEC-032, DEC-034 (icon: DEC-033) · flows F-01, F-02, F-17, F-18 · A0 D4, D5, D7, D9. Deep links: <code>launch.html#switch</code>, <code>#new</code>, <code>#adopt</code>, <code>#setup-1</code> …</p>
+</div>
+
+<!-- Mockup controls (outside the window on purpose) -->
+<div class="mock" data-show="loading"><b>Mockup · phase</b>
+  <span class="seg" data-group="ld"><button class="on" data-p="open">Opening</button><button data-p="backup">Backing up before update (determinate)</button><button data-p="finish">Finishing library file setup</button><button data-p="slow">Takes longer than usual</button></span>
+</div>
+<div class="mock" data-show="cant-open"><b>Mockup · cause</b>
+  <span class="seg" id="co-seg"><button class="on" data-co="nc">Not connected</button><button data-co="nf">Not found</button><button data-co="mm">Identity mismatch</button></span>
+</div>
+<div class="mock" data-show="invalid"><b>Mockup · cause</b>
+  <span class="seg" data-group="iv"><button class="on" data-p="nodb">No database inside</button><button data-p="newer">Made by a newer MLM</button></span>
+</div>
+<div class="mock" data-show="adopt"><b>Mockup · S-ADOPT step</b>
+  <span class="seg" id="ad-seg"><button class="on" data-ad="offer">Offer</button><button data-ad="run">Running</button><button data-ad="ok">Success</button><button data-ad="fail">Failure</button></span>
+  <button class="btn" data-open="s-adopt">Reopen sheet</button>
+</div>
+<div class="mock" data-show="new"><b>Mockup</b>
+  <span class="seg" data-group="nl"><button class="on" data-p="ok">Name is free</button><button data-p="taken">Name already used</button></span>
+  <button class="btn" data-open="s-newlib">Reopen sheet</button>
+</div>
+<div class="mock" data-show="switch"><b>Mockup · running work</b>
+  <span class="seg" data-group="sw"><button class="on" data-p="busy">2 downloads and 1 sync running</button><button data-p="idle">Nothing running</button></span>
+  <button class="btn" data-open="a-switch">Reopen alert</button>
+</div>
+<div class="mock" data-show="copy"><b>Mockup</b> <button class="btn" data-open="a-copy">Reopen alert</button></div>
+<div class="mock" data-show="open-alerts"><b>Mockup · alert while a library is open</b>
+  <span class="seg" data-group="ac"><button class="on" data-p="nc">Not connected</button><button data-p="nf">Not found</button><button data-p="mm">Identity mismatch</button></span>
+  <button class="btn" data-open="a-cant">A-LIBFILE-CANTOPEN</button><button class="btn" data-open="a-invalid">A-LIBFILE-INVALID</button><button class="btn" data-open="a-newfail">New library couldn’t be created</button>
+</div>
+<div class="mock" data-show="setup-2"><b>Mockup · library folder</b>
+  <span class="seg" data-group="sf"><button class="on" data-p="none">Nothing chosen</button><button data-p="ok">Chosen, connected</button><button data-p="off">Chosen, not connected</button></span>
+</div>
+<div class="mock" data-show="setup-3"><b>Mockup</b> <button class="btn" data-set-state="setup-done">Import finishes</button></div>
+<div class="mock" data-show="setup-done"><b>Mockup · result</b>
+  <span class="seg" data-group="sd"><button class="on" data-p="ok">Finished</button><button data-p="stopped">Stopped early</button></span>
+</div>
+
+<!-- ═════════ The main window ═════════ -->
+<div class="window no-sidebar" id="win" style="height:720px" data-fb-id="W-MAIN" data-fb-label="Main window (launch states)" data-fb-note="Still the one main window. While no library is open it shows the library picker or a launch state: no sidebar, no player, no search. Activity stays reachable." data-fb-dec="DEC-031" data-fb-api="Window(id: main) — root switches between launch content and NavigationSplitView">
+  <div class="titlebar" data-fb-id="W-MAIN.E02" data-fb-label="Title bar / toolbar" data-fb-note="Native unified title bar. Without a library it carries only the title and the Activity item; the full toolbar appears with the library." data-fb-api=".windowToolbarStyle(.unified); ToolbarItem(Activity) kept in every launch state">
+    <div class="traffic"><i></i><i></i><i></i></div>
+    <div class="wtitle" data-fb-id="W-MAIN.E01" data-fb-label="Window title and subtitle" data-fb-note="No library: title MLM. Library open: title = current place, subtitle = library name and count, so the open library is always named (fixes PP-SHELL-07). During setup the subtitle names the library being set up." data-fb-dec="DEC-031" data-fb-api=".navigationTitle / .navigationSubtitle">
+      <span data-show="picker picker-empty cant-open invalid failed adopt new loading">MLM</span>
+      <span data-show="setup-1">MLM <span class="t2" style="font-weight:400">— New library</span></span>
+      <span data-show="setup-2 setup-3 setup-done">MLM <span class="t2" style="font-weight:400">— Setting up “Main Library”</span></span>
+      <span data-show="switch copy open-alerts">All Tracks <span class="t2" style="font-weight:400">— Main Library · 12,935 tracks</span></span>
+    </div>
+    <div class="tbar-right">
+      <a class="tb-btn" href="activity.html" title="Activity ⌥⌘0" data-fb-id="P-ACTIVITY" data-fb-label="Activity item (launch states)" data-fb-note="Activity and its logs are available in every launch state — a failed launch is exactly when the logs are needed." data-fb-dec="DEC-005" data-fb-api="ToolbarItem + openWindow(id: activity)"><i data-i="activity"></i><span class="txt" data-show="setup-3">Importing 4,318 of 8,916</span></a>
+      <a class="tb-btn" href="settings.html" title="Settings ⌘,"><i data-i="gear"></i></a>
+    </div>
+  </div>
+
+  <div class="win-body">
+    <!-- backdrop sidebar: only while a library is open (switch / copy / open-alerts) -->
+    <div class="sidebar" style="padding-top:8px">
+      <div class="sb-scroll">
+        <div class="sb-h">Library</div>
+        <a class="sb-row active" href="library.html"><i data-i="note"></i><span class="lbl trunc">All Tracks</span></a>
+        <a class="sb-row" href="albums.html"><i data-i="album"></i><span class="lbl trunc">Albums</span></a>
+        <a class="sb-row" href="genres.html"><i data-i="tag"></i><span class="lbl trunc">Genres</span></a>
+        <a class="sb-row" href="folders.html"><i data-i="folder"></i><span class="lbl trunc">Folders</span></a>
+        <div class="sb-h">Playlists</div>
+        <a class="sb-row" href="playlists.html"><i data-i="list"></i><span class="lbl trunc">Liked on SoundCloud<small>Importing · 12 of 44</small></span></a>
+        <div class="sb-h">Sync</div>
+        <a class="sb-row two" href="sync.html"><i data-i="device"></i><span class="lbl trunc">iPod Classic<small>Syncing · 86 of 214</small></span></a>
+      </div>
+      <div class="sb-foot" data-menu-click="m-library" data-fb-id="P-LIBFOOTER" data-fb-label="Library footer (switcher)" data-fb-note="Names the open library. Its menu is the same list as File ▸ Open Recent; choosing another library opens A-LIB-SWITCH." data-fb-dec="DEC-031" data-fb-api="safeAreaInset(edge: .bottom) + Menu"><i data-i="disc"></i><span class="lbl trunc">Main Library<small>12,935 tracks</small></span><span class="t2"><i data-i="chevd" class="s"></i></span></div>
+    </div>
+
+    <div class="main"><div class="content lbg">
+
+      <!-- backdrop content for the library-open states -->
+      <div class="view" data-show="switch copy open-alerts" style="background:var(--content);flex:1">
+        <div class="vhead"><h1>All Tracks</h1><span class="sub">Main Library</span></div>
+        <div class="table"><table><thead><tr><th>Title</th><th style="width:170px">Artist</th><th style="width:170px">Album</th><th style="width:60px">Time</th><th style="width:130px">Status</th></tr></thead><tbody id="skel"></tbody></table></div>
+        <div class="statusbar"><span>12,935 tracks · 38 days · 412 GB</span><span class="grow"></span><span>Backdrop only — the real view is <a href="library.html">library.html</a></span></div>
+      </div>
+
+      <!-- ───────── V-PICKER (states: picker, picker-empty, cant-open; behind adopt / new) ───────── -->
+      <div class="lwrap" data-show="picker picker-empty cant-open adopt new" data-menu="cm-libentry" data-fb-id="V-PICKER" data-fb-label="Library picker" data-fb-note="Fills the window whenever no library is open: launch with “Open the last library at launch” off, after a launch problem, after Choose Another Library. Lists every library MLM knows (registry, A0 D5) with its state in words. Replaces V-LAUNCH-NOLIB and the CANTOPEN screens." data-fb-dec="DEC-031" data-fb-api="List(selection:) in the Window root; .dropDestination(for: URL.self)">
+        <div class="lcol">
+          <div class="lhead">
+            <h1 data-show="picker picker-empty adopt new" data-fb-id="V-LAUNCH-NOLIB.E01" data-fb-label="Picker title" data-fb-note="Was “No library open” with a disc symbol. Now the heading of a list you can act on.">Choose a library</h1>
+            <p data-show="picker adopt new" data-fb-id="V-LAUNCH-NOLIB.E02" data-fb-label="Picker description" data-fb-note="Was “Create a new library or open an existing library file.”">MLM opens one library at a time. Switching later relaunches MLM.</p>
+            <h1 data-show="cant-open" id="co-title" data-fb-id="V-LAUNCH-CANTOPEN.E01" data-fb-label="Can’t-open title" data-fb-note="Approved title kept. It heads the picker instead of a separate screen; the reason and the fix live on the affected row." data-fb-dec="DEC-031">“Archive 2019” can’t be opened</h1>
+            <p data-show="cant-open">The reason is shown on its row. Fix it there, or open another library.</p>
+          </div>
+
+          <div class="liblist" id="liblist" data-hide="picker-empty" data-fb-id="V-PICKER.N01" data-fb-label="Known libraries list" data-fb-note="One row per registry entry, most recently opened first: library-file icon, name, location, last opened, state in words. Availability is live (mount events), not computed once at launch. Click selects, double-click or Return opens, ⌫ removes from the list, right-click for the row menu." data-fb-dec="DEC-031" data-fb-api="List(selection:) + contextMenu(forSelectionType:primaryAction:)">
+
+            <div class="lrow sel" data-lib="main" data-ok="1" data-name="Main Library" data-fb-id="V-PICKER.N02" data-fb-label="Library row — available" data-fb-note="Available libraries show track count and where their library folder is; no state word is needed when nothing is wrong." data-fb-api="LabeledContent in a List row; icon = ICON-MLIBM">
+              <svg class="crate"><use href="#crate"/></svg>
+              <div class="grow"><div class="nm">Main Library</div><div class="path trunc">~/Library/Application Support/com.musiclibrary.app/libraries/Main Library.mlibm</div><div class="caption">12,935 tracks · library folder on “Lexxar”</div></div>
+              <div class="meta">Last opened<br>today, 09:14</div>
+            </div>
+
+            <div class="lrow" data-lib="laptop" data-ok="1" data-name="Laptop Subset">
+              <svg class="crate"><use href="#crate"/></svg>
+              <div class="grow"><div class="nm">Laptop Subset</div><div class="path trunc">~/Music/MLM/Laptop Subset.mlibm</div>
+                <div class="caption" data-when="ok">1,204 tracks · library folder on this Mac</div>
+                <div data-when="mm" hidden><span class="status error" data-fb-id="V-PICKER.N05" data-fb-label="Row state: doesn’t match" data-fb-note="Identity mismatch has no glossary word; the row says what is wrong in plain words and never repairs silently (A0 D5, A3 decision 2)."><i data-i="warn" class="s"></i>Can’t be opened — the file and its database don’t match</span></div></div>
+              <div class="meta">Last opened<br>28 Sep 2026</div>
+            </div>
+            <div class="lx" data-lx="laptop-mm" hidden>
+              <p data-fb-id="V-LAUNCH-CANTOPEN.E07" data-fb-label="Mismatch explanation" data-fb-note="Approved text kept. OK (E09) is gone: the picker is already the way out.">The library file and its database don’t belong together. This can happen when files inside a library file were replaced. MLM didn’t change anything.</p>
+              <div class="acts"><button class="btn" data-fb-id="V-LAUNCH-CANTOPEN.E08" data-fb-label="Show in Finder">Show in Finder</button><button class="btn" data-open="s-restore" data-fb-id="V-PICKER.N06" data-fb-label="Restore from Backup…" data-fb-note="New: a mismatch is recoverable from a backup of this library.">Restore from Backup…</button></div>
+              <details style="margin-top:8px"><summary>Details</summary><pre>Library file ID  7C0E…41AA  (library.json)
+Database ID      B93F…0D12  (app_config.library_id)</pre></details>
+            </div>
+
+            <div class="lrow" data-lib="archive" data-name="Archive 2019" data-why="not connected" data-fb-id="V-PICKER.N03" data-fb-label="Library row — Not connected" data-fb-note="The state names the disk, which today’s screen never did (“which disk?”). The row keeps its last-known location." data-fb-dec="DEC-031">
+              <svg class="crate"><use href="#crate"/></svg>
+              <div class="grow"><div class="nm">Archive 2019</div><div class="path trunc">/Volumes/Lexxar/MLM Libraries/Archive 2019.mlibm</div><div><span class="status failed"><i data-i="drive" class="s"></i>Not connected — on “Lexxar”</span></div></div>
+              <div class="meta">Last opened<br>3 Jun 2026</div>
+              <div class="acts"><button class="btn" data-try data-fb-id="V-LAUNCH-CANTOPEN.E03" data-fb-label="Try Again" data-fb-note="Only for Not connected. Rarely needed: the row turns available by itself when the disk appears.">Try Again</button></div>
+            </div>
+            <div class="lx" data-lx="archive" hidden>
+              <p data-fb-id="V-LAUNCH-CANTOPEN.E02" data-fb-label="Not connected explanation" data-fb-note="Was: “The library file is on a disk that isn’t connected. Connect the disk, then try again.” Now names the disk and waits for it." data-fb-api="NSWorkspace.didMountNotification / DiskArbitration before a library is open">The library file is on “Lexxar”, which isn’t connected. Connect the disk, then try again — this row becomes available as soon as the disk appears.</p>
+              <p class="caption" id="try-msg" hidden>Checked just now — “Lexxar” is still not connected.</p>
+            </div>
+
+            <div class="lrow" data-lib="oldtest" data-name="Old Test Library" data-why="not found" data-fb-id="V-PICKER.N04" data-fb-label="Library row — Not found" data-fb-note="The file is gone from its last location on a connected disk. The row carries the two ways out.">
+              <svg class="crate"><use href="#crate"/></svg>
+              <div class="grow"><div class="nm">Old Test Library</div><div class="path trunc">~/Desktop/Old Test Library.mlibm</div><div><span class="status missing"><i data-i="missing" class="s"></i>Not found</span></div></div>
+              <div class="meta">Last opened<br>11 Aug 2026</div>
+              <div class="acts"><button class="btn" data-popover="p-openpanel" data-fb-id="V-PICKER.N07" data-fb-label="Locate…" data-fb-note="Opens the system open panel; a file with the same library ID re-points the entry (A0 D1).">Locate…</button><button class="btn" data-remove="oldtest" data-fb-id="V-PICKER.N08" data-fb-label="Remove from List" data-fb-note="Removes the registry entry only. Nothing on disk is deleted, so no confirmation; the text under the row says so.">Remove from List</button></div>
+            </div>
+            <div class="lx" data-lx="oldtest" hidden>
+              <p data-fb-id="V-PICKER.N09" data-fb-label="Not found explanation" data-fb-note="Was: “The library file isn’t where MLM last found it. Open it from its new location, or create a new library.”">The library file isn’t where MLM last found it. If you moved it, locate it. If you deleted it, remove it from this list — nothing else is removed.</p>
+            </div>
+
+            <div class="lrow" data-lib="legacy" data-ok="1" data-name="Main Library (needs setup)" data-fb-id="V-PICKER.N10" data-fb-label="Library row — needs setup (legacy install)" data-fb-note="The pre-library-file install after Not Now in S-ADOPT. It stays listed and openable until it is set up (A0 D7). In reality it does not coexist with an adopted “Main Library”; both are shown here for review." data-fb-dec="DEC-031">
+              <svg class="crate"><use href="#crate"/></svg>
+              <div class="grow"><div class="nm">Main Library <span class="t2" style="font-weight:400">(needs setup)</span></div><div class="path trunc">~/Library/Application Support/com.musiclibrary.app/music_library.db</div><div class="caption">12,935 tracks · not yet a library file</div></div>
+              <div class="meta">Last opened<br>2 Oct 2026</div>
+              <div class="acts"><button class="btn" data-open="s-adopt" data-fb-id="V-PICKER.N11" data-fb-label="Set Up…" data-fb-note="Opens S-ADOPT. Opening the row without setting up is still possible (double-click).">Set Up…</button></div>
+            </div>
+            <div class="lx" data-lx="legacy" hidden>
+              <p>This is your library from before MLM used library files. Setting it up takes about a minute: MLM backs up first, then copies it into one library file. Audio files are not moved. You can also open it as it is.</p>
+            </div>
+          </div>
+
+          <!-- picker-empty -->
+          <div class="liblist" data-show="picker-empty" data-fb-id="V-PICKER.N12" data-fb-label="Picker — no libraries" data-fb-note="Registry is empty and setup was left before a library existed. First run normally goes straight to V-SETUP." data-fb-api="ContentUnavailableView">
+            <div class="center"><svg class="crate big"><use href="#crate"/></svg><h2>No libraries yet</h2><p>Create a library, or open a library file you already have. You can also drop a library file here.</p></div>
+          </div>
+
+          <div class="lfoot">
+            <button class="btn lg" data-open="s-newlib" data-fb-id="V-LAUNCH-NOLIB.E03" data-fb-label="New Library…" data-fb-note="Opens S-NEWLIB; after Create the in-window setup continues with the library folder.">New Library…</button>
+            <button class="btn lg" data-popover="p-openpanel" data-fb-id="V-LAUNCH-NOLIB.E04" data-fb-label="Open Other…" data-fb-note="Was “Open Library…”. System open panel (S-LIBFILE-OPEN) for a library file that isn’t in the list; it is added to the list on open (import by double-click, A0 D9)." data-fb-api=".fileImporter(allowedContentTypes: [.mlmLibrary])">Open Other…</button>
+            <span class="grow"></span>
+            <span class="caption" id="open-why"></span>
+            <button class="btn lg primary" id="open-btn" data-fb-id="V-PICKER.N13" data-fb-label="Open" data-fb-note="Default button (Return). Disabled with the reason beside it when the selected library can’t be opened." data-fb-api="Button(.borderedProminent).keyboardShortcut(.defaultAction)">Open</button>
+          </div>
+          <div class="lfoot">
+            <span class="check on" data-fb-id="ST-LIB.E04" data-fb-label="Open the last library at launch" data-fb-note="Same registry-level setting as Settings ▸ General. Off = MLM shows this picker at every launch. Offered here because this is where the question arises." data-fb-dec="DEC-031" data-fb-api="Toggle(.checkbox) bound to the registry setting">Open the last library at launch</span>
+            <span class="grow"></span>
+            <a class="caption" id="drop-hint" data-fb-id="D-LIBFILE-WINDOWDROP" data-fb-label="Drop a library file" data-fb-note="New: a .mlibm dropped anywhere on this window opens it (and adds it to the list). Click to see the drop highlight." data-fb-dec="DEC-040" data-fb-api=".dropDestination(for: URL.self) filtered to the library UTI">Drop a library file (.mlibm) here to open it</a>
+          </div>
+          <div class="caption" id="drop-msg" hidden style="text-align:right">Release to open “Festival Set 2024.mlibm”</div>
+        </div>
+      </div>
+
+      <!-- ───────── V-LAUNCH-LOADING ───────── -->
+      <div class="center" data-show="loading" data-fb-id="V-LAUNCH-LOADING" data-fb-label="Opening a library" data-fb-note="Names the library and says what is happening. Long phases are determinate. Replaces the anonymous “Loading Library...”." data-fb-dec="DEC-031" data-fb-api="ProgressView (indeterminate / value:total:) in the Window root">
+        <svg class="crate big"><use href="#crate"/></svg>
+        <h2 data-fb-id="V-LAUNCH-LOADING.E02" data-fb-label="Opening title" data-fb-note="Was “Loading Library...”. Always names the library; real ellipsis.">Opening “<span id="ld-name">Main Library</span>”…</h2>
+        <div data-pane="ld:open" data-fb-id="V-LAUNCH-LOADING.E01" data-fb-label="Phase line + progress" data-fb-note="Was a large anonymous spinner. A small spinner plus a phase line; phases that can take long show a determinate bar.">
+          <p><span class="spinner"></span>&nbsp; Reading the library…</p>
+          <div class="acts" style="justify-content:center"><button class="btn" data-set-state="picker" data-fb-id="V-LAUNCH-LOADING.N01" data-fb-label="Choose Another Library" data-fb-note="New: a way out while nothing is being written. Hidden during backup and setup phases, which must finish.">Choose Another Library</button></div>
+        </div>
+        <div data-pane="ld:backup" hidden data-fb-id="V-LAUNCH-LOADING.N02" data-fb-label="Phase: backing up before update" data-fb-note="The pre-update backup ran invisibly (G-LIB-LOADING). Now a determinate phase; it also appears in Settings ▸ Backup as “Before update”." data-fb-dec="DEC-044">
+          <p>Backing up before update… <span class="num">62 %</span></p>
+          <div class="progress" style="width:300px;margin:8px auto"><i style="width:62%"></i></div>
+          <p class="caption">This version of MLM updates the library database. A backup is made first — about 20 seconds.</p>
+        </div>
+        <div data-pane="ld:finish" hidden data-fb-id="V-LAUNCH-LOADING.N03" data-fb-label="Phase: finishing library file setup" data-fb-note="An interrupted adoption used to be finished or undone silently (G-LIB-ADOPT-INTERRUPTED). Now it is said.">
+          <p><span class="spinner"></span>&nbsp; Finishing library file setup…</p>
+          <p class="caption">The setup was interrupted last time. MLM is completing it; your library is not changed until it is verified.</p>
+        </div>
+        <div data-pane="ld:slow" hidden data-fb-id="V-LAUNCH-LOADING.N04" data-fb-label="Takes longer than usual" data-fb-note="After 10 s the screen offers the logs and a way out instead of spinning forever.">
+          <p><span class="spinner"></span>&nbsp; Reading the library… this is taking longer than usual.</p>
+          <div class="acts" style="justify-content:center"><a class="btn" href="activity.html#logs">Show Logs</a><button class="btn" data-set-state="picker">Choose Another Library</button></div>
+        </div>
+      </div>
+
+      <!-- ───────── V-LAUNCH-INVALID ───────── -->
+      <div class="center" data-show="invalid" data-fb-id="V-LAUNCH-INVALID" data-fb-label="Not a valid library file" data-fb-note="Shown when a file opened from Finder or the open panel can’t be a library. Each cause gets its own plain sentence; the file is never added to the list." data-fb-dec="DEC-031" data-fb-api="ContentUnavailableView + actions">
+        <i data-i="warn" class="xl"></i>
+        <h2 data-fb-id="V-LAUNCH-INVALID.E01" data-fb-label="Title" data-fb-note="Approved title kept (without the trailing full stop in a heading).">“Festival Set 2024.mlibm” isn’t a valid library file</h2>
+        <p data-pane="iv:nodb" data-fb-id="V-LAUNCH-INVALID.N01" data-fb-label="Cause: no database" data-fb-note="New: the cause in plain words.">It doesn’t contain a library database. The file may be incomplete or damaged. MLM didn’t change it.</p>
+        <p data-pane="iv:newer" hidden data-fb-id="V-LAUNCH-INVALID.N02" data-fb-label="Cause: newer MLM" data-fb-note="New: “made by a newer MLM” is not damage and gets its own wording.">It was made by a newer version of MLM. Update MLM to open it. MLM didn’t change the file.</p>
+        <div class="acts">
+          <button class="btn lg primary" data-set-state="picker" data-fb-id="V-LAUNCH-INVALID.E02" data-fb-label="Choose Another Library" data-fb-note="Was “OK”. Says where it goes.">Choose Another Library</button>
+          <button class="btn lg" data-fb-id="V-LAUNCH-INVALID.N03" data-fb-label="Show in Finder" data-fb-note="New: reveal the file that was rejected.">Show in Finder</button>
+        </div>
+        <details><summary>Details</summary><pre>/Volumes/Lexxar/MLM Libraries/Festival Set 2024.mlibm
+library.json: present (manifest_version 1)
+music_library.db: missing</pre></details>
+      </div>
+
+      <!-- ───────── V-LAUNCH-FAILED ───────── -->
+      <div class="center" data-show="failed" data-fb-id="V-LAUNCH-FAILED" data-fb-label="Library failed to open" data-fb-note="Was a dead end with raw error text. Now: sentence, cause, recovery actions, raw text behind Details, logs one click away." data-fb-dec="DEC-031" data-fb-api="ContentUnavailableView + DisclosureGroup(Details)">
+        <i data-i="warn" class="xl" data-fb-id="V-LAUNCH-FAILED.E01" data-fb-label="Symbol" data-fb-note="Warning symbol accompanies the text; the text carries the meaning."></i>
+        <h2 data-fb-id="V-LAUNCH-FAILED.E02" data-fb-label="Title" data-fb-note="Was “Failed to Initialize”. Names the library.">“Main Library” couldn’t be opened</h2>
+        <p>The library database couldn’t be read. Your music files are not affected, and MLM didn’t change the library file.</p>
+        <div class="acts">
+          <button class="btn lg primary" data-set-state="loading" data-fb-id="V-LAUNCH-FAILED.N01" data-fb-label="Try Again">Try Again</button>
+          <button class="btn lg" data-set-state="picker" data-fb-id="V-LAUNCH-FAILED.N02" data-fb-label="Choose Another Library">Choose Another Library</button>
+          <button class="btn lg" data-open="s-restore" data-fb-id="V-LAUNCH-FAILED.N03" data-fb-label="Restore from Backup…" data-fb-note="Lists this library’s backups without needing the library to open. Hidden when there are none.">Restore from Backup…</button>
+          <a class="btn lg" href="activity.html#logs" data-fb-id="V-LAUNCH-FAILED.N04" data-fb-label="Show Logs" data-fb-note="Activity window, Logs tab, filtered to this launch.">Show Logs</a>
+        </div>
+        <details data-fb-id="V-LAUNCH-FAILED.E03" data-fb-label="Details (raw error)" data-fb-note="The raw error text was the whole screen; now it sits behind Details, selectable."><summary>Details</summary><pre>SQLite error 11: database disk image is malformed
+~/Library/Application Support/com.musiclibrary.app/libraries/Main Library.mlibm/music_library.db</pre></details>
+      </div>
+
+      <!-- ───────── V-SETUP 1: library file ───────── -->
+      <div class="lwrap" data-show="setup-1" data-fb-id="V-SETUP" data-fb-label="First-run setup (in the window)" data-fb-note="Replaces the S-WIZARD scrim card. Three steps in the window’s content, native controls, steps 2–3 skippable, import continues in the background. First run lands here directly (no “No library open” behind a sheet)." data-fb-dec="DEC-034" data-fb-api="Form(.grouped) in the Window root; no overlay">
+        <div class="lcol narrow">
+          <div class="lhead"><div class="steps">Step 1 of 3</div><h1 data-fb-id="S-WIZARD.E02" data-fb-label="Welcome heading" data-fb-note="Was “Welcome to MLM / Music Library Manager” with a gradient icon and a Get Started step (E01, E03, E04). The welcome step is folded into step 1.">Create your library</h1>
+            <p>A library keeps its own tracks, playlists and settings in one library file. Audio files stay where they are.</p></div>
+          <div class="form"><div class="group">
+            <div class="frow" data-fb-id="V-SETUP.N01" data-fb-label="Name" data-fb-note="Same field as S-NEWLIB.E02; prefilled Main Library on first run."><span class="fl">Name</span><input class="field" style="width:260px" value="Main Library"></div>
+            <div class="frow" data-fb-id="V-SETUP.N02" data-fb-label="Location of the library file" data-fb-note="New: the location is shown and can be changed (today always the default, silently). The default is explained in one line." data-fb-api="LabeledContent + .fileImporter(folders)"><span class="fl">Location<small class="path">~/Library/Application Support/com.musiclibrary.app/libraries</small></span><span class="t2 small">Default</span><button class="btn" data-popover="p-folderpanel">Choose…</button></div>
+          </div>
+          <div class="ghelp" data-fb-id="V-SETUP.N03" data-fb-label="Why the default location">Saved as “Main Library.mlibm”. The default location is on this Mac, so the library opens even when your music drive isn’t connected. You can move the file in Finder later.</div></div>
+          <div class="lfoot" style="margin-top:6px">
+            <button class="btn lg" data-popover="p-openpanel" data-fb-id="V-SETUP.N04" data-fb-label="Open Other…" data-fb-note="For someone who already has a library file (new Mac, restored backup).">Open Other…</button>
+            <span class="grow"></span>
+            <button class="btn lg primary" data-set-state="setup-2" data-fb-id="V-SETUP.N10" data-fb-label="Create Library" data-fb-note="Creates the library file. From here on a library exists; the remaining steps can be skipped.">Create Library</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ───────── V-SETUP 2: library folder ───────── -->
+      <div class="lwrap" data-show="setup-2">
+        <div class="lcol narrow">
+          <div class="lhead"><div class="steps">Step 2 of 3</div><h1 data-fb-id="S-WIZARD.E05" data-fb-label="Library folder heading" data-fb-note="Was “Select Library Folder”.">Where is your music?</h1>
+            <p>Choose the folder that contains your audio files — for example a folder on an external drive. MLM reads MP3, FLAC, AAC, M4A, OGG, WAV, AIFF and ALAC.</p></div>
+          <div class="dropzone" data-fb-id="D-WIZ-FOLDERDROP" data-fb-label="Library folder drop target" data-fb-note="New: drop a folder from Finder, or use the button. Shows whether the folder can be reached right now." data-fb-dec="DEC-040" data-fb-api=".dropDestination(for: URL.self) + .fileImporter">
+            <div data-pane="sf:none"><i data-i="folder" class="xl"></i><div>Drop your music folder here</div></div>
+            <div data-pane="sf:ok" hidden data-fb-id="S-WIZARD.E06" data-fb-label="Chosen folder + reachability" data-fb-note="Path plus state in words. Drive monitoring starts immediately (today only after the next launch)."><i data-i="folder" class="xl"></i><div class="path">/Volumes/Lexxar/Music</div><div><span class="status ok"><i data-i="check" class="s"></i>Connected</span> <span class="t2">· on “Lexxar” · 1.2 TB free</span></div></div>
+            <div data-pane="sf:off" hidden data-fb-id="V-SETUP.N05" data-fb-label="Chosen folder — not connected"><i data-i="folder" class="xl"></i><div class="path">/Volumes/Lexxar/Music</div><div><span class="status failed"><i data-i="drive" class="s"></i>Not connected — on “Lexxar”</span></div><div class="caption">MLM remembers the folder and scans it when “Lexxar” is connected.</div></div>
+            <button class="btn" data-popover="p-folderpanel" data-fb-id="S-WIZARD.E07" data-fb-label="Choose Folder…" data-fb-note="Opens the system folder panel (S-WIZ-FOLDER).">Choose Folder…</button>
+          </div>
+          <div class="ghelp" data-fb-id="S-WIZARD.E14" data-fb-label="Managed folders line" data-fb-note="Moved from the Done step: said before MLM creates anything.">MLM will create folders like “Downloads (SoundCloud)” inside this folder when you import from sources. Your existing files are not moved.</div>
+          <div class="lfoot" style="margin-top:6px">
+            <a class="btn lg" href="library.html" data-fb-id="V-SETUP.N06" data-fb-label="Set Up Later" data-fb-note="New: leaves setup with an empty All Tracks (“Import Files or Folder…” empty state). The library folder can be set in Settings ▸ Library at any time." data-fb-dec="DEC-034">Set Up Later</a>
+            <span class="grow"></span>
+            <button class="btn lg primary" disabled data-pane="sf:none">Scan and Import</button>
+            <button class="btn lg primary" hidden data-pane="sf:ok" data-set-state="setup-3" data-fb-id="S-WIZARD.E08" data-fb-label="Scan and Import" data-fb-note="Was “Scan &amp; Import”. Saves the folder and starts the import as an Activity operation.">Scan and Import</button>
+            <a class="btn lg primary" hidden data-pane="sf:off" href="library.html" data-fb-id="V-SETUP.N07" data-fb-label="Scan When Connected" data-fb-note="Saves the folder; the scan is queued in Activity as waiting for “Lexxar”.">Scan When Connected</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- ───────── V-SETUP 3: scan and import ───────── -->
+      <div class="lwrap" data-show="setup-3">
+        <div class="lcol narrow">
+          <div class="lhead"><div class="steps">Step 3 of 3</div><h1>Scanning “Music” on Lexxar</h1><p>You can start using MLM now; tracks appear in All Tracks as they are imported.</p></div>
+          <div class="form"><div class="group"><div class="frow" style="flex-direction:column;align-items:stretch;gap:6px;padding:12px">
+            <div class="row" data-fb-id="S-WIZARD.E09" data-fb-label="Phase, counts, current file" data-fb-note="Same words and numbers as the Activity operation."><span class="grow">Reading tags…</span><span class="num t2">4,318 of 8,916 files</span></div>
+            <div class="progress" data-fb-id="S-WIZARD.E10" data-fb-label="Progress" data-fb-api="ProgressView(value:total:)"><i style="width:48%"></i></div>
+            <div class="path trunc">Downloads (SoundCloud)/Skee Mask - Rev8617 (Original Mix) [Ilian Tape].m4a</div>
+          </div></div></div>
+          <div class="lfoot" style="margin-top:6px">
+            <button class="btn lg" data-set-state="setup-done" id="stop-btn" data-fb-id="S-WIZARD.E11" data-fb-label="Stop" data-fb-note="Was “Cancel”. Keeps what is already imported; the scan can be resumed from Settings ▸ Library.">Stop</button>
+            <span class="grow"></span>
+            <a class="btn lg primary" href="library.html" data-fb-id="V-SETUP.N08" data-fb-label="Continue in Background" data-fb-note="New: a 13,000-file scan no longer holds the window. Progress stays in the Activity item (“Importing 4,318 of 8,916”)." data-fb-dec="DEC-044">Continue in Background</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- ───────── V-SETUP done ───────── -->
+      <div class="center" data-show="setup-done">
+        <i data-i="check" class="xl"></i>
+        <h2 data-fb-id="S-WIZARD.E12" data-fb-label="Result" data-fb-note="Was “Import Complete” even when it wasn’t. The title says the library is ready; the line below carries the counts.">“Main Library” is ready</h2>
+        <p data-pane="sd:ok"><span class="num">Imported 8,902 tracks · 14 skipped</span> · <a href="activity.html" data-fb-id="V-SETUP.N09" data-fb-label="Show (skipped files)" data-fb-note="New: opens the import result in Activity with every skipped file and its reason.">Show</a></p>
+        <p data-pane="sd:stopped" hidden data-fb-id="S-WIZARD.E13" data-fb-label="Stopped / error line" data-fb-note="Was a red raw error. A sentence with what was kept and how to continue."><span class="num">Stopped — imported 4,318 of 8,916 files.</span> Scan again any time in <a href="settings.html#library">Settings ▸ Library</a>.</p>
+        <p class="caption">Downloads from sources go into folders MLM creates inside your library folder — see <a href="settings.html#library">Settings ▸ Library</a>.</p>
+        <div class="acts"><a class="btn lg primary" href="library.html" data-fb-id="S-WIZARD.E15" data-fb-label="Done" data-fb-note="Was “Open Library”, which collided with File ▸ Open Library…. Goes to All Tracks.">Done</a></div>
+      </div>
+
+    </div></div>
+  </div>
+</div>
+
+<!-- ═════════ Exhibits ═════════ -->
+<div class="cat-h">Library menu, Open Recent and the window title</div>
+<div class="cat wide">
+  <div class="spec"><h4>File ▸ Open Recent · library footer menu <code>M-FILE.E04 · P-LIBFOOTER.N01</code></h4>
+    <p>One list, two entry points. The current library is checked. Unavailable libraries stay listed with their state in words and are disabled; availability follows mount events instead of being computed once at launch. Choosing a library opens A-LIB-SWITCH.</p>
+    <div class="demo"><div class="menu static" data-fb-id="M-FILE.E04" data-fb-label="Open Recent (with states)" data-fb-note="Checkmark on the open library, “— Not connected” / “— Not found” suffixes, Clear Menu. The same items appear in the sidebar footer menu and the Dock menu." data-fb-dec="DEC-031" data-fb-api="CommandGroup(replacing: .newItem) + Menu; Dock: applicationDockMenu">
+      <div class="mi hdr">Open Recent</div>
+      <a class="mi chk">Main Library</a>
+      <a class="mi nochk" data-set-state="switch">Laptop Subset</a>
+      <a class="mi nochk dis">Archive 2019 — Not connected</a>
+      <a class="mi nochk dis">Old Test Library — Not found</a>
+      <hr><a class="mi nochk">Clear Menu</a>
+      <hr><a class="mi" data-set-state="picker" data-fb-id="M-FILE.E03" data-fb-label="Open Library…">Open Library…<span class="k">⌘O</span></a>
+      <a class="mi" data-set-state="new" data-fb-id="M-FILE.E02" data-fb-label="New Library…">New Library…</a>
+      <hr><a class="mi">Show Library File in Finder</a>
+      <a class="mi" href="settings.html#library">Library Settings…</a>
+    </div></div>
+  </div>
+  <div class="spec"><h4>Window title and subtitle <code>W-MAIN.E01</code></h4>
+    <p>The title is the current place, the subtitle names the open library and the count. The sidebar footer repeats the library name with the drive state.</p>
+    <div class="demo" style="flex-direction:column;gap:8px;align-items:stretch">
+      <div class="titlebar" style="border-radius:8px;position:relative"><div class="traffic"><i></i><i></i><i></i></div><div class="wtitle">All Tracks <span class="t2" style="font-weight:400">— Main Library · 12,935 tracks</span></div></div>
+      <div class="titlebar" style="border-radius:8px;position:relative"><div class="traffic"><i></i><i></i><i></i></div><div class="wtitle">Warm-up <span class="t2" style="font-weight:400">— Laptop Subset · 44 tracks</span></div></div>
+      <div class="titlebar" style="border-radius:8px;position:relative"><div class="traffic"><i></i><i></i><i></i></div><div class="wtitle">MLM</div></div>
+    </div>
+  </div>
+  <div class="spec"><h4>What MLM shows at launch <code>G-LIB-*</code></h4>
+    <p>Every launch outcome is one of the states on this page.</p>
+    <table class="plain"><tr><th>Situation</th><th>Shows</th></tr>
+      <tr><td>Last library available, “Open the last library at launch” on</td><td>Opening “‹name›”… → the library</td></tr>
+      <tr><td>Setting off, or no last library</td><td>Library picker</td></tr>
+      <tr><td>Last library Not connected / Not found / doesn’t match</td><td>Library picker, that row selected with its reason and actions</td></tr>
+      <tr><td>Library file opened from Finder</td><td>Opening… (no library open) or “Switch to …?” (library open)</td></tr>
+      <tr><td>Opened file is not a library / is a copy</td><td>Not a valid library file · “… is a copy of …”</td></tr>
+      <tr><td>Old install found (no library file yet)</td><td>Library picker with “Set up your library file” on top</td></tr>
+      <tr><td>Nothing registered (first run)</td><td>Setup, step 1</td></tr>
+      <tr><td>Library can’t be read</td><td>“‹name›” couldn’t be opened, with recovery actions</td></tr></table>
+  </div>
+  <div class="spec"><h4>Library file in Finder <code>ICON-MLIBM · D-LIBFILE-OPEN</code></h4>
+    <p>Double-click, Open With, or dropping a library file on the Dock icon or the window all take the same route as Open Recent. Kind: “MLM Library File”. Icon variants: <a href="library-icon.html">library-icon.html</a>.</p>
+    <div class="demo"><div class="row" data-fb-id="D-LIBFILE-OPEN" data-fb-label="Open a library file from Finder" data-fb-note="While S-ADOPT is up the request is queued and handled afterwards (today it is dropped). The same file as the open library just brings the window forward." data-fb-dec="DEC-040" data-fb-api="application(_:open:) / .onOpenURL"><svg class="crate"><use href="#crate"/></svg><div><div style="font-weight:500">Laptop Subset.mlibm</div><div class="caption">MLM Library File · 14.2 MB</div></div></div></div>
+  </div>
+</div>
+
+<!-- ═════════ Overlays ═════════ -->
+<div class="menu" id="cm-libentry" hidden data-fb-id="V-PICKER.N14" data-fb-label="Library row context menu" data-fb-note="New. Follows the context-menu order rule: primary, info, locate, remove. Rename renames file, manifest and registry together (A0 D1)." data-fb-dec="DEC-039" data-fb-api="contextMenu(forSelectionType:)">
+  <a class="mi" data-set-state="loading">Open</a><hr>
+  <a class="mi">Rename…</a><hr>
+  <a class="mi">Show in Finder</a><a class="mi">Copy Path</a><hr>
+  <a class="mi">Remove from List</a>
+</div>
+
+<div class="popover" id="p-openpanel" hidden style="width:300px" data-fb-id="S-LIBFILE-OPEN" data-fb-label="Open panel (system)" data-fb-note="System open panel; only library files can be chosen. Message: “Choose a library file.” Catalogued on the sheets and alerts pattern page." data-fb-api=".fileImporter(allowedContentTypes: [.mlmLibrary]) + .fileDialogMessage">
+  <div style="font-weight:600;margin-bottom:4px">System open panel</div>
+  <div class="caption">Opens the standard macOS panel limited to library files (.mlibm), with the message “Choose a library file.” See <a href="patterns-sheets-alerts.html">patterns-sheets-alerts.html</a>.</div>
+</div>
+<div class="popover" id="p-folderpanel" hidden style="width:300px" data-fb-id="S-WIZ-FOLDER" data-fb-label="Folder panel (system)" data-fb-note="System folder panel, New Folder allowed. Message: “Choose the folder that contains your music.”" data-fb-api=".fileImporter(allowedContentTypes: [.folder]) + .fileDialogMessage">
+  <div style="font-weight:600;margin-bottom:4px">System folder panel</div>
+  <div class="caption">Opens the standard macOS folder panel. See <a href="patterns-sheets-alerts.html">patterns-sheets-alerts.html</a>.</div>
+</div>
+
+<!-- S-ADOPT -->
+<div class="sheet" id="s-adopt" hidden style="width:470px" data-fb-id="S-ADOPT" data-fb-label="Set up your library file" data-fb-note="Stays a sheet, now over the picker instead of a blank window. Not Now returns to the picker, where the old install stays listed as “Main Library (needs setup)”. A library file opened from Finder meanwhile is queued, not dropped." data-fb-dec="DEC-031" data-fb-api=".sheet + .interactiveDismissDisabled while running">
+  <div class="sh"><h2 data-fb-id="S-ADOPT.E01" data-fb-label="Title">Set up your library file</h2></div>
+  <div class="sb">
+    <p data-fb-id="S-ADOPT.E02" data-fb-label="Explanation" data-fb-note="Approved text, unchanged; stays visible in every step.">MLM now keeps your library — tracks, playlists, settings and playlist covers — in a single library file that you can move and back up as one item. MLM backs up first, then copies your library into the new file. Audio files are not moved.</p>
+    <div data-pane="ad:offer">
+      <div class="kv" data-fb-id="S-ADOPT.E03" data-fb-label="Name field + saved-as line"><label>Name</label><input class="field" value="Main Library"></div>
+      <div class="caption" style="margin:6px 0 0 102px">Saved as “Main Library.mlibm” in MLM’s folder in your user Library.</div>
+    </div>
+    <div data-pane="ad:run" hidden data-fb-id="S-ADOPT.E06" data-fb-label="Phases" data-fb-note="Was one spinner with a changing word. Now the three phases as a list, so it is clear what is done and what is left. Click a phase to jump (mockup)." data-fb-dec="DEC-044" data-fb-api="ProgressView + phase list">
+      <div class="phase" data-ph="1"><span class="slot"><span class="spinner"></span><i data-i="check" class="s"></i></span>Backing up…</div>
+      <div class="phase" data-ph="2"><span class="slot"><span class="spinner"></span><i data-i="check" class="s"></i></span>Creating library file…</div>
+      <div class="phase" data-ph="3"><span class="slot"><span class="spinner"></span><i data-i="check" class="s"></i></span>Checking…</div>
+      <div class="caption" style="margin-top:8px">This can’t be interrupted. It usually takes under a minute.</div>
+    </div>
+    <div data-pane="ad:ok" hidden>
+      <p data-fb-id="S-ADOPT.E07" data-fb-label="Success text"><span class="status ok"><i data-i="check" class="s"></i></span> Your library is now stored in “Main Library.mlibm”. The previous files were moved to a folder named “legacy-adopted-2026-10-05” — you can delete it once everything looks right.</p>
+    </div>
+    <div data-pane="ad:fail" hidden>
+      <p class="inline-err" data-fb-id="S-ADOPT.E10" data-fb-label="Failure text"><i data-i="warn" class="s"></i>The library file couldn’t be created. Your library was not changed.</p>
+      <details data-fb-id="S-ADOPT.E11" data-fb-label="Details"><summary>Details</summary><pre>The volume “Macintosh HD” is out of space (needed 262 MB, available 118 MB).</pre></details>
+    </div>
+  </div>
+  <div class="sf">
+    <span data-pane="ad:offer" class="row" style="gap:8px"><button class="btn" data-close data-fb-id="S-ADOPT.E04" data-fb-label="Not Now" data-fb-note="Esc. Back to the picker; asked again at the next launch.">Not Now</button><button class="btn primary" id="ad-create" data-fb-id="S-ADOPT.E05" data-fb-label="Create Library File" data-fb-note="Return. Disabled while the name is empty.">Create Library File</button></span>
+    <span data-pane="ad:run" hidden class="caption">Working…</span>
+    <span data-pane="ad:ok" hidden class="row" style="gap:8px"><button class="btn" data-fb-id="S-ADOPT.E08" data-fb-label="Show in Finder">Show in Finder</button><a class="btn primary" href="library.html" data-fb-id="S-ADOPT.E09" data-fb-label="Done" data-fb-note="Opens the new library.">Done</a></span>
+    <span data-pane="ad:fail" hidden class="row" style="gap:8px"><a class="btn plain left" href="activity.html#logs">Show Logs</a><button class="btn" data-close data-fb-id="S-ADOPT.E12" data-fb-label="Not Now">Not Now</button><button class="btn primary" id="ad-retry" data-fb-id="S-ADOPT.E13" data-fb-label="Try Again" data-fb-note="Reruns with the same name.">Try Again</button></span>
+  </div>
+</div>
+
+<!-- S-NEWLIB -->
+<div class="sheet" id="s-newlib" hidden style="width:450px" data-fb-id="S-NEWLIB" data-fb-label="New Library" data-fb-note="From the picker, File ▸ New Library… or the footer menu. New: the location is shown and can be chosen, and the final file name is stated before creating. From the picker, Create continues in the in-window setup (library folder); with a library open it leads to A-LIB-SWITCH." data-fb-dec="DEC-034" data-fb-api=".sheet + Form">
+  <div class="sh"><h2 data-fb-id="S-NEWLIB.E01" data-fb-label="Title">New Library</h2></div>
+  <div class="sb">
+    <p data-fb-id="S-NEWLIB.E03" data-fb-label="What a library is">A library keeps its own tracks, playlists and settings. Audio files stay where they are.</p>
+    <div class="kv">
+      <label>Name</label><input class="field" value="New Library" data-fb-id="S-NEWLIB.E02" data-fb-label="Name field">
+      <label>Location</label><div class="row"><span class="popup grow" data-fb-id="S-NEWLIB.N01" data-fb-label="Location" data-fb-note="Default = MLM’s Libraries folder on this Mac. “Choose…” opens the system folder panel; an external disk is allowed (A0 D1)." data-fb-api="Picker(.menu) + .fileImporter">MLM Libraries folder (default)</span><button class="btn" data-popover="p-folderpanel">Choose…</button></div>
+    </div>
+    <div class="caption" style="margin:8px 0 0 102px" data-fb-id="S-NEWLIB.N02" data-fb-label="Saved-as line and rationale">Saved as “New Library.mlibm”. The default location is on this Mac, so the library opens even when no external drive is connected.</div>
+    <div class="inline-err" data-pane="nl:taken" hidden style="margin:8px 0 0 102px" data-fb-id="S-NEWLIB.N03" data-fb-label="Inline error" data-fb-note="Errors appear here, above the buttons — not as a second alert with the wrong message (today: “isn’t a valid library file” for a create failure)."><i data-i="warn" class="s"></i>A library named “New Library” already exists there. Choose another name.</div>
+    <div data-pane="nl:ok"></div>
+  </div>
+  <div class="sf"><button class="btn" data-close data-fb-id="S-NEWLIB.E04" data-fb-label="Cancel">Cancel</button><button class="btn primary" data-set-state="setup-2" data-fb-id="S-NEWLIB.E05" data-fb-label="Create" data-fb-note="Return. Nothing is registered if the user cancels afterwards (today a cancelled switch leaves an empty library in Open Recent).">Create</button></div>
+</div>
+
+<!-- Restore from backup at launch -->
+<div class="sheet" id="s-restore" hidden style="width:480px" data-fb-id="S-LAUNCH-RESTORE" data-fb-label="Restore from Backup (launch)" data-fb-note="New. Lists the backups of the library that failed to open — the backup folder is known from the registry, so this works without opening the library." data-fb-dec="DEC-031" data-fb-api=".sheet + List(selection:)">
+  <div class="sh"><h2>Restore “Main Library” from a backup</h2></div>
+  <div class="sb">
+    <p>MLM keeps the current library file as “Main Library (before restore).mlibm” and opens the restored library. Audio files are not changed.</p>
+    <div class="form"><div class="group">
+      <div class="frow"><span class="check radio on" data-name="rb"></span><span class="fl">Today, 09:14<small>Automatic · 12,935 tracks · 124.8 MB</small></span></div>
+      <div class="frow"><span class="check radio" data-name="rb"></span><span class="fl">4 Oct 2026, 08:57<small>Automatic · 12,921 tracks · 124.6 MB</small></span></div>
+      <div class="frow"><span class="check radio" data-name="rb"></span><span class="fl">28 Sep 2026, 18:02<small>Before update · 12,790 tracks · 123.9 MB</small></span></div>
+    </div></div>
+  </div>
+  <div class="sf"><button class="btn" data-close>Cancel</button><button class="btn primary" data-set-state="loading">Restore and Open</button></div>
+</div>
+
+<!-- A-LIB-SWITCH -->
+<div class="alert" id="a-switch" hidden style="width:300px" data-fb-id="A-LIB-SWITCH" data-fb-label="Switch library" data-fb-note="Was: “MLM relaunches to open this library. Finish active downloads and syncs first.” — a request, not a check. Now the alert lists the work that will stop; without running work it is the two-line version. Uses the library’s name from its manifest, not the file name." data-fb-dec="DEC-032" data-fb-api=".alert(…, presenting:) with a default and a cancel action">
+  <div class="aic"><svg class="crate" style="color:var(--on-accent)"><use href="#crate"/></svg></div>
+  <h2>Switch to “Laptop Subset”?</h2>
+  <p>MLM quits and reopens with “Laptop Subset”.</p>
+  <div data-pane="sw:busy" data-fb-id="A-LIB-SWITCH.N01" data-fb-label="Running work list" data-fb-note="Read from Activity at the moment of asking. Downloads resume and the sync can be continued when Main Library is opened again." data-fb-dec="DEC-032">
+    <p><b>2 downloads and 1 sync will stop:</b></p>
+    <ul><li>Importing “Liked on SoundCloud” — 12 of 44</li><li>Downloading “Rev8617” — Skee Mask</li><li>Syncing iPod Classic — 86 of 214 copied</li></ul>
+    <p style="margin-top:6px">They continue the next time you open “Main Library”.</p>
+  </div>
+  <div data-pane="sw:idle" hidden><p class="t2">Nothing is running.</p></div>
+  <div class="ab"><button class="btn primary" data-set-state="loading" id="sw-go" data-fb-id="A-LIB-SWITCH.E01" data-fb-label="Switch and Relaunch" data-fb-note="Was “Relaunch”. Validates the file first; problems appear as A-LIBFILE-CANTOPEN / -INVALID / A-LIB-COPY and nothing quits.">Switch and Relaunch</button><button class="btn" data-close data-fb-id="A-LIB-SWITCH.E02" data-fb-label="Cancel">Cancel</button></div>
+</div>
+
+<!-- A-LIB-COPY -->
+<div class="alert" id="a-copy" hidden style="width:300px" data-fb-id="A-LIB-COPY" data-fb-label="Library file is a copy" data-fb-note="Approved copy kept. One presentation only: an alert — over the picker when no library is open, over the main window otherwise. With a library open the button says that it relaunches." data-fb-dec="DEC-031" data-fb-api=".alert">
+  <div class="aic"><i data-i="doc" class="l"></i></div>
+  <h2>“Main Library copy” is a copy of “Main Library”</h2>
+  <p>To open it, MLM makes the copy a separate library. “Main Library” is not changed.</p>
+  <div class="ab"><button class="btn primary" data-set-state="switch" data-fb-id="A-LIB-COPY.E01" data-fb-label="Open as Separate Library" data-fb-note="With a library open this continues to the switch confirmation (today it relaunches without asking).">Open as Separate Library</button><button class="btn" data-close data-fb-id="A-LIB-COPY.E02" data-fb-label="Cancel">Cancel</button></div>
+</div>
+
+<!-- A-LIBFILE-CANTOPEN -->
+<div class="alert" id="a-cant" hidden style="width:300px" data-fb-id="A-LIBFILE-CANTOPEN" data-fb-label="Library can’t be opened (library open)" data-fb-note="Alert form while another library stays open. Same three causes and words as the picker rows. “New Library…” left this alert — it has nothing to do with the problem." data-fb-dec="DEC-031" data-fb-api=".alert">
+  <div class="aic"><i data-i="warn" class="l"></i></div>
+  <h2>“Archive 2019” can’t be opened</h2>
+  <div data-pane="ac:nc"><p>The library file is on “Lexxar”, which isn’t connected. Connect the disk, then try again. “Main Library” stays open.</p>
+    <div class="ab"><button class="btn primary" data-fb-id="A-LIBFILE-CANTOPEN.N01" data-fb-label="Try Again" data-fb-note="New in the alert form (the launch screen had it, the alert didn’t).">Try Again</button><button class="btn" data-close>Cancel</button></div></div>
+  <div data-pane="ac:nf" hidden><p>The library file isn’t where MLM last found it. If you moved it, locate it. “Main Library” stays open.</p>
+    <div class="ab"><button class="btn primary" data-popover="p-openpanel" data-fb-id="A-LIBFILE-CANTOPEN.E01" data-fb-label="Locate…" data-fb-note="Was “Open Library…”.">Locate…</button><button class="btn" data-close>Cancel</button></div></div>
+  <div data-pane="ac:mm" hidden><p>The library file and its database don’t belong together. This can happen when files inside a library file were replaced. MLM didn’t change anything.</p>
+    <div class="ab"><button class="btn" data-fb-id="A-LIBFILE-CANTOPEN.E02" data-fb-label="Show in Finder">Show in Finder</button><button class="btn primary" data-close>OK</button></div></div>
+</div>
+
+<!-- A-LIBFILE-INVALID -->
+<div class="alert" id="a-invalid" hidden style="width:300px" data-fb-id="A-LIBFILE-INVALID" data-fb-label="Not a valid library file (library open)" data-fb-note="Alert form. Gains the cause sentence and Show in Finder. No longer used for a failed New Library — that is its own message." data-fb-api=".alert">
+  <div class="aic"><i data-i="warn" class="l"></i></div>
+  <h2>“Festival Set 2024.mlibm” isn’t a valid library file</h2>
+  <p>It doesn’t contain a library database. The file may be incomplete or damaged. MLM didn’t change it.</p>
+  <div class="ab"><button class="btn primary" data-close>OK</button><button class="btn">Show in Finder</button></div>
+</div>
+<div class="alert" id="a-newfail" hidden style="width:300px" data-fb-id="A-LIBFILE-INVALID.N01" data-fb-label="New library couldn’t be created" data-fb-note="Normally shown inline in S-NEWLIB. This alert exists only for failures after the sheet closed (disk removed mid-create)." data-fb-api=".alert">
+  <div class="aic"><i data-i="warn" class="l"></i></div>
+  <h2>The library “Festival Set 2025” couldn’t be created</h2>
+  <p>MLM can’t write to “Lexxar”. Choose another location and try again. Nothing was added to your libraries.</p>
+  <div class="ab"><button class="btn primary" data-close data-open="s-newlib">Choose Another Location…</button><button class="btn" data-close>Cancel</button></div>
+</div>
+
+<script>
+(function () {
+  const $ = (s, r) => (r || document).querySelector(s), $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const SHEET = { adopt: 's-adopt', 'new': 's-newlib', 'switch': 'a-switch', copy: 'a-copy', 'open-alerts': 'a-cant' };
+  const OPEN_LIB = ['switch', 'copy', 'open-alerts'];
+  let adTimer = null, cause = 'nc';
+
+  function closeSheets() {
+    $$('.scrim').forEach(sc => { const ov = $('#overlays') || document.body; Array.from(sc.children).forEach(n => { n.hidden = true; ov.appendChild(n); }); sc.remove(); });
+  }
+  function setState(s) { const b = $('.reviewbar [data-set-state="' + s + '"]'); if (b) b.click(); return !!b; }
+  function pane(group, name) { $$('[data-pane^="' + group + ':"]').forEach(p => { p.hidden = p.dataset.pane !== group + ':' + name; }); }
+
+  /* ── picker ── */
+  function select(id) {
+    const rows = $$('.lrow[data-lib]');
+    const row = rows.find(r => r.dataset.lib === id); if (!row) return;
+    rows.forEach(r => r.classList.toggle('sel', r === row));
+    const mm = id === 'laptop' && row.dataset.mm === '1';
+    $$('[data-lx]').forEach(x => { x.hidden = x.dataset.lx !== (mm ? 'laptop-mm' : id); });
+    const ok = row.dataset.ok === '1' && !mm;
+    $('#open-btn').disabled = !ok;
+    $('#open-why').textContent = ok ? '' : 'Can’t open — ' + (mm ? 'doesn’t match its database' : row.dataset.why);
+    $('#ld-name').textContent = row.dataset.name.replace(' (needs setup)', '');
+  }
+  function setMismatch(on) {
+    const row = $('.lrow[data-lib="laptop"]'); row.dataset.mm = on ? '1' : '';
+    $$('[data-when]', row).forEach(n => { n.hidden = (n.dataset.when === 'mm') !== on; });
+  }
+  function setCause(c) {
+    cause = c; setMismatch(c === 'mm');
+    const map = { nc: ['archive', 'Archive 2019'], nf: ['oldtest', 'Old Test Library'], mm: ['laptop', 'Laptop Subset'] };
+    select(map[c][0]); $('#co-title').textContent = '“' + map[c][1] + '” can’t be opened';
+    $$('#co-seg button').forEach(b => b.classList.toggle('on', b.dataset.co === c));
+  }
+  $$('.lrow[data-lib]').forEach(r => {
+    r.addEventListener('click', () => select(r.dataset.lib));
+    r.addEventListener('dblclick', e => { if (e.target.closest('.btn')) return; select(r.dataset.lib); if (!$('#open-btn').disabled) setState('loading'); });
+  });
+  $('#open-btn').addEventListener('click', () => setState('loading'));
+  $$('#co-seg button').forEach(b => b.addEventListener('click', () => setCause(b.dataset.co)));
+  $$('[data-try]').forEach(b => b.addEventListener('click', () => { select('archive'); $('#try-msg').hidden = false; }));
+  $$('[data-remove]').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); const id = b.dataset.remove; $$('.lrow[data-lib="' + id + '"], [data-lx="' + id + '"]').forEach(n => n.remove()); select('main'); }));
+  $('#drop-hint').addEventListener('click', () => { const on = $('#liblist').classList.toggle('dropping'); $('#drop-msg').hidden = !on; });
+
+  /* ── S-ADOPT phases ── */
+  function adopt(step, phase) {
+    clearTimeout(adTimer); pane('ad', step);
+    $$('#ad-seg button').forEach(b => b.classList.toggle('on', b.dataset.ad === step));
+    if (step !== 'run') return;
+    const p = phase || 1;
+    $$('.phase').forEach(n => { const k = +n.dataset.ph; n.classList.toggle('done', k < p); n.classList.toggle('run', k === p); });
+    adTimer = setTimeout(() => (p < 3 ? adopt('run', p + 1) : adopt('ok')), 1400);
+  }
+  $('#ad-create').addEventListener('click', () => adopt('run'));
+  $('#ad-retry').addEventListener('click', () => adopt('run'));
+  $$('#ad-seg button').forEach(b => b.addEventListener('click', () => adopt(b.dataset.ad)));
+  $$('.phase').forEach(n => n.addEventListener('click', () => adopt('run', +n.dataset.ph)));
+
+  /* radios in sheets (framework toggles .check; make them exclusive) */
+  document.addEventListener('click', e => { const r = e.target.closest('.radio[data-name]'); if (!r) return; $$('.radio[data-name="' + r.dataset.name + '"]').forEach(x => x.classList.toggle('on', x === r)); });
+
+  /* ── states ── */
+  document.addEventListener('mlm:state', e => {
+    const s = e.detail; closeSheets(); clearTimeout(adTimer);
+    $('#win').classList.toggle('no-sidebar', !OPEN_LIB.includes(s));
+    if (s === 'cant-open') setCause(cause); else { setMismatch(false); if ($('.lrow[data-lib="main"]')) select('main'); }
+    if (s === 'picker-empty') { $('#open-btn').disabled = true; $('#open-why').textContent = ''; }
+    if (s === 'adopt') adopt('offer');
+    if (s === 'switch') $('#ld-name').textContent = 'Laptop Subset';
+    if (SHEET[s]) setTimeout(() => window.MLM && MLM.openSheet(SHEET[s]), 0);
+  });
+  function fromHash() { const h = decodeURIComponent(location.hash.slice(1)); if (h) setState(h); }
+  window.addEventListener('hashchange', fromHash);
+  document.addEventListener('mlm:ready', () => {
+    $('#skel').innerHTML = Array.from({ length: 18 }, (_, i) => '<tr class="skel">' + [58, 44, 40, 30, 0].map(w => '<td>' + (w ? '<span style="width:' + (w + (i * 13) % 30) + '%"></span>' : '') + '</td>').join('') + '</tr>').join('');
+    fromHash();
+  });
+})();
+</script>
+</body></html>

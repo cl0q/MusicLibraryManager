@@ -1,0 +1,30 @@
+V-SRC	merged	import.html	DEC-004: no Sources sidebar section. Accounts move to Settings > Sources (settings.html#sources); entry points are the Add menu (P-ADDMENU); source state and Reconnect appear in place in S-IMPORT step 1; the per-card Sync becomes Refresh from Sources (exhibit on import.html)
+W-REMOTE	merged	import.html	DEC-026: the separate import window is replaced by the S-IMPORT sheet (Source > Preview > Confirm); progress/result move to the playlist header (playlists.html#detail) and to Activity (DEC-044)
+V-REV	mocked	review.html	
+P-ACTIVITY	mocked	activity.html	DEC-005: bottom panel becomes toolbar Activity item + popover + Activity window; bottom strip kept as variant P-ACTIVITY/B
+P-ACTIVITY-OPS	mocked	activity.html	Popover (Running / Needs attention / Recent) and Operations tab of W-ACTIVITY
+P-ACTIVITY-LOGS	mocked	activity.html#logs	
+CM-LOGS-TEXT	mocked	activity.html#logs	System text menu plus two filter items; right-click the log text
+S-REV-UNDOTOAST	merged	review.html	DEC-016: floating undo toast replaced by the status-bar confirmation with Undo (working in the mockup)
+S-SRC-OAUTH	mocked	import.html	In place in S-IMPORT step 1 (Spotify > Reconnect), as sheet s-oauth from other Reconnect buttons, and as exhibit
+A-SRC-KEYCHAIN	mocked	import.html	System dialog shown as exhibit with MLM's context line; Deny maps to Sign-in expired - Reconnect
+A-OPS-CLEARQUEUE	mocked	activity.html	Reworded 'Clear 212 waiting analyses?'; opens from Clear Waiting... on the analysis row; static exhibit too
+K-REMOTE-DONE	merged	import.html	DEC-026: the window's Done toolbar button becomes the sheet's Cancel (Esc); element carries the ID in S-IMPORT step 1
+K-ACT-ESC	merged	activity.html	DEC-005: the hidden Esc button of the bottom panel is gone; Esc closes the popover (system), Option-Command-0 opens the Activity window (keyboard table on activity.html)
+K-LOGS-COPY	unchanged	activity.html#logs	Standard text-view Select All / Copy stays; a Copy button is added next to it
+D-LOGS-TEXTDRAG	unchanged	activity.html#logs	System drag of selected log text stays (text view unchanged); listed in the keyboard/drag table
+D-REMOTE-URL-DROP	pattern	patterns-dnd.html	DEC-018/DEC-040: a link dropped on the window or search field opens S-QUICKADD (track) or S-IMPORT step 2 (playlist); target sheets mocked on import.html
+D-REMOTE-PLAYLIST-TO-SIDEBAR	removed		DEC-026: the account playlist list now lives in a modal sheet (S-IMPORT step 1), so there is no sidebar to drag to; replaced by clicking the row (preview) and by dropping a playlist link on the window (D-REMOTE-URL-DROP)
+D-REV-TRACK-OUT	pattern	patterns-dnd.html	DEC-040: Review version rows are tracks and use the standard track drag payload (IDs + file URL); not mocked interactively on review.html
+P-ADDMENU	mocked	import.html	new screen ID (THOUGHTS 3.3)
+S-QUICKADD	mocked	import.html#quickadd	new screen ID (THOUGHTS 3.3)
+S-IMPORT	mocked	import.html	new screen ID (THOUGHTS 3.3)
+W-ACTIVITY	mocked	activity.html	new screen ID (THOUGHTS 3.3)
+P-ACTIVITY/B	mocked	activity.html	new: variant B exhibit (bottom strip), DEC-005 alternative
+CM-OPS-ROW	mocked	activity.html	new: context menu on operation rows (DEC-039)
+A-LOGS-CLEAR	mocked	activity.html#logs	new: confirmation for Clear... in Logs
+CM-REV-GROUP	mocked	review.html	new: context menu on duplicate/conflict group rows (DEC-039)
+CM-REV-VERSION	mocked	review.html	new: context menu on version rows (DEC-039)
+CM-REV-ALBUM	mocked	review.html#albums	new: context menu on album-suggestion rows (DEC-039)
+A-REV-APPLYALL	mocked	review.html	new: confirmation for Apply Recommended to All (DEC-028)
+A-REV-ALBBULK	mocked	review.html#albums	new: confirmation for Accept All Above 90 % (DEC-021)

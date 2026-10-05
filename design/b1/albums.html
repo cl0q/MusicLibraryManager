@@ -1,0 +1,478 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Albums — MLM B1</title>
+<link rel="stylesheet" href="assets/mlm.css"><script src="assets/app.js"></script>
+<style>
+  /* page-local helpers; existing variables only */
+  .card { cursor: default; }
+  .card .art.cov { height: auto; }
+  .card.sel .art { box-shadow: 0 0 0 3px var(--accent); }
+  #alb-scroll, #alb-tbl { outline: none; }
+  .footline { display: flex; align-items: center; gap: 8px; padding: 6px 20px; font-size: 12px; color: var(--text2); border-top: .5px solid var(--sep); flex: none; }
+  .dhead .art.cov { border-radius: 9px; }
+  .dhead .meta { display: flex; align-items: center; gap: 10px; margin-top: 5px; color: var(--text2); flex-wrap: wrap; }
+  .shelf h3 { margin: 22px 20px 2px; font-size: 13px; }
+  .shelf .grid { grid-template-columns: repeat(auto-fill, 150px); }
+  .hdl { color: var(--text3); cursor: grab; }
+  .skl { display: block; height: 9px; border-radius: 4px; background: var(--fill2); }
+  /* mlm.css gives .radio no box of its own (only .check has one) */
+  .radio { display: inline-flex; align-items: center; gap: 6px; } .radio::before { content: ""; width: 14px; height: 14px; background: var(--control); box-shadow: inset 0 0 0 .5px var(--sep-strong); flex: none; }
+</style></head>
+<body data-screen="V-ALB" data-title="Albums" data-nav="albums" data-home="grid" data-search-manual="1"
+      data-states="default,empty,loading,error" data-variants="A,B" data-variant-rec="A" data-variant-dec="DEC-020">
+
+<div class="note">
+  <h3>Albums (new) — Tier 1 · V-ALB grid → V-ALBD detail</h3>
+  <p><b>Grid:</b> click a cover to select it, ←↑↓→ to move, <kbd>Return</kbd> / double-click opens the album · right-click = album menu · <b>Sort</b> popup · scope bar <code>All · Complete · Incomplete · Compilations</code> · type in Search to filter in place (counts follow) · the footer line handles the tracks without an album. Open <b>“Low Season”</b> by Overmono for the full detail (editions, two discs, mixed states); any other card opens too — one by <i>Various Artists</i> shows the compilation layout with an Artist column.</p>
+  <p><b>Detail:</b> click a row, ↑/↓, <kbd>Space</kbd> = preview, <kbd>Return</kbd> / double-click = play (a “Not downloaded” row starts its download) · ⌘/⇧-click for several rows → selection bar · right-click a row · <b>Find</b> on a “Not in library” row · the edition picker <code>Standard edition</code> (variant A) or the edition strip (variant B, switch in the review bar) · <b>More ▸ Edit Order</b> (drag rows, Done / Cancel) · <b>More ▸ Edit Album Info…</b> and <b>Merge with Another Album…</b> · “Other versions” at the bottom · toolbar Back returns to the grid · Drive → Not connected.</p>
+  <p>The mockup shows 62 demo albums; the real grid will hold about 1,200 once the album clean-up has run. Decisions: DEC-013, DEC-019, DEC-020, DEC-021, DEC-039, DEC-040, DEC-041. Flow F-24.</p>
+</div>
+
+<div id="content">
+
+  <!-- ═════════ V-ALB · album grid ═════════ -->
+  <div class="view" data-view="grid" data-fb-id="V-ALB" data-fb-label="Albums (grid)" data-fb-note="New screen. Cover grid of every album that has two or more tracks or a known tracklist. Tracks without an album are not an album (footer line)." data-fb-dec="DEC-019" data-fb-api="NavigationStack root · ScrollView { LazyVGrid(columns: [GridItem(.adaptive(minimum: 150))]) }">
+
+    <div class="view" data-show="default">
+      <div class="vhead">
+        <h1 data-fb-id="V-ALB.N01" data-fb-label="View title" data-fb-note="Window title = Albums, subtitle = the open library." data-fb-dec="DEC-002" data-fb-api=".navigationTitle / .navigationSubtitle">Albums</h1>
+        <span class="sub" data-fb-id="W-MAIN.E01" data-fb-label="Library name (window subtitle)" data-fb-note="The open library is always named." data-fb-dec="DEC-031">Main Library</span>
+        <span class="grow"></span>
+        <span class="caption">Sort by</span>
+        <span class="popup" id="sort-popup" data-menu-click="m-sort" data-fb-id="V-ALB.N02" data-fb-label="Sort control" data-fb-note="Artist (then year), Title, Year (newest first), Recently Added. Lives in the view header, not in the toolbar, so the toolbar never changes shape. Also in View ▸ Sort By. Persisted per library." data-fb-dec="DEC-048" data-fb-api="Picker(.menu) bound to @SceneStorage sort order">Artist</span>
+      </div>
+      <div class="scopebar" data-fb-id="V-ALB.N03" data-fb-label="Scope bar" data-fb-note="All · Complete · Incomplete · Compilations with live counts that follow the search. “Incomplete” = the tracklist is known and at least one track is not in the library." data-fb-dec="DEC-019" data-fb-api="Picker(.segmented) / scope buttons in safeAreaInset(edge: .top)">
+        <button class="scope on" data-scope="all">All<span class="n" data-n="all"></span></button>
+        <button class="scope" data-scope="complete">Complete<span class="n" data-n="complete"></span></button>
+        <button class="scope" data-scope="incomplete">Incomplete<span class="n" data-n="incomplete"></span></button>
+        <button class="scope" data-scope="comp">Compilations<span class="n" data-n="comp"></span></button>
+      </div>
+      <div class="scroll" id="alb-scroll" tabindex="0" data-fb-id="V-ALB.N04" data-fb-label="Album grid" data-fb-note="Content, opaque — never glass. Lazy; covers come from the library file so they show while the drive is not connected. Click selects, Return / double-click opens, type-to-select by title. Cards are drag sources (album → sidebar playlist, sync profile, player/queue, Finder) and drop targets for an image (set cover)." data-fb-dec="DEC-040" data-fb-api="LazyVGrid + .focusable + .draggable(Album) + .dropDestination(for: Image.self)">
+        <div class="grid" id="alb-grid"></div>
+        <div class="empty" id="alb-none" hidden data-fb-id="V-ALB.N14" data-fb-label="No results" data-fb-note="Filtered-empty: system search variant plus one action that clears the filters." data-fb-api="ContentUnavailableView.search">
+          <i data-i="search" class="xl"></i><h2>No albums found</h2><p>No album matches the search and the selected scope.</p>
+          <div class="acts"><button class="btn" id="alb-clear">Clear Filters</button></div>
+        </div>
+      </div>
+      <div class="footline" data-fb-id="V-ALB.N08" data-fb-label="Tracks without an album (footer line)" data-fb-note="Tracks without an album are not shown as a fake album. One quiet line says how many there are and offers the two ways forward. “unknown album” and source names (SoundCloud, YouTube, Downloads…) count as no album." data-fb-dec="DEC-021" data-fb-api="safeAreaInset(edge: .bottom) { HStack }">
+        <span>6,341 tracks have no album</span>
+        <a class="btn plain" href="library.html" data-fb-id="V-ALB.N09" data-fb-label="Show" data-fb-note="Opens All Tracks filtered by the token is: no album." data-fb-dec="DEC-013">Show</a>
+        <a class="btn plain" href="review.html#albums" data-fb-id="V-ALB.N10" data-fb-label="Find Albums…" data-fb-note="Opens Review ▸ Albums, where album suggestions for these tracks are accepted or rejected." data-fb-dec="DEC-021">Find Albums…</a>
+      </div>
+    </div>
+
+    <div class="empty" data-show="empty" data-fb-id="V-ALB.N11" data-fb-label="Empty: no albums" data-fb-note="One sentence and the action that fills it. In a library where no track has album information, the way forward is Review ▸ Albums." data-fb-dec="DEC-021" data-fb-api="ContentUnavailableView">
+      <i data-i="album" class="xl"></i><h2>No albums yet</h2>
+      <p>Albums appear when tracks carry album information. 6,341 tracks in this library have no album.</p>
+      <div class="acts"><a class="btn lg primary" href="review.html#albums">Find Albums…</a><a class="btn lg" href="import.html">Import Files or Folder…</a></div>
+    </div>
+
+    <div class="view" data-show="loading" data-fb-id="V-ALB.N12" data-fb-label="First load" data-fb-note="Only the very first load shows placeholder cards. Later refreshes keep the grid and show a small spinner in the status bar." data-fb-api=".redacted(reason: .placeholder)">
+      <div class="vhead"><h1>Albums</h1><span class="sub">Main Library</span></div>
+      <div class="scopebar"><button class="scope on">All</button><button class="scope">Complete</button><button class="scope">Incomplete</button><button class="scope">Compilations</button></div>
+      <div class="scroll"><div class="grid" id="alb-skel"></div></div>
+    </div>
+
+    <div class="empty" data-show="error" data-fb-id="V-ALB.N13" data-fb-label="Load error" data-fb-note="Plain-language cause and one action; raw text behind Details; link to the log lines.">
+      <i data-i="warn" class="xl"></i><h2>Can’t load the albums</h2>
+      <p>The library database didn’t answer. Your music and your library file are not affected.</p>
+      <div class="acts"><button class="btn lg primary">Try Again</button><a class="btn lg" href="activity.html#logs">Show Logs</a></div>
+      <p class="caption" style="margin-top:8px">▸ Details</p>
+    </div>
+  </div>
+
+  <!-- ═════════ V-ALBD · album detail ═════════ -->
+  <div class="view" data-view="detail" hidden data-fb-id="V-ALBD" data-fb-label="Album detail" data-fb-note="New screen, pushed from the grid (Back / ⌘[ returns). Header, one status sentence when the album is not complete, fixed-order track list grouped by disc, other versions." data-fb-dec="DEC-019" data-fb-api="NavigationStack destination · Table inside a ScrollView-free VStack">
+
+    <div class="dhead" data-fb-id="V-ALBD.N01" data-fb-label="Album header" data-fb-note="Same header pattern as the playlist detail: cover, kind, title, facts, Play / Shuffle / More. On macOS 26 the cover artwork may extend softly under the sidebar; the header itself is opaque content." data-fb-dec="DEC-022" data-fb-api="HStack header; macOS 26: .backgroundExtensionEffect() on the artwork, macOS 15: plain">
+      <span class="art cov c2" id="d-art" data-fb-id="V-ALBD.N02" data-fb-label="Cover (drop target)" data-fb-note="160 pt. Drop an image from Finder or a browser to set the cover; click shows it large. More ▸ Choose Cover… is the same without drag." data-fb-dec="DEC-040" data-fb-api=".dropDestination(for: Image.self) + popover"></span>
+      <div class="grow" style="min-width:0">
+        <div class="kind" id="d-kind" data-fb-id="V-ALBD.N03" data-fb-label="Kind line" data-fb-note="“Album” or “Compilation”. Says what you are looking at, as in the playlist header.">Album</div>
+        <h1 class="trunc" id="d-title" data-fb-id="V-ALBD.N04" data-fb-label="Album title" data-fb-note="Not editable in place — More ▸ Edit Album Info… edits title, album artist, year, genre and the compilation flag together.">Low Season</h1>
+        <div style="margin-top:2px"><a id="d-artist" href="library.html" data-fb-id="V-ALBD.N05" data-fb-label="Album artist" data-fb-note="Link = Go to Artist (All Tracks filtered by artist: ‹name›). Compilations show “Various Artists” as plain text." data-fb-dec="DEC-039">Overmono</a></div>
+        <div class="meta">
+          <span class="num" id="d-meta" data-fb-id="V-ALBD.N06" data-fb-label="Facts line" data-fb-note="Year · genre · track count · duration of the shown edition. Counts the album’s tracklist, not only the tracks in the library.">2019 · Techno · 12 tracks · 58 min</span>
+          <span id="ed-a-wrap"><span data-variant="A">
+            <span class="popup" id="ed-popup" data-menu-click="m-edition" data-fb-id="V-ALBD.N07" data-fb-label="Edition picker (variant A, recommended)" data-fb-note="Shown only when the album has more than one edition. Lists the editions with year, track count and how many tracks are in the library; the check marks the preferred edition. Choosing one shows it and makes it preferred (user_album_variant_pref) — undoable. Scales from 2 to 6 editions without taking header space." data-fb-dec="DEC-020" data-fb-api="Menu / Picker(.menu) in the header subtitle">Standard edition</span>
+          </span></span>
+        </div>
+        <div class="caption drive-off" hidden style="margin-top:6px" data-fb-id="V-ALBD.N25" data-fb-label="Offline line" data-fb-note="Screen-specific echo of the window banner: Play and Shuffle are disabled with the reason. Browsing, editing info, order and editions all keep working." data-fb-dec="DEC-014">Play and Shuffle are paused — “Lexxar” is not connected.</div>
+        <div class="acts">
+          <button class="btn lg primary" id="d-play" data-fb-id="V-ALBD.N10" data-fb-label="Play" data-fb-note="Plays the album in its own order from track 1; tracks that are not downloaded or not in the library are skipped and the status bar says so. Always shown; disabled with a reason instead of hidden." data-fb-dec="DEC-045" data-fb-api="Button(.borderedProminent)"><i data-i="play" class="s"></i>Play</button>
+          <button class="btn lg" id="d-shuffle" data-fb-id="V-ALBD.N11" data-fb-label="Shuffle" data-fb-api="Button(.bordered)"><i data-i="shuffle" class="s"></i>Shuffle</button>
+          <button class="btn lg" data-menu-click="m-album-more" data-fb-id="V-ALBD.N12" data-fb-label="More" data-fb-note="Everything else, in the one menu order used by every context and More menu." data-fb-dec="DEC-039" data-fb-api="Menu { } label: Image(systemName: &quot;ellipsis&quot;)"><i data-i="more" class="s"></i>More</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="ed-b-wrap"><div data-variant="B" class="scopebar" style="padding-top:0" data-fb-id="V-ALBD.N09" data-fb-label="Edition strip (variant B)" data-fb-note="Alternative to the picker: all editions as a segmented control under the header. Every edition is visible at once, but it costs a row and stops fitting at four or more editions — the reason A is recommended." data-fb-dec="DEC-020" data-fb-api="Picker(.segmented)">
+      <div class="seg" id="ed-seg"><button class="on" data-ed="standard">Standard edition · 2019</button><button data-ed="deluxe">Deluxe edition · 2020</button><button data-ed="remaster">2021 Remaster</button></div>
+      <span class="caption" id="ed-pref">Preferred edition: Standard edition</span>
+    </div></div>
+
+    <div class="statusline" id="d-status" data-fb-id="V-ALBD.N13" data-fb-label="Status line (only when not complete)" data-fb-note="One sentence at album level instead of a hint on every row: how many tracks of the tracklist are not in the library, not downloaded or failed, with the one batch action. Hidden for a complete album." data-fb-dec="DEC-023" data-fb-api="HStack in safeAreaInset(edge: .top)">
+      <span id="d-status-txt">Incomplete · 2 of 12 not in library</span><span class="grow"></span>
+      <button class="btn" id="d-dl">Download 2 Missing</button>
+    </div>
+
+    <div class="banner info" id="edit-bar" hidden data-fb-id="V-ALBD.N23" data-fb-label="Edit Order bar" data-fb-note="Mode entered from More ▸ Edit Order, for albums whose track numbers are missing or wrong. Rows show a drag handle; drag (or ⌥↑ / ⌥↓) moves a row, also across discs. Numbers follow the new order per disc. Done saves one undo step, Cancel (Esc) restores. The order is stored in the library (album_tracks); files are not renamed." data-fb-dec="DEC-019" data-fb-api="Table rows with .draggable + .dropDestination (or List.onMove) while editMode is active">
+      <i data-i="lines"></i><span><b>Edit Order.</b> Drag rows to reorder. Tracks are renumbered 1, 2, 3… within each disc. Files are not renamed.</span>
+      <span class="act"><button class="btn" id="edit-cancel">Cancel</button><button class="btn primary" id="edit-done">Done</button></span>
+    </div>
+
+    <div class="table" id="alb-tbl" tabindex="0" data-fb-id="V-ALBD.N14" data-fb-label="Track list (fixed album order)" data-fb-note="Disc and track order are the album’s own order (album_tracks.disc / position, seeded from file tags). The headers are labels only: there is no sorting here, because a sorted album is no longer the album — to sort these tracks use All Tracks (Album column link). Selection, Space, Return, ⌘I, drag and the context menu behave exactly as in every other track list." data-fb-dec="DEC-019" data-fb-api="Table(selection: Set<Track.ID>) without sortOrder; Section per disc; contextMenu(forSelectionType:menu:primaryAction:)">
+      <table id="alb-table"></table>
+      <div id="shelf-wrap"><div class="shelf" data-variant="A" data-fb-id="V-ALBD.N22" data-fb-label="Other versions shelf" data-fb-note="The other editions of this album as cards (cover, name, year, how much of it is in the library). Click shows that edition. Part of variant A; in variant B the strip already shows them." data-fb-dec="DEC-020" data-fb-api="ScrollView(.horizontal) { LazyHStack }">
+        <h3>Other versions</h3>
+        <div class="grid" id="shelf"></div>
+      </div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════ menus ═════════ -->
+<div class="menu" id="m-sort" hidden data-fb-id="V-ALB.N15" data-fb-label="Sort menu" data-fb-note="One choice, checked. “Recently Added” = newest album first." data-fb-api="Picker(.menu)">
+  <div class="mi hdr">Sort By</div>
+  <a class="mi chk" data-sort="artist">Artist</a><a class="mi nochk" data-sort="title">Title</a><a class="mi nochk" data-sort="year">Year</a><a class="mi nochk" data-sort="added">Recently Added</a>
+</div>
+
+<div class="menu" id="cm-album" hidden data-fb-id="CM-ALB-CARD" data-fb-label="Album card context menu" data-fb-note="Same group order as every context menu: Primary · Queue · Add to · Info · Fix · Locate · Remove. Groups that don’t apply disappear (no Download line for a fully downloaded album)." data-fb-dec="DEC-039" data-fb-api="contextMenu(forSelectionType: Album.ID.self, menu:, primaryAction:)">
+  <a class="mi" data-alb-act="play" data-fb-id="CM-ALB-CARD.N01" data-fb-label="Play"><i data-i="play"></i>Play</a><hr>
+  <a class="mi" data-alb-say="Playing next: {t}" data-fb-id="CM-ALB-CARD.N02" data-fb-label="Play Next">Play Next</a><a class="mi" data-alb-say="Added {t} to the queue" data-fb-id="CM-ALB-CARD.N03" data-fb-label="Add to Queue">Add to Queue</a><hr>
+  <a class="mi sub" data-fb-id="CM-ALB-CARD.N04" data-fb-label="Add to Playlist ▸">Add to Playlist</a><a class="mi sub" data-fb-id="CM-ALB-CARD.N05" data-fb-label="Add to Sync Profile ▸">Add to Sync Profile</a><hr>
+  <a class="mi" data-open="s-alb-edit" data-fb-id="CM-ALB-CARD.N06" data-fb-label="Get Info" data-fb-note="Opens the album info sheet (S-ALB-EDIT).">Get Info</a><a class="mi" href="library.html" data-fb-id="CM-ALB-CARD.N07" data-fb-label="Go to Artist">Go to Artist</a>
+  <span id="cm-alb-dl-wrap"><hr><a class="mi" id="cm-alb-dl" data-alb-say="Download started — {t}" data-fb-id="CM-ALB-CARD.N08" data-fb-label="Download n Missing" data-fb-note="Only when tracks of the album are not downloaded or failed; n is in the label."><i data-i="download"></i>Download 2 Missing</a></span><hr>
+  <a class="mi" data-fb-id="CM-ALB-CARD.N09" data-fb-label="Show in Finder" data-fb-note="Reveals the album’s folder (or its files when they sit in several folders). Disabled with the reason while the drive is not connected.">Show in Finder</a><hr>
+  <a class="mi destr" data-open="a-alb-remove" data-fb-id="CM-ALB-CARD.N10" data-fb-label="Remove from Library…">Remove from Library…</a>
+</div>
+
+<div class="menu" id="m-album-more" hidden data-fb-id="CM-ALBD-MORE" data-fb-label="Album More menu" data-fb-note="Same order rule as the context menus. Play and Shuffle are buttons in the header, so the menu starts with the Queue group." data-fb-dec="DEC-039" data-fb-api="Menu">
+  <a class="mi" data-alb-say="Playing next: {t}">Play Next</a><a class="mi" data-alb-say="Added {t} to the queue">Add to Queue</a><hr>
+  <a class="mi sub">Add to Playlist</a><a class="mi sub">Add to Sync Profile</a><hr>
+  <a class="mi" data-open="s-alb-edit" data-fb-id="CM-ALBD-MORE.N01" data-fb-label="Edit Album Info…" data-fb-note="The album’s Get Info: title, album artist, year, genre, compilation, cover."><i data-i="pencil"></i>Edit Album Info…</a>
+  <a class="mi" id="mi-cover" data-fb-id="CM-ALBD-MORE.N02" data-fb-label="Choose Cover…" data-fb-note="System file dialog for an image; the same as dropping an image on the cover." data-fb-api=".fileImporter(allowedContentTypes: [.image])"><i data-i="photo"></i>Choose Cover…</a>
+  <a class="mi" id="mi-edit-order" data-fb-id="CM-ALBD-MORE.N03" data-fb-label="Edit Order" data-fb-note="Enters the reorder mode of the track list." data-fb-dec="DEC-019"><i data-i="lines"></i>Edit Order</a>
+  <a class="mi" data-open="s-alb-merge" data-fb-id="CM-ALBD-MORE.N04" data-fb-label="Merge with Another Album…" data-fb-note="For the same album stored twice (spelling, source) or for declaring another album an edition of this one."><i data-i="link"></i>Merge with Another Album…</a>
+  <span id="more-dl-wrap"><hr><a class="mi" id="more-dl" data-fb-id="CM-ALBD-MORE.N05" data-fb-label="Download n Missing"><i data-i="download"></i>Download 2 Missing</a></span><hr>
+  <a class="mi">Show in Finder</a><hr>
+  <a class="mi destr" data-open="a-alb-remove">Remove from Library…</a>
+</div>
+
+<div class="menu" id="m-edition" hidden data-fb-id="V-ALBD.N08" data-fb-label="Edition menu" data-fb-note="Check = preferred edition. Each line says how much of that edition is in the library, so choosing is informed." data-fb-dec="DEC-020" data-fb-api="Picker(.menu) / Menu with Toggle-style checkmarks">
+  <div class="mi hdr">Editions — the checked one is preferred</div>
+  <a class="mi chk" data-ed="standard">Standard edition (2019)<span class="k">10 of 12 in library</span></a>
+  <a class="mi nochk" data-ed="deluxe">Deluxe edition (2020)<span class="k">12 of 16 in library</span></a>
+  <a class="mi nochk" data-ed="remaster">2021 Remaster<span class="k">3 of 12 in library</span></a>
+</div>
+
+<div class="menu" id="cm-alb-absent" hidden data-fb-id="CM-ALBD-ABSENT" data-fb-label="Context menu of a “Not in library” row" data-fb-note="A track the album has but the library doesn’t can’t be played, queued or removed — the menu only offers ways to get it." data-fb-dec="DEC-039" data-fb-api="contextMenu">
+  <a class="mi" data-absent="find"><i data-i="search"></i>Find Online</a>
+  <a class="mi" data-absent="link"><i data-i="link"></i>Use a Track from the Library…</a><hr>
+  <a class="mi" data-absent="copy">Copy Title — Artist</a>
+</div>
+
+<!-- ═════════ sheets & alert ═════════ -->
+<div class="sheet" id="s-alb-edit" hidden data-fb-id="S-ALB-EDIT" data-fb-label="Edit Album Info sheet" data-fb-note="A short task with a beginning and an end, so it is a sheet. Edits apply to the album and to the album fields of its tracks in one undo step. File tags follow the “Write tags to files” setting and are queued while the drive is away." data-fb-dec="DEC-041" data-fb-api=".sheet { Form(.grouped) } with .dropDestination on the cover">
+  <div class="sh"><h2>Edit Album Info</h2><p class="caption" id="ae-sub" style="margin:4px 0 0">Applies to the album and its 10 tracks in the library.</p></div>
+  <div class="sb">
+    <div class="row gap16" style="align-items:flex-start;margin-top:6px">
+      <div class="col gap4" style="align-items:center;gap:6px">
+        <span class="cov c2" id="ae-art" style="width:104px;height:104px;border-radius:8px" data-fb-id="S-ALB-EDIT.N06" data-fb-label="Cover well" data-fb-note="Drop an image or use Choose…. A missing cover shows the neutral placeholder."></span>
+        <button class="btn">Choose…</button><span class="caption">or drop an image</span>
+      </div>
+      <div class="kv grow">
+        <label>Title</label><input class="field" id="ae-title" value="Low Season" data-fb-id="S-ALB-EDIT.N01" data-fb-label="Title">
+        <label>Album artist</label><input class="field" id="ae-artist" value="Overmono" data-fb-id="S-ALB-EDIT.N02" data-fb-label="Album artist">
+        <label>Year</label><input class="field" id="ae-year" value="2019" style="width:70px" data-fb-id="S-ALB-EDIT.N03" data-fb-label="Year">
+        <label>Genre</label><input class="field" id="ae-genre" value="Techno" data-fb-id="S-ALB-EDIT.N04" data-fb-label="Genre" data-fb-note="Completes from the existing genres so no new spelling variant is created.">
+        <label></label><span class="check" id="ae-comp" data-fb-id="S-ALB-EDIT.N05" data-fb-label="Compilation" data-fb-note="On: album artist becomes “Various Artists”, the track list shows an Artist column and the album appears under the Compilations scope.">Compilation of tracks by various artists</span>
+      </div>
+    </div>
+    <p class="ghelp" style="margin-top:14px">Saved to the library and, because “Write tags to files” is on in Settings ▸ Library, to the tags of the files. While “Lexxar” is not connected the tag changes wait in Activity.</p>
+  </div>
+  <div class="sf"><span class="left caption">One undo step (⌘Z)</span><button class="btn" data-close>Cancel</button><button class="btn primary" data-close id="ae-save">Save</button></div>
+</div>
+
+<div class="sheet" id="s-alb-merge" hidden data-fb-id="S-ALB-MERGE" data-fb-label="Merge with Another Album sheet" data-fb-note="Two outcomes, chosen explicitly: the other album is the same album (its tracks join this tracklist) or another edition (it appears in the edition picker). The consequence is stated in numbers before the button; the merge is one undo step." data-fb-dec="DEC-041" data-fb-api=".sheet { Form } + List(selection:) of candidates">
+  <div class="sh"><h2 id="am-title">Merge “Low Season” with Another Album</h2></div>
+  <div class="sb">
+    <input class="field" style="width:100%;margin:6px 0 10px" placeholder="Search albums" value="low season" data-fb-id="S-ALB-MERGE.N01" data-fb-label="Album search" data-fb-note="Prefilled with this album’s title; likely duplicates are listed first.">
+    <div class="group" data-fb-id="S-ALB-MERGE.N02" data-fb-label="Candidates" data-fb-note="One album can be chosen. Each line says what the candidate contains so the choice is informed.">
+      <div class="frow"><span class="radio on" data-name="cand"></span><span class="cov none" style="width:32px;height:32px"><i data-i="album" class="s"></i></span><div class="fl">low season<small>Overmono · no year · 3 tracks · linked to SoundCloud</small></div></div>
+      <div class="frow"><span class="radio" data-name="cand"></span><span class="cov c4" style="width:32px;height:32px"></span><div class="fl">Low Season (Deluxe)<small>Overmono · 2020 · 4 tracks</small></div></div>
+      <div class="frow"><span class="radio" data-name="cand"></span><span class="cov c6" style="width:32px;height:32px"></span><div class="fl">Low Season Remixes<small>Various Artists · 2020 · 6 tracks</small></div></div>
+    </div>
+    <p class="gtitle" style="margin-top:14px">The other album is</p>
+    <div class="group" data-fb-id="S-ALB-MERGE.N03" data-fb-label="Merge as" data-fb-note="Same album: tracklists are combined. Another edition: it stays an album of its own and is connected as an edition (variant_of).">
+      <div class="frow"><span class="radio on" data-name="as"></span><div class="fl">the same album<small>Its tracks join this tracklist; the other album disappears.</small></div></div>
+      <div class="frow"><span class="radio" data-name="as"></span><div class="fl">another edition of this album<small>It stays separate and appears in the edition picker and under Other versions.</small></div></div>
+    </div>
+    <p class="ghelp" style="margin-top:12px" data-fb-id="S-ALB-MERGE.N04" data-fb-label="Consequence text" data-fb-note="Numbers first. Possible duplicates are not decided silently — they go to Review.">3 tracks move to “Low Season”. 1 of them looks like a track that is already here (“Clipper”) and will be listed in Review ▸ Duplicates. “low season” is removed from Albums. Track order is not changed. You can undo the merge.</p>
+  </div>
+  <div class="sf"><button class="btn" data-close>Cancel</button><button class="btn primary" data-close id="am-go">Merge Albums</button></div>
+</div>
+
+<div class="alert" id="a-alb-remove" hidden data-fb-id="A-ALB-REMOVE" data-fb-label="Remove album from Library confirmation" data-fb-note="Same pattern as A-TRACK-REMOVE: the question in the title, the consequence in numbers, destructive role. Not undoable, therefore confirmed." data-fb-dec="DEC-041" data-fb-api=".confirmationDialog / .alert with role: .destructive">
+  <div class="aic"><i data-i="trash" class="l"></i></div>
+  <h2 id="ar-title">Remove “Low Season” from the library?</h2>
+  <p id="ar-text">Its 10 tracks are removed from the library, from 3 playlists and 1 sync profile, and their files move to the Trash. You can put the files back from the Trash.</p>
+  <div class="ab"><button class="btn destructive" data-close>Move to Trash</button><button class="btn" data-close>Cancel</button></div>
+</div>
+
+<script>
+document.addEventListener('mlm:ready', () => {
+  const $ = (s, r) => (r || document).querySelector(s), $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const esc = MLM.esc, ic = MLM.icon, nf = n => n.toLocaleString('en-US');
+  const setDef = h => { const d = $('.statusbar .def'); if (d) d.innerHTML = h; };
+
+  /* Workaround (framework gap): app.js matches <html data-drive> for every otherwise unhandled click, so plain menu items and outside clicks never close an open menu. */
+  document.addEventListener('click', e => { if (e.target.closest('[data-menu-click],[data-popover]')) return; if (e.target.closest('.menu .mi') || !e.target.closest('.menu,.popover')) document.querySelectorAll('.menu.open,.popover.open').forEach(m => { m.classList.remove('open'); m.hidden = true; }); });
+
+  /* ───── demo albums: [title, artist, year, genre, tracks, in library, flags] · flags: f featured, c compilation, x no artwork ───── */
+  const A = [
+    ['Low Season', 'Overmono', 2019, 'Techno', 12, 10, 'f'], ['Good Lies', 'Overmono', 2023, 'UK Garage', 12], ['Compro', 'Skee Mask', 2018, 'Techno', 12], ['Pool', 'Skee Mask', 2021, 'Breaks', 18, 15],
+    ['Knock Knock', 'DJ Koze', 2018, 'House', 16], ['Amygdala', 'DJ Koze', 2013, 'House', 13, 13, 'x'], ['Arpo', 'Call Super', 2017, 'Techno', 9], ['Suzi Ecto', 'Call Super', 2014, 'Techno', 10, 7],
+    ['Cocoon Crush', 'Objekt', 2018, 'Electro', 11], ['Flatland', 'Objekt', 2014, 'Electro', 11], ['Opal', 'Batu', 2022, 'Techno', 10], ['Tangerine', 'Shanti Celeste', 2019, 'House', 11],
+    ['Crush', 'Floating Points', 2019, 'IDM', 12], ['Elaenia', 'Floating Points', 2015, 'IDM', 7], ['Promises', 'Floating Points, Pharoah Sanders & The London Symphony Orchestra', 2021, 'Ambient', 9],
+    ['Sixteen Oceans', 'Four Tet', 2020, 'Downtempo', 16], ['New Energy', 'Four Tet', 2017, 'Downtempo', 14, 12], ['There Is Love in You', 'Four Tet', 2010, 'House', 9],
+    ['Untrue', 'Burial', 2007, 'UK Garage', 13], ['Burial', 'Burial', 2006, 'UK Garage', 12, 12, 'x'], ['I Hear You', 'Peggy Gou', 2024, 'House', 10], ['Stochastic Drift', 'Barker', 2025, 'Techno', 9],
+    ['Utility', 'Barker', 2019, 'Techno', 9], ['Changes in Air', 'Pangaea', 2023, 'Techno', 8], ['still slipping vol. 1', 'Joy Orbison', 2021, 'UK Garage', 14], ['Tread', 'Ross From Friends', 2021, 'House', 12],
+    ['Family Portrait', 'Ross From Friends', 2018, 'House', 12, 9], ['Rare, Forever', 'Leon Vynehall', 2021, 'House', 10], ['Nothing Is Still', 'Leon Vynehall', 2018, 'Ambient', 10], ['& the Charm', 'Avalon Emerson', 2023, 'Downtempo', 9],
+    ['Isles', 'Bicep', 2021, 'Breaks', 10], ['Bicep', 'Bicep', 2017, 'House', 12], ['Mas Amable', 'DJ Python', 2020, 'Deep House', 8], ['Raven', 'Kelela', 2023, 'Downtempo', 15, 15, 'x'],
+    ['Suddenly', 'Caribou', 2020, 'Downtempo', 12], ['Swim', 'Caribou', 2010, 'House', 9], ['Cherry', 'Daphni', 2022, 'House', 14, 11], ['In Colour', 'Jamie xx', 2015, 'UK Garage', 11],
+    ['In Waves', 'Jamie xx', 2024, 'House', 12], ['Selected Ambient Works 85–92', 'Aphex Twin', 1992, 'Ambient', 13], ['Syro', 'Aphex Twin', 2014, 'IDM', 12], ['Music Has the Right to Children', 'Boards of Canada', 1998, 'IDM', 17],
+    ['Geogaddi', 'Boards of Canada', 2002, 'IDM', 23, 20], ['Karma & Desire', 'Actress', 2020, 'IDM', 17], ['Dust', 'Laurel Halo', 2017, 'IDM', 11], ['Reality Testing', 'Lone', 2014, 'House', 12],
+    ['Galaxy Garden', 'Lone', 2012, 'Breaks', 12, 12, 'x'], ['Moodymann', 'Moodymann', 2014, 'House', 27, 19], ['American Intelligence', 'Theo Parrish', 2014, 'House', 15], ['Between Two Selves', 'Octo Octa', 2017, 'House', 9],
+    ['Modern Warfare (EPs 1–3)', 'Roza Terenzi', 2020, 'Electro', 12], ['Quivering in Time', 'Eris Drew', 2021, 'House', 9], ['Unlit Signals', 'Ploy', 2020, 'Techno', 9], ['Shadows in Blue', 'Hodge', 2020, 'Techno', 11],
+    ['2 Alivë', 'Yeat', 2022, 'Hip-Hop', 20], ['Lyfë', 'Yeat', 2022, 'Hip-Hop', 12, 8], ['fabric presents Overmono', 'Various Artists', 2021, 'Techno', 26, 21, 'c'], ['DJ-Kicks: Avalon Emerson', 'Various Artists', 2020, 'House', 20, 20, 'c'],
+    ['Dekmantel 10 Years 01–10', 'Various Artists', 2017, 'Techno', 31, 24, 'c'], ['Late Night Tales: Floating Points', 'Various Artists', 2019, 'Downtempo', 19, 19, 'c'], ['Livity Sound Remixes', 'Various Artists', null, 'Breaks', 10, 10, 'cx'], ['Ilian Tape 10 Years (ITLP10)', 'Various Artists', 2017, 'Techno', 14, 14, 'c']
+  ].map((a, i) => { const f = a[6] || ''; return { i, title: a[0], artist: a[1], year: a[2], genre: a[3], n: a[4], have: a[5] == null ? a[4] : a[5], feat: f.includes('f'), comp: f.includes('c'), noart: f.includes('x'), dl: i === 0 ? 2 : (i % 9 === 4 ? 1 + (i % 3) : 0), added: i === 0 ? 99 : (i * 37) % 61, c: i === 0 ? 2 : 1 + (i * 5) % 6 }; });
+
+  /* ═════════ grid ═════════ */
+  const grid = $('#alb-grid'), scroller = $('#alb-scroll');
+  let sortKey = 'artist', scope = 'all', q = [], selAlb = null, curView = $('[data-view="detail"]').hidden ? 'grid' : 'detail', shown = [];
+  const sorters = {
+    artist: (a, b) => a.artist.localeCompare(b.artist) || (a.year || 0) - (b.year || 0), title: (a, b) => a.title.localeCompare(b.title),
+    year: (a, b) => (b.year || 0) - (a.year || 0) || a.title.localeCompare(b.title), added: (a, b) => b.added - a.added
+  };
+  const inScope = (a, s) => s === 'all' || (s === 'complete' && a.have === a.n) || (s === 'incomplete' && a.have < a.n) || (s === 'comp' && a.comp);
+  const matches = a => q.every(w => (a.title + ' ' + a.artist + ' ' + (a.year || '') + ' ' + a.genre).toLowerCase().includes(w));
+  function card(a, first) {
+    const fb = (id, label, note) => ' data-fb-id="' + id + '" data-fb-label="' + label + '" data-fb-note="' + note + '"';
+    const line = (a.year ? a.year + ' · ' : '') + (a.have < a.n ? 'Incomplete · ' + a.have + ' of ' + a.n : a.n + ' tracks');
+    return '<div class="card' + (selAlb === a ? ' sel' : '') + '" data-idx="' + a.i + '" data-menu="cm-album" draggable="true"' + (first.card ? fb('V-ALB.N05', 'Album card', 'Cover, title, album artist, and one line of facts: year and track count — or the word Incomplete with how many tracks are in the library. No badges, no colour codes.') + ' data-fb-dec="DEC-043" data-fb-api="Button-less grid cell: Image + Text; .draggable(album)"' : '') + '>' +
+      '<span class="art cov ' + (a.noart ? 'none' : 'c' + a.c) + '"' + (a.noart && first.noart ? fb('V-ALB.N07', 'Missing artwork placeholder', 'Neutral system placeholder; drop an image on it to set the cover. Maintenance can fetch missing artwork in bulk.') : '') + '>' + (a.noart ? ic('album', 'xl') : '') + '</span>' +
+      '<span class="nm" title="' + esc(a.title) + '">' + esc(a.title) + '</span><span class="sb" title="' + esc(a.artist) + '">' + esc(a.artist) + '</span>' +
+      '<span class="sb num"' + (a.have < a.n && first.inc ? fb('V-ALB.N06', 'Incomplete, in words', 'An incomplete album says so in text with n of m. The detail view names the missing tracks.') + ' data-fb-dec="DEC-023"' : '') + '>' + line + '</span></div>';
+  }
+  function drawGrid() {
+    const base = A.filter(matches);
+    $$('[data-n]').forEach(n => { n.textContent = nf(base.filter(a => inScope(a, n.dataset.n)).length); });
+    shown = base.filter(a => inScope(a, scope)).sort(sorters[sortKey]);
+    const first = { card: true, noart: true, inc: true };
+    grid.innerHTML = shown.map(a => { const h = card(a, first); first.card = false; if (a.noart) first.noart = false; if (a.have < a.n) first.inc = false; return h; }).join('');
+    grid.hidden = !shown.length; $('#alb-none').hidden = !!shown.length;
+    gridStatus(); MLM.refreshBadges();
+  }
+  function gridStatus() {
+    if (curView !== 'grid') return;
+    if (selAlb && shown.includes(selAlb)) setDef('“' + esc(selAlb.title) + '” — ' + esc(selAlb.artist) + ' · ' + selAlb.n + ' tracks' + (selAlb.have < selAlb.n ? ' · ' + selAlb.have + ' in library' : ''));
+    else setDef(nf(shown.length) + ' albums · ' + nf(shown.reduce((s, a) => s + a.have, 0)) + ' tracks' + (q.length || scope !== 'all' ? ' · filtered' : ''));
+  }
+  function selectAlb(a) { selAlb = a; $$('.card', grid).forEach(c => c.classList.toggle('sel', !!a && +c.dataset.idx === a.i)); gridStatus(); const c = a && $('.card.sel', grid); if (c && c.scrollIntoView) c.scrollIntoView({ block: 'nearest' }); }
+  const albOf = node => { const c = node.closest('.card[data-idx]'); return c && grid.contains(c) ? A[+c.dataset.idx] : null; };
+  grid.addEventListener('mousedown', e => { const a = albOf(e.target); if (a) selectAlb(a); });
+  grid.addEventListener('dblclick', e => { const a = albOf(e.target); if (a) openAlbum(a); });
+  grid.addEventListener('contextmenu', e => { const a = albOf(e.target); if (a) { selectAlb(a); prepMenus(a); } });
+  scroller.addEventListener('mousedown', e => { if (!albOf(e.target) && !e.target.closest('.btn')) selectAlb(null); });
+  scroller.addEventListener('keydown', e => {
+    const cards = $$('.card', grid); if (!cards.length) return;
+    let i = selAlb ? shown.indexOf(selAlb) : -1;
+    const cols = cards.filter(c => c.offsetTop === cards[0].offsetTop).length || 1;
+    if (e.key === 'ArrowRight') i++; else if (e.key === 'ArrowLeft') i--; else if (e.key === 'ArrowDown') i += i < 0 ? 1 : cols; else if (e.key === 'ArrowUp') i -= cols;
+    else if (e.key === 'Enter' && selAlb) { e.preventDefault(); return openAlbum(selAlb); }
+    else if (e.key === 'Escape') return selectAlb(null); else return;
+    e.preventDefault(); selectAlb(shown[Math.max(0, Math.min(shown.length - 1, i))]);
+  });
+  document.addEventListener('mlm:scope', e => { if (e.target.dataset.scope) { scope = e.target.dataset.scope; drawGrid(); } });
+  $('#alb-clear').addEventListener('click', () => { q = []; const s = $('.search'); if (s) s.value = ''; scope = 'all'; $$('.scope[data-scope]').forEach(b => b.classList.toggle('on', b.dataset.scope === 'all')); drawGrid(); });
+  $('#m-sort').addEventListener('click', e => { const m = e.target.closest('[data-sort]'); if (!m) return; sortKey = m.dataset.sort; $$('[data-sort]').forEach(x => { x.classList.toggle('chk', x === m); x.classList.toggle('nochk', x !== m); }); $('#sort-popup').textContent = m.textContent; drawGrid(); });
+  $('#alb-skel').innerHTML = Array.from({ length: 21 }, (_, i) => '<div class="card"><span class="art cov none"></span><span class="skl" style="width:' + (55 + (i * 17) % 40) + '%"></span><span class="skl" style="width:' + (35 + (i * 11) % 30) + '%"></span></div>').join('');
+
+  /* ═════════ detail ═════════ */
+  const FEAT = [[1, 1, 'Arla Fen', 252, 'local'], [1, 2, 'So U Kno (Album Version)', 302, 'local'], [1, 3, 'Clipper', 278, 'local'], [1, 4, 'Daisy Chain (Another World)', 320, 'notdl'], [1, 5, 'Verbosa', 231, 'local'], [1, 6, 'If U Ever (Low Season Interlude)', 134, 'notinlib'],
+    [2, 1, 'BMW Track', 344, 'local'], [2, 2, 'Le Tigre — Live at Printworks, London, 23 November 2019 (Full Length Version)', 391, 'local'], [2, 3, 'Gunk', 297, 'failed'], [2, 4, 'Pieces of 8', 308, 'local'], [2, 5, 'Quadraluv (Reprise)', 206, 'notinlib'], [2, 6, 'Bone Mics', 417, 'local']];
+  const BONUS = [[3, 1, 'So U Kno (Edit)', 200, 'local'], [3, 2, 'Arla Fen (Joy Orbison Remix)', 362, 'local'], [3, 3, 'Clipper (Dub)', 311, 'notinlib'], [3, 4, 'Low Season (Demo)', 168, 'notinlib']];
+  const EDS = { standard: { name: 'Standard edition', year: 2019, long: 'Standard edition (2019)' }, deluxe: { name: 'Deluxe edition', year: 2020, long: 'Deluxe edition (2020)' }, remaster: { name: '2021 Remaster', year: 2021, long: '2021 Remaster' } };
+  const host = $('#alb-tbl'), tableEl = $('#alb-table');
+  let cur = A[0], ed = 'standard', pref = 'standard', rows = [], sel = new Set(), anchor = -1, editing = false, snapshot = null, dragId = null;
+
+  function tracksFor(a, e) {
+    let list;
+    if (a.feat) {
+      list = FEAT.concat(e === 'deluxe' ? BONUS : []).map(f => ({ disc: f[0], num: f[1], title: f[2], time: f[3], status: f[4], artist: a.artist }));
+      if (e === 'remaster') list.forEach((t, i) => { t.status = i < 3 ? 'local' : 'notinlib'; });
+    } else {
+      const g = MLM.tracks(a.n, 100 + a.i, { allLocal: true }), half = Math.ceil(a.n / 2), two = a.n > 16, gone = new Set();
+      for (let k = 0; gone.size < a.n - a.have && k < a.n * 6; k++) gone.add((k * 5 + 3 + a.i) % a.n);
+      let dl = a.dl;
+      list = g.map((t, i) => ({ disc: two && i >= half ? 2 : 1, num: two && i >= half ? i - half + 1 : i + 1, title: t.title, time: t.time, artist: a.comp ? t.artist : a.artist, status: gone.has(i) ? 'notinlib' : (dl-- > 0 ? 'notdl' : 'local') }));
+    }
+    return list.map((t, i) => Object.assign({ id: 'alb' + a.i + '-' + e + '-' + i, album: a.title, genre: a.genre, year: e === 'standard' ? a.year : EDS[e].year, c: a.c, bpm: null, reason: 'Not available on SoundCloud any more', attempts: 1 }, t));
+  }
+  const selRows = () => rows.filter(t => sel.has(t.id));
+  const api = { el: host, opts: {}, draw: () => renderRows(), selection: selRows, view: () => rows, all: () => rows, setRows() {}, setFilter() {}, setCols() {}, select() {},
+    markPlaying(t) { rows.forEach(x => { x.playing = !!t && x.id === t.id; }); renderRows(); } };
+  MLM.tables.push(api); /* adapter: lets the shell's selection bar, player and Drive switch treat this hand-written list like a track table */
+  function emit() { host.dispatchEvent(new CustomEvent('mlm:select', { bubbles: true, detail: { rows: selRows(), total: rows, table: api } })); }
+
+  function renderRows() {
+    const comp = cur.comp, off = document.documentElement.dataset.drive === 'off', ncol = 4 + (comp ? 1 : 0) + (editing ? 1 : 0);
+    const vis = q.length && !editing ? rows.filter(t => q.every(w => (t.title + ' ' + t.artist).toLowerCase().includes(w))) : rows;
+    const discs = new Set(rows.map(t => t.disc)).size, pos = {};
+    let h = '<thead><tr>' + (editing ? '<th style="width:26px"></th>' : '') +
+      '<th class="r" style="width:40px" data-fb-id="V-ALBD.N16" data-fb-label="# column" data-fb-note="Track number within the disc. Header is a label, not a sort control." data-fb-api="TableColumn(&quot;#&quot;)">#</th>' +
+      '<th data-fb-id="V-ALBD.N17" data-fb-label="Title column" data-fb-note="No per-row cover: the album has one cover, in the header. The playing track is marked by accent colour and a speaker glyph in the # column." data-fb-api="TableColumn">Title</th>' +
+      (comp ? '<th style="width:190px" data-fb-id="V-ALBD.N18" data-fb-label="Artist column (compilations only)" data-fb-note="Hidden on a normal album, where every row would repeat the album artist." data-fb-api="TableColumn, included only when album.isCompilation">Artist</th>' : '') +
+      '<th class="r" style="width:56px" data-fb-id="V-ALBD.N19" data-fb-label="Time column" data-fb-api="TableColumn">Time</th>' +
+      '<th style="width:232px" data-fb-id="V-ALBD.N20" data-fb-label="Status column" data-fb-note="Words from the glossary: Not downloaded, Download failed, File missing — plus the album-only state Not in library. Empty for a local track; stays empty for local tracks while the drive is not connected (the banner speaks)." data-fb-dec="DEC-014" data-fb-api="TableColumn">Status</th></tr></thead><tbody>';
+    let last = null, fbG = true, fbA = true, fbF = true;
+    vis.forEach(t => {
+      if (discs > 1 && t.disc !== last) {
+        const dt = rows.filter(x => x.disc === t.disc);
+        h += '<tr class="group"' + (fbG ? ' data-fb-id="V-ALBD.N15" data-fb-label="Disc group row" data-fb-note="One group per disc, only when the album has more than one. Not selectable; shows the disc’s track count and duration." data-fb-api="Section(&quot;Disc 1&quot;) inside Table rows"' : '') + '><td colspan="' + ncol + '">Disc ' + t.disc + ' <span class="t3" style="font-weight:400">· ' + dt.length + ' tracks · ' + MLM.fmtDur(dt.reduce((s, x) => s + x.time, 0)) + '</span></td></tr>'; fbG = false;
+      }
+      last = t.disc; pos[t.disc] = (pos[t.disc] || 0) + 1;
+      const absent = t.status === 'notinlib', failed = t.status === 'failed';
+      let st = MLM.STATUS[t.status] || '';
+      if (absent) st = '<span class="status">Not in library</span> <button class="btn plain" data-find>Find</button>';
+      if (off && t.status === 'missing') st = '';
+      const fb = absent && fbA ? ' data-fb-id="V-ALBD.N21" data-fb-label="“Not in library” row + Find" data-fb-note="The album’s tracklist is known, this track isn’t in the library. Greyed, not playable, kept in its place so the album reads complete. Find searches the online sources for exactly this title and offers Download; nothing is added until then." data-fb-dec="DEC-019" data-fb-api="Table row with .foregroundStyle(.tertiary) + Button(&quot;Find&quot;)"' :
+        failed && fbF ? ' data-fb-id="V-ALBD.N26" data-fb-label="“Download failed” row" data-fb-note="Second line gives the reason and the attempts left. Return or ⌘D retries." data-fb-dec="DEC-011"' : '';
+      if (absent) fbA = false; if (failed) fbF = false;
+      h += '<tr data-id="' + t.id + '"' + fb + ' class="' + (sel.has(t.id) ? 'sel ' : '') + (t.playing ? 'playing ' : '') + (absent || (off && (t.status === 'local' || t.status === 'missing')) ? 'off ' : '') + (failed ? 'tall' : '') + '"' + (editing ? ' draggable="true"' : '') + '>' +
+        (editing ? '<td class="hdl" data-fb-id="V-ALBD.N24" data-fb-label="Drag handle">' + ic('lines', 's') + '</td>' : '') +
+        '<td class="r num dim">' + (t.playing ? ic('speaker', 's') : (editing ? pos[t.disc] : t.num)) + '</td>' +
+        '<td><div class="cellt"><span class="ttl">' + esc(t.title) + (failed ? '<small class="sub2">' + esc(t.reason) + ' · ' + (3 - t.attempts) + ' attempts left</small>' : '') + '</span></div></td>' +
+        (comp ? '<td class="dim">' + esc(t.artist) + '</td>' : '') + '<td class="r num">' + MLM.fmtTime(t.time) + '</td><td>' + st + '</td></tr>';
+    });
+    if (!vis.length) h += '<tr><td colspan="' + ncol + '" class="dim" style="text-align:center;height:60px">No track of this album matches the search.</td></tr>';
+    tableEl.innerHTML = h + '</tbody>';
+    albumStatus(); MLM.refreshBadges();
+  }
+  function albumStatus() {
+    const n = rows.length, gone = rows.filter(t => t.status === 'notinlib').length, nd = rows.filter(t => t.status === 'notdl').length, nfail = rows.filter(t => t.status === 'failed').length, parts = [];
+    if (gone) parts.push('Incomplete · ' + gone + ' of ' + n + ' not in library');
+    if (nfail) parts.push(gone ? nfail + ' download failed' : 'Incomplete · ' + nfail + ' failed');
+    if (nd) parts.push(gone || nfail ? nd + ' not downloaded' : 'Not downloaded · ' + nd + ' track' + (nd === 1 ? '' : 's'));
+    $('#d-status').hidden = !parts.length || editing; $('#d-status-txt').textContent = parts.join(' · ');
+    const m = nd + nfail, lbl = 'Download ' + m + ' Missing';
+    $('#d-dl').hidden = !m; $('#d-dl').textContent = lbl; $('#more-dl-wrap').hidden = !m; $('#more-dl').lastChild.textContent = lbl;
+    $('#d-meta').textContent = [cur.feat ? EDS[ed].year : cur.year, cur.genre, n + ' tracks', MLM.fmtDur(rows.reduce((s, t) => s + t.time, 0))].filter(Boolean).join(' · ');
+    const off = document.documentElement.dataset.drive === 'off'; $('#d-play').disabled = $('#d-shuffle').disabled = off; $('#d-play').title = $('#d-shuffle').title = off ? '“Lexxar” is not connected' : '';
+  }
+  function renderDetail() {
+    sel.clear(); anchor = -1; editing = false; $('#edit-bar').hidden = true;
+    rows = tracksFor(cur, ed);
+    $('#d-art').className = 'art cov ' + (cur.noart ? 'none' : 'c' + cur.c); $('#d-art').innerHTML = cur.noart ? ic('album', 'xl') : '';
+    $('#d-kind').textContent = cur.comp ? 'Compilation' : 'Album'; $('#d-title').textContent = cur.title; $('#d-title').title = cur.title;
+    const ar = $('#d-artist'); ar.textContent = cur.artist; ar.style.pointerEvents = cur.comp ? 'none' : ''; ar.style.color = cur.comp ? 'var(--text2)' : '';
+    ['#ed-a-wrap', '#ed-b-wrap', '#shelf-wrap'].forEach(s => { $(s).hidden = !cur.feat; });
+    if (cur.feat) {
+      $('#ed-popup').textContent = EDS[ed].name; $('#ed-pref').textContent = 'Preferred edition: ' + EDS[pref].name;
+      $$('#m-edition [data-ed]').forEach(x => { x.classList.toggle('chk', x.dataset.ed === pref); x.classList.toggle('nochk', x.dataset.ed !== pref); });
+      $$('#ed-seg [data-ed]').forEach(x => x.classList.toggle('on', x.dataset.ed === ed));
+      const have = k => tracksFor(cur, k).filter(t => t.status !== 'notinlib').length, tot = k => tracksFor(cur, k).length;
+      $('#shelf').innerHTML = Object.keys(EDS).filter(k => k !== ed).map((k, j) => '<div class="card" data-ed="' + k + '"><span class="art cov c' + (k === 'deluxe' ? 4 : k === 'remaster' ? 6 : 2) + '"></span><span class="nm">' + EDS[k].name + '</span><span class="sb num">' + EDS[k].year + ' · ' + have(k) + ' of ' + tot(k) + ' in library</span><span class="sb">' + (k === pref ? 'Preferred edition' : '&nbsp;') + '</span></div>').join('');
+    }
+    renderRows();
+  }
+  function setEdition(k, user) {
+    if (!EDS[k]) return; ed = k; if (user) pref = k; renderDetail(); if (curView === 'detail') emit();
+    if (user) MLM.say('“' + EDS[k].long + '” is now the preferred edition of “' + esc(cur.title) + '”', true);
+  }
+  function openAlbum(a) { cur = a; ed = a.feat ? pref : 'standard'; renderDetail(); MLM.goto('detail'); host.scrollTop = 0; host.focus(); }
+  function prepMenus(a) {
+    const m = a === cur && curView === 'detail' ? rows.filter(t => t.status === 'notdl' || t.status === 'failed').length : a.dl;
+    $('#cm-alb-dl-wrap').hidden = !m; $('#cm-alb-dl').lastChild.textContent = 'Download ' + m + ' Missing';
+  }
+  const target = () => curView === 'detail' ? cur : (selAlb || cur);
+
+  /* selection + keyboard: the same meanings as MLM.table (Space preview, Return play) */
+  function pick(i, ev) {
+    if (i < 0 || i >= rows.length) return;
+    if (ev && ev.shiftKey && anchor >= 0) { const a = Math.min(anchor, i), b = Math.max(anchor, i); if (!(ev.metaKey || ev.ctrlKey)) sel.clear(); for (let k = a; k <= b; k++) sel.add(rows[k].id); }
+    else if (ev && (ev.metaKey || ev.ctrlKey)) { const id = rows[i].id; sel.has(id) ? sel.delete(id) : sel.add(id); anchor = i; }
+    else { sel.clear(); sel.add(rows[i].id); anchor = i; }
+    $$('tr[data-id]', tableEl).forEach(tr => tr.classList.toggle('sel', sel.has(tr.dataset.id))); emit();
+    const tr = $('tr[data-id="' + rows[i].id + '"]', tableEl); if (tr && tr.scrollIntoView) tr.scrollIntoView({ block: 'nearest' });
+  }
+  const idxOf = node => { const tr = node.closest('tr[data-id]'); return tr ? rows.findIndex(t => t.id === tr.dataset.id) : -1; };
+  function play(t) { if (t.status === 'notinlib') return MLM.say('“' + esc(t.title) + '” is not in the library — use Find to look for it online.'); MLM.shell.play(t, api); }
+  function find(t) { MLM.say('Found “' + esc(t.title) + '” on SoundCloud. <a class="btn plain" style="height:16px">Download</a> <a class="btn plain" style="height:16px" href="search.html">Show in Search</a>'); }
+  host.addEventListener('mousedown', e => { const i = idxOf(e.target); if (i < 0) return; if (e.button === 2 && sel.has(rows[i].id)) return; pick(i, e.button === 2 ? null : e); });
+  host.addEventListener('click', e => { if (e.target.closest('[data-find]')) { const i = idxOf(e.target); if (i >= 0) find(rows[i]); } const c = e.target.closest('#shelf .card'); if (c) setEdition(c.dataset.ed, true); });
+  host.addEventListener('dblclick', e => { const i = idxOf(e.target); if (i >= 0 && !editing && !e.target.closest('[data-find]')) play(rows[i]); });
+  host.addEventListener('contextmenu', e => { const i = idxOf(e.target); if (i < 0) return; e.preventDefault(); const s = selRows(); MLM.openMenu(s.length === 1 && s[0].status === 'notinlib' ? 'cm-alb-absent' : 'cm-track', e.clientX, e.clientY, { rows: s }); });
+  host.addEventListener('keydown', e => {
+    const sh = MLM.shell, s = selRows();
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault(); const d = e.key === 'ArrowDown' ? 1 : -1;
+      if (editing && e.altKey && anchor >= 0) { const j = anchor + d; if (j < 0 || j >= rows.length) return; const t = rows.splice(anchor, 1)[0]; t.disc = rows[Math.min(j, rows.length - 1)].disc; rows.splice(j, 0, t); anchor = j; return renderRows(); }
+      const n = Math.max(0, Math.min(rows.length - 1, anchor + d)); pick(n, e.shiftKey ? { shiftKey: true } : null); if (!e.shiftKey) anchor = n; if (sh.previewing && rows[n].status === 'local') sh.preview(rows[n]);
+    } else if (e.key === ' ') { e.preventDefault(); if (sh.previewing) sh.endPreview(); else if (s.length === 1) { if (s[0].status === 'notinlib') MLM.say('Can’t preview — not in the library.'); else sh.preview(s[0]); } else MLM.say('Space previews one selected track. Select a single track.'); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (editing) return $('#edit-done').click(); if (s.length) { if (e.altKey) MLM.say('Playing next: ' + (s.length === 1 ? '“' + esc(s[0].title) + '”' : s.length + ' tracks'), true); else play(s[0]); } }
+    else if (e.key === 'a' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); rows.forEach(t => sel.add(t.id)); renderRows(); emit(); }
+    else if (e.key === 'Escape') { if (sh.previewing) sh.endPreview(); else if (editing) $('#edit-cancel').click(); else { sel.clear(); renderRows(); emit(); } }
+  });
+
+  /* Edit Order */
+  $('#mi-edit-order').addEventListener('click', () => { editing = true; snapshot = rows.map(t => Object.assign({}, t)); $('#edit-bar').hidden = false; renderRows(); host.focus(); });
+  function endEdit(save) {
+    if (!editing) return; editing = false; $('#edit-bar').hidden = true;
+    if (save) { const pos = {}; rows.forEach(t => { pos[t.disc] = (pos[t.disc] || 0) + 1; t.num = pos[t.disc]; }); MLM.say('Track order saved — ' + rows.length + ' tracks renumbered', true); } else rows = snapshot;
+    renderRows();
+  }
+  $('#edit-done').addEventListener('click', () => endEdit(true)); $('#edit-cancel').addEventListener('click', () => endEdit(false));
+  host.addEventListener('dragstart', e => { const tr = e.target.closest && e.target.closest('tr[data-id]'); if (!editing || !tr) return; dragId = tr.dataset.id; e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', dragId); } catch (x) { /* ignore */ } });
+  host.addEventListener('dragover', e => { const tr = e.target.closest('tr[data-id]'); if (!editing || !dragId || !tr) return; e.preventDefault(); $$('tr.drop-before', tableEl).forEach(x => x.classList.remove('drop-before')); tr.classList.add('drop-before'); });
+  host.addEventListener('drop', e => {
+    const tr = e.target.closest('tr[data-id]'); if (!editing || !dragId || !tr) return; e.preventDefault();
+    const from = rows.findIndex(t => t.id === dragId), moved = rows.splice(from, 1)[0], to = rows.findIndex(t => t.id === tr.dataset.id);
+    if (to < 0) rows.splice(from, 0, moved); else { moved.disc = rows[to].disc; rows.splice(to, 0, moved); }
+    dragId = null; renderRows();
+  });
+  host.addEventListener('dragend', () => { dragId = null; $$('tr.drop-before', tableEl).forEach(x => x.classList.remove('drop-before')); });
+
+  /* header buttons, menus, sheets */
+  $('#d-play').addEventListener('click', () => { const t = rows.find(x => x.status === 'local'); if (!t) return MLM.say('Nothing to play — no track of this album is downloaded. <a class="btn plain" style="height:16px">Download</a>'); play(t); const skipped = rows.filter(x => x.status !== 'local').length; if (skipped) MLM.say('Playing “' + esc(cur.title) + '” — ' + skipped + ' tracks that aren’t available will be skipped.'); });
+  $('#d-shuffle').addEventListener('click', () => { const l = rows.filter(x => x.status === 'local'); if (l.length) play(l[(l.length * 0.6) | 0]); });
+  function download() { let n = 0; rows.forEach(t => { if (t.status === 'notdl' || t.status === 'failed') { t.status = 'downloading'; n++; } }); renderRows(); MLM.say('Download started — ' + n + ' track' + (n === 1 ? '' : 's') + ' of “' + esc(cur.title) + '”'); }
+  $('#d-dl').addEventListener('click', download); $('#more-dl').addEventListener('click', download);
+  $('#mi-cover').addEventListener('click', () => MLM.say('Choose Cover… opens the system file dialog for an image.'));
+  document.addEventListener('click', e => {
+    const s = e.target.closest('[data-alb-say]'), a = target();
+    if (s) MLM.say(s.dataset.albSay.replace('{t}', s.id === 'cm-alb-dl' ? a.dl + ' tracks of “' + esc(a.title) + '”' : '“' + esc(a.title) + '”'), s.id !== 'cm-alb-dl');
+    if (e.target.closest('[data-alb-act="play"]')) { openAlbum(a); $('#d-play').click(); }
+    const edm = e.target.closest('#m-edition [data-ed], #ed-seg [data-ed]'); if (edm) setEdition(edm.dataset.ed, true);
+    const ab = e.target.closest('[data-absent]'), one = selRows()[0];
+    if (ab && one) { if (ab.dataset.absent === 'find') find(one); else if (ab.dataset.absent === 'copy') MLM.say('Copied “' + esc(one.title) + ' — ' + esc(one.artist) + '”'); else MLM.say('Choose the library track that is “' + esc(one.title) + '” — it takes this place in the album.'); }
+    if (e.target.closest('[data-open="s-alb-edit"]')) { $('#ae-title').value = a.title; $('#ae-artist').value = a.artist; $('#ae-year').value = a.year || ''; $('#ae-genre').value = a.genre; $('#ae-comp').classList.toggle('on', a.comp); $('#ae-art').className = 'cov ' + (a.noart ? 'none' : 'c' + a.c); $('#ae-sub').textContent = 'Applies to the album and its ' + a.have + ' tracks in the library.'; }
+    if (e.target.closest('[data-open="s-alb-merge"]')) $('#am-title').textContent = 'Merge “' + a.title + '” with Another Album';
+    if (e.target.closest('[data-open="a-alb-remove"]')) { $('#ar-title').textContent = 'Remove “' + a.title + '” from the library?'; $('#ar-text').textContent = 'Its ' + a.have + ' tracks are removed from the library, from 3 playlists and 1 sync profile, and their files move to the Trash. You can put the files back from the Trash.'; }
+    if (e.target.closest('#ae-save')) MLM.say('Album info saved — ' + a.have + ' tracks updated', true);
+    if (e.target.closest('#am-go')) MLM.say('Merged “low season” into “' + esc(a.title) + '” — 3 tracks moved, 1 sent to Review', true);
+  });
+  $$('[data-menu-click="m-album-more"]').forEach(b => b.addEventListener('mousedown', () => prepMenus(cur)));
+
+  /* search, views, states */
+  document.addEventListener('input', e => { if (!e.target.classList.contains('search')) return; q = e.target.value.toLowerCase().split(/\s+/).filter(Boolean); if (curView === 'grid') drawGrid(); else renderRows(); });
+  document.addEventListener('mlm:view', e => {
+    if (e.detail !== 'grid' && e.detail !== 'detail') return; curView = e.detail;
+    if (curView === 'grid') { if (editing) endEdit(false); sel.clear(); emit(); drawGrid(); } else { renderRows(); emit(); }
+  });
+  document.addEventListener('mlm:state', e => { if (e.detail !== 'default' && curView !== 'grid') MLM.goto('grid'); });
+
+  renderDetail(); drawGrid(); if (curView === 'detail') emit();
+});
+</script>
+</body></html>

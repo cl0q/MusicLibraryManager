@@ -1,0 +1,514 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Discover — MLM B1</title>
+<link rel="stylesheet" href="assets/mlm.css"><script src="assets/app.js"></script>
+<style>
+  /* Page-local layout only; colours come from mlm.css variables. */
+  #recs.table tr.sel td .btn, #recs.table tr.sel td .btn * { color: var(--text) !important; }
+  #recs td.acts { text-align: right; overflow: visible; } #recs td.acts .btn { margin-left: 4px; }
+  #recs tr.group td .btn { font-weight: 400; } #recs tr.group td .row { display: flex; align-items: center; gap: 6px; }
+  .md { flex: 1; min-height: 0; display: flex; }
+  .md .master { width: 272px; flex: none; border-right: .5px solid var(--sep); display: flex; flex-direction: column; min-height: 0; }
+  .rlist { flex: 1; min-height: 0; overflow: auto; outline: none; padding: 4px 0; }
+  .rrow { display: flex; gap: 9px; align-items: center; padding: 5px 8px; margin: 0 6px; border-radius: 6px; min-width: 0; }
+  .rrow .nm { font-weight: 500; } .rrow small { display: block; font-size: 11px; color: var(--text2); }
+  .rrow.sel { background: var(--sel-inactive); }
+  .rlist:focus .rrow.sel { background: var(--sel); } .rlist:focus .rrow.sel, .rlist:focus .rrow.sel * { color: var(--on-accent) !important; }
+  .thumb { width: 30px; height: 40px; border-radius: 4px; }
+  .drophint { margin: 8px; padding: 10px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--sep-strong); color: var(--text2); font-size: 11px; text-align: center; white-space: normal; }
+  .bench { flex: 1; min-width: 0; overflow: auto; padding: 14px 20px 28px; display: flex; flex-direction: column; gap: 16px; }
+  .bench .cols { display: flex; gap: 20px; align-items: flex-start; }
+  .vframe { width: 170px; height: 300px; border-radius: 9px; background: var(--fill2); display: flex; flex-direction: column; gap: 6px; align-items: center; justify-content: center; color: var(--text2); flex: none; }
+  .kfs { display: flex; gap: 4px; margin-top: 8px; width: 170px; overflow-x: auto; padding-bottom: 2px; }
+  .kf { flex: none; text-align: center; font-size: 10px; color: var(--text2); } .kf .cov { width: 39px; height: 52px; display: flex; }
+  .sech { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px 2px; } .sech b { font-weight: 600; } .sech .grow { flex: 1; }
+  .frow .btn + .btn, .frow .status + .btn { margin-left: 0; }
+  .simhead { display: flex; gap: 14px; align-items: center; padding: 14px 20px 10px; flex: none; }
+  .simhead .cov { width: 56px; height: 56px; border-radius: 7px; } .simhead h1 { margin: 0; font-size: 20px; letter-spacing: -.2px; } .simhead .kind { font-size: 11px; font-weight: 600; color: var(--text2); }
+  #simtbl { flex: none; height: 366px; border-top: .5px solid var(--sep); border-bottom: .5px solid var(--sep); }
+  .radio { display: inline-flex; align-items: center; gap: 6px; } .radio::before { content: ""; width: 14px; height: 14px; background: var(--control); box-shadow: inset 0 0 0 .5px var(--sep-strong); flex: none; }
+  .inl { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 26px 20px; text-align: center; color: var(--text2); } .inl h2 { margin: 0; font-size: 15px; color: var(--text); } .inl p { margin: 0; max-width: 430px; white-space: normal; } .inl .acts { display: flex; gap: 8px; margin-top: 8px; }
+  .spec .demo .statusbar { height: auto; min-height: 24px; padding: 4px 10px; } .spec .demo .msg { flex-wrap: wrap; white-space: normal; } .spec .demo .status { white-space: normal; align-items: flex-start; }
+</style></head>
+<body data-screen="V-DISC" data-title="Discover" data-nav="discover" data-home="recs"
+      data-states="default,empty,loading,error,identifying,not-identified,no-results,no-internet,not-analysed,no-sources">
+
+<div class="note">
+  <h3>Discover — Recommendations · Reels · Similar to ‹track› — Tier 2 (mid fidelity, complete)</h3>
+  <p><b>Recommendations:</b> click a row, then ↑/↓ · <kbd>Space</kbd> preview in the toolbar player · <kbd>K</kbd> Keep · <kbd>⌫</kbd> Dismiss · <kbd>⌘Z</kbd> or the status-bar <b>Undo</b> brings the row back · ⌘-/⇧-click several rows → selection bar with bulk Keep / Dismiss · right-click a row · drag a row onto a sidebar playlist (keeps it and adds it) · <b>Find Recommendations…</b> · switch <b>Drive → Not connected</b>: preview is unavailable and Dismiss is disabled with the reason.</p>
+  <p><b>Reels:</b> scope bar → Reels. Select reels (⌘-click for several, <kbd>⌫</kbd> = Delete Reel…), click a keyframe, press <b>Use</b> on a guess, click the text fragments, <b>Download</b> on a result (Queued → Downloading… → In library), <b>Add to Playlist</b>. <b>Similar:</b> <a href="discover.html#similar">discover.html#similar</a> (also reached from Info ▸ Audio ▸ Show All and from every track menu ▸ Find Similar); the toolbar Back button returns to Recommendations.</p>
+  <p><b>States</b> (the switcher jumps to the view the state belongs to): Empty / Loading / Error → Recommendations (in Reels “Empty” = no reels yet) · Identifying / Not identified / No results / No internet → Reels · Not analysed / No sources → Similar (Loading, Error, No internet, Empty also change its Online section). Decisions: DEC-029, DEC-030, DEC-016, DEC-039, DEC-041, DEC-044.</p>
+</div>
+
+<div id="content">
+
+<!-- ═════════════ Recommendations (V-INBOX) ═════════════ -->
+<div class="view" data-view="recs" data-fb-id="V-INBOX" data-fb-label="Recommendations" data-fb-note="A verdict inbox: downloaded recommendations wait here and are not part of All Tracks, Albums, Folders or search until kept. Fixes “Add to library” for something that already was in the library." data-fb-dec="DEC-029" data-fb-api="List/Table(selection: Set<Recommendation.ID>) inside the Discover NavigationStack">
+  <div class="vhead">
+    <h1 data-fb-id="V-DISC.E01" data-fb-label="View title" data-fb-note="One title only. The stacked second titles “Recommendations” / “Reels Inbox” (V-INBOX.E01, V-REELS.E01) are gone; the scope bar names the job." data-fb-api=".navigationTitle">Discover</h1>
+    <span class="sub">Main Library</span><span class="grow"></span>
+    <button class="btn" data-open="s-find" data-fb-id="V-INBOX.N01" data-fb-label="Find Recommendations…" data-fb-note="Starts a recommendation search from Discover itself (today only possible via Inspector ▸ Similar ▸ Show all). Seed = the selection or the playing track. Replaces Refresh (V-INBOX.E03): the list updates in place, there is nothing to refresh by hand." data-fb-dec="DEC-029" data-fb-api="Button → .sheet">Find Recommendations…</button>
+  </div>
+  <div class="scopebar" data-fb-id="V-DISC.E02" data-fb-label="Scope bar: Recommendations · Reels" data-fb-note="Replaces the 260 pt segmented control. Carries the waiting counts (the sidebar badge is their sum). The chosen scope and the selected reel are remembered while the app runs." data-fb-dec="DEC-029" data-fb-api="Picker(.segmented) in safeAreaInset(edge: .top); @SceneStorage for the scope">
+    <button class="scope on" data-goto="recs">Recommendations<span class="n" data-n="recs"></span></button>
+    <button class="scope" data-goto="reels">Reels<span class="n" data-n="reels"></span></button>
+  </div>
+
+  <div class="view" data-hide="empty loading error">
+    <div class="statusline" data-fb-id="V-INBOX.E02" data-fb-label="Count and keyboard hint" data-fb-note="Count with correct singular/plural, what “held here” means, and the triage keys. Space is the same preview as everywhere (DEC-009)." data-fb-dec="DEC-029">
+      <span><b data-n="recs-line"></b> — held here, not in All Tracks, until you keep them.</span><span class="grow"></span>
+      <span class="t2"><kbd>Space</kbd> Preview · <kbd>K</kbd> Keep · <kbd>⌫</kbd> Dismiss · <kbd>⌘Z</kbd> Undo</span>
+    </div>
+    <div class="banner info drive-off" data-fb-id="V-INBOX.N02" data-fb-label="Drive-off hint (Recommendations)" data-fb-note="Screen-specific addition to the window banner: the files of held recommendations live on the library drive. Keep only changes the database, so it still works. Dismiss must move the file to the Trash, so it is disabled with the reason instead of leaving an orphan file behind (today’s behaviour)." data-fb-dec="DEC-014">
+      <i data-i="drive"></i><span>You can keep recommendations, but not preview them. <b>Dismiss is unavailable</b> because the files can’t be moved to the Trash while “Lexxar” is not connected.</span>
+    </div>
+    <div class="table" id="recs" tabindex="0" data-fb-id="V-INBOX.E06" data-fb-label="Recommendation list, grouped by seed" data-fb-note="Grouped by the track each recommendation came from. Rows are selectable (click, ⌘, ⇧, ↑/↓), previewable with Space, draggable to playlists, with a context menu. Rows update in place: no spinner after a verdict." data-fb-dec="DEC-029" data-fb-api="Table { Section(“Because of …”) { TableRow } }.onKeyPress(“k”), .onDeleteCommand, .draggable">
+      <table><thead><tr>
+        <th data-fb-id="V-INBOX.E06b" data-fb-label="Title column" data-fb-note="Cover + title. A speaker glyph marks the row being previewed." data-fb-api="TableColumn">Title</th>
+        <th style="width:170px" data-fb-id="V-INBOX.E06c" data-fb-label="Artist column" data-fb-api="TableColumn">Artist</th>
+        <th style="width:104px" data-fb-id="V-INBOX.E06e" data-fb-label="Source column" data-fb-note="A word with the 6 pt brand dot: SoundCloud, Last.fm. Replaces the upper-case capsule (SOUNDCLOUD / LASTFM)." data-fb-dec="DEC-043" data-fb-api="TableColumn">Source</th>
+        <th class="r" style="width:52px" data-fb-id="V-INBOX.N03" data-fb-label="Time column" data-fb-note="New: duration was missing." data-fb-api="TableColumn">Time</th>
+        <th style="width:84px" data-fb-id="V-INBOX.N04" data-fb-label="Energy column" data-fb-note="Number + 5-step bar once the automatic analysis has finished; “Analyzing…” until then. After analysis, Space starts the preview at the most characteristic part." data-fb-dec="DEC-046" data-fb-api="TableColumn">Energy</th>
+        <th style="width:150px"></th>
+      </tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+
+  <div class="empty" data-show="empty" data-fb-id="V-INBOX.E05" data-fb-label="Empty: no recommendations waiting" data-fb-note="One sentence and the action that fills it, instead of describing a path through the inspector." data-fb-dec="DEC-029" data-fb-api="ContentUnavailableView { } actions: { Button }">
+    <i data-i="sparkles" class="xl"></i><h2>No recommendations waiting</h2>
+    <p>Pick a track you like and MLM looks for similar ones on SoundCloud or Last.fm. What you download waits here until you keep or dismiss it.</p>
+    <div class="acts"><button class="btn lg primary" data-open="s-find">Find Recommendations…</button><button class="btn lg" data-goto="similar">Similar to the Playing Track</button></div>
+  </div>
+
+  <div class="view" data-show="loading" data-fb-id="V-INBOX.E04" data-fb-label="First load" data-fb-note="Only the first load shows placeholder rows. Verdicts and finished downloads update rows in place; a small spinner appears in the status bar after 300 ms." data-fb-api=".redacted(reason: .placeholder)">
+    <div class="table"><table><thead><tr><th>Title</th><th style="width:170px">Artist</th><th style="width:104px">Source</th><th style="width:52px">Time</th><th style="width:84px">Energy</th><th style="width:150px"></th></tr></thead><tbody id="skel"></tbody></table></div>
+  </div>
+
+  <div class="empty" data-show="error" data-fb-id="V-INBOX.N05" data-fb-label="Load error" data-fb-note="A failed load is never shown as “No recommendations” (today it is). Sentence + cause + one action; raw text behind Details." data-fb-api="ContentUnavailableView + DisclosureGroup(“Details”)">
+    <i data-i="warn" class="xl"></i><h2>Can’t load the recommendations</h2>
+    <p>The library database didn’t answer. The recommendations you downloaded are still on “Lexxar”; nothing was kept or dismissed.</p>
+    <div class="acts"><button class="btn lg primary" data-set-state="default">Try Again</button><a class="btn lg" href="activity.html#logs">Show Logs</a></div>
+    <p class="caption" style="margin-top:8px">▸ Details</p>
+  </div>
+</div>
+
+<!-- ═════════════ Reels (V-REELS) ═════════════ -->
+<div class="view" data-view="reels" hidden data-fb-id="V-REELS" data-fb-label="Reels" data-fb-note="Identify the song in a saved video and get it. Master–detail inside the content column: videos on the left with a state word, the workbench for the selected video on the right." data-fb-dec="DEC-029" data-fb-api="HStack { List(selection:) ; ScrollView { workbench } } (not a second NavigationSplitView)">
+  <div class="vhead">
+    <h1>Discover</h1><span class="sub">Main Library</span><span class="grow"></span>
+    <button class="btn" data-say-plain="Choose video files or a folder (system open panel)…" data-fb-id="V-REELS.E02" data-fb-label="Import…" data-fb-note="Opens the system panel (S-REELS-OPENFOLDER) for files or folders; folders are scanned with their subfolders. A folder without videos says so in the status bar." data-fb-api=".fileImporter(allowedContentTypes: [.movie, .folder], allowsMultipleSelection: true)">Import…</button>
+    <button class="btn" data-open="s-reel-link" data-fb-id="V-REELS.N01" data-fb-label="Add from Link…" data-fb-note="New (D-REELS-URL): paste or drop an Instagram / TikTok / YouTube Shorts link; the video is fetched as an Activity operation and appears as New." data-fb-dec="DEC-018" data-fb-api="Button → .sheet; .dropDestination(for: URL.self)">Add from Link…</button>
+  </div>
+  <div class="scopebar">
+    <button class="scope" data-goto="recs">Recommendations<span class="n" data-n="recs"></span></button>
+    <button class="scope on" data-goto="reels">Reels<span class="n" data-n="reels"></span></button>
+  </div>
+
+  <div class="md" data-hide="empty">
+    <div class="master">
+      <div class="rlist" id="reels" tabindex="0" data-fb-id="V-REELS.E04" data-fb-label="Reel list" data-fb-note="Thumbnail, file name, guess line and a state word: New (nothing decided), Identified (artist and title set), Done (downloaded, added to a playlist or marked by hand). Multi-selection; ⌫ = Delete Reel…. Selecting a reel never starts work: identification runs once after import as an Activity operation, and again only on request (arrowing through the list is free). Rows drag out to Finder as files." data-fb-dec="DEC-029" data-fb-api="List(selection: Set<Reel.ID>).onDeleteCommand; .draggable(fileURL)"></div>
+      <div class="drophint" data-fb-id="V-REELS.N02" data-fb-label="Drop hint" data-fb-note="D-REELS-IMPORT: the whole Reels view accepts .mp4 / .mov files, folders and links, and shows the drop highlight also when the list is not empty (today only the empty state reacts)." data-fb-dec="DEC-040" data-fb-api=".dropDestination(for: URL.self) { } isTargeted:">Drop .mp4 or .mov files, folders or a link here</div>
+    </div>
+
+    <div class="bench" data-fb-id="V-REELS.N03" data-fb-label="Workbench" data-fb-note="Everything about the selected reel in reading order: watch it, see the guesses, settle artist and title, get the song. Jargon labels (Music Identification, Unified Search Results, OCR) are gone.">
+      <div class="row" style="gap:10px">
+        <div class="grow trunc"><b id="reel-name" style="font-size:15px">Snapinsta.app_video_AQP3xKmB7vYt2_n.mp4</b><div class="caption"><span id="reel-state">Identified</span> · imported Oct 2, 2026 · 0:23 · ~/Downloads/Reels</div></div>
+        <button class="btn" id="reel-done" data-fb-id="V-REELS.N04" data-fb-label="Mark as Done" data-fb-note="Explicit finish for a reel (also set automatically after Download or Add to Playlist). Done reels stay listed, dimmed in order, until deleted." data-fb-api="Button">Mark as Done</button>
+        <button class="btn destructive" data-open="a-reel-delete" data-fb-id="V-REELS.N05" data-fb-label="Delete Reel…" data-fb-note="Visible delete (today only an unverified list gesture). Opens A-REELS-DELETE, attached to the view, not to result rows." data-fb-api="Button(role: .destructive) → .confirmationDialog">Delete Reel…</button>
+      </div>
+
+      <div class="cols">
+        <div>
+          <div class="vframe" data-fb-id="V-REELS.E06" data-fb-label="Video" data-fb-note="Inline system player. Space plays / pauses the video while the workbench has focus; starting a result preview pauses the video and the other way round, so two things never sound at once." data-fb-api="VideoPlayer(player:) (AVKit)"><i data-i="video" class="xl"></i><span class="caption">Video · 0:23</span><span class="caption drive-off">The video file is not reachable</span></div>
+          <div class="kfs" data-fb-id="V-REELS.E16" data-fb-label="Keyframe strip" data-fb-note="Stills across the video. Click a still to see it large with the text found in it (popover). The separate “seek” glyph is gone: the popover has Play from Here." data-fb-api="ScrollView(.horizontal) { ForEach(keyframes) }.popover">
+            <span class="kf" data-popover="po-keyframe"><span class="cov c2"></span>0:01</span><span class="kf" data-popover="po-keyframe"><span class="cov c4"></span>0:04</span><span class="kf" data-popover="po-keyframe"><span class="cov c1"></span>0:07</span><span class="kf" data-popover="po-keyframe"><span class="cov c6"></span>0:11</span><span class="kf" data-popover="po-keyframe"><span class="cov c3"></span>0:15</span><span class="kf" data-popover="po-keyframe"><span class="cov c5"></span>0:19</span>
+          </div>
+        </div>
+
+        <div class="grow col" style="gap:16px;min-width:0">
+          <div>
+            <div class="sech"><b>Guesses</b><span class="caption">A guess fills Artist and Title only when you press Use. Nothing is overwritten silently.</span></div>
+            <div class="group" id="guesses" data-fb-id="V-REELS.N06" data-fb-label="Guesses with provenance" data-fb-note="File name, Shazam and text in the video are competing guesses, each named by where it came from. Replaces the Shazam card (E14), the recognised-songs buttons (E17) and the auto-fill that overwrote typed text." data-fb-dec="DEC-029" data-fb-api="Section { ForEach(guesses) { LabeledContent + Button(“Use”) } }">
+              <div class="frow" data-hide="identifying not-identified no-internet" data-g="Shazam" data-a="Fred again.." data-t="Delilah (pull me out of this)"><div class="fl trunc">Fred again.. — Delilah (pull me out of this)<small>Shazam · matched at 0:07</small></div><span class="status ok use-mark">In use</span><button class="btn use-btn" hidden data-fb-id="V-REELS.E14" data-fb-label="Use (guess)" data-fb-note="Was “Use match”. Fills both fields and searches; undoable.">Use</button></div>
+              <div class="frow" data-hide="not-identified" data-g="Text in video" data-a="Fred again" data-t="delilah"><div class="fl trunc">Fred again — delilah<small>Text in video · still at 0:04</small></div><span class="status ok use-mark" hidden>In use</span><button class="btn use-btn" data-fb-id="V-REELS.E17" data-fb-label="Use (text guess)" data-fb-note="Artist – Title shaped text found in the stills.">Use</button></div>
+              <div class="frow" data-g="File name" data-a="Snapinsta.app" data-t="video AQP3xKmB7vYt2 n"><div class="fl trunc">Snapinsta.app — video AQP3xKmB7vYt2 n<small>File name · doesn’t look like a song title</small></div><span class="status ok use-mark" hidden>In use</span><button class="btn use-btn">Use</button></div>
+              <div class="frow" data-hide="not-identified" data-fb-id="V-REELS.E18" data-fb-label="Text fragments" data-fb-note="Other text read from the stills. Click a fragment for Use as Artist / Use as Title / Use as “Artist – Title” / Copy (CM-REELS-TEXTPILL)." data-fb-api="Menu on each fragment"><div class="fl" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span class="caption">Text in video:</span><span class="token" data-menu-click="cm-textpill">actual life 3 ▾</span><span class="token" data-menu-click="cm-textpill">pull me out of this ▾</span><span class="token" data-menu-click="cm-textpill">@fredagainagainagainagainagain — out now ▾</span></div></div>
+              <div class="frow" data-fb-id="V-REELS.E13" data-fb-label="Identify by Audio (Shazam)" data-fb-note="English (was German “Per Audio erkennen (Shazam)”). Listens to the first 12 seconds. The result arrives as a guess; it never replaces what you typed. Offline and “no match” are different sentences (E15)." data-fb-api="Button { } + ProgressView; SHSession">
+                <div class="fl" data-hide="identifying not-identified no-internet"><small>Shazam listened on Oct 2 and found the guess above.</small></div>
+                <div class="fl" data-show="identifying"><span class="row" style="gap:6px"><span class="spinner"></span>Listening to the first 12 seconds…</span></div>
+                <div class="fl" data-show="not-identified" data-fb-id="V-REELS.E15" data-fb-label="No match" data-fb-note="Says what happened and what to try next.">Shazam didn’t recognise this audio.<small>Try the text in the video, or type the artist and title yourself.</small></div>
+                <div class="fl" data-show="no-internet"><span class="status failed"><i data-i="globe" class="s"></i>Can’t identify by audio — this Mac is offline.</span><small>Guesses from the file name and the text in the video still work.</small></div>
+                <button class="btn" data-hide="identifying" data-set-state="identifying">Identify by Audio (Shazam)</button>
+                <button class="btn" data-show="identifying" data-set-state="default">Cancel</button>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="sech"><b>Song</b><span class="caption" id="fill-src">Filled from: Shazam</span></div>
+            <div class="kv" data-fb-id="V-REELS.E09" data-fb-label="Artist / Title fields" data-fb-note="Two fields (E09, E10); the third free-text field (E08) is merged into them. Return in either field searches (K-REELS-RETURN). Saved when you leave the field, not on every keystroke." data-fb-api="Form { TextField(“Artist”) ; TextField(“Title”) }.onSubmit">
+              <label>Artist</label><input class="field" id="f-artist" value="Fred again..">
+              <label>Title</label><div class="row" style="gap:8px"><input class="field grow" id="f-title" value="Delilah (pull me out of this)"><button class="btn" id="reel-search" data-fb-id="V-REELS.E11" data-fb-label="Search" data-fb-note="Was “Search &amp; download”, which only searched. Now named for what it does; enabled as soon as either field has text.">Search</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="sech"><b>Results</b><span class="caption" data-hide="identifying not-identified no-results no-internet">for “Fred again.. Delilah (pull me out of this)” · up to 3 per source</span><span class="grow"></span><span class="caption drive-off">Downloads wait until “Lexxar” is connected.</span></div>
+        <div data-hide="identifying not-identified no-results no-internet" data-fb-id="V-REELS.E20" data-fb-label="Results per source" data-fb-note="One group per source with its count; a source without matches says “No matches” instead of vanishing. A download made here becomes a normal library track with no album (never album “Reels”)." data-fb-dec="DEC-013" data-fb-api="Section(source) { ForEach(results) }">
+          <div class="group" id="results"></div>
+        </div>
+        <div class="group" data-show="identifying not-identified"><div class="inl" data-fb-id="V-REELS.E19" data-fb-label="Nothing to search for yet" data-fb-note="Not identified: there is no artist or title yet. Different words from offline and from zero results."><h2>Nothing to search for yet</h2><p>Choose a guess or type an artist and a title. MLM then searches SoundCloud, YouTube, Spotify and DAB.</p></div></div>
+        <div class="group" data-show="no-results"><div class="inl" data-fb-id="V-REELS.N07" data-fb-label="Zero results" data-fb-note="Today the area is simply blank."><h2>No matches on any source</h2><p>Nothing found for “Fred again.. Delilah (pull me out of this)” on SoundCloud, YouTube, Spotify or DAB. Try a shorter title or only the artist.</p><div class="acts"><button class="btn" data-set-state="default">Search Again</button></div></div></div>
+        <div class="group" data-show="no-internet"><div class="inl" data-fb-id="V-REELS.N08" data-fb-label="Offline" data-fb-note="Offline is said in words; it is not shown as “couldn’t identify” or as an empty result."><i data-i="globe" class="l"></i><h2>Can’t search — this Mac is offline</h2><p>Artist and title are saved with the reel. Search again when you are back online.</p><div class="acts"><button class="btn" data-set-state="default">Try Again</button></div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="empty" data-show="empty" data-fb-id="V-REELS.E03" data-fb-label="Empty: no reels yet" data-fb-note="Also covers “no selection” (E05): with reels present the first one is selected, so the right side is never a dead placeholder." data-fb-api="ContentUnavailableView + .dropDestination">
+    <i data-i="video" class="xl"></i><h2>No reels yet</h2>
+    <p>Save a short video whose music you want, then import it. MLM names the song from the audio, the file name and the text in the video, and finds it on your sources.</p>
+    <div class="acts"><button class="btn lg primary" data-say-plain="Choose video files or a folder (system open panel)…">Import…</button><button class="btn lg" data-open="s-reel-link">Add from Link…</button></div>
+    <p class="caption" style="margin-top:8px">You can also drop .mp4 or .mov files, folders or a link here.</p>
+  </div>
+</div>
+
+<!-- ═════════════ Similar to ‹track› (V-SIMILAR) ═════════════ -->
+<div class="view" data-view="similar" hidden data-fb-id="V-SIMILAR" data-fb-label="Similar to ‹track› (pushed view)" data-fb-note="Replaces the 1040 pt sheet S-GROOVE-SIMILAR. A pushed view has room for a real track table with selection, Space preview, context menu and drag to playlists. Back (⌘[) returns to where you came from." data-fb-dec="DEC-030" data-fb-api="NavigationStack path → SimilarView(seed:)">
+  <div class="simhead" data-fb-id="S-GROOVE-SIMILAR.E01" data-fb-label="Seed header" data-fb-note="Names the seed track. The close button of the sheet is replaced by the toolbar Back button." data-fb-dec="DEC-030" data-fb-api=".navigationTitle(“Similar to …”) + header">
+    <span class="cov c4"></span>
+    <div class="grow trunc"><div class="kind">SIMILAR TO</div><h1 class="trunc">Night Drive (Extended Mix)</h1><div class="t2">Bicep · 6:41 · 124 BPM · Energy 4</div></div>
+    <button class="btn" data-goto="recs" data-fb-id="V-SIMILAR.N01" data-fb-label="Show Recommendations" data-fb-note="Downloads made in the Online section wait in Discover ▸ Recommendations.">Show Recommendations</button>
+  </div>
+  <div class="scroll">
+    <div class="pad" style="padding-bottom:6px">
+      <div class="sech"><b>In your library</b><span class="caption" data-hide="not-analysed empty">Top 12 by sound · select, press Space to preview, drag onto a playlist or sync profile</span></div>
+    </div>
+    <div data-hide="not-analysed empty">
+      <div id="simtbl" data-fb-id="S-GROOVE-SIMILAR.E02" data-fb-label="In your library (track table)" data-fb-note="The standard track table with a Match column: same selection, Space preview, Return = play, context menu (Add to Playlist ▸, Add to Sync Profile ▸) and drag as everywhere. The per-row playlist / sync / thumbs buttons are gone; the hidden thumbs “feedback” is replaced by what you actually do (keep, add, dismiss)." data-fb-dec="DEC-030" data-fb-api="Table(selection:sortOrder:) + contextMenu(forSelectionType:) + .draggable"></div>
+    </div>
+    <div class="inl" data-show="not-analysed" data-fb-id="V-SIMILAR.N02" data-fb-label="Seed not analysed" data-fb-note="Was the Similar tab’s “No analysis yet”. Analysis is an Activity operation with a visible failure. Disabled with the reason when the file is not downloaded or the drive is not connected (today the button is enabled and fails silently)." data-fb-dec="DEC-044" data-fb-api="ContentUnavailableView + Button; ProgressView(value:)">
+      <div id="an-idle"><h2>This track isn’t analysed yet</h2><p>MLM compares tracks by their sound. Analysing “Night Drive (Extended Mix)” takes about 20 seconds.</p><div class="acts" style="justify-content:center"><button class="btn lg primary drive-on" id="an-go">Analyze This Track</button><button class="btn lg drive-off" disabled>Analyze This Track</button></div><p class="caption drive-off" style="margin-top:6px">Can’t analyse — “Lexxar” is not connected.</p></div>
+      <div id="an-run" hidden><h2>Analyzing “Night Drive (Extended Mix)”…</h2><div class="progress" style="width:260px;margin:8px auto"><i style="width:55%"></i></div><p>Also shown in Activity. Results appear here when it finishes.</p><div class="acts" style="justify-content:center"><button class="btn" id="an-cancel">Cancel</button></div></div>
+    </div>
+    <div class="inl" data-show="empty"><h2>No similar tracks in your library yet</h2><p>9,412 of 12,935 tracks are analysed. The more are analysed, the better the matches.</p><div class="acts"><a class="btn" href="settings.html#maintenance">Open Settings ▸ Maintenance</a></div></div>
+
+    <div class="pad" style="padding-bottom:28px">
+      <div class="sech" style="margin-top:8px"><b>Online</b>
+        <span class="seg" data-group="src" data-fb-id="S-GROOVE-SIMILAR.E03" data-fb-label="Source picker" data-fb-note="SoundCloud (related tracks) or Last.fm (similar tracks). “Last.fm” is spelled correctly (was “Lastfm”)." data-fb-api="Picker(.segmented)"><button class="on" data-p="sc">SoundCloud</button><button data-p="lf">Last.fm</button></span>
+        <span class="caption" data-hide="loading error no-internet no-sources empty">10 suggestions · Preview plays a 30-second stream without downloading</span><span class="grow"></span>
+        <button class="btn" data-set-state="loading" data-fb-id="V-SIMILAR.N03" data-fb-label="Refresh" data-fb-note="Labeled (was an icon without tooltip). ⌘R does the same: re-read from outside.">Refresh</button></div>
+
+      <div data-hide="loading error no-internet no-sources empty">
+        <div class="group" data-pane="src:sc" id="on-sc" data-fb-id="S-GROOVE-SIMILAR.E04" data-fb-label="Online suggestions" data-fb-note="Preview streams 30 seconds in the toolbar player’s Preview state (today suggestions can’t be heard before downloading). Download fetches the track and holds it in Discover ▸ Recommendations (Queued → Downloading… → In Recommendations). Keep downloads it straight into the library. Tracks you already have say “In library” and offer nothing destructive." data-fb-dec="DEC-029" data-fb-api="Section { ForEach(suggestions) } ; AVPlayer for the stream"></div>
+        <div class="group" data-pane="src:lf" id="on-lf" hidden></div>
+        <div class="row" style="margin-top:8px;gap:8px"><button class="btn" data-say-plain="Loading 10 more suggestions…" data-fb-id="S-GROOVE-SIMILAR.E06" data-fb-label="Load More" data-fb-api="Button">Load More</button></div>
+      </div>
+      <div class="group" data-show="loading"><div class="inl" data-fb-id="V-SIMILAR.N04" data-fb-label="Online loading"><span class="row" style="gap:6px"><span class="spinner"></span>Asking SoundCloud for tracks related to “Night Drive (Extended Mix)”…</span><div class="acts"><button class="btn" data-set-state="default">Cancel</button></div></div></div>
+      <div class="group" data-show="error"><div class="inl" data-fb-id="V-SIMILAR.N05" data-fb-label="Online error" data-fb-note="Cause + one action; the library section above keeps working."><i data-i="warn" class="l"></i><h2>SoundCloud didn’t answer</h2><p>The request for related tracks failed (HTTP 503). This is on SoundCloud’s side; your library is not affected.</p><div class="acts"><button class="btn" data-set-state="default">Try Again</button><a class="btn" href="activity.html#logs">Show Logs</a></div></div></div>
+      <div class="group" data-show="no-internet"><div class="inl"><i data-i="globe" class="l"></i><h2>Can’t load online suggestions — this Mac is offline</h2><p>The matches from your library above don’t need a connection.</p><div class="acts"><button class="btn" data-set-state="default">Try Again</button></div></div></div>
+      <div class="group" data-show="no-sources"><div class="inl" data-fb-id="V-SIMILAR.N06" data-fb-label="Source not configured" data-fb-note="Points to a place that exists: Settings ▸ Sources (today the message names Settings fields that don’t exist)." data-fb-dec="DEC-037"><h2>SoundCloud isn’t set up for suggestions</h2><p>MLM needs a connected SoundCloud account (or a Last.fm API key) to ask for similar tracks.</p><div class="acts"><a class="btn primary" href="settings.html#sources">Open Settings ▸ Sources</a></div></div></div>
+      <div class="group" data-show="empty"><div class="inl"><h2>No suggestions found</h2><p>SoundCloud has no related tracks for “Night Drive (Extended Mix)”. Last.fm may know some.</p></div></div>
+
+      <div class="banner info" style="margin-top:16px;border-radius:8px;border:0" data-fb-id="V-SIMILAR.N07" data-fb-label="No delete in Similar" data-fb-note="Removes A-GROOVE-DELETEFILE and the thumbs-down Delete of S-GROOVE-SIMILAR.E05. That delete could match an existing library track by artist and title and move its file to the Trash (PP-INSPECTOR-21, data risk). Similar now only adds; throwing away happens in Recommendations and only for tracks held there." data-fb-dec="DEC-030">
+        <i data-i="info"></i><span style="white-space:normal">Nothing in this view can remove a track from your library. Downloaded suggestions are kept or dismissed in <a data-goto="recs">Recommendations</a>.</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /content -->
+
+<!-- Bulk bar for Recommendations (moved into the content column on ready) -->
+<div class="selbar" id="recbar" hidden data-fb-id="V-INBOX.N06" data-fb-label="Selection bar (Recommendations)" data-fb-note="The shared selection bar with this list’s batch actions: clears a backlog in one step. One undo step per batch." data-fb-dec="DEC-015" data-fb-api="GlassEffectContainer + .glassEffect(.regular.interactive(), in: .capsule); macOS 15: .regularMaterial">
+  <span class="cnt"></span><button class="tb-btn" id="bulk-keep">Keep</button><button class="tb-btn" id="bulk-dismiss">Dismiss</button><button class="tb-btn" data-menu-click="cm-reels-addpl">Keep and Add to Playlist <i data-i="chevd" class="s"></i></button>
+</div>
+
+<!-- ═════════════ Overlays ═════════════ -->
+<div class="menu" id="cm-rec" hidden data-fb-id="V-INBOX.N07" data-fb-label="Recommendation context menu" data-fb-note="New (no right-click existed). Standard order: Primary · Add to · Info · Locate · Remove." data-fb-dec="DEC-039" data-fb-api="contextMenu(forSelectionType:)">
+  <div class="mi hdr" id="cm-rec-count" hidden></div>
+  <a class="mi" id="cm-rec-preview"><i data-i="wave"></i>Preview<span class="k">Space</span></a><hr>
+  <a class="mi" id="cm-rec-keep">Keep<span class="k">K</span></a><a class="mi sub" data-menu-click="cm-reels-addpl">Keep and Add to Playlist</a><hr>
+  <a class="mi" href="library.html">Go to Seed Track</a><a class="mi" data-goto="similar">Find Similar</a><hr>
+  <a class="mi drive-on">Show in Finder</a><a class="mi dis drive-off">Show in Finder</a><a class="mi sub">Copy</a><hr>
+  <a class="mi destr" id="cm-rec-dismiss">Dismiss<span class="k">⌫</span></a>
+</div>
+
+<div class="menu" id="cm-reel" hidden data-fb-id="V-REELS.N09" data-fb-label="Reel context menu" data-fb-note="New (expected, missing today)." data-fb-dec="DEC-039" data-fb-api="contextMenu(forSelectionType:)">
+  <a class="mi">Play Video</a><hr>
+  <a class="mi" data-set-state="identifying">Identify Again</a><a class="mi" data-say-plain="Marked as Done" data-undo="1">Mark as Done</a><hr>
+  <a class="mi">Show in Finder</a><a class="mi sub">Copy</a><hr>
+  <a class="mi destr" data-open="a-reel-delete">Delete Reel…<span class="k">⌫</span></a>
+</div>
+
+<div class="menu" id="cm-reels-addpl" hidden data-fb-id="CM-REELS-ADDPL" data-fb-label="Add to Playlist menu" data-fb-note="The standard Add to Playlist submenu (live list, folders, New Playlist…), not a private copy loaded once. Confirms in the status bar with Undo; the track is added as Not downloaded and its download is queued." data-fb-dec="DEC-039" data-fb-api="Menu(“Add to Playlist”) { ForEach(playlists) ; Divider ; Button(“New Playlist…”) }">
+  <a class="mi" data-say-plain="Added to “Warm-up” — downloading" data-undo="1">Warm-up</a><a class="mi" data-say-plain="Added to “Peak time” — downloading" data-undo="1">Peak time</a><a class="mi" data-say-plain="Added to “Closing” — downloading" data-undo="1">Closing</a><a class="mi" data-say-plain="Added to “Boiler Room picks” — downloading" data-undo="1">Boiler Room picks</a><a class="mi" data-say-plain="Added to “Road trip 2026” — downloading" data-undo="1">Road trip 2026</a><a class="mi" data-say-plain="Added to “Ambient for work” — downloading" data-undo="1">Ambient for work</a><hr><a class="mi" data-say-plain="New playlist — type its name in the sidebar">New Playlist…</a>
+</div>
+
+<div class="menu" id="cm-textpill" hidden data-fb-id="CM-REELS-TEXTPILL" data-fb-label="Text fragment menu" data-fb-note="Same four items with clearer names. “Use as Artist – Title” is disabled when the text can’t be split, instead of silently doing nothing." data-fb-api="Menu">
+  <a class="mi" data-say-plain="Artist set from the text in the video" data-undo="1">Use as Artist</a><a class="mi" data-say-plain="Title set from the text in the video" data-undo="1">Use as Title</a><a class="mi dis">Use as “Artist – Title”</a><hr><a class="mi" data-say-plain="Copied">Copy</a>
+</div>
+
+<div class="menu" id="cm-online" hidden data-fb-id="V-SIMILAR.N08" data-fb-label="Online suggestion context menu" data-fb-dec="DEC-039" data-fb-api="contextMenu">
+  <a class="mi"><i data-i="wave"></i>Preview<span class="k">Space</span></a><hr><a class="mi">Download</a><a class="mi">Keep</a><a class="mi sub" data-menu-click="cm-reels-addpl">Keep and Add to Playlist</a><hr><a class="mi">Open on SoundCloud</a><a class="mi">Copy Link</a>
+</div>
+
+<div class="popover" id="po-keyframe" hidden style="width:420px" data-fb-id="S-REELS-KEYFRAME" data-fb-label="Keyframe (popover)" data-fb-note="Was an 850 × 560 sheet. A glance belongs in a popover: the still, the text found in it, and the same Use actions. Esc or a click outside closes it (K-REELS-KEYFRAME-ESC)." data-fb-api=".popover(item:) { }">
+  <div class="row" style="gap:12px;align-items:flex-start">
+    <span class="cov c4" style="width:132px;height:176px;border-radius:7px"></span>
+    <div class="grow col" style="gap:8px;min-width:0">
+      <div><b>Still at 0:04</b> <button class="btn plain">Play from Here</button></div>
+      <div class="caption">Text in this still</div>
+      <div class="col" style="gap:6px">
+        <div class="row" style="gap:6px"><span class="grow trunc">Fred again — delilah</span><button class="btn" data-say-plain="Using “Fred again — delilah” from the text in the video" data-undo="1">Use</button></div>
+        <div class="row" style="gap:6px"><span class="grow trunc">actual life 3</span><button class="btn" data-menu-click="cm-textpill">Use as ▾</button></div>
+        <div class="row" style="gap:6px"><span class="grow trunc">out now</span><button class="btn" data-menu-click="cm-textpill">Use as ▾</button></div>
+      </div>
+      <div class="caption">A still without readable text says “No text found in this still”.</div>
+    </div>
+  </div>
+</div>
+
+<div class="sheet" id="s-find" hidden style="width:460px" data-fb-id="S-DISC-FIND" data-fb-label="Find Recommendations (sheet)" data-fb-note="New. Seed and source in one small task; the search and the downloads you start from its results run as Activity operations. Opens V-SIMILAR for the chosen seed, where the suggestions can be previewed." data-fb-dec="DEC-029" data-fb-api=".sheet { Form { Picker ; Picker(.segmented) } }">
+  <div class="sh"><h2>Find Recommendations</h2><div class="caption">Tracks similar to one you like, from SoundCloud or Last.fm.</div></div>
+  <div class="sb"><div class="form">
+    <div><div class="gtitle">Based on</div><div class="group">
+      <div class="frow"><span class="radio on" data-name="seed"></span><div class="fl">Selected track<small>Night Drive (Extended Mix) — Bicep</small></div></div>
+      <div class="frow"><span class="radio" data-name="seed"></span><div class="fl">Playing track<small>Nothing is playing</small></div></div>
+      <div class="frow"><span class="radio" data-name="seed"></span><div class="fl">Another track…<small>Choose from the library</small></div></div>
+    </div></div>
+    <div><div class="gtitle">Source</div><div class="row" style="gap:10px"><span class="seg"><button class="on">SoundCloud</button><button>Last.fm</button></span><span class="caption">SoundCloud: related tracks · Last.fm: similar tracks</span></div>
+    <div class="ghelp">Nothing is downloaded until you choose it. Downloads wait in Discover ▸ Recommendations until you keep them.</div></div>
+  </div></div>
+  <div class="sf"><button class="btn" data-close>Cancel</button><button class="btn primary" data-close data-goto="similar" id="find-go">Find</button></div>
+</div>
+
+<div class="sheet" id="s-reel-link" hidden style="width:460px" data-fb-id="S-REELS-LINK" data-fb-label="Add Reel from Link (sheet)" data-fb-note="New (D-REELS-URL). Same shape as Add from Link… (S-QUICKADD); a reel link pasted there lands here too." data-fb-dec="DEC-018" data-fb-api=".sheet { TextField ; Button }">
+  <div class="sh"><h2>Add Reel from Link</h2></div>
+  <div class="sb"><input class="field" style="width:100%" value="https://www.instagram.com/reel/C9xQ2mTtP4k/"><div class="ghelp">Instagram, TikTok and YouTube Shorts links. The video is saved to ~/Downloads/Reels and appears as New. If the link needs a sign-in, MLM says so here.</div></div>
+  <div class="sf"><button class="btn" data-close>Cancel</button><button class="btn primary" data-close id="link-go">Add Reel</button></div>
+</div>
+
+<div class="alert" id="a-reel-delete" hidden data-fb-id="A-REELS-DELETE" data-fb-label="Delete Reel confirmation" data-fb-note="Attached to the view (today it only appears when search results are on screen). States the consequence, offers to move the video file to the Trash, and names the button by its verb. A failure (A-REELS-DELETEERROR) names the reel and the cause in the status bar." data-fb-api=".confirmationDialog / .alert with Toggle (AppKit accessory: NSAlert.showsSuppressionButton-style checkbox)">
+  <div class="aic"><i data-i="trash" class="l"></i></div><h2 id="a-reel-title">Delete 1 reel?</h2>
+  <p>It is removed from this list. Songs you downloaded from it stay in the library.</p>
+  <p style="margin-top:6px"><span class="check" id="a-reel-trash">Also move the video file to the Trash</span></p>
+  <div class="ab"><button class="btn destructive" data-close id="a-reel-go">Delete</button><button class="btn" data-close>Cancel</button></div>
+</div>
+
+<!-- Desk: wording that replaces the two error alerts -->
+<div class="cat-h">Failure wording (replaces the alerts A-INBOX-ERROR and A-REELS-DELETEERROR)</div>
+<div class="cat">
+  <div class="spec" data-fb-id="A-INBOX-ERROR" data-fb-label="Keep / Dismiss failed" data-fb-note="Was an alert titled “Recommendations” with “OK”. Now a status-bar message with the cause and the action; the row stays in the list." data-fb-dec="DEC-016"><h4>Keep or Dismiss failed <code>A-INBOX-ERROR → status bar</code></h4><p>The row stays; the message names the cause and offers the fix.</p><div class="demo"><div class="statusbar" style="border:0;border-radius:6px;width:100%"><span class="msg"><i data-i="warn" class="s"></i>Couldn’t dismiss “Glue (Hammer Remix)” — the file is in use by another app. <a class="btn plain" style="height:16px">Try Again</a></span></div></div></div>
+  <div class="spec" data-fb-id="A-REELS-DELETEERROR" data-fb-label="Delete reel failed" data-fb-note="Was an alert “Deletion Error” with “OK”. The reel stays in the list." data-fb-dec="DEC-016"><h4>Delete reel failed <code>A-REELS-DELETEERROR → status bar</code></h4><p>Names the reel by its file name and says why.</p><div class="demo"><div class="statusbar" style="border:0;border-radius:6px;width:100%"><span class="msg"><i data-i="warn" class="s"></i>Couldn’t delete “IMG_4471.mov” — the library is busy. <a class="btn plain" style="height:16px">Try Again</a> <a class="btn plain" style="height:16px" href="activity.html#logs">Show Logs</a></span></div></div></div>
+  <div class="spec" data-fb-id="V-INBOX.E06g" data-fb-label="Verdict confirmations" data-fb-note="Keep = “Add to library” (E06g), Dismiss = “Delete…” (E06h). Both confirm in the status bar with Undo; no alert (A-INBOX-DELETE removed)." data-fb-dec="DEC-041"><h4>Verdict confirmations <code>status bar</code></h4><p>Kept and dismissed, each with Undo for 8 s and in Edit ▸ Undo.</p><div class="demo" style="flex-direction:column;gap:6px"><div class="statusbar" style="border:0;border-radius:6px;width:100%"><span class="msg">Added “Atlas (Edit)” to the library <a class="btn plain" style="height:16px">Undo</a></span></div><div class="statusbar" style="border:0;border-radius:6px;width:100%"><span class="msg">Moved to the Trash <a class="btn plain" style="height:16px">Undo</a></span></div></div></div>
+</div>
+
+<script>
+document.addEventListener('mlm:ready', () => {
+  const $ = (s, r) => (r || document).querySelector(s), $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const esc = MLM.esc, win = MLM.shell.win, driveOff = () => document.documentElement.dataset.drive === 'off';
+  const fmt = s => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  const meter = v => v == null ? '<span class="t3">Analyzing…</span>' : '<span class="num">' + v + '</span><span class="meter">' + [1, 2, 3, 4, 5].map(k => '<i' + (k <= v ? ' class="f"' : '') + '></i>').join('') + '</span>';
+  const SRC = { sc: '<span class="srcdot sc"></span>SoundCloud', lf: '<span class="srcdot"></span>Last.fm', yt: '<span class="srcdot yt"></span>YouTube', sp: '<span class="srcdot sp"></span>Spotify', dab: '<span class="srcdot"></span>DAB' };
+
+  /* ── Recommendations ── */
+  let uid = 0; const R = (title, artist, src, time, energy, c) => ({ id: 'r' + (uid++), title, artist, src, time, energy, c, status: 'local' });
+  const groups = [
+    { seed: 'Night Drive (Extended Mix)', by: 'Bicep', items: [R('Atlas (Edit)', 'Overmono', 'sc', 262, 4, 2), R('Glue (Hammer Remix)', 'Hammer', 'sc', 371, 5, 4), R('Sundial — live at Printworks, London, 14 March 2025 (unreleased ID)', 'Ross From Friends', 'sc', 412, null, 6), R('Opal (Four Tet Remix)', 'Bicep', 'lf', 478, 3, 1)] },
+    { seed: 'Pull Me Out of This', by: 'Fred again..', items: [R('Leavemealone', 'Fred again.. & Baby Keem', 'sc', 228, 5, 3), R('Rumble', 'Skrillex, Fred again.. & Flowdan', 'lf', 146, 5, 5), R('adore u', 'Fred again.. & Obongjayar', 'sc', 221, 3, 2)] },
+    { seed: 'Xtal', by: 'Aphex Twin', items: [R('Roygbiv', 'Boards of Canada', 'lf', 151, 2, 6), R('An Ending (Ascent)', 'Brian Eno', 'lf', 263, 1, 1), R('Untitled 03 (b-side, vinyl rip)', 'unknown uploader', 'sc', 334, null, 0)] },
+    { seed: 'Finally (Extended)', by: 'Kings of Tomorrow', items: [R('Flowerz feat. Tony Williams', 'Armand Van Helden', 'sc', 517, 4, 5), R('The Whistle Song', 'Frankie Knuckles', 'lf', 429, 3, 3)] }
+  ];
+  const recs = $('#recs'), tbody = $('tbody', recs), sel = new Set(), undo = [];
+  let anchor = null, newReels = 3;
+  const flat = () => groups.reduce((a, g) => a.concat(g.items), []);
+  const find = id => flat().find(r => r.id === id);
+  function counts() {
+    const n = flat().length;
+    $$('[data-n="recs"]').forEach(x => x.textContent = n); $$('[data-n="reels"]').forEach(x => x.textContent = newReels ? newReels + ' new' : '');
+    $$('[data-n="recs-line"]').forEach(x => x.textContent = n === 1 ? '1 recommendation waiting' : n + ' recommendations waiting');
+    const b = $('.sb-row[data-nav="discover"] .badge', win); if (b) b.textContent = n + newReels || '';
+    setDef();
+  }
+  function setDef() {
+    const d = $('.statusbar .def', win); if (!d) return; const v = currentView();
+    if (v === 'recs') d.textContent = sel.size ? sel.size + ' of ' + flat().length + ' selected' : flat().length + ' recommendations · ' + groups.filter(g => g.items.length).length + ' seed tracks';
+    else if (v === 'reels') d.textContent = REELS.length + ' reels · ' + newReels + ' new';
+  }
+  const currentView = () => { const v = $$('#content > [data-view]').find(x => !x.hidden); return v ? v.dataset.view : 'recs'; };
+  function draw() {
+    const off = driveOff(); let h = '', first = true;
+    groups.forEach((g, gi) => {
+      if (!g.items.length) return;
+      h += '<tr class="group" data-g="' + gi + '"' + (gi === 0 ? ' data-fb-id="V-INBOX.E06d" data-fb-label="Seed group row" data-fb-note="“Because of …” names the seed once per group instead of repeating an accent-coloured sentence in every row. Keep All / Dismiss All act on the group." data-fb-dec="DEC-029" data-fb-api="Section header"' : '') + '><td colspan="6"><div class="row"><span class="grow trunc">Because of “' + esc(g.seed) + '” <span style="font-weight:400">— ' + esc(g.by) + ' · ' + g.items.length + '</span></span><button class="btn plain" data-gact="keep">Keep All</button><button class="btn plain" data-gact="dismiss"' + (off ? ' disabled' : '') + '>Dismiss All</button></div></td></tr>';
+      g.items.forEach(r => {
+        h += '<tr data-id="' + r.id + '" class="' + (sel.has(r.id) ? 'sel' : '') + (off ? ' off' : '') + '"><td><div class="cellt"><span class="cov ' + (r.c ? 'c' + r.c : 'none') + '">' + (r.c ? '' : MLM.icon('note', 's')) + '</span><span class="ttl">' + esc(r.title) + '</span></div></td><td>' + esc(r.artist) + '</td><td class="dim">' + SRC[r.src] + '</td><td class="r num">' + fmt(r.time) + '</td><td>' + meter(r.energy) + '</td>' +
+          '<td class="acts"><button class="btn" data-ract="keep"' + (first ? ' data-fb-id="V-INBOX.E06g" data-fb-label="Keep" data-fb-note="Was “Add to library”. Now it really adds: the track enters All Tracks. Key K. Confirmed in the status bar with Undo." data-fb-dec="DEC-029" data-fb-api="Button; .onKeyPress(“k”)"' : '') + '>Keep</button><button class="btn" data-ract="dismiss"' + (off ? ' disabled title="Can’t dismiss — the file can’t be moved to the Trash while “Lexxar” is not connected"' : '') + (first ? ' data-fb-id="V-INBOX.E06h" data-fb-label="Dismiss" data-fb-note="Was “Delete…” + alert. Moves the file to the Trash, undoable until the Trash is emptied, so no confirmation. Key ⌫. Disabled with the reason while the drive is not connected." data-fb-dec="DEC-041" data-fb-api="Button; .onDeleteCommand; FileManager.trashItem"' : '') + '>Dismiss</button></td></tr>';
+        first = false;
+      });
+    });
+    tbody.innerHTML = h; bar(); counts(); MLM.refreshBadges();
+  }
+  function bar() { const b = $('#recbar'); b.hidden = !(sel.size >= 2 && currentView() === 'recs'); $('.cnt', b).innerHTML = sel.size + ' selected'; $('#bulk-dismiss').disabled = driveOff(); }
+  function verdict(ids, keep) {
+    ids = ids.filter(find); if (!ids.length) return;
+    if (!keep && driveOff()) { MLM.say(MLM.icon('drive', 's') + ' Can’t dismiss — the file can’t be moved to the Trash while “Lexxar” is not connected.'); return; }
+    const order = flat().map(r => r.id), nextId = order.slice(order.indexOf(ids[ids.length - 1]) + 1).find(i => !ids.includes(i)) || order.filter(i => !ids.includes(i)).pop();
+    const step = []; let one = null;
+    groups.forEach(g => { for (let i = g.items.length - 1; i >= 0; i--) if (ids.includes(g.items[i].id)) { one = g.items[i]; step.push({ g, i, r: g.items[i] }); g.items.splice(i, 1); } });
+    undo.push(step); sel.clear(); if (nextId) { sel.add(nextId); anchor = nextId; } draw(); recs.focus();
+    if (MLM.shell.previewing) MLM.shell.endPreview();
+    MLM.say(keep ? (ids.length === 1 ? 'Added “' + esc(one.title) + '” to the library' : 'Added ' + ids.length + ' tracks to the library') : (ids.length === 1 ? 'Moved to the Trash' : 'Moved ' + ids.length + ' files to the Trash'), true);
+  }
+  function undoLast() { const step = undo.pop(); if (!step) return false; step.slice().reverse().forEach(s => s.g.items.splice(Math.min(s.i, s.g.items.length), 0, s.r)); sel.clear(); step.forEach(s => sel.add(s.r.id)); draw(); MLM.say('Undone — back in Recommendations'); return true; }
+  function pick(id, e) {
+    const order = flat().map(r => r.id);
+    if (e && e.shiftKey && anchor) { const a = order.indexOf(anchor), b = order.indexOf(id); if (!(e.metaKey || e.ctrlKey)) sel.clear(); order.slice(Math.min(a, b), Math.max(a, b) + 1).forEach(i => sel.add(i)); }
+    else if (e && (e.metaKey || e.ctrlKey)) { sel.has(id) ? sel.delete(id) : sel.add(id); anchor = id; }
+    else { sel.clear(); sel.add(id); anchor = id; }
+    $$('tr[data-id]', tbody).forEach(tr => tr.classList.toggle('sel', sel.has(tr.dataset.id))); bar(); setDef();
+  }
+  recs.addEventListener('click', e => {
+    const g = e.target.closest('[data-gact]'); if (g) { const grp = groups[+g.closest('tr').dataset.g]; return verdict(grp.items.map(r => r.id), g.dataset.gact === 'keep'); }
+    const tr = e.target.closest('tr[data-id]'); if (!tr) return;
+    const b = e.target.closest('[data-ract]'); if (b) return verdict([tr.dataset.id], b.dataset.ract === 'keep');
+    pick(tr.dataset.id, e);
+  });
+  recs.addEventListener('contextmenu', e => {
+    const tr = e.target.closest('tr[data-id]'); if (!tr) return; e.preventDefault(); if (!sel.has(tr.dataset.id)) pick(tr.dataset.id);
+    const c = $('#cm-rec-count'); c.hidden = sel.size < 2; c.textContent = sel.size + ' recommendations'; $('#cm-rec-dismiss').classList.toggle('dis', driveOff());
+    MLM.openMenu('cm-rec', e.clientX, e.clientY);
+  });
+  recs.addEventListener('keydown', e => {
+    const order = flat().map(r => r.id), cur = order.indexOf(anchor);
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undoLast(); return; }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') { e.preventDefault(); order.forEach(i => sel.add(i)); draw(); return; }
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const n = order[Math.max(0, Math.min(order.length - 1, cur + (e.key === 'ArrowDown' ? 1 : -1)))]; if (n) { pick(n, e.shiftKey ? e : null); const tr = $('tr[data-id="' + n + '"]', tbody); if (tr) tr.scrollIntoView({ block: 'nearest' }); if (MLM.shell.previewing) MLM.shell.preview(find(n)); } }
+    else if (e.key === ' ') { e.preventDefault(); if (MLM.shell.previewing) MLM.shell.endPreview(); else if (sel.size === 1) MLM.shell.preview(find(Array.from(sel)[0])); }
+    else if (e.key.toLowerCase() === 'k') { e.preventDefault(); e.stopPropagation(); verdict(Array.from(sel), true); }
+    else if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); verdict(Array.from(sel), false); }
+    else if (e.key === 'Escape' && MLM.shell.previewing) MLM.shell.endPreview();
+  });
+  $('#bulk-keep').onclick = () => verdict(Array.from(sel), true); $('#bulk-dismiss').onclick = () => verdict(Array.from(sel), false);
+  $('#cm-rec-keep').onclick = () => verdict(Array.from(sel), true); $('#cm-rec-dismiss').onclick = () => verdict(Array.from(sel), false);
+  $('#cm-rec-preview').onclick = () => { if (sel.size) MLM.shell.preview(find(Array.from(sel)[0])); };
+  $('.content', win).appendChild($('#recbar'));
+  $('#skel').innerHTML = Array.from({ length: 12 }, (_, i) => '<tr class="skel">' + [58, 44, 40, 30, 36, 0].map(w => '<td>' + (w ? '<span style="width:' + (w + (i * 11) % 28) + '%"></span>' : '') + '</td>').join('') + '</tr>').join('');
+
+  /* ── Reels ── */
+  const REELS = [
+    { f: 'Snapinsta.app_video_AQP3xKmB7vYt2_n.mp4', g: 'Fred again.. — Delilah (pull me out of this)', s: 'Identified', c: 4 },
+    { f: 'IMG_4471.mov', g: 'Not identified yet', s: 'New', c: 2 },
+    { f: 'ssstik.io_@berlin.rave.diary_1727563312.mp4', g: 'Not identified yet', s: 'New', c: 6 },
+    { f: 'Overmono - So U Kno.mp4', g: 'Overmono — So U Kno', s: 'Identified', c: 1 },
+    { f: 'reel_2026-09-28_22-14-03.mp4', g: 'Not identified yet', s: 'New', c: 3 },
+    { f: 'Snapinsta.app_video_10000000_892713_n.mp4', g: 'Barry Can’t Swim — Sunsleeper', s: 'Done', c: 5 },
+    { f: 'boiler room clip (who is this??).mov', g: 'DJ Heartstring — Will We Ever Be the Same', s: 'Done', c: 2 },
+    { f: 'ScreenRecording_09-12-2026 23-41-07_1.mov', g: 'Shazam didn’t recognise this audio', s: 'Identified', c: 6 },
+    { f: 'Snapinsta.app_video_4F1BB2C93A_n.mp4', g: 'KETTAMA — Fly Away XTC', s: 'Done', c: 1 }
+  ];
+  const rl = $('#reels'), rsel = new Set([0]); let rcur = 0;
+  function drawReels() {
+    rl.innerHTML = REELS.map((r, i) => '<div class="rrow' + (rsel.has(i) ? ' sel' : '') + '" data-i="' + i + '"><span class="cov c' + r.c + ' thumb">' + MLM.icon('video', 's') + '</span><span class="grow trunc"><span class="nm trunc" style="display:block" title="' + esc(r.f) + '">' + esc(r.f) + '</span><small class="trunc">' + esc(r.g) + '</small></span><span class="caption"' + (i === 0 ? ' data-fb-id="V-REELS.N10" data-fb-label="Reel state word" data-fb-note="New · Identified · Done. A word, not a colour. “Not parsed” is gone." data-fb-dec="DEC-029"' : '') + '>' + r.s + '</span></div>').join('');
+    newReels = REELS.filter(r => r.s === 'New').length; counts();
+    const r = REELS[rcur]; if (r) { $('#reel-name').textContent = r.f; $('#reel-state').textContent = r.s; }
+    MLM.refreshBadges();
+  }
+  rl.addEventListener('click', e => { const row = e.target.closest('.rrow'); if (!row) return; const i = +row.dataset.i; if (e.metaKey || e.ctrlKey) { rsel.has(i) ? rsel.delete(i) : rsel.add(i); } else if (e.shiftKey) { for (let k = Math.min(rcur, i); k <= Math.max(rcur, i); k++) rsel.add(k); } else { rsel.clear(); rsel.add(i); } rcur = i; drawReels(); });
+  rl.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); rcur = Math.max(0, Math.min(REELS.length - 1, rcur + (e.key === 'ArrowDown' ? 1 : -1))); if (!e.shiftKey) rsel.clear(); rsel.add(rcur); drawReels(); }
+    else if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); askDelete(); }
+  });
+  rl.addEventListener('contextmenu', e => { const row = e.target.closest('.rrow'); if (!row) return; e.preventDefault(); const i = +row.dataset.i; if (!rsel.has(i)) { rsel.clear(); rsel.add(i); rcur = i; drawReels(); } MLM.openMenu('cm-reel', e.clientX, e.clientY); });
+  function askDelete() { $('#a-reel-title').textContent = rsel.size === 1 ? 'Delete 1 reel?' : 'Delete ' + rsel.size + ' reels?'; $('#a-reel-trash').textContent = rsel.size === 1 ? 'Also move the video file to the Trash' : 'Also move the ' + rsel.size + ' video files to the Trash'; MLM.openSheet('a-reel-delete'); }
+  document.addEventListener('click', e => { if (e.target.closest('[data-open="a-reel-delete"]')) askDelete(); }, true);
+  $('#a-reel-go').addEventListener('click', () => { const n = rsel.size, trash = $('#a-reel-trash').classList.contains('on'); Array.from(rsel).sort((a, b) => b - a).forEach(i => REELS.splice(i, 1)); rsel.clear(); rcur = 0; if (REELS.length) rsel.add(0); drawReels(); MLM.say((n === 1 ? 'Deleted 1 reel' : 'Deleted ' + n + ' reels') + (trash ? ' — video ' + (n === 1 ? 'file' : 'files') + ' moved to the Trash' : ' — video ' + (n === 1 ? 'file' : 'files') + ' kept')); });
+  $('#reel-done').addEventListener('click', () => { if (REELS[rcur]) { REELS[rcur].s = 'Done'; drawReels(); MLM.say('Marked as Done', true); } });
+  $('#link-go').addEventListener('click', () => { REELS.unshift({ f: 'instagram_C9xQ2mTtP4k.mp4', g: 'Fetching the video…', s: 'New', c: 3 }); rsel.clear(); rsel.add(0); rcur = 0; drawReels(); MLM.say('Fetching the reel from Instagram — it appears in Activity'); });
+  $('#guesses').addEventListener('click', e => {
+    const b = e.target.closest('.use-btn'); if (!b) return; const row = b.closest('.frow');
+    $$('#guesses .frow[data-g]').forEach(r => { const on = r === row; $('.use-mark', r).hidden = !on; $('.use-btn', r).hidden = on; });
+    $('#f-artist').value = row.dataset.a; $('#f-title').value = row.dataset.t; $('#fill-src').textContent = 'Filled from: ' + row.dataset.g; MLM.say('Using the guess from ' + row.dataset.g + ' — searching 4 sources', true);
+  });
+  const doSearch = () => MLM.say('Searching SoundCloud, YouTube, Spotify and DAB for “' + esc(($('#f-artist').value + ' ' + $('#f-title').value).trim()) + '”…');
+  $('#reel-search').addEventListener('click', doSearch);
+  ['#f-artist', '#f-title'].forEach(s => { $(s).addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); e.stopPropagation(); }); $(s).addEventListener('input', () => { $('#fill-src').textContent = 'Typed by you'; }); });
+
+  const RES = [
+    ['sc', 'SoundCloud', [['Delilah (pull me out of this)', 'Fred again..', 252, ''], ['Fred again.. - Delilah (pull me out of this) [Boiler Room London rip]', 'ravearchive_uk', 301, ''], ['delilah (sped up)', 'nightcore.tapes', 198, '']]],
+    ['yt', 'YouTube', [['Fred again.. - Delilah (pull me out of this) (Official Audio)', 'Fred again . .', 253, ''], ['Fred again.. | Boiler Room: London (full set, 1 h 02 min)', 'Boiler Room', 3724, '']]],
+    ['sp', 'Spotify', []],
+    ['dab', 'DAB', [['Delilah (pull me out of this)', 'Fred again.. · Actual Life 3 (January 1 – September 9 2022) · FLAC', 252, 'lib']]]
+  ];
+  let firstRes = true;
+  const acts = (lib, endWord) => lib ? '<span class="status ok">In library</span><a class="btn plain" href="library.html">Show</a>' :
+    '<button class="btn" data-pv' + (firstRes ? ' data-fb-id="V-REELS.E21" data-fb-label="Result row actions" data-fb-note="Words instead of three unlabeled icons. Preview streams in the toolbar player’s Preview state (does not download the whole file first, does not replace what is playing). Download shows its state in the row: Queued → Downloading… → In library, or Download failed with the reason and Retry; a second download queues instead of being dropped. Rows drag onto sidebar playlists (D-REELS-RESULT-TO-PLAYLIST)." data-fb-dec="DEC-044" data-fb-api="Button ×3; .draggable"' : '') + '>Preview</button><button class="btn" data-dl="' + endWord + '">Download</button><button class="btn" data-menu-click="cm-reels-addpl">Add to Playlist ▸</button>';
+  $('#results').innerHTML = RES.map(([k, name, rows]) => '<div class="frow" style="min-height:26px;padding-top:4px;padding-bottom:4px"><div class="fl"><b>' + SRC[k] + '</b> <span class="t2">' + (rows.length ? rows.length : '— no matches') + '</span></div></div>' +
+    rows.map(r => { const h = '<div class="frow dragrow"><div class="fl trunc"><span class="tt">' + esc(r[0]) + '</span><small class="trunc">' + esc(r[1]) + ' · ' + (r[2] > 3600 ? Math.floor(r[2] / 3600) + ':' + String(Math.floor(r[2] % 3600 / 60)).padStart(2, '0') + ':' + String(r[2] % 60).padStart(2, '0') : fmt(r[2])) + '</small></div>' + acts(r[3] === 'lib', 'In library') + '</div>'; firstRes = false; return h; }).join('')).join('');
+
+  /* ── Similar ── */
+  MLM.COLS.match = { label: 'Match', w: 64, cls: 'r num', render: t => t.match + ' %', sort: 'match' };
+  const sim = MLM.tracks(12, 21, { allLocal: true }).map((t, i) => Object.assign(t, { match: 96 - i * 3 - (i % 2) }));
+  MLM.table('#simtbl', { rows: sim, cols: ['title', 'artist', 'album', 'time', 'bpm', 'energy', 'match'], sort: 'match', desc: true, ids: { match: 'V-SIMILAR.N09' }, notes: { match: 'Similarity as a plain percentage, sortable. No coloured capsules.' } });
+  const ON = {
+    sc: [['Apricots', 'Bicep', 264, ''], ['Higher Level (Hammer Edit)', 'Hammer', 342, ''], ['Atlas (Edit)', 'Overmono', 262, 'rec'], ['Glue', 'Bicep', 269, 'lib'], ['Chroma 001 HELIUM', 'Bicep', 301, ''], ['Is U', 'Overmono', 227, ''], ['Cash Romantic (full EP continuous mix, unofficial upload)', 'feel my bicep fan uploads', 1432, ''], ['Lone — Echo Paths', 'R&S Records', 318, ''], ['Kelly Lee Owens - Melt!', 'Kelly Lee Owens', 229, ''], ['Bored of Rave', 'Sally C', 356, '']],
+    lf: [['Just', 'Bicep', 344, 'lib'], ['So U Kno', 'Overmono', 248, ''], ['Marea (we’ve lost dancing)', 'Fred again.. & The Blessed Madonna', 286, ''], ['Idontknow', 'Jamie xx', 372, ''], ['Says', 'Nils Frahm', 498, ''], ['Kerala', 'Bonobo', 236, 'lib'], ['Only Human', 'Four Tet', 471, ''], ['Emerald Rush', 'Jon Hopkins', 337, ''], ['Rave', 'Dxrk', 172, ''], ['Hackney Parrot (Special Request VIP)', 'Tessela', 331, '']]
+  };
+  let firstOn = true;
+  Object.keys(ON).forEach(k => {
+    $('#on-' + k).innerHTML = ON[k].map(r => {
+      const a = r[3] === 'lib' ? '<span class="status ok">In library</span><a class="btn plain" href="library.html">Show in All Tracks</a>' : r[3] === 'rec' ? '<span class="status">In Recommendations</span><button class="btn" data-keep>Keep</button>' :
+        '<button class="btn" data-pv' + (firstOn ? ' data-fb-id="V-SIMILAR.N10" data-fb-label="Preview (30 s stream)" data-fb-note="Hear a suggestion before downloading it. Uses the toolbar player’s Preview state; Space or Esc ends it and resumes what was playing." data-fb-dec="DEC-010" data-fb-api="AVPlayer(url: previewStream)"' : '') + '>Preview</button><button class="btn" data-dl="In Recommendations"' + (firstOn ? ' data-fb-id="S-GROOVE-SIMILAR.E04b" data-fb-label="Download" data-fb-note="Inline states: Queued → Downloading… → In Recommendations (or Download failed · Retry). The download is an Activity operation." data-fb-dec="DEC-044"' : '') + '>Download</button><button class="btn" data-dl="In library" data-keepdl' + (firstOn ? ' data-fb-id="V-SIMILAR.N11" data-fb-label="Keep" data-fb-note="Download and keep in one step: the track goes straight into the library and skips the Recommendations inbox." data-fb-dec="DEC-029"' : '') + '>Keep</button>';
+      if (!r[3]) firstOn = false;
+      return '<div class="frow dragrow" data-online><div class="fl trunc"><span class="srcdot ' + (k === 'sc' ? 'sc' : '') + '"></span><span class="tt">' + esc(r[0]) + '</span><small class="trunc">' + esc(r[1]) + ' · ' + fmt(r[2]) + '</small></div>' + a + '</div>';
+    }).join('');
+  });
+  $('#an-go').addEventListener('click', () => { $('#an-idle').hidden = true; $('#an-run').hidden = false; MLM.say('Analysis started — “Night Drive (Extended Mix)”'); clearTimeout(window.anT); window.anT = setTimeout(() => { $('#an-idle').hidden = false; $('#an-run').hidden = true; $('[data-set-state="default"]').click(); MLM.say('Analysis finished — 12 similar tracks found'); }, 2600); });
+  $('#an-cancel').addEventListener('click', () => { clearTimeout(window.anT); $('#an-idle').hidden = false; $('#an-run').hidden = true; MLM.say('Analysis cancelled'); });
+
+  /* ── Shared small behaviours ── */
+  document.addEventListener('click', e => {
+    const t = e.target;
+    const u = t.closest('.statusbar .msg a'); if (u && u.textContent.trim() === 'Undo' && currentView() === 'recs') { if (!undoLast()) MLM.say('Undone'); return; }
+    if (t.closest('.menu [data-set-state]')) setTimeout(() => document.body.click(), 0);
+    const sp = t.closest('[data-say-plain]'); if (sp) { MLM.say(sp.dataset.sayPlain, !!sp.dataset.undo); return; }
+    const pv = t.closest('[data-pv]'); if (pv) { const row = pv.closest('.frow'); if (MLM.shell.previewing && pv.textContent === 'Stop') { MLM.shell.endPreview(); pv.textContent = 'Preview'; return; } $$('[data-pv]').forEach(x => x.textContent = 'Preview'); MLM.shell.previewing = { title: $('.tt', row).textContent.trim(), artist: '', time: 30, c: 3 }; MLM.shell.setPlayer(MLM.shell.previewing, 'preview'); pv.textContent = 'Stop'; return; }
+    const kp = t.closest('[data-keep]'); if (kp) { const row = kp.closest('.frow'); kp.previousElementSibling.outerHTML = '<span class="status ok">In library</span>'; kp.remove(); MLM.say('Added to the library', true); return; }
+    const dl = t.closest('[data-dl]'); if (dl) {
+      const row = dl.closest('.frow'), end = dl.dataset.dl, keep = dl.hasAttribute('data-keepdl'), off = driveOff();
+      $$('[data-dl],[data-pv],[data-menu-click]', row).forEach(x => { if (x !== dl) x.remove(); });
+      dl.outerHTML = '<span class="status dlst">' + (off ? 'Queued — waiting for “Lexxar”' : 'Queued') + '</span>'; const st = $('.dlst', row);
+      MLM.say(off ? 'Download queued — it starts when “Lexxar” is connected' : 'Download started — it appears in Activity');
+      if (off) return;
+      setTimeout(() => { st.innerHTML = '<span class="spinner"></span>Downloading…'; }, 800);
+      setTimeout(() => { st.className = 'status ok'; st.textContent = end; if (end === 'In Recommendations') { st.className = 'status'; st.insertAdjacentHTML('afterend', '<button class="btn" data-keep>Keep</button>'); } MLM.say(keep || end === 'In library' ? 'Download finished — added to the library' : 'Download finished — waiting in Recommendations'); }, 2600);
+    }
+  });
+  document.addEventListener('contextmenu', e => { const r = e.target.closest('[data-online]'); if (r) { e.preventDefault(); MLM.openMenu('cm-online', e.clientX, e.clientY); } });
+  /* drag rows onto sidebar playlists / sync profiles */
+  document.addEventListener('mousedown', e => { const r = e.target.closest('#recs tr[data-id], #simtbl tbody tr, .dragrow, .rrow'); if (r && !e.target.closest('button,input,a')) r.draggable = true; });
+  let dragWhat = '';
+  document.addEventListener('dragstart', e => { const r = e.target.closest ? e.target.closest('tr, .dragrow, .rrow') : null; if (!r) return; dragWhat = r.closest('#recs') ? 'rec' : r.closest('#reels') ? 'reel' : 'track'; if (dragWhat === 'rec' && !sel.has(r.dataset.id)) pick(r.dataset.id); e.dataTransfer.setData('text/plain', 'mlm'); });
+  const target = e => { const a = e.target.closest ? e.target.closest('.sb-row') : null; return a && /^(pl\d|sync)/.test(a.dataset.nav || '') && dragWhat && dragWhat !== 'reel' ? a : null; };
+  document.addEventListener('dragover', e => { const a = target(e); $$('.sb-row.drop').forEach(x => { if (x !== a) x.classList.remove('drop'); }); if (a) { e.preventDefault(); a.classList.add('drop'); } });
+  document.addEventListener('drop', e => { const a = target(e); $$('.sb-row.drop').forEach(x => x.classList.remove('drop')); if (!a) return; e.preventDefault(); const name = $('.lbl', a).childNodes[0].textContent; if (dragWhat === 'rec') { const ids = Array.from(sel), n = ids.length; verdict(ids, true); MLM.say('Kept ' + (n === 1 ? '1 track' : n + ' tracks') + ' and added to “' + esc(name) + '”', true); } else MLM.say('Added to “' + esc(name) + '”', true); dragWhat = ''; });
+  document.addEventListener('click', e => { if (e.target.closest('[data-drive],[data-drive-on]')) setTimeout(draw, 0); });
+
+  const STATE_VIEW = { identifying: 'reels', 'not-identified': 'reels', 'no-results': 'reels', 'not-analysed': 'similar', 'no-sources': 'similar' };
+  const FIELDS = { artist: $('#f-artist').value, title: $('#f-title').value };
+  document.addEventListener('mlm:state', e => {
+    const s = e.detail; if (STATE_VIEW[s] && currentView() !== STATE_VIEW[s]) MLM.goto(STATE_VIEW[s]);
+    if (s === 'no-internet' && currentView() === 'recs') MLM.goto('reels');
+    if ((s === 'loading' || s === 'error') && currentView() === 'reels') MLM.goto('recs');
+    const blank = s === 'not-identified' || s === 'identifying'; $('#f-artist').value = blank ? '' : FIELDS.artist; $('#f-title').value = blank ? '' : FIELDS.title; $('#fill-src').textContent = blank ? 'Empty — choose a guess or type' : 'Filled from: Shazam';
+    $('#an-idle').hidden = false; $('#an-run').hidden = true;
+  });
+  document.addEventListener('mlm:view', () => { bar(); setDef(); });
+  document.addEventListener('mlm:select', () => setTimeout(setDef, 0));
+  draw(); drawReels();
+  if (location.hash === '#similar') { bar(); }
+});
+</script>
+</body></html>

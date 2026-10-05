@@ -1,0 +1,28 @@
+ST-STUDIO-GRID	mocked	genres.html#list	DEC-025: the Genre Workshop grid leaves Settings and becomes the V-GENRES list (table with multi-selection); elements E01–E04 reused
+ST-STUDIO-GENRE	mocked	genres.html#detail	DEC-025: becomes V-GENRED (genre tracks + Suggested tracks section + staging bar); E02 dual preview players removed, replaced by Space preview in the toolbar player (DEC-009/010)
+ST-STUDIO-MERGE	mocked	genres.html#list	DEC-025/DEC-041: screen becomes the sheet "Merge Genres…" (id s-merge) on the list selection; previewed, counted, undoable
+ST-STUDIO-EXPORT	mocked	genres.html#list	DEC-025/DEC-044: screen becomes the sheet "Export Create ML Training Set…" (id s-export; More menu and File ▸ Export); progress is an Activity operation; result counts skipped/failed
+CM-STUDIO-SUGGESTION	mocked	genres.html#detail	menu cm-genre-sugg: shared track menu in DEC-039 order plus Add to ‹Genre› / Not This Genre
+CM-STUDIO-GENRETRACK	mocked	genres.html#detail	menu cm-genre-track: shared track menu in DEC-039 order plus Use as Reference for Suggestions / Remove from ‹Genre›
+CM-STUDIO-MERGETABLE	mocked	genres.html#list	merge sheet preview table uses the shared CM-TRACK menu (multi-selection aware)
+S-STUDIO-EXPORTFOLDER	pattern	patterns-sheets-alerts.html	system folder dialog (.fileImporter); its trigger "Choose…" is mocked in the export sheet on genres.html
+K-STUDIO-MERGE-PRIMARY	mocked	genres.html#list	merge preview table is a standard track table: Return/double-click plays, Space previews (DEC-008/009); misleading caption removed
+D-STUDIO-TRACK-TO-GENRE	pattern	patterns-dnd.html	expected-missing drag; designed as "drag a suggestion onto the genre's track table = stage" and "drop tracks on a genre row = set genre" (described in element notes on genres.html, DEC-040), not interactive in the mockup
+ST-ADV	merged	genres.html	DEC-025: the Genre Workshop (the tab's only content) moves to the sidebar destination Genres (V-GENRES/V-GENRED); Settings ▸ Advanced gets other content per DEC-035 (settings.html)
+S-SET-EXPORTFOLDER	merged	patterns-sheets-alerts.html	same panel as S-STUDIO-EXPORTFOLDER (duplicate inventory entry of the Create ML destination dialog); trigger mocked in the export sheet on genres.html (DEC-025)
+K-SET-GW-TABLE-RETURN	merged	genres.html#list	same shortcut as K-STUDIO-MERGE-PRIMARY (duplicate inventory entry); Return/double-click = play in the merge preview table (DEC-008)
+D-SET-GW-TRACK-TO-GENRE	pattern	patterns-dnd.html	expected-missing drag; same design as D-STUDIO-TRACK-TO-GENRE (tracks → genre row or genre track table sets/stages the genre, DEC-040)
+D-SET-GW-TRACK-OUT	pattern	patterns-dnd.html	expected-missing drag; genre and suggestion rows are standard track rows and drag to sidebar playlists / sync profiles / Finder like every track table (DEC-040)
+V-ALB	mocked	albums.html#grid	new
+V-ALBD	mocked	albums.html#detail	new
+CM-ALB-CARD	mocked	albums.html#grid	new
+CM-ALBD-MORE	mocked	albums.html#detail	new
+CM-ALBD-ABSENT	mocked	albums.html#detail	new
+S-ALB-EDIT	mocked	albums.html#detail	new
+S-ALB-MERGE	mocked	albums.html#detail	new
+A-ALB-REMOVE	mocked	albums.html#grid	new
+V-GENRES	mocked	genres.html#list	new
+V-GENRED	mocked	genres.html#detail	new
+CM-GENRE-ROW	mocked	genres.html#list	new
+CM-GENRED-MORE	mocked	genres.html#detail	new
+ICON-MLIBM	mocked	library-icon.html	new

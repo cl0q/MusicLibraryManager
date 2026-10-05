@@ -1,0 +1,272 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Track inspector — MLM B1</title>
+<link rel="stylesheet" href="assets/mlm.css"><script src="assets/app.js"></script>
+<style>
+  .ex-wide { grid-column: 1 / -1; }
+  .trx { height: auto; border-radius: 10px; border: 0; box-shadow: 0 0 0 .5px var(--sep-strong); overflow: hidden; }
+  .trx .tr-body { overflow: visible; }
+  .ihead { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+  .ihead .cov { width: 64px; height: 64px; border-radius: 8px; position: relative; }
+  .ihead .cov.drop { box-shadow: 0 0 0 3px var(--accent); }
+  .ihead .cov.drop::after { content: "Set cover"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; color: var(--on-accent); background: color-mix(in srgb, var(--accent) 55%, transparent); border-radius: 8px; }
+  .ihead .stack { position: relative; width: 64px; height: 64px; flex: none; } .ihead .stack .cov { position: absolute; width: 52px; height: 52px; box-shadow: 0 0 0 1.5px var(--content); }
+  .itabs { display: flex; justify-content: center; margin-bottom: 14px; }
+  .isec { font-size: 11px; font-weight: 600; color: var(--text2); margin: 16px 0 6px; display: flex; align-items: center; gap: 6px; }
+  .kv.insp { grid-template-columns: 82px 1fr; } .kv.insp > label { white-space: nowrap; font-size: 11.5px; } .kv.insp .two { display: flex; gap: 6px; align-items: center; } .kv.insp .two .field { width: 38px; text-align: center; }
+  .kv.insp textarea.field { height: 44px; padding: 4px 7px; resize: none; }
+  .kv.insp .val { font-size: 12px; }
+  .ferr { grid-column: 2; color: var(--red); font-size: 11px; margin-top: -3px; white-space: normal; }
+  .plrow { display: flex; align-items: center; gap: 7px; height: 26px; border-radius: 5px; padding: 0 4px; } .plrow:hover { background: var(--fill); }
+  .plrow svg { color: var(--accent-text); } .plrow .rm { color: var(--text2); opacity: 0; display: flex; } .plrow:hover .rm { opacity: 1; }
+  .wavebox { height: 64px; display: flex; align-items: center; gap: 1px; position: relative; border-radius: 6px; background: var(--content-alt); padding: 0 4px; }
+  .wavebox b { flex: 1; min-width: 1px; border-radius: 1px; background: var(--text3); } .wavebox b.p { background: var(--text2); }
+  .wavebox .ph { position: absolute; top: 2px; bottom: 2px; width: 1.5px; background: var(--accent); } .wavebox .hot { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text); border-radius: 1px; }
+  .wavebox.flat { justify-content: center; color: var(--text2); font-size: 11px; text-align: center; white-space: normal; padding: 0 14px; }
+  .avail { border-radius: 8px; background: var(--content-alt); box-shadow: inset 0 0 0 .5px var(--sep); padding: 9px 10px; white-space: normal; font-size: 12px; }
+  .avail .acts { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; } .avail .why { color: var(--text2); margin-top: 3px; }
+  .path { user-select: text; overflow-wrap: anywhere; white-space: normal; font-size: 11px; color: var(--text2); margin: 4px 0 6px; }
+  .srow { display: flex; align-items: center; gap: 8px; height: 32px; border-radius: 5px; padding: 0 4px; } .srow:hover { background: var(--fill); } .srow .cov { width: 24px; height: 24px; }
+  details.diag { margin-top: 16px; font-size: 12px; } details.diag summary { font-weight: 600; color: var(--text2); font-size: 11px; cursor: default; } details.diag .kv { margin-top: 8px; }
+  .note2 { font-size: 11px; color: var(--text2); white-space: normal; margin-top: 8px; display: flex; gap: 6px; align-items: flex-start; }
+</style></head>
+<body data-screen="P-INSPECTOR" data-title="Track inspector (Info)" data-nav="tracks" data-states="default,analyzing,tool-missing,save-error">
+
+<div class="note">
+  <h3>Track inspector — the Info mode of the trailing column — Tier 1</h3>
+  <p><b>Try:</b> click rows: Info follows the <b>selection</b> (not the playing track) · <kbd>⌘I</kbd> or ⓘ shows/hides it · the tabs <b>Details · Audio · File</b> · edit a field and press <kbd>Return</kbd> or click elsewhere (it commits; status bar offers Undo), <kbd>Esc</kbd> reverts · empty the Title or type letters into Year (inline message, no alert) · ⌘-click or ⇧-click several rows: the same form with <code>Mixed</code>, one edit for all · select a <b>Not downloaded</b>, <b>Download failed</b> or <b>File missing</b> row and open <b>File</b> · remove a playlist under “In playlists” · <b>Drive → Not connected</b>.</p>
+  <p><b>State</b> switcher: analysis running · analysis tool missing (both on the Audio tab) · a save that failed (inline, was an alert). Static copies of every case are below the window.</p>
+  <p>Decisions: DEC-007 (system inspector, ⌘I, follows selection, multi-edit, three tabs), DEC-008 (double-click plays and opens nothing), DEC-030 (Similar is a view; the top five live on the Audio tab), DEC-041 (undo).</p>
+</div>
+
+<div id="content">
+  <div class="vhead"><h1>All Tracks</h1><span class="sub">Main Library</span></div>
+  <div class="scopebar"><button class="scope on" data-status-filter="">All</button><button class="scope" data-status-filter="local">Local</button><button class="scope" data-status-filter="notdl,downloading">Not downloaded</button><button class="scope" data-status-filter="failed">Download failed</button><button class="scope" data-status-filter="missing">File missing</button></div>
+  <div id="tbl"></div>
+</div>
+
+<div class="menu" id="m-addpl" hidden data-fb-id="P-INSPECTOR.E11" data-fb-label="Add to Playlist menu (was the footer picker)" data-fb-note="The playlist used last is on top, so the old Quick Add is one click + Return. The footer with Quick Add, a picker and a second menu is gone." data-fb-dec="DEC-007" data-fb-api="Menu { ForEach(playlists) … }">
+  <a class="mi" data-addpl="Warm-up">Warm-up<span class="k">last used</span></a><hr>
+  <div class="mi hdr">Sets</div><a class="mi" data-addpl="Peak time">Peak time</a><a class="mi" data-addpl="Closing">Closing</a><hr>
+  <a class="mi" data-addpl="Boiler Room picks">Boiler Room picks</a><a class="mi" data-addpl="Road trip 2026">Road trip 2026</a><a class="mi" data-addpl="Ambient for work">Ambient for work</a><hr>
+  <a class="mi" data-addpl="New Playlist">New Playlist…<span class="k">⇧⌘N</span></a>
+</div>
+
+<h2 class="cat-h">One track — the three tabs</h2>
+<div class="cat" id="ex-tabs"></div>
+<h2 class="cat-h">Selection cases</h2>
+<div class="cat" id="ex-sel"></div>
+<h2 class="cat-h">Availability on the File tab</h2>
+<div class="cat" id="ex-avail"></div>
+<h2 class="cat-h">Editing, artwork, analysis</h2>
+<div class="cat" id="ex-edit"></div>
+
+<h2 class="cat-h">What changed</h2>
+<div class="cat wide">
+  <div class="spec ex-wide">
+    <h4>From five custom tabs to a system inspector <code>P-INSPECTOR</code></h4>
+    <table class="plain">
+      <tr><th style="width:30%">Today</th><th>After</th></tr>
+      <tr><td>Opens on double-click (which also plays); ⌘I is dead; follows the playing track</td><td>⌘I / ⓘ / Get Info. Follows the selection. Double-click only plays (DEC-008). To inspect what plays: ⌘L, then ⌘I.</td></tr>
+      <tr><td><code>P-INSPECTOR.E01</code> waveform strip on top (shows the player’s track, not the inspected one)</td><td>Waveform of <b>this</b> track on the Audio tab; while previewing it is also in the player.</td></tr>
+      <tr><td><code>E02</code> cover fused with a play button</td><td>Cover only: drop an image to set artwork, drag it out as the track. Playing is Return / Space in the list.</td></tr>
+      <tr><td><code>E05</code>–<code>E07</code> coloured format badge, kbps, duration</td><td>One secondary line <code>FLAC · 921 kbps · 6:12</code>; never a source name as format.</td></tr>
+      <tr><td><code>E08</code> × close button</td><td>Removed: the toolbar’s ⓘ and ⌘I toggle the column.</td></tr>
+      <tr><td><code>E09</code> tab bar General · Audio · File · Similar · Debug (accent-filled custom buttons)</td><td>Segmented <code>Details · Audio · File</code>. Similar → Audio tab + its own view. Debug → <code>Diagnostics</code> disclosure on File.</td></tr>
+      <tr><td><code>E10</code>–<code>E12</code> footer: Quick Add, playlist picker, Add to Playlist…</td><td>One <code>Add to Playlist</code> menu button under “In playlists”, last-used playlist first. Status bar confirms with Undo.</td></tr>
+      <tr><td>One field at a time, click-to-edit cards with ✓ / ✗, silent validation, no undo</td><td>Plain form fields. Return or leaving the field commits, Esc reverts, Tab moves on. Problems are said under the field. ⌘Z undoes.</td></tr>
+      <tr><td>An open edit survives a track change and can be saved into the wrong track</td><td>The form is keyed to the selection: changing the selection commits the open field to the track it belonged to.</td></tr>
+      <tr><td>Edits only in the database</td><td>Also written to the file’s tags (Settings ▸ Library, on by default); queued while the drive is away.</td></tr>
+      <tr><td><code>P-INSPECTOR-AUDIO.E03</code> Sensitivity / Gain / Height sliders</td><td>Removed. One waveform rendering; pinch still zooms long tracks (K-WAVE-PINCH).</td></tr>
+      <tr><td><code>A-META-SAVEERROR</code> alert “Could not save metadata”</td><td>Inline under the field with the cause and <code>Try Again</code>; the typed text stays.</td></tr>
+      <tr><td>No multiple selection</td><td>Same form for n tracks, <code>Mixed</code> placeholders, one undo step.</td></tr>
+      <tr><td>Drive unplugged reads <code>File missing</code>; Debug says “Download the track”</td><td>The File tab says <code>“Lexxar” is not connected</code>; nothing is called missing.</td></tr>
+    </table>
+  </div>
+  <div class="spec">
+    <h4>Keys <code>K-META-EDIT-RETURN</code> <code>K-META-EDIT-ESC</code> <code>K-WAVE-PINCH</code></h4>
+    <table class="plain">
+      <tr data-fb-id="K-LIB-INFO" data-fb-label="⌘I" data-fb-note="Finally wired: shows or hides Info for the selection. Also Track ▸ Get Info and the context menu." data-fb-dec="DEC-007" data-fb-api=".inspector(isPresented:) + .keyboardShortcut(&quot;i&quot;)"><td><kbd>⌘I</kbd></td><td>Show/hide Info for the selection</td></tr>
+      <tr data-fb-id="K-META-EDIT-RETURN" data-fb-label="Return in a field" data-fb-note="Commits the field. Leaving the field (Tab, click elsewhere, changing the selection) commits too, like Finder’s Get Info. An invalid value is not committed; the reason shows under the field." data-fb-dec="DEC-007" data-fb-api="TextField.onSubmit + @FocusState change"><td><kbd>Return</kbd> / <kbd>Tab</kbd> / leave</td><td>Commit the field (Tab moves to the next)</td></tr>
+      <tr data-fb-id="K-META-EDIT-ESC" data-fb-label="Esc in a field" data-fb-note="Reverts the field to the stored value and keeps focus in the inspector." data-fb-dec="DEC-007" data-fb-api=".onExitCommand"><td><kbd>Esc</kbd></td><td>Revert the field</td></tr>
+      <tr><td><kbd>⌘Z</kbd></td><td>Undo the last edit (one step even for 14 tracks)</td></tr>
+      <tr data-fb-id="K-WAVE-PINCH" data-fb-label="Pinch on the waveform" data-fb-note="Unchanged: zooms the waveform of tracks of 7 min or longer, 0.5×–8×; double-click resets. The zoom is remembered." data-fb-api="MagnifyGesture on the Canvas"><td>Pinch</td><td>Zoom the waveform (long tracks); click = seek</td></tr>
+    </table>
+  </div>
+</div>
+
+<script>
+document.addEventListener('mlm:ready', () => {
+  const I = MLM.icon, esc = MLM.esc, S = MLM.shell, fmt = MLM.fmtTime;
+  const A = (id, label, note, dec, api) => ' data-fb-id="' + id + '" data-fb-label="' + esc(label) + '" data-fb-note="' + esc(note) + '"' + (dec ? ' data-fb-dec="' + dec + '"' : '') + (api ? ' data-fb-api="' + esc(api) + '"' : '');
+  const SRC = { sc: 'SoundCloud', yt: 'YouTube', sp: 'Spotify' };
+  const hash = t => { let h = 0; for (const c of t.id) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
+  const PLS = ['Warm-up', 'Peak time', 'Boiler Room picks', 'Road trip 2026', 'Ambient for work'];
+  const memb = {}; const playlistsOf = t => memb[t.id] || (memb[t.id] = PLS.filter((_, i) => (hash(t) >> i) % 3 === 0));
+  const wave = (n, seed, pos) => Array.from({ length: n }, (_, i) => '<b class="' + (i / n < pos ? 'p' : '') + '" style="height:' + (6 + Math.abs(Math.sin(i * 0.9 + seed) * 26 + Math.sin(i * 0.23 + seed) * 18) | 0) + 'px"></b>').join('');
+  const sizeOf = t => t.kbps ? (t.kbps * t.time / 8 / 1024).toFixed(1) + ' MB' : '—';
+  const sim = MLM.tracks(5, 314, { allLocal: true });
+
+  /* ───── rendering: one function for the live column and the static exhibits ───── */
+  function header(rows, o) {
+    const one = rows.length === 1, t = rows[0];
+    if (!one) return '<div class="ihead"' + (o.ids ? A('P-INSPECTOR.N01', 'Multiple selection header', 'Says how many tracks the form edits. The same three tabs apply to all of them.', 'DEC-007') : '') + '><div class="stack">' + rows.slice(0, 3).map((r, i) => '<span class="cov c' + r.c + '" style="left:' + i * 6 + 'px;top:' + i * 6 + 'px"></span>').join('') + '</div><div class="grow" style="min-width:0"><div style="font-weight:600">' + rows.length + ' tracks selected</div><div class="t2 small" style="white-space:normal">' + MLM.fmtDur(rows.reduce((a, r) => a + r.time, 0)) + ' · edits apply to all ' + rows.length + '</div></div></div>';
+    const noart = t.status === 'notdl' || t.status === 'failed';
+    return '<div class="ihead"><span class="cov ' + (noart ? 'none' : 'c' + t.c) + (o.drop ? ' drop' : '') + '" draggable="true"' + (o.ids || o.drop ? A(o.drop ? 'D-TD-ARTWORK-IN' : 'P-INSPECTOR.E02', o.drop ? 'Cover as drop target' : 'Cover', o.drop ? 'Drop an image from Finder or a browser to set the artwork (also Choose Cover… in the cover’s context menu). Written to the file with the other tags; undoable. With several tracks selected it sets the cover of all.' : 'Just the cover: no play overlay. Drop an image to set artwork (D-TD-ARTWORK-IN); drag it out as the track onto a playlist, the queue or Finder (D-TD-TRACK-OUT). Click = large cover.', o.drop ? 'DEC-040' : 'DEC-007', '.dropDestination(for: Image.self) + .draggable(track)') : '') + '>' + (noart && !o.drop ? I('note') : '') + '</span>' +
+      '<div class="grow" style="min-width:0"><div style="font-weight:600;white-space:normal"' + (o.ids ? A('P-INSPECTOR.E03', 'Title', 'Up to two lines. The header is a summary; editing happens in the fields below.', 'DEC-007') : '') + '>' + esc(t.title) + '</div><div class="t2 trunc"' + (o.ids ? A('P-INSPECTOR.E04', 'Artist', 'Artist only; the album is a field with a link below. “unknown album” is never printed.', 'DEC-013') : '') + '>' + esc(t.artist) + '</div>' +
+      '<div class="t2 small num"' + (o.ids ? A('P-INSPECTOR.E05', 'Format line', 'Format · bitrate · duration as quiet text (was a coloured badge plus two labels: E05, E06, E07). A track without a file shows its state word here instead.', 'DEC-043') : '') + '>' + (t.status === 'local' || t.status === 'missing' ? (t.format || 'M4A') + (t.kbps ? ' · ' + t.kbps + ' kbps' : '') + ' · ' + fmt(t.time) : (t.status === 'failed' ? 'Download failed' : t.status === 'downloading' ? 'Downloading…' : 'Not downloaded') + ' · ' + fmt(t.time)) + '</div></div></div>';
+  }
+  function details(rows, o) {
+    const one = rows.length === 1, t = rows[0], n = rows.length;
+    const mix = (k, extra) => { const v = new Set(rows.map(r => r[k] == null ? '' : String(r[k]))); return v.size === 1 ? ' value="' + esc([...v][0]) + '"' : ' placeholder="Mixed"'; };
+    const f = (k, label, id, note, extra) => '<label>' + label + '</label><input class="field" data-k="' + k + '" data-label="' + label + '"' + mix(k) + (o.ids && id ? A(id, label + ' field', note, 'DEC-007', 'TextField in LabeledContent; .onSubmit; .focused') : '') + '>' + (extra || '');
+    const tn = 1 + hash(t) % 11, mem = one ? playlistsOf(t) : PLS.slice(0, 2);
+    let h = '<div class="kv insp">' +
+      (one ? f('title', 'Title', 'P-INSPECTOR-GENERAL.E01', 'Required. Emptying it is refused with a line under the field instead of being ignored silently.') : '') +
+      (o.err ? '<div class="ferr"' + A('A-META-SAVEERROR', 'Save error, inline', 'Was a modal alert “Could not save metadata / Your changes were not saved.” Now under the field that failed, with the cause in plain words and a retry. The typed text stays in the field.', 'DEC-007', 'Text(.red) under the field; no .alert') + '>' + I('warn', 's') + ' Couldn’t save this change — the library database is busy. <a>Try Again</a></div>' : '') +
+      f('artist', 'Artist', 'P-INSPECTOR-GENERAL.E02', 'Required for one track. Suggests existing artists while typing.') +
+      '<label>Album</label><div class="two"><input class="field grow" data-k="album" data-label="Album"' + mix('album') + (o.ids ? A('P-INSPECTOR-GENERAL.E04', 'Album field', 'May be empty (shown as nothing). Suggests existing albums; choosing one joins the track to that album. The arrow goes to the album.', 'DEC-019', 'TextField + .textInputSuggestions') : '') + '>' + (one && t.album ? '<a class="btn plain" href="albums.html#detail" title="Go to Album" style="padding:0"' + (o.ids ? A('P-INSPECTOR.N02', 'Go to Album', 'The album value is a link as well as a field.', 'DEC-019') : '') + '>' + I('chevr', 's') + '</a>' : '') + '</div>' +
+      '<label>Album artist</label><input class="field" data-k="albumArtist" data-label="Album artist"' + (one ? ' placeholder="' + esc(t.artist) + '"' : ' placeholder="Mixed"') + (o.ids ? A('P-INSPECTOR-GENERAL.E03', 'Album artist field', 'Empty means “same as Artist” and shows the artist as placeholder; the hidden fallback rule is now visible.', 'DEC-007') : '') + '>' +
+      '<label>Track</label><div class="two"' + (o.ids ? A('P-INSPECTOR.N03', 'Track / Disc', 'New. The position on the album (album_tracks); edits here and in the album’s Edit Order are the same data.', 'DEC-019') : '') + '><input class="field"' + (one && t.album ? ' value="' + tn + '"' : one ? '' : ' placeholder="—"') + '><span class="t2">of</span><input class="field"' + (one && t.album ? ' value="12"' : '') + '><span class="t2" style="margin-left:6px">Disc</span><input class="field"' + (one && t.album ? ' value="1"' : '') + '></div>' +
+      f('genre', 'Genre', 'P-INSPECTOR-GENERAL.E05', 'Suggests existing genres so they stop fragmenting. Empty clears.') +
+      f('year', 'Year', 'P-INSPECTOR-GENERAL.E06', 'A number. Anything else is refused with a line under the field.') +
+      f('bpm', 'BPM', 'P-INSPECTOR.N04', 'Editable: the analysed tempo is sometimes half or double. A typed value is kept when the track is analysed again.') +
+      '<label style="align-self:start;margin-top:4px">Comment</label><textarea class="field" data-k="comment" data-label="Comment" placeholder="' + (one ? '' : 'Mixed') + '"' + (o.ids ? A('P-INSPECTOR.N05', 'Comment', 'New. Free text, written to the file’s comment tag. The source is never written into a tag.', 'DEC-007') : '') + '>' + (one && hash(t) % 4 === 0 ? 'Good opener. Long intro, mix out at 5:10.' : '') + '</textarea></div>';
+    if (o.queued) h += '<div class="note2"' + A('P-INSPECTOR.N06', 'Tag write queued', 'Edits are saved to the library at once. Writing them into the files waits for the drive; Activity lists the waiting changes and writes them when it returns. Nothing is lost if MLM quits.', 'DEC-044', 'Activity operation “Write tags”, persisted queue') + '>' + I('drive', 's') + '<span>Saved. The file’s tags will be updated when “Lexxar” is connected — 3 tag changes waiting. <a href="activity.html">Show in Activity</a></span></div>';
+    h += '<div class="isec"' + (o.ids ? A('P-INSPECTOR-GENERAL.E07', 'In playlists', 'Which playlists contain the track. Click a name to open it; the remove button appears on hover and is undoable. For several tracks: how many of them each playlist contains.', 'DEC-041', 'Section + ForEach; Button(role: .destructive) on hover') : '') + '>In playlists</div>' +
+      (mem.length ? mem.map((p, i) => '<div class="plrow" data-pl="' + p + '">' + I('list', 's') + '<a class="grow trunc" href="playlists.html#detail" style="color:inherit">' + p + '</a>' + (one ? '' : '<span class="t2 small">' + (i ? '3 of ' + n : 'all ' + n) + '</span>') + '<a class="rm" data-rmpl title="Remove from “' + p + '”">' + I('x', 's') + '</a></div>').join('') : '<div class="caption" style="padding:2px 4px">Not in any playlist.</div>') +
+      '<div style="margin-top:8px"><button class="btn" data-menu-click="m-addpl"' + (o.ids ? A('P-INSPECTOR.E12', 'Add to Playlist', 'One menu button replaces the footer (Quick Add, picker, second menu). The status bar confirms “Added to “Warm-up” · Undo”; the list above grows.', 'DEC-016', 'Menu("Add to Playlist")') : '') + '>Add to Playlist ' + I('chevd', 's') + '</button></div>';
+    return h;
+  }
+  function audio(rows, o) {
+    const one = rows.length === 1, t = rows[0], off = o.off, n = rows.length;
+    if (!one) { const an = rows.filter(r => r.bpm).length, b = rows.filter(r => r.bpm).map(r => r.bpm); return '<div class="kv insp"><label>Analysed</label><span class="val">' + an + ' of ' + n + '</span><label>BPM</label><span class="val num">' + (b.length ? Math.min(...b) + '–' + Math.max(...b) : '—') + '</span><label>Energy</label><span class="val">' + (an ? 'Mixed' : '—') + '</span></div>' + (an < n ? '<div style="margin-top:10px"><button class="btn">Analyze ' + (n - an) + ' Tracks</button></div><div class="note2">Runs as one Activity operation. Tracks that aren’t downloaded are left out.</div>' : ''); }
+    const local = t.status === 'local' && !off, an = t.bpm != null;
+    const why = off ? 'The waveform needs the file. “Lexxar” is not connected.' : t.status === 'missing' ? 'The waveform needs the file. This file is missing.' : t.status !== 'local' ? 'Download the track to see its waveform.' : '';
+    let h = '<div' + (o.ids ? A('P-INSPECTOR-WAVEFORM', 'Waveform', 'The waveform of the inspected track (today it shows whatever the player plays). Click seeks: in the playing track directly, otherwise it starts a preview there. The mark is the hot spot used by Space preview. Neutral colours; no blue-to-red ramp.', 'DEC-010', 'Canvas (cached peaks) + gestures') : '') + '>' +
+      (why ? '<div class="wavebox flat"' + (o.ids ? A('P-INSPECTOR-WAVEFORM.N01', 'Waveform unavailable, in words', 'Was a flat line with no explanation.', 'DEC-014') : '') + '>' + why + '</div>' :
+        '<div class="wavebox"' + (o.ids ? A('P-INSPECTOR-WAVEFORM.E01', 'Waveform bars', 'Played part darker, playhead in the accent colour only when this is the playing track.', 'DEC-043') : '') + '>' + wave(90, hash(t) % 7, t.playing ? 0.34 : 0) + (t.playing ? '<u class="ph" style="left:34%"' + (o.ids ? A('P-INSPECTOR-WAVEFORM.E02', 'Playhead', 'Only for the playing track.') : '') + '></u>' : '') + '<u class="hot" style="left:22%" title="Hot spot 1:24"></u></div><div class="row t2 small num" style="margin-top:3px"' + (o.ids ? A('P-INSPECTOR-WAVEFORM.E03', 'Time row', 'Position (when playing) and duration. The resize handle (E04) is gone: the height is fixed, long tracks scroll and pinch-zoom.') : '') + '><span>' + (t.playing ? '2:06' : '0:00') + '</span><span class="grow"></span><span>hot spot 1:24</span><span class="grow"></span><span>' + fmt(t.time) + '</span></div>') + '</div>';
+    h += '<div class="isec"' + (o.ids ? A('P-INSPECTOR-AUDIO.E01', 'Analysis values', 'Four values a DJ reads, with plain labels; the technical ones (loudness range, true peak) are under More. Missing values say “Not analysed”, not a dash.', 'DEC-046', 'LabeledContent rows; Gauge-like 5-step meter') : '') + '>Analysis</div>';
+    const meter = v => '<span class="num">' + v + ' of 5</span><span class="meter">' + [1, 2, 3, 4, 5].map(k => '<i' + (k <= v ? ' class="f"' : '') + '></i>').join('') + '</span>';
+    h += an ? '<div class="kv insp"><label>BPM</label><span class="val num">' + t.bpm + '</span><label>Energy</label><span class="val">' + meter(t.energy) + '</span><label>Danceability</label><span class="val">' + meter(t.dance) + '</span><label>Loudness</label><span class="val num" title="Integrated loudness. Closer to 0 is louder.">' + (-(7 + hash(t) % 60 / 10)).toFixed(1) + ' LUFS</span></div><details class="caption" style="margin-top:6px"><summary>More</summary><div class="kv insp" style="margin-top:6px"><label>Loudness range</label><span class="val num">6.2 LU</span><label>True peak</label><span class="val num">−0.8 dBTP</span></div></details>'
+      : '<div class="caption" style="white-space:normal">Not analysed yet. Analysis measures tempo, energy, danceability and loudness and makes “Similar” work.</div>';
+    const st = o.audio;
+    h += '<div style="margin-top:10px"' + (o.ids ? A('P-INSPECTOR-AUDIO.E02', 'Analyze', 'One button for all values (was two: Loudness, Danceability, which silently overwrote BPM). It is an Activity operation, so it shows progress, can be cancelled and reports failure. Disabled with the reason when the file isn’t reachable.', 'DEC-044', 'Button → ActivityCenter.run(.analyze(track))') : '') + '>' +
+      (st === 'running' ? '<div class="row"' + A('P-INSPECTOR-AUDIO.N01', 'Analysis running', 'The inline echo of the Activity operation: same words, with Cancel. Today the only sign is a spinner inside the pressed button.', 'DEC-044') + '><span class="spinner"></span><span class="grow">Analyzing… loudness, then tempo</span><a class="btn plain">Cancel</a></div><div class="progress" style="margin-top:6px"><i style="width:45%"></i></div>'
+        : st === 'tool' ? '<div class="avail"' + A('P-INSPECTOR-AUDIO.N02', 'Analysis tool missing', 'Today the spinner just stops and the error goes to print(). Now the cause and where to fix it (DEC-037).', 'DEC-037') + '><span class="status failed">' + I('warn', 's') + 'Can’t analyze — ffmpeg not found</span><div class="why">Analysis needs ffmpeg. MLM looked in /opt/homebrew/bin, /usr/local/bin and ~/.local/bin.</div><div class="acts"><a class="btn" href="settings.html#sources">Open Settings ▸ Sources</a></div></div>'
+          : local ? '<button class="btn">' + (an ? 'Analyze Again' : 'Analyze') + '</button>'
+            : '<button class="btn" disabled>Analyze</button><div class="note2">' + (off ? 'Can’t analyze — “Lexxar” is not connected.' : t.status === 'missing' ? 'Can’t analyze — the file is missing.' : 'Download the track to analyze it.') + '</div>') + '</div>';
+    h += '<div class="isec"' + (o.ids ? A('P-INSPECTOR-SIMILAR', 'Similar (top five)', 'Was its own tab with dead-end rows. Now five real rows: double-click plays, Space previews, they drag onto playlists and have the track menu. Ranked; no percentages. Show All opens the Similar view with library and online matches.', 'DEC-030', 'List rows + NavigationLink to V-SIMILAR') : '') + '><span class="grow">Similar</span>' + (an ? '<a class="btn plain small" href="discover.html#similar">Show All</a>' : '') + '</div>' +
+      (an ? sim.map(s => '<div class="srow"><span class="cov c' + s.c + '"></span><div class="grow" style="min-width:0;line-height:1.2"><div class="trunc">' + esc(s.title) + '</div><div class="t2 small trunc">' + esc(s.artist) + (s.bpm ? ' · ' + s.bpm + ' BPM' : '') + '</div></div></div>').join('') : '<div class="caption" style="white-space:normal">Analyze this track to find similar ones in your library.</div>');
+    return h;
+  }
+  function file(rows, o) {
+    const one = rows.length === 1, t = rows[0], off = o.off, n = rows.length;
+    if (!one) { const c = k => rows.filter(r => k.includes(r.status)).length, nd = c(['notdl', 'failed']); return '<div class="avail"><b>' + c(['local']) + ' local</b>' + (nd ? ' · ' + nd + ' not downloaded' : '') + (c(['missing']) ? ' · ' + c(['missing']) + ' file missing' : '') + (nd ? '<div class="acts"><button class="btn">Download ' + nd + '</button></div>' : '') + '</div><div class="kv insp" style="margin-top:12px"><label>Formats</label><span class="val">' + ([...new Set(rows.map(r => r.format).filter(Boolean))].join(', ') || '—') + '</span><label>Size</label><span class="val num">' + rows.reduce((a, r) => a + (r.kbps || 0) * r.time / 8 / 1024, 0).toFixed(0) + ' MB</span><label>Location</label><span class="val">' + (n > 3 ? '5 folders on “Lexxar”' : 'Lexxar › Music') + '</span></div><div style="margin-top:10px"><button class="btn"' + (off ? ' disabled' : '') + '>Show in Finder</button></div>'; }
+    const src = SRC[t.source], st = off && (t.status === 'local' || t.status === 'missing') ? 'off' : t.status;
+    const path = '/Volumes/Lexxar/Music/' + esc(t.artist) + '/' + (t.album ? esc(t.album) + '/' : '') + esc(t.title).replace(/\//g, '-') + '.' + (t.format || 'm4a').toLowerCase();
+    const av = {
+      local: ['<span class="status ok">' + I('check', 's') + 'On “Lexxar”, ready to play</span>', '', '', 'P-INSPECTOR-FILE.N01', 'Availability: local', 'One sentence per state, always at the top of the tab, with the action that fixes it.'],
+      notdl: ['<span class="status">' + I('cloud', 's') + 'Not downloaded</span>', 'MLM knows this track' + (src ? ' from ' + src : '') + ' but has no file yet.', '<button class="btn primary" data-fx="Download started — “{t}”">Download</button>', 'P-INSPECTOR-FILE.N02', 'Availability: Not downloaded', 'Today the inspector offers no Download anywhere. ⌘D does the same.'],
+      downloading: ['<span class="status"><span class="spinner"></span>Downloading… 42 %</span>', 'It will be playable in a moment.', '<button class="btn">Cancel</button>', 'P-INSPECTOR-FILE.N03', 'Availability: downloading', 'Echo of the Activity operation.'],
+      failed: ['<span class="status failed">' + I('retry', 's') + 'Download failed</span>', esc(t.reason) + '. ' + t.attempts + ' of 3 attempts used, last on Oct 3, 2026.', '<button class="btn primary" data-fx="Retrying “{t}”">Retry Download</button>' + (/Sign-in/.test(t.reason) ? '<a class="btn" href="settings.html#sources">Reconnect…</a>' : /yt-dlp/.test(t.reason) ? '<a class="btn" href="settings.html#sources">Open Settings ▸ Sources</a>' : '') + '<a class="btn plain" href="activity.html#logs">Show Log</a>', 'P-INSPECTOR-FILE.N04', 'Availability: Download failed', 'The reason, the attempts and the date were stored but never shown. The second button is the fix for this particular cause.'],
+      missing: ['<span class="status missing">' + I('missing', 's') + 'File missing</span>', 'The file isn’t at its location on “Lexxar”. It may have been moved or deleted outside MLM.', '<button class="btn primary">Locate…</button><button class="btn" data-fx="Download started — “{t}”">Download Again</button>', 'P-INSPECTOR-FILE.N05', 'Availability: File missing', 'Only when the drive is connected and the file really isn’t there. Locate… re-links; Download Again is offered when the track has a source.'],
+      off: ['<span class="status">' + I('drive', 's') + '“Lexxar” is not connected</span>', 'The file can’t be checked or played until the drive is back. You can still edit tags and playlists.', '', 'P-INSPECTOR-FILE.N06', 'Availability: drive not connected', 'Never “File missing” for an unplugged drive. No action: the fix is the drive.']
+    }[st];
+    let h = '<div class="avail"' + (o.ids || o.avid ? A(av[3], av[4], av[5], 'DEC-014', 'LabeledContent / GroupBox with state-specific Button') : '') + '>' + av[0] + (av[1] ? '<div class="why">' + av[1] + '</div>' : '') + (av[2] ? '<div class="acts">' + av[2] + '</div>' : '') + '</div>';
+    if (t.status === 'local' || t.status === 'missing') h += '<div class="isec"' + (o.ids ? A('P-INSPECTOR-FILE.E01', 'Location', 'One absolute path (was Original path + a relative Library path). Wraps, selectable. Copy Path copies the absolute path.', 'DEC-007', 'Text(.textSelection(.enabled)) + Buttons') : '') + '>Location</div><div class="path">' + path + '</div><div class="row"><button class="btn"' + (st !== 'local' ? ' disabled title="' + (st === 'off' ? '“Lexxar” is not connected' : 'The file is missing') + '"' : '') + '>Show in Finder</button><button class="btn" data-fx="Copied the path">Copy Path</button></div>';
+    h += '<div class="isec"' + (o.ids ? A('P-INSPECTOR-FILE.E03', 'File facts', 'Format, bitrate, size, added, downloaded. The Status row is the sentence at the top; raw stored values are never printed.', 'DEC-007', 'LabeledContent') : '') + '>File</div><div class="kv insp"><label>Format</label><span class="val">' + (t.format || '—') + '</span><label>Bitrate</label><span class="val num">' + (t.kbps ? t.kbps + ' kbps' : '—') + '</span><label>Size</label><span class="val num">' + sizeOf(t) + '</span><label>Added</label><span class="val num">' + esc(t.added) + '</span>' + (t.status === 'local' && src ? '<label>Downloaded</label><span class="val num">' + esc(t.added) + '</span>' : '') +
+      '<label>Source</label><span class="val"' + (o.ids ? A('P-INSPECTOR-FILE.N07', 'Source', 'Provenance from track_sources, not guessed from the path. “Linked to ‹Source›” with Open Link. It is shown here and never written into the file’s tags, so shared files don’t carry it.', 'DEC-023') : '') + '>' + (src ? '<span class="srcdot ' + t.source + '"></span>Linked to ' + src + ' <a class="btn plain" style="padding:0 0 0 4px">Open Link</a>' : 'Imported from a folder') + '</span></div>';
+    if (o.dup || (o.live && t.status === 'local' && hash(t) % 3 === 0)) h += '<div class="avail" style="margin-top:12px"' + A('P-INSPECTOR-FILE.E04', 'Duplicate hint', 'Says which other version exists and links to the group in Review (the old button navigated without focusing anything).', 'DEC-028', 'NavigationLink to Review ▸ Duplicates, focused on the group') + '>' + I('review', 's') + ' Possible duplicate of “' + esc(t.artist) + ' — ' + esc(t.title.split(' (')[0]) + '” (MP3, 320 kbps).<div class="acts"><a class="btn" href="review.html">Show in Review</a></div></div>';
+    h += '<details class="diag"' + (o.open ? ' open' : '') + (o.ids || o.open ? A('P-INSPECTOR-DEBUG', 'Diagnostics (was the Debug tab)', 'A disclosure at the bottom of File instead of an everyday tab. Nothing runs until Check File is pressed (the tab decoded the whole file on every visit). Result first in plain words, numbers below, the decoder log behind Copy Report.', 'DEC-007', 'DisclosureGroup("Diagnostics")') : '') + '><summary>Diagnostics</summary>' +
+      (st === 'off' ? '<div class="note2">Can’t check the file — “Lexxar” is not connected.</div>' : t.status !== 'local' ? '<div class="note2">There is no file to check.</div>' :
+        (o.open ? '<div style="margin-top:8px"><span class="status ok">' + I('check', 's') + 'The file decodes cleanly</span></div><div class="kv insp"><label>Container</label><span class="val">' + (t.format === 'FLAC' ? 'flac' : 'mov, mp4, m4a') + '</span><label>Codec</label><span class="val">' + (t.format === 'FLAC' ? 'flac' : 'aac (LC)') + '</span><label>Sample rate</label><span class="val num">44,100 Hz</span><label>Channels</label><span class="val">2 (stereo)</span><label>Decode errors</label><span class="val num">0</span><label>Broken frames</label><span class="val num">0</span></div><div class="row" style="margin-top:8px"><button class="btn">Check Again</button><button class="btn">Copy Report</button></div><div class="caption" style="margin-top:6px">ffmpeg 7.1 · checked 14:02</div>'
+          : '<div class="note2">Decodes the whole file to find corruption. Takes a few seconds for long mixes.</div><div style="margin-top:8px"><button class="btn" data-fx="Checking “{t}”… — the file decodes cleanly">Check File</button></div>')) + '</details>';
+    return h;
+  }
+  function insp(rows, o) {
+    o = o || {};
+    if (!rows.length) return '<div class="empty" style="padding:40px 10px"' + A('P-INSPECTOR.N07', 'No selection', 'The column stays open and says what it is for. It never falls back to the playing track.', 'DEC-007', 'ContentUnavailableView') + '>' + I('info', 'xl') + '<h2>No selection</h2><p>Select one or more tracks to see and edit their details.</p></div>';
+    const tab = o.tab || 'details', panes = { details, audio, file };
+    const seg = '<div class="itabs"><div class="seg"' + (o.live ? ' data-group="insp"' : '') + (o.ids ? A('P-INSPECTOR.E09', 'Tabs', 'System segmented control, three tabs (was five accent-filled custom buttons). The chosen tab is remembered while the app runs.', 'DEC-007', 'Picker(.segmented)') : '') + '>' + ['details', 'audio', 'file'].map(k => '<button data-p="' + k + '"' + (k === tab ? ' class="on"' : '') + '>' + k[0].toUpperCase() + k.slice(1) + '</button>').join('') + '</div></div>';
+    const idOf = { details: ['P-INSPECTOR-GENERAL', 'Details tab (was General)'], audio: ['P-INSPECTOR-AUDIO', 'Audio tab'], file: ['P-INSPECTOR-FILE', 'File tab'] };
+    return header(rows, o) + seg + (o.live ? Object.keys(panes).map(k => '<div data-pane="insp:' + k + '"' + (k === tab ? '' : ' hidden') + A(idOf[k][0], idOf[k][1], 'Full notes on the elements inside.', 'DEC-007', 'Form(.grouped) inside .inspector') + '>' + panes[k](rows, o) + '</div>').join('') : '<div>' + panes[tab](rows, o) + '</div>');
+  }
+
+  /* ───── live window ───── */
+  const rows = MLM.tracks(400, 7);
+  const t = MLM.table('#tbl', { rows, sort: 'addedSort', desc: true });
+  const host = document.getElementById('insp-auto');
+  let cur = [], tab = 'details';
+  function render() {
+    const s = document.body.dataset.state, off = document.documentElement.dataset.drive === 'off';
+    if (s === 'analyzing' || s === 'tool-missing') tab = 'audio'; if (s === 'save-error') tab = 'details';
+    host.innerHTML = insp(cur, { live: true, ids: true, tab, off, audio: s === 'analyzing' ? 'running' : s === 'tool-missing' ? 'tool' : '', err: s === 'save-error' && cur.length === 1, queued: false });
+    MLM.refreshBadges();
+  }
+  document.addEventListener('mlm:select', e => { if (e.detail.table !== t) return; cur = e.detail.rows; render(); });
+  document.addEventListener('mlm:state', () => { if (!cur.length) { const f = t.view().find(r => r.status === 'local'); if (f) return t.select([f.id]); } render(); });
+  document.addEventListener('click', e => {
+    const b = e.target.closest('#insp-auto .seg [data-p]'); if (b) tab = b.dataset.p;
+    if (e.target.closest('.reviewbar [data-drive], [data-drive-on]')) setTimeout(render, 0);
+    const rm = e.target.closest('#insp-auto [data-rmpl]'); if (rm && cur.length === 1) { const p = rm.closest('.plrow').dataset.pl; memb[cur[0].id] = playlistsOf(cur[0]).filter(x => x !== p); render(); MLM.say('Removed “' + esc(cur[0].title) + '” from “' + p + '”', true); }
+    const ap = e.target.closest('[data-addpl]'); if (ap && cur.length) { const p = ap.dataset.addpl; if (cur.length === 1 && PLS.includes(p) && !playlistsOf(cur[0]).includes(p)) { memb[cur[0].id] = playlistsOf(cur[0]).concat(p); render(); } MLM.say('Added ' + (cur.length === 1 ? '“' + esc(cur[0].title) + '”' : cur.length + ' tracks') + ' to “' + p + '”', true); }
+    const fx = e.target.closest('#insp-auto [data-fx]'); if (fx && cur.length) MLM.say(fx.dataset.fx.replace('{t}', esc(cur[0].title)));
+  });
+  /* commit on Return / leaving the field; Esc reverts; inline validation */
+  host.addEventListener('keydown', e => { const f = e.target.closest('.field'); if (!f) return; if (e.key === 'Enter' && f.tagName === 'INPUT') { e.preventDefault(); f.blur(); } if (e.key === 'Escape') { f.value = f.defaultValue; f.dataset.revert = '1'; f.blur(); } e.stopPropagation(); });
+  host.addEventListener('change', e => {
+    const f = e.target.closest('.field[data-k]'); if (!f || !cur.length) return; const k = f.dataset.k, v = f.value.trim(), lab = f.dataset.label;
+    const old = f.parentElement.querySelector('.ferr.live'); if (old) old.remove();
+    const refuse = m => { f.insertAdjacentHTML('afterend', '<div class="ferr live"' + A('P-INSPECTOR.N08', 'Validation message', 'Says why a value was not saved (was: silently ignored). The field keeps the text so it can be corrected; Esc restores the old value.', 'DEC-007') + '>' + m + '</div>'); MLM.refreshBadges(); };
+    if (f.dataset.revert) { delete f.dataset.revert; return; }
+    if ((k === 'title' || (k === 'artist' && cur.length === 1)) && !v) return refuse('A track needs ' + (k === 'title' ? 'a title' : 'an artist') + '. Press Esc to restore the old one.');
+    if ((k === 'year' || k === 'bpm') && v && !/^\d{1,4}$/.test(v)) return refuse(lab + ' is a number, like ' + (k === 'year' ? '2019' : '128') + '.');
+    cur.forEach(r => { if (k !== 'comment' && k !== 'albumArtist') r[k] = (k === 'year' || k === 'bpm') ? (v ? +v : null) : v; });
+    t.draw(); t.select(cur.map(r => r.id));
+    MLM.say('Changed ' + lab + (cur.length === 1 ? ' of “' + esc(cur[0].title) + '”' : ' of ' + cur.length + ' tracks') + (v ? ' to “' + esc(v) + '”' : ' (cleared)') + (document.documentElement.dataset.drive === 'off' ? ' — file tags will be written when “Lexxar” is connected' : ''), true);
+  });
+  const ib = document.querySelector('.window [data-act="info"]'); if (ib) ib.click();
+  t.select([t.view().find(r => r.status === 'local').id]);
+
+  /* ───── static exhibits ───── */
+  const L = { id: 'x-local', title: 'Glass Circuit (Overmono Remix)', artist: 'Skee Mask', album: 'Compro', time: 372, bpm: 128, energy: 4, dance: 3, genre: 'Techno', year: 2018, format: 'FLAC', kbps: 921, added: 'Sep 14, 2026', status: 'local', source: 'sc', c: 3, playing: true };
+  const ND = { id: 'x-nd', title: 'Paper Engine [FREE DL]', artist: 'Ploy', album: '', time: 311, bpm: null, energy: null, dance: null, genre: 'Breaks', year: null, format: '', kbps: null, added: 'Oct 2, 2026', status: 'notdl', source: 'sc', c: 2, reason: '', attempts: 0 };
+  const FA = Object.assign({}, ND, { id: 'x-fa', title: 'Northern Tide — Live at Dekmantel 2024', artist: 'Call Super', status: 'failed', reason: 'Sign-in expired (SoundCloud)', attempts: 2 });
+  const MI = Object.assign({}, L, { id: 'x-mi', title: 'Velvet Hours (Extended Mix)', artist: 'Leon Vynehall', album: 'Rare, Forever', status: 'missing', format: 'M4A', kbps: null, playing: false, c: 4, bpm: null });
+  const UN = Object.assign({}, L, { id: 'x-un', title: 'Slow Weather', artist: 'DJ Python', album: '', bpm: null, energy: null, dance: null, playing: false, c: 6, source: '', format: 'MP3', kbps: 320 });
+  const multi = rows.filter(r => r.status === 'local').slice(0, 12).concat(rows.filter(r => r.status === 'notdl').slice(0, 2));
+  const col = (inner, seg) => '<aside class="trailing trx">' + (seg === false ? '' : '<div class="tr-head"><div class="seg"><button class="on">Info</button><button>Queue</button></div></div>') + '<div class="tr-body">' + inner + '</div></aside>';
+  const card = (name, id, desc, html) => '<div class="spec"><h4>' + name + ' <code>' + id + '</code></h4><p>' + desc + '</p><div class="demo">' + col(html) + '</div></div>';
+  document.getElementById('ex-tabs').innerHTML = [
+    card('Details', 'P-INSPECTOR-GENERAL', 'Tags as plain fields, then playlist membership. Was “General”.', insp([L], { ids: true, tab: 'details' })),
+    card('Audio', 'P-INSPECTOR-AUDIO', 'This track’s waveform, the analysis values in plain labels, and the five most similar tracks.', insp([L], { ids: true, tab: 'audio' })),
+    card('File', 'P-INSPECTOR-FILE', 'Availability sentence first, then location, facts, source, duplicate hint, diagnostics.', insp([L], { ids: true, tab: 'file', dup: true })),
+    card('File ▸ Diagnostics open', 'P-INSPECTOR-DEBUG', 'The Debug tab as a disclosure. Runs on demand; answers “is the file OK” in words first.', insp([UN], { ids: true, tab: 'file', open: true }))
+  ].join('');
+  document.getElementById('ex-sel').innerHTML = [
+    card('14 tracks selected — Details', 'P-INSPECTOR.N01', 'Same form. Values that differ show <code>Mixed</code>; typing replaces it for all 14 in one undo step. Title is left out. Fields you don’t touch stay as they are.', insp(multi, { ids: true, tab: 'details' })),
+    card('14 tracks selected — Audio', 'P-INSPECTOR.N09', 'A summary and one batch action instead of fourteen waveforms.', insp(multi, { ids: true, tab: 'audio' })),
+    card('14 tracks selected — File', 'P-INSPECTOR.N10', 'Availability as counts with the batch fix.', insp(multi, { ids: true, tab: 'file' })),
+    card('No selection', 'P-INSPECTOR.N07', 'The column stays, explains itself, and does not show the playing track instead.', insp([], {}))
+  ].join('');
+  document.getElementById('ex-avail').innerHTML = [
+    card('Not downloaded', 'P-INSPECTOR-FILE.N02', 'Tags are editable as for any track. File offers the download.', insp([ND], { ids: true, tab: 'file', avid: true })),
+    card('Download failed', 'P-INSPECTOR-FILE.N04', 'Reason, attempts, date, <code>Retry Download</code>, and the fix for the cause.', insp([FA], { ids: true, tab: 'file', avid: true })),
+    card('File missing', 'P-INSPECTOR-FILE.N05', 'Drive connected, file not there. <code>Locate…</code> or <code>Download Again</code>.', insp([MI], { ids: true, tab: 'file', avid: true })),
+    card('Drive not connected', 'P-INSPECTOR-FILE.N06', 'The same local track with “Lexxar” unplugged. Not missing — unreachable.', insp([L], { ids: true, tab: 'file', off: true, avid: true })),
+    card('Local', 'P-INSPECTOR-FILE.N01', 'The healthy case, for comparison.', insp([UN], { ids: true, tab: 'file', avid: true }))
+  ].join('');
+  document.getElementById('ex-edit').innerHTML = [
+    card('Save error, inline', 'A-META-SAVEERROR', 'The alert becomes a line under the field that failed. Nothing typed is lost.', insp([L], { ids: true, tab: 'details', err: true })),
+    card('Cover drop target', 'D-TD-ARTWORK-IN', 'Dragging an image over the cover. The cover is also a drag source for the track (<code>D-TD-TRACK-OUT</code>).', insp([UN], { ids: true, tab: 'details', drop: true })),
+    card('Tag write queued', 'P-INSPECTOR.N06', 'Editing with the drive away: saved to the library now, written to the file later.', insp([L], { ids: true, tab: 'details', queued: true, off: true })),
+    card('Analysis running', 'P-INSPECTOR-AUDIO.N01', 'After pressing Analyze. Also visible in Activity.', insp([UN], { ids: true, tab: 'audio', audio: 'running' })),
+    card('Analysis tool missing', 'P-INSPECTOR-AUDIO.N02', 'ffmpeg isn’t installed. Says so and links to the place that shows the tools.', insp([UN], { ids: true, tab: 'audio', audio: 'tool' })),
+    card('Audio — not downloaded', 'P-INSPECTOR-WAVEFORM.N01', 'No file: the waveform area and the Analyze button say why.', insp([ND], { ids: true, tab: 'audio' }))
+  ].join('');
+  /* tag the exhibit-only root ids so each exhibit can be commented */
+  [['ex-sel', 1, 'P-INSPECTOR.N09', 'Multiple selection: Audio'], ['ex-sel', 2, 'P-INSPECTOR.N10', 'Multiple selection: File'], ['ex-edit', 1, 'D-TD-TRACK-OUT', 'Cover as drag source']].forEach(x => { const c = document.getElementById(x[0]).children[x[1]]; const n = c && c.querySelector(x[2] === 'D-TD-TRACK-OUT' ? 'h4' : '.tr-body > div:last-child'); if (n) { n.dataset.fbId = x[2]; n.dataset.fbLabel = x[3]; n.dataset.fbDec = x[2][0] === 'D' ? 'DEC-040' : 'DEC-007'; n.dataset.fbNote = x[2] === 'D-TD-TRACK-OUT' ? 'Drag the cover (or the title) out of the inspector: onto a sidebar playlist, a sync profile, the queue, or into Finder as the file.' : 'Summary for several tracks with the batch action.'; } });
+  MLM.refreshBadges();
+});
+</script>
+</body></html>

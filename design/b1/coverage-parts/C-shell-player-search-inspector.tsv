@@ -1,0 +1,56 @@
+V-MAIN-LAYOUT	mocked	shell.html	Live shell plus exhibits; E05 Activity strip removed (DEC-005), E06–E09 launch states live on launch.html (DEC-031, DEC-034)
+P-SIDEBAR	mocked	shell.html	Library · Inbox · Playlists · Sync + library footer (DEC-001…004); E06 Sources, E10 Queue, E11 Settings rows removed
+P-TOOLBAR	mocked	shell.html	Constant toolbar at three widths; E04/E05 section items removed (DEC-048)
+P-PLAYER	mocked	player.html	All states, Space preview, variants A/B (DEC-009, DEC-010, DEC-045)
+V-QUEUE	mocked	queue.html	Becomes P-QUEUE, the Queue mode of the trailing column (DEC-006); V-QUEUE.E01–E05 reused
+V-SEARCH	mocked	search.html	Filter in place, scopes This view · Library · Online, tokens, links (DEC-017, DEC-018)
+S-SEARCH-UNIVERSAL	merged	search.html	DEC-018: link detection is a suggestion row in the search field plus Add from Link… ⌘U (S-QUICKADD) and the import sheet (S-IMPORT); the panel is not rebuilt
+S-PLAYER-COVER	mocked	player.html	Large cover popover, live and as exhibit
+K-SEARCH-CMDF	mocked	search.html	⌘F focuses the system search field of the main window only (DEC-017); ⌥⌘F = Library scope
+K-SEARCH-RETURN	mocked	search.html	Return takes the first suggestion or moves focus to the results; no pane (DEC-017)
+K-SEARCH-ESC	mocked	search.html	Esc clears text and tokens, view as it was (DEC-017)
+K-SIDEBAR-QUEUE8	removed	shell.html	DEC-006: Queue is no sidebar destination; ⌥⌘U shows the Queue column; ⌘8 unbound
+K-SIDEBAR-NAV	mocked	shell.html	⌘1…⌘6 = All Tracks, Albums, Genres, Folders, Discover, Review (DEC-038); full map on patterns-menus-shortcuts.html
+K-SIDEBAR-RENAME	mocked	shell.html	Inline rename exhibit: Return commits, Esc cancels, failure inline
+K-SEARCH-UNIVERSAL-KEYS	removed	search.html	DEC-018: goes with the merged S-SEARCH-UNIVERSAL panel; Return/Esc of the search field replace it
+D-SIDEBAR-SPRINGLOAD	mocked	shell.html	Sidebar rows now accept the drop (DEC-040); spring-loading stays as system behaviour
+D-QUEUE-ROWS	mocked	queue.html	Queue rows drag out (live: onto sidebar playlists) and reorder
+D-SEARCH-ROWS	pattern	patterns-dnd.html	Result rows drag like any track rows (noted on search.html)
+V-LIB	mocked	library.html	Mocked by the lead
+V-TRACK-TABLE	mocked	library.html	Mocked by the lead
+V-TRACK-PRIMITIVES	mocked	library.html	Mocked by the lead
+CM-TRACK	mocked	library.html	Shell context menu, mocked by the lead; queue variant CM-QUEUE on queue.html
+S-SEL-NEWPLAYLIST	pattern	patterns-sheets-alerts.html	
+S-SEL-NEWSYNCPROFILE	pattern	patterns-sheets-alerts.html	
+A-TRACK-REMOVE	mocked	library.html	Shell alert, mocked by the lead
+A-TRACK-REMOVE-FAILED	pattern	patterns-sheets-alerts.html	
+K-LIB-RESCAN	pattern	patterns-menus-shortcuts.html	⌘R = refresh the current view's source of truth; the toolbar button P-TOOLBAR.E04 is removed (DEC-048)
+K-LIB-SPACE	mocked	player.html	Space-bar rules table and live preview (DEC-009)
+K-LIB-DELETE	pattern	patterns-menus-shortcuts.html	⌫ removes from the current container, ⌘⌫ Remove from Library…; ⌫ in the queue is live on queue.html
+K-LIB-INFO	mocked	inspector.html	⌘I shows/hides Info for the selection (DEC-007)
+K-LIB-RETURN	mocked	player.html	Return / double-click plays, never opens the inspector (DEC-008); status-bar messages for non-local rows
+D-LIB-TRACK-OUT	pattern	patterns-dnd.html	
+D-LIB-SPRING	mocked	shell.html	Same exhibit as D-SIDEBAR-SPRINGLOAD: rows accept drops directly (DEC-040)
+D-LIB-FINDER-IN	pattern	patterns-dnd.html	
+D-LIB-TO-FINDER	pattern	patterns-dnd.html	
+D-LIB-TO-SIDEBAR-NEWPL	mocked	shell.html	Drop on a playlist row / on the Playlists header exhibit (DEC-040)
+D-LIB-TO-QUEUE	mocked	queue.html	Drop on the player = Play Next; Queue column top half Play Next, bottom half Add to Queue
+D-LIB-TO-SYNC	mocked	shell.html	Sync profile row as drop target exhibit (DEC-027)
+P-INSPECTOR	mocked	inspector.html	System inspector, ⌘I, follows selection, multi-edit, tabs Details · Audio · File (DEC-007)
+P-INSPECTOR-WAVEFORM	mocked	inspector.html	Moved from the top strip into the Audio tab; shows the inspected track
+P-INSPECTOR-GENERAL	mocked	inspector.html	Renamed Details tab
+P-INSPECTOR-AUDIO	mocked	inspector.html	E03 waveform option sliders removed
+P-INSPECTOR-FILE	mocked	inspector.html	Availability sentence with fix action per state
+P-INSPECTOR-SIMILAR	merged	inspector.html	DEC-007/DEC-030: top-5 Similar section on the Audio tab, Show All opens V-SIMILAR (discover.html#similar)
+P-INSPECTOR-DEBUG	merged	inspector.html	DEC-007: Diagnostics disclosure at the bottom of the File tab, runs on demand
+A-META-SAVEERROR	merged	inspector.html	DEC-007: inline error under the field with Try Again; no alert
+K-META-EDIT-RETURN	mocked	inspector.html	Return, Tab or leaving the field commits
+K-META-EDIT-ESC	mocked	inspector.html	Esc reverts the field
+K-WAVE-PINCH	unchanged	inspector.html	Pinch still zooms the waveform of long tracks (now on the Audio tab); zoom remembered
+D-TD-TRACK-OUT	mocked	inspector.html	Inspector cover is a drag source for the track (DEC-040)
+D-TD-ARTWORK-IN	mocked	inspector.html	Cover drop-target exhibit (DEC-040)
+P-QUEUE	mocked	queue.html	New (DEC-006)
+P-PREVIEW	mocked	player.html	New (DEC-009, DEC-010)
+P-LIBFOOTER	mocked	shell.html	New (DEC-031); switching flow on launch.html
+P-ADDMENU	mocked	shell.html	New (DEC-004, DEC-026); menu exhibit here, sheets on import.html
+CM-QUEUE	mocked	queue.html	New: queue row context menu in DEC-039 order, ends with Remove from Queue

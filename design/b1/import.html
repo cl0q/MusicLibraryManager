@@ -1,0 +1,420 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Add menu, Add from Link, Import — MLM B1</title>
+<link rel="stylesheet" href="assets/mlm.css"><script src="assets/app.js"></script>
+<style>
+  .sheet .step { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+  .sheet .steps { display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--text2); margin-top: 4px; }
+  .sheet .steps b { color: var(--text); font-weight: 600; }
+  .imp-cols { display: flex; gap: 14px; min-height: 330px; }
+  .imp-src { width: 214px; flex: none; display: flex; flex-direction: column; gap: 2px; }
+  .srcrow { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; border: 0; background: none; text-align: left; width: 100%; }
+  .srcrow:hover { background: var(--fill); } .srcrow.sel { background: var(--sel-inactive); }
+  .srcrow .lbl { flex: 1; min-width: 0; line-height: 1.25; } .srcrow small { display: block; font-size: 11px; color: var(--text2); }
+  .imp-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+  .listbox { border-radius: 8px; box-shadow: inset 0 0 0 .5px var(--sep-strong); overflow: auto; flex: 1; min-height: 0; max-height: 300px; background: var(--content); }
+  .listbox.t { max-height: 268px; }
+  .plrow { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-bottom: .5px solid var(--sep); }
+  .plrow:hover { background: var(--fill); } .plrow.sel { background: var(--sel-inactive); }
+  .plrow .cov { width: 26px; height: 26px; }
+  .boxmsg { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; color: var(--text2); padding: 26px; min-height: 240px; border-radius: 8px; box-shadow: inset 0 0 0 .5px var(--sep-strong); }
+  .boxmsg h3 { margin: 0; font-size: 14px; color: var(--text); } .boxmsg p { margin: 0; max-width: 420px; white-space: normal; } .boxmsg .acts { display: flex; gap: 8px; margin-top: 8px; }
+  .qa-item { display: flex; gap: 12px; align-items: center; padding: 10px; border-radius: 8px; background: var(--content-alt); box-shadow: inset 0 0 0 .5px var(--sep); margin-top: 10px; }
+  .qa-item .cov { width: 56px; height: 56px; border-radius: 7px; } .qa-item .ti { font-weight: 600; white-space: normal; }
+  .opt { display: flex; align-items: center; gap: 10px; padding: 5px 0; } .opt .fl { flex: 1; min-width: 0; } .opt small { display: block; font-size: 11px; color: var(--text2); white-space: normal; }
+  .numf { width: 46px; text-align: right; }
+  .spec .demo.col { flex-direction: column; align-items: center; gap: 8px; }
+  .sysdlg { width: 300px; border-radius: 12px; background: var(--glass-strong); box-shadow: var(--pop-shadow); padding: 16px; display: flex; flex-direction: column; gap: 8px; font-size: 12px; white-space: normal; }
+</style></head>
+<body data-screen="S-IMPORT" data-title="Add menu · Add from Link · Import Playlist from Source" data-nav="allpl"
+      data-states="default,empty,loading,error,sign-in-expired,private,tool-missing,queued" data-status="23 playlists · 2,418 tracks">
+
+<div class="note">
+  <h3>Add menu, Add from Link and Import Playlist from Source — Tier 2</h3>
+  <p><b>Open a flow:</b>
+    <button class="btn" data-menu-click="m-add">Add menu (＋)</button>
+    <button class="btn" data-open="s-quickadd">Add from Link… ⌘U</button>
+    <button class="btn" data-open="s-import" data-goto="imp-1">Import Playlist from Source… ⇧⌘I</button>
+    <button class="btn" data-open="s-import" data-goto="imp-2">Import · step 2 (preview)</button>
+    <button class="btn" data-open="s-import" data-goto="imp-3">Import · step 3 (confirm)</button>
+    <button class="btn" id="btn-refresh">Refresh from Sources</button>
+  </p>
+  <p><b>Then try:</b> with a sheet open, use <b>State</b> in the review bar — every state changes what the open sheet shows (Empty · Loading · Error = the source didn’t answer · Sign-in expired found mid-way · Private · Tool missing · Queued behind another import). In <b>Add from Link</b> the three example links switch between a single track, a track that is already in the library and a playlist link (which hands over to the import sheet, step 2). In <b>Import</b>: pick a source on the left (Spotify shows <code>Sign-in expired · Reconnect</code> in place), click a playlist (one marked <code>Already imported</code> shows the re-import consequence), change <code>All · First n · Random n</code>, toggle <code>Download now</code> / <code>Keep linked to SoundCloud</code>, then Next → <code>Import</code>: the sheet closes and the status bar confirms.</p>
+  <p>Replaces the Sources sidebar section (<code>V-SRC</code>) and the separate import window (<code>W-REMOTE</code>). Accounts live in Settings ▸ Sources; the result of an import lives on the playlist (<a href="playlists.html#detail">playlists.html#detail</a>) and in <a href="activity.html">Activity</a>. A second import is queued, never rejected. Decisions: DEC-004, DEC-018, DEC-026, DEC-023, DEC-044. Flows F-05, F-06, F-20.</p>
+</div>
+
+<div id="content">
+  <div class="vhead">
+    <h1 data-fb-id="V-PL.E01" data-fb-label="All Playlists (backdrop)" data-fb-note="Backdrop only — the page is about the Add menu and the two sheets that open over the main window. Full design: playlists.html." data-fb-dec="DEC-003">All Playlists</h1>
+    <span class="sub">Main Library</span>
+  </div>
+  <div class="scroll"><div class="grid" id="plgrid"></div></div>
+</div>
+
+<!-- ───────── P-ADDMENU (live; replaces the shell copy) ───────── -->
+<div class="menu" id="m-add" hidden data-fb-id="P-ADDMENU" data-fb-label="Add menu" data-fb-note="One toolbar item for everything that brings something into the library. Same items as File ▸ New / Import in the menu bar. Replaces the Sources section as the entry point." data-fb-dec="DEC-004" data-fb-api="ToolbarItem { Menu { … } label: { Image(systemName: &quot;plus&quot;) } }">
+  <a class="mi" href="playlists.html" data-fb-id="P-ADDMENU.N02" data-fb-label="New Playlist" data-fb-note="Creates a playlist with inline rename in the sidebar."><i data-i="list"></i>New Playlist<span class="k">⌘N</span></a>
+  <a class="mi" href="playlists.html" data-fb-id="P-ADDMENU.N03" data-fb-label="New Playlist Folder"><i data-i="folder"></i>New Playlist Folder<span class="k">⌥⌘N</span></a>
+  <hr>
+  <a class="mi" data-open="s-quickadd" data-fb-id="P-ADDMENU.N04" data-fb-label="Add from Link…" data-fb-note="Opens S-QUICKADD. Reads the clipboard: if it holds a link, the field is pre-filled." data-fb-dec="DEC-018"><i data-i="link"></i>Add from Link…<span class="k">⌘U</span></a>
+  <a class="mi" data-open="s-import" data-goto="imp-1" data-fb-id="P-ADDMENU.N05" data-fb-label="Import Playlist from Source…" data-fb-note="Opens S-IMPORT at step 1. Was: Sources ▸ card ▸ Playlists ▸ separate window." data-fb-dec="DEC-026"><i data-i="download"></i>Import Playlist from Source…<span class="k">⇧⌘I</span></a>
+  <a class="mi" href="folders.html" data-fb-id="P-ADDMENU.N06" data-fb-label="Import Files or Folder…" data-fb-note="System open panel; the import runs as an Activity operation."><i data-i="folder"></i>Import Files or Folder…</a>
+  <a class="mi" href="playlists.html" data-fb-id="P-ADDMENU.N07" data-fb-label="Import M3U…"><i data-i="doc"></i>Import M3U…</a>
+  <hr>
+  <a class="mi" data-refresh data-fb-id="P-ADDMENU.N08" data-fb-label="Refresh from Sources" data-fb-note="Was the per-card “Sync” button in Sources (V-SRC.E04f). Pulls new likes and account playlists from every connected source. Never called Sync." data-fb-dec="DEC-023"><i data-i="retry"></i>Refresh from Sources</a>
+</div>
+
+<!-- ───────── S-QUICKADD ───────── -->
+<div class="sheet" id="s-quickadd" hidden data-fb-id="S-QUICKADD" data-fb-label="Add from Link (sheet)" data-fb-note="Small sheet for one link. Also what a link pasted into Search or dropped on the window opens. Replaces the unreachable universal search panel (S-SEARCH-UNIVERSAL)." data-fb-dec="DEC-018" data-fb-api=".sheet + Form; URL detection on change (debounced), .onSubmit">
+  <div class="sh"><h2>Add from Link</h2></div>
+  <div class="sb">
+    <div class="row">
+      <input class="field grow" id="qa-url" spellcheck="false" placeholder="Paste a SoundCloud, YouTube or Spotify link" value="https://soundcloud.com/skeemask/rev8617"
+             data-fb-id="S-QUICKADD.N01" data-fb-label="Link field" data-fb-note="Pre-filled from the clipboard when it holds a link. Detection starts as soon as the text is a link; Return repeats it." data-fb-api="TextField + .onSubmit">
+      <button class="btn" data-fb-id="S-QUICKADD.N02" data-fb-label="Paste" data-fb-note="Convenience for mouse users; ⌘V works in the field.">Paste</button>
+    </div>
+    <p class="caption" data-show="default queued" style="margin:6px 0 0">Mockup aid — example links:
+      <a class="btn plain small" data-goto="qa-track" data-url="https://soundcloud.com/skeemask/rev8617">a track</a>
+      <a class="btn plain small" data-goto="qa-inlib" data-url="https://www.youtube.com/watch?v=Jm0VOzsvtTc">a track you already have</a>
+      <a class="btn plain small" data-goto="qa-playlist" data-url="https://www.youtube.com/playlist?list=PL4mY0gLIx…">a playlist</a></p>
+
+    <div data-show="empty" class="boxmsg" style="min-height:110px;margin-top:10px" data-fb-id="S-QUICKADD.N03" data-fb-label="No link yet" data-fb-note="Shown when the clipboard has no link. Says where else a link can go.">
+      <p>Paste a link to a track or a playlist. You can also paste a link into Search or drop it onto the window.</p>
+    </div>
+
+    <div data-show="loading" class="qa-item" data-fb-id="S-QUICKADD.N04" data-fb-label="Detecting" data-fb-note="Indeterminate, usually under 2 s. The primary button stays disabled until the item is known." data-fb-api="ProgressView().controlSize(.small)">
+      <span class="cov none" ></span><div class="grow"><div class="row"><span class="spinner"></span>Looking up the link…</div><div class="caption">soundcloud.com</div></div>
+    </div>
+
+    <div data-show="default queued">
+      <div data-view="qa-track" data-view-group="qa" data-fb-id="S-QUICKADD.N05" data-fb-label="Detected: single track" data-fb-note="Cover, title, artist, source and duration, so the user recognises the song before downloading. The album stays empty — the source name is never written as an album." data-fb-dec="DEC-013">
+        <div class="qa-item"><span class="cov c3"></span><div class="grow"><div class="ti">Rev8617</div><div class="t2">Skee Mask</div><div class="caption"><span class="srcdot sc"></span>SoundCloud · 5:48</div></div></div>
+        <div class="opt" style="margin-top:8px"><span class="fl">Add to playlist</span><span class="popup" data-fb-id="S-QUICKADD.N06" data-fb-label="Add to playlist (optional)" data-fb-note="Default None: the track goes to All Tracks. Remembers the last choice for this session." data-fb-api="Picker(.menu)">None</span></div>
+        <p class="caption" data-show="queued" data-fb-id="S-QUICKADD.N07" data-fb-label="Queued note" data-fb-note="A download that starts while others run is queued — never rejected silently." data-fb-dec="DEC-044">2 downloads are running. This one starts after them.</p>
+      </div>
+      <div data-view="qa-inlib" data-view-group="qa" hidden data-fb-id="S-QUICKADD.N08" data-fb-label="Detected: already in the library" data-fb-note="Stated instead of creating a duplicate (a second click used to add the track twice). “Show” selects it in All Tracks. If the track is in the library but not downloaded, the line reads “In your library · Not downloaded” and the button is Download.">
+        <div class="qa-item"><span class="cov c5"></span><div class="grow"><div class="ti">Glue (Original Mix)</div><div class="t2">Bicep</div><div class="caption"><span class="srcdot yt"></span>YouTube · 4:29</div>
+          <div class="status ok" style="margin-top:3px"><i data-i="check" class="s"></i>Already in your library · <a href="library.html">Show</a></div></div></div>
+        <p class="caption" style="margin-top:8px">Added Mar 14, 2026 from SoundCloud · FLAC · in 2 playlists.</p>
+      </div>
+      <div data-view="qa-playlist" data-view-group="qa" hidden data-fb-id="S-QUICKADD.N09" data-fb-label="Detected: playlist link" data-fb-note="A playlist link is not downloaded from here; Import… continues in the import sheet at the preview step with this playlist loaded." data-fb-dec="DEC-026">
+        <div class="qa-item"><span class="cov c2"></span><div class="grow"><div class="ti">Boiler Room: Best of Dekmantel 2024</div><div class="t2">Boiler Room</div><div class="caption"><span class="srcdot yt"></span>YouTube playlist · 62 videos</div></div></div>
+        <p class="caption" style="margin-top:8px">Playlists are imported with a preview, so you can see what is new before anything is downloaded.</p>
+      </div>
+    </div>
+
+    <div data-show="error" class="qa-item" data-fb-id="S-QUICKADD.N10" data-fb-label="Unsupported link" data-fb-note="Plain sentence, what is supported, no raw error.">
+      <span class="cov none"><i data-i="link" class="s"></i></span><div class="grow"><div class="ti">MLM can’t add this link</div><div class="t2" style="white-space:normal">It isn’t a track or playlist on SoundCloud, YouTube or Spotify. Check that you copied the whole link.</div></div>
+    </div>
+    <div data-show="tool-missing" class="qa-item" data-fb-id="S-QUICKADD.N11" data-fb-label="Tool missing" data-fb-note="The failure points to the one place that fixes it. Settings ▸ Sources ▸ Download tools shows each tool as Found / Not found with install help." data-fb-dec="DEC-037">
+      <span class="cov none"><i data-i="warn" class="s"></i></span><div class="grow"><div class="ti">yt-dlp not found</div><div class="t2" style="white-space:normal">YouTube links need the yt-dlp tool. · <a href="settings.html#sources">Open Settings ▸ Sources</a></div></div>
+    </div>
+    <div data-show="sign-in-expired" class="qa-item" data-fb-id="S-QUICKADD.N12" data-fb-label="Sign-in expired" data-fb-note="Reconnect in place (browser hand-off, S-SRC-OAUTH); the link stays in the field and detection repeats afterwards." data-fb-dec="DEC-004">
+      <span class="cov none"><i data-i="person" class="s"></i></span><div class="grow"><div class="ti">Sign-in expired (SoundCloud)</div><div class="t2" style="white-space:normal">MLM needs your SoundCloud sign-in to read this link.</div></div><button class="btn" data-open="s-oauth">Reconnect</button>
+    </div>
+    <div data-show="private" class="qa-item" data-fb-id="S-QUICKADD.N13" data-fb-label="Private / unavailable">
+      <span class="cov none"><i data-i="lock" class="s"></i></span><div class="grow"><div class="ti">This track is private or no longer available</div><div class="t2" style="white-space:normal">SoundCloud doesn’t offer it to your account.</div></div>
+    </div>
+  </div>
+  <div class="sf">
+    <span class="left caption" data-show="default queued">Goes to All Tracks · <a href="activity.html">progress in Activity</a></span>
+    <button class="btn" data-close data-fb-id="S-QUICKADD.N14" data-fb-label="Cancel (Esc)">Cancel</button>
+    <span data-show="default queued">
+      <button class="btn primary" data-view="qa-track" data-view-group="qab" data-close data-qa-download data-fb-id="S-QUICKADD.N15" data-fb-label="Download (default)" data-fb-note="Closes the sheet. Status bar: “Download started — “Rev8617”” then “Downloaded “Rev8617” · Show”. The same job is an Activity operation." data-fb-dec="DEC-016" data-fb-api="Button(.borderedProminent).keyboardShortcut(.defaultAction)">Download</button>
+      <a class="btn primary" data-view="qa-inlib" data-view-group="qab" hidden href="library.html" data-fb-id="S-QUICKADD.N16" data-fb-label="Show in Library">Show in Library</a>
+      <button class="btn primary" data-view="qa-playlist" data-view-group="qab" hidden data-close data-open="s-import" data-goto="imp-2" data-fb-id="S-QUICKADD.N17" data-fb-label="Import…" data-fb-note="Hands over to S-IMPORT step 2 with the playlist loaded.">Import…</button>
+    </span>
+    <button class="btn primary" disabled data-hide="default queued">Download</button>
+  </div>
+</div>
+
+<!-- ───────── S-IMPORT ───────── -->
+<div class="sheet wide" id="s-import" hidden data-fb-id="S-IMPORT" data-fb-label="Import Playlist from Source (sheet, 3 steps)" data-fb-note="One sheet in the main window replaces the separate import window (W-REMOTE). Source → Preview → Confirm. The sheet never shows download progress: that lives on the playlist and in Activity, so nothing is lost when it closes." data-fb-dec="DEC-026" data-fb-api=".sheet { NavigationStack-like step view }, fixed size 760 pt">
+
+  <!-- Step 1 -->
+  <div class="step" data-view="imp-1" data-view-group="imp">
+    <div class="sh"><h2>Import Playlist from Source</h2><div class="steps"><b>1 Source</b>›<span>2 Preview</span>›<span>3 Confirm</span></div></div>
+    <div class="sb">
+      <div class="imp-cols">
+        <div class="imp-src" data-fb-id="S-IMPORT.N01" data-fb-label="Sources list" data-fb-note="The four sources with their state in words (was the card grid V-SRC.E03/E04). A broken sign-in is fixed here, in place — the row is not hidden." data-fb-dec="DEC-004" data-fb-api="List(selection:)">
+          <button class="srcrow sel" data-goto="src-sc"><span class="srcdot sc"></span><span class="lbl">SoundCloud<small data-hide="sign-in-expired">Connected · olli-i</small><small data-show="sign-in-expired" class="status failed">Sign-in expired</small></span></button>
+          <button class="srcrow" data-goto="src-sp" data-fb-id="V-SRC.E04c" data-fb-label="Source state (Spotify)" data-fb-note="Glossary words only: Connected · Disconnected · Sign-in expired. The old card said Connected while every request failed with a raw 401."><span class="srcdot sp"></span><span class="lbl">Spotify<small class="status failed" id="sp-state">Sign-in expired</small></span></button>
+          <button class="srcrow" data-goto="src-yt"><span class="srcdot yt"></span><span class="lbl">YouTube<small>Paste a playlist link</small></span></button>
+          <button class="srcrow" data-goto="src-am" data-fb-id="V-SRC.E04i" data-fb-label="Apple Music — Not available yet" data-fb-note="Listed, disabled in words. Today its Connect button is enabled and always fails."><span class="srcdot am"></span><span class="lbl t2">Apple Music<small>Not available yet</small></span></button>
+          <span class="grow"></span>
+          <a class="btn plain small" href="settings.html#sources" data-fb-id="S-IMPORT.N02" data-fb-label="Manage Accounts…" data-fb-note="Connect / Disconnect and the refresh schedule live in Settings ▸ Sources.">Manage Accounts…</a>
+        </div>
+
+        <!-- SoundCloud -->
+        <div class="imp-pane" data-view="src-sc" data-view-group="impsrc">
+          <div class="row"><input class="field grow" spellcheck="false" placeholder="https://soundcloud.com/…/sets/…" data-fb-id="W-REMOTE.E02" data-fb-label="Playlist link field" data-fb-note="Return loads the link (today Return does nothing). An error for the link appears under the field and never replaces the playlist list." data-fb-api="TextField + .onSubmit">
+            <button class="btn" data-goto="imp-2" data-fb-id="W-REMOTE.E03" data-fb-label="Load">Load</button></div>
+          <div class="row"><span class="caption grow" data-hide="sign-in-expired">Your SoundCloud playlists · 14</span><input class="field" style="width:150px" placeholder="Filter" data-hide="sign-in-expired" data-fb-id="S-IMPORT.N03" data-fb-label="Filter playlists" data-fb-note="New: the account list had no search."></div>
+          <div class="listbox" id="sc-list" data-show="default queued private tool-missing" data-fb-id="W-REMOTE.E06" data-fb-label="Account playlists" data-fb-note="Cover, name, track count, Private marker, and — new — “Already imported” with the date of the last refresh. A click opens the preview (step 2)." data-fb-api="List"></div>
+          <div class="listbox" data-show="loading" data-fb-id="W-REMOTE.E07" data-fb-label="Loading the playlist list" data-fb-note="Placeholder rows; the link field stays usable."><div id="sc-skel"></div></div>
+          <div class="boxmsg" data-show="error" data-fb-id="W-REMOTE.E08" data-fb-label="The source didn’t answer">
+            <i data-i="warn" class="l"></i><h3>SoundCloud didn’t answer</h3><p>Your playlists couldn’t be loaded. Check your internet connection and try again. You can still paste a playlist link above.</p>
+            <div class="acts"><button class="btn">Try Again</button><a class="btn" href="activity.html#logs">Show in Logs</a></div><p class="caption">▸ Details</p></div>
+          <div class="boxmsg" data-show="empty" data-fb-id="W-REMOTE.E09" data-fb-label="No playlists"><h3>No playlists in this account</h3><p>“olli-i” has no playlists on SoundCloud. Paste a playlist link above, or use Refresh from Sources to pull your likes.</p></div>
+          <div class="boxmsg" data-show="sign-in-expired" data-fb-id="S-IMPORT.N04" data-fb-label="Sign-in expired (in place)" data-fb-note="One state, one action, here. Not “Video unavailable”, not a detour through Settings." data-fb-dec="DEC-004">
+            <i data-i="person" class="l"></i><h3>Sign-in expired</h3><p>SoundCloud asked MLM to sign in again. Your imported playlists and tracks are not affected.</p><div class="acts"><button class="btn primary" data-open="s-oauth">Reconnect</button></div></div>
+        </div>
+
+        <!-- Spotify -->
+        <div class="imp-pane" data-view="src-sp" data-view-group="impsrc" hidden>
+          <div class="boxmsg" data-view="sp-expired" data-view-group="sp" data-fb-id="V-SRC.E04g" data-fb-label="Sign-in expired · Reconnect (Spotify)" data-fb-note="Reconnect signs in again in the browser and returns here; the pane then lists the playlists. Today the fix needs Disconnect, then Connect, in another place." data-fb-dec="DEC-004">
+            <i data-i="person" class="l"></i><h3>Sign-in expired</h3><p>Spotify asked MLM to sign in again. Your imported playlists and tracks are not affected.</p>
+            <div class="acts"><button class="btn primary" data-goto="sp-waiting">Reconnect</button></div></div>
+          <div class="boxmsg" data-view="sp-waiting" data-view-group="sp" hidden data-fb-id="S-SRC-OAUTH" data-fb-label="Browser sign-in hand-off (in place)" data-fb-note="While the browser is open MLM says so and offers Cancel — today it shows nothing and waits forever. Times out after 5 minutes with “Sign-in wasn’t finished · Try Again”." data-fb-api="ASWebAuthenticationSession (or loopback redirect) + ProgressView">
+            <span class="spinner"></span><h3>Waiting for Spotify in your browser…</h3><p>Finish signing in there. This sheet continues by itself.</p>
+            <div class="acts"><button class="btn" data-goto="sp-expired">Cancel</button><button class="btn">Open Browser Again</button><button class="btn plain" data-goto="sp-ok" data-sp-ok>Mockup: finish sign-in</button></div></div>
+          <div data-view="sp-ok" data-view-group="sp" hidden style="display:flex;flex-direction:column;gap:8px;flex:1;min-height:0">
+            <div class="row"><span class="caption grow">Your Spotify playlists · 6</span></div>
+            <div class="listbox" id="sp-list"></div>
+            <p class="caption" data-fb-id="W-REMOTE.E14" data-fb-label="Spotify note" data-fb-note="Kept: says where the audio comes from.">Spotify doesn’t provide audio files. MLM finds each track on SoundCloud or YouTube.</p>
+          </div>
+        </div>
+
+        <!-- YouTube -->
+        <div class="imp-pane" data-view="src-yt" data-view-group="impsrc" hidden data-fb-id="V-SRC.E05" data-fb-label="YouTube: paste a playlist link" data-fb-note="No account. The tool it depends on is checked here, before the user waits for a download to fail." data-fb-dec="DEC-037">
+          <div class="row"><input class="field grow" spellcheck="false" placeholder="https://www.youtube.com/playlist?list=…"><button class="btn" data-goto="imp-2">Load</button></div>
+          <div class="boxmsg" data-hide="tool-missing"><i data-i="video" class="l"></i><h3>Paste a YouTube playlist link</h3><p>Public and unlisted playlists work. Mixes and live sets import as single long tracks without an album.</p><p class="caption">Recently imported: <a data-goto="imp-2">Boiler Room: Best of Dekmantel 2024</a> · <a data-goto="imp-2">Essential mixes 2025</a></p></div>
+          <div class="boxmsg" data-show="tool-missing" data-fb-id="W-REMOTE.E05" data-fb-label="yt-dlp not found · Open Settings ▸ Sources" data-fb-note="Deep link to the tab that shows the tool as Not found with install help (today “open Settings” leads to a window without any tool setting)." data-fb-dec="DEC-037"><i data-i="warn" class="l"></i><h3>yt-dlp not found</h3><p>YouTube playlists need the yt-dlp tool on this Mac.</p><div class="acts"><a class="btn primary" href="settings.html#sources">Open Settings ▸ Sources</a></div></div>
+        </div>
+
+        <!-- Apple Music -->
+        <div class="imp-pane" data-view="src-am" data-view-group="impsrc" hidden>
+          <div class="boxmsg"><i data-i="note" class="l"></i><h3>Not available yet</h3><p>Importing from Apple Music isn’t built yet. Playlists exported from Music as M3U can be imported with Import M3U….</p></div>
+        </div>
+      </div>
+    </div>
+    <div class="sf"><span class="left caption">Click a playlist or load a link to see its tracks.</span>
+      <button class="btn" data-close data-fb-id="K-REMOTE-DONE" data-fb-label="Cancel (Esc)" data-fb-note="Was the Done toolbar button of the import window. A sheet has Cancel on Esc; nothing is lost because progress never lives in the sheet." data-fb-dec="DEC-026" data-fb-api="Button(role: .cancel)">Cancel</button>
+      <button class="btn primary" data-goto="imp-2" data-fb-id="S-IMPORT.N05" data-fb-label="Next" data-fb-note="Enabled when a playlist is selected or a link is loaded.">Next</button></div>
+  </div>
+
+  <!-- Step 2 -->
+  <div class="step" data-view="imp-2" data-view-group="imp" hidden>
+    <div class="sh"><h2 data-fb-id="W-REMOTE.E12" data-fb-label="Playlist heading"><span class="srcdot sc"></span><span data-pl-name>Late night rollers</span></h2><div class="steps"><span>1 Source</span>›<b>2 Preview</b>›<span>3 Confirm</span></div></div>
+    <div class="sb">
+      <div data-show="default queued">
+        <div class="row" style="margin-bottom:8px">
+          <div class="seg" id="selmode" data-fb-id="W-REMOTE.E15" data-fb-label="Selection: All · First n · Random n" data-fb-note="Kept. The list below always shows exactly what will be imported." data-fb-api="Picker(.segmented)"><button class="on" data-m="all">All</button><button data-m="first">First n</button><button data-m="random">Random n</button></div>
+          <input class="field numf" id="seln" value="20" hidden data-fb-id="W-REMOTE.E16" data-fb-label="n" data-fb-note="1 … number of tracks.">
+          <span class="grow"></span>
+          <span class="caption" id="imp-summary" data-fb-id="S-IMPORT.N06" data-fb-label="Summary line" data-fb-note="Answers “what will actually happen” before the commit: total · new · already in library." data-fb-dec="DEC-026">44 tracks · 31 new · 13 already in library</span>
+        </div>
+        <div class="listbox t"><div class="table" id="imp-tbl" style="overflow:visible" data-fb-id="W-REMOTE.E17" data-fb-label="Preview table" data-fb-note="Title, artist and time (today: titles only) plus the column that matters: New / In library / Already downloaded." data-fb-api="Table"></div></div>
+        <div style="margin-top:8px">
+          <div class="opt"><span class="fl">Add to<small id="target-note">A new playlist is created and linked to SoundCloud.</small></span>
+            <span class="popup" id="target-pop" data-menu-click="m-target" data-fb-id="S-IMPORT.N07" data-fb-label="Target playlist" data-fb-note="New playlist named after the source playlist, or the existing linked playlist. Re-importing a part into an existing playlist only adds — it never truncates it (today “First 10” cuts the playlist to 10) and never takes over a same-named playlist from another source." data-fb-api="Picker(.menu)">New playlist “Late night rollers”</span></div>
+          <div class="opt"><span class="fl">Download now<small id="dl-note">New tracks are downloaded right after the import.</small></span><span class="toggle on" id="tg-dl" data-fb-id="W-REMOTE.E20" data-fb-label="Download now" data-fb-note="Was two buttons (Download All / Save without downloading). Off: the tracks are added as Not downloaded and the playlist says “Not downloaded · n tracks · Download all”." data-fb-dec="DEC-023" data-fb-api="Toggle"></span></div>
+          <div class="opt"><span class="fl">Keep linked to SoundCloud<small id="link-note">The playlist stays “Linked to SoundCloud”; Refresh from SoundCloud pulls later additions.</small></span><span class="toggle on" id="tg-link" data-fb-id="S-IMPORT.N08" data-fb-label="Keep linked to ‹Source›" data-fb-note="Off = one-time import: an ordinary playlist with no link (WISH-13)." data-fb-dec="DEC-023" data-fb-api="Toggle"></span></div>
+        </div>
+      </div>
+      <div class="boxmsg" data-show="loading" data-fb-id="S-IMPORT.N09" data-fb-label="Loading playlist" data-fb-note="Determinate when the source reports a total. Cancel returns to step 1."><span class="spinner"></span><h3>Loading playlist…</h3><p class="num">Read 120 of 312 tracks from SoundCloud</p><div class="progress" style="width:240px"><i style="width:38%"></i></div></div>
+      <div class="boxmsg" data-show="error" data-fb-id="W-REMOTE.E04" data-fb-label="Source didn’t answer"><i data-i="warn" class="l"></i><h3>SoundCloud didn’t answer</h3><p>The playlist couldn’t be loaded (the request timed out). Nothing was imported.</p><div class="acts"><button class="btn primary">Try Again</button><a class="btn" href="activity.html#logs">Show in Logs</a></div><p class="caption">▸ Details</p></div>
+      <div class="boxmsg" data-show="sign-in-expired" data-fb-id="S-IMPORT.N10" data-fb-label="Sign-in expired, discovered mid-way" data-fb-note="Says the real cause (today: “Video unavailable” + a useless Retry). After Reconnect the preview loads again; the chosen playlist is kept." data-fb-dec="DEC-004"><i data-i="person" class="l"></i><h3>Sign-in expired (SoundCloud)</h3><p>SoundCloud stopped answering after 120 of 312 tracks because your sign-in ran out. Reconnect to continue — your place is kept.</p><div class="acts"><button class="btn primary" data-open="s-oauth">Reconnect</button></div></div>
+      <div class="boxmsg" data-show="private" data-fb-id="S-IMPORT.N11" data-fb-label="Private / unavailable playlist"><i data-i="lock" class="l"></i><h3>This playlist is private or no longer available</h3><p>SoundCloud doesn’t offer “Late night rollers” to the account “olli-i”. If it is yours, check its privacy setting on SoundCloud.</p></div>
+      <div class="boxmsg" data-show="tool-missing"><i data-i="warn" class="l"></i><h3>yt-dlp not found</h3><p>The playlist can be previewed and imported, but its tracks can’t be downloaded until the tool is installed.</p><div class="acts"><a class="btn primary" href="settings.html#sources">Open Settings ▸ Sources</a></div></div>
+      <div class="boxmsg" data-show="empty"><h3>This playlist has no tracks</h3><p>There is nothing to import from “Late night rollers”.</p></div>
+    </div>
+    <div class="sf">
+      <button class="btn left" data-goto="imp-1" data-fb-id="W-REMOTE.E11" data-fb-label="Back">Back</button>
+      <button class="btn" data-close>Cancel</button>
+      <button class="btn primary" data-goto="imp-3" data-show="default queued" data-fb-id="S-IMPORT.N12" data-fb-label="Next">Next</button>
+      <button class="btn primary" disabled data-hide="default queued">Next</button></div>
+  </div>
+
+  <!-- Step 3 -->
+  <div class="step" data-view="imp-3" data-view-group="imp" hidden>
+    <div class="sh"><h2><span class="srcdot sc"></span><span data-pl-name>Late night rollers</span></h2><div class="steps"><span>1 Source</span>›<span>2 Preview</span>›<b>3 Confirm</b></div></div>
+    <div class="sb">
+      <div class="banner info" data-show="queued" style="border-radius:8px;margin-bottom:10px;white-space:normal" data-fb-id="S-IMPORT.N13" data-fb-label="Queued behind another import" data-fb-note="A second import is accepted and queued. Today it is refused silently and the window shows the other batch’s numbers." data-fb-dec="DEC-044"><i data-i="clock"></i><span><b>“Liked on SoundCloud” is still importing (12 of 44).</b> This import is queued and starts when that one ends. You don’t need to wait here.</span></div>
+      <div class="group" data-fb-id="S-IMPORT.N14" data-fb-label="Confirmation" data-fb-note="One plain summary of the consequences; nothing technical. The primary button names the action and the number." data-fb-api="Form(.grouped) + LabeledContent">
+        <div class="frow"><span class="fl">Playlist</span><span id="c-target">New playlist “Late night rollers”</span></div>
+        <div class="frow"><span class="fl">Tracks<small id="c-detail">31 new tracks are added to the library. 13 are already in your library and are only added to the playlist (9 downloaded, 4 not downloaded).</small></span><span class="num" id="c-count">44</span></div>
+        <div class="frow"><span class="fl">Download<small id="c-dlnote">Starts right away, runs in the background.</small></span><span id="c-dl">31 tracks now</span></div>
+        <div class="frow"><span class="fl">Link</span><span id="c-link">Linked to SoundCloud</span></div>
+        <div class="frow"><span class="check" id="ck-also" data-fb-id="S-IMPORT.N15" data-fb-label="Also download tracks already in the library" data-fb-note="Only shown when some of the playlist’s tracks are in the library but not downloaded.">Also download the 4 tracks that are in your library but not downloaded</span></div>
+      </div>
+      <p class="caption" style="margin-top:10px;white-space:normal" data-fb-id="S-IMPORT.N16" data-fb-label="Where progress lives" data-fb-note="The sheet closes on Import. Progress and the result (also after a relaunch) are on the playlist header and in Activity — the same numbers, the same words." data-fb-dec="DEC-044">After you click Import this sheet closes. Progress shows on the playlist (<code>Importing · 12 of 44</code>, then <code>Incomplete · 9 failed · Retry all</code> if something fails) and in Activity. Failed tracks can be retried there at any time.</p>
+    </div>
+    <div class="sf">
+      <button class="btn left" data-goto="imp-2">Back</button>
+      <button class="btn" data-close>Cancel</button>
+      <button class="btn primary" id="btn-import" data-close data-fb-id="W-REMOTE.E19" data-fb-label="Import n Tracks (default)" data-fb-note="Named by its verb and count (was “Download All (44 tracks)”). Closes the sheet; status bar: “Import started — 31 tracks · Show Playlist”." data-fb-dec="DEC-016" data-fb-api="Button(.borderedProminent).keyboardShortcut(.defaultAction)">Import 44 Tracks</button></div>
+  </div>
+</div>
+
+<div class="menu" id="m-target" hidden data-fb-id="S-IMPORT.N17" data-fb-label="Target menu">
+  <a class="mi chk" data-target="new">New playlist “<span data-pl-name>Late night rollers</span>”</a>
+  <hr><div class="mi hdr">Existing playlists linked to this source playlist</div>
+  <a class="mi nochk" data-target="existing">“<span data-pl-name>Late night rollers</span>” — Linked to SoundCloud</a>
+</div>
+
+<!-- ───────── S-SRC-OAUTH as a sheet (from Reconnect buttons outside step 1) ───────── -->
+<div class="sheet" id="s-oauth" hidden style="width:400px" data-fb-id="S-SRC-OAUTH" data-fb-label="Browser sign-in hand-off" data-fb-note="Shown whenever MLM has opened the browser for a sign-in. Says what it waits for, can be cancelled, times out. On success it closes by itself and the interrupted step repeats." data-fb-dec="DEC-004" data-fb-api="ASWebAuthenticationSession; fallback: loopback redirect with a 5 min timeout">
+  <div class="sh"><h2>Sign in to SoundCloud</h2></div>
+  <div class="sb"><div class="row" style="margin:8px 0"><span class="spinner"></span><span>Waiting for SoundCloud in your browser…</span></div>
+    <p class="caption" style="white-space:normal">Finish signing in there. MLM continues by itself and keeps your place.</p></div>
+  <div class="sf"><button class="btn left">Open Browser Again</button><button class="btn" data-close>Cancel</button><button class="btn plain" data-close data-msg="SoundCloud connected.">Mockup: finish sign-in</button></div>
+</div>
+
+<!-- ───────── Exhibits on the desk ───────── -->
+<h2 class="cat-h">Exhibits</h2>
+<div class="cat wide">
+  <div class="spec">
+    <h4>Add menu <code>P-ADDMENU</code></h4>
+    <p>Toolbar ＋, constant in every section. Three groups: make something new · bring something in · pull what changed. Each item is also in the menu bar (File). The live menu opens from the ＋ in the toolbar above.</p>
+    <div class="demo"><div class="menu static" data-fb-id="P-ADDMENU" data-fb-label="Add menu (exhibit)">
+      <a class="mi"><i data-i="list"></i>New Playlist<span class="k">⌘N</span></a><a class="mi"><i data-i="folder"></i>New Playlist Folder<span class="k">⌥⌘N</span></a><hr>
+      <a class="mi" data-open="s-quickadd"><i data-i="link"></i>Add from Link…<span class="k">⌘U</span></a><a class="mi" data-open="s-import" data-goto="imp-1"><i data-i="download"></i>Import Playlist from Source…<span class="k">⇧⌘I</span></a><a class="mi"><i data-i="folder"></i>Import Files or Folder…</a><a class="mi"><i data-i="doc"></i>Import M3U…</a><hr>
+      <a class="mi" data-refresh><i data-i="retry"></i>Refresh from Sources</a></div></div>
+  </div>
+
+  <div class="spec" data-fb-id="P-ADDMENU.N08" data-fb-label="Refresh from Sources (exhibit)" data-fb-note="Replaces the Sync button on each source card. Runs as one Activity operation per source; the result is a sentence with a count, kept in Activity ▸ Recent. Optional schedule in Settings ▸ Sources." data-fb-dec="DEC-023">
+    <h4>Refresh from Sources <code>P-ADDMENU.N08</code> <code>was V-SRC.E04f “Sync”</code></h4>
+    <p><b>What it does:</b> for every connected source, pulls newly liked tracks into All Tracks as <code>Not downloaded</code> and refreshes the account playlists that are linked. It never removes anything and never downloads by itself (unless “Download new tracks automatically” is on in Settings ▸ Sources). Sources whose sign-in expired are skipped and reported.</p>
+    <p><b>Where the result shows:</b> status bar at the start and the end; Activity ▸ Running while it works; Activity ▸ Recent afterwards (kept across relaunch).</p>
+    <table class="plain">
+      <tr><th>Moment</th><th>Status bar</th><th>Activity</th></tr>
+      <tr><td>Start</td><td><code>Refreshing from sources…</code></td><td>Running: <code>Refreshing SoundCloud · likes 240 of 585</code> · Cancel</td></tr>
+      <tr><td>New tracks</td><td><code>Refreshed SoundCloud — 6 new tracks · Show</code></td><td>Recent: <code>Refreshed SoundCloud — 6 new tracks, 2 playlists updated</code></td></tr>
+      <tr><td>Nothing new</td><td><code>Refreshed SoundCloud — nothing new</code></td><td>Recent: same sentence</td></tr>
+      <tr><td>Sign-in expired</td><td><code>Couldn’t refresh Spotify — sign-in expired · Reconnect</code></td><td>Needs attention: <code>Sign-in expired (Spotify) · Reconnect</code></td></tr>
+      <tr><td>No source connected</td><td><code>No source is connected · Open Settings ▸ Sources</code></td><td>—</td></tr>
+    </table>
+    <div class="demo col"><div class="statusbar" style="width:100%;border-radius:6px;border:0"><span class="msg">Refreshed SoundCloud — 6 new tracks <a class="btn plain" style="height:16px" href="library.html">Show</a></span></div>
+      <button class="btn" data-refresh>Try it in the window above</button></div>
+  </div>
+
+  <div class="spec">
+    <h4>Browser sign-in hand-off <code>S-SRC-OAUTH</code></h4>
+    <p>MLM opens the source’s sign-in page in the default browser. While it waits it says so, in the place that asked (import sheet, Add from Link, Settings ▸ Sources, Activity). Outcomes: success → the place continues, status bar <code>Spotify connected</code> · cancelled → back to <code>Sign-in expired · Reconnect</code> · no answer for 5 minutes → <code>Sign-in wasn’t finished · Try Again</code>. No raw token or HTTP text.</p>
+    <div class="demo"><div class="sheet static" style="width:380px" data-fb-id="S-SRC-OAUTH" data-fb-label="Browser sign-in hand-off (exhibit)" data-fb-dec="DEC-004">
+      <div class="sh"><h2>Sign in to Spotify</h2></div><div class="sb"><div class="row" style="margin:8px 0"><span class="spinner"></span><span>Waiting for Spotify in your browser…</span></div><p class="caption" style="white-space:normal">Finish signing in there. MLM continues by itself and keeps your place.</p></div>
+      <div class="sf"><button class="btn left">Open Browser Again</button><button class="btn">Cancel</button></div></div></div>
+  </div>
+
+  <div class="spec">
+    <h4>Keychain permission <code>A-SRC-KEYCHAIN</code> <code>system dialog</code></h4>
+    <p>A macOS dialog, not MLM copy — it can appear after an update when MLM reads a saved sign-in. MLM adds one line of context <i>before</i> it triggers the dialog (in the row that needs it), and treats <code>Deny</code> as <code>Sign-in expired · Reconnect</code> instead of an error. The old amber notice “token inaccessible — reconnect in Settings” is gone.</p>
+    <div class="demo col">
+      <div class="srcrow" style="width:320px;background:var(--content);border-radius:8px" data-fb-id="V-SRC.E04l" data-fb-label="Context line before the system dialog" data-fb-note="Replaces “‹Name› token inaccessible — reconnect in Settings”."><span class="srcdot sc"></span><span class="lbl">SoundCloud<small style="white-space:normal">MLM needs your permission to read the saved sign-in.</small></span><button class="btn">Allow…</button></div>
+      <div class="sysdlg" data-fb-id="A-SRC-KEYCHAIN" data-fb-label="macOS keychain prompt (system)" data-fb-note="System-owned text and buttons. Allow / Always Allow → Connected. Deny → Sign-in expired · Reconnect (browser sign-in)." data-fb-api="Security framework (SecItemCopyMatching) — system UI">
+        <div class="row"><i data-i="lock" class="l"></i><b>MLM wants to use your confidential information stored in “MLM SoundCloud” in your keychain.</b></div>
+        <span class="t2">To allow this, enter the “login” keychain password.</span>
+        <input class="field" placeholder="Password">
+        <div class="row" style="justify-content:flex-end"><button class="btn">Always Allow</button><button class="btn">Deny</button><button class="btn primary">Allow</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="spec" style="grid-column:1/-1">
+    <h4>Where the old Sources section and import window went <code>V-SRC</code> <code>W-REMOTE</code></h4>
+    <table class="plain">
+      <tr><th>Today</th><th>After</th><th>Decision</th></tr>
+      <tr><td><code>V-SRC</code> sidebar section with four cards</td><td>Accounts: Settings ▸ Sources (<a href="settings.html#sources">settings.html#sources</a>). Entry points: the Add menu. Source state where it matters: step 1 of the import sheet, Activity ▸ Needs attention.</td><td>DEC-004</td></tr>
+      <tr><td><code>V-SRC.E04f</code> <code>Sync</code> per card (no result)</td><td><code>Refresh from Sources</code> (Add menu, File menu, optional schedule) with a counted result in the status bar and Activity.</td><td>DEC-023, DEC-044</td></tr>
+      <tr><td><code>V-SRC.E04h</code> <code>Disconnect</code> without confirmation</td><td>Only in Settings ▸ Sources, with confirmation.</td><td>DEC-004</td></tr>
+      <tr><td><code>V-SRC.E04j</code> hint with the hidden <code>.env</code> path</td><td>Settings ▸ Advanced ▸ Credentials file · <code>Show in Finder</code>.</td><td>DEC-035</td></tr>
+      <tr><td><code>W-REMOTE</code> separate window, one per source, closes another source’s import</td><td><code>S-IMPORT</code> sheet in the main window; all sources in one list.</td><td>DEC-026</td></tr>
+      <tr><td><code>W-REMOTE.E21–E25</code> progress, result, failed list and embedded playlist inside the window</td><td>Not in the sheet. Playlist header line + <code>Download failed</code> scope on the playlist; Activity operation with per-track outcomes and <code>Retry All</code>.</td><td>DEC-044</td></tr>
+      <tr><td><code>W-REMOTE.E13</code> “Metadata completes after download”</td><td>Dropped: the preview already shows title, artist and time; album suggestions come later in Review ▸ Albums.</td><td>DEC-021</td></tr>
+      <tr><td>Album written as <code>SoundCloud</code> / <code>YouTube</code> at import</td><td>Album stays empty; the source is the track’s link (<code>Linked to SoundCloud</code>), never a tag.</td><td>DEC-013</td></tr>
+    </table>
+  </div>
+</div>
+
+<script>
+document.addEventListener('mlm:ready', () => {
+  const $ = (s, r) => (r || document).querySelector(s), $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const esc = MLM.esc;
+
+  /* backdrop grid */
+  const PL = ['Warm-up', 'Peak time', 'Closing', 'Liked on SoundCloud', 'Boiler Room picks', 'Road trip 2026', 'Ambient for work', 'Late night rollers (old)', 'Breaks & bass', 'Sunday garage', 'Dub techno essentials', 'Mixes to rip', 'Dekmantel 2024', 'Driving home for Christmas, but make it jungle', 'B2B with Jonas', 'House classics', 'Running 170', 'Unsorted finds'];
+  const SUB = ['38 tracks', '52 tracks', '21 tracks', 'Importing · 12 of 44', '64 tracks · Linked to YouTube', '112 tracks', '47 tracks', '44 tracks', '83 tracks', '29 tracks', 'Incomplete · 3 failed', 'Not downloaded · 18 tracks', '62 tracks · Linked to YouTube', '15 tracks', '71 tracks', '96 tracks', '33 tracks', '204 tracks'];
+  $('#plgrid').innerHTML = PL.map((n, i) => '<a class="card" href="playlists.html#detail"><span class="art cov c' + (1 + i % 6) + '" style="height:auto">' + (i % 5 === 3 ? MLM.icon('list', 'l') : '') + '</span><span class="nm">' + esc(n) + '</span><span class="sb">' + SUB[i] + '</span></a>').join('');
+
+  /* status-bar messages without Undo */
+  document.addEventListener('click', e => { const m = e.target.closest('[data-msg]'); if (m) MLM.say(m.dataset.msg); });
+
+  /* Refresh from Sources */
+  const refresh = () => { MLM.say('<span class="spinner"></span> Refreshing from sources…'); setTimeout(() => MLM.say('Refreshed SoundCloud — 6 new tracks <a class="btn plain" style="height:16px" href="library.html">Show</a> · Couldn’t refresh Spotify — sign-in expired <a class="btn plain" style="height:16px" href="settings.html#sources">Reconnect</a>'), 1800); scrollTo({ top: 0, behavior: 'smooth' }); };
+  document.addEventListener('click', e => { if (e.target.closest('[data-refresh]') || e.target.closest('#btn-refresh')) refresh(); });
+
+  /* account playlists */
+  const SC = [['Late night rollers', 44, 0, 0], ['Liked on SoundCloud', 585, 1, 0, 'Importing · 12 of 44 (first 44)'], ['Warm-up ideas', 38, 0, 0], ['Breaks & bass', 83, 1, 0, 'refreshed Sep 28, 2026'], ['Dub techno essentials — the long list for winter evenings', 212, 0, 0], ['Sunday garage', 29, 1, 0, 'refreshed Aug 3, 2026'], ['Private edits (do not share)', 17, 0, 1], ['Ambient for work', 47, 0, 0], ['B2B with Jonas', 71, 0, 1], ['Jungle 94–97', 156, 0, 0], ['Reposts worth keeping', 312, 0, 0], ['Dekmantel 2024 IDs', 23, 0, 0], ['Closing tracks', 21, 0, 0], ['Untitled playlist', 0, 0, 0]];
+  const SP = [['Discover Weekly archive', 420, 0, 0], ['House classics', 96, 1, 0, 'refreshed Jul 12, 2026'], ['Running 170', 33, 0, 0], ['Road trip 2026', 112, 0, 0], ['Focus', 58, 0, 0], ['Shared with Lena', 140, 0, 0]];
+  const plrows = (L) => L.map((p, i) => '<div class="plrow" data-pl="' + esc(p[0]) + '" data-n="' + p[1] + '" data-imp="' + p[2] + '"><span class="cov c' + (1 + i % 6) + (p[1] ? '' : ' none') + '"></span><span class="grow trunc">' + esc(p[0]) + (p[3] ? ' <span class="caption">' + MLM.icon('lock', 's') + ' Private</span>' : '') + '</span>' + (p[2] ? '<span class="caption">Already imported' + (p[4] ? ' · ' + p[4] : '') + '</span>' : '') + '<span class="t2 num small" style="width:64px;text-align:right">' + p[1].toLocaleString('en-US') + ' tracks</span><span class="t3">' + MLM.icon('chevr', 's') + '</span></div>').join('');
+  $('#sc-list').innerHTML = plrows(SC); $('#sp-list').innerHTML = plrows(SP);
+  $('#sc-skel').innerHTML = Array.from({ length: 9 }, (_, i) => '<div class="plrow skel"><span class="cov none"></span><span class="grow"><span style="display:inline-block;height:9px;border-radius:4px;background:var(--fill2);width:' + (30 + (i * 17) % 40) + '%"></span></span></div>').join('');
+
+  /* preview model */
+  const base = MLM.tracks(44, 21);
+  let pl = { name: 'Late night rollers', imported: false }, mode = 'all', target = 'new';
+  const kindOf = (i) => { if (pl.imported) return i % 11 === 3 ? 'new' : i % 13 === 5 ? 'inlib' : 'dl'; return [2, 9, 17, 30].includes(i) ? 'inlib' : [0, 5, 6, 12, 14, 21, 26, 33, 40].includes(i) ? 'dl' : 'new'; };
+  const KIND = { new: '<span class="status">New</span>', inlib: '<span class="status">' + MLM.icon('cloud', 's') + 'In library</span>', dl: '<span class="status ok">' + MLM.icon('check', 's') + 'Already downloaded</span>' };
+  function selected() {
+    const n = Math.max(1, Math.min(44, parseInt($('#seln').value, 10) || 20)), idx = base.map((_, i) => i);
+    if (mode === 'first') return idx.slice(0, n);
+    if (mode === 'random') return idx.map(i => [(i * 7919 + 13) % 44, i]).sort((a, b) => a[0] - b[0]).slice(0, n).map(x => x[1]).sort((a, b) => a - b);
+    return idx;
+  }
+  function draw() {
+    const sel = selected(), c = { new: 0, inlib: 0, dl: 0 };
+    $('#imp-tbl').innerHTML = '<table><thead><tr><th class="r" style="width:34px">#</th><th>Title</th><th style="width:150px">Artist</th><th class="r" style="width:50px">Time</th><th style="width:170px" data-fb-id="S-IMPORT.N18" data-fb-label="In library column" data-fb-note="New = not in the library yet. In library = known, not downloaded. Already downloaded = nothing to do. Matching uses the source ID first, then artist + title + duration.">In library</th></tr></thead><tbody>' +
+      sel.map(i => { const t = base[i], k = kindOf(i); c[k]++; return '<tr class="' + (k === 'dl' ? 'dim' : '') + '"><td class="r num dim">' + (i + 1) + '</td><td><div class="cellt"><span class="cov c' + t.c + '"></span><span class="ttl">' + esc(t.title) + '</span></div></td><td>' + esc(t.artist) + '</td><td class="r num">' + MLM.fmtTime(t.time) + '</td><td>' + KIND[k] + '</td></tr>'; }).join('') + '</tbody></table>';
+    const tot = sel.length, old = c.inlib + c.dl, dlOn = $('#tg-dl').classList.contains('on'), linkOn = $('#tg-link').classList.contains('on'), also = $('#ck-also').classList.contains('on');
+    $('#imp-summary').textContent = tot + ' tracks · ' + c.new + ' new · ' + old + ' already in library';
+    $$('[data-pl-name]').forEach(n => n.textContent = pl.name);
+    const part = mode !== 'all';
+    $('#target-pop').textContent = target === 'new' ? 'New playlist “' + pl.name + '”' : '“' + pl.name + '” — Linked to SoundCloud';
+    $('#target-note').innerHTML = target === 'new' ? (pl.imported ? 'A second playlist is created. The existing “' + esc(pl.name) + '” is not changed.' : 'A new playlist is created' + (linkOn ? ' and linked to SoundCloud.' : '.')) :
+      (part ? '<b>Re-importing a part:</b> the ' + tot + ' selected tracks are added if they are missing. Nothing is removed — the other tracks of the playlist stay.' : 'Tracks that are missing are added at the end. Nothing is removed; tracks removed on SoundCloud are listed in the playlist as “Not on SoundCloud any more”.');
+    $('#dl-note').textContent = dlOn ? (c.new ? c.new + ' new tracks are downloaded right after the import.' : 'Nothing new to download.') : 'Tracks are added as “Not downloaded”. Download them later from the playlist.';
+    $('#link-note').textContent = linkOn ? 'The playlist stays “Linked to SoundCloud”; Refresh from SoundCloud pulls later additions.' : 'One-time import: an ordinary playlist. It will not follow changes on SoundCloud.';
+    $('#c-target').textContent = $('#target-pop').textContent;
+    $('#c-count').textContent = tot;
+    $('#c-detail').textContent = c.new + ' new tracks are added to the library. ' + old + ' are already in your library and are only added to the playlist (' + c.dl + ' downloaded, ' + c.inlib + ' not downloaded).';
+    const dln = dlOn ? c.new + (also ? c.inlib : 0) : 0;
+    $('#c-dl').textContent = dlOn ? dln + ' tracks now' : 'Not now';
+    $('#c-dlnote').textContent = dlOn ? 'Starts right away, runs in the background.' : 'The playlist will say “Not downloaded · ' + (c.new + c.inlib) + ' tracks · Download all”.';
+    $('#c-link').textContent = linkOn ? 'Linked to SoundCloud' : 'Not linked (one-time import)';
+    $('#ck-also').textContent = 'Also download the ' + c.inlib + ' tracks that are in your library but not downloaded'; $('#ck-also').parentElement.hidden = !c.inlib || !dlOn;
+    $('#btn-import').textContent = 'Import ' + tot + ' Tracks';
+    $('#btn-import').dataset.result = (document.body.dataset.state === 'queued' ? 'Import queued — ' : 'Import started — ') + (dlOn ? dln : tot) + ' tracks <a class="btn plain" style="height:16px" href="playlists.html#detail">Show Playlist</a> <a class="btn plain" style="height:16px" href="activity.html">Activity</a>';
+    $$('#m-target .mi[data-target]').forEach(m => { m.classList.toggle('chk', m.dataset.target === target); m.classList.toggle('nochk', m.dataset.target !== target); m.classList.toggle('dis', m.dataset.target === 'existing' && !pl.imported); });
+    MLM.refreshBadges();
+  }
+  draw();
+  document.addEventListener('click', e => {
+    const t = e.target;
+    const row = t.closest('.plrow[data-pl]');
+    if (row && +row.dataset.n) { pl = { name: row.dataset.pl, imported: row.dataset.imp === '1' }; target = pl.imported ? 'existing' : 'new'; draw(); MLM.goto('imp-2'); return; }
+    const m = t.closest('#selmode button'); if (m) { mode = m.dataset.m; $('#seln').hidden = mode === 'all'; }
+    const tg = t.closest('#m-target .mi[data-target]'); if (tg) target = tg.dataset.target;
+    const ex = t.closest('[data-url]'); if (ex) { $('#qa-url').value = ex.dataset.url; MLM.goto({ 'qa-track': 'qa-track', 'qa-inlib': 'qa-inlib', 'qa-playlist': 'qa-playlist' }[ex.dataset.goto]); }
+    if (t.closest('[data-sp-ok]')) { const s = $('#sp-state'); s.className = ''; s.textContent = 'Connected · oliver'; }
+    if (t.closest('#btn-import')) MLM.say($('#btn-import').dataset.result);
+    if (t.closest('[data-qa-download]')) { MLM.say(document.body.dataset.state === 'queued' ? 'Download queued — “Rev8617” starts after 2 running downloads.' : '<span class="spinner"></span> Download started — “Rev8617”'); setTimeout(() => MLM.say('Downloaded “Rev8617” <a class="btn plain" style="height:16px" href="library.html">Show</a>'), 2600); }
+    setTimeout(draw, 0);
+  });
+  $('#seln').addEventListener('input', draw);
+  document.addEventListener('mlm:state', () => setTimeout(draw, 0));
+
+  /* views: keep source-row highlight and the quick-add primary button in step with the views */
+  document.addEventListener('mlm:view', e => {
+    const v = e.detail;
+    if (/^src-/.test(v)) $$('.srcrow[data-goto]').forEach(r => r.classList.toggle('sel', r.dataset.goto === v));
+    if (/^qa-/.test(v)) $$('[data-view-group="qab"]').forEach(b => { b.hidden = b.dataset.view !== v; });
+  });
+
+  /* deep links */
+  const h = decodeURIComponent(location.hash.slice(1));
+  if (h === 'quickadd') MLM.openSheet('s-quickadd');
+  else if (h === 'import') { MLM.openSheet('s-import'); MLM.goto('imp-1'); }
+  else if (/^imp-[123]$/.test(h)) MLM.openSheet('s-import');
+});
+</script>
+</body></html>

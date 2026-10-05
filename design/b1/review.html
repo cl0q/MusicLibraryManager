@@ -1,0 +1,357 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Review — MLM B1</title>
+<link rel="stylesheet" href="assets/mlm.css"><script src="assets/app.js"></script>
+<style>
+  .grp td { height: 42px; } .grp .disc { color: var(--text2); font-size: 9px; width: 12px; display: inline-block; }
+  .exp > td { padding: 0 0 10px 34px; white-space: normal; height: auto; background: var(--content) !important; border-bottom: .5px solid var(--sep); }
+  .cmp { border-radius: 8px; box-shadow: inset 0 0 0 .5px var(--sep-strong); overflow: hidden; }
+  .cmp table { table-layout: fixed; } .cmp th { position: static; background: var(--content-alt); } .cmp td { height: 30px; }
+  .cmp tr.rec td { font-weight: 500; }
+  .cmp td:first-child { text-overflow: clip; }
+  .cmp td.wrapc { white-space: normal; line-height: 1.25; }
+  .exp .acts { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+  .exp .foot { font-size: 11px; color: var(--text2); margin-top: 6px; }
+  .recw { color: var(--green); font-weight: 500; white-space: normal; }
+  .after td { background: var(--content-alt) !important; font-weight: 500; }
+  .rowacts { display: flex; gap: 4px; justify-content: flex-end; } .rowacts .btn { height: 20px; font-size: 12px; padding: 0 7px; }
+  .statusline .radio, .statusline .check { white-space: nowrap; }
+  .table:focus tr.sel td .btn, .table:focus tr.sel td .popup { color: var(--text) !important; } .table:focus tr.sel td .btn.primary { color: var(--on-accent) !important; box-shadow: 0 0 0 1px var(--on-accent); }
+  /* the shared CSS draws the radio dot but no box for a bare .radio */
+  .radio { display: inline-flex; align-items: center; gap: 6px; } .radio::before { content: ""; width: 14px; height: 14px; flex: none; background: var(--control); box-shadow: inset 0 0 0 .5px var(--sep-strong); }
+  .radio.on::before { box-shadow: none; }
+  .cmp td.wrapc { padding-top: 4px; padding-bottom: 4px; }
+  .conseq { color: var(--text2); white-space: normal; flex: 1 1 260px; min-width: 0; }
+</style></head>
+<body data-screen="V-REV" data-title="Review" data-nav="review" data-states="default,empty,scanning,error"
+      data-status="14 duplicate groups · 8 conflicts · 1,204 album suggestions">
+
+<div class="note">
+  <h3>Review: Duplicates · Conflicts · Albums · Resolved — Tier 2</h3>
+  <p><b>Try:</b> the tabs in the scope bar · <b>Duplicates:</b> click a group to expand its comparison table (or ↑/↓ then →), pick another version with its radio button, <kbd>Space</kbd> previews the picked version in the toolbar player, <kbd>Return</kbd> = <code>Keep Recommended</code>; the status bar confirms with <code>Undo</code> (works) · switch <code>Unkept versions</code> between <code>Stay in library, hidden from lists</code> and <code>Move to Trash</code> and watch the consequence text · <code>Apply Recommended to All…</code> · right-click a group or a version row · <b>Conflicts:</b> choose a value per field, <code>Use All from A</code>, see <code>After merge</code> update · <b>Albums</b> (new, also <a href="review.html#albums">review.html#albums</a>): <code>Accept</code> / <code>Reject</code> / <code>No Album</code>, the alternatives pop-up, <code>Accept All Above 90 %…</code> · <b>Resolved:</b> <code>Restore</code> · <b>State:</b> Empty, Scanning, Error · <b>Drive → Not connected</b>.</p>
+  <p>What changes: a decision now does something (unkept versions disappear from lists or go to the Trash; playlists are re-pointed to the kept version), decisions are remembered by the next scan, bulk decisions exist, conflicts compare every version, the scan is an Activity operation, and the floating undo toast becomes a status-bar message. Decisions: DEC-021, DEC-028, DEC-016, DEC-039, DEC-041, DEC-044. Flows F-12, F-24 step 4.</p>
+</div>
+
+<div id="content">
+  <div class="vhead">
+    <h1 data-fb-id="V-REV.E01" data-fb-label="View title" data-fb-api=".navigationTitle">Review</h1><span class="sub">Main Library</span>
+    <span class="grow"></span>
+    <span class="caption" data-show="default empty error" data-fb-id="V-REV.E03" data-fb-label="Last scan" data-fb-note="Persisted with its date (today it is forgotten at quit). Says how much of the library a scan can see." data-fb-dec="DEC-044">Last scan: Oct 3, 2026 at 17:02 · 9,412 of 12,935 tracks have a fingerprint</span>
+    <span class="caption" data-show="scanning"><span class="spinner"></span> Scanning for duplicates…</span>
+    <button class="btn" data-show="default empty error" id="run-scan" data-fb-id="V-REV.E02" data-fb-label="Run Scan" data-fb-note="Starts the duplicate scan as an Activity operation; it keeps running when you leave Review. Earlier decisions (also “Not Duplicates”) are never proposed again." data-fb-dec="DEC-044" data-fb-api="Button; ⌘R in this view">Run Scan</button>
+    <button class="btn" data-show="scanning" id="cancel-scan">Cancel Scan</button>
+  </div>
+
+  <div class="scopebar" data-fb-id="V-REV.E05" data-fb-label="Tabs: Duplicates · Conflicts · Albums · Resolved" data-fb-note="Scope bar with counts of what waits for a verdict. Albums is new: album suggestions for tracks without one. The sidebar badge is the sum of the first three." data-fb-dec="DEC-021" data-fb-api="Picker(.segmented) in safeAreaInset(edge: .top)">
+    <button class="scope on" data-goto="duplicates">Duplicates<span class="n" data-n="dup" data-hide="empty">14</span></button>
+    <button class="scope" data-goto="conflicts">Conflicts<span class="n" data-n="conf" data-hide="empty">8</span></button>
+    <button class="scope" data-goto="albums" data-fb-id="V-REV.N01" data-fb-label="Albums tab (new)" data-fb-note="Where tracks without an album get one — or get “No album” on purpose." data-fb-dec="DEC-021">Albums<span class="n" data-n="alb" data-hide="empty">1,204</span></button>
+    <button class="scope" data-goto="resolved">Resolved<span class="n" data-n="res">37</span></button>
+  </div>
+
+  <div class="statusline" data-show="scanning" data-fb-id="V-REV.E03" data-fb-label="Scan running" data-fb-note="The echo of the Activity operation: same numbers, same words. Groups already found stay usable while the scan runs." data-fb-dec="DEC-044" data-fb-api="ProgressView(value:total:)">
+    <span>Scanning · Comparing 48,210 of 131,400</span><div class="progress" style="width:180px"><i style="width:37%"></i></div><span class="t2">Decisions you already made are kept.</span><span class="grow"></span><a class="btn plain" href="activity.html">Show in Activity</a>
+  </div>
+  <div class="banner err" data-show="error" data-fb-id="V-REV.E04" data-fb-label="Scan error" data-fb-note="Cause in plain words and the one action; raw text behind Details and in Logs. The groups found earlier stay."><i data-i="warn"></i><span><b>The last scan didn’t finish.</b> The fingerprint tool fpcalc was not found. Groups from the scan before are still shown.</span><span class="act"><a class="btn" href="settings.html#sources">Open Settings ▸ Sources</a><a class="btn" href="activity.html#logs">Show in Logs</a></span></div>
+  <div data-show="default scanning error"><div class="banner info drive-off" data-fb-id="V-REV.N02" data-fb-label="Review while the drive is away" data-fb-note="Screen-specific addition to the window banner: deciding works offline; listening and Trash moves need the files."><i data-i="info"></i><span>You can still decide. Previews are paused, and versions chosen for the Trash are moved when “Lexxar” is connected.</span></div></div>
+
+  <div class="view" data-show="default scanning error">
+
+    <!-- ───────── Duplicates ───────── -->
+    <div class="view" data-view="duplicates">
+      <div class="statusline" style="flex-wrap:wrap" data-fb-id="V-REV.N03" data-fb-label="Unkept versions: session choice" data-fb-note="Chosen once, applies to every decision until changed; resets to “Stay in library” at the next launch. Either way playlists and sync profiles are re-pointed to the kept version. Replaces the footer “Media files are not renamed, moved, or deleted”." data-fb-dec="DEC-028" data-fb-api="Picker(.radioGroup).horizontalRadioGroupLayout()">
+        <b>Unkept versions:</b>
+        <span class="radio on" data-name="unkept" data-mode="hide">Stay in library, hidden from lists</span>
+        <span class="radio" data-name="unkept" data-mode="trash">Move to Trash</span>
+        <span class="conseq" id="conseq"></span>
+        <button class="btn" data-open="a-rev-applyall" id="apply-all" data-fb-id="V-REV.N04" data-fb-label="Apply Recommended to All…" data-fb-note="Bulk decision for every group still listed (respects the search filter). Confirms with the consequence; one Undo step." data-fb-dec="DEC-028">Apply Recommended to All 14…</button>
+      </div>
+      <div class="table" id="dups" tabindex="0" data-fb-id="V-REV.E06" data-fb-label="Duplicate groups" data-fb-note="A list, not cards: one row per group, expandable (→ / click) into a comparison table. ↑/↓ move, Return = Keep Recommended, Space = preview the picked version." data-fb-dec="DEC-028" data-fb-api="List / Table with DisclosureGroup rows; .onKeyPress"></div>
+    </div>
+
+    <!-- ───────── Conflicts ───────── -->
+    <div class="view" data-view="conflicts" hidden>
+      <div class="statusline" data-fb-id="V-REV.E08a" data-fb-label="Conflicts intro" data-fb-note="Says in one line what a merge does and where it is written.">
+        <span class="t2" style="white-space:normal">The same recording with different tags. Choose the value to keep for each field; the result is written to every version<span id="tagfiles"> — to the database and, because <a href="settings.html#library">Write tags to files</a> is on, to the files</span>.</span>
+      </div>
+      <div class="table" id="confs" tabindex="0" data-fb-id="V-REV.E06" data-fb-label="Conflict groups" data-fb-note="Same list pattern as Duplicates."></div>
+    </div>
+
+    <!-- ───────── Albums ───────── -->
+    <div class="view" data-view="albums" hidden>
+      <div class="statusline" style="flex-wrap:wrap" data-fb-id="V-REV.N05" data-fb-label="Albums header" data-fb-note="How big the problem is, how far the lookup is, and the bulk action. The lookup is an Activity operation that can pause and continues after a relaunch." data-fb-dec="DEC-021">
+        <span><b class="num">6,341</b> tracks without album · <b class="num" id="alb-ready">1,204</b> suggestions ready</span>
+        <span class="t2 row" data-fb-id="V-REV.N06" data-fb-label="Lookup progress" data-fb-dec="DEC-044"><span class="spinner"></span>Looking up albums · 2,410 of 6,341 · <a href="activity.html">Show in Activity</a></span>
+        <span class="grow"></span>
+        <div class="seg" id="alb-seg" data-fb-id="V-REV.N07" data-fb-label="Filter: Suggestions · No Match · No Album" data-fb-api="Picker(.segmented)"><button class="on" data-k="ready">Suggestions</button><button data-k="none">No Match</button><button data-k="noalbum">No Album</button></div>
+        <button class="btn" data-open="a-rev-albbulk" data-fb-id="V-REV.N08" data-fb-label="Accept All Above 90 %…" data-fb-note="Accepts every suggestion with a match of more than 90 %. Confirms with the count; one Undo step." data-fb-dec="DEC-021">Accept All Above 90 % (812)…</button>
+      </div>
+      <div class="table" id="albs" tabindex="0" data-fb-id="V-REV.N09" data-fb-label="Album suggestions" data-fb-note="One row per track without an album: the best suggestion with year, where it comes from and how sure it is. Return = Accept, ⌫ = Reject. Accepting sets Album, Album artist, Year and the track number, and adds the track to the album (albums.html)." data-fb-dec="DEC-021" data-fb-api="Table(selection:)"></div>
+    </div>
+
+    <!-- ───────── Resolved ───────── -->
+    <div class="view" data-view="resolved" hidden>
+      <div class="statusline"><span class="t2" style="white-space:normal">Decisions you made. They are remembered by every later scan. <b>Restore</b> puts a group back into its tab; versions that went to the Trash are put back if they are still there.</span></div>
+      <div class="table" id="resv" data-fb-id="V-REV.E09" data-fb-label="Resolved history" data-fb-note="Now with the date, what happened to the other versions, and a kind column. Restore is available as long as the snapshot exists." data-fb-dec="DEC-041"></div>
+    </div>
+  </div>
+
+  <div class="empty" data-show="empty" data-fb-id="V-REV.N10" data-fb-label="Nothing to review" data-fb-note="One sentence and the one action. Distinguishes “clean” from “never scanned” by the last-scan date in the header." data-fb-api="ContentUnavailableView">
+    <i data-i="check" class="xl"></i><h2>Nothing to review</h2>
+    <p>No duplicates, tag conflicts or album suggestions are waiting. Run a scan after importing more music.</p>
+    <div class="acts"><button class="btn lg primary" data-set-state="scanning">Run Scan</button><button class="btn lg" id="show-resolved">Show Resolved</button></div>
+  </div>
+</div>
+
+<!-- ───────── menus ───────── -->
+<div class="menu" id="cm-rev-group" hidden data-fb-id="CM-REV-GROUP" data-fb-label="Group context menu (new)" data-fb-note="Groups had no menu. Order rule: Primary · Info · Fix · Locate/Share. No Remove group — a decision is the way out." data-fb-dec="DEC-039" data-fb-api="contextMenu(forSelectionType:menu:primaryAction:)">
+  <a class="mi" data-cm="keep-rec">Keep Recommended<span class="k">↩</span></a><a class="mi" data-cm="toggle">Show Comparison<span class="k">→</span></a><hr>
+  <a class="mi" href="library.html">Show Versions in All Tracks</a><hr>
+  <a class="mi" data-cm="keep-all">Keep All — Not Duplicates</a><hr>
+  <a class="mi sub">Copy</a></div>
+<div class="menu" id="cm-rev-conflict" hidden data-fb-id="CM-REV-GROUP" data-fb-label="Conflict group context menu (new)" data-fb-note="Same order as the duplicate group menu; the primary action is Apply Merge." data-fb-dec="DEC-039">
+  <a class="mi" data-cm="c-merge">Apply Merge<span class="k">↩</span></a><a class="mi" data-cm="c-toggle">Show Comparison<span class="k">→</span></a><hr>
+  <a class="mi" href="library.html">Show Versions in All Tracks</a><hr>
+  <a class="mi" data-cm="c-both">Different Versions — Keep Both</a><hr>
+  <a class="mi sub">Copy</a></div>
+<div class="menu" id="cm-rev-version" hidden data-fb-id="CM-REV-VERSION" data-fb-label="Version row context menu (new)" data-fb-note="A version is a track, so it gets the track menu’s order: Primary · Queue · Add to · Info · Fix · Locate/Share · Remove." data-fb-dec="DEC-039" data-fb-api="contextMenu(forSelectionType:)">
+  <a class="mi"><i data-i="play"></i>Play</a><a class="mi" data-cm="preview"><i data-i="wave"></i>Preview<span class="k">Space</span></a><hr>
+  <a class="mi">Play Next<span class="k">⌥↩</span></a><a class="mi">Add to Queue<span class="k">⌥⇧↩</span></a><hr>
+  <a class="mi sub">Add to Playlist</a><hr>
+  <a class="mi" data-act="info-open">Get Info<span class="k">⌘I</span></a><a class="mi" href="library.html">Show in All Tracks</a><hr>
+  <a class="mi" data-cm="keep-this">Keep This Version</a><hr>
+  <a class="mi">Show in Finder<span class="k">⇧⌘R</span></a><a class="mi sub">Copy</a><hr>
+  <a class="mi destr" data-open="a-track-remove">Remove from Library…<span class="k">⌘⌫</span></a></div>
+<div class="menu" id="cm-rev-album" hidden data-fb-id="CM-REV-ALBUM" data-fb-label="Album suggestion context menu (new)" data-fb-dec="DEC-039">
+  <a class="mi"><i data-i="play"></i>Play</a><a class="mi"><i data-i="wave"></i>Preview<span class="k">Space</span></a><hr>
+  <a class="mi" data-act="info-open">Get Info<span class="k">⌘I</span></a><a class="mi" href="albums.html#detail">Show Suggested Album</a><hr>
+  <a class="mi" data-cm="alb-accept">Accept<span class="k">↩</span></a><a class="mi" href="albums.html">Choose Another Album…</a><a class="mi" data-cm="alb-none">No Album</a><a class="mi" data-cm="alb-reject">Reject<span class="k">⌫</span></a><hr>
+  <a class="mi">Show in Finder</a><a class="mi sub">Copy</a></div>
+<div class="menu" id="m-alb-alt" hidden data-fb-id="V-REV.N11" data-fb-label="Alternatives pop-up" data-fb-note="Other candidates for the same track, each with source and match. Choosing one replaces the suggestion in the row; nothing is written until Accept." data-fb-api="Menu / Picker(.menu)">
+  <div class="mi hdr">Other suggestions</div>
+  <a class="mi nochk" data-alt="1">Selected Ambient Works 85–92 (2013 Remaster) · 2013 — Spotify · 88 %</a>
+  <a class="mi nochk" data-alt="2">Classics · 1995 — MusicBrainz · 71 %</a>
+  <a class="mi nochk" data-alt="3">Single · 1992 — SoundCloud · 64 %</a><hr>
+  <a class="mi" href="albums.html">Choose Another Album…</a></div>
+
+<!-- ───────── alerts ───────── -->
+<div class="alert" id="a-rev-applyall" hidden data-fb-id="A-REV-APPLYALL" data-fb-label="Apply Recommended to All (new)" data-fb-note="Question with the number; the consequence follows the session choice. Destructive role only when files go to the Trash." data-fb-dec="DEC-028" data-fb-api=".confirmationDialog">
+  <div class="aic"><i data-i="review" class="l"></i></div><h2 id="aa-h">Keep the recommended version in 14 groups?</h2><p id="aa-p"></p>
+  <div class="ab"><button class="btn primary" data-close id="aa-go">Keep Recommended in 14 Groups</button><button class="btn" data-close>Cancel</button></div></div>
+<div class="alert" id="a-rev-albbulk" hidden data-fb-id="A-REV-ALBBULK" data-fb-label="Accept All Above 90 % (new)" data-fb-dec="DEC-021" data-fb-api=".confirmationDialog">
+  <div class="aic"><i data-i="album" class="l"></i></div><h2>Set the album for 812 tracks?</h2><p>Every suggestion with a match above 90 % is accepted: Album, Album artist, Year and track number are set, and the changes are written to the files (queued while “Lexxar” is not connected). You can undo this in one step.</p>
+  <div class="ab"><button class="btn primary" data-close id="ab-go">Accept 812 Suggestions</button><button class="btn" data-close>Cancel</button></div></div>
+
+<script>
+document.addEventListener('mlm:ready', () => {
+  const $ = (s, r) => (r || document).querySelector(s), $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const esc = MLM.esc, ic = MLM.icon, fmt = MLM.fmtTime, nf = n => n.toLocaleString('en-US');
+  const fb = (id, label, note, dec) => ' data-fb-id="' + id + '" data-fb-label="' + label + '"' + (note ? ' data-fb-note="' + esc(note) + '"' : '') + (dec ? ' data-fb-dec="' + dec + '"' : '');
+  const PLS = ['Warm-up', 'Peak time', 'Closing', 'Road trip 2026', 'Boiler Room picks', 'Ambient for work'];
+  const ALB = ['Compro', 'Knock Knock', 'Good Lies', 'Arpo', 'Cocoon Crush', 'Tangerine', 'Crush', 'Untrue', 'Isles', 'Selected Ambient Works 85–92', 'Music Has the Right to Children', 'In Colour', 'Suddenly', 'Reality Testing', 'Rare, Forever'];
+  let mode = 'hide', q = '';
+  const match = (t) => !q || (t.title + ' ' + t.artist).toLowerCase().includes(q);
+
+  /* ───────── Duplicates ───────── */
+  const TPL = [
+    { why: 'highest quality', v: [['FLAC', 1411, 0, 'art', 3, ''], ['MP3', 320, 0, 'dl', 1, ''], ['M4A', 256, 1, 'sc', 0, '']], rec: 0 },
+    { why: 'highest quality', v: [['M4A', 256, 0, 'art', 2, ''], ['MP3', 128, -2, 'old', 0, '']], rec: 0 },
+    { why: 'highest quality', v: [['FLAC', 921, 0, 'art', 1, ''], ['FLAC', 1411, 0, 'dl', 0, '']], rec: 1 },
+    { why: 'the only downloaded version', v: [['M4A', 248, 0, 'art', 4, ''], ['', 0, 0, '', 1, 'notdl']], rec: 0 },
+    { why: 'same quality, most complete tags', v: [['MP3', 320, 0, 'art', 2, ''], ['MP3', 320, 0, 'dupe', 0, ''], ['MP3', 192, 3, 'old', 1, ''], ['', 0, 0, '', 0, 'failed']], rec: 0 },
+    { why: 'the other file is missing', v: [['ALAC', 1411, 0, 'art', 1, 'missing'], ['M4A', 256, 0, 'dl', 2, '']], rec: 1 }
+  ];
+  const seed = MLM.tracks(14, 44, { allLocal: true });
+  let groups = seed.map((t, i) => {
+    const tp = TPL[i % TPL.length], album = t.album || 'Singles';
+    const loc = { art: 'Lexxar/Music/' + t.artist + '/' + album, dl: 'Lexxar/Music/_Downloads/2024-11', sc: 'Lexxar/Music/SoundCloud Likes', old: 'Lexxar/Music/_old iTunes/Unknown Artist/Unknown Album', dupe: 'Lexxar/Music/' + t.artist + '/' + album + ' 2' };
+    return { id: i, t, pct: 99 - (i * 3) % 9, variant: i % 7 === 4, rec: tp.rec, pick: tp.rec, why: tp.why, open: i === 0,
+      v: tp.v.map((x, k) => ({ fmt: x[0], kbps: x[1], dur: t.time + x[2], loc: loc[x[3]] || '', pls: PLS.slice((i + k) % 4, (i + k) % 4 + x[4]), status: x[5] })) };
+  });
+  let selG = 0, lastRemoved = null, resolvedN = 37;
+  const others = g => g.v.length - 1, plsOf = (g, keep) => g.v.reduce((a, v, k) => a + (k === keep ? 0 : v.pls.length), 0);
+  function consequence(g, keep) {
+    const o = others(g), p = plsOf(g, keep);
+    return (mode === 'trash' ? o + ' other ' + (o === 1 ? 'version moves' : 'versions move') + ' to the Trash' : o + ' other ' + (o === 1 ? 'version stays' : 'versions stay') + ' in the library, hidden from lists') + (p ? ' · ' + p + ' playlist ' + (p === 1 ? 'entry is' : 'entries are') + ' re-pointed to the kept version' : '');
+  }
+  function drawDups() {
+    const list = groups.filter(g => match(g.t));
+    if (!list.some(g => g.id === selG) && list.length) selG = list[0].id;
+    $('[data-n="dup"]').textContent = groups.length; $('[data-n="res"]').textContent = resolvedN;
+    $('#apply-all').textContent = 'Apply Recommended to All ' + list.length + '…'; $('#apply-all').disabled = !list.length;
+    $('#conseq').innerHTML = mode === 'trash' ? '<span class="status failed">' + ic('trash', 's') + '</span> Files of versions you don’t keep are moved to the Trash (you can put them back from there). Playlists and sync profiles are re-pointed to the kept version.' : 'Versions you don’t keep stay on disk and in the library but no longer appear in All Tracks, albums or search. Playlists and sync profiles are re-pointed to the kept version.';
+    const head = '<table><thead><tr><th style="width:26px"></th><th>Group</th><th style="width:230px">Why</th><th style="width:290px"' + fb('V-REV.E06c', 'Recommendation column', 'Names the file by what distinguishes it (format, bitrate) and says why in words — not “Artist — Title”, which is identical for all versions.', 'DEC-028') + '>Recommendation</th><th style="width:150px"></th></tr></thead><tbody>';
+    const body = list.map(g => {
+      const r = g.v[g.rec];
+      let h = '<tr class="grp tall' + (g.id === selG ? ' sel' : '') + '" data-g="' + g.id + '" data-menu="cm-rev-group"><td><span class="disc">' + (g.open ? '▾' : '▸') + '</span></td><td><div class="cellt"><span class="cov c' + g.t.c + '"></span><span class="ttl">' + g.v.length + ' versions of “' + esc(g.t.title) + '”<small class="sub2">' + esc(g.t.artist) + '</small></span></div></td>' +
+        '<td class="dim">' + (g.variant ? 'Same recording, different version' : 'Identical recording') + ' · ' + g.pct + ' % match</td><td class="dim">Keep ' + r.fmt + ' · ' + nf(r.kbps) + ' kbps — ' + g.why + '</td><td><div class="rowacts"><button class="btn" data-keep="rec">Keep Recommended</button></div></td></tr>';
+      if (g.open) {
+        h += '<tr class="exp" data-g="' + g.id + '"><td colspan="5"><div class="cmp"' + fb('V-REV.E07', 'Comparison table', 'One row per version with what matters for the choice. The location is a folder path, shown in full (wraps) — today it is cut to 140 pt.', 'DEC-028') + '><table><thead><tr><th style="width:34px"></th><th style="width:230px"' + fb('V-REV.E07a', 'Version column', 'The recommended version is marked in words (“Recommended — highest quality”), not by a green background alone.') + '>Version</th><th style="width:58px">Format</th><th class="r" style="width:84px">Bitrate</th><th class="r" style="width:62px">Duration</th><th>Location</th><th style="width:180px"' + fb('V-REV.N12', 'Playlists using it', 'New: shows what a decision will re-point.') + '>Playlists using it</th><th style="width:124px">Status</th><th style="width:92px"></th></tr></thead><tbody>' +
+          g.v.map((v, k) => '<tr class="' + (k === g.rec ? 'rec' : '') + '" data-v="' + k + '" data-menu="cm-rev-version"><td><span class="radio' + (k === g.pick ? ' on' : '') + '" data-pick="' + k + '"></span></td><td class="wrapc">' + (k === g.rec ? '<span class="recw">' + ic('check', 's') + ' Recommended — ' + g.why + '</span>' : '<span class="t2">' + (v.status === 'notdl' ? 'Not downloaded' : v.status === 'failed' ? 'Download failed' : v.status === 'missing' ? 'File missing' : v.kbps < g.v[g.rec].kbps ? 'Lower bitrate' : v.kbps === g.v[g.rec].kbps ? 'Same quality' : 'Alternative') + '</span>') + '</td><td>' + (v.fmt || '<span class="t3">—</span>') + '</td><td class="r num">' + (v.kbps ? nf(v.kbps) + ' kbps' : '<span class="t3">—</span>') + '</td><td class="r num">' + fmt(v.dur) + '</td><td class="wrapc dim" style="font-size:12px">' + (v.loc ? esc(v.loc) : '<span class="t3">—</span>') + '</td><td class="wrapc dim" style="font-size:12px">' + (v.pls.length ? v.pls.length + ' · ' + v.pls.join(', ') : '<span class="t3">None</span>') + '</td><td>' + (MLM.STATUS[v.status] || '') + '</td><td>' + (v.status ? '' : '<button class="btn" data-prev="' + k + '" style="height:20px;font-size:12px;padding:0 7px"' + fb('V-REV.N13', 'Preview', 'The same preview as everywhere (Space): plays in the toolbar player and resumes what was playing — it no longer replaces main playback.', 'DEC-010') + '>Preview</button>') + '</td></tr>').join('') +
+          '</tbody></table></div><div class="acts"><button class="btn primary" data-keep="rec"' + fb('V-REV.E07b', 'Keep Recommended (default)', 'Return. Status bar says what happened, with Undo.', 'DEC-028') + '>Keep Recommended</button><button class="btn" data-keep="pick"' + (g.pick === g.rec ? ' disabled' : '') + fb('V-REV.E07c', 'Keep Selected', 'Keeps the version picked with the radio button (was a pop-up listing identical names).') + '>Keep Selected</button><button class="btn" data-keep="all"' + fb('V-REV.E07d', 'Keep All — Not Duplicates', 'Merges “Keep all” and “Never suggest again”: all versions stay visible and the group is never proposed again.', 'DEC-028') + '>Keep All — Not Duplicates</button><span class="caption" style="white-space:normal">' + consequence(g, g.pick) + '</span></div>' +
+          (g.variant ? '<div class="foot">' + ic('note', 's') + ' Probably different versions of the same recording (edit, remaster). Listen before you decide.</div>' : '') + '</td></tr>';
+      }
+      return h;
+    }).join('');
+    $('#dups').innerHTML = list.length ? head + body + '</tbody></table>' : (groups.length ? '<div class="empty" style="height:70%">' + ic('search', 'xl') + '<h2>No results</h2><p>No duplicate group matches the search.</p></div>' : '<div class="empty" style="height:70%">' + ic('check', 'xl') + '<h2>No duplicates</h2><p>Every group has a decision. Run a scan after importing more music.</p><div class="acts"><button class="btn" data-set-state="scanning">Run Scan</button></div></div>');
+    const p = plsAll(); $('#aa-h').textContent = 'Keep the recommended version in ' + list.length + ' groups?'; $('#aa-go').textContent = 'Keep Recommended in ' + list.length + ' Groups'; $('#aa-go').className = 'btn ' + (mode === 'trash' ? 'destructive' : 'primary');
+    $('#aa-p').textContent = (mode === 'trash' ? p.o + ' files of the other versions are moved to the Trash.' : p.o + ' other versions stay in the library, hidden from lists.') + ' ' + p.p + ' playlist entries are re-pointed to the kept versions. You can undo this, or restore single groups in Resolved.';
+    MLM.refreshBadges();
+  }
+  const plsAll = () => groups.filter(g => match(g.t)).reduce((a, g) => ({ o: a.o + others(g), p: a.p + plsOf(g, g.rec) }), { o: 0, p: 0 });
+  const G = id => groups.find(g => g.id === id);
+  function resolve(g, how) {
+    const keep = how === 'pick' ? g.pick : g.rec, v = g.v[keep], i = groups.indexOf(g); if (i < 0) return;
+    lastRemoved = { g, i }; groups.splice(i, 1); resolvedN++;
+    const next = groups[Math.min(i, groups.length - 1)]; if (next) { selG = next.id; }
+    drawDups();
+    MLM.say(how === 'all' ? 'Kept all ' + g.v.length + ' versions of “' + esc(g.t.title) + '” — not duplicates' : 'Kept the ' + v.fmt + ' version of “' + esc(g.t.title) + '” · ' + consequence(g, keep), true);
+  }
+  const prevTrack = (g, k) => ({ title: g.t.title + ' — ' + g.v[k].fmt + ' ' + nf(g.v[k].kbps) + ' kbps', artist: g.t.artist, status: 'local', c: g.t.c, time: g.v[k].dur });
+  function preview(g, k) {
+    const v = g.v[k]; if (v.status) { MLM.say(v.status === 'missing' ? 'Can’t preview — file missing.' : 'Can’t preview — not downloaded.'); return; }
+    if (MLM.shell.previewing) MLM.shell.endPreview(); else MLM.shell.preview(prevTrack(g, k));
+  }
+  const dups = $('#dups');
+  dups.addEventListener('click', e => {
+    const tr = e.target.closest('tr[data-g]'); if (!tr) return; const g = G(+tr.dataset.g); if (!g) return; selG = g.id;
+    const keep = e.target.closest('[data-keep]'), pick = e.target.closest('[data-pick]'), prev = e.target.closest('[data-prev]');
+    if (keep) return resolve(g, keep.dataset.keep);
+    if (pick) { g.pick = +pick.dataset.pick; return drawDups(); }
+    if (prev) return preview(g, +prev.dataset.prev);
+    if (tr.classList.contains('grp')) g.open = !g.open;
+    drawDups();
+  });
+  dups.addEventListener('keydown', e => {
+    const list = groups.filter(g => match(g.t)), i = list.findIndex(g => g.id === selG), g = list[i]; if (!g) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); selG = list[Math.max(0, Math.min(list.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))].id; drawDups(); const r = $('tr.grp.sel', dups); if (r) r.scrollIntoView({ block: 'nearest' }); if (MLM.shell.previewing) { const n = G(selG); MLM.shell.preview(prevTrack(n, n.pick)); } }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); g.open = true; drawDups(); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); g.open = false; drawDups(); }
+    else if (e.key === 'Enter') { e.preventDefault(); resolve(g, 'rec'); }
+    else if (e.key === ' ') { e.preventDefault(); preview(g, g.pick); }
+    else if (e.key === 'Escape' && MLM.shell.previewing) MLM.shell.endPreview();
+  });
+
+  /* ───────── Conflicts ───────── */
+  const FIELDS = ['Title', 'Artist', 'Album artist', 'Album', 'Genre', 'Year'];
+  const cseed = MLM.tracks(8, 63, { allLocal: true });
+  let confs = cseed.map((t, i) => {
+    const three = i % 3 === 0, alb = t.album || ALB[i % ALB.length];
+    const A = { Title: t.title, Artist: t.artist, 'Album artist': t.artist, Album: alb, Genre: t.genre || 'Techno', Year: String(t.year || 2019) };
+    const Bv = Object.assign({}, A), Cv = Object.assign({}, A);
+    [() => { Bv.Title = t.title.toLowerCase() + ' (official audio)'; Bv.Album = ''; Bv.Year = ''; }, () => { Bv.Genre = 'Electronic'; Bv['Album artist'] = 'Various Artists'; }, () => { Bv.Artist = t.artist + ' feat. Kelela'; Bv.Year = String(+A.Year + 2); }, () => { Bv.Album = alb + ' (Deluxe Edition)'; Bv.Genre = ''; }][i % 4]();
+    if (three) { Cv.Title = t.title + ' [FREE DL]'; Cv.Album = ''; Cv.Genre = 'Dance'; }
+    const vs = [{ k: 'A', d: A, f: 'FLAC · 1,411 kbps', loc: 'Lexxar/Music/' + t.artist + '/' + alb, pl: 2 }, { k: 'B', d: Bv, f: 'M4A · 256 kbps', loc: 'Lexxar/Music/SoundCloud Likes', pl: 1 }].concat(three ? [{ k: 'C', d: Cv, f: 'MP3 · 320 kbps', loc: 'Lexxar/Music/_Downloads/2024-11', pl: 0 }] : []);
+    const fields = FIELDS.filter(f => new Set(vs.map(v => v.d[f])).size > 1), ch = {}; fields.forEach(f => ch[f] = 0);
+    return { id: i, t, vs, fields, ch, open: i === 0, pct: 97 - i };
+  });
+  let selC = 0;
+  function drawConfs() {
+    $('[data-n="conf"]').textContent = confs.length;
+    const list = confs.filter(g => match(g.t));
+    const v = x => x ? esc(x) : '<span class="t3">— empty</span>';
+    $('#confs').innerHTML = !list.length ? '<div class="empty" style="height:70%">' + ic('check', 'xl') + '<h2>No tag conflicts</h2><p>Versions of the same recording with different tags appear here.</p></div>' :
+      '<table><thead><tr><th style="width:26px"></th><th>Group</th><th style="width:300px">Differs in</th><th style="width:200px">Why</th><th style="width:60px"></th></tr></thead><tbody>' + list.map(g => {
+        let h = '<tr class="grp tall' + (g.id === selC ? ' sel' : '') + '" data-c="' + g.id + '" data-menu="cm-rev-conflict"><td><span class="disc">' + (g.open ? '▾' : '▸') + '</span></td><td><div class="cellt"><span class="cov c' + g.t.c + '"></span><span class="ttl">' + g.vs.length + ' versions of “' + esc(g.t.title) + '”<small class="sub2">' + esc(g.t.artist) + '</small></span></div></td><td class="dim">' + g.fields.join(', ') + '</td><td class="dim">Same recording · ' + g.pct + ' % match</td><td></td></tr>';
+        if (g.open) {
+          const w = Math.floor(100 / (g.vs.length + 1));
+          h += '<tr class="exp" data-c="' + g.id + '"><td colspan="5"><div class="cmp"' + fb('V-REV.E08b', 'Field-by-field table', 'One row per differing field, one column per version — all versions, not only the first two. A radio button per cell chooses the value.', 'DEC-028') + '><table><thead><tr><th style="width:110px">Field</th>' + g.vs.map((x, k) => '<th style="width:' + w + '%;white-space:normal;height:auto;padding:5px 8px;line-height:1.3"><b style="color:var(--text)">Version ' + x.k + '</b> · ' + x.f + '<br>' + esc(x.loc) + ' · ' + (x.pl ? x.pl + (x.pl === 1 ? ' playlist' : ' playlists') : 'no playlists') + ' <a class="btn plain small" data-cprev="' + k + '">Preview</a></th>').join('') + '</tr></thead><tbody>' +
+            g.fields.map(f => '<tr data-f="' + esc(f) + '"><td class="dim">' + f + '</td>' + g.vs.map((x, k) => '<td class="wrapc"><span class="radio' + (g.ch[f] === k ? ' on' : '') + '" data-ch="' + k + '" style="white-space:normal">' + v(x.d[f]) + '</span></td>').join('') + '</tr>').join('') +
+            '<tr class="after"' + fb('V-REV.E08d', 'After merge', 'The resulting tags as a row of the same table, updated as you choose.') + '><td>After merge</td><td class="wrapc" colspan="' + g.vs.length + '">' + g.fields.map(f => f + ' “' + (esc(g.vs[g.ch[f]].d[f]) || '—') + '”').join(' · ') + '</td></tr></tbody></table></div>' +
+            '<div class="acts">' + g.vs.map((x, k) => '<button class="btn" data-useall="' + k + '"' + (k === 0 ? fb('V-REV.E08c', 'Use All from A / B / C') : '') + '>Use All from ' + x.k + '</button>').join('') + '<span class="grow"></span><button class="btn" data-cres="both"' + fb('V-REV.E08c', 'Different Versions — Keep Both', 'Nothing is changed; the group is not proposed again.') + '>Different Versions — Keep ' + (g.vs.length === 2 ? 'Both' : 'All') + '</button><button class="btn primary" data-cres="merge"' + fb('V-REV.E08f', 'Apply Merge (default)', 'Writes the chosen values to every version: to the database and, if “Write tags to files” is on, to the file tags (queued while the drive is away). Undoable.', 'DEC-028') + '>Apply Merge</button></div>' +
+            '<div class="foot"' + fb('V-REV.E08e', 'Where it is written', 'Was “Applies to the database only”. Now follows the Write tags to files setting.') + '>Writes to the database and to the file tags of ' + g.vs.length + ' files. The versions stay separate tracks — if they are also duplicates, the group appears under Duplicates afterwards.</div></td></tr>';
+        }
+        return h;
+      }).join('') + '</tbody></table>';
+    MLM.refreshBadges();
+  }
+  function confResolve(g, how) { confs.splice(confs.indexOf(g), 1); resolvedN++; $('[data-n="res"]').textContent = resolvedN; if (confs.length) selC = confs[0].id; drawConfs(); MLM.say(how === 'merge' ? 'Merged tags of “' + esc(g.t.title) + '” · ' + g.vs.length + ' files updated' : 'Kept “' + esc(g.t.title) + '” as different versions', true); }
+  $('#confs').addEventListener('keydown', e => {
+    const list = confs.filter(g => match(g.t)), i = list.findIndex(g => g.id === selC), g = list[i]; if (!g) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); selC = list[Math.max(0, Math.min(list.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))].id; drawConfs(); }
+    else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); g.open = e.key === 'ArrowRight'; drawConfs(); }
+    else if (e.key === 'Enter' && g.open) { e.preventDefault(); confResolve(g, 'merge'); }
+  });
+  $('#confs').addEventListener('click', e => {
+    const tr = e.target.closest('tr[data-c]'); if (!tr) return; const g = confs.find(x => x.id === +tr.dataset.c); if (!g) return; selC = g.id;
+    const ch = e.target.closest('[data-ch]'), ua = e.target.closest('[data-useall]'), cr = e.target.closest('[data-cres]'), cp = e.target.closest('[data-cprev]');
+    if (ch) g.ch[ch.closest('tr[data-f]').dataset.f] = +ch.dataset.ch;
+    else if (ua) g.fields.forEach(f => g.ch[f] = +ua.dataset.useall);
+    else if (cp) { const k = +cp.dataset.cprev; if (MLM.shell.previewing) MLM.shell.endPreview(); else MLM.shell.preview({ title: g.t.title + ' — Version ' + g.vs[k].k, artist: g.t.artist, status: 'local', c: g.t.c, time: g.t.time }); return; }
+    else if (cr) return confResolve(g, cr.dataset.cres);
+    else if (tr.classList.contains('grp')) g.open = !g.open;
+    drawConfs();
+  });
+
+  /* ───────── Albums ───────── */
+  const SRC = [['MusicBrainz', ''], ['Spotify', 'sp'], ['SoundCloud', 'sc']];
+  let albs = MLM.tracks(64, 91).map((t, i) => {
+    const kind = i % 8 === 6 ? 'none' : i % 11 === 9 ? 'noalbum' : 'ready', pct = [98, 96, 95, 93, 91, 88, 84, 79, 72, 66][i % 10], s = SRC[i % 5 === 3 ? 2 : i % 2];
+    const mix = kind === 'noalbum';
+    return { id: i, title: mix ? ['Boiler Room Berlin — 2 h set', 'Essential Mix 2025-03-14', 'Dekmantel Podcast 412', 'Live at Printworks (full set)', 'Rinse FM — 12 Sep 2025', 'HÖR — Sunday session'][i % 6] : t.title, artist: t.artist, c: t.c, kind, album: ALB[(i * 7) % ALB.length], year: 1992 + (i * 5) % 33, src: s, pct, alt: 1 + i % 3, ytmix: mix };
+  });
+  let albK = 'ready', selA = null, albReady = 1204;
+  function drawAlbs() {
+    $('#alb-ready').textContent = nf(albReady); $('[data-n="alb"]').textContent = nf(albReady);
+    $$('#alb-seg button').forEach(b => b.classList.toggle('on', b.dataset.k === albK));
+    const list = albs.filter(a => a.kind === albK && match(a));
+    if (!list.some(a => a.id === selA)) selA = list.length ? list[0].id : null;
+    const sug = a => a.kind === 'ready' ? '<div class="cellt"><span class="cov c' + (1 + a.id % 6) + '"></span><span class="ttl">' + esc(a.album) + ' <span class="t2 num">· ' + a.year + '</span></span></div>' : a.kind === 'none' ? '<span class="t2">No match found on MusicBrainz, Spotify or SoundCloud</span>' : '<span class="t2">No album — confirmed</span>';
+    const acts = a => a.kind === 'ready' ? '<button class="btn primary" data-al="accept">Accept</button><button class="btn" data-al="reject">Reject</button><button class="btn" data-al="none">No Album</button>' : a.kind === 'none' ? '<a class="btn" href="albums.html">Choose Album…</a><button class="btn" data-al="none">No Album</button>' : '<button class="btn" data-al="again">Suggest Again</button>';
+    $('#albs').innerHTML = '<table><thead><tr><th>Track</th><th style="width:140px">Artist</th><th style="width:250px"' + fb('V-REV.N14', 'Suggested album + year', 'Cover, album title and year of the suggestion. Click = Show Suggested Album.', 'DEC-021') + '>Suggested album</th><th style="width:106px"' + fb('V-REV.N15', 'Source', 'Where the suggestion comes from: MusicBrainz, Spotify or SoundCloud. The source is provenance of the suggestion, never written into the file.') + '>Source</th><th class="r" style="width:60px"' + fb('V-REV.N16', 'Match', 'How sure the lookup is (title, artist, duration, fingerprint). Sortable; the bulk action uses it.') + '>Match</th><th style="width:92px">Other</th><th style="width:224px"' + fb('V-REV.N17', 'Accept / Reject / No Album', 'Accept (Return) sets the album. Reject (⌫) discards this suggestion; the next best one appears. No Album confirms the track as intentionally album-less — e.g. a YouTube mix or live set — so it is not suggested again and stops counting as “without album”.', 'DEC-021') + '></th></tr></thead><tbody>' +
+      list.map(a => '<tr class="' + (a.id === selA ? 'sel' : '') + '" data-a="' + a.id + '" data-menu="cm-rev-album"><td><div class="cellt"><span class="cov c' + a.c + '"></span><span class="ttl">' + esc(a.title) + '</span></div></td><td>' + esc(a.artist) + '</td><td>' + sug(a) + '</td><td class="dim">' + (a.kind === 'ready' ? '<span class="srcdot ' + a.src[1] + '"></span>' + a.src[0] : '') + '</td><td class="r num">' + (a.kind === 'ready' ? a.pct + ' %' : '') + '</td><td>' + (a.kind === 'ready' ? '<span class="popup" data-menu-click="m-alb-alt" style="height:20px;font-size:12px">' + a.alt + ' more</span>' : '') + '</td><td><div class="rowacts">' + acts(a) + '</div></td></tr>').join('') + '</tbody></table>' +
+      (list.length ? '' : '<div class="empty" style="height:60%">' + ic('album', 'xl') + '<h2>' + (albK === 'ready' ? 'No suggestions waiting' : albK === 'none' ? 'Every track got a suggestion' : 'No tracks confirmed as “No album”') + '</h2><p>' + (albK === 'ready' ? 'New suggestions appear while the lookup runs.' : '') + '</p></div>');
+    MLM.refreshBadges();
+  }
+  function albAct(a, what) {
+    if (what === 'accept') { a.kind = 'done'; albReady--; MLM.say('Set album “' + esc(a.album) + '” (' + a.year + ') for “' + esc(a.title) + '”', true); }
+    else if (what === 'reject') { a.album = ALB[(a.id * 3 + 1) % ALB.length]; a.pct = Math.max(51, a.pct - 14); a.src = SRC[(a.id + 1) % 3]; a.alt = Math.max(0, a.alt - 1); MLM.say('Rejected — showing the next suggestion for “' + esc(a.title) + '”', true); }
+    else if (what === 'none') { if (a.kind === 'ready') albReady--; a.kind = 'noalbum'; MLM.say('“' + esc(a.title) + '” is confirmed as No album — it won’t be suggested again', true); }
+    else if (what === 'again') { a.kind = 'none'; MLM.say('“' + esc(a.title) + '” will be looked up again', true); }
+    drawAlbs();
+  }
+  const albsEl = $('#albs');
+  albsEl.addEventListener('click', e => { const tr = e.target.closest('tr[data-a]'); if (!tr) return; const a = albs.find(x => x.id === +tr.dataset.a); selA = a.id; const b = e.target.closest('[data-al]'); if (b) return albAct(a, b.dataset.al); $$('tr[data-a]', albsEl).forEach(x => x.classList.toggle('sel', x === tr)); });
+  albsEl.addEventListener('keydown', e => {
+    const list = albs.filter(a => a.kind === albK && match(a)), i = list.findIndex(a => a.id === selA), a = list[i]; if (!a) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); selA = list[Math.max(0, Math.min(list.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))].id; drawAlbs(); const r = $('tr.sel', albsEl); if (r) r.scrollIntoView({ block: 'nearest' }); }
+    else if (e.key === 'Enter' && a.kind === 'ready') { e.preventDefault(); albAct(a, 'accept'); }
+    else if ((e.key === 'Backspace' || e.key === 'Delete') && a.kind === 'ready') { e.preventDefault(); albAct(a, 'reject'); }
+    else if (e.key === ' ') { e.preventDefault(); if (MLM.shell.previewing) MLM.shell.endPreview(); else MLM.shell.preview({ title: a.title, artist: a.artist, status: 'local', c: a.c, time: 312 }); }
+  });
+
+  /* ───────── Resolved ───────── */
+  const rseed = MLM.tracks(14, 77, { allLocal: true });
+  const OUT = [['Duplicate', 'Recommended version kept', 'FLAC kept · 2 versions hidden from lists · 3 playlist entries re-pointed'], ['Duplicate', 'Selected version kept', 'M4A 256 kept · 1 version moved to the Trash'], ['Conflict', 'Tags merged', '2 files updated: Album, Year'], ['Duplicate', 'All kept — not duplicates', 'Nothing changed · not proposed again'], ['Conflict', 'Different versions — kept both', 'Nothing changed · not proposed again'], ['Album', 'No album confirmed', 'Not suggested again'], ['Duplicate', 'Recommended version kept', 'FLAC kept · 1 version moved to the Trash · file no longer in the Trash']];
+  $('#resv').innerHTML = '<table><thead><tr><th style="width:90px">Kind</th><th>Group</th><th style="width:210px">Decision</th><th>What happened</th><th style="width:120px">Decided</th><th style="width:84px"></th></tr></thead><tbody>' + rseed.map((t, i) => { const o = OUT[i % OUT.length], gone = /no longer/.test(o[2]); return '<tr class="tall"><td class="dim">' + o[0] + '</td><td><div class="cellt"><span class="cov c' + t.c + '"></span><span class="ttl">“' + esc(t.title) + '”<small class="sub2">' + esc(t.artist) + '</small></span></div></td><td>' + o[1] + '</td><td class="dim" style="white-space:normal;font-size:12px;line-height:1.25">' + o[2] + '</td><td class="num dim">' + ['Today 21:14', 'Today 21:12', 'Yesterday', 'Oct 3, 2026', 'Oct 3, 2026', 'Sep 28, 2026', 'Sep 14, 2026'][i % 7] + '</td><td><div class="rowacts">' + (gone ? '<span class="caption" title="The file was removed from the Trash">Can’t restore</span>' : '<button class="btn" data-restore="' + esc(t.title) + '"' + (i === 0 ? fb('V-REV.E09', 'Restore', 'Puts the group back to pending and undoes hiding / re-pointing / tag changes. Disabled with the reason when a trashed file is gone.', 'DEC-041') : '') + '>Restore</button>') + '</div></td></tr>'; }).join('') + '</tbody></table>';
+
+  /* ───────── shared wiring ───────── */
+  document.addEventListener('click', e => {
+    const t = e.target;
+    const m = t.closest('.radio[data-mode]'); if (m) { mode = m.dataset.mode; drawDups(); }
+    const k = t.closest('#alb-seg button'); if (k) { albK = k.dataset.k; drawAlbs(); }
+    if (t.closest('#aa-go')) { const n = groups.filter(g => match(g.t)).length, p = plsAll(); groups = groups.filter(g => !match(g.t)); resolvedN += n; drawDups(); MLM.say('Kept the recommended version in ' + n + ' groups · ' + p.o + (mode === 'trash' ? ' files moved to the Trash' : ' versions hidden from lists') + ' · ' + p.p + ' playlist entries re-pointed', true); }
+    if (t.closest('#ab-go')) { albReady -= 812; albs.forEach(a => { if (a.kind === 'ready' && a.pct > 90) a.kind = 'done'; }); drawAlbs(); MLM.say('Set the album for 812 tracks', true); }
+    const rs = t.closest('[data-restore]'); if (rs) { rs.closest('tr').remove(); resolvedN--; $('[data-n="res"]').textContent = resolvedN; MLM.say('Restored “' + esc(rs.dataset.restore) + '” — it is back in its tab', true); }
+    if (t.closest('#show-resolved')) { document.querySelector('.reviewbar [data-set-state="default"]').click(); MLM.goto('resolved'); }
+    if (t.closest('#run-scan')) { MLM.say('Scan started — it continues in the background. <a class="btn plain" style="height:16px" href="activity.html">Show in Activity</a>'); document.querySelector('.reviewbar [data-set-state="scanning"]').click(); }
+    if (t.closest('#cancel-scan')) { MLM.say('Scan cancelled. Your decisions and the groups found so far are kept.'); document.querySelector('.reviewbar [data-set-state="default"]').click(); }
+    const cm = t.closest('[data-cm]'); if (cm) { const g = G(selG), a = albs.find(x => x.id === selA), c = cm.dataset.cm;
+      if (c === 'keep-rec' && g) resolve(g, 'rec'); else if (c === 'keep-all' && g) resolve(g, 'all'); else if (c === 'toggle' && g) { g.open = !g.open; drawDups(); } else if (c === 'preview' && g) preview(g, g.pick); else if (c === 'keep-this' && g) resolve(g, 'pick'); else if (a && c.indexOf('alb-') === 0) albAct(a, c.slice(4)); else if (c.indexOf('c-') === 0) { const cg = confs.find(x => x.id === selC); if (cg) { if (c === 'c-toggle') { cg.open = !cg.open; drawConfs(); } else confResolve(cg, c === 'c-merge' ? 'merge' : 'both'); } } }
+    /* Undo in the status bar restores the last duplicate decision */
+    const u = t.closest('.statusbar .msg a'); if (u && u.textContent === 'Undo') { if (lastRemoved && !groups.includes(lastRemoved.g)) { groups.splice(lastRemoved.i, 0, lastRemoved.g); selG = lastRemoved.g.id; resolvedN--; lastRemoved = null; drawDups(); } MLM.say('Undone.'); }
+  });
+  /* context menus on rows inside tables (the shell skips [data-menu] inside .table rows) */
+  document.addEventListener('contextmenu', e => {
+    const r = e.target.closest('.table tbody tr[data-menu]'); if (!r) return; e.preventDefault();
+    const gr = r.closest('tr[data-g]') || r.closest('.exp'); if (gr && gr.dataset.g != null) { selG = +gr.dataset.g; const g = G(selG); if (r.dataset.v != null && g) g.pick = +r.dataset.v; drawDups(); }
+    if (r.dataset.a != null) { selA = +r.dataset.a; drawAlbs(); }
+    if (r.dataset.c != null) { selC = +r.dataset.c; drawConfs(); }
+    MLM.openMenu(r.dataset.menu, e.clientX, e.clientY);
+  });
+  /* search filters the current tab in place */
+  document.addEventListener('input', e => { if (e.target.classList.contains('search')) { q = e.target.value.trim().toLowerCase(); drawDups(); drawConfs(); drawAlbs(); } });
+  document.addEventListener('mlm:view', e => { const el = { duplicates: dups, conflicts: $('#confs'), albums: albsEl }[e.detail]; if (el) setTimeout(() => el.focus(), 0); });
+  drawDups(); drawConfs(); drawAlbs();
+});
+</script>
+</body></html>

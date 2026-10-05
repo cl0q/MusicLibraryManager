@@ -1,0 +1,52 @@
+V-DISC	mocked	discover.html	Discover with scope bar Recommendations · Reels (DEC-029); one title, counts on the scopes
+V-INBOX	mocked	discover.html#recs	Grouped by seed, keyboard triage, held outside All Tracks until kept (DEC-029)
+V-REELS	mocked	discover.html#reels	Master–detail with state words, guesses with provenance, results per source (DEC-029)
+CM-REELS-ADDPL	mocked	discover.html#reels	Standard Add to Playlist menu with New Playlist…, confirmation + Undo (DEC-039)
+CM-REELS-TEXTPILL	mocked	discover.html#reels	Menu on text fragments: Use as Artist / Use as Title / Use as “Artist – Title” / Copy
+A-INBOX-DELETE	removed	discover.html#recs	DEC-029/DEC-041: Dismiss moves the file to the Trash without an alert; undoable via status bar and Edit ▸ Undo
+A-INBOX-ERROR	merged	discover.html	DEC-016: replaced by a status-bar message with cause and Try Again (exhibit below the window); load failure has its own error state
+S-REELS-OPENFOLDER	unchanged	discover.html#reels	System open panel, now via Import… for files or folders (recursive); nothing to design
+S-REELS-KEYFRAME	mocked	discover.html#reels	Becomes a popover on the keyframe strip (po-keyframe), DEC-029 / THOUGHTS §3.2 (a glance is a popover)
+A-REELS-DELETE	mocked	discover.html#reels	Attached to the view; option “Also move the video file to the Trash”
+A-REELS-DELETEERROR	merged	discover.html	DEC-016: replaced by a status-bar message naming the reel and the cause (exhibit below the window)
+K-DISC-NAV	pattern	patterns-menus-shortcuts.html	Go ▸ Discover becomes ⌘5 (THOUGHTS §4.2, DEC-038); menu owned by the shortcuts catalogue
+K-REELS-RETURN	mocked	discover.html#reels	Return in Artist or Title searches; the third free-text field is merged into them
+K-REELS-LISTNAV	mocked	discover.html#reels	↑/↓ in the reel list only selects; identification no longer starts per selection
+K-REELS-DELETE	mocked	discover.html#reels	⌫ on selected reels opens A-REELS-DELETE; also a visible Delete Reel… button and context menu
+K-REELS-KEYFRAME-ESC	mocked	discover.html#reels	Esc closes the keyframe popover
+D-REELS-IMPORT	mocked	discover.html#reels	Drop hint in the list and in the empty state; whole view is the drop target (DEC-040)
+D-INBOX-TO-PLAYLIST	mocked	discover.html#recs	Drag a recommendation onto a sidebar playlist = keep and add (DEC-040)
+D-REELS-RESULT-TO-PLAYLIST	mocked	discover.html#reels	Result rows drag onto sidebar playlists (DEC-040)
+D-REELS-URL	mocked	discover.html#reels	Add from Link… sheet (S-REELS-LINK) and link drop (DEC-018/DEC-040)
+D-REELS-OUT	mocked	discover.html#reels	Reel rows are draggable as file URLs (annotated on the reel list); Show in Finder in the reel context menu
+S-GROOVE-SIMILAR	merged	discover.html#similar	DEC-030: the sheet becomes the pushed view V-SIMILAR
+A-GROOVE-DELETEFILE	removed	discover.html#similar	DEC-030: no delete in Similar (fixes PP-INSPECTOR-21); discarding happens in Recommendations via Dismiss, only for held tracks
+D-GROOVE-ROW-TO-PLAYLIST	mocked	discover.html#similar	In-library rows are a standard track table, online rows are draggable; drop on sidebar playlists / sync profiles (DEC-040)
+V-SIMILAR	mocked	discover.html#similar	New screen (DEC-030)
+S-DISC-FIND	mocked	discover.html	New sheet: Find Recommendations (seed + source), DEC-029
+S-REELS-LINK	mocked	discover.html#reels	New sheet: Add Reel from Link, DEC-018
+V-SYNC	merged	sync.html	DEC-027: the profile list becomes sidebar rows (exhibit below the window); its empty state is the page state no-profiles
+V-SYNC-DETAIL	mocked	sync.html	Header · Content · Plan · Options · Last sync, nine page states (DEC-027)
+CM-SYNC-PROFILE	mocked	sync.html	On the sidebar rows, DEC-039 order; same items as the More menu
+CM-SYNC-PLROW	mocked	sync.html	Playlist and album rows in Content
+CM-SYNC-TRACKROW	mocked	sync.html	Track rows in Content and in Plan ▸ Skip
+CM-SYNC-PREVIEWFILE	mocked	sync.html	Rows of Plan ▸ Add / Remove
+CM-SYNC-FAILED	mocked	sync.html	Failed rows in Last sync (state done-with-failures)
+S-SYNC-DEVICEINGEST	mocked	sync.html	Unified sheet “Read Playlist Changes from Device”; Apply merges, undoable (DEC-027)
+S-SYNC-NEWPROFILE	mocked	sync.html	Name, destination with detected devices / Choose… / drop, device preset
+S-SYNC-OPENPANEL	unchanged	sync.html	System folder panel behind Choose… in the new-profile and change-destination sheets
+S-SYNC-RENAME	removed	sync.html	DEC-027: inline rename in the sidebar row (More ▸ Rename; exhibit below the window)
+S-SYNC-PLAYLISTPICKER	mocked	sync.html	One picker for Playlists · Albums · Tracks
+S-SYNC-INGESTPREVIEW	merged	sync.html	DEC-027: its entry-level diff is the right half of the unified device sheet; the M3U import keeps S-PLD-M3U-PREVIEW (playlists area)
+S-SYNC-TOAST	removed	sync.html	DEC-016: preset summary in the new-profile sheet plus a device-defaults note under Options
+A-SYNC-DELETEPROFILE	mocked	sync.html	More ▸ Delete Sync Profile…
+A-SYNC-REMOVECONTENT	removed	sync.html	DEC-041: undoable removal (⌫ / context menu) with the consequence in the status-bar message
+K-SYNC-REFRESH	mocked	sync.html	⌘R = Recompute plan, with progress and Cancel
+K-SYNC-NEWPROFILE-KEYS	mocked	sync.html	Esc = Cancel, Return = Create in the sheet (Return is annotated, not wired in the mockup)
+K-SYNC-RENAME-KEYS	merged	sync.html	DEC-027: Return commits / Esc cancels the inline rename field in the sidebar
+K-SYNC-PICKER-RETURN	mocked	sync.html	Return = Add, Esc = Cancel in the picker
+D-SYNC-PLAYLIST-TO-PROFILE	mocked	sync.html	Sidebar profile rows are drop targets (exhibit; Content rows can be dragged onto the real rows), DEC-040
+D-SYNC-TRACKS-TO-PROFILE	mocked	sync.html	Same drop target for tracks and albums, status-bar confirmation with Undo, DEC-040
+D-SYNC-FOLDER-TO-OUTPUT	mocked	sync.html	Destination in the new-profile sheet accepts a dropped folder or disk, DEC-040
+D-SYNC-REORDER-PROFILES	mocked	sync.html	Insertion line in the sidebar exhibit, DEC-040
+S-SYNC-DESTINATION	mocked	sync.html	New sheet: Change Destination…, DEC-027

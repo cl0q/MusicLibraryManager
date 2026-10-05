@@ -1,0 +1,659 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Playlists — MLM B1</title>
+<link rel="stylesheet" href="assets/mlm.css"><script src="assets/app.js"></script>
+<style>
+  /* Page-local helpers. Only existing variables, no new colours. */
+  .art.a1, .mosaic i.a1 { background: linear-gradient(135deg, var(--art1), var(--art4)); }
+  .art.a2, .mosaic i.a2 { background: linear-gradient(135deg, var(--art2), var(--art5)); }
+  .art.a3, .mosaic i.a3 { background: linear-gradient(135deg, var(--art3), var(--art6)); }
+  .art.a4, .mosaic i.a4 { background: linear-gradient(135deg, var(--art4), var(--art2)); }
+  .art.a5, .mosaic i.a5 { background: linear-gradient(135deg, var(--art5), var(--art3)); }
+  .art.a6, .mosaic i.a6 { background: linear-gradient(135deg, var(--art6), var(--art1)); }
+  .art.mosaic { display: grid !important; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; overflow: hidden; align-items: stretch; justify-content: stretch; }
+  .art.mosaic i { display: block; }
+  .art.ini { font-size: 34px; font-weight: 700; letter-spacing: -1px; }
+  .dhead .art.ini { font-size: 48px; }
+  .card { position: relative; }
+  .card.sel .art, .card.drop .art, #d-art.drop .art { box-shadow: 0 0 0 3px var(--accent); }
+  .card .progress { height: 2px; margin-top: -2px; }
+  .card .sb.st { display: flex; align-items: center; gap: 4px; }
+  .card .sb.err { color: var(--red); white-space: normal; }
+  .card .field { width: 100%; }
+  .card.skel .art { background: var(--fill2); box-shadow: none; }
+  .card.skel span { display: block; height: 9px; border-radius: 4px; background: var(--fill2); margin-top: 3px; }
+  .gsec { display: flex; align-items: center; gap: 7px; padding: 10px 20px 2px; font-weight: 600; border-top: .5px solid var(--sep); margin-top: 4px; }
+  .gsec:first-child { border-top: 0; margin-top: 0; }
+  .gsec .tw { width: 10px; font-size: 9px; color: var(--text2); }
+  .gsec small { font-weight: 400; color: var(--text2); font-size: 11px; }
+  .gsec.drop { box-shadow: inset 0 0 0 2px var(--accent); border-radius: 6px; }
+  .gsep { border-top: .5px solid var(--sep); margin: 4px 20px 0; }
+  #gridhost { outline: none; }
+  .dhead h1 { cursor: text; }
+  .dhead .field.big { font-size: 24px; font-weight: 700; height: 34px; width: 100%; max-width: 620px; }
+  :root[data-drive="off"] #d-play, :root[data-drive="off"] #d-shuffle { opacity: .45; pointer-events: none; }
+  #pltbl.unordered tbody td:first-child { color: var(--text3); }
+  .sb-row .field { flex: 1; min-width: 0; height: 20px; }
+  .sb-err { font-size: 11px; color: var(--red); padding: 2px 8px 6px 26px; white-space: normal; }
+  .mock { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 2px; }
+  .mock > b { font-weight: 600; font-size: 12px; margin-right: 2px; }
+  .lk-res { border-radius: 8px; background: var(--fill); padding: 10px 12px; margin-top: 10px; white-space: normal; }
+  .lk-res p { margin: 4px 0 0; color: var(--text2); font-size: 12px; }
+</style></head>
+<body data-screen="V-PL" data-title="Playlists" data-nav="allpl" data-home="grid"
+      data-states="default,empty,loading,error,filtered-empty,not-found">
+
+<div class="note">
+  <h3>All Playlists (V-PL) and playlist detail (V-PLD) — Tier 1</h3>
+  <p><b>Grid:</b> click a card to select it, double-click (or Return) to open it, right-click for its menu (same group order as every menu, DEC-039). Try the sort control, the scopes (source · <code>Needs attention</code>) and Search (filters cards in place). <code>New Playlist</code> creates <code>Untitled Playlist</code> at once and puts its name into edit mode — there is no naming popover any more (S-PL-NEWPLAYLIST is merged into the inline rename). Folder headings collapse.</p>
+  <p><b>Detail</b> (<code>playlists.html#detail</code>, any sidebar playlist, or a card): click the title to rename, open <code>More</code>, right-click the cover, select rows and press <kbd>⌫</kbd> (removal with Undo in the status bar — no alert), sort by a column other than <code>#</code> to see the reorder hint. States <b>Empty</b> and <b>Not found</b> in the review bar apply to the detail; <b>Filtered empty</b> to the grid. <b>Drive → Not connected</b> shows the banner, disables Play with the reason, and dims local rows.</p>
+  <div class="mock" id="pls-switch"><b>Playlist state (detail + its card + its sidebar row):</b>
+    <div class="seg"><button data-pls="ok" class="on">Healthy</button><button data-pls="importing">Importing</button><button data-pls="incomplete">Incomplete</button><button data-pls="notdl">Not downloaded</button><button data-pls="expired">Sign-in expired</button></div>
+  </div>
+  <div class="mock"><b>Simulate drags:</b>
+    <button class="btn" data-sim="tracks-card">Tracks → card</button>
+    <button class="btn" data-sim="cover-card">Image → card cover</button>
+    <button class="btn" data-sim="bad-cover">Non-image → card (inline error)</button>
+    <button class="btn" data-sim="cover-head">Image → detail cover</button>
+    <button class="btn" data-sim="insert">Tracks → between rows (insertion line)</button>
+    <button class="btn" data-sim="tracks-sb">Tracks → sidebar playlist</button>
+    <button class="btn" data-sim="pl-folder">Playlist → playlist folder</button>
+  </div>
+  <div class="mock"><b>Sidebar:</b>
+    <button class="btn" data-sim="sb-new">New Playlist (⌘N)</button>
+    <button class="btn" data-sim="sb-folder">New Playlist Folder (⌥⌘N)</button>
+    <button class="btn" data-sim="sb-rename">Rename a row</button>
+    <button class="btn" data-sim="sb-renamefail">Rename fails (inline)</button>
+    <span class="caption">Right-click a sidebar playlist for its menu. Folder rows expand and collapse.</span>
+  </div>
+  <p>Removed: pinning and the pin-limit banner (S-PL-BANNER-PINLIMIT) — every playlist is in the sidebar. Merged: A-PLD-LINKMISMATCH and A-PLD-LINKDONE (into the Link sheet and a status-bar line), A-PLD-IMPORTDONE (status bar), A-PLD-REMOVE (undoable removal), A-SIDEBAR-DELETEPL (one delete alert). Decisions: DEC-003, DEC-016, DEC-022, DEC-023, DEC-039, DEC-040, DEC-041. Flows F-07, F-08, F-23.</p>
+</div>
+
+<div id="content">
+
+  <!-- ═════════ V-PL: All Playlists ═════════ -->
+  <div class="view" data-view="grid" data-fb-id="V-PL" data-fb-label="All Playlists (cover grid)" data-fb-note="The cover view of what the sidebar lists. Same playlists, same order when sorted Manual. Opened from the sidebar row “All Playlists”." data-fb-dec="DEC-003" data-fb-api="ScrollView + LazyVGrid(adaptive 150–190)">
+    <div class="view" data-show="default filtered-empty not-found">
+      <div class="vhead">
+        <h1 data-fb-id="V-PL.E01" data-fb-label="Title + count" data-fb-note="The count follows the filters (“6 of 28 playlists”) — today it always showed the total." data-fb-api=".navigationTitle + .navigationSubtitle">All Playlists</h1>
+        <span class="sub" id="g-count"></span>
+        <span class="grow"></span>
+        <span class="t2 small">Sort by</span>
+        <span class="popup" id="g-sort" data-menu-click="m-pl-sort" data-fb-id="V-PL.N01" data-fb-label="Sort control" data-fb-note="Manual (the sidebar order, with playlist folders as groups), Name, Recently Added, Recently Played. Today the order was fixed: pinned first, then A→Z." data-fb-dec="DEC-003" data-fb-api="Picker(.menu) bound to @SceneStorage sort order">Manual</span>
+        <button class="btn" id="g-new" data-fb-id="V-PL.E05" data-fb-label="New Playlist" data-fb-note="⌘N. Creates “Untitled Playlist” immediately (numbered if the name exists) and puts the name into edit mode, here on the card and in the sidebar. Return or clicking away commits, Esc keeps the default name, ⌘Z removes the playlist. Replaces the New Playlist popover (S-PL-NEWPLAYLIST) and ends the two different ⌘N behaviours." data-fb-dec="DEC-003" data-fb-api="Button + FocusState on an inline TextField"><i data-i="plus" class="s"></i>New Playlist</button>
+      </div>
+      <div class="scopebar" id="gscope" data-fb-id="V-PL.E02" data-fb-label="Filter scopes" data-fb-note="Replaces the source filter menu and the separate “Incomplete” toggle with one scope bar. Counts are live. The playlist-name search field (V-PL.E04) is gone: the toolbar search filters this grid in place." data-fb-dec="DEC-017" data-fb-api="scope buttons in safeAreaInset(edge: .top)">
+        <button class="scope on" data-scope="all">All<span class="n" data-gn="all"></span></button>
+        <button class="scope" data-scope="local">Local<span class="n" data-gn="local"></span></button>
+        <button class="scope" data-scope="sc"><span class="srcdot sc"></span>SoundCloud<span class="n" data-gn="sc"></span></button>
+        <button class="scope" data-scope="yt"><span class="srcdot yt"></span>YouTube<span class="n" data-gn="yt"></span></button>
+        <button class="scope" data-scope="sp"><span class="srcdot sp"></span>Spotify<span class="n" data-gn="sp"></span></button>
+        <button class="scope" data-scope="attn" data-fb-id="V-PL.E03" data-fb-label="Scope: Needs attention" data-fb-note="Was the “Incomplete” toggle. Now covers every playlist that is not fully playable for a reason the user can fix: Incomplete · n failed, Not downloaded · n tracks, Sign-in expired. A running import is not “attention”." data-fb-dec="DEC-023">Needs attention<span class="n" data-gn="attn"></span></button>
+      </div>
+      <div class="scroll" id="gridhost" tabindex="0" data-fb-id="V-PL.E08" data-fb-label="Card grid" data-fb-note="Click selects, double-click or Return opens, ←/→ moves, type-to-select by name. Cards accept dropped tracks (append) and dropped images (set cover); in Manual order cards can be dragged to rearrange and onto a folder heading to move. Sorted Manual with no filter, playlist folders appear as collapsible groups in sidebar order; any other sort or filter shows one flat grid." data-fb-dec="DEC-040" data-fb-api="LazyVGrid + .dropDestination(for: TrackDrag.self / Image.self) + .draggable"></div>
+    </div>
+
+    <div class="empty" data-show="empty" data-fb-id="V-PL.E15" data-fb-label="No playlists" data-fb-note="One sentence and the actions that fill it. Dropping tracks or an .m3u file here also creates a playlist." data-fb-api="ContentUnavailableView + .dropDestination">
+      <i data-i="list" class="xl"></i><h2>No playlists yet</h2>
+      <p>Create an empty playlist and drag tracks onto it, or import one from SoundCloud, YouTube or Spotify.</p>
+      <div class="acts"><button class="btn lg primary" data-set-state="default">New Playlist</button><a class="btn lg" href="import.html">Import Playlist from Source…</a></div>
+    </div>
+
+    <div class="view" data-show="loading" data-fb-id="V-PL.E16" data-fb-label="First load" data-fb-note="Placeholder cards on the very first load only. Later refreshes update cards in place; covers are cached in the library file and are not regenerated on every visit." data-fb-api=".redacted(reason: .placeholder)">
+      <div class="vhead"><h1>All Playlists</h1></div>
+      <div class="scopebar"><button class="scope on">All</button><button class="scope">Local</button><button class="scope">SoundCloud</button><button class="scope">YouTube</button><button class="scope">Spotify</button><button class="scope">Needs attention</button></div>
+      <div class="scroll"><div class="grid" id="g-skel"></div></div>
+    </div>
+
+    <div class="empty" data-show="error" data-fb-id="V-PL.N02" data-fb-label="Load error" data-fb-note="Today every grid error (load, create, rename, delete) was silent. A failed load is this pane; a failed action is a status-bar sentence or an inline line where it happened.">
+      <i data-i="warn" class="xl"></i><h2>Can’t load the playlists</h2>
+      <p>The library database didn’t answer. Your playlists and your music are not affected.</p>
+      <div class="acts"><button class="btn lg primary" data-set-state="default">Try Again</button><a class="btn lg" href="activity.html#logs">Show Logs</a></div>
+      <p class="caption" style="margin-top:8px">▸ Details</p>
+    </div>
+  </div>
+
+  <!-- ═════════ V-PLD: playlist detail ═════════ -->
+  <div class="view" data-view="detail" hidden data-fb-id="V-PLD" data-fb-label="Playlist detail" data-fb-note="Looks and behaves the same from every entry (sidebar row, card, search). Back (⌘[) returns to where the user came from." data-fb-dec="DEC-022" data-fb-api="NavigationStack destination">
+    <div class="view" data-show="default empty error filtered-empty">
+      <div class="dhead" id="dhead">
+        <div id="d-art" data-menu="cm-cover" style="flex:none" data-fb-id="V-PLD.E02" data-fb-label="Cover, 160 pt (drop target)" data-fb-note="Automatic mosaic of the first four artworks, or a custom image. Drop an image here to set it; right-click or More ▸ Choose Cover… for the file panel; Use Automatic Cover reverts. On macOS 26 the artwork tint extends under the sidebar." data-fb-dec="DEC-040" data-fb-api="Image + .dropDestination(for: Image.self); .backgroundExtensionEffect() on 26, plain on 15"></div>
+        <div class="grow" style="min-width:0">
+          <div class="kind" id="d-kind">Playlist</div>
+          <h1 id="d-title" class="trunc" data-fb-id="V-PLD.E03" data-fb-label="Title (editable)" data-fb-note="Click to rename in place; Return commits, Esc cancels. If saving fails the field stays open with the typed text and one line of explanation. Undoable." data-fb-dec="DEC-041" data-fb-api="TextField(.plain) with FocusState"></h1>
+          <div class="t2" id="d-meta" style="margin-top:3px" data-fb-id="V-PLD.E04" data-fb-label="Facts line" data-fb-note="Count · total duration (new) · Linked to ‹Source› with the 6 pt source dot. Help text: import date and last refresh. A local playlist shows no source." data-fb-dec="DEC-023"></div>
+          <div class="acts">
+            <button class="btn lg primary" id="d-play" data-fb-id="V-PLD.E05" data-fb-label="Play" data-fb-note="Always present. When nothing can play it is disabled and the reason is written next to it — it never disappears. Tracks that are not downloaded are skipped with a status-bar note." data-fb-dec="DEC-022" data-fb-api="Button(.borderedProminent).disabled + help"><i data-i="play" class="s"></i>Play</button>
+            <button class="btn lg" id="d-shuffle" data-fb-id="V-PLD.E06" data-fb-label="Shuffle" data-fb-note="Shuffles the playable tracks only."><i data-i="shuffle" class="s"></i>Shuffle</button>
+            <button class="btn lg" data-menu-click="m-pl-more" title="More" data-fb-id="V-PLD.N01" data-fb-label="More menu" data-fb-note="All other playlist actions. Same items and order as the playlist’s context menu in the grid and the sidebar. Replaces the row of six buttons." data-fb-dec="DEC-022" data-fb-api="Menu { } label: Image(systemName: &quot;ellipsis.circle&quot;)"><i data-i="more"></i></button>
+            <span class="caption" style="align-self:center;margin-left:4px"><span class="drive-off">Can’t play — “Lexxar” is not connected</span><span class="drive-on" id="d-why"></span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="banner err" data-show="error" data-fb-id="V-PLD.E12" data-fb-label="Action error line" data-fb-note="A failed action (refresh, add, reorder) says what failed and offers the one fix. It clears on the next success or with ✕. The table stays."><i data-i="warn"></i><span><b>Couldn’t refresh from SoundCloud.</b> The connection timed out. Nothing in this playlist was changed.</span><span class="act"><button class="btn" data-set-state="default">Try Again</button><a class="btn plain" href="activity.html#logs">Details</a></span></div>
+
+      <div class="statusline" id="d-status" hidden data-fb-id="V-PLD.E13" data-fb-label="Playlist status sentence" data-fb-note="Exactly one sentence when the playlist is not healthy, in the same words as the card and the sidebar row. Order of precedence: sign-in expired, Importing, Incomplete, Not downloaded. Healthy playlists show no line. With the drive not connected the window banner speaks instead." data-fb-dec="DEC-023" data-fb-api="HStack in safeAreaInset(edge: .top); ProgressView(value:total:)"></div>
+
+      <div class="scopebar" id="dscope" hidden data-fb-id="V-PLD.E14" data-fb-label="Scope: All · Download failed" data-fb-note="Replaces the “Failed tracks” disclosure. In the failed scope each row shows the reason and the attempts left on a second line and has Retry. ⌘A then ⌫ removes all failed tracks from the playlist (undoable). Shown only when something failed." data-fb-dec="DEC-023" data-fb-api="scope buttons; Table filtered by availability">
+        <button class="scope on" data-status-filter="">All<span class="n" id="dn-all"></span></button>
+        <button class="scope" data-status-filter="failed">Download failed<span class="n" id="dn-failed"></span></button>
+      </div>
+
+      <div class="statusline" id="d-sorthint" hidden data-fb-id="V-PLD.N02" data-fb-label="Reorder hint" data-fb-note="While sorted by another column, # is dimmed (it still shows the playlist position, it does not renumber) and dragging to reorder is off. This line says so and offers the way back. Dropping tracks from elsewhere still works." data-fb-api="Table sortOrder != [.position]">
+        <i data-i="lines" class="s"></i><span id="d-sorttxt"></span><span class="grow"></span><button class="btn" id="d-sortback">Return to Playlist Order</button>
+      </div>
+
+      <div id="pltbl" data-fb-id="V-PLD.E15" data-fb-label="Track table" data-fb-note="Same table as All Tracks plus #. Return / double-click plays (on a not-downloaded row: downloads it). ⌫ removes from this playlist with Undo. Drag rows to reorder; drop tracks between rows to insert." data-fb-dec="DEC-012" data-fb-api="Table(selection:sortOrder:) + .onMove / .dropDestination + .onDeleteCommand"></div>
+    </div>
+
+    <div class="view" data-show="loading" data-fb-id="V-PLD.E29" data-fb-label="First load" data-fb-note="Header and rows as placeholders on a cold open; a cached playlist appears instantly with no spinner.">
+      <div class="dhead"><div class="art" style="background:var(--fill2);box-shadow:none"></div><div class="grow"><div class="kind">Playlist</div><h1 class="t3">Loading…</h1><div class="acts"><button class="btn lg primary" disabled>Play</button><button class="btn lg" disabled>Shuffle</button></div></div></div>
+      <div class="table"><table><thead><tr><th class="r" style="width:38px">#</th><th>Title</th><th style="width:150px">Artist</th><th style="width:160px">Album</th><th style="width:52px">Time</th><th style="width:104px">Added</th><th style="width:146px">Status</th></tr></thead><tbody id="d-skel"></tbody></table></div>
+    </div>
+
+    <div class="empty" data-show="not-found" data-fb-id="V-PLD.N03" data-fb-label="Playlist not found" data-fb-note="Shown when the open playlist was deleted elsewhere (or its creation was undone). Today the deleted playlist stayed on screen.">
+      <i data-i="list" class="xl"></i><h2>This playlist no longer exists</h2>
+      <p>It was deleted, or its creation was undone. Its tracks are still in the library.</p>
+      <div class="acts"><button class="btn lg primary" data-set-state="default" data-to-grid>Show All Playlists</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════ Menus ═════════ -->
+<div class="menu" id="m-pl-sort" hidden data-fb-id="V-PL.N01/menu" data-fb-label="Sort menu">
+  <a class="mi chk" data-sort="manual">Manual</a><a class="mi nochk" data-sort="name">Name</a><a class="mi nochk" data-sort="added">Recently Added</a><a class="mi nochk" data-sort="played">Recently Played</a>
+</div>
+
+<div class="menu" id="cm-pl-card" hidden data-fb-id="CM-PL-CARD" data-fb-label="Playlist card context menu" data-fb-note="Groups in the one order: Primary · Queue · Add to · Edit · Fix · Remove. Items that don’t apply are absent (no Refresh on a local playlist, no Delete on a liked playlist). “Pin to Top / Unpin” is gone with pinning; “Sync to ▸” is “Add to Sync Profile ▸”; “Show failed tracks” opens the playlist in its Download failed scope." data-fb-dec="DEC-039" data-fb-api=".contextMenu on the card">
+  <a class="mi" data-cmd="open" data-fb-id="CM-PL-CARD.E01">Open<span class="k">↩</span></a>
+  <a class="mi" data-cmd="play" data-fb-id="CM-PL-CARD.N01">Play</a><hr>
+  <a class="mi" data-cmd="playnext" data-fb-id="CM-PL-CARD.N02">Play Next</a><a class="mi" data-cmd="addqueue">Add to Queue</a><hr>
+  <a class="mi sub" data-cmd="sync" data-fb-id="CM-PL-CARD.E09" data-fb-label="Add to Sync Profile ▸" data-fb-note="Submenu: iPod Classic · Car USB stick · — · New Sync Profile…. Confirms in the status bar with Undo. “New Sync Profile…” opens the sheet (today the item did nothing).">Add to Sync Profile</a><hr>
+  <a class="mi" data-cmd="rename" data-fb-id="CM-PL-CARD.E03">Rename</a>
+  <a class="mi" data-cmd="cover" data-fb-id="CM-PL-CARD.N03">Choose Cover…</a>
+  <a class="mi" data-cmd="autocover" data-r="autocover" data-fb-id="CM-PL-CARD.E05">Use Automatic Cover</a>
+  <a class="mi sub" data-cmd="move" data-fb-id="CM-PL-CARD.N04" data-fb-label="Move to Folder ▸" data-fb-note="Submenu: the playlist folders, “No Folder”, — , New Playlist Folder….">Move to Folder</a><hr data-r="fixhr">
+  <a class="mi" data-cmd="dl" data-r="dl" data-fb-id="CM-PL-CARD.E06">Download Missing</a>
+  <a class="mi" data-cmd="showfailed" data-r="showfailed" data-fb-id="CM-PL-CARD.E07">Show Failed Downloads</a>
+  <a class="mi" data-cmd="refresh" data-r="refresh" data-fb-id="CM-PL-CARD.N05">Refresh from Source</a>
+  <a class="mi" data-cmd="link" data-r="link" data-fb-id="CM-PL-CARD.N06">Link Source…</a><hr data-r="delhr">
+  <a class="mi destr" data-cmd="delete" data-r="delete" data-fb-id="CM-PL-CARD.E11">Delete Playlist…</a>
+</div>
+
+<div class="menu" id="cm-sb-playlist" hidden data-fb-id="CM-SIDEBAR-PINNED" data-fb-label="Sidebar playlist row context menu" data-fb-note="Replaces the pinned-row menu. “Unpin from Sidebar” is gone (no pinning); “Reveal in Grid” is “Show in All Playlists” and now selects and scrolls to the card. Same order rule as everywhere." data-fb-dec="DEC-039" data-fb-api=".contextMenu on the sidebar row">
+  <a class="mi" data-cmd="play" data-fb-id="CM-SIDEBAR-PINNED.N01">Play</a><hr>
+  <a class="mi" data-cmd="playnext" data-fb-id="CM-SIDEBAR-PINNED.N02">Play Next</a><hr>
+  <a class="mi sub" data-cmd="sync" data-fb-id="CM-SIDEBAR-PINNED.N03">Add to Sync Profile</a><hr>
+  <a class="mi" data-cmd="rename" data-fb-id="CM-SIDEBAR-PINNED.E02">Rename</a>
+  <a class="mi sub" data-cmd="move" data-fb-id="CM-SIDEBAR-PINNED.N04">Move to Folder</a><hr data-r="fixhr">
+  <a class="mi" data-cmd="dl" data-r="dl" data-fb-id="CM-SIDEBAR-PINNED.N05">Download Missing</a>
+  <a class="mi" data-cmd="refresh" data-r="refresh" data-fb-id="CM-SIDEBAR-PINNED.N06">Refresh from Source</a><hr>
+  <a class="mi" data-cmd="reveal" data-fb-id="CM-SIDEBAR-PINNED.E04">Show in All Playlists</a><hr data-r="delhr">
+  <a class="mi destr" data-cmd="delete" data-r="delete" data-fb-id="CM-SIDEBAR-PINNED.E06">Delete Playlist…</a>
+</div>
+
+<div class="menu" id="cm-sb-folder" hidden data-fb-id="P-SIDEBAR.N03/menu" data-fb-label="Playlist folder context menu" data-fb-note="A playlist folder only groups playlists. Deleting a folder moves its playlists out, it never deletes them." data-fb-dec="DEC-003">
+  <a class="mi" data-fcmd="newpl">New Playlist in Folder</a><hr><a class="mi" data-fcmd="rename">Rename</a><hr><a class="mi destr" data-fcmd="del">Delete Folder…</a>
+</div>
+
+<div class="menu" id="m-sb-add" hidden data-fb-id="P-SIDEBAR.E03/add" data-fb-label="Playlists section ＋">
+  <a class="mi" data-sim="sb-new">New Playlist<span class="k">⌘N</span></a><a class="mi" data-sim="sb-folder">New Playlist Folder<span class="k">⌥⌘N</span></a>
+</div>
+
+<div class="menu" id="m-pl-more" hidden data-fb-id="V-PLD.N01/menu" data-fb-label="More menu items" data-fb-note="Order follows DEC-039 (Queue · Add to · Edit · Fix · Remove). Counts are in the labels. Items that don’t apply are absent." data-fb-dec="DEC-039">
+  <a class="mi" data-cmd="playnext">Play Next</a><a class="mi" data-cmd="addqueue">Add to Queue</a><hr>
+  <a class="mi sub" data-cmd="sync" data-fb-id="V-PLD.N04" data-fb-label="Add to Sync Profile ▸">Add to Sync Profile</a><hr>
+  <a class="mi" data-cmd="rename" data-fb-id="V-PLD.N05" data-fb-label="Rename">Rename</a>
+  <a class="mi" data-cmd="cover" data-fb-id="V-PLD.N06" data-fb-label="Choose Cover…" data-fb-note="System file panel for an image. Was drag-only." data-fb-api=".fileImporter(allowedContentTypes: [.image])">Choose Cover…</a>
+  <a class="mi" data-cmd="autocover" data-r="autocover">Use Automatic Cover</a>
+  <a class="mi sub" data-cmd="move">Move to Folder</a><hr>
+  <a class="mi" data-cmd="dl" data-r="dl" data-fb-id="V-PLD.E07" data-fb-label="Download n Missing" data-fb-note="⌘D with nothing selected does the same. Also offered as “Download All” in the status sentence when nothing is downloaded.">Download Missing</a>
+  <a class="mi" data-cmd="refresh" data-r="refresh" data-fb-id="V-PLD.E08" data-fb-label="Refresh from ‹Source›" data-fb-note="⌘R. Was “Sync”. Pulls tracks that are new at the source; offered for every linked playlist, not only YouTube. The result is a status-bar line: “Refreshed from SoundCloud — 3 new tracks”. “Sync” now only means sync profiles." data-fb-dec="DEC-023">Refresh from Source<span class="k">⌘R</span></a>
+  <a class="mi" data-cmd="link" data-r="link" data-fb-id="V-PLD.E09" data-fb-label="Link Source… / Change Link…">Link Source…</a>
+  <a class="mi" data-cmd="m3u" data-fb-id="V-PLD.E10" data-fb-label="Import M3U into This Playlist…" data-fb-note="The label says where the tracks go. The file panel’s message repeats it. Importing an M3U as a new playlist is in the Add menu.">Import M3U into This Playlist…</a><hr data-r="delhr">
+  <a class="mi destr" data-cmd="delete" data-r="delete" data-fb-id="V-PLD.N07" data-fb-label="Delete Playlist…">Delete Playlist…</a>
+</div>
+
+<div class="menu" id="cm-cover" hidden data-fb-id="V-PLD.E02/menu" data-fb-label="Cover context menu">
+  <a class="mi" data-cmd="cover">Choose Cover…</a><a class="mi" data-cmd="autocover">Use Automatic Cover</a>
+</div>
+
+<!-- Playlist variant of the track context menu (replaces the shell's cm-track on this page) -->
+<div class="menu" id="cm-track" hidden data-fb-id="CM-TRACK" data-fb-label="Track context menu (in a playlist)" data-fb-note="The standard track menu. The only difference in a playlist: “Remove from Playlist” in the Remove group, above “Remove from Library…”. No confirmation for any count — the removal is undoable." data-fb-dec="DEC-039" data-fb-api="contextMenu(forSelectionType:menu:primaryAction:)">
+  <div class="mi hdr" data-cm-count></div>
+  <a class="mi" data-fb-id="CM-TRACK.E02"><i data-i="play"></i>Play<span class="k">↩</span></a><a class="mi" data-fb-id="CM-TRACK.N01"><i data-i="wave"></i>Preview<span class="k">Space</span></a><hr>
+  <a class="mi" data-fb-id="CM-TRACK.E03">Play Next<span class="k">⌥↩</span></a><a class="mi" data-fb-id="CM-TRACK.N02">Add to Queue<span class="k">⌥⇧↩</span></a><hr>
+  <a class="mi sub" data-fb-id="CM-TRACK.E04">Add to Playlist</a><a class="mi sub" data-fb-id="CM-TRACK.E05">Add to Sync Profile</a><hr>
+  <a class="mi" data-act="info-open" data-fb-id="CM-TRACK.N03">Get Info<span class="k">⌘I</span></a><a class="mi" href="albums.html#detail" data-fb-id="CM-TRACK.N04">Go to Album</a><a class="mi" data-fb-id="CM-TRACK.N05">Go to Artist</a><a class="mi" href="discover.html#similar" data-fb-id="CM-TRACK.N06">Find Similar</a><hr>
+  <a class="mi" data-fb-id="CM-TRACK.E08"><i data-i="download"></i>Download<span class="k">⌘D</span></a><hr>
+  <a class="mi" data-fb-id="CM-TRACK.E06">Show in Finder<span class="k">⇧⌘R</span></a><a class="mi sub" data-fb-id="CM-TRACK.E07">Copy</a><a class="mi" data-fb-id="CM-TRACK.N07">Share…</a><hr>
+  <a class="mi" data-rm data-fb-id="CM-TRACK.E01" data-fb-label="Remove from Playlist" data-fb-note="Immediate and undoable for one track or many. Replaces the “Remove n” header button and the A-PLD-REMOVE alert." data-fb-dec="DEC-041">Remove from Playlist<span class="k">⌫</span></a>
+  <a class="mi destr" data-open="a-track-remove" data-fb-id="CM-TRACK.E09">Remove from Library…<span class="k">⌘⌫</span></a>
+</div>
+
+<!-- ═════════ Sheets & alerts ═════════ -->
+<div class="sheet" id="s-link" hidden data-fb-id="S-PLD-LINK" data-fb-label="Link Source sheet" data-fb-note="One sheet for the whole task. The check result — including a mismatch — is explained inline, so the separate “Different tracks” alert (A-PLD-LINKMISMATCH) and the “Link Updated” alert (A-PLD-LINKDONE) are gone; success is a status-bar line with Undo. Spotify links are accepted; Cancel works while checking." data-fb-dec="DEC-023" data-fb-api=".sheet + Form; primary button named by its verb">
+  <div class="sh"><h2>Link “<span class="pl-name"></span>” to a Source</h2>
+    <p class="t2" style="margin:6px 0 0;white-space:normal">Paste the link of a SoundCloud, YouTube or Spotify playlist. Linking doesn’t add or remove any track now. It tells MLM where <b>Refresh from ‹Source›</b> looks for new tracks.</p></div>
+  <div class="sb">
+    <div class="row" style="margin-top:8px"><input class="field grow" id="lk-url" spellcheck="false" placeholder="https://soundcloud.com/…/sets/…  ·  https://youtube.com/playlist?list=…  ·  https://open.spotify.com/playlist/…" value="https://soundcloud.com/boilerroom/sets/best-of-2025" data-fb-id="S-PLD-LINK.E01" data-fb-label="Link field" data-fb-note="Prefilled with the current link when one exists. Editing it clears the result.">
+      <button class="btn" id="lk-check" data-fb-id="S-PLD-LINK.E02" data-fb-label="Check">Check</button></div>
+    <div class="row caption" style="margin-top:10px"><span>Mockup: result of Check</span>
+      <div class="seg" data-group="lk" id="lk-seg"><button data-p="idle" class="on">Not checked</button><button data-p="checking">Checking</button><button data-p="match">Same tracks</button><button data-p="differs">Different tracks</button><button data-p="bad">Not a playlist link</button><button data-p="expired">Sign-in expired</button></div></div>
+    <div data-pane="lk:idle"></div>
+    <div data-pane="lk:checking" hidden class="lk-res"><span class="status"><span class="spinner"></span>Checking link…</span></div>
+    <div data-pane="lk:match" hidden class="lk-res" data-fb-id="S-PLD-LINK.E03" data-fb-label="Result: same tracks"><span class="status ok"><i data-i="check" class="s"></i></span> <b><span class="srcdot sc"></span>“Boiler Room: Best of 2025”</b> on SoundCloud · 44 tracks
+      <p>Same tracks as this playlist.</p></div>
+    <div data-pane="lk:differs" hidden class="lk-res" data-fb-id="A-PLD-LINKMISMATCH" data-fb-label="Result: different tracks (inline)" data-fb-note="Was a second alert on top of the sheet. The difference and its consequence are stated here; the primary button stays “Link Playlist”." data-fb-dec="DEC-023"><span class="status"><i data-i="info" class="s"></i></span> <b><span class="srcdot sc"></span>“Boiler Room: Best of 2025”</b> on SoundCloud · 51 tracks
+      <p>41 tracks are in both. <b>10 are only on SoundCloud</b> — they are added the next time you choose Refresh from SoundCloud. <b>3 are only in this playlist</b> — they stay. Nothing changes now.</p></div>
+    <div data-pane="lk:bad" hidden class="lk-res"><span class="status error"><i data-i="warn" class="s"></i>This isn’t a playlist link.</span>
+      <p>It points to a single track. Use the link of a playlist or set — or choose Add from Link… (⌘U) to download just this track.</p></div>
+    <div data-pane="lk:expired" hidden class="lk-res" data-fb-id="S-PLD-LINK.E04" data-fb-label="Result: sign-in expired"><span class="status failed"><i data-i="warn" class="s"></i>SoundCloud sign-in expired</span>
+      <p>MLM can’t read this playlist until you sign in again. <a href="settings.html#sources">Reconnect in Settings ▸ Sources</a>, then press Check.</p></div>
+  </div>
+  <div class="sf"><button class="btn" data-close>Cancel</button><button class="btn primary" id="lk-go" disabled data-close data-fb-id="S-PLD-LINK.E05" data-fb-label="Link Playlist" data-fb-note="Enabled after a successful check. Closes the sheet; the status bar says “Linked … to SoundCloud” with Undo (was the “Link Updated” alert).">Link Playlist</button></div>
+</div>
+
+<div class="sheet wide" id="s-m3u" hidden data-fb-id="S-PLD-M3U-PREVIEW" data-fb-label="Import M3U into this playlist — preview" data-fb-note="Opened after the system file panel. The title and the first sentence say where the tracks go: into the open playlist, appended. Today the target was chosen by the file’s name, silently. The result is a status-bar line (was the “Import Complete” alert)." data-fb-dec="DEC-016" data-fb-api=".fileImporter → .sheet + Table">
+  <div class="sh"><h2>Import “Old iPod — On-The-Go 1.m3u8” into “<span class="pl-name"></span>”</h2>
+    <p style="margin:6px 0 0;white-space:normal" data-fb-id="S-PLD-M3U-PREVIEW.E01" data-fb-label="Where the tracks go"><b>38 tracks will be added to the end of “<span class="pl-name"></span>”.</b> <span class="t2">Nothing is removed or reordered. 4 entries are already in this playlist and 6 can’t be found in the library.</span></p></div>
+  <div class="sb">
+    <div class="scopebar" style="padding:6px 0" id="m3u-scope"><button class="scope on" data-m3u="">All<span class="n">48</span></button><button class="scope" data-m3u="add">Will be added<span class="n">38</span></button><button class="scope" data-m3u="dup">Already in playlist<span class="n">4</span></button><button class="scope" data-m3u="nf" data-fb-id="S-PLD-M3U-PREVIEW.E02" data-fb-label="Not found entries" data-fb-note="Entries whose file path and artist/title match nothing in the library. They are skipped; “Copy Not-Found List” lets the user look for them later.">Not found<span class="n">6</span></button></div>
+    <div class="table" style="max-height:330px;border:.5px solid var(--sep);border-radius:8px"><table><thead><tr><th class="r" style="width:34px">#</th><th>Entry in the file</th><th style="width:250px">Track in the library</th><th style="width:170px">Result</th></tr></thead><tbody id="m3u-rows"></tbody></table></div>
+  </div>
+  <div class="sf"><span class="left"><button class="btn plain" data-m3u-copy>Copy Not-Found List</button></span><button class="btn" data-close>Cancel</button><button class="btn primary" id="m3u-go" data-close data-fb-id="S-PLD-M3U-PREVIEW.E03" data-fb-label="Add 38 Tracks">Add 38 Tracks</button></div>
+</div>
+
+<div class="alert" id="a-pl-delete" hidden data-fb-id="A-PL-DELETE" data-fb-label="Delete playlist confirmation" data-fb-note="One alert for the grid, the sidebar (was A-SIDEBAR-DELETEPL) and the detail. The title asks, the message states the consequence, and says that Undo works until MLM quits. A failed delete is reported in the status bar." data-fb-dec="DEC-041" data-fb-api=".confirmationDialog(titleVisibility: .visible), destructive role">
+  <div class="aic"><i data-i="trash" class="l"></i></div>
+  <h2>Delete “<span class="pl-name"></span>”?</h2>
+  <p id="del-msg"></p>
+  <div class="ab"><button class="btn destructive" data-close id="del-go">Delete Playlist</button><button class="btn" data-close>Cancel</button></div>
+</div>
+
+<script>
+document.addEventListener('mlm:ready', () => {
+  const $ = (s, r) => (r || document).querySelector(s), $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const esc = MLM.esc, ic = MLM.icon;
+  const SRC = { sc: 'SoundCloud', yt: 'YouTube', sp: 'Spotify' };
+  const commenting = () => document.body.classList.contains('commenting');
+
+  /* ───── Data: 28 playlists, 3 playlist folders, manual (sidebar) order ───── */
+  const PL = {}, FOLD = { sets: { name: 'Sets', open: true, kids: [] }, radio: { name: 'Radio shows & mixes', open: false, kids: [] }, imp: { name: 'Imported 2025', open: false, kids: [] } };
+  let TOP = [];
+  let seq = 0;
+  const add = (folder, name, src, n, state, o) => { const id = 'p' + (++seq); const p = Object.assign({ id, name, src: src || '', n, state: state || 'ok', folder: folder || '', cov: 'm', c: 1 + seq % 6, seed: 40 + seq, added: (seq * 37) % 29, played: (seq * 53) % 31, local: 0, failed: 0 }, o || {}); PL[id] = p; if (folder) FOLD[folder].kids.push(id); else TOP.push(id); return p; };
+  TOP.push('F:sets');
+  add('sets', 'Warm-up', '', 38, 'ok', { sync: 1, played: 30 }); add('sets', 'Peak time', '', 52, 'ok', { sync: 1, played: 29 }); add('sets', 'Closing', '', 21, 'ok', { cov: 'c' });
+  add('', 'Liked on SoundCloud', 'sc', 44, 'importing', { liked: 1, cov: 'h', local: 12, added: 28 });
+  add('', 'Boiler Room picks', 'sc', 44, 'ok', { sync: 1 });
+  add('', 'Road trip 2026', '', 127);
+  add('', 'Ambient for work', 'yt', 86, 'incomplete', { failed: 9 });
+  add('', 'Sunday records', '', 73);
+  add('', 'Liked Songs', 'sp', 412, 'ok', { liked: 1, cov: 'h' });
+  add('', 'Dekmantel 2024 — everything I Shazamed on Saturday night', 'sp', 44, 'notdl', { cov: 'i' });
+  add('', 'Gym — fast', '', 31);
+  TOP.push('F:radio');
+  add('radio', 'Rinse FM — Hessle Audio', 'sc', 212); add('radio', 'NTS — Floating Points', 'yt', 58); add('radio', 'Essential Mix favourites', 'yt', 34, 'incomplete', { failed: 3 });
+  add('radio', 'Resident Advisor podcast picks', 'sc', 97); add('radio', 'Kiosk Radio finds', 'yt', 18, 'notdl', { cov: 'i' }); add('radio', 'Tiny Desk', 'yt', 26);
+  TOP.push('F:imp');
+  add('imp', 'Discover Weekly archive', 'sp', 310); add('imp', 'Release Radar keepers', 'sp', 142, 'importing', { local: 96 }); add('imp', 'Bandcamp Friday March', '', 19); add('imp', 'Bandcamp Friday June', '', 23);
+  add('imp', 'SoundCloud reposts 2025', 'sc', 388, 'incomplete', { failed: 41 }); add('imp', 'Berlin trip', '', 64); add('imp', 'Wedding — Anna & Jonas', '', 156, 'ok', { cov: 'c' }); add('imp', 'DJ Koze — everything', 'yt', 77);
+  add('imp', 'UKG crate', '', 91); add('imp', 'Untitled Playlist', '', 0, 'ok', { cov: 'i' }); add('imp', 'Old iPod — On-The-Go 1', '', 48);
+  const byName = n => Object.values(PL).find(p => p.name === n);
+  const NAVPL = { pl1: byName('Warm-up'), pl2: byName('Peak time'), pl3: byName('Closing'), pl4: byName('Liked on SoundCloud'), pl5: byName('Boiler Room picks'), pl6: byName('Road trip 2026'), pl7: byName('Ambient for work') };
+  Object.keys(NAVPL).forEach(k => { NAVPL[k].nav = k; });
+  const manual = () => { const out = []; TOP.forEach(e => { if (e.startsWith('F:')) FOLD[e.slice(2)].kids.forEach(id => out.push(PL[id])); else out.push(PL[e]); }); return out; };
+  const attn = p => p.state === 'incomplete' || p.state === 'notdl' || p.state === 'expired';
+  const plural = (n, w) => n.toLocaleString('en-US') + ' ' + w + (n === 1 ? '' : 's');
+  function statusText(p) {
+    if (p.state === 'importing') return '<span class="status"><span class="spinner"></span>Importing · ' + p.local + ' of ' + p.n + '</span>';
+    if (p.state === 'incomplete') return '<span class="status failed">' + ic('warn', 's') + 'Incomplete · ' + p.failed + ' failed</span>';
+    if (p.state === 'notdl') return '<span class="status">' + ic('cloud', 's') + 'Not downloaded · ' + plural(p.n, 'track') + '</span>';
+    if (p.state === 'expired') return '<span class="status failed">' + ic('warn', 's') + (SRC[p.src] || 'Source') + ' sign-in expired</span>';
+    return '';
+  }
+  const statusPlain = p => statusText(p).replace(/<[^>]+>/g, '');
+  function cover(p) {
+    if (p.cov === 'h') return '<div class="art a2">' + ic('heart', 'xl') + '</div>';
+    if (p.cov === 'i') return '<div class="art a' + p.c + ' ini">' + esc(p.name.split(/[\s—-]+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('')) + '</div>';
+    if (p.cov === 'c') return '<div class="art a' + p.c + '">' + ic('photo', 'xl') + '</div>';
+    return '<div class="art mosaic">' + [0, 2, 3, 5].map(k => '<i class="a' + ((p.c + k) % 6 + 1) + '"></i>').join('') + '</div>';
+  }
+
+  /* ───── Small helpers ───── */
+  let undoFn = null;
+  function say(html, undo) { undoFn = typeof undo === 'function' ? undo : null; MLM.say(html, !!undo); }
+  document.addEventListener('click', e => { const a = e.target.closest('.statusbar .msg a'); if (a && a.textContent.trim() === 'Undo') { if (undoFn) { const f = undoFn; undoFn = null; f(); MLM.say('Undone.'); } else MLM.say('Undone.'); } });
+  function inlineEdit(target, value, onCommit, onCancel, cls) {
+    const inp = document.createElement('input'); inp.className = 'field ' + (cls || ''); inp.value = value; inp.spellcheck = false;
+    target.hidden = true; target.after(inp); inp.focus(); inp.select(); let done = false;
+    const fin = ok => { if (done) return; done = true; const v = inp.value.trim(); inp.remove(); target.hidden = false; if (ok && v && v !== value) onCommit(v); else if (onCancel) onCancel(); };
+    inp.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') fin(true); else if (e.key === 'Escape') fin(false); });
+    inp.addEventListener('blur', () => fin(true));
+    ['click', 'mousedown', 'dblclick'].forEach(t => inp.addEventListener(t, e => { e.stopPropagation(); if (t === 'click') e.preventDefault(); }));
+    return inp;
+  }
+  function uniqueName(base) { const names = new Set(Object.values(PL).filter(p => !p.deleted).map(p => p.name)); if (!names.has(base)) return base; let i = 2; while (names.has(base + ' ' + i)) i++; return base + ' ' + i; }
+
+  /* ───── Grid ───── */
+  const G = { scope: 'all', sort: 'manual', q: '', sel: null };
+  const SORTLBL = { manual: 'Manual', name: 'Name', added: 'Recently Added', played: 'Recently Played' };
+  const fbCard = { // annotate only the cards that show something particular
+    'Warm-up': { art: ['V-PL.E09', 'Card cover', 'Automatic 2×2 mosaic of the first artworks, a single artwork, initials when there is none, a heart for liked playlists, or a custom image. Cached in the library file. A play badge appears on hover; double-click it (or ⌥-double-click the card) to play.'], nm: ['V-PL.E11', 'Name / inline rename', 'Two-click or Rename: the name becomes a focused field. Return or clicking away commits, Esc cancels, an empty name restores the old one.'], sb: ['V-PL.E14', 'Track count', 'Count; liked playlists add “Liked”.'] },
+    'Liked on SoundCloud': { pg: ['V-PL.E10', 'Import progress', 'Thin determinate line under the cover while the playlist is importing.'], sb: ['V-PL.E12', 'Source', 'The 6 pt source dot and the source name. No brand-coloured text.'], st: ['V-PL.E13', 'Status in words', 'Importing · n of m / Incomplete · n failed / Not downloaded · n tracks / ‹Source› sign-in expired. Same words in the detail header and the sidebar row. Nothing when healthy.'] },
+    'Dekmantel 2024 — everything I Shazamed on Saturday night': { st: ['V-PL.N03', 'Not downloaded · n tracks', 'New state: an imported playlist whose tracks were never downloaded no longer looks healthy.'] }
+  };
+  const fb = a => a ? ' data-fb-id="' + a[0] + '" data-fb-label="' + esc(a[1]) + '" data-fb-note="' + esc(a[2]) + '" data-fb-dec="DEC-023"' : '';
+  function cardHTML(p) {
+    const f = fbCard[p.name] || {}, st = statusText(p);
+    return '<div class="card' + (G.sel === p.id ? ' sel' : '') + '" data-pl="' + p.id + '" data-menu="cm-pl-card">' + cover(p).replace('<div class="art', '<div' + fb(f.art) + ' class="art') +
+      (p.state === 'importing' ? '<div class="progress"' + fb(f.pg) + '><i style="width:' + Math.round(100 * p.local / p.n) + '%"></i></div>' : '') +
+      '<div class="nm" title="' + esc(p.name) + '"' + fb(f.nm) + '>' + esc(p.name) + '</div>' +
+      '<div class="sb"' + fb(f.sb) + '>' + (p.src ? '<span class="srcdot ' + p.src + '"></span>' + SRC[p.src] + ' · ' : '') + plural(p.n, 'track') + (p.liked ? ' · Liked' : '') + '</div>' +
+      (p.err ? '<div class="sb err" data-fb-id="S-PL-BANNER-COVERDROP" data-fb-label="Cover drop rejected (inline)" data-fb-note="Was a banner that pushed the whole grid down. The sentence appears on the card that refused the drop and goes away by itself. A non-image file gets it too (today it failed silently).">' + p.err + '</div>' : st ? '<div class="sb st"' + fb(f.st) + '>' + st + '</div>' : '') + '</div>';
+  }
+  function gridList() {
+    let l = manual().filter(p => !p.deleted);
+    if (G.scope === 'local') l = l.filter(p => !p.src); else if (SRC[G.scope]) l = l.filter(p => p.src === G.scope); else if (G.scope === 'attn') l = l.filter(attn);
+    if (G.q) l = l.filter(p => p.name.toLowerCase().includes(G.q));
+    if (G.sort === 'name') l.sort((a, b) => a.name.localeCompare(b.name)); else if (G.sort === 'added') l.sort((a, b) => b.added - a.added); else if (G.sort === 'played') l.sort((a, b) => b.played - a.played);
+    return l;
+  }
+  function renderGrid() {
+    const all = manual().filter(p => !p.deleted), l = gridList(), host = $('#gridhost');
+    const c = { all: all.length, local: 0, sc: 0, yt: 0, sp: 0, attn: 0 }; all.forEach(p => { c[p.src || 'local']++; if (attn(p)) c.attn++; });
+    $$('[data-gn]').forEach(n => { n.textContent = c[n.dataset.gn]; });
+    $('#g-count').textContent = l.length === all.length ? plural(all.length, 'playlist') : l.length + ' of ' + plural(all.length, 'playlist');
+    $('#g-sort').textContent = SORTLBL[G.sort];
+    $$('#m-pl-sort .mi').forEach(m => { m.classList.toggle('chk', m.dataset.sort === G.sort); m.classList.toggle('nochk', m.dataset.sort !== G.sort); });
+    if (!l.length) {
+      host.innerHTML = '<div class="empty" style="height:80%" data-fb-id="V-PL.E15/filtered" data-fb-label="No playlists match" data-fb-note="Filtered-empty: says which filters are active and offers the one way out.">' + ic('search', 'xl') + '<h2>No playlists match</h2><p>' + (G.q ? 'Nothing is named “' + esc(G.q) + '”' : 'No playlist') + (G.scope !== 'all' ? ' in ' + esc($('#gscope .scope.on').textContent.replace(/\d+$/, '')) : '') + '.</p><div class="acts"><button class="btn" id="g-clear">Clear Filters</button></div></div>';
+    } else if (G.sort === 'manual' && G.scope === 'all' && !G.q) {
+      let h = '', chunk = [];
+      const flush = sep => { if (chunk.length) { h += (sep && h ? '<div class="gsep"></div>' : '') + '<div class="grid">' + chunk.map(cardHTML).join('') + '</div>'; chunk = []; } };
+      TOP.forEach(e => {
+        if (!e.startsWith('F:')) { if (!PL[e].deleted) chunk.push(PL[e]); return; }
+        flush(true); const k = e.slice(2), f = FOLD[k], kids = f.kids.map(id => PL[id]).filter(p => !p.deleted);
+        h += '<div class="gsec" data-gfold="' + k + '"' + (k === 'sets' ? ' data-fb-id="V-PL.N04" data-fb-label="Playlist folder (group heading)" data-fb-note="Playlist folders are new. In Manual order the grid groups by folder exactly as the sidebar does; the heading collapses the group and accepts dropped playlists. They have nothing to do with the disk folders of the Folders section." data-fb-dec="DEC-003" data-fb-api="Section in LazyVGrid with its own collapse state"' : '') + '><span class="tw">' + (f.gclosed ? '▸' : '▾') + '</span>' + ic('folder') + '<span>' + esc(f.name) + '</span><small>' + plural(kids.length, 'playlist') + '</small></div>';
+        if (!f.gclosed) h += '<div class="grid">' + kids.map(cardHTML).join('') + '</div>';
+      });
+      flush(true); host.innerHTML = h;
+    } else host.innerHTML = '<div class="grid">' + l.map(cardHTML).join('') + '</div>';
+    MLM.refreshBadges();
+  }
+  const cardEl = id => $('#gridhost .card[data-pl="' + id + '"]');
+  function selectCard(id, scroll) { G.sel = id; $$('#gridhost .card').forEach(c => c.classList.toggle('sel', c.dataset.pl === id)); const c = id && cardEl(id); if (c && scroll) c.scrollIntoView({ block: 'nearest' }); setDef(); }
+  function showInGrid(p) { if (p.folder) FOLD[p.folder].gclosed = false; G.scope = 'all'; G.q = ''; $$('#gscope .scope').forEach(s => s.classList.toggle('on', s.dataset.scope === 'all')); MLM.goto('grid'); renderGrid(); renderSidebar(); selectCard(p.id, true); }
+  $('#gridhost').addEventListener('click', e => {
+    if (commenting()) return;
+    if (e.target.closest('#g-clear')) { clearFilters(); return; }
+    const gs = e.target.closest('.gsec'); if (gs) { const f = FOLD[gs.dataset.gfold]; f.gclosed = !f.gclosed; renderGrid(); return; }
+    const c = e.target.closest('.card'); selectCard(c ? c.dataset.pl : null);
+  });
+  $('#gridhost').addEventListener('dblclick', e => { const c = e.target.closest('.card'); if (c && !e.target.closest('input')) openDetail(PL[c.dataset.pl]); });
+  $('#gridhost').addEventListener('keydown', e => {
+    const cards = $$('#gridhost .card'); if (!cards.length) return; let i = cards.findIndex(c => c.dataset.pl === G.sel);
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft' || e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const per = Math.max(1, Math.floor(cards[0].parentElement.clientWidth / cards[0].offsetWidth)); const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowDown' ? per : -per; i = Math.max(0, Math.min(cards.length - 1, (i < 0 ? 0 : i + d))); selectCard(cards[i].dataset.pl, true); }
+    else if (e.key === 'Enter' && G.sel) { e.preventDefault(); openDetail(PL[G.sel]); }
+    else if (e.key === 'Escape') selectCard(null);
+  });
+  function clearFilters() { G.scope = 'all'; G.q = ''; const s = $('.search'); if (s) s.value = ''; $$('#gscope .scope').forEach(x => x.classList.toggle('on', x.dataset.scope === 'all')); if (document.body.dataset.state === 'filtered-empty') { const b = $('.reviewbar [data-set-state="default"]'); if (b) b.click(); } renderGrid(); }
+  document.addEventListener('mlm:scope', e => {
+    if (e.target.closest && e.target.closest('#gscope')) { G.scope = e.target.dataset.scope; renderGrid(); }
+    else if (e.target.closest && e.target.closest('#dscope')) setFailedScope(e.detail === 'failed');
+  });
+  document.addEventListener('input', e => { if (e.target.classList.contains('search')) { G.q = e.target.value.trim().toLowerCase(); if (view === 'grid') renderGrid(); } });
+  $('#g-new').addEventListener('click', () => { if (!commenting()) newPlaylist('grid'); });
+  function newPlaylist(where, folder) {
+    const p = add(folder || '', uniqueName('Untitled Playlist'), '', 0, 'ok', { cov: 'i', added: 99, played: 0 });
+    if (!folder) { TOP.pop(); TOP.unshift(p.id); }
+    const finish = () => { renderGrid(); renderSidebar(); if (where === 'grid') selectCard(p.id, true); say('Created “' + esc(p.name) + '”', () => { p.deleted = true; renderGrid(); renderSidebar(); }); };
+    if (where === 'grid') { G.scope = 'all'; G.q = ''; G.sort = 'manual'; $$('#gscope .scope').forEach(x => x.classList.toggle('on', x.dataset.scope === 'all')); renderGrid(); renderSidebar(); selectCard(p.id, true); const nm = $('.nm', cardEl(p.id)); inlineEdit(nm, p.name, v => { p.name = v; finish(); }, finish); }
+    else { if (folder) FOLD[folder].open = true; renderSidebar(); if (view === 'grid') renderGrid(); const row = $('.sb-row[data-plid="' + p.id + '"]'); row.scrollIntoView({ block: 'nearest' }); inlineEdit($('.lbl', row), p.name, v => { p.name = v; finish(); }, finish); }
+  }
+
+  /* ───── Sidebar: the Playlists section rebuilt from the same data (all playlists, folders, state words) ───── */
+  let view = 'grid', cur = NAVPL.pl5;
+  function renderSidebar() {
+    const sb = $('.sidebar .sb-scroll'); if (!sb) return; const allrow = $('.sb-row[data-nav="allpl"]', sb); if (!allrow) return;
+    let n = allrow.nextElementSibling; while (n && !n.classList.contains('sb-h')) { const x = n; n = n.nextElementSibling; x.remove(); }
+    allrow.classList.toggle('active', view === 'grid');
+    const row = (p, indent) => { const st = statusPlain(p), act = view === 'detail' && cur === p;
+      return '<a class="sb-row' + (indent ? ' indent' : '') + (st ? ' two' : '') + (act ? ' active' : '') + '" href="playlists.html#detail" data-plid="' + p.id + '" data-menu="cm-sb-playlist"' +
+        (p.name === 'Warm-up' ? ' data-fb-id="P-PINNED.E02" data-fb-label="Playlist row" data-fb-note="Every playlist is a sidebar row, in the user’s own order, and accepts dropped tracks directly (no spring-loading needed). No pin, no limit of 8. Drag rows to reorder or into a playlist folder." data-fb-dec="DEC-003" data-fb-api="List row + .dropDestination + .onMove"' : '') +
+        (p.name === 'Liked on SoundCloud' ? ' data-fb-id="P-SIDEBAR.N04" data-fb-label="Playlist row with state" data-fb-note="A playlist that is not healthy says so in words on its second line — the same words as its card and its header." data-fb-dec="DEC-023"' : '') +
+        '>' + ic(p.liked ? 'heart' : 'list') + '<span class="lbl trunc" title="' + esc(p.name) + '">' + esc(p.name) + (st ? '<small>' + esc(st) + '</small>' : '') + '</span></a>'; };
+    let h = '';
+    TOP.forEach(e => {
+      if (!e.startsWith('F:')) { if (!PL[e].deleted) h += row(PL[e]); return; }
+      const k = e.slice(2), f = FOLD[k];
+      h += '<a class="sb-row" href="playlists.html" data-sfold="' + k + '" data-menu="cm-sb-folder"' + (k === 'sets' ? ' data-fb-id="P-SIDEBAR.N03" data-fb-label="Playlist folder row" data-fb-note="Groups playlists; expand state persists; accepts dropped playlists. Clicking toggles it." data-fb-dec="DEC-003" data-fb-api="DisclosureGroup in List(.sidebar)"' : '') + (f.fresh ? ' data-fb-id="S-PLFOLDER-NEW" data-fb-label="New playlist folder (inline rename)" data-fb-note="⌥⌘N or the section’s ＋. The folder appears as “untitled folder” with its name in edit mode — no sheet. Return commits, Esc keeps the default name, ⌘Z removes it." data-fb-dec="DEC-003" data-fb-api="DisclosureGroup + inline TextField with FocusState"' : '') + '><span class="disc">' + (f.open ? '▾' : '▸') + '</span>' + ic('folder') + '<span class="lbl trunc">' + esc(f.name) + '</span></a>';
+      if (f.open) f.kids.forEach(id => { if (!PL[id].deleted) h += row(PL[id], true); });
+    });
+    allrow.insertAdjacentHTML('afterend', h); MLM.refreshBadges();
+  }
+  document.addEventListener('click', e => {
+    const r = e.target.closest('.sidebar .sb-row'); if (!r || e.target.closest('input')) return;
+    if (r.dataset.plid) { e.preventDefault(); openDetail(PL[r.dataset.plid]); }
+    else if (r.dataset.sfold) { e.preventDefault(); const f = FOLD[r.dataset.sfold]; f.open = !f.open; renderSidebar(); if (view === 'grid') renderGrid(); }
+    else if (r.dataset.nav === 'allpl') { e.preventDefault(); MLM.goto('grid'); }
+  });
+  const plHead = $$('.sidebar .sb-h').find(h => h.textContent.trim() === 'Playlists');
+  if (plHead && $('.add', plHead)) { const a = $('.add', plHead); a.dataset.menuClick = 'm-sb-add'; a.title = 'New playlist or playlist folder'; }
+  $$('#m-add .mi').forEach(mi => { const t = mi.textContent; if (t.startsWith('New Playlist Folder')) mi.dataset.sim = 'sb-folder'; else if (t.startsWith('New Playlist')) { mi.removeAttribute('href'); mi.dataset.sim = 'sb-new'; } });
+  function sbRename(p, value, err) {
+    if (p.folder) FOLD[p.folder].open = true; renderSidebar(); const row = $('.sb-row[data-plid="' + p.id + '"]'); if (!row) return; row.scrollIntoView({ block: 'nearest' });
+    let errEl = null;
+    if (err) { errEl = MLM.el('<div class="sb-err" data-fb-id="A-SIDEBAR-RENAMEFAIL" data-fb-label="Rename failed (inline)" data-fb-note="Was an alert with raw error text that also threw the typed name away. The field stays open with the text, the reason is one plain sentence below it." data-fb-dec="DEC-016">Couldn’t save this name — the library file is read-only right now. Your text is kept: press Return to try again, or Esc to cancel.</div>'); row.after(errEl); }
+    const old = p.name, inp = inlineEdit($('.lbl', row), value || p.name, v => { if (errEl) errEl.remove(); p.name = v; renderAll(); say('Renamed “' + esc(old) + '” to “' + esc(v) + '”', () => { p.name = old; renderAll(); }); }, () => { if (errEl) errEl.remove(); });
+    inp.dataset.fbId = 'P-PINNED.E04'; inp.dataset.fbLabel = 'Inline rename field'; inp.dataset.fbNote = 'Return commits, Esc cancels, clicking away commits. An empty name restores the old one. Right-click shows the standard text-field menu (the special one-item “Cancel” menu is gone).'; MLM.refreshBadges();
+  }
+  function newFolder() {
+    const k = 'f' + (++seq); FOLD[k] = { name: 'untitled folder', open: true, kids: [], fresh: true }; TOP.unshift('F:' + k); renderSidebar(); if (view === 'grid') renderGrid();
+    const row = $('.sb-row[data-sfold="' + k + '"]'); row.scrollIntoView({ block: 'nearest' });
+    const fin = () => { renderSidebar(); if (view === 'grid') renderGrid(); say('Created the playlist folder “' + esc(FOLD[k].name) + '” — drag playlists onto it', () => { TOP = TOP.filter(e => e !== 'F:' + k); renderAll(); }); };
+    inlineEdit($('.lbl', row), FOLD[k].name, v => { FOLD[k].name = v; fin(); }, fin);
+  }
+  let menuPl = null, menuFold = null;
+  document.addEventListener('contextmenu', e => {
+    const c = e.target.closest('.card[data-pl]'), r = e.target.closest('.sb-row[data-plid]'), f = e.target.closest('.sb-row[data-sfold]');
+    if (c) { menuPl = PL[c.dataset.pl]; selectCard(menuPl.id); fillMenu($('#cm-pl-card'), menuPl); }
+    else if (r) { menuPl = PL[r.dataset.plid]; fillMenu($('#cm-sb-playlist'), menuPl); }
+    else if (f) menuFold = f.dataset.sfold;
+    else if (e.target.closest('#d-art')) fillMenu($('#cm-cover'), cur);
+  }, true);
+  function fillMenu(m, p) {
+    const missing = p.state === 'notdl' ? p.n : 0, failed = (p.state === 'incomplete' || p.state === 'expired') ? p.failed : 0;
+    const set = (r, show, label) => $$('[data-r="' + r + '"]', m).forEach(x => { x.hidden = !show; if (label && show) { const k = $('.k', x); x.textContent = label; if (k) x.appendChild(k); } });
+    set('dl', missing > 0, 'Download ' + missing + ' Missing'); set('showfailed', failed > 0, 'Show ' + failed + ' Failed Downloads');
+    set('refresh', !!p.src, 'Refresh from ' + SRC[p.src]); set('link', !p.liked, p.src ? 'Change Link…' : 'Link Source…');
+    set('autocover', p.cov === 'c'); set('delete', !p.liked); set('delhr', !p.liked); set('fixhr', missing > 0 || failed > 0 || !!p.src || (!p.liked && m.id !== 'cm-sb-playlist'));
+  }
+
+  /* ───── Commands shared by the card menu, the sidebar menu and More ───── */
+  function run(cmd, p, from) {
+    const nm = '“' + esc(p.name) + '”';
+    if (cmd === 'open') openDetail(p);
+    else if (cmd === 'play') say(p.state === 'notdl' ? 'Nothing to play — no track of ' + nm + ' is downloaded. <a class="btn plain" style="height:16px">Download ' + p.n + ' Missing</a>' : 'Playing ' + nm + (p.state === 'ok' ? '' : ' — tracks that aren’t downloaded are skipped'));
+    else if (cmd === 'playnext') say('Playing next: ' + nm + ' — ' + plural(p.n, 'track'), true);
+    else if (cmd === 'addqueue') say('Added ' + nm + ' to the queue — ' + plural(p.n, 'track'), true);
+    else if (cmd === 'sync') say('Added ' + nm + ' to the sync profile “iPod Classic”', true);
+    else if (cmd === 'move') say('Moved ' + nm + ' to the folder “Sets”', true);
+    else if (cmd === 'rename') { if (from === 'cm-pl-card') { const c = cardEl(p.id), old = p.name; if (c) inlineEdit($('.nm', c), p.name, v => { p.name = v; renderAll(); say('Renamed “' + esc(old) + '” to “' + esc(v) + '”', () => { p.name = old; renderAll(); }); }); } else if (from === 'cm-sb-playlist') sbRename(p); else renameTitle(); }
+    else if (cmd === 'cover') say('Choose Cover… opens the system file panel for an image (PNG, JPEG, HEIC).');
+    else if (cmd === 'autocover') { if (p.cov !== 'c') { say(nm + ' already uses its automatic cover.'); return; } p.cov = 'm'; renderAll(); say('Using the automatic cover for ' + nm, () => { p.cov = 'c'; renderAll(); }); }
+    else if (cmd === 'dl') { p.state = 'importing'; p.local = 0; p._rows = null; renderAll(); say('Download started — ' + plural(p.n, 'track')); }
+    else if (cmd === 'retry') { const k = p.failed; p.state = 'importing'; p.local = p.n - k; p._rows = null; renderAll(); say('Retrying ' + plural(k, 'download')); }
+    else if (cmd === 'showfailed') { openDetail(p); const b = $('#dscope [data-status-filter="failed"]'); if (b) b.click(); }
+    else if (cmd === 'refresh') { if (p.state === 'expired') { say(SRC[p.src] + ' sign-in expired — <a class="btn plain" style="height:16px" href="settings.html#sources">Reconnect</a>'); return; } say('<span class="spinner"></span> Refreshing ' + nm + ' from ' + SRC[p.src] + '…'); setTimeout(() => say('Refreshed from ' + SRC[p.src] + ' — 3 new tracks, nothing removed', true), 1300); }
+    else if (cmd === 'link') { menuPl = p; fillNames(p); lkSet('idle'); $('#lk-url').value = p.src ? 'https://soundcloud.com/boilerroom/sets/best-of-2025' : ''; MLM.openSheet('s-link'); }
+    else if (cmd === 'm3u') { menuPl = p; fillNames(p); MLM.openSheet('s-m3u'); }
+    else if (cmd === 'delete') { menuPl = p; fillNames(p); $('#del-msg').innerHTML = 'The playlist is removed from the sidebar' + (p.sync ? ' and from the sync profile “iPod Classic”' : '') + '. Its ' + plural(p.n, 'track') + ' and their files stay in the library. You can undo this until you quit MLM.'; MLM.openSheet('a-pl-delete'); }
+    else if (cmd === 'reveal') showInGrid(p);
+  }
+  const fillNames = p => $$('.pl-name').forEach(n => { n.textContent = p.name; });
+  document.addEventListener('click', e => {
+    const mi = e.target.closest('.menu .mi[data-cmd]'); if (mi) { const id = mi.closest('.menu').id; run(mi.dataset.cmd, (id === 'm-pl-more' || id === 'cm-cover') ? cur : menuPl, id); return; }
+    const fm = e.target.closest('.menu .mi[data-fcmd]'); if (fm && menuFold) { const f = FOLD[menuFold];
+      if (fm.dataset.fcmd === 'newpl') newPlaylist('sidebar', menuFold);
+      else if (fm.dataset.fcmd === 'rename') { const row = $('.sb-row[data-sfold="' + menuFold + '"]'); inlineEdit($('.lbl', row), f.name, v => { f.name = v; renderAll(); }); }
+      else say('Deleted the folder “' + esc(f.name) + '” — its ' + plural(f.kids.length, 'playlist') + ' moved out of it, none was deleted', true);
+      return; }
+    const sm = e.target.closest('.menu .mi[data-sort]'); if (sm) { G.sort = sm.dataset.sort; renderGrid(); return; }
+    const sim = e.target.closest('[data-sim]'); if (sim && !commenting()) { e.preventDefault(); simulate(sim.dataset.sim); return; }
+    if (e.target.closest('[data-rm]')) { removeRows(t.selection()); return; }
+    if (e.target.closest('[data-to-grid]')) { MLM.goto('grid'); return; }
+    if (e.target.closest('[data-m3u-copy]')) { say('Copied 6 not-found entries to the clipboard.'); return; }
+  });
+  $('#del-go').addEventListener('click', () => { const p = menuPl; if (!p) return; p.deleted = true; if (view === 'detail' && cur === p) MLM.goto('grid'); renderAll(); say('Deleted “' + esc(p.name) + '”', () => { p.deleted = false; renderAll(); }); });
+
+  /* ───── Link sheet ───── */
+  function lkSet(pn) { const b = $('#lk-seg [data-p="' + pn + '"]'); if (b) b.click(); }
+  $('#lk-seg').addEventListener('click', e => { const b = e.target.closest('button'); if (b) $('#lk-go').disabled = !(b.dataset.p === 'match' || b.dataset.p === 'differs'); });
+  $('#lk-check').addEventListener('click', () => { if (commenting()) return; lkSet('checking'); setTimeout(() => { if (!$('#s-link').hidden) lkSet('differs'); }, 900); });
+  $('#lk-url').addEventListener('input', () => lkSet('idle'));
+  $('#lk-url').addEventListener('keydown', e => e.stopPropagation());
+  $('#lk-go').addEventListener('click', e => { const p = menuPl || cur, old = p.src; p.src = 'sc'; renderAll(); say('Linked “' + esc(p.name) + '” to SoundCloud — nothing was added or removed', () => { p.src = old; renderAll(); }); });
+  $('#m3u-go').addEventListener('click', () => { const p = menuPl || cur; say('Added 38 tracks to “' + esc(p.name) + '” · 4 already there · 6 not found', true); });
+  (function m3u() {
+    const r = MLM.tracks(48, 311, { allLocal: true });
+    $('#m3u-rows').innerHTML = r.map((x, i) => { const k = i % 8 === 5 ? 'nf' : i % 12 === 7 ? 'dup' : 'add'; const kind = (i < 38 || k !== 'add') ? k : 'add';
+      return '<tr data-k="' + kind + '"' + (kind === 'nf' ? ' class="dim"' : '') + '><td class="r num dim">' + (i + 1) + '</td><td class="dim">' + (i % 3 ? esc(x.artist + ' - ' + x.title) + '.m4a' : '../Music/' + esc(x.artist) + '/' + esc(x.title) + '.mp3') + '</td><td>' + (kind === 'nf' ? '<span class="t3">—</span>' : esc(x.title) + ' <span class="t2">— ' + esc(x.artist) + '</span>') + '</td><td>' + (kind === 'nf' ? '<span class="status failed">Not found — skipped</span>' : kind === 'dup' ? '<span class="status">Already in playlist — skipped</span>' : '<span class="status ok">Will be added</span>') + '</td></tr>'; }).join('');
+    $('#m3u-scope').addEventListener('click', e => { const b = e.target.closest('.scope'); if (!b) return; const k = b.dataset.m3u; $$('#m3u-rows tr').forEach(tr => { tr.hidden = !!k && tr.dataset.k !== k; }); });
+  })();
+
+  /* ───── Detail ───── */
+  MLM.COLS.num.sort = 'num';   // page-local: makes # a real sort key so the playlist order can be left and restored
+  MLM.COLS.plretry = { label: '', w: 74, render: x => x.status === 'failed' ? '<button class="btn" data-retry="' + x.id + '">Retry</button>' : '' };
+  const BASECOLS = ['num', 'title', 'artist', 'album', 'time', 'bpm', 'energy', 'genre', 'added', 'status'];
+  let failedScope = false, dropDemo = false;
+  const EMPTYPL = '<div class="empty" style="height:70%" data-fb-id="V-PLD.E28" data-fb-label="Empty playlist" data-fb-note="Says how tracks get in, in the order people do it: drag here, drag onto the sidebar row, Add to Playlist from any track menu. The whole pane is a drop target.">' + ic('list', 'xl') + '<h2>No tracks yet</h2><p>Add tracks by dragging them here, or onto this playlist in the sidebar. You can also select tracks anywhere and choose Add to Playlist.</p><div class="acts"><a class="btn lg" href="library.html">Go to All Tracks</a><button class="btn lg" data-m3u-open>Import M3U into This Playlist…</button></div></div>';
+  const t = MLM.table('#pltbl', {
+    rows: [], cols: BASECOLS, sort: 'num', menu: 'cm-track',
+    ids: { num: 'V-PLD.E16', title: 'V-PLD.E17', artist: 'V-PLD.E18', album: 'V-PLD.E19', time: 'V-PLD.E20', bpm: 'V-PLD.N08', energy: 'V-PLD.E25', genre: 'V-PLD.E23', added: 'V-PLD.E27', status: 'V-PLD.E22', format: 'V-PLD.E21', year: 'V-PLD.E24', dance: 'V-PLD.E26' },
+    notes: { num: 'The track’s position in the playlist. It never renumbers under a filter or another sort; it is dimmed while another column sorts. Click to return to playlist order.', album: 'No album and source names render as “—” (DEC-013).', added: 'When the track was added to this playlist (not to the library), always with the year.', status: 'Words, sortable; empty for a local track. Failed rows are dimmed.', bpm: 'Same default columns as All Tracks; Format, Year, Dance and kbps via the header menu.' },
+    rowClass: x => (failedScope ? 'tall ' : '') + (x.status === 'failed' ? 'dim ' : '') + (dropDemo && x.num === 6 ? 'drop-before' : ''),
+    onDelete: rows => removeRows(rows)
+  });
+  function rowsFor(p) {
+    if (p._rows && p._rows.state === p.state) return p._rows.rows;
+    const rows = MLM.tracks(p.n, p.seed, { allLocal: true }), ds = rows.map(r => [r.addedSort, r.added]).sort((a, b) => a[0] - b[0]);
+    const nf = (p.state === 'incomplete' || p.state === 'expired') ? p.failed : 0, step = nf ? Math.max(1, Math.floor(p.n / nf)) : 0;
+    rows.forEach((r, i) => {
+      r.num = i + 1; r.time = Math.round(150 + (r.time - 150) * 0.455); r.addedSort = ds[i][0]; r.added = ds[i][1]; r.source = p.src;
+      let s = 'local';
+      if (p.state === 'notdl') s = 'notdl'; else if (p.state === 'importing') s = i < p.local ? 'local' : i < p.local + 2 ? 'downloading' : 'notdl';
+      else if (nf && i % step === step - 1 && Math.floor(i / step) < nf) s = 'failed';
+      r.status = s; if (s !== 'local') { r.format = ''; r.kbps = r.bpm = r.energy = r.dance = null; }
+      if (s === 'failed' && p.state === 'expired') { r.reason = 'Sign-in expired (' + SRC[p.src] + ')'; r.attempts = 1; }
+    });
+    p._rows = { state: p.state, rows }; return rows;
+  }
+  function renderDetail() {
+    const p = cur, forceEmpty = document.body.dataset.state === 'empty', rows = forceEmpty ? [] : rowsFor(p);
+    $('#d-art').innerHTML = cover(p); $('#d-kind').textContent = p.liked ? 'Liked playlist' : 'Playlist'; $('#d-title').textContent = p.name; $('#d-title').title = 'Click to rename';
+    const dur = rows.reduce((a, r) => a + r.time, 0);
+    $('#d-meta').innerHTML = plural(rows.length, 'track') + (rows.length ? ' · ' + MLM.fmtDur(dur) : '') + (p.src ? ' · <span class="srcdot ' + p.src + '"></span>Linked to ' + SRC[p.src] : '');
+    $('#d-meta').title = p.src ? 'Imported Jan 12, 2026 · last refreshed Oct 3, 2026' : 'Local playlist';
+    const nLocal = rows.filter(r => r.status === 'local').length, nFailed = rows.filter(r => r.status === 'failed').length;
+    $('#d-play').disabled = $('#d-shuffle').disabled = !nLocal;
+    $('#d-why').textContent = !rows.length || nLocal ? '' : p.state === 'importing' ? 'Nothing to play yet — the first tracks are still downloading' : 'Nothing to play yet — no track is downloaded';
+    const sl = $('#d-status'), btn = (label, cmd) => '<button class="btn" data-dcmd="' + cmd + '">' + label + '</button>';
+    let h = '';
+    if (!forceEmpty) {
+      if (p.state === 'expired') h = '<span class="status failed">' + ic('warn', 's') + '<b>' + SRC[p.src] + ' sign-in expired</b></span><span class="t2">' + plural(nFailed, 'track') + ' can’t be downloaded and Refresh is paused until you sign in again.</span><span class="grow"></span><a class="btn" href="settings.html#sources" data-fb-id="V-PLD.N09" data-fb-label="Reconnect" data-fb-note="The source problem is stated on the playlist it affects, with the fix; it leads to Settings ▸ Sources. Today it only surfaced as a raw “Sync failed” error." data-fb-dec="DEC-004">Reconnect</a>';
+      else if (p.state === 'importing') h = '<span class="status"><span class="spinner"></span><b>Importing · ' + p.local + ' of ' + p.n + '</b></span><div class="progress" style="width:180px"><i style="width:' + Math.round(100 * p.local / p.n) + '%"></i></div><span class="grow"></span><a class="btn plain" href="activity.html">Show in Activity</a>';
+      else if (p.state === 'incomplete') h = '<span class="status failed">' + ic('warn', 's') + '<b>Incomplete · ' + nFailed + ' failed</b></span><span class="grow"></span>' + btn('Retry All', 'retry') + btn('Show', 'showfailed');
+      else if (p.state === 'notdl') h = '<span class="status">' + ic('cloud', 's') + '<b>Not downloaded · ' + plural(p.n, 'track') + '</b></span><span class="grow"></span>' + btn('Download All', 'dl');
+    }
+    sl.innerHTML = h; sl.hidden = !h;
+    $('#dscope').hidden = !nFailed; $('#dn-all').textContent = rows.length; $('#dn-failed').textContent = nFailed;
+    $$('#dscope .scope').forEach((s, i) => s.classList.toggle('on', i === 0)); failedScope = false; t.opts.subline = null; t.opts.cols = BASECOLS;
+    t.opts.empty = rows.length ? undefined : EMPTYPL; t.setFilter(null); t.setRows(rows);
+    fillMenu($('#m-pl-more'), p);
+    $$('#pls-switch button').forEach(b => b.classList.toggle('on', b.dataset.pls === p.state));
+  }
+  function setFailedScope(on) {
+    failedScope = on;
+    t.opts.subline = on ? (r => esc(r.reason) + ' · ' + (3 - r.attempts > 0 ? (3 - r.attempts) + ' automatic ' + (3 - r.attempts === 1 ? 'retry' : 'retries') + ' left' : 'no automatic retries left')) : null;
+    t.setCols(on ? ['num', 'title', 'artist', 'album', 'time', 'added', 'status', 'plretry'] : BASECOLS);   // fewer columns in the failed scope: the reason line needs the room
+  }
+  $('#pltbl').addEventListener('click', e => {
+    const b = e.target.closest('[data-retry]'); if (b) { const r = t.all().find(x => x.id === b.dataset.retry); if (r) { r.status = 'downloading'; t.draw(); say('Retrying “' + esc(r.title) + '”'); } return; }
+    if (e.target.closest('[data-m3u-open]')) run('m3u', cur);
+  });
+  $('#d-status').addEventListener('click', e => { const b = e.target.closest('[data-dcmd]'); if (b && !commenting()) run(b.dataset.dcmd, cur); });
+  $('#pltbl').addEventListener('mlm:select', () => {
+    const th = $('#pltbl th.sorted'), other = !!th && !(th.dataset.col === 'num' && th.textContent.includes('▲'));
+    $('#d-sorthint').hidden = !other || !t.all().length; $('#pltbl').classList.toggle('unordered', other);
+    if (other) $('#d-sorttxt').innerHTML = 'Sorted by <b>' + esc(th.dataset.col === 'num' ? '# (descending)' : th.textContent.replace(/[▲▼]/g, '')) + '</b>. # still shows each track’s place in the playlist. Dragging to reorder is off until you return to playlist order.';
+  });
+  $('#d-sortback').addEventListener('click', () => { for (let i = 0; i < 2; i++) { const th = $('#pltbl th.sorted'); if (th && th.dataset.col === 'num' && th.textContent.includes('▲')) break; $('#pltbl th[data-col="num"]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 })); } });
+  function removeRows(sel) {
+    if (!sel || !sel.length || view !== 'detail') return; const p = cur, before = p._rows.rows.slice(), ids = new Set(sel.map(r => r.id));
+    p._rows.rows = before.filter(r => !ids.has(r.id)); p._rows.rows.forEach((r, i) => { r.num = i + 1; }); const n0 = p.n, f0 = p.failed; p.n = p._rows.rows.length; p.failed = p._rows.rows.filter(r => r.status === 'failed').length;
+    if (p.state === 'incomplete' && !p.failed) p.state = p._rows.state = 'ok';
+    renderDetail(); renderSidebar(); t.el.focus();
+    say('Removed ' + (sel.length === 1 ? '“' + esc(sel[0].title) + '”' : sel.length + ' tracks') + ' from “' + esc(p.name) + '” — the files stay in the library', () => { before.forEach((r, i) => { r.num = i + 1; }); p.n = n0; p.failed = f0; if (f0 && p.state === 'ok') p.state = 'incomplete'; p._rows = { state: p.state, rows: before }; renderDetail(); renderSidebar(); });
+  }
+  function renameTitle() { const h = $('#d-title'), p = cur, old = p.name; inlineEdit(h, p.name, v => { p.name = v; renderAll(); say('Renamed “' + esc(old) + '” to “' + esc(v) + '”', () => { p.name = old; renderAll(); }); }, null, 'big'); }
+  $('#d-title').addEventListener('click', () => { if (!commenting()) renameTitle(); });
+  $('#d-play').addEventListener('click', () => { if (commenting()) return; const r = t.view().find(x => x.status === 'local'); if (r) { MLM.shell.play(r, t); const skip = t.view().filter(x => x.status !== 'local').length; if (skip) say('Playing “' + esc(cur.name) + '” — ' + plural(skip, 'track') + ' that ' + (skip === 1 ? 'isn’t' : 'aren’t') + ' downloaded will be skipped'); } });
+  $('#d-shuffle').addEventListener('click', () => { if (commenting()) return; const l = t.view().filter(x => x.status === 'local'); if (l.length) { MLM.shell.play(l[(l.length * 0.37) | 0], t); say('Shuffling “' + esc(cur.name) + '” — ' + plural(l.length, 'playable track')); } });
+  function openDetail(p) { if (!p || p.deleted) return; cur = p; if (['empty', 'loading', 'error', 'not-found', 'filtered-empty'].includes(document.body.dataset.state)) { const b = $('.reviewbar [data-set-state="default"]'); if (b) b.click(); } if (view !== 'detail') MLM.goto('detail'); else onView('detail'); }
+  $('#pls-switch').addEventListener('click', e => {
+    const b = e.target.closest('[data-pls]'); if (!b) return; const p = cur, st = b.dataset.pls;
+    if (!p.n) { say('“' + esc(p.name) + '” is empty — open a playlist with tracks to try its states.'); return; }
+    if (st !== 'ok' && !p.src) p.src = 'sc';
+    p.state = st; p.local = Math.max(1, Math.round(p.n * 12 / 44)); p.failed = Math.max(1, Math.round(p.n * 9 / 44)); p._rows = null;
+    if (view !== 'detail') MLM.goto('detail'); else renderAll();
+  });
+
+  /* ───── Views, states, status bar ───── */
+  function setDef() {
+    const d = $('.statusbar .def'); if (!d || view !== 'grid') return; const all = manual().filter(p => !p.deleted), s = G.sel && PL[G.sel];
+    const txt = s ? '“' + esc(s.name) + '” selected · ' + plural(s.n, 'track') : plural(all.length, 'playlist') + ' · ' + plural(TOP.filter(e => e.startsWith('F:')).length, 'playlist folder') + ' · ' + plural(all.reduce((a, p) => a + p.n, 0), 'track');
+    document.body.dataset.status = txt; d.innerHTML = txt;
+  }
+  function renderAll() { renderSidebar(); if (view === 'grid') { renderGrid(); setDef(); } else renderDetail(); }
+  function onView(v) {
+    view = v; $('#pls-switch').style.opacity = v === 'detail' ? 1 : .55;
+    if (v === 'grid') { t.select([]); renderGrid(); setDef(); } else { delete document.body.dataset.status; renderDetail(); }
+    renderSidebar();
+  }
+  document.addEventListener('mlm:view', e => onView(e.detail));
+  addEventListener('hashchange', () => { const h = decodeURIComponent(location.hash.slice(1)); if (h) MLM.goto(h); });
+  document.addEventListener('mlm:state', e => {
+    const s = e.detail, sf = $('.search');
+    if (s === 'filtered-empty') { if (sf) sf.value = 'vaporwave'; G.q = 'vaporwave'; if (view !== 'grid') MLM.goto('grid'); else renderGrid(); return; }
+    if (G.q === 'vaporwave') { G.q = ''; if (sf) sf.value = ''; }
+    if (s === 'not-found' && view !== 'detail') { MLM.goto('detail'); return; }
+    renderAll();
+  });
+
+  /* ───── Drag simulations (the real thing is native drag & drop) ───── */
+  function simulate(k) {
+    const flash = (el, cls, then) => { if (!el) return; el.scrollIntoView({ block: 'nearest' }); el.classList.add(cls || 'drop'); setTimeout(() => { el.classList.remove(cls || 'drop'); then(); }, 1100); };
+    const needGrid = () => { if (view !== 'grid') MLM.goto('grid'); }, needDetail = () => { if (view !== 'detail') openDetail(cur); };
+    if (k === 'tracks-card') { needGrid(); const p = byName('Road trip 2026') || manual()[0]; flash(cardEl(p.id), 'drop', () => { p.n += 3; p._rows = null; renderGrid(); say('Added 3 tracks to “' + esc(p.name) + '”', () => { p.n -= 3; p._rows = null; renderAll(); }); }); }
+    else if (k === 'cover-card') { needGrid(); const p = byName('Sunday records') || manual()[0], old = p.cov; flash(cardEl(p.id), 'drop', () => { p.cov = 'c'; renderGrid(); say('Cover set for “' + esc(p.name) + '”', () => { p.cov = old; renderAll(); }); }); }
+    else if (k === 'bad-cover') { needGrid(); const p = byName('Gym — fast') || manual()[0]; flash(cardEl(p.id), 'drop', () => { p.err = 'Couldn’t use “notes.txt” as a cover. Drop a PNG, JPEG or HEIC image.'; renderGrid(); setTimeout(() => { p.err = ''; if (view === 'grid') renderGrid(); }, 5000); }); }
+    else if (k === 'cover-head') { needDetail(); const p = cur, old = p.cov; flash($('#d-art'), 'drop', () => { p.cov = 'c'; renderDetail(); say('Cover set for “' + esc(p.name) + '”', () => { p.cov = old; renderAll(); }); }); }
+    else if (k === 'insert') { needDetail(); if (t.all().length < 6) { say('Open a playlist with at least six tracks to see the insertion line.'); return; } dropDemo = !dropDemo; t.draw(); const r = t.all().find(x => x.num === 6); MLM.say(dropDemo ? 'Dragging 3 tracks: release to insert them before #6 “' + esc(r.title) + '”. (Press the button again to end the illustration.)' : 'Inserted 3 tracks at position 6', !dropDemo); }
+    else if (k === 'tracks-sb') { const p = byName('Warm-up'); FOLD.sets.open = true; renderSidebar(); flash($('.sb-row[data-plid="' + p.id + '"]'), 'drop', () => { p.n += 3; p._rows = null; renderAll(); say('Added 3 tracks to “Warm-up”', () => { p.n -= 3; p._rows = null; renderAll(); }); }); }
+    else if (k === 'pl-folder') { const p = byName('Sunday records'); if (!p || p.folder) { say('“Sunday records” is already in a folder.'); return; } FOLD.sets.open = true; renderSidebar(); flash($('.sb-row[data-sfold="sets"]'), 'drop', () => { TOP = TOP.filter(e => e !== p.id); p.folder = 'sets'; FOLD.sets.kids.push(p.id); renderAll(); say('Moved “Sunday records” to the folder “Sets”', () => { FOLD.sets.kids = FOLD.sets.kids.filter(i => i !== p.id); p.folder = ''; TOP.splice(6, 0, p.id); renderAll(); }); }); }
+    else if (k === 'sb-new') newPlaylist('sidebar');
+    else if (k === 'sb-folder') newFolder();
+    else if (k === 'sb-rename') sbRename(byName('Road trip 2026') || cur);
+    else if (k === 'sb-renamefail') sbRename(byName('Road trip 2026') || cur, 'Road trip 2026 — final', true);
+  }
+
+  /* ───── Skeletons, first paint ───── */
+  $('#g-skel').innerHTML = Array.from({ length: 14 }, (_, i) => '<div class="card skel"><div class="art"></div><span style="width:' + (55 + (i * 17) % 35) + '%"></span><span style="width:' + (30 + (i * 11) % 25) + '%"></span></div>').join('');
+  $('#d-skel').innerHTML = Array.from({ length: 18 }, (_, i) => '<tr class="skel">' + [0, 60, 42, 46, 30, 50, 0].map(w => '<td>' + (w ? '<span style="width:' + (w + (i * 13) % 30) + '%"></span>' : '') + '</td>').join('') + '</tr>').join('');
+  onView($('[data-view="detail"]').hidden ? 'grid' : 'detail');
+  if (document.body.dataset.state === 'not-found' && view !== 'detail') MLM.goto('detail');
+});
+</script>
+</body></html>

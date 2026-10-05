@@ -1,0 +1,175 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Library-file icon — MLM B1</title>
+<link rel="stylesheet" href="assets/mlm.css"><script src="assets/app.js"></script>
+<style>
+  /* The icon is static artwork: its greys are fixed mixes of white and black (they do not follow the
+     light/dark theme, exactly like an .icns). The one tint is var(--accent), standing in for the app icon's colour. */
+  .icn { --ic-1: color-mix(in srgb, white 98%, black); --ic-2: color-mix(in srgb, white 89%, black); --ic-3: color-mix(in srgb, white 77%, black);
+         --ic-4: color-mix(in srgb, white 60%, black); --ic-5: color-mix(in srgb, white 30%, black); --ic-line: color-mix(in srgb, black 26%, transparent);
+         display: block; flex: none; overflow: visible; }
+  .specs { max-width: 1320px; width: 100%; display: flex; flex-direction: column; gap: 16px; }
+  .spec.cur { box-shadow: 0 0 0 2px var(--accent); }
+  .bds { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .bd { border-radius: 10px; padding: 18px 20px 12px; display: flex; align-items: flex-end; justify-content: center; gap: 30px; overflow: auto; }
+  .bd.light { background: color-mix(in srgb, white 95%, black); color: color-mix(in srgb, black 58%, white); }
+  .bd.dark { background: color-mix(in srgb, black 86%, white); color: color-mix(in srgb, white 62%, black); }
+  .bd figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 11px; font-variant-numeric: tabular-nums; }
+  .ctx { max-width: 1320px; width: 100%; display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; justify-content: center; }
+  .ctx .window { box-shadow: var(--pop-shadow); }
+  .fname { display: flex; align-items: center; gap: 7px; min-width: 0; }
+  .tiles { display: flex; gap: 26px; padding: 16px 22px 14px; border-top: .5px solid var(--sep); background: var(--content); }
+  .tile { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 12px; width: 104px; text-align: center; }
+  .tile span.nm { padding: 1px 6px; border-radius: 4px; } .tile.sel span.nm { background: var(--sel); color: var(--on-accent); }
+  .prow { display: flex; align-items: center; gap: 12px; padding: 9px 14px; } .prow + .prow { border-top: .5px solid var(--sep); }
+  .prow.sel { background: var(--sel-inactive); }
+  .menu .mi .icn { margin-right: -1px; }
+  .rules { max-width: 1320px; width: 100%; }
+</style></head>
+<body data-shell="plain" data-screen="ICON-MLIBM" data-title="Library-file icon"
+      data-variants="A,B,C" data-variant-rec="A" data-variant-dec="DEC-033">
+
+<div class="note">
+  <h3>The <code>.mlibm</code> library-file icon — concept (THOUGHTS §7.19, DEC-033, A0-LIBRARY-DEFINITION D9)</h3>
+  <p>A library is one file package in Finder, so it needs a document icon that reads as <b>“an MLM library”</b> — a collection — and not as “MLM itself”. Three concepts, each at 256, 64, 32 and 16 px on a light and a dark backdrop. <b>A (record crate) is recommended.</b> The <b>Variant</b> switch in the review bar changes which concept is used in the in-context samples below (Finder list and icon view, File ▸ Open Recent, the library picker). <b>Dark</b> switches the surrounding UI; the artwork itself does not change with the theme.</p>
+  <p>These are concept drawings in inline SVG, not final artwork: the disc with the tinted label is a placeholder for the app icon’s mark, and the tint uses the accent colour as a stand-in for the app icon’s colour. Question Q8 in THOUGHTS §9.</p>
+</div>
+
+<div class="specs">
+  <div class="spec" data-v="A" data-fb-id="ICON-MLIBM/A" data-fb-label="Variant A — Record crate (recommended)" data-fb-note="A record crate seen from the front: three sleeve edges fanned behind a front sleeve that carries the mark, standing in a crate with a handle slot. Reads as “a collection you carry around” — which is what a library file is. Its silhouette (wide base, stepped top) stays recognisable at 16 px and differs clearly from the app icon and from a generic document." data-fb-dec="DEC-033" data-fb-api="Static .icns in Contents/Resources, referenced by CFBundleDocumentTypes ▸ CFBundleTypeIconFile for the exported UTI (conforms to com.apple.package)">
+    <h4>A — Record crate <code>ICON-MLIBM/A</code> <span class="token">Recommended</span></h4>
+    <p>Three sleeve edges fanned behind a front sleeve with the mark, in a crate with a handle slot. A collection, portable, one object. The stepped top and the wide base keep the silhouette legible down to 16 px, where it is still clearly not a plain document and not the app.</p>
+    <div class="bds"><div class="bd light" data-sizes="A"></div><div class="bd dark" data-sizes="A"></div></div>
+  </div>
+  <div class="spec" data-v="B" data-fb-id="ICON-MLIBM/B" data-fb-label="Variant B — Stacked sleeves" data-fb-note="Three record sleeves stacked diagonally, a record sliding out of the front one. Closest to “albums”, friendly at large sizes. Weaker small: at 16 px the stack collapses into overlapping squares and resembles the generic “multiple documents” icon; it also suggests “an album” more than “the whole library”." data-fb-dec="DEC-033" data-fb-api="Static .icns (same registration as A)">
+    <h4>B — Stacked sleeves <code>ICON-MLIBM/B</code></h4>
+    <p>Three sleeves stacked diagonally, a record sliding out of the front one. Pleasant at 256 px; at 16 px it turns into overlapping squares (the system’s “several documents” look) and says “album” more than “library”.</p>
+    <div class="bds"><div class="bd light" data-sizes="B"></div><div class="bd dark" data-sizes="B"></div></div>
+  </div>
+  <div class="spec" data-v="C" data-fb-id="ICON-MLIBM/C" data-fb-label="Variant C — Document with folded corner + mark" data-fb-note="The standard macOS document shape with the mark on it. The safest and most conventional choice, and what macOS would generate by itself from the app icon. It says “a file that belongs to MLM”, not “your whole collection” — and it is easy to mistake for an exported playlist or any other MLM document that may come later." data-fb-dec="DEC-033" data-fb-api="Static .icns (same registration as A); on macOS 11+ a similar result comes for free from UTTypeIconFile-less document types">
+    <h4>C — Document with folded corner + mark <code>ICON-MLIBM/C</code></h4>
+    <p>The system document shape carrying the mark. Conventional and unmistakably a file — but generic: it does not say “collection”, and it leaves no distinct shape for other MLM documents later (an exported playlist, a backup).</p>
+    <div class="bds"><div class="bd light" data-sizes="C"></div><div class="bd dark" data-sizes="C"></div></div>
+  </div>
+</div>
+
+<div class="cat-h">In context <span class="caption" id="ctx-which" style="font-weight:400"></span></div>
+<div class="ctx">
+
+  <div class="window auto w720" data-fb-id="ICON-MLIBM.N01" data-fb-label="Finder sample: list row and icon view" data-fb-note="Where the icon is seen most: a 16 px list row (“Main Library.mlibm”, Kind “MLM Library”) next to ordinary files and folders, selected and unselected, and 64 px tiles in icon view. The package is one item — its database and artwork inside are not visible." data-fb-dec="DEC-033" data-fb-api="Finder (system). Kind string from UTTypeDescription of the exported type">
+    <div class="titlebar"><div class="traffic"><i></i><i></i><i></i></div><div class="wtitle">MLM — Finder</div></div>
+    <div class="table focus" style="background:var(--content)">
+      <table>
+        <thead><tr><th>Name</th><th style="width:170px">Date Modified</th><th class="r" style="width:84px">Size</th><th style="width:130px">Kind</th></tr></thead>
+        <tbody>
+          <tr><td><div class="fname"><i data-i="folder"></i><span class="trunc">Backups</span></div></td><td class="dim">Today, 09:02</td><td class="r dim num">--</td><td class="dim">Folder</td></tr>
+          <tr class="sel"><td><div class="fname"><span data-ic data-size="16"></span><span class="trunc">Main Library.mlibm</span></div></td><td class="dim">Today, 11:47</td><td class="r dim num">412.6 MB</td><td class="dim">MLM Library</td></tr>
+          <tr><td><div class="fname"><span data-ic data-size="16"></span><span class="trunc">Laptop Subset.mlibm</span></div></td><td class="dim">3 Oct 2026, 22:15</td><td class="r dim num">38.1 MB</td><td class="dim">MLM Library</td></tr>
+          <tr><td><div class="fname"><span data-ic data-size="16"></span><span class="trunc">Archive 2019 — vinyl rips and old SoundCloud likes.mlibm</span></div></td><td class="dim">14 Jan 2026, 18:30</td><td class="r dim num">96.4 MB</td><td class="dim">MLM Library</td></tr>
+          <tr><td><div class="fname"><i data-i="doc"></i><span class="trunc">Warm-up.m3u</span></div></td><td class="dim">28 Sep 2026, 20:04</td><td class="r dim num">4 KB</td><td class="dim">M3U Playlist</td></tr>
+          <tr><td><div class="fname"><i data-i="doc"></i><span class="trunc">mlm-b1-feedback.md</span></div></td><td class="dim">Yesterday, 23:10</td><td class="r dim num">12 KB</td><td class="dim">Markdown</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="tiles" data-fb-id="ICON-MLIBM.N02" data-fb-label="Finder icon view (64 px)" data-fb-note="At 64 px the full drawing is used. The file name carries the library’s identity; the icon is the same for every library.">
+      <div class="tile sel"><span data-ic data-size="64"></span><span class="nm">Main Library.mlibm</span></div>
+      <div class="tile"><span data-ic data-size="64"></span><span class="nm">Laptop Subset.mlibm</span></div>
+      <div class="tile"><span data-ic data-size="64"></span><span class="nm">Archive 2019.mlibm</span></div>
+    </div>
+  </div>
+
+  <div class="col gap16" style="gap:22px;align-items:center">
+    <div data-fb-id="ICON-MLIBM.N03" data-fb-label="File ▸ Open Recent sample (16 px)" data-fb-note="The same menu as the sidebar footer’s library menu. 16 px icons before each library; the open library is checked; a library whose drive is away is listed disabled with the reason in words." data-fb-dec="DEC-031" data-fb-api="Menu { ForEach(recentLibraries) { Button { } label: { Label { Text(name) } icon: { Image(nsImage: NSWorkspace.shared.icon(forFile:)) } } } }">
+      <div class="menu static" style="min-width:270px">
+        <div class="mi hdr">Open Recent</div>
+        <a class="mi chk"><span data-ic data-size="16"></span>Main Library</a>
+        <a class="mi nochk"><span data-ic data-size="16"></span>Laptop Subset</a>
+        <a class="mi nochk dis"><span data-ic data-size="16" style="opacity:.5"></span>Archive 2019 — Not connected</a>
+        <hr><a class="mi nochk">Clear Menu</a>
+      </div>
+    </div>
+
+    <div class="window auto w560" style="width:500px" data-fb-id="ICON-MLIBM.N04" data-fb-label="Library picker rows (32 px)" data-fb-note="The picker (V-PICKER, launch.html) lists known libraries with the icon at 32 px, name, location and state in words. The icon is identical for every library — the state is never drawn into the icon." data-fb-dec="DEC-031" data-fb-api="List row: Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 32, height: 32)">
+      <div class="titlebar"><div class="traffic"><i></i><i></i><i></i></div><div class="wtitle">MLM</div></div>
+      <div style="background:var(--content)">
+        <div class="prow sel"><span data-ic data-size="32"></span><div class="grow"><div style="font-weight:500">Main Library</div><div class="caption trunc">~/Library/Application Support/MLM · opened today</div></div><button class="btn primary">Open</button></div>
+        <div class="prow"><span data-ic data-size="32"></span><div class="grow"><div style="font-weight:500">Laptop Subset</div><div class="caption trunc">~/Music/MLM · opened 3 Oct 2026</div></div><button class="btn">Open</button></div>
+        <div class="prow"><span data-ic data-size="32" style="opacity:.55"></span><div class="grow"><div style="font-weight:500">Archive 2019</div><div class="caption trunc">Not connected — on “Lexxar”</div></div><button class="btn" disabled>Open</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="rules">
+  <div class="spec" data-fb-id="ICON-MLIBM.N05" data-fb-label="Rules for the asset" data-fb-note="What the final artwork has to respect, whichever concept is chosen." data-fb-dec="DEC-033" data-fb-api="Info.plist: UTExportedTypeDeclarations (conforms to com.apple.package) + CFBundleDocumentTypes ▸ CFBundleTypeIconFile; MLMLibrary.icns in Contents/Resources">
+    <h4>Rules for the asset <code>ICON-MLIBM.N05</code></h4>
+    <table class="plain">
+      <tr><th style="width:230px">Rule</th><th>Why</th></tr>
+      <tr><td><b>Static <code>.icns</code>, the same for every library — not per-library artwork.</b></td><td>A per-file icon rendered from a library’s covers would live in extended attributes / a resource fork, which many copy, sync and backup tools silently drop. The static document icon is registered once in the app bundle and survives every copy. The library’s identity is its <b>name</b> (file name, window subtitle, sidebar footer); its state is always <b>text</b> (“Not connected — on ‘Lexxar’”), never drawn into the icon.</td></tr>
+      <tr><td>Reads as “an MLM library”, not “MLM”.</td><td>Derived from the app icon’s visual language (same mark, same tint) but a different object and silhouette, so the Dock icon and a library file are never confused. Document-like footprint: it sits next to other files in Finder.</td></tr>
+      <tr><td>Small sizes are redrawn, not scaled.</td><td>16 and 32 px use a simplified drawing (fewer sleeve edges, no grooves, thicker edges) aligned to the pixel grid — shown above. The <code>.icns</code> carries 16, 32, 128, 256 and 512 pt at 1× and 2×.</td></tr>
+      <tr><td>Restrained colour.</td><td>Neutral greys plus the one tint of the app icon. No source brand colours, no state colours, no text. The artwork is fixed (it does not follow light/dark or the accent colour); it must hold on light and dark backdrops and on a selection highlight — check the selected rows above.</td></tr>
+      <tr><td>Used wherever a library is named as a file.</td><td>Finder, Open and Save dialogs, File ▸ Open Recent, the library menu in the sidebar footer, the library picker, the switch-library alert, drag previews of a <code>.mlibm</code> file. Read from the system (<code>NSWorkspace.shared.icon(forFile:)</code>) so the app and Finder always agree.</td></tr>
+    </table>
+  </div>
+</div>
+
+<script>
+document.addEventListener('mlm:ready', () => {
+  const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const f = (k, extra) => 'style="fill:var(--' + k + ');stroke:var(--ic-line);' + (extra || '') + '"';
+  const nf = k => 'style="fill:var(--' + k + ')"';
+  const ACC = 'style="fill:var(--accent)"';
+  /* the mark: a disc with a tinted label — placeholder for the app icon's mark */
+  const disc = (cx, cy, r, big) => '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" ' + nf('ic-5') + '/>' +
+    (big ? '<circle cx="' + cx + '" cy="' + cy + '" r="' + (r * 0.76) + '" style="fill:none;stroke:var(--ic-4);stroke-width:1.5;opacity:.55"/><circle cx="' + cx + '" cy="' + cy + '" r="' + (r * 0.56) + '" style="fill:none;stroke:var(--ic-4);stroke-width:1.5;opacity:.55"/>' : '') +
+    '<circle cx="' + cx + '" cy="' + cy + '" r="' + (r * (big ? 0.36 : 0.4)) + '" ' + ACC + '/>' + (big ? '<circle cx="' + cx + '" cy="' + cy + '" r="' + (r * 0.07) + '" ' + nf('ic-1') + '/>' : '');
+
+  const FULL = { /* viewBox 0 0 256 256 — used at 64 px and above */
+    A: '<g stroke-width="2">' +
+      '<rect x="52" y="30" width="152" height="150" rx="9" transform="rotate(-9 128 190)" ' + f('ic-4') + '/>' +
+      '<rect x="52" y="34" width="152" height="150" rx="9" transform="rotate(-3 128 190)" ' + f('ic-3') + '/>' +
+      '<rect x="52" y="40" width="152" height="150" rx="9" transform="rotate(5 128 190)" ' + f('ic-2') + '/>' +
+      '<rect x="50" y="54" width="156" height="156" rx="10" ' + f('ic-1') + '/>' + disc(128, 108, 42, true) +
+      '<rect x="30" y="156" width="196" height="80" rx="13" ' + f('ic-3') + '/>' +
+      '<path d="M31 196H225" style="fill:none;stroke:var(--ic-line)"/>' +
+      '<rect x="98" y="170" width="60" height="16" rx="8" ' + f('ic-5') + '/></g>',
+    B: '<g stroke-width="2">' +
+      '<rect x="82" y="26" width="148" height="148" rx="9" ' + f('ic-4') + '/>' +
+      '<rect x="58" y="50" width="148" height="148" rx="9" ' + f('ic-3') + '/>' +
+      '<circle cx="176" cy="150" r="60" style="fill:var(--ic-5);stroke:var(--ic-4)"/><circle cx="176" cy="150" r="46" style="fill:none;stroke:var(--ic-4);stroke-width:1.5;opacity:.55"/>' +
+      '<rect x="26" y="76" width="148" height="148" rx="9" ' + f('ic-1') + '/>' +
+      '<circle cx="100" cy="150" r="40" style="fill:none;stroke:var(--ic-3);stroke-width:3"/><circle cx="100" cy="150" r="17" ' + ACC + '/><circle cx="100" cy="150" r="3" ' + nf('ic-1') + '/></g>',
+    C: '<g stroke-width="2">' +
+      '<path d="M62 22H162L206 66V224a10 10 0 0 1-10 10H62a10 10 0 0 1-10-10V32a10 10 0 0 1 10-10Z" ' + f('ic-1') + '/>' +
+      '<path d="M162 22V56a10 10 0 0 0 10 10H206Z" ' + f('ic-3') + '/>' + disc(128, 146, 48, true) + '</g>'
+  };
+  const SMALL = s16 => ({ /* viewBox 0 0 32 32 — redrawn for 32 and 16 px */
+    A: '<g stroke-width="' + (s16 ? 1.6 : 1) + '">' + (s16 ? '' : '<rect x="9" y="2.5" width="14" height="6" rx="1.5" ' + f('ic-4') + '/>') +
+      '<rect x="7.5" y="' + (s16 ? 3.5 : 5) + '" width="17" height="6" rx="1.5" ' + f('ic-3') + '/>' +
+      '<rect x="6" y="7.5" width="20" height="15" rx="2" ' + f('ic-1') + '/>' + disc(16, 13.5, s16 ? 4.2 : 4.6, false) +
+      '<rect x="2.5" y="18.5" width="27" height="11" rx="2.5" ' + f('ic-3') + '/>' +
+      '<rect x="11.5" y="22" width="9" height="' + (s16 ? 3.6 : 3) + '" rx="1.5" ' + nf('ic-5') + '/></g>',
+    B: '<g stroke-width="' + (s16 ? 1.6 : 1) + '">' + (s16 ? '' : '<rect x="12" y="3" width="17" height="17" rx="2" ' + f('ic-4') + '/>') +
+      '<rect x="' + (s16 ? 10 : 8) + '" y="' + (s16 ? 4 : 7) + '" width="17" height="17" rx="2" ' + f('ic-3') + '/>' +
+      '<circle cx="22" cy="20" r="7.5" style="fill:var(--ic-5);stroke:var(--ic-4)"/>' +
+      '<rect x="3.5" y="11.5" width="17" height="17" rx="2" ' + f('ic-1') + '/><circle cx="12" cy="20" r="' + (s16 ? 3.2 : 2.6) + '" ' + ACC + '/></g>',
+    C: '<g stroke-width="' + (s16 ? 1.6 : 1) + '">' +
+      '<path d="M8 2.5H19L25.5 9V27.5a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4.5a2 2 0 0 1 2-2Z" ' + f('ic-1') + '/>' +
+      '<path d="M19 2.5V7a2 2 0 0 0 2 2H25.5Z" ' + f('ic-3') + '/>' + disc(15.75, 19, s16 ? 5.6 : 6, false) + '</g>'
+  });
+  const icon = (v, size) => '<svg class="icn" width="' + size + '" height="' + size + '" viewBox="' + (size <= 32 ? '0 0 32 32' : '0 0 256 256') + '" role="img" aria-label="MLM library file icon, variant ' + v + ', ' + size + ' px">' + (size <= 32 ? SMALL(size <= 16)[v] : FULL[v]) + '</svg>';
+
+  $$('[data-sizes]').forEach(bd => { const v = bd.dataset.sizes; bd.innerHTML = [256, 64, 32, 16].map(s => '<figure>' + icon(v, s) + '<figcaption>' + s + ' px</figcaption></figure>').join(''); });
+  const NAMES = { A: 'A — Record crate', B: 'B — Stacked sleeves', C: 'C — Document with mark' };
+  function ctx(v) {
+    if (!FULL[v]) v = 'A';
+    $$('[data-ic]').forEach(n => { n.innerHTML = icon(v, +n.dataset.size); n.style.display = 'inline-flex'; });
+    $$('.spec[data-v]').forEach(s => s.classList.toggle('cur', s.dataset.v === v));
+    document.getElementById('ctx-which').textContent = '— showing ' + NAMES[v] + (v === 'A' ? ' (recommended)' : '') + '. Switch with Variant in the review bar.';
+    MLM.refreshBadges();
+  }
+  document.addEventListener('mlm:variant', e => ctx(e.detail));
+  ctx(document.body.dataset.variant || 'A');
+});
+</script>
+</body></html>

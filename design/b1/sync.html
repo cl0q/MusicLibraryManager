@@ -1,0 +1,496 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Sync profile — MLM B1</title>
+<link rel="stylesheet" href="assets/mlm.css"><script src="assets/app.js"></script>
+<style>
+  /* Page-local layout only; colours come from mlm.css variables. */
+  .shead { display: flex; gap: 16px; align-items: flex-start; padding: 18px 20px 14px; border-bottom: .5px solid var(--sep); }
+  .shead .dev { width: 56px; height: 56px; border-radius: 12px; background: var(--fill); display: flex; align-items: center; justify-content: center; color: var(--text2); flex: none; }
+  .shead h1 { margin: 0; font-size: 22px; letter-spacing: -.2px; } .shead .acts { display: flex; gap: 8px; align-items: center; flex: none; }
+  .cap { margin-top: 10px; max-width: 520px; } .cap .legend { display: flex; gap: 14px; font-size: 11px; color: var(--text2); margin-top: 5px; flex-wrap: wrap; }
+  .cap .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: var(--text2); margin-right: 4px; } .cap .legend i.add { background: var(--accent); } .cap .legend i.free { background: var(--fill2); }
+  .body { padding: 16px 20px 40px; display: flex; flex-direction: column; gap: 22px; max-width: 900px; }
+  .sech { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px 2px; } .sech b { font-weight: 600; font-size: 15px; } .sech .grow { flex: 1; }
+  .subh { display: flex; align-items: center; gap: 8px; margin: 10px 2px 5px; font-weight: 600; font-size: 12px; } .subh .n { font-weight: 400; color: var(--text2); } .subh .grow { flex: 1; }
+  .clist { outline: none; } .clist .frow { min-height: 28px; padding-top: 3px; padding-bottom: 3px; }
+  .clist .frow.sel { background: var(--sel-inactive); } .clist:focus .frow.sel { background: var(--sel); } .clist:focus .frow.sel, .clist:focus .frow.sel * { color: var(--on-accent) !important; }
+  .clist .frow:first-child.sel { border-radius: 8px 8px 0 0; } .clist .frow:last-child.sel { border-radius: 0 0 8px 8px; }
+  .plan { display: flex; gap: 0; } .plan .stat { flex: 1; padding: 10px 12px; } .plan .stat + .stat { border-left: .5px solid var(--sep); } .plan .stat b { font-size: 20px; font-weight: 600; display: block; font-variant-numeric: tabular-nums; } .plan .stat span { color: var(--text2); font-size: 11px; }
+  details.dl { border-top: .5px solid var(--sep); } details.dl > summary { list-style: none; padding: 7px 12px; display: flex; gap: 8px; align-items: center; } details.dl > summary::-webkit-details-marker { display: none; }
+  details.dl > summary::before { content: "›"; color: var(--text2); width: 8px; display: inline-block; } details.dl[open] > summary::before { transform: rotate(90deg); }
+  details.dl .frow { min-height: 28px; padding: 3px 12px 3px 28px; display: flex; align-items: center; gap: 10px; border-top: .5px solid var(--sep); } details.dl .frow .fl { flex: 1; min-width: 0; }
+  .frow small.path { font-family: ui-monospace, Menlo, monospace; font-size: 10px; }
+  .radio { display: inline-flex; align-items: center; gap: 6px; } .radio::before { content: ""; width: 14px; height: 14px; background: var(--control); box-shadow: inset 0 0 0 .5px var(--sep-strong); flex: none; }
+  .sbx { width: 232px; padding: 4px 8px 8px; border-radius: 12px; background: var(--glass-strong); box-shadow: 0 0 0 .5px var(--sep); }
+  .sbx .sb-h .add { opacity: 1; }
+  .ing { display: flex; min-height: 300px; border-radius: 8px; box-shadow: inset 0 0 0 .5px var(--sep); overflow: hidden; }
+  .ing .l { width: 250px; flex: none; border-right: .5px solid var(--sep); padding: 4px; } .ing .l .frow { display: flex; gap: 8px; align-items: center; padding: 5px 8px; border-radius: 6px; } .ing .l .frow.sel { background: var(--sel-inactive); }
+  .ing .r { flex: 1; min-width: 0; overflow: auto; padding: 8px 12px; } .ing .r .e { display: flex; gap: 8px; align-items: center; min-height: 24px; } .ing .r .e .sgn { width: 12px; text-align: center; font-weight: 600; color: var(--text2); }
+  .ing h5 { margin: 8px 0 3px; font-size: 11px; color: var(--text2); font-weight: 600; }
+  .spec .demo .statusbar { height: auto; min-height: 24px; padding: 4px 10px; } .spec .demo .msg { flex-wrap: wrap; white-space: normal; } .spec .demo .status { white-space: normal; align-items: flex-start; }
+</style></head>
+<body data-screen="V-SYNC-DETAIL" data-title="iPod Classic — sync profile" data-nav="sync1" data-selbar="off"
+      data-states="ready,not-connected,syncing,paused,device-removed,done-with-failures,library-drive-off,empty-profile,no-profiles">
+
+<div class="note">
+  <h3>Sync profile detail — Tier 2 (mid fidelity, complete)</h3>
+  <p><b>Try:</b> the <b>State</b> switcher (the sidebar row’s second line follows it) · <b>Sync Now</b> → Pause / Resume / Cancel · <b>More</b> menu → Read Playlist Changes from Device…, Rename (inline in the sidebar), Change Destination…, Delete Sync Profile… · Content: click a row, <kbd>⌫</kbd> removes it with Undo in the status bar, <b>Add…</b> opens the picker, right-click rows · Plan: open <b>Add / Remove / Skip</b>, press <kbd>⌘R</kbd> or <b>Recompute</b> (progress + Cancel), <b>Download</b> on skipped tracks · right-click the sidebar rows “iPod Classic” / “Car USB stick” · the <b>＋</b> in the sidebar’s Sync header or the state “No profiles” → New Sync Profile… · switching <b>Drive → Not connected</b> shows the “Library drive off” state.</p>
+  <p>The profile list (V-SYNC) no longer exists as a pane: each profile is a sidebar row (exhibit below the window). Results, errors and progress belong to <i>this</i> profile. Decisions: DEC-027, DEC-016, DEC-039, DEC-040, DEC-041, DEC-044. Flows F-10, F-11.</p>
+</div>
+
+<div id="content">
+
+<div class="empty" data-show="no-profiles" data-fb-id="V-SYNC.E07" data-fb-label="No sync profiles" data-fb-note="Replaces the V-SYNC empty state. With no profile the sidebar’s Sync section shows only its header with ＋; this explanation appears when the header is clicked or from Library ▸ New Sync Profile…. It says what a profile is and has the button." data-fb-dec="DEC-027" data-fb-api="ContentUnavailableView { } description: { } actions: { Button }">
+  <i data-i="device" class="xl"></i><h2>No sync profiles yet</h2>
+  <p>A sync profile is a destination — a player, a USB stick or any folder — plus the playlists, albums and tracks you want on it. MLM shows what will change before it copies anything, and converts files if the device needs it.</p>
+  <div class="acts"><button class="btn lg primary" data-open="s-newprofile">New Sync Profile…</button></div>
+  <p class="caption" style="margin-top:8px">Nothing is copied from a device into your library. Playlist edits made on the device can be read back.</p>
+</div>
+
+<div class="scroll" data-hide="no-profiles">
+  <div class="shead" data-fb-id="V-SYNC-DETAIL" data-fb-label="Sync profile detail" data-fb-note="One scrolling grouped layout: header, Content, Plan, Options, Last sync. No collapsed cards; the answer to “can I sync now?” is in the header." data-fb-dec="DEC-027" data-fb-api="ScrollView { header ; Form(.grouped) sections }">
+    <div class="dev"><i data-i="device" class="l"></i></div>
+    <div class="grow" style="min-width:0">
+      <h1 id="pname" data-fb-id="V-SYNC-DETAIL.E01" data-fb-label="Profile name" data-fb-note="Also the window title. Renamed inline in the sidebar." data-fb-api=".navigationTitle">iPod Classic</h1>
+      <div class="row" style="gap:8px;margin-top:2px;flex-wrap:wrap">
+        <span class="t2 trunc" style="font-family:ui-monospace,Menlo,monospace;font-size:11px" data-fb-id="V-SYNC-DETAIL.E02" data-fb-label="Destination path" data-fb-note="Now changeable: More ▸ Change Destination…. A missing subfolder on a connected device is said as “Folder not found on IPOD CLASSIC”, not as “not connected”." data-fb-api="Text(path).truncationMode(.middle)">/Volumes/IPOD CLASSIC</span>
+        <span data-fb-id="V-SYNC.E06" data-fb-label="Connection and sync state (words)" data-fb-note="The same words as the sidebar row’s second line. Every profile computes its own state; it no longer depends on which profile is selected." data-fb-dec="DEC-027">
+          <span class="status ok" data-show="ready syncing paused done-with-failures library-drive-off empty-profile"><i data-i="check" class="s"></i>Connected</span>
+          <span class="status" data-show="not-connected device-removed"><i data-i="eject" class="s"></i>Not connected</span>
+        </span>
+        <span class="t2" data-show="ready">· Rockbox · last synced 2 days ago</span>
+        <span class="t2" data-show="not-connected">· last connected Oct 3, 2026</span>
+        <span class="t2" data-show="done-with-failures">· synced just now</span>
+        <span class="t2" data-show="empty-profile">· not synced yet</span>
+      </div>
+
+      <div class="cap" data-show="ready syncing paused done-with-failures library-drive-off empty-profile" data-fb-id="V-SYNC-DETAIL.N01" data-fb-label="Capacity gauge" data-fb-note="Used / to add / free on the device, in one bar with a legend in words. Replaces the “≈ size” and “Available” stat cards (E21). Space freed by removals is credited." data-fb-dec="DEC-027" data-fb-api="Gauge / custom Capsule segments; URLResourceKey.volumeAvailableCapacity">
+        <div class="gauge"><i style="width:90%" data-hide="done-with-failures"></i><i style="width:92.4%" data-show="done-with-failures"></i><i class="add" style="width:2.6%" data-hide="empty-profile done-with-failures"></i></div>
+        <div class="legend"><span><i></i>Used <span data-hide="done-with-failures">107.2 GB</span><span data-show="done-with-failures">110.1 GB</span></span><span data-hide="empty-profile done-with-failures"><i class="add"></i>To add 3.1 GB</span><span><i class="free"></i><span data-hide="done-with-failures">Free 12 GB</span><span data-show="done-with-failures">Free 9.1 GB</span> of 119.2 GB</span></div>
+      </div>
+      <div class="caption" style="margin-top:10px" data-show="not-connected device-removed">Capacity is unknown while the device is not connected.</div>
+
+      <!-- per-state line under the header -->
+      <div class="caption" style="margin-top:8px" data-show="not-connected" data-fb-id="V-SYNC-DETAIL.E06" data-fb-label="Why Sync Now is unavailable" data-fb-note="One sentence next to the disabled button (also its help text): the reason and what to do. Replaces the info banner with six possible raw reasons." data-fb-api="Text + .help() on the disabled Button">Connect “IPOD CLASSIC” to sync. The plan below is from the last time it was connected.</div>
+      <div class="caption" style="margin-top:8px" data-show="empty-profile">Nothing to sync yet — add playlists, albums or tracks below, or drag them onto “iPod Classic” in the sidebar.</div>
+
+      <div style="margin-top:10px;max-width:520px" data-show="syncing paused" data-fb-id="V-SYNC-DETAIL.E24" data-fb-label="Sync progress" data-fb-note="Progress lives in the header while syncing: count, current file with what is happening to it, Pause / Cancel. The same operation with the same numbers is in Activity and on the sidebar row. Cancel finishes the current file, then writes the playlist files for what is on the device." data-fb-dec="DEC-044" data-fb-api="ProgressView(value:total:) + Button(“Pause”) + Button(“Cancel”)">
+        <div class="progress"><i style="width:40%"></i></div>
+        <div class="row" style="gap:8px;margin-top:5px"><span data-show="syncing"><b>Syncing · 86 of 214</b></span><span data-show="paused"><b>Paused · 86 of 214</b></span><span class="t2 trunc grow" data-show="syncing">Converting to AAC: Overmono — So U Kno</span><span class="t2 trunc grow" data-show="paused">Continues with: Overmono — So U Kno</span><span class="caption">about 11 min left</span></div>
+      </div>
+    </div>
+    <div class="acts">
+      <button class="btn lg primary" data-show="ready" data-set-state="syncing" data-fb-id="V-SYNC-DETAIL.E05" data-fb-label="Sync Now" data-fb-note="The one primary action. Disabled with the reason beside it when it can’t run (not connected, library drive not connected, nothing to do, not enough space). Also Library ▸ Sync “iPod Classic” Now." data-fb-dec="DEC-027" data-fb-api="Button(.borderedProminent).disabled().help()">Sync Now</button>
+      <button class="btn lg primary" data-show="not-connected library-drive-off empty-profile device-removed" disabled>Sync Now</button>
+      <button class="btn lg" data-show="done-with-failures" data-set-state="syncing">Sync Now</button>
+      <button class="btn lg" data-show="syncing" data-set-state="paused">Pause</button>
+      <button class="btn lg primary" data-show="paused" data-set-state="syncing">Resume</button>
+      <button class="btn lg" data-show="syncing paused" id="sync-cancel">Cancel</button>
+      <button class="btn lg" data-menu-click="m-sync-more" data-fb-id="V-SYNC-DETAIL.N02" data-fb-label="More menu" data-fb-note="Same items as the sidebar row’s context menu (CM-SYNC-PROFILE)." data-fb-dec="DEC-039" data-fb-api="Menu { } label: { Label(“More”, systemImage: “ellipsis.circle”) }">More <i data-i="chevd" class="s"></i></button>
+    </div>
+  </div>
+
+  <div class="banner err" data-show="device-removed" data-fb-id="V-SYNC-DETAIL.N03" data-fb-label="Device removed during sync" data-fb-note="New state: removal is detected at once (volume unmount), the run stops cleanly and keeps its result. Resume When Connected continues with the remaining 128 files as soon as the volume is back. Today the remaining files fail one by one with misleading reasons." data-fb-dec="DEC-027" data-fb-api="NSWorkspace.didUnmountNotification → paused operation; banner in safeAreaInset">
+    <i data-i="eject"></i><span><b>“iPod Classic” was disconnected — 86 of 214 copied.</b> The copied tracks are complete; the playlist files on the device were not updated yet.</span>
+    <span class="act"><button class="btn" id="resume-armed">Resume When Connected</button><button class="btn" data-set-state="not-connected">Cancel Sync</button></span>
+  </div>
+  <div class="banner" data-show="library-drive-off" data-fb-id="V-SYNC-DETAIL.N04" data-fb-label="Library drive not connected" data-fb-note="New: with the source files away there is nothing to copy, and the plan says so (today the sync “succeeds” with 0 synced). The device being connected does not help; both disks are named." data-fb-dec="DEC-014" data-fb-api="banner (safeAreaInset) + disabled Sync Now">
+    <i data-i="drive"></i><span><b>Can’t sync — “Lexxar” is not connected.</b> The music to copy is on “Lexxar”. Connect it and the sync can start; the plan below stays as it was.</span>
+  </div>
+  <div class="banner info" data-show="done-with-failures" data-fb-id="V-SYNC-DETAIL.E26" data-fb-label="Result line" data-fb-note="Result of this profile’s last run, in words with counts, including skipped. Kept across relaunch; never shown on another profile." data-fb-dec="DEC-044">
+    <i data-i="check"></i><span><b>Sync finished — 205 copied, 12 removed, 9 failed, 9 skipped.</b> Playlist files on the device are up to date for the copied tracks.</span>
+    <span class="act"><a class="btn" href="#lastsync" id="show-failed">Show Failed</a></span>
+  </div>
+
+  <div class="body">
+
+    <!-- ───── Content ───── -->
+    <section>
+      <div class="sech"><b>Content</b><span class="caption" data-hide="empty-profile">1,482 tracks in all · a track in several playlists is copied once</span></div>
+
+      <div class="subh" data-fb-id="V-SYNC-DETAIL.E16" data-fb-label="Playlists (count, Add…)" data-fb-note="Always visible (was a collapsed card). Add… opens the picker; playlists can also be dragged onto the sidebar row or into this list." data-fb-api="Section { } header: { Text ; Button(“Add…”) }">Playlists <span class="n" data-hide="empty-profile">6</span><span class="grow"></span><button class="btn" data-open="s-picker" data-pick="pl">Add…</button></div>
+      <div class="group clist" tabindex="0" data-kind="playlist" data-hide="empty-profile" data-fb-id="V-SYNC-DETAIL.E17" data-fb-label="Playlist rows" data-fb-note="Name, track count, and in words what will not make it onto the device. Select + ⌫ removes with Undo (the hover trash and the confirmation are gone). Double-click opens the playlist." data-fb-dec="DEC-041" data-fb-api="List(selection:).onDeleteCommand; .dropDestination(for: Playlist.self)">
+        <div class="frow" data-menu="cm-sync-plrow"><i data-i="list"></i><div class="fl trunc">Warm-up</div><span class="t2 num">38 tracks</span></div>
+        <div class="frow" data-menu="cm-sync-plrow"><i data-i="list"></i><div class="fl trunc">Peak time</div><span class="t2 num">61 tracks</span></div>
+        <div class="frow" data-menu="cm-sync-plrow"><i data-i="heart"></i><div class="fl trunc">Liked on SoundCloud</div><span class="status" data-fb-id="V-SYNC-DETAIL.N05" data-fb-label="Not downloaded count on a playlist" data-fb-note="Says up front which part of a playlist can’t be copied; the tracks are listed under Plan ▸ Skip." data-fb-dec="DEC-023"><i data-i="cloud" class="s"></i>Not downloaded · 7 tracks</span><span class="t2 num">1,044 tracks</span></div>
+        <div class="frow" data-menu="cm-sync-plrow"><i data-i="list"></i><div class="fl trunc">Road trip 2026</div><span class="t2 num">112 tracks</span></div>
+        <div class="frow" data-menu="cm-sync-plrow"><i data-i="list"></i><div class="fl trunc">Ambient for work — long pieces, no vocals, nothing above 90 BPM</div><span class="t2 num">154 tracks</span></div>
+        <div class="frow" data-menu="cm-sync-plrow"><i data-i="list"></i><div class="fl trunc">Boiler Room picks</div><span class="t2 num">27 tracks</span></div>
+      </div>
+      <div class="group" data-show="empty-profile"><div class="frow"><div class="fl t2">No playlists — press Add… or drag playlists onto “iPod Classic” in the sidebar.</div></div></div>
+
+      <div class="subh" data-fb-id="V-SYNC-DETAIL.N06" data-fb-label="Albums (count, Add…)" data-fb-note="New: whole albums as profile content, following the Albums section." data-fb-dec="DEC-019" data-fb-api="Section">Albums <span class="n" data-hide="empty-profile">4</span><span class="grow"></span><button class="btn" data-open="s-picker" data-pick="al">Add…</button></div>
+      <div class="group clist" tabindex="0" data-kind="album" data-hide="empty-profile">
+        <div class="frow" data-menu="cm-sync-plrow"><span class="cov c2"></span><div class="fl trunc">Selected Ambient Works 85–92<small>Aphex Twin</small></div><span class="t2 num">13 tracks</span></div>
+        <div class="frow" data-menu="cm-sync-plrow"><span class="cov c4"></span><div class="fl trunc">Isles (Deluxe)<small>Bicep</small></div><span class="t2 num">20 tracks</span></div>
+        <div class="frow" data-menu="cm-sync-plrow"><span class="cov c6"></span><div class="fl trunc">Actual Life 3 (January 1 – September 9 2022)<small>Fred again..</small></div><span class="t2 num">13 tracks</span></div>
+        <div class="frow" data-menu="cm-sync-plrow"><span class="cov c1"></span><div class="fl trunc">Good Lies<small>Overmono</small></div><span class="status"><i data-i="cloud" class="s"></i>Not downloaded · 2 tracks</span><span class="t2 num">12 tracks</span></div>
+      </div>
+      <div class="group" data-show="empty-profile"><div class="frow"><div class="fl t2">No albums.</div></div></div>
+
+      <div class="subh" data-fb-id="V-SYNC-DETAIL.E18" data-fb-label="Tracks (count, Add…)" data-fb-note="Tracks added one by one. Has its own Add… now (today the only way is a context menu elsewhere, explained by a tooltip). The count says it covers individually added tracks only." data-fb-api="Section">Tracks <span class="n" data-hide="empty-profile">23 added individually</span><span class="grow"></span><button class="btn" data-open="s-picker" data-pick="tr">Add…</button></div>
+      <div class="group clist" tabindex="0" data-kind="track" data-hide="empty-profile" data-fb-id="V-SYNC-DETAIL.E19" data-fb-label="Track rows" data-fb-note="Title — artist, with the availability word when a track can’t be copied. ⌫ removes with Undo; full track context menu." data-fb-dec="DEC-041" data-fb-api="List(selection: Set<Track.ID>).onDeleteCommand">
+        <div class="frow" data-menu="cm-sync-trackrow"><span class="cov c3"></span><div class="fl trunc">Finally (Extended)<small>Kings of Tomorrow</small></div><span class="t2 num">9:12</span></div>
+        <div class="frow" data-menu="cm-sync-trackrow"><span class="cov c5"></span><div class="fl trunc">The Whistle Song<small>Frankie Knuckles</small></div><span class="t2 num">7:09</span></div>
+        <div class="frow" data-menu="cm-sync-trackrow"><span class="cov none"><i data-i="note" class="s"></i></span><div class="fl trunc">Untitled 03 (b-side, vinyl rip)<small>unknown uploader</small></div><span class="status failed"><i data-i="retry" class="s"></i>Download failed</span><span class="t2 num">5:34</span></div>
+        <div class="frow" data-menu="cm-sync-trackrow"><span class="cov c1"></span><div class="fl trunc">Hackney Parrot (Special Request VIP)<small>Tessela</small></div><span class="t2 num">5:31</span></div>
+        <div class="frow" data-menu="cm-sync-trackrow"><span class="cov c2"></span><div class="fl trunc">Says<small>Nils Frahm</small></div><span class="t2 num">8:18</span></div>
+        <div class="frow"><div class="fl"><a class="btn plain" data-say-plain="Showing all 23 tracks">Show All 23</a></div></div>
+      </div>
+      <div class="group" data-show="empty-profile"><div class="frow"><div class="fl t2">No tracks — press Add…, or select tracks anywhere and choose Add to Sync Profile ▸ iPod Classic.</div></div></div>
+    </section>
+
+    <!-- ───── Plan ───── -->
+    <section data-hide="empty-profile">
+      <div class="sech"><b>Plan</b>
+        <span class="caption" id="plan-ok" data-fb-id="V-SYNC-DETAIL.E20" data-fb-label="Plan status line" data-fb-note="Was “Preview: up to date · computed …”. The plan belongs to the profile, is kept across relaunch and recomputes by itself when content, options or the connection change."><span data-hide="not-connected device-removed">Up to date · computed 2 min ago</span><span data-show="not-connected device-removed">From Oct 3, 2026 — will be checked against the device when it is connected</span></span>
+        <span class="caption row" id="plan-upd" hidden style="gap:6px" data-fb-id="V-SYNC-DETAIL.E03" data-fb-label="Updating plan (progress + Cancel)" data-fb-note="Counted progress with Cancel; the previous numbers stay visible underneath, slightly dimmed, until the new ones are ready." data-fb-dec="DEC-044" data-fb-api="ProgressView + Button(“Cancel”)"><span class="spinner"></span><span id="plan-upd-t">Updating plan… 120 of 214</span><button class="btn plain" id="plan-cancel">Cancel</button></span>
+        <span class="grow"></span>
+        <button class="btn" id="plan-go" data-fb-id="V-SYNC-DETAIL.E04" data-fb-label="Recompute (⌘R)" data-fb-note="K-SYNC-REFRESH. ⌘R keeps one meaning everywhere: re-read from outside — here, compare the profile with what is on the device." data-fb-api="Button.keyboardShortcut(“r”)">Recompute <span class="t2">⌘R</span></button>
+      </div>
+      <div class="group" id="planbox">
+        <div class="plan" data-fb-id="V-SYNC-DETAIL.E21" data-fb-label="Plan summary" data-fb-note="Add · Remove · Skip · space, as one line of numbers with words. Skip is new: tracks that can’t be copied are named instead of staying “pending” forever. Remove is 0 and says why when Clean up is off. If it doesn’t fit: “Not enough space — 3.1 GB needed, 2.4 GB free after removals” replaces the last cell and Sync Now is disabled." data-fb-dec="DEC-027" data-fb-api="Grid / HStack of LabeledContent">
+          <div class="stat"><b>214</b><span>Add</span></div><div class="stat"><b>12</b><span>Remove</span></div><div class="stat"><b>9</b><span>Skip</span></div><div class="stat"><b>3.1 GB</b><span>of 12 GB free</span></div>
+        </div>
+        <details class="dl" data-fb-id="V-SYNC-DETAIL.E22" data-fb-label="Add / Remove lists" data-fb-note="Expandable, lazily loaded lists (a first sync can have thousands of rows). Each row: track, destination path, size. Right-click: CM-SYNC-PREVIEWFILE." data-fb-api="DisclosureGroup { LazyVStack / Table }">
+          <summary><b>Add 214</b><span class="t2">3.1 GB · 198 converted to AAC 248 kbps, 16 copied as they are</span></summary>
+          <div id="addrows"></div>
+          <div class="frow"><div class="fl t2">and 206 more… <a class="btn plain" data-say-plain="Showing all 214 files">Show All</a></div></div>
+        </details>
+        <details class="dl">
+          <summary><b>Remove 12</b><span class="t2">0.2 GB · no longer in this profile · deleted from the device (it has no Trash)</span></summary>
+          <div id="remrows"></div>
+          <div class="frow"><div class="fl t2">and 8 more…</div></div>
+        </details>
+        <details class="dl" open data-fb-id="V-SYNC-DETAIL.N07" data-fb-label="Skip list" data-fb-note="New: every track that will not be copied, by name, with the glossary state and its fix. After Download finishes the track moves to Add by itself." data-fb-dec="DEC-027" data-fb-api="DisclosureGroup { ForEach(skipped) { LabeledContent + Button } }">
+          <summary><b>Skip 9</b><span class="t2">can’t be copied until fixed</span><span class="grow" style="flex:1"></span><button class="btn" id="dl-all" data-fb-id="V-SYNC-DETAIL.N08" data-fb-label="Download All">Download All 7</button></summary>
+          <div id="skiprows"></div>
+        </details>
+      </div>
+    </section>
+    <section data-show="empty-profile"><div class="sech"><b>Plan</b></div><div class="group"><div class="frow"><div class="fl t2">Nothing to plan yet. The plan appears as soon as the profile has content.</div></div></div></section>
+
+    <!-- ───── Options ───── -->
+    <section>
+      <div class="sech" data-fb-id="V-SYNC-DETAIL.E07" data-fb-label="Options section" data-fb-note="Was the collapsed “Settings” card. Always visible, at the place where it is read once and rarely changed. A change saves at once and the plan recomputes; during a sync it says “Applies to the next sync”."><b>Options</b><span class="caption" data-show="syncing paused">Changes apply to the next sync.</span></div>
+      <div class="group">
+        <div class="frow" data-fb-id="V-SYNC-DETAIL.E10" data-fb-label="Format" data-fb-note="Was “Transcode mode”. Plain words; the consequence of a change (every file is replaced) is said before it happens." data-fb-api="Picker(“Format”)"><div class="fl">Format<small>Lossless and high-bitrate files are converted; files already smaller are copied as they are.</small></div><span class="popup">AAC 248 kbps</span></div>
+        <div class="frow" data-fb-id="V-SYNC-DETAIL.E11" data-fb-label="Normalize volume" data-fb-api="Toggle"><div class="fl">Normalize volume<small>To −14 LUFS, for tracks whose loudness was measured. Only when converting.</small></div><span class="toggle on"></span></div>
+        <div class="frow" data-fb-id="V-SYNC-DETAIL.E12" data-fb-label="Artwork" data-fb-api="Picker"><div class="fl">Artwork<small>Smaller covers for players with little memory. Only when converting.</small></div><span class="popup">250 px</span></div>
+        <div class="frow" data-fb-id="V-SYNC-DETAIL.E08" data-fb-label="Playlist files" data-fb-note="The switch and the “Format &amp; app” picker (E09) in one row. The picker names what is written (.m3u8 or .m3u), and the folder layout no longer depends on a hidden control." data-fb-api="Toggle + Picker"><div class="fl">Playlist files<small>Write a playlist file for each playlist of this profile.</small></div><span class="popup" data-fb-id="V-SYNC-DETAIL.E09" data-fb-label="Playlist file format">Rockbox (.m3u8)</span><span class="toggle on"></span></div>
+        <div class="frow" data-fb-id="V-SYNC-DETAIL.E14" data-fb-label="Clean up" data-fb-note="When off, the plan shows Remove 0 with “Clean up is off” instead of a number that will not happen." data-fb-api="Toggle"><div class="fl">Clean up<small>Remove files from the device that are no longer in this profile.</small></div><span class="toggle on"></span></div>
+        <div class="frow" data-fb-id="V-SYNC-DETAIL.E13" data-fb-label="Path style" data-fb-note="Was the “Compatible paths” switch that did nothing. A real choice of how files are named on the device." data-fb-api="Picker"><div class="fl">Path style<small>How folders and file names are written on the device.</small></div><span class="popup">Compatible (FAT32-safe)</span></div>
+      </div>
+      <div class="ghelp" data-fb-id="S-SYNC-TOAST" data-fb-label="Device defaults note" data-fb-note="Replaces the toast that appeared behind the sheet. Says which defaults, stays readable, and can be undone." data-fb-dec="DEC-016">Rockbox defaults were applied when this profile was created: AAC 248 kbps, artwork 250 px, playlist files on. <a class="btn plain" data-say-plain="Options reset to the Rockbox defaults" data-undo="1">Reset to Device Defaults</a></div>
+      <div class="ghelp" data-fb-id="V-SYNC-DETAIL.E15" data-fb-label="Background processing (moved)" data-fb-note="An app-wide setting does not belong in a per-profile form. One line points to its only home.">How much of the Mac a sync may use is set once for all work in <a href="settings.html#maintenance">Settings ▸ Maintenance</a>.</div>
+    </section>
+
+    <!-- ───── Last sync ───── -->
+    <section id="lastsync">
+      <div class="sech"><b>Last sync</b><span class="grow"></span><button class="btn" data-show="done-with-failures" id="retry-all" data-fb-id="V-SYNC-DETAIL.N09" data-fb-label="Retry Failed" data-fb-note="New: retries all failed tracks of this profile as one Activity operation, then rewrites the playlist files." data-fb-dec="DEC-044" data-fb-api="Button">Retry Failed (9)</button></div>
+      <div class="group">
+        <div class="frow" data-show="ready not-connected library-drive-off"><div class="fl">Oct 3, 2026, 18:42 — 1,268 copied, 4 removed, no failures<small>1,268 tracks of this profile are on the device.</small></div><a class="btn plain" href="activity.html">Show in Activity</a></div>
+        <div class="frow" data-show="syncing paused"><div class="fl">Running now — started 17:20<small>Previous sync: Oct 3, 2026, 18:42 — 1,268 copied, no failures.</small></div><a class="btn plain" href="activity.html">Show in Activity</a></div>
+        <div class="frow" data-show="device-removed"><div class="fl">Interrupted today, 17:31 — 86 of 214 copied<small>The device was disconnected. Nothing is marked as failed; the remaining 128 files are still in the plan.</small></div><a class="btn plain" href="activity.html">Show in Activity</a></div>
+        <div class="frow" data-show="empty-profile"><div class="fl t2">Not synced yet.</div></div>
+        <div class="frow" data-show="done-with-failures"><div class="fl">Today, 17:44 — 205 copied, 12 removed, <span class="status failed">9 failed</span>, 9 skipped<small>The failures below belong to this profile and stay until they are fixed or the next sync.</small></div><a class="btn plain" href="activity.html">Show in Activity</a></div>
+        <div data-show="done-with-failures" id="failrows" data-fb-id="V-SYNC-DETAIL.E27" data-fb-label="Failed tracks" data-fb-note="Shown open, per profile, each with a reason in the user’s words and Retry (which shows progress and rewrites the playlist files). Double-click plays the track; it no longer opens the inspector. Developer wording is gone." data-fb-dec="DEC-027" data-fb-api="ForEach(failures) { LabeledContent + Button(“Retry”) }.contextMenu"></div>
+      </div>
+    </section>
+  </div>
+</div>
+</div><!-- /content -->
+
+<!-- ═════════════ Menus ═════════════ -->
+<div class="menu" id="m-sync-more" hidden data-fb-id="V-SYNC-DETAIL.N10" data-fb-label="More menu (items)" data-fb-dec="DEC-039" data-fb-api="Menu">
+  <a class="mi" data-open="s-ingest">Read Playlist Changes from Device…</a><hr>
+  <a class="mi" data-rename>Rename</a><a class="mi" data-say-plain="Created “iPod Classic copy”" data-undo="1">Duplicate</a><a class="mi" data-open="s-dest">Change Destination…</a><hr>
+  <a class="mi" data-say-plain="Showing /Volumes/IPOD CLASSIC in Finder">Show in Finder</a><hr>
+  <a class="mi destr" data-open="a-delprofile">Delete Sync Profile…</a>
+</div>
+
+<div class="menu" id="cm-sync-profile" hidden data-fb-id="CM-SYNC-PROFILE" data-fb-label="Sync profile context menu (sidebar row)" data-fb-note="Right-click acts on the clicked row. Groups in the standard order: Primary · Info/edit · Fix · Locate · Remove. Duplicate copies every option including Artwork." data-fb-dec="DEC-039" data-fb-api="contextMenu on the sidebar row">
+  <a class="mi" href="sync.html">Open</a><a class="mi" data-set-state="syncing">Sync Now</a><hr>
+  <a class="mi" data-rename>Rename</a><a class="mi" data-say-plain="Created “iPod Classic copy”" data-undo="1">Duplicate</a><a class="mi" data-open="s-dest">Change Destination…</a><hr>
+  <a class="mi" data-open="s-ingest">Read Playlist Changes from Device…</a><a class="mi" data-recompute>Recompute Plan<span class="k">⌘R</span></a><hr>
+  <a class="mi" data-say-plain="Showing /Volumes/IPOD CLASSIC in Finder">Show in Finder</a><a class="mi" data-say-plain="“IPOD CLASSIC” can be removed safely" data-fb-id="CM-SYNC-PROFILE.N01" data-fb-label="Eject (proposal)" data-fb-note="Proposal: MLM has no eject today and the flow ends in Finder. Only shown for removable volumes.">Eject “IPOD CLASSIC”</a><hr>
+  <a class="mi destr" data-open="a-delprofile">Delete Sync Profile…</a>
+</div>
+
+<div class="menu" id="cm-sync-plrow" hidden data-fb-id="CM-SYNC-PLROW" data-fb-label="Playlist / album row in a profile" data-fb-note="Was a single destructive item. Removal is undoable, so it needs no confirmation." data-fb-dec="DEC-039" data-fb-api="contextMenu">
+  <a class="mi" href="playlists.html#detail">Open</a><hr>
+  <a class="mi sub">Add to Sync Profile</a><hr>
+  <a class="mi" data-say-plain="Download started — 7 tracks">Download Not-Downloaded Tracks</a><hr>
+  <a class="mi destr" data-remove-sel>Remove from “iPod Classic”<span class="k">⌫</span></a>
+</div>
+
+<div class="menu" id="cm-sync-trackrow" hidden data-fb-id="CM-SYNC-TRACKROW" data-fb-label="Track row in a profile" data-fb-note="The standard track menu, with this container’s Remove last." data-fb-dec="DEC-039" data-fb-api="contextMenu(forSelectionType:)">
+  <a class="mi"><i data-i="play"></i>Play<span class="k">↩</span></a><a class="mi"><i data-i="wave"></i>Preview<span class="k">Space</span></a><hr>
+  <a class="mi">Play Next<span class="k">⌥↩</span></a><a class="mi">Add to Queue<span class="k">⌥⇧↩</span></a><hr>
+  <a class="mi sub">Add to Playlist</a><a class="mi sub">Add to Sync Profile</a><hr>
+  <a class="mi" data-act="info-open">Get Info<span class="k">⌘I</span></a><a class="mi" href="albums.html#detail">Go to Album</a><a class="mi" href="discover.html#similar">Find Similar</a><hr>
+  <a class="mi">Show in Finder</a><a class="mi sub">Copy</a><hr>
+  <a class="mi destr" data-remove-sel>Remove from “iPod Classic”<span class="k">⌫</span></a>
+</div>
+
+<div class="menu" id="cm-sync-previewfile" hidden data-fb-id="CM-SYNC-PREVIEWFILE" data-fb-label="File in a plan list" data-fb-note="Show in Finder says which file: the library file always exists; the file on the device only once it was copied (disabled before, instead of doing nothing)." data-fb-dec="DEC-039" data-fb-api="contextMenu">
+  <a class="mi"><i data-i="play"></i>Play<span class="k">↩</span></a><hr>
+  <a class="mi" data-act="info-open">Get Info<span class="k">⌘I</span></a><hr>
+  <a class="mi">Show Library File in Finder</a><a class="mi dis">Show on Device in Finder</a><a class="mi sub">Copy</a><hr>
+  <a class="mi destr" data-say-plain="Removed 1 track from “iPod Classic”" data-undo="1">Remove from “iPod Classic”</a>
+</div>
+
+<div class="menu" id="cm-sync-failed" hidden data-fb-id="CM-SYNC-FAILED" data-fb-label="Failed track row" data-fb-note="Same items as today in the standard order; “Show Details” is Get Info, “Retry Sync” is Retry (a Fix)." data-fb-dec="DEC-039" data-fb-api="contextMenu">
+  <a class="mi"><i data-i="play"></i>Play<span class="k">↩</span></a><hr>
+  <a class="mi">Play Next<span class="k">⌥↩</span></a><a class="mi">Add to Queue<span class="k">⌥⇧↩</span></a><hr>
+  <a class="mi" data-act="info-open">Get Info<span class="k">⌘I</span></a><hr>
+  <a class="mi" data-say-plain="Retrying 1 track…">Retry</a><hr>
+  <a class="mi">Show in Finder</a><a class="mi sub">Copy</a>
+</div>
+
+<!-- ═════════════ Sheets and alerts ═════════════ -->
+<div class="sheet" id="s-newprofile" hidden data-fb-id="S-SYNC-NEWPROFILE" data-fb-label="New Sync Profile (sheet)" data-fb-note="One sheet for both entry points (sidebar ＋ and Add to Sync Profile ▸ New Sync Profile… from a selection, where the button reads “Create and Add 3 Tracks”). A destination is required. Detected devices are listed at once, no extra Detect step. Return = Create, Esc = Cancel." data-fb-dec="DEC-027" data-fb-api=".sheet { Form } ; .fileImporter ; .dropDestination(for: URL.self)">
+  <div class="sh"><h2>New Sync Profile</h2></div>
+  <div class="sb"><div class="form">
+    <div class="kv"><label>Name</label><input class="field" value="iPod Classic" data-fb-id="S-SYNC-NEWPROFILE.E01" data-fb-label="Name" data-fb-note="Prefilled from the chosen device. A duplicate name is reported inline under the field."></div>
+    <div>
+      <div class="gtitle">Destination</div>
+      <div class="group" data-fb-id="S-SYNC-NEWPROFILE.E03" data-fb-label="Detected devices" data-fb-note="Removable volumes that are connected now; Rockbox players are recognised. Choosing one fills the destination and the preset." data-fb-api="ForEach(volumes) { row with radio selection }">
+        <div class="frow"><span class="radio on" data-name="dev"></span><i data-i="device"></i><div class="fl">IPOD CLASSIC<small>Rockbox player · /Volumes/IPOD CLASSIC · 12 GB free of 119.2 GB</small></div></div>
+        <div class="frow"><span class="radio" data-name="dev"></span><i data-i="drive"></i><div class="fl">SANDISK 64<small>USB drive · /Volumes/SANDISK 64 · 58.3 GB free of 62.5 GB</small></div></div>
+        <div class="frow"><span class="radio" data-name="dev"></span><i data-i="folder"></i><div class="fl">Another folder<small>Any folder on this Mac or on a connected disk</small></div><button class="btn" data-say-plain="Choose a folder (system panel, can create folders)…" data-fb-id="S-SYNC-OPENPANEL" data-fb-label="Choose… (system folder panel)" data-fb-note="Unchanged system panel: folders only, can create folders.">Choose…</button></div>
+      </div>
+      <div class="row" style="gap:8px;margin-top:8px"><input class="field grow" value="/Volumes/IPOD CLASSIC" style="font-family:ui-monospace,Menlo,monospace;font-size:11px" data-fb-id="S-SYNC-NEWPROFILE.E02" data-fb-label="Destination path" data-fb-note="Shows the chosen folder; a folder dropped here or anywhere on the sheet sets it (D-SYNC-FOLDER-TO-OUTPUT)." data-fb-dec="DEC-040"></div>
+      <div class="ghelp">You can also drop a folder or a disk from Finder here. Lexxar (your library drive) is not offered as a destination.</div>
+    </div>
+    <div>
+      <div class="gtitle">Device preset</div>
+      <div class="row" style="gap:10px"><span class="popup" data-fb-id="S-SYNC-NEWPROFILE.N01" data-fb-label="Device preset" data-fb-note="Says what the defaults are before they apply; replaces the “device defaults applied” toast. Presets: Rockbox player · Phone app (Doppi) · MLM for iOS · Plain folder." data-fb-api="Picker">Rockbox player</span><span class="caption">AAC 248 kbps · artwork 250 px · playlist files (.m3u8) · clean up on</span></div>
+      <div class="ghelp">Every option can be changed later on the profile.</div>
+    </div>
+  </div></div>
+  <div class="sf"><span class="left caption">The profile appears in the sidebar under Sync.</span><button class="btn" data-close>Cancel</button><button class="btn primary" data-close data-then-state="empty-profile" id="np-create">Create</button></div>
+</div>
+
+<div class="sheet" id="s-picker" hidden style="width:480px" data-fb-id="S-SYNC-PLAYLISTPICKER" data-fb-label="Add to profile (picker sheet)" data-fb-note="One picker for Playlists, Albums and Tracks. Rows show cover / count; items already in the profile are marked and dimmed; ⇧ / ⌘ selection; Return = Add, Esc = Cancel. Its own loading, error and empty sentences stay inside the sheet." data-fb-dec="DEC-027" data-fb-api=".sheet { List(selection: Set<ID>).searchable }">
+  <div class="sh"><h2>Add to “iPod Classic”</h2>
+    <div class="row" style="gap:8px;margin-top:8px"><span class="seg" data-group="pick"><button class="on" data-p="pl">Playlists</button><button data-p="al">Albums</button><button data-p="tr">Tracks</button></span><input class="field grow" placeholder="Search"></div></div>
+  <div class="sb">
+    <div class="group" data-pane="pick:pl">
+      <div class="frow"><span class="check on"></span><i data-i="list"></i><div class="fl">Closing</div><span class="t2 num">44 tracks</span></div>
+      <div class="frow"><span class="check on"></span><i data-i="list"></i><div class="fl">Gym</div><span class="t2 num">31 tracks</span></div>
+      <div class="frow"><span class="check"></span><i data-i="list"></i><div class="fl">Sunday morning</div><span class="t2 num">58 tracks</span></div>
+      <div class="frow"><span class="check"></span><i data-i="list"></i><div class="fl">Liked on YouTube</div><span class="t2 num">612 tracks</span></div>
+      <div class="frow t3"><i data-i="check"></i><i data-i="list"></i><div class="fl">Warm-up</div><span>In profile</span></div>
+      <div class="frow t3"><i data-i="check"></i><i data-i="list"></i><div class="fl">Peak time</div><span>In profile</span></div>
+      <div class="frow t3"><i data-i="check"></i><i data-i="heart"></i><div class="fl">Liked on SoundCloud</div><span>In profile</span></div>
+    </div>
+    <div class="group" data-pane="pick:al" hidden>
+      <div class="frow"><span class="check on"></span><span class="cov c5"></span><div class="fl">Fragments<small>Bonobo</small></div><span class="t2 num">12 tracks</span></div>
+      <div class="frow"><span class="check"></span><span class="cov c3"></span><div class="fl">Music Has the Right to Children<small>Boards of Canada</small></div><span class="t2 num">17 tracks</span></div>
+      <div class="frow"><span class="check"></span><span class="cov c1"></span><div class="fl">In Colour<small>Jamie xx</small></div><span class="t2 num">11 tracks</span></div>
+      <div class="frow t3"><i data-i="check"></i><span class="cov c4"></span><div class="fl">Isles (Deluxe)<small>Bicep</small></div><span>In profile</span></div>
+    </div>
+    <div class="group" data-pane="pick:tr" hidden>
+      <div class="frow"><div class="fl t2" style="white-space:normal">Type to find tracks by title, artist or album. Faster: select tracks anywhere and drag them onto “iPod Classic” in the sidebar, or choose Add to Sync Profile ▸.</div></div>
+      <div class="frow"><span class="check on"></span><span class="cov c2"></span><div class="fl">Kerala<small>Bonobo</small></div><span class="t2 num">3:56</span></div>
+      <div class="frow"><span class="check"></span><span class="cov c6"></span><div class="fl">Only Human<small>Four Tet</small></div><span class="t2 num">7:51</span></div>
+    </div>
+  </div>
+  <div class="sf"><button class="btn" data-close>Cancel</button><button class="btn primary" data-close data-say-plain="Added 2 playlists to “iPod Classic” — 75 tracks to add" data-undo="1" data-fb-id="K-SYNC-PICKER-RETURN" data-fb-label="Add (Return)" data-fb-note="Named by its verb with the count. Return = Add, Esc = Cancel.">Add 2 Playlists</button></div>
+</div>
+
+<div class="sheet wide" id="s-ingest" hidden data-fb-id="S-SYNC-DEVICEINGEST" data-fb-label="Read Playlist Changes from Device (sheet)" data-fb-note="The results list (S-SYNC-DEVICEINGEST) and the entry-level diff (S-SYNC-INGESTPREVIEW) in one sheet. Per playlist a summary (+3 −1 on device), per entry a checkbox. Apply merges: it adds and removes exactly the checked entries and never replaces the playlist, so tracks that exist only in MLM (not downloaded, never synced) stay. One undo step; the result is confirmed in the status bar. Only audio-less playlist files are read; no music is copied from the device. Other states inside the sheet: “Reading playlists on iPod Classic… 3 of 9 · Cancel”, “No playlist changes on the device”, “iPod Classic is not connected”; an apply error appears above the buttons and the list stays." data-fb-dec="DEC-027" data-fb-api=".sheet { HSplit: List(playlists) | List(entries with Toggle) } ; UndoManager.registerUndo">
+  <div class="sh"><h2>Read Playlist Changes from Device</h2><div class="caption">From “iPod Classic” — /Volumes/IPOD CLASSIC · 3 of 9 playlist files differ from MLM</div></div>
+  <div class="sb">
+    <div class="ing">
+      <div class="l" data-fb-id="S-SYNC-DEVICEINGEST.E04" data-fb-label="Changed playlists" data-fb-note="One row per playlist with its diff in words and numbers; a playlist created on the device says “New on device”. Unchecking a row leaves that playlist alone." data-fb-api="List(selection:)">
+        <div class="frow sel"><span class="check on"></span><div class="grow trunc">Road trip 2026<div class="caption">+3 −1 on device</div></div></div>
+        <div class="frow"><span class="check on"></span><div class="grow trunc">Warm-up<div class="caption">+1 on device · order changed</div></div></div>
+        <div class="frow"><span class="check on"></span><div class="grow trunc">Gym<div class="caption">New on device · 14 tracks</div></div></div>
+        <div class="caption" style="padding:8px">6 playlists are the same on the device and in MLM.</div>
+      </div>
+      <div class="r" data-fb-id="S-SYNC-INGESTPREVIEW" data-fb-label="Entry-level diff" data-fb-note="The diff for the selected playlist: added on device, removed on device, order, and entries that couldn’t be matched (with the file name and a reason in plain words). Each entry can be left out.">
+        <div class="row"><b class="grow">Road trip 2026</b><span class="caption">112 tracks in MLM · 114 after applying</span></div>
+        <h5>Added on the device</h5>
+        <div class="e"><span class="check on"></span><span class="sgn">+</span><span class="grow trunc">Kerala — Bonobo</span></div>
+        <div class="e"><span class="check on"></span><span class="sgn">+</span><span class="grow trunc">Emerald Rush — Jon Hopkins</span></div>
+        <div class="e"><span class="check on"></span><span class="sgn">+</span><span class="grow trunc">Marea (we’ve lost dancing) — Fred again.. &amp; The Blessed Madonna</span></div>
+        <h5>Removed on the device</h5>
+        <div class="e"><span class="check on"></span><span class="sgn">−</span><span class="grow trunc">Rumble — Skrillex, Fred again.. &amp; Flowdan</span></div>
+        <h5>Order</h5>
+        <div class="e"><span class="check"></span><span class="sgn">↕</span><span class="grow">Use the device’s order for this playlist</span></div>
+        <h5>Not matched</h5>
+        <div class="e"><span class="sgn"><i data-i="warn" class="s"></i></span><span class="grow trunc">Music/Unknown/track 07.m4a <span class="t2">— no track in the library has this file</span></span></div>
+        <h5>Only in MLM — kept</h5>
+        <div class="e t2" data-fb-id="S-SYNC-DEVICEINGEST.N01" data-fb-label="MLM-only tracks kept" data-fb-note="Fixes the data risk PP-SYNC-04: tracks that never reached the device are not treated as “removed on device”."><span class="sgn"></span><span class="grow">7 tracks that are not on the device (6 Not downloaded, 1 Download failed) stay in the playlist.</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="sf"><span class="left caption">Apply merges the checked changes into your playlists. You can undo it.</span><button class="btn" data-close>Cancel</button><button class="btn primary" data-close data-say-plain="Applied 5 changes to 2 playlists and created “Gym” from “iPod Classic”" data-undo="1" data-fb-id="S-SYNC-DEVICEINGEST.N02" data-fb-label="Apply (merge)">Apply 5 Changes and Create 1 Playlist</button></div>
+</div>
+
+<div class="sheet" id="s-dest" hidden style="width:460px" data-fb-id="S-SYNC-DESTINATION" data-fb-label="Change Destination (sheet)" data-fb-note="New: the destination could not be changed after creation. States the consequence before it happens." data-fb-dec="DEC-027" data-fb-api=".sheet + .fileImporter">
+  <div class="sh"><h2>Change Destination</h2></div>
+  <div class="sb"><div class="row" style="gap:8px"><input class="field grow" value="/Volumes/IPOD CLASSIC" style="font-family:ui-monospace,Menlo,monospace;font-size:11px"><button class="btn" data-say-plain="Choose a folder (system panel)…">Choose…</button></div>
+  <div class="ghelp">Files already copied to the old destination stay there. The plan is computed again for the new destination, so the next sync may copy everything.</div></div>
+  <div class="sf"><button class="btn" data-close>Cancel</button><button class="btn primary" data-close data-recompute>Change Destination</button></div>
+</div>
+
+<div class="alert" id="a-delprofile" hidden data-fb-id="A-SYNC-DELETEPROFILE" data-fb-label="Delete Sync Profile confirmation" data-fb-note="Title asks the question with the name; the message says what goes and what stays; the button is named by its verb. While this profile is syncing the message adds “The running sync will be cancelled.”" data-fb-api=".confirmationDialog(titleVisibility: .visible)">
+  <div class="aic"><i data-i="trash" class="l"></i></div><h2>Delete the sync profile “iPod Classic”?</h2>
+  <p>The profile, its plan and its sync history are removed. Music on the device and in your library is not touched.</p>
+  <div class="ab"><button class="btn destructive" data-close data-then-state="no-profiles" id="del-go">Delete Sync Profile</button><button class="btn" data-close>Cancel</button></div>
+</div>
+
+<!-- ═════════════ Desk exhibits ═════════════ -->
+<div class="cat-h">Sync section of the sidebar — rows in their states and as drop targets (replaces the V-SYNC profile list)</div>
+<div class="cat">
+  <div class="spec" data-fb-id="V-SYNC" data-fb-label="Profile list → sidebar rows" data-fb-note="V-SYNC’s list pane is gone: profiles are rows of the sidebar section “Sync” (header was “Sync Profiles”, E01; ＋ was the unlabeled button E02; rows E03–E06). The detail-pane placeholder “Select a profile” (E10) has no successor: a row is a destination." data-fb-dec="DEC-027">
+    <h4>States in words <code>V-SYNC.E03–E06</code></h4><p>Second line = this profile’s own state, whichever profile is open. A device and a plain folder have different icons.</p>
+    <div class="demo"><div class="sbx">
+      <div class="sb-h" data-fb-id="V-SYNC.E01" data-fb-label="Sync section header with ＋" data-fb-note="＋ (E02) has the help text “New Sync Profile…” and opens S-SYNC-NEWPROFILE.">Sync<span class="add" data-open="s-newprofile" data-fb-id="V-SYNC.E02" data-fb-label="New Sync Profile (＋)"><i data-i="plus" class="s"></i></span></div>
+      <a class="sb-row two active"><i data-i="device"></i><span class="lbl trunc" data-fb-id="V-SYNC.E04" data-fb-label="Row: name + state">iPod Classic<small>Connected · 214 to add</small></span></a>
+      <a class="sb-row two"><i data-i="device"></i><span class="lbl trunc">iPod Classic<small>Syncing · 86 of 214</small></span><span class="spinner"></span></a>
+      <a class="sb-row two"><i data-i="device"></i><span class="lbl trunc">iPod Classic<small>Paused · 86 of 214</small></span></a>
+      <a class="sb-row two"><i data-i="device"></i><span class="lbl trunc">iPod Classic<small>Not connected</small></span></a>
+      <a class="sb-row two"><i data-i="device"></i><span class="lbl trunc">iPod Classic<small>Synced 2 hours ago</small></span></a>
+      <a class="sb-row two"><i data-i="device"></i><span class="lbl trunc">iPod Classic<small>9 failed · Synced just now</small></span></a>
+      <a class="sb-row two"><i data-i="drive"></i><span class="lbl trunc">Car USB stick<small>12 to add</small></span></a>
+      <a class="sb-row two"><i data-i="folder"></i><span class="lbl trunc">Phone (Doppi folder)<small>Not synced yet</small></span></a>
+    </div></div>
+  </div>
+  <div class="spec" data-fb-id="D-SYNC-TRACKS-TO-PROFILE" data-fb-label="Drop targets" data-fb-note="D-SYNC-TRACKS-TO-PROFILE, D-SYNC-PLAYLIST-TO-PROFILE (and albums / folders): a profile row accepts the drop directly; the status bar confirms with Undo and the open profile is not switched. D-SYNC-REORDER-PROFILES: rows reorder by drag with an insertion line." data-fb-dec="DEC-040" data-fb-api=".dropDestination(for: TrackRef.self / PlaylistRef.self / AlbumRef.self) ; .onMove">
+    <h4>Drop targets <code>D-SYNC-*</code></h4><p>Tracks, albums and playlists dropped on a profile are added to it. Rows reorder by drag.</p>
+    <div class="demo" style="flex-direction:column;align-items:center;gap:8px"><div class="sbx">
+      <div class="sb-h">Sync</div>
+      <a class="sb-row two drop"><i data-i="device"></i><span class="lbl trunc">iPod Classic<small>Add 3 tracks</small></span></a>
+      <a class="sb-row two" style="box-shadow:inset 0 2px 0 var(--accent)" data-fb-id="D-SYNC-REORDER-PROFILES" data-fb-label="Reorder (insertion line)"><i data-i="drive"></i><span class="lbl trunc">Car USB stick<small>12 to add</small></span></a>
+    </div>
+    <div class="statusbar" style="border:0;border-radius:6px;width:100%"><span class="msg">Added 3 tracks to “iPod Classic” <a class="btn plain" style="height:16px">Undo</a></span></div></div>
+  </div>
+  <div class="spec" data-fb-id="S-SYNC-RENAME" data-fb-label="Rename → inline in the sidebar" data-fb-note="The rename sheet is gone. Rename (menu, or Return on the selected row) turns the row’s name into a text field, like Finder and like playlists. Return commits, Esc cancels (K-SYNC-RENAME-KEYS). A duplicate name shakes the field and says “A sync profile with this name already exists” under it." data-fb-dec="DEC-027" data-fb-api="TextField in the List row + @FocusState ; .onSubmit / .onExitCommand">
+    <h4>Rename inline <code>S-SYNC-RENAME → sidebar</code></h4><p>No sheet: the name is edited in the row. Try More ▸ Rename in the window above.</p>
+    <div class="demo"><div class="sbx">
+      <div class="sb-h">Sync</div>
+      <a class="sb-row two active"><i data-i="device"></i><span class="lbl"><input class="field" value="iPod Classic" style="width:150px"><small>Connected · 214 to add</small></span></a>
+      <a class="sb-row two"><i data-i="drive"></i><span class="lbl trunc">Car USB stick<small>12 to add</small></span></a>
+    </div></div>
+  </div>
+  <div class="spec" data-fb-id="A-SYNC-REMOVECONTENT" data-fb-label="Remove content → undoable" data-fb-note="The confirmation “Remove from profile?” is replaced by an undoable removal (⌫ or the context menu). The message carries the consequence the alert used to explain." data-fb-dec="DEC-041">
+    <h4>Remove from a profile <code>A-SYNC-REMOVECONTENT → Undo</code></h4><p>No alert. The consequence is in the confirmation.</p>
+    <div class="demo"><div class="statusbar" style="border:0;border-radius:6px;width:100%"><span class="msg">Removed “Warm-up” from “iPod Classic” — its files leave the device at the next sync <a class="btn plain" style="height:16px">Undo</a></span></div></div>
+  </div>
+  <div class="spec" data-fb-id="V-SYNC-DETAIL.E23" data-fb-label="Not enough space" data-fb-note="Shown in the header in place of the gauge legend’s last entry and as the reason beside the disabled Sync Now. Counts space freed by removals; names what would help." data-fb-dec="DEC-027">
+    <h4>Not enough space <code>V-SYNC-DETAIL.E23</code></h4><p>Header variant when the plan doesn’t fit.</p>
+    <div class="demo" style="flex-direction:column;gap:6px;align-items:stretch"><div class="gauge"><i style="width:98%"></i><i class="add" style="width:2%"></i></div><span class="status error"><i data-i="warn" class="s"></i>Not enough space — 3.1 GB to add, 2.4 GB free after removals.</span><span class="caption" style="white-space:normal">Remove a playlist from the profile or choose a smaller format in Options.</span></div>
+  </div>
+  <div class="spec" data-fb-id="V-SYNC-DETAIL.E25" data-fb-label="Errors where they happen" data-fb-note="The single shared red banner is gone. Each failure appears at its place in plain words with one action: plan (below), options, picker and sheets inline, a sync that could not start in the header and in Activity." data-fb-dec="DEC-044">
+    <h4>Errors at their place <code>V-SYNC-DETAIL.E25</code></h4><p>Example: the plan could not be computed.</p>
+    <div class="demo" style="flex-direction:column;gap:6px;align-items:stretch"><span class="status error"><i data-i="warn" class="s"></i>Couldn’t read “IPOD CLASSIC” — the device stopped answering.</span><span class="row" style="gap:6px"><button class="btn">Try Again</button><a class="btn plain" href="activity.html#logs">Show Logs</a></span></div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('mlm:ready', () => {
+  const $ = (s, r) => (r || document).querySelector(s), $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const esc = MLM.esc, win = MLM.shell.win;
+  const frow = (t, sub, right, menu, fb) => '<div class="frow"' + (menu ? ' data-menu="' + menu + '"' : '') + (fb || '') + '><div class="fl trunc">' + esc(t) + (sub ? '<small class="trunc path">' + esc(sub) + '</small>' : '') + '</div>' + right + '</div>';
+
+  /* plan lists */
+  const ADD = [['Overmono — So U Kno', 'Music/Overmono/Good Lies/03 So U Kno.m4a', '7.6 MB'], ['Bicep — Apricots', 'Music/Bicep/Isles (Deluxe)/02 Apricots.m4a', '7.9 MB'], ['Fred again.. — Delilah (pull me out of this)', 'Music/Fred again__/Actual Life 3 (January 1 - September 9 2022)/04 Delilah (pull me out of this).m4a', '7.7 MB'], ['Ross From Friends — Sundial — live at Printworks, London, 14 March 2025', 'Music/Ross From Friends/No album/Sundial - live at Printworks, London, 14 March 2025.m4a', '12.6 MB'], ['Kelly Lee Owens — Melt!', 'Music/Kelly Lee Owens/Inner Song/05 Melt!.m4a', '7.0 MB'], ['Jon Hopkins — Emerald Rush', 'Music/Jon Hopkins/Singularity/02 Emerald Rush.m4a', '10.3 MB'], ['DJ Heartstring — Will We Ever Be the Same', 'Music/DJ Heartstring/No album/Will We Ever Be the Same.mp3', '8.8 MB'], ['Boiler Room — Fred again.. | Boiler Room: London', 'Music/Boiler Room/No album/Fred again__ _ Boiler Room_ London.m4a', '113.4 MB']];
+  $('#addrows').innerHTML = ADD.map(r => frow(r[0], r[1], '<span class="t2 num">' + r[2] + '</span>', 'cm-sync-previewfile')).join('');
+  $('#remrows').innerHTML = [['Skrillex, Fred again.. & Flowdan — Rumble', 'Music/Skrillex/No album/Rumble.m4a', '4.5 MB'], ['Armand Van Helden — Flowerz feat. Tony Williams', 'Music/Armand Van Helden/2 Future 4 U/04 Flowerz.m4a', '15.8 MB'], ['Tessela — Hackney Parrot', 'Music/Tessela/No album/Hackney Parrot.m4a', '9.9 MB'], ['Sally C — Bored of Rave', 'Music/Sally C/No album/Bored of Rave.m4a', '10.9 MB']].map(r => frow(r[0], r[1], '<span class="t2 num">' + r[2] + '</span>', 'cm-sync-previewfile')).join('');
+  const SKIP = [['Lone — Echo Paths', 'nd'], ['Bicep — Chroma 001 HELIUM', 'nd'], ['feel my bicep fan uploads — Cash Romantic (full EP continuous mix, unofficial upload)', 'nd'], ['Overmono — Is U', 'nd'], ['Overmono — Calon', 'nd'], ['nightcore.tapes — delilah (sped up)', 'nd'], ['unknown uploader — Untitled 03 (b-side, vinyl rip)', 'df'], ['Brian Eno — An Ending (Ascent)', 'fm'], ['Boards of Canada — Roygbiv', 'nd']];
+  const ST = { nd: '<span class="status">' + MLM.icon('cloud', 's') + 'Not downloaded</span><button class="btn" data-dl>Download</button>', df: '<span class="status failed">' + MLM.icon('retry', 's') + 'Download failed</span><span class="t2 small">Not available on SoundCloud any more</span><button class="btn" data-dl>Retry Download</button>', fm: '<span class="status missing">' + MLM.icon('missing', 's') + 'File missing</span><button class="btn" data-say-plain="Locate the file (system panel)…">Locate…</button>' };
+  $('#skiprows').innerHTML = SKIP.map(r => frow(r[0], '', ST[r[1]], 'cm-sync-trackrow')).join('');
+  const FAIL = [['So U Kno', 'Overmono', 'The device is full'], ['Fred again.. | Boiler Room: London', 'Boiler Room', 'The device is full'], ['Emerald Rush', 'Jon Hopkins', 'The device is full'], ['Melt!', 'Kelly Lee Owens', 'Couldn’t convert to AAC — the file is damaged'], ['Says', 'Nils Frahm', 'Couldn’t convert to AAC — ffmpeg stopped'], ['Kerala', 'Bonobo', 'File missing in the library'], ['Idontknow', 'Jamie xx', 'The file name is too long for the device'], ['Only Human', 'Four Tet', 'The device is full'], ['Opal (Four Tet Remix)', 'Bicep', 'The device is full']];
+  $('#failrows').innerHTML = FAIL.map((r, i) => '<div class="frow" data-menu="cm-sync-failed" style="border-top:.5px solid var(--sep)"><i data-i="warn"></i><div class="fl trunc">' + esc(r[0]) + '<small>' + esc(r[1]) + '</small></div><span class="status failed"' + (i === 0 ? ' data-fb-id="V-SYNC-DETAIL.N11" data-fb-label="Failure reason" data-fb-note="A cause the user can act on. A missing destination is no longer reported as “Source file is missing”."' : '') + '>' + esc(r[2]) + '</span><button class="btn" data-retry>Retry</button></div>').join('');
+  MLM.hydrateIcons(document);
+
+  /* content lists: select, ⌫ with undo */
+  const undo = [];
+  $$('.clist').forEach(list => {
+    list.addEventListener('click', e => { const r = e.target.closest('.frow'); if (!r || e.target.closest('a,button')) return; if (!(e.metaKey || e.ctrlKey)) $$('.frow.sel', list).forEach(x => x.classList.remove('sel')); r.classList.toggle('sel', !(e.metaKey || e.ctrlKey) || !r.classList.contains('sel')); });
+    list.addEventListener('contextmenu', e => { const r = e.target.closest('.frow'); if (r && !r.classList.contains('sel')) { $$('.frow.sel').forEach(x => x.classList.remove('sel')); r.classList.add('sel'); } }, true);
+    list.addEventListener('keydown', e => {
+      const rows = $$('.frow[data-menu]', list), cur = rows.findIndex(r => r.classList.contains('sel'));
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const n = rows[Math.max(0, Math.min(rows.length - 1, cur + (e.key === 'ArrowDown' ? 1 : -1)))]; rows.forEach(r => r.classList.toggle('sel', r === n)); }
+      else if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); removeSel(list); }
+    });
+  });
+  function removeSel(list) {
+    list = list || $$('.clist').find(l => $('.frow.sel', l)); if (!list) return; const rows = $$('.frow.sel', list); if (!rows.length) return;
+    const kind = list.dataset.kind, name = $('.fl', rows[0]).childNodes[0].textContent.trim(), step = rows.map(r => ({ r, next: r.nextSibling, list }));
+    rows.forEach(r => { r.classList.remove('sel'); r.remove(); }); undo.push(step);
+    MLM.say((rows.length === 1 ? 'Removed “' + esc(name) + '”' : 'Removed ' + rows.length + ' ' + kind + 's') + ' from “iPod Classic” — ' + (rows.length === 1 && kind === 'track' ? 'its file leaves' : 'the files leave') + ' the device at the next sync', true);
+    recompute(true);
+  }
+  function undoLast() { const step = undo.pop(); if (!step) return false; step.forEach(s => s.list.insertBefore(s.r, s.next && s.next.parentNode === s.list ? s.next : null)); MLM.say('Undone — back in “iPod Classic”'); return true; }
+
+  /* plan recompute */
+  let pt = 0, pi = 0;
+  function recompute(quiet) {
+    clearInterval(pi); clearTimeout(pt); let n = 20; $('#plan-ok').hidden = true; $('#plan-upd').hidden = false; $('#planbox').style.opacity = .55; $('#plan-upd-t').textContent = 'Updating plan… ' + n + ' of 214';
+    pi = setInterval(() => { n = Math.min(214, n + 25); $('#plan-upd-t').textContent = 'Updating plan… ' + n + ' of 214'; }, 300);
+    pt = setTimeout(() => endPlan(), 2700); if (!quiet) MLM.refreshBadges();
+  }
+  function endPlan(cancelled) { clearInterval(pi); clearTimeout(pt); $('#plan-ok').hidden = false; $('#plan-upd').hidden = true; $('#planbox').style.opacity = ''; if (cancelled) MLM.say('Plan update cancelled — showing the plan from 2 min ago'); }
+  $('#plan-go').addEventListener('click', () => recompute()); $('#plan-cancel').addEventListener('click', () => endPlan(true));
+  document.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'r' && !e.shiftKey) { e.preventDefault(); recompute(); }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !/INPUT|TEXTAREA/.test(e.target.tagName)) { e.preventDefault(); undoLast(); }
+  });
+
+  /* inline rename in the real sidebar */
+  const sbRow = () => $('.sb-row[data-nav="sync1"]', win);
+  function rename() {
+    const row = sbRow(), lbl = row && $('.lbl', row); if (!lbl || $('input', lbl)) return; const old = lbl.childNodes[0].textContent;
+    const inp = document.createElement('input'); inp.className = 'field'; inp.value = old; inp.style.width = '150px'; lbl.replaceChild(inp, lbl.childNodes[0]); lbl.classList.remove('trunc'); inp.focus(); inp.select();
+    const done = ok => { if (!inp.parentNode) return; const v = ok && inp.value.trim() ? inp.value.trim() : old; lbl.replaceChild(document.createTextNode(v), inp); lbl.classList.add('trunc'); $('#pname').textContent = v; if (v !== old) MLM.say('Renamed to “' + esc(v) + '”', true); };
+    inp.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); done(true); } if (e.key === 'Escape') done(false); }); inp.addEventListener('blur', () => done(true)); inp.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); });
+  }
+
+  /* sidebar rows: context menu, state text, ＋ */
+  $$('.sb-row[data-nav^="sync"]', win).forEach(r => r.dataset.menu = 'cm-sync-profile');
+  const SUB = { ready: 'Connected · 214 to add', 'not-connected': 'Not connected', syncing: 'Syncing · 86 of 214', paused: 'Paused · 86 of 214', 'device-removed': 'Not connected · sync interrupted', 'done-with-failures': '9 failed · Synced just now', 'library-drive-off': 'Waiting for “Lexxar”', 'empty-profile': 'Nothing to sync yet' };
+  document.addEventListener('mlm:state', e => {
+    const s = e.detail, none = s === 'no-profiles'; $$('.sb-row[data-nav^="sync"]', win).forEach(r => r.hidden = none);
+    const sm = sbRow() && $('small', sbRow()); if (sm && SUB[s]) sm.textContent = SUB[s];
+    endPlan(); $('#resume-armed').textContent = 'Resume When Connected'; $('#resume-armed').disabled = false;
+    const def = $('.statusbar .def', win); if (def) def.textContent = none ? 'No sync profiles' : s === 'empty-profile' ? 'Nothing in this profile yet' : '1,482 tracks in this profile · 1,268 on the device';
+  });
+  const hdr = $$('.sb-h', win).find(h => h.textContent.trim() === 'Sync'); if (hdr && $('.add', hdr)) { $('.add', hdr).title = 'New Sync Profile…'; $('.add', hdr).addEventListener('click', () => MLM.openSheet('s-newprofile')); }
+
+  document.addEventListener('click', e => {
+    const t = e.target;
+    if (t.closest('.menu [data-set-state]')) setTimeout(() => document.body.click(), 0);
+    const u = t.closest('.statusbar .msg a'); if (u && u.textContent.trim() === 'Undo') { if (!undoLast()) MLM.say('Undone'); return; }
+    if (t.closest('[data-rename]')) { setTimeout(rename, 30); return; }
+    if (t.closest('[data-recompute]')) { recompute(); return; }
+    if (t.closest('[data-remove-sel]')) { removeSel(); return; }
+    const pk = t.closest('[data-pick]'); if (pk) { const b = $('#s-picker .seg [data-p="' + pk.dataset.pick + '"]'); if (b) setTimeout(() => b.click(), 0); }
+    const sp = t.closest('[data-say-plain]'); if (sp) { MLM.say(sp.dataset.sayPlain, !!sp.dataset.undo); return; }
+    const dl = t.closest('[data-dl]'); if (dl) { const row = dl.closest('.frow'); $$('.status, .small', row).forEach(x => x.remove()); dl.outerHTML = '<span class="status dlst"><span class="spinner"></span>Downloading…</span>'; MLM.say('Download started — the track moves to Add when it is ready'); setTimeout(() => { const st = $('.dlst', row); if (st) { st.className = 'status ok'; st.textContent = 'Downloaded — now in Add'; } }, 2400); return; }
+    if (t.closest('#dl-all')) { e.preventDefault(); $$('#skiprows [data-dl]').forEach((b, i) => setTimeout(() => b.click(), i * 120)); return; }
+    const rt = t.closest('[data-retry]'); if (rt) { const row = rt.closest('.frow'); rt.outerHTML = '<span class="status rst"><span class="spinner"></span>Retrying…</span>'; setTimeout(() => { const st = $('.rst', row); if (st) { st.className = 'status ok'; st.textContent = 'Copied'; const f = $('.status.failed', row); if (f) f.remove(); } }, 1800); return; }
+    if (t.closest('#retry-all')) { MLM.say('Retrying 9 tracks on “iPod Classic” — playlist files are rewritten afterwards'); $$('#failrows [data-retry]').forEach((b, i) => setTimeout(() => b.click(), i * 150)); return; }
+    if (t.closest('#sync-cancel')) { $('[data-set-state="ready"]').click(); MLM.say('Sync cancelled — 86 of 214 copied. Playlist files were written for what is on the device.'); return; }
+    if (t.closest('#resume-armed')) { const b = $('#resume-armed'); b.textContent = 'Will Resume When Connected'; b.disabled = true; MLM.say('The sync continues when “iPod Classic” is connected again'); return; }
+    if (t.closest('#show-failed')) { e.preventDefault(); $('#lastsync').scrollIntoView({ behavior: 'smooth' }); return; }
+    const ts = t.closest('[data-then-state]'); if (ts) { $('.reviewbar [data-set-state="' + ts.dataset.thenState + '"]').click(); MLM.say(ts.id === 'np-create' ? 'Created the sync profile “iPod Classic” — add playlists, albums or tracks' : 'Deleted the sync profile “iPod Classic”'); return; }
+    if (t.closest('[data-drive],[data-drive-on]')) setTimeout(syncDrive, 0);
+  });
+  /* library drive switch ↔ state */
+  function syncDrive() { const off = document.documentElement.dataset.drive === 'off', cur = document.body.dataset.state; if (off && cur !== 'library-drive-off' && cur !== 'no-profiles') $('[data-set-state="library-drive-off"]').click(); else if (!off && cur === 'library-drive-off') $('[data-set-state="ready"]').click(); }
+  /* drop onto the real sidebar profile rows */
+  document.addEventListener('mousedown', e => { const r = e.target.closest('.clist .frow[data-menu]'); if (r && !e.target.closest('button,a')) r.draggable = true; });
+  let dragging = false;
+  document.addEventListener('dragstart', e => { dragging = !!(e.target.closest && e.target.closest('.clist .frow')); if (dragging) e.dataTransfer.setData('text/plain', 'mlm'); });
+  const target = e => { const a = e.target.closest ? e.target.closest('.sb-row') : null; return dragging && a && /^sync/.test(a.dataset.nav || '') ? a : null; };
+  document.addEventListener('dragover', e => { const a = target(e); $$('.sb-row.drop', win).forEach(x => { if (x !== a) x.classList.remove('drop'); }); if (a) { e.preventDefault(); a.classList.add('drop'); } });
+  document.addEventListener('drop', e => { const a = target(e); $$('.sb-row.drop', win).forEach(x => x.classList.remove('drop')); if (!a) return; e.preventDefault(); MLM.say('Added to “' + esc($('.lbl', a).childNodes[0].textContent) + '”', true); dragging = false; });
+
+  const s0 = document.body.dataset.state || 'ready'; document.dispatchEvent(new CustomEvent('mlm:state', { detail: s0 })); syncDrive();
+});
+</script>
+</body></html>

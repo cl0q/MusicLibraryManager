@@ -1,0 +1,423 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Activity — MLM B1</title>
+<link rel="stylesheet" href="assets/mlm.css"><script src="assets/app.js"></script>
+<style>
+  .ring { width: 14px; height: 14px; border-radius: 50%; flex: none; display: inline-block; background: conic-gradient(var(--accent) calc(var(--p, 27) * 1%), var(--fill2) 0);
+    -webkit-mask: radial-gradient(circle, transparent 3.6px, black 4.2px); mask: radial-gradient(circle, transparent 3.6px, black 4.2px); }
+  .tbx { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: 10px; background: linear-gradient(var(--glass-strong), var(--glass)); box-shadow: 0 0 0 .5px var(--sep); }
+  .pop { width: 384px; display: flex; flex-direction: column; font-size: 13px; }
+  .pop .ph { font-size: 11px; font-weight: 600; color: var(--text2); display: flex; align-items: center; gap: 6px; margin: 10px 0 4px; } .pop .ph:first-child { margin-top: 0; }
+  .pop .job { padding: 5px 0; } .pop .job + .job { border-top: .5px solid var(--sep); }
+  .pop .job .l2 { font-size: 11px; color: var(--text2); white-space: normal; }
+  .pop .subs { margin: 4px 0 2px 18px; font-size: 11px; display: flex; flex-direction: column; gap: 2px; }
+  .pop .subs .row { gap: 6px; }
+  .pop .disc { width: 12px; color: var(--text2); font-size: 9px; border: 0; background: none; padding: 0; }
+  .pop .foot { border-top: .5px solid var(--sep); margin-top: 10px; padding-top: 8px; display: flex; align-items: center; }
+  .wtab { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: .5px solid var(--sep); background: var(--content); flex: none; }
+  .wbody { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--content); }
+  .ops td { height: 40px; } .ops td .sub2 a { color: inherit; text-decoration: underline; text-decoration-color: var(--text3); }
+  .ops .ctl { display: flex; gap: 4px; justify-content: flex-end; } .ops .btn { height: 20px; font-size: 12px; padding: 0 7px; }
+  .detail { flex: none; height: 250px; border-top: .5px solid var(--sep-strong); display: flex; flex-direction: column; background: var(--content); }
+  .detail .dh { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: .5px solid var(--sep); flex: none; }
+  .logbar { display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-bottom: .5px solid var(--sep); flex: none; flex-wrap: wrap; }
+  .logview { flex: 1; min-height: 0; overflow: auto; font: 11px/1.55 ui-monospace, Menlo, monospace; padding: 6px 14px; user-select: text; cursor: text; white-space: pre; background: var(--content); outline: none; }
+  .logview.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .logview .tm { color: var(--text2); } .logview .lv { font-weight: 700; display: inline-block; width: 44px; } .logview .src { color: var(--accent-text); display: inline-block; width: 86px; }
+  .logview .ERROR { color: var(--red); } .logview .WARN { color: var(--orange); } .logview .DEBUG { color: var(--text3); } .logview .INFO { color: var(--text2); }
+  .logfoot { display: flex; align-items: center; gap: 10px; padding: 0 14px; height: 26px; border-top: .5px solid var(--sep); font-size: 11px; color: var(--text2); flex: none; background: var(--content); }
+  .strip { height: 24px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-top: .5px solid var(--sep-strong); font-size: 11px; background: var(--content-alt); }
+  .strip:hover { background: var(--fill); }
+  .strip-panel { flex: none; height: 170px; overflow: auto; border-top: .5px solid var(--sep); background: var(--content); padding: 8px 14px; }
+  .table:focus tr.sel td .btn { color: var(--text) !important; }
+  .spec code { font: 11px ui-monospace, Menlo, monospace; }
+  .spec.full { grid-column: 1 / -1; }
+  .statew { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+</style></head>
+<body data-shell="plain" data-screen="W-ACTIVITY" data-title="Activity" data-states="default,empty,loading,error,no-library"
+      data-variants="A,B" data-variant-rec="A" data-variant-dec="DEC-005">
+
+<div class="note">
+  <h3>Activity: toolbar item, popover and Activity window — Tier 2</h3>
+  <p><b>Try:</b> click the live Activity item in the first exhibit to open the real popover; expand the download batch (▸) inside it · in the <b>Activity window</b> switch <code>Operations · Logs</code>, use the filters <code>All · Running · Needs attention · Finished</code>, click a row to see its detail, <code>Show in Logs</code> jumps to the log lines of that operation · right-click a row · <code>Clear Waiting…</code> on the analysis row opens the confirmation · in <b>Logs</b>: level and source filters (remembered across reloads), search, <code>Pause</code> / <code>Resume</code>, <code>Wrap lines</code>, <code>Clear…</code>, <code>Export…</code>, <code>Copy</code>, right-click the text · <b>State</b> switches the window between Default, Empty, Loading, Error and No library open · <b>Variant</b> B shows the bottom-strip alternative.</p>
+  <p>Rule (DEC-044): every job slower than about 2 s is an Activity operation with a subject link, a result that survives relaunch, and only the controls that are true. The place that started a job shows a short echo with the same numbers and words. Decisions: DEC-005, DEC-044, DEC-016, DEC-037.</p>
+  <p data-variant="A"><b>Variant A (recommended):</b> toolbar item + popover + window. <b>For:</b> calm when idle; failures stay visible as words in the toolbar; frees 36 pt of height in every view; the window exists without a library, so Logs are reachable when a library can’t open. <b>Against:</b> running work is one click away instead of always listed — mitigated by the item’s text (<code>Downloading 12 of 44</code>).</p>
+  <p data-variant="B"><b>Variant B (kept for comparison):</b> a status-bar-height strip at the bottom of the main window that expands upward. <b>For:</b> always visible; familiar from today; more room for several jobs in one line. <b>Against:</b> costs height in every view and competes with the status bar and the selection bar for the bottom edge; not available on launch screens (no main window content); an expanding panel pushes content — the “nothing moves unless you ask” principle suffers; a second place for text next to the status bar.</p>
+</div>
+
+<!-- ═════════ Variant A exhibits ═════════ -->
+<h2 class="cat-h" data-variant="A">Toolbar Activity item <span class="caption">P-ACTIVITY</span></h2>
+<div class="cat" data-variant="A">
+  <div class="spec"><h4>Idle <code>P-ACTIVITY</code></h4><p>Plain icon. No text, no dot. Click still opens the popover (Recent, last backup).</p>
+    <div class="demo"><div class="tbx"><div class="tb-group"><button class="tb-btn" data-fb-id="P-ACTIVITY.E01" data-fb-label="Activity item — idle" data-fb-note="Was the 36 pt header bar at the bottom of the window. Now a toolbar item; looks like a button because it is one." data-fb-dec="DEC-005" data-fb-api="ToolbarItem { Button + .popover }"><i data-i="activity"></i></button></div></div></div></div>
+  <div class="spec"><h4>Running <code>P-ACTIVITY</code></h4><p>Determinate ring + the most important job in words with its count. Several jobs: the one the user started last, then <code>+2</code>.</p>
+    <div class="demo"><div class="tbx"><div class="tb-group"><button class="tb-btn" data-fb-id="P-ACTIVITY.E05" data-fb-label="Activity item — running" data-fb-note="Text says the kind of work and n of m (today: a bare track name without count). Priority: download/import, sync, scan, analysis." data-fb-dec="DEC-044" data-fb-api="ProgressView(value:).progressViewStyle(.circular).controlSize(.small) + Text"><span class="ring" style="--p:27"></span><span class="txt">Downloading 12 of 44</span><span class="txt t2">+2</span></button></div></div></div></div>
+  <div class="spec"><h4>Needs attention <code>P-ACTIVITY.N01</code></h4><p>Nothing running, but something failed or waits for the user. The words stay until fixed or dismissed — never only a colour.</p>
+    <div class="demo"><div class="tbx"><div class="tb-group"><button class="tb-btn" data-fb-id="P-ACTIVITY.N01" data-fb-label="Activity item — needs attention" data-fb-note="New: today the header never shows failures. Count = things waiting for the user, grouped by cause in the popover." data-fb-dec="DEC-044"><i data-i="warn"></i><span class="txt attn">9 failed</span></button></div></div></div></div>
+  <div class="spec"><h4>Running and needs attention — live <code>P-ACTIVITY</code></h4><p>Both. <b>Click it</b> to open the popover. At narrow window widths the running text collapses to the ring first; the attention text stays.</p>
+    <div class="demo" style="gap:10px;flex-wrap:wrap"><div class="tbx"><div class="tb-group"><button class="tb-btn" data-popover="p-activity" data-fb-id="P-ACTIVITY" data-fb-label="Activity item — running + needs attention (live)" data-fb-note="Click: popover. ⌥⌘0 or Window ▸ Activity: the Activity window. A job that ends bounces the symbol once (respects Reduce Motion); nothing else moves." data-fb-dec="DEC-005" data-fb-api="ToolbarItem + .popover(isPresented:) ; .symbolEffect(.bounce, value: finishedCount)"><span class="ring" style="--p:27"></span><span class="txt">Downloading 12 of 44</span><span class="txt attn">· 9 failed</span></button></div></div>
+      <div class="tbx"><div class="tb-group"><button class="tb-btn" title="Narrow window"><span class="ring" style="--p:27"></span><span class="txt attn">9 failed</span></button></div></div></div></div>
+</div>
+
+<h2 class="cat-h" data-variant="A">Activity popover <span class="caption">P-ACTIVITY-OPS in the popover</span></h2>
+<div class="cat wide" data-variant="A">
+  <div class="spec"><h4>Nothing happening</h4><p>One line, plus the fact people open it for when idle: when the last backup ran.</p><div class="demo"><div class="popover static"><div class="pop" id="x-idle"></div></div></div></div>
+  <div class="spec"><h4>Several jobs running</h4><p>One row per operation (a sync is one row, not two). The download batch expands into per-track rows — click ▸. Controls say what they really do.</p><div class="demo"><div class="popover static"><div class="pop" id="x-run"></div></div></div></div>
+  <div class="spec"><h4>Needs attention — grouped by cause, with the fix</h4><p>Hundreds of failures become a few causes. Each group has the one action that fixes it; waiting groups resume by themselves.</p><div class="demo"><div class="popover static"><div class="pop" id="x-attn"></div></div></div></div>
+  <div class="spec"><h4>Recent — results stay</h4><p>Finished operations keep their result sentence and survive a relaunch. A click opens the subject (playlist, profile, Review…).</p><div class="demo"><div class="popover static"><div class="pop" id="x-recent"></div></div></div></div>
+</div>
+
+<!-- live popover (replaces the shell's short copy on this page) -->
+<div class="popover" id="p-activity" hidden data-fb-id="P-ACTIVITY-OPS" data-fb-label="Activity popover" data-fb-note="Safari-Downloads pattern: Running · Needs attention · Recent. Dismissed by clicking away or Esc (system) — replaces the hidden Esc button that collapsed the old panel (K-ACT-ESC)." data-fb-dec="DEC-005" data-fb-api=".popover { List } — system container, no custom material"><div class="pop" id="x-live"></div></div>
+
+<!-- ═════════ Variant B exhibit ═════════ -->
+<h2 class="cat-h" data-variant="B">Variant B — bottom strip <span class="caption">P-ACTIVITY/B · DEC-005 alternative</span></h2>
+<div class="window auto" data-variant="B" style="width:900px;height:430px" data-fb-id="P-ACTIVITY/B" data-fb-label="Variant B: bottom Activity strip" data-fb-note="Today’s panel restyled: status-bar height, words for running and failed work, expands upward on click. Shown for comparison; not recommended (see the note)." data-fb-dec="DEC-005" data-fb-api="safeAreaInset(edge: .bottom) { DisclosureGroup-like strip }">
+  <div class="titlebar"><div class="traffic"><i></i><i></i><i></i></div><div class="wtitle">All Tracks — Main Library <span class="t2" style="font-weight:400">(main-window fragment)</span></div></div>
+  <div class="wbody">
+    <div class="table" id="b-tbl" style="flex:1"></div>
+    <div class="statusbar"><span class="def">12,935 tracks · 38 days · 412 GB</span></div>
+    <div class="strip-panel" id="b-panel" hidden><div class="pop" id="x-b" style="width:auto"></div></div>
+    <div class="strip" id="b-strip" data-fb-id="P-ACTIVITY/B.N01" data-fb-label="Strip (click to expand)" data-fb-note="Chevron, running jobs in words with counts, failures in words, a way to the window. Costs 24 pt under the status bar in every view.">
+      <span id="b-chev" class="t2" style="font-size:9px">▸</span><b>Activity</b><span class="ring" style="--p:27;width:12px;height:12px"></span>
+      <span class="trunc grow">Downloading 12 of 44 · Syncing “iPod Classic” 86 of 214 · 212 analyses waiting</span>
+      <span class="status failed"><i data-i="warn" class="s"></i>9 failed</span><a class="btn plain small" href="#win">Activity Window</a></div>
+  </div>
+</div>
+
+<!-- ═════════ Activity window ═════════ -->
+<h2 class="cat-h" id="win">Activity window <span class="caption">W-ACTIVITY · ⌥⌘0 · Window ▸ Activity</span></h2>
+<div class="window w900" style="height:760px;width:min(1180px,calc(100vw - 32px))" data-fb-id="W-ACTIVITY" data-fb-label="Activity window" data-fb-note="Auxiliary window (Mail’s Window ▸ Activity pattern): the full operations history and the logs. Opens on every launch state, also when no library can be opened. Remembers its tab, size and position." data-fb-dec="DEC-005" data-fb-api="Window(&quot;Activity&quot;, id: &quot;activity&quot;) + openWindow; .keyboardShortcut(&quot;0&quot;, modifiers: [.option, .command])">
+  <div class="titlebar"><div class="traffic"><i></i><i></i><i></i></div><div class="wtitle">Activity</div></div>
+  <div class="wtab">
+    <span class="grow"></span>
+    <div class="seg" data-fb-id="P-ACTIVITY.E07" data-fb-label="Tabs: Operations · Logs" data-fb-note="Kept. The selected tab is remembered. A deep link (failure → Show in Logs, launch failure → Show Logs) selects Logs." data-fb-api="Picker(.segmented) in the toolbar (.principal)"><button class="on" data-goto="ops">Operations</button><button data-goto="logs">Logs</button></div>
+    <span class="grow"></span>
+  </div>
+
+  <!-- Operations -->
+  <div class="wbody" data-view="ops" data-fb-id="P-ACTIVITY-OPS" data-fb-label="Operations" data-fb-note="One table for every kind of background work instead of four unrelated inputs. State is a word in its own column.">
+    <div class="banner info" data-show="no-library"><i data-i="info"></i><span><b>No library is open.</b> Operations of the last session are shown; new work starts when a library is open. Logs are complete.</span><span class="act"><a class="btn" href="launch.html">Choose Library…</a></span></div>
+    <div class="scopebar" style="padding-top:8px" data-show="default no-library" data-fb-id="P-ACTIVITY-OPS.E02" data-fb-label="Filters: All · Running · Needs attention · Finished" data-fb-note="Were the fixed sections Active / Needs Attention / Recent. Counts are live. Running includes Queued and Paused." data-fb-api="Picker(.segmented) / scope buttons">
+      <button class="scope on" data-scope="all">All<span class="n" data-c="all"></span></button>
+      <button class="scope" data-scope="running">Running<span class="n" data-c="running"></span></button>
+      <button class="scope" data-scope="attention" data-fb-id="P-ACTIVITY-OPS.E03" data-fb-label="Needs attention" data-fb-note="Operations that ended with failures or wait for the user. The same items the popover groups by cause.">Needs attention<span class="n" data-c="attention"></span></button>
+      <button class="scope" data-scope="finished" data-fb-id="P-ACTIVITY-OPS.E04" data-fb-label="Finished" data-fb-note="Was Recent (capped at 20, lost on quit). Now the last 200 operations, kept in the library file.">Finished<span class="n" data-c="finished"></span></button>
+      <span class="grow"></span>
+      <button class="btn" id="retry-all" data-fb-id="P-ACTIVITY-OPS.N01" data-fb-label="Retry All" data-fb-note="Retries every failed item whose cause may have gone away; items that can never succeed (removed, DRM) are skipped and named.">Retry All</button>
+    </div>
+    <div class="table ops" id="ops-tbl" tabindex="0" data-show="default no-library" data-fb-id="P-ACTIVITY-OPS.E05" data-fb-label="Operations table" data-fb-note="Kind · operation with subject link · state word · progress · started · result · controls. Rows are selectable; the detail of the selected row is below." data-fb-api="Table(selection:) + contextMenu(forSelectionType:)"></div>
+    <div class="detail" id="ops-detail" data-show="default no-library" data-fb-id="P-ACTIVITY-OPS.N02" data-fb-label="Operation detail" data-fb-note="Per-item outcomes of the selected operation (all 44 tracks, not the first 5), each with a plain reason, and the way to its log lines." data-fb-api="VSplitView / inspector-like bottom pane"></div>
+    <div class="empty" data-show="empty" data-fb-id="P-ACTIVITY-OPS.E01" data-fb-label="No activity"><i data-i="activity" class="xl"></i><h2>No activity</h2><p>Downloads, imports, syncs, scans, analyses and backups appear here while they run, and stay with their result.</p></div>
+    <div class="table" data-show="loading" data-fb-id="P-ACTIVITY-OPS.N03" data-fb-label="Loading history" data-fb-note="Running operations appear at once; only the stored history shows placeholder rows on first open."><table><thead><tr><th style="width:120px">Kind</th><th>Operation</th><th style="width:110px">State</th><th style="width:150px">Progress</th><th style="width:210px">Result</th></tr></thead><tbody id="ops-skel"></tbody></table></div>
+    <div class="empty" data-show="error" data-fb-id="P-ACTIVITY-OPS.N04" data-fb-label="History can’t be loaded"><i data-i="warn" class="xl"></i><h2>Can’t load the operation history</h2><p>The library didn’t answer. Running work is not affected, and the logs are still available.</p><div class="acts"><button class="btn lg primary">Try Again</button><button class="btn lg" data-goto="logs">Show Logs</button></div><p class="caption" style="margin-top:8px">▸ Details</p></div>
+  </div>
+
+  <!-- Logs -->
+  <div class="wbody" data-view="logs" hidden data-fb-id="P-ACTIVITY-LOGS" data-fb-label="Logs" data-fb-note="Same live text view as today (cross-line selection kept), with filters that persist, labeled controls and Export.">
+    <div class="logbar" data-fb-id="P-ACTIVITY-LOGS.E01" data-fb-label="Logs toolbar">
+      <div class="seg" id="lv-seg" data-fb-id="P-ACTIVITY-LOGS.E02" data-fb-label="Level filter" data-fb-note="All · Info and above · Warnings and above · Errors · Debug only, each with its count. The choice is remembered (today it resets when the tab is left)." data-fb-api="Picker(.segmented) + @AppStorage">
+        <button data-lv="all" class="on">All</button><button data-lv="info">Info+</button><button data-lv="warn">Warnings+</button><button data-lv="error">Errors</button><button data-lv="debug">Debug</button></div>
+      <span class="popup" id="src-pop" data-menu-click="m-logsrc" data-fb-id="P-ACTIVITY-LOGS.E03" data-fb-label="Source filter" data-fb-note="All sources or one subsystem. Remembered." data-fb-api="Picker(.menu) + @AppStorage">All sources</span>
+      <input class="field grow" id="log-q" placeholder="Search logs" spellcheck="false" style="min-width:120px" data-fb-id="P-ACTIVITY-LOGS.E04" data-fb-label="Search" data-fb-note="Filters lines as you type (message or source). ⌘F focuses it while the window is key." data-fb-api=".searchable or TextField(.roundedBorder)">
+      <button class="btn" id="log-pause" data-fb-id="P-ACTIVITY-LOGS.E05" data-fb-label="Pause / Resume" data-fb-note="A labeled button plus state text next to it (Live / Paused · n new lines held) — today an icon whose state is only a tint. Autoscroll is implicit: the view follows while you are at the bottom." data-fb-api="Button + Text">Pause</button>
+      <span class="caption" id="log-live" style="min-width:150px"><span class="status ok">Live</span></span>
+      <span class="check" id="log-wrap" data-fb-id="P-ACTIVITY-LOGS.E07" data-fb-label="Wrap lines" data-fb-note="A checkbox with a label (was an icon toggle). Off: one line per entry with a horizontal scroller." data-fb-api="Toggle(.checkbox)">Wrap lines</span>
+    </div>
+    <div class="banner info" id="log-link" hidden data-fb-id="P-ACTIVITY-LOGS.N01" data-fb-label="Deep-link filter" data-fb-note="Coming from a failure (“Show in Logs”) the view is pre-filtered to that operation’s lines and time span. One click returns to everything." data-fb-dec="DEC-044"><i data-i="filter"></i><span id="log-link-t"></span><span class="act"><button class="btn" id="log-unlink">Show All Lines</button></span></div>
+    <div class="logview" id="logview" tabindex="0" data-menu="cm-logs" data-fb-id="P-ACTIVITY-LOGS.E10" data-fb-label="Log text" data-fb-note="Read-only selectable text: time · level · source · message. Select across lines, ⌘A, ⌘C, drag the selection out (system behaviour, unchanged)." data-fb-api="NSTextView (read-only, selectable) via NSViewRepresentable"></div>
+    <div class="empty" id="log-empty" hidden data-fb-id="P-ACTIVITY-LOGS.E11" data-fb-label="No lines"><i data-i="lines" class="xl"></i><h2 id="log-empty-h">No lines match</h2><p id="log-empty-p">No log lines match the current filters.</p><div class="acts"><button class="btn" id="log-reset">Clear Filters</button></div></div>
+    <div class="logfoot">
+      <span id="log-count" class="num" data-fb-id="P-ACTIVITY-LOGS.N02" data-fb-label="Buffer note" data-fb-note="Says what the view holds: the newest 5,000 lines in memory. Older lines are in the log file. The view keeps updating when the buffer is full (today it probably freezes).">—</span>
+      <span class="grow"></span>
+      <span id="log-msg" class="t2"></span>
+      <button class="btn" id="log-copy" data-fb-id="P-ACTIVITY-LOGS.N03" data-fb-label="Copy" data-fb-note="Copies the selection, or all shown lines when nothing is selected. For pasting into a bug report or to an agent.">Copy</button>
+      <button class="btn" id="log-export" data-fb-id="P-ACTIVITY-LOGS.N04" data-fb-label="Export…" data-fb-note="Saves the shown lines (or the full log files) as text via the system save panel." data-fb-api=".fileExporter">Export…</button>
+      <button class="btn" data-fb-id="P-ACTIVITY-LOGS.E09" data-fb-label="Show Log File in Finder" data-fb-note="Was an icon whose tooltip was a file path.">Show Log File in Finder</button>
+      <button class="btn" data-open="a-logs-clear" data-fb-id="P-ACTIVITY-LOGS.E08" data-fb-label="Clear…" data-fb-note="Now confirms and says what stays (the file). One of three different “Clear” buttons today.">Clear…</button>
+    </div>
+  </div>
+</div>
+
+<!-- menus / alerts -->
+<div class="menu" id="m-logsrc" hidden data-fb-id="P-ACTIVITY-LOGS.E03" data-fb-label="Source menu"></div>
+<div class="menu" id="cm-logs" hidden data-fb-id="CM-LOGS-TEXT" data-fb-label="Log text context menu" data-fb-note="The system text menu, plus two filter shortcuts taken from the clicked line. Order: act on the text · narrow the view · system items." data-fb-dec="DEC-039" data-fb-api="NSTextView menu (menu(for:) adds two items)">
+  <a class="mi" data-log-copy>Copy<span class="k">⌘C</span></a><a class="mi" data-log-all>Select All<span class="k">⌘A</span></a><hr>
+  <a class="mi" data-log-src="Download" data-fb-id="CM-LOGS-TEXT.N01" data-fb-label="Show Only ‹Source› Lines">Show Only “Download” Lines</a><a class="mi" data-log-op data-fb-id="CM-LOGS-TEXT.N02" data-fb-label="Show Only This Operation">Show Only This Operation</a><hr>
+  <a class="mi">Look Up</a><a class="mi">Share…</a><a class="mi sub">Services</a></div>
+<div class="menu" id="cm-ops" hidden data-fb-id="CM-OPS-ROW" data-fb-label="Operation context menu" data-fb-note="New (rows had no menu). Same order rule as every menu: Primary · Fix · Locate/Share · Remove. Items that don’t apply to the row are absent." data-fb-dec="DEC-039" data-fb-api="contextMenu(forSelectionType:)">
+  <a class="mi" id="cm-ops-subject">Show Playlist</a><hr>
+  <a class="mi">Retry Failed</a><a class="mi">Pause</a><a class="mi">Cancel after This Track</a><hr>
+  <a class="mi" data-show-logs>Show in Logs</a><a class="mi">Copy Summary</a><hr>
+  <a class="mi destr">Remove from History</a></div>
+
+<div class="alert" id="a-ops-clearqueue" hidden data-fb-id="A-OPS-CLEARQUEUE" data-fb-label="Clear waiting analyses" data-fb-note="Title is the question with the number, message the consequence, the destructive button is named by its verb (was: Clear Pending Jobs · “This cannot be undone.” · Keep / Clear). Queued downloads are no longer in this queue, so nothing is dropped silently." data-fb-dec="DEC-044" data-fb-api=".confirmationDialog / .alert(role: .destructive)">
+  <div class="aic"><i data-i="wave" class="l"></i></div><h2>Clear 212 waiting analyses?</h2><p>The track being analysed now is finished. The other 212 tracks stay without loudness, fingerprint and similarity data until you run the analysis again in Settings ▸ Maintenance. No files or downloads are affected.</p>
+  <div class="ab"><button class="btn destructive" data-close>Clear Waiting</button><button class="btn" data-close>Cancel</button></div></div>
+<div class="alert" id="a-logs-clear" hidden data-fb-id="A-LOGS-CLEAR" data-fb-label="Clear logs confirmation" data-fb-note="New. States what is cleared (the view) and what stays (the log file)." data-fb-api=".confirmationDialog">
+  <div class="aic"><i data-i="lines" class="l"></i></div><h2>Clear the log view?</h2><p>The 5,000 lines held in memory are removed from this view. The log file on disk keeps everything and can still be exported.</p>
+  <div class="ab"><button class="btn" data-close id="log-clear-go">Clear</button><button class="btn" data-close>Cancel</button></div></div>
+
+<!-- ═════════ Specs ═════════ -->
+<h2 class="cat-h">Every kind of background work <span class="caption">inventory §10.1 → Activity</span></h2>
+<div class="cat wide">
+  <div class="spec full" data-fb-id="W-ACTIVITY.N01" data-fb-label="Job-kind map" data-fb-note="Each row of inventory §10.1 and what becomes of it. Two kinds are deliberately not operations; the reason is given." data-fb-dec="DEC-044">
+    <h4>Job kinds <code>W-ACTIVITY.N01</code></h4>
+    <table class="plain" id="kinds"></table>
+  </div>
+  <div class="spec"><h4>State words <code>G-JOB-STATUS</code></h4>
+    <p>Exactly six, always as text in the State column: <code>Queued</code> (accepted, waiting for its turn or for a condition — the reason is in Progress) · <code>Running</code> · <code>Paused</code> (by the user, or by MLM with the reason: <code>Waiting — paused while downloads run</code>) · <code>Completed</code> (may carry failures in its result: <code>35 downloaded · 9 failed</code>) · <code>Failed</code> (nothing was achieved; cause + one action) · <code>Cancelled</code>. Per-track rows use the track glossary: <code>Downloaded</code>, <code>Downloading…</code>, <code>Queued</code>, <code>Download failed</code>, <code>Skipped — already downloaded</code>. No lowercase enum names, no <code>Stalled</code>.</p></div>
+  <div class="spec"><h4>Clear waiting analyses <code>A-OPS-CLEARQUEUE</code></h4><p>From <code>Clear Waiting…</code> on the analysis row (window and popover).</p>
+    <div class="demo"><div class="alert static" data-fb-id="A-OPS-CLEARQUEUE" data-fb-label="Clear waiting analyses (exhibit)"><div class="aic"><i data-i="wave" class="l"></i></div><h2>Clear 212 waiting analyses?</h2><p>The track being analysed now is finished. The other 212 tracks stay without loudness, fingerprint and similarity data until you run the analysis again in Settings ▸ Maintenance. No files or downloads are affected.</p><div class="ab"><button class="btn destructive">Clear Waiting</button><button class="btn">Cancel</button></div></div></div></div>
+  <div class="spec"><h4>Quitting or switching library with running work <code>A-LIB-SWITCH</code></h4>
+    <p>The alert takes its list from Activity: it names what stops and what continues later. Designed on <a href="launch.html#switch">launch.html#switch</a>; quitting uses the same alert with <code>Quit</code>. Downloads and syncs stop after the current track or file and are listed as <code>Cancelled</code> with <code>Run Again</code>; the analysis queue and waiting tag changes are stored and continue at the next launch.</p>
+    <div class="demo"><div class="alert static" data-fb-id="A-LIB-SWITCH" data-fb-label="Switch with running work (reference)" data-fb-dec="DEC-032"><div class="aic"><i data-i="disc" class="l"></i></div><h2>Switch to “Laptop Subset”?</h2><p>1 import and 1 sync will stop after the current track. 212 waiting analyses continue the next time “Main Library” is open.</p><div class="ab"><a class="btn primary" href="launch.html#switch">Switch and Relaunch</a><button class="btn">Cancel</button></div></div></div></div>
+  <div class="spec"><h4>Keyboard and drag <code>K-ACT-ESC</code> <code>K-LOGS-COPY</code> <code>D-LOGS-TEXTDRAG</code></h4>
+    <table class="plain">
+      <tr><th>Key / gesture</th><th>Does</th></tr>
+      <tr><td><kbd>⌥⌘0</kbd></td><td>Open the Activity window (Window ▸ Activity) — new, there was no way to open Activity from the keyboard.</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td>Closes the popover (system behaviour). The invisible Esc button of the old panel is gone, so Esc no longer competes with tables and search.</td></tr>
+      <tr><td><kbd>⌘W</kbd></td><td>Closes the Activity window.</td></tr>
+      <tr><td><kbd>⌘F</kbd> in Logs</td><td>Focuses the log search.</td></tr>
+      <tr><td><kbd>⌘A</kbd> / <kbd>⌘C</kbd> in Logs</td><td>Select all / copy (unchanged, system text view).</td></tr>
+      <tr><td>Drag selected log text</td><td>Out to any text target (unchanged, system).</td></tr>
+      <tr><td><kbd>↑</kbd> <kbd>↓</kbd> in Operations</td><td>Move the selection; <kbd>Return</kbd> opens the subject.</td></tr>
+    </table></div>
+</div>
+
+<script>
+document.addEventListener('mlm:ready', () => {
+  const $ = (s, r) => (r || document).querySelector(s), $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const esc = MLM.esc, ic = MLM.icon;
+
+  /* sheets/alerts opened from exhibits outside a window belong to the Activity window (the first .window in the DOM is the hidden Variant B fragment) */
+  const WIN = $('[data-fb-id="W-ACTIVITY"]'); MLM.shell.win = WIN;
+  document.addEventListener('click', e => { const o = e.target.closest('[data-open]'); if (o && !o.closest('.window')) WIN.scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+
+  /* relabel the variant buttons: the variants are of P-ACTIVITY (DEC-005) */
+  $$('.reviewbar [data-set-variant]').forEach(b => { b.textContent = 'P-ACTIVITY/' + b.dataset.setVariant; });
+
+  /* ───── popover content ───── */
+  const fb = (id, label, note) => ' data-fb-id="' + id + '" data-fb-label="' + label + '"' + (note ? ' data-fb-note="' + esc(note) + '"' : '');
+  const job = (title, right, l2, ctl, prog, extra) => '<div class="job"' + (extra || '') + '><div class="row"><span class="grow trunc">' + title + '</span><span class="t2 small num">' + right + '</span>' + (ctl || '') + '</div>' + (prog != null ? '<div class="progress" style="margin:4px 0 2px"><i style="width:' + prog + '%"></i></div>' : '') + (l2 ? '<div class="l2">' + l2 + '</div>' : '') + '</div>';
+  const subs = '<div class="subs" hidden>' +
+    '<div class="row"><span class="status ok">' + ic('check', 's') + '</span><span class="grow trunc">Skee Mask — Rev8617</span><span class="t2">Downloaded</span></div>' +
+    '<div class="row"><span class="status ok">' + ic('check', 's') + '</span><span class="grow trunc">Overmono — Good Lies (Extended Mix)</span><span class="t2">Downloaded</span></div>' +
+    '<div class="row"><span class="status failed">' + ic('retry', 's') + '</span><span class="grow trunc">Barker — Paradise Engineering</span><span class="status failed">Download failed</span></div>' +
+    '<div class="row"><span class="spinner" style="width:10px;height:10px"></span><span class="grow trunc">Call Super — Arpo — Live at Dekmantel 2024</span><span class="t2 num">Downloading… 62 %</span></div>' +
+    '<div class="row"><span style="width:13px"></span><span class="grow trunc t2">Objekt — Theme from Q</span><span class="t2">Queued</span></div>' +
+    '<div class="row"><span style="width:13px"></span><a class="grow" href="#win">31 more queued · Show All</a></div></div>';
+  const RUN = '<div class="ph">Running</div>' +
+    '<div class="job"' + fb('P-ACTIVITY-OPS.E07', 'Download batch row', 'Title = what the batch is for, with its count (today: the current track’s name). ▸ shows per-track rows: the last finished ones, the current one with its percentage, the next ones, and a link to all of them.') + '><div class="row"><button class="disc" data-subs' + fb('P-ACTIVITY-OPS.E13', 'Per-track disclosure') + '>▸</button><span class="grow trunc">Importing <a href="playlists.html#detail">“Liked on SoundCloud”</a></span><span class="t2 small num">12 of 44</span><button class="btn small"' + fb('P-ACTIVITY-OPS.E18', 'Cancel after this track', 'The honest label: a download batch can only stop after the current track.') + '>Cancel after this track</button></div><div class="progress" style="margin:4px 0 2px"><i style="width:27%"></i></div><div class="l2">Downloading “Arpo — Live at Dekmantel 2024” · 1 failed so far</div>' + subs + '</div>' +
+    job('Syncing <a href="sync.html">“iPod Classic”</a>', '86 of 214', 'Copying “Shanti Celeste — Tangerine.m4a” · about 6 min left', '<button class="btn small"' + fb('P-ACTIVITY-OPS.E20', 'Pause / Resume', 'Only where pausing really exists (sync, album lookup).') + '>Pause</button><button class="btn small">Cancel</button>', 40, fb('P-ACTIVITY-OPS.E08', 'Sync row', 'One row per sync (today two rows with two Cancel buttons).')) +
+    job('Analysing new tracks', '212 waiting', '<span' + fb('P-ACTIVITY-OPS.N05', 'Why it waits', 'The analysis queue says in words why nothing moves.') + '>Waiting — paused while downloads run</span>', '<button class="btn small" data-open="a-ops-clearqueue"' + fb('P-ACTIVITY-OPS.E21', 'Clear Waiting…', 'Was “Clear”. Opens A-OPS-CLEARQUEUE.') + '>Clear Waiting…</button>', null, fb('P-ACTIVITY-OPS.E09', 'Analysis queue row')) +
+    job('Scanning <a href="folders.html">“Lexxar/Music/2026”</a>', '1,204 of 3,890 files', 'Reading tags · 9 new files so far', '<button class="btn small">Cancel</button>', 31, fb('P-ACTIVITY-OPS.E06', 'Import scan row'));
+  const ATTN = (full) => '<div class="ph"' + fb('P-ACTIVITY-OPS.E03', 'Needs attention', 'Grouped by cause, not one row per failed track. Each group: what, why, the one fix.') + '><span class="status failed">' + ic('warn', 's') + '</span>Needs attention<span class="grow"></span><button class="btn small"' + fb('P-ACTIVITY-OPS.N01', 'Retry All', 'Retries everything that can be retried now.') + '>Retry All</button><button class="btn small"' + fb('P-ACTIVITY-OPS.N06', 'Dismiss', 'Removes the groups from the toolbar text and this list. The tracks keep their Download failed status and stay retryable from All Tracks.') + '>Dismiss</button></div>' +
+    '<div class="job"' + fb('P-ACTIVITY-OPS.E11', 'Failure group: sign-in expired', 'Was one row per track with texts like “Video unavailable”. The fix is in place; after Reconnect the 9 downloads retry by themselves.') + '><div class="row"><span class="grow" style="white-space:normal">9 downloads failed — sign-in expired (SoundCloud)</span><a class="btn small" href="settings.html#sources">Reconnect</a></div><div class="l2">From <a href="playlists.html#detail">“Dekmantel 2024”</a> · yesterday 21:58 · <a data-goto="logs" data-oplink="Import “Dekmantel 2024”" href="#win">Show in Logs</a></div></div>' +
+    (full ? '<div class="job"' + fb('P-ACTIVITY-OPS.N07', 'Failure group: tool missing', 'Points to the tab that lists the tools (DEC-037).') + '><div class="row"><span class="grow" style="white-space:normal">yt-dlp not found — 4 downloads waiting</span><a class="btn small" href="settings.html#sources">Open Settings ▸ Sources</a></div><div class="l2">They start by themselves once the tool is found.</div></div>' +
+    '<div class="job"' + fb('P-ACTIVITY-OPS.N08', 'Waiting for the drive', 'Not a failure: queued work that needs the library folder waits and resumes. Today every track fails with a generic reason.') + '><div class="row"><span>' + ic('drive', 's') + '</span><span class="grow" style="white-space:normal">“Lexxar” not connected · 14 waiting</span></div><div class="l2">11 downloads and 3 analyses resume when the drive is connected.</div></div>' +
+    '<div class="job"' + fb('P-ACTIVITY-OPS.N09', 'Tag changes waiting', 'Edits are saved in the library at once; writing them into the files waits for the drive.') + '><div class="row"><span>' + ic('pencil', 's') + '</span><span class="grow" style="white-space:normal">3 tag changes waiting for “Lexxar”</span><a class="btn plain small" href="library.html">Show Tracks</a></div></div>' +
+    '<div class="job"><div class="row"><span class="grow" style="white-space:normal">2 downloads failed — not available on SoundCloud any more</span><a class="btn plain small" href="library.html">Show Tracks</a></div><div class="l2">Retrying won’t help. Try another source from the track’s menu, or dismiss.</div></div>' : '');
+  const RECENT = '<div class="ph"' + fb('P-ACTIVITY-OPS.E12', 'Recent', 'Result sentences with counts and the time; kept across relaunch. Successful downloads leave a trace now.') + '>Recent</div>' +
+    '<div class="row t2" style="padding:2px 0"><span class="grow trunc">Refreshed SoundCloud — 6 new tracks</span><span class="small">21:40</span></div>' +
+    '<div class="row t2" style="padding:2px 0"><span class="grow trunc"><a href="playlists.html#detail">Import “Dekmantel 2024”</a> — 53 downloaded, 9 failed</span><span class="small">Yesterday</span></div>' +
+    '<div class="row t2" style="padding:2px 0"><span class="grow trunc"><a href="folders.html">Scan “Lexxar/Music/2026”</a> — 14 imported, 2 skipped</span><span class="small">Yesterday</span></div>' +
+    '<div class="row t2" style="padding:2px 0"><span class="grow trunc"><a href="review.html">Duplicate scan</a> — 14 groups, 8 conflicts</span><span class="small">Oct 3</span></div>';
+  const BACKUP = '<div class="row t2" style="padding:2px 0"' + fb('P-ACTIVITY-OPS.N10', 'Last backup line', 'Scheduled backups are silent today. Their last result is always one glance away.') + '><span class="grow trunc">Last backup: today 9:02 — 12,935 tracks</span><a class="small" href="settings.html#backup">Backup Settings</a></div>';
+  const FOOT = '<div class="foot"><a class="btn plain" href="#win"' + fb('P-ACTIVITY.N02', 'Open Activity Window', 'Full history and logs. Also Window ▸ Activity.') + '>Open Activity Window<span class="t2" style="margin-left:6px">⌥⌘0</span></a><span class="grow"></span><a class="btn plain" href="#win" data-goto="logs">Logs</a></div>';
+  $('#x-idle').innerHTML = '<div class="empty" style="padding:14px 10px 6px"' + fb('P-ACTIVITY-OPS.E01', 'No activity') + '>' + ic('activity', 'l') + '<h2 style="font-size:13px">No activity</h2></div>' + BACKUP + FOOT;
+  $('#x-run').innerHTML = RUN + FOOT;
+  $('#x-attn').innerHTML = ATTN(true) + FOOT;
+  $('#x-recent').innerHTML = RECENT + BACKUP + FOOT;
+  $('#x-live').innerHTML = RUN + ATTN(false) + RECENT + BACKUP + FOOT;
+  $('#x-b').innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px"><div>' + RUN + '</div><div>' + ATTN(false) + RECENT + '</div></div>';
+  document.addEventListener('click', e => {
+    const d = e.target.closest('[data-subs]'); if (d) { const s = d.closest('.job').querySelector('.subs'); s.hidden = !s.hidden; d.textContent = s.hidden ? '▸' : '▾'; MLM.refreshBadges(); }
+    if (e.target.closest('#b-strip') && !e.target.closest('a')) { const p = $('#b-panel'); p.hidden = !p.hidden; $('#b-chev').textContent = p.hidden ? '▸' : '▾'; MLM.refreshBadges(); }
+  });
+  MLM.table('#b-tbl', { rows: MLM.tracks(40, 5), cols: ['title', 'artist', 'album', 'time', 'genre', 'status'] });
+
+  /* ───── operations ───── */
+  const K = { dl: ['download', 'Download'], imp: ['download', 'Import'], scan: ['folder', 'Scan'], an: ['wave', 'Analysis'], art: ['photo', 'Artwork'], sync: ['sync', 'Sync'], dev: ['device', 'Device'], bak: ['clock', 'Backup'], lib: ['disc', 'Library'], src: ['retry', 'Refresh'], rev: ['review', 'Review'], exp: ['share', 'Export'], alb: ['album', 'Albums'], tag: ['pencil', 'Tags'] };
+  const B = (t, x) => '<button class="btn"' + (x || '') + '>' + t + '</button>';
+  const OPS = [
+    { k: 'imp', t: 'Import “Liked on SoundCloud”', s: ['Playlist', 'playlists.html#detail'], st: 'Running', pr: [12, 44], pt: 'Downloading “Arpo — Live at Dekmantel 2024”', at: '22:14', res: '11 downloaded · 1 failed so far', ctl: B('Cancel after this track'), g: 'running', tracks: 1 },
+    { k: 'sync', t: 'Sync “iPod Classic”', s: ['Sync profile', 'sync.html'], st: 'Running', pr: [86, 214], pt: 'Copying · 3 transcoding · about 6 min left', at: '22:09', res: '', ctl: B('Pause') + B('Cancel'), g: 'running' },
+    { k: 'alb', t: 'Look up albums', s: ['Review ▸ Albums', 'review.html#albums'], st: 'Running', pr: [2410, 6341], pt: 'MusicBrainz, Spotify, SoundCloud', at: '21:50', res: '1,204 suggestions ready', ctl: B('Pause') + B('Cancel'), g: 'running' },
+    { k: 'an', t: 'Analyse new tracks', s: ['Settings ▸ Maintenance', 'settings.html#maintenance'], st: 'Paused', pt: 'Waiting — paused while downloads run · 212 waiting', at: '22:14', res: '38 analysed today', ctl: B('Clear Waiting…', ' data-open="a-ops-clearqueue"'), g: 'running' },
+    { k: 'sync', t: 'Compute sync plan “Car USB stick”', s: ['Sync profile', 'sync.html'], st: 'Running', pt: 'Comparing 1,902 tracks with the device', at: '22:31', res: '', ctl: B('Cancel'), g: 'running' },
+    { k: 'imp', t: 'Import “Late night rollers”', s: ['Playlist', 'playlists.html#detail'], st: 'Queued', pt: 'Starts after “Liked on SoundCloud” · 31 tracks', at: '22:30', res: '', ctl: B('Cancel'), g: 'running', tracks: 2 },
+    { k: 'dl', t: 'Download 3 tracks', s: ['All Tracks', 'library.html'], st: 'Queued', pt: 'Waiting for its turn', at: '22:27', res: '', ctl: B('Cancel'), g: 'running', tracks: 2 },
+    { k: 'dl', t: 'Download recommendation “Glass Circuit (Club Edit)”', s: ['Discover', 'discover.html'], st: 'Queued', pt: 'Waiting for its turn', at: '22:26', res: '', ctl: B('Cancel'), g: 'running' },
+    { k: 'dl', t: 'Download 2 tracks found in reels', s: ['Discover ▸ Reels', 'discover.html'], st: 'Queued', pt: 'Waiting for its turn', at: '22:21', res: '', ctl: B('Cancel'), g: 'running' },
+    { k: 'an', t: 'Similarity analysis (embeddings)', s: ['Settings ▸ Maintenance', 'settings.html#maintenance'], st: 'Queued', pt: 'Starts after “Analyse new tracks” · 3,523 tracks', at: '20:02', res: '', ctl: B('Cancel'), g: 'running' },
+    { k: 'imp', t: 'Import “Dekmantel 2024”', s: ['Playlist', 'playlists.html#detail'], st: 'Completed', at: 'Yesterday 21:40', res: '<span class="status failed">53 downloaded · 9 failed</span> — sign-in expired (SoundCloud)', ctl: '<a class="btn" href="settings.html#sources">Reconnect</a>', g: 'attention', tracks: 3 },
+    { k: 'src', t: 'Refresh from Spotify', s: ['Settings ▸ Sources', 'settings.html#sources'], st: 'Failed', at: '21:40', res: '<span class="status failed">Sign-in expired</span>', ctl: '<a class="btn" href="settings.html#sources">Reconnect</a>', g: 'attention' },
+    { k: 'an', t: 'Danceability analysis', s: ['Settings ▸ Maintenance', 'settings.html#maintenance'], st: 'Failed', at: 'Oct 3, 18:20', res: '<span class="status failed">ffmpeg not found</span>', ctl: '<a class="btn" href="settings.html#sources">Open Settings ▸ Sources</a>', g: 'attention' },
+    { k: 'bak', t: 'Backup (manual)', s: ['Settings ▸ Backup', 'settings.html#backup'], st: 'Failed', at: 'Oct 2, 23:11', res: '<span class="status failed">Destination “Lexxar” was not connected</span>', ctl: B('Run Again'), g: 'attention' },
+    { k: 'src', t: 'Refresh from SoundCloud', s: ['All Tracks', 'library.html'], st: 'Completed', at: '21:40', res: '6 new tracks · 2 playlists updated', ctl: '', g: 'finished' },
+    { k: 'src', t: 'Refresh “Boiler Room picks” from YouTube', s: ['Playlist', 'playlists.html#detail'], st: 'Completed', at: '21:12', res: '3 new tracks · 1 no longer on YouTube', ctl: '', g: 'finished' },
+    { k: 'bak', t: 'Backup (scheduled, daily)', s: ['Settings ▸ Backup', 'settings.html#backup'], st: 'Completed', at: '9:02', res: '12,935 tracks · 48 MB · kept 10', ctl: '', g: 'finished' },
+    { k: 'scan', t: 'Scan “Lexxar/Music/2026”', s: ['Folders', 'folders.html'], st: 'Completed', at: 'Yesterday 19:05', res: '14 imported · 2 skipped (not audio)', ctl: '', g: 'finished' },
+    { k: 'art', t: 'Artwork for 14 new tracks', s: ['All Tracks', 'library.html'], st: 'Completed', at: 'Yesterday 19:07', res: '11 embedded · 2 fetched · 1 not found', ctl: '', g: 'finished' },
+    { k: 'dev', t: 'Read playlist changes from “iPod Classic”', s: ['Sync profile', 'sync.html'], st: 'Completed', at: 'Yesterday 18:44', res: '3 playlists changed on the device', ctl: '<a class="btn" href="sync.html">Review Changes</a>', g: 'finished' },
+    { k: 'rev', t: 'Scan for duplicates', s: ['Review', 'review.html'], st: 'Completed', at: 'Oct 3, 17:02', res: '14 duplicate groups · 8 conflicts', ctl: '', g: 'finished' },
+    { k: 'an', t: 'ReplayGain analysis', s: ['Settings ▸ Maintenance', 'settings.html#maintenance'], st: 'Completed', at: 'Oct 3, 16:10', res: '9,412 analysed · <span class="status failed">31 failed</span>', ctl: B('Retry Failed'), g: 'finished' },
+    { k: 'an', t: 'Fingerprint all tracks', s: ['Settings ▸ Maintenance', 'settings.html#maintenance'], st: 'Cancelled', at: 'Oct 3, 14:30', res: 'Stopped at 4,120 of 12,935 — done work is kept', ctl: B('Run Again'), g: 'finished' },
+    { k: 'art', t: 'Fetch artwork from MusicBrainz', s: ['Settings ▸ Maintenance', 'settings.html#maintenance'], st: 'Completed', at: 'Oct 2, 20:15', res: '312 fetched · 48 not found', ctl: '', g: 'finished' },
+    { k: 'exp', t: 'Export Create ML training set', s: ['Genres', 'genres.html'], st: 'Completed', at: 'Oct 2, 19:40', res: '1,840 tracks exported', ctl: B('Show in Finder'), g: 'finished' },
+    { k: 'sync', t: 'Sync “Car USB stick”', s: ['Sync profile', 'sync.html'], st: 'Cancelled', at: 'Oct 2, 08:12', res: '“Car USB stick” was disconnected — 40 of 126 copied', ctl: B('Run Again'), g: 'finished' },
+    { k: 'lib', t: 'Move transcode cache to “Macintosh HD/MLM Cache”', s: ['Settings ▸ Maintenance', 'settings.html#maintenance'], st: 'Completed', at: 'Oct 1, 22:50', res: 'Moved 2,114 files · 3.2 GB', ctl: '', g: 'finished' },
+    { k: 'lib', t: 'Reorganise file paths', s: ['Settings ▸ Maintenance', 'settings.html#maintenance'], st: 'Completed', at: 'Oct 1, 22:20', res: '412 files moved · backup made first', ctl: B('Roll Back…'), g: 'finished' },
+    { k: 'lib', t: 'Calculate storage sizes', s: ['Settings ▸ Storage Location', 'settings.html#storage'], st: 'Completed', at: 'Oct 1, 22:02', res: 'Library folder 412 GB · library file 96 MB', ctl: '', g: 'finished' },
+    { k: 'bak', t: 'Backup before update', s: ['Settings ▸ Backup', 'settings.html#backup'], st: 'Completed', at: 'Oct 1, 21:58', res: '12,921 tracks · 47 MB', ctl: '', g: 'finished' },
+    { k: 'lib', t: 'Create library file “Main Library”', s: ['Library file', 'launch.html'], st: 'Completed', at: 'Oct 1, 21:57', res: 'Old install adopted · backup “Before library file setup”', ctl: B('Show in Finder'), g: 'finished' },
+    { k: 'tag', t: 'Write tags to files', s: ['All Tracks', 'library.html'], st: 'Completed', at: 'Oct 1, 20:31', res: '27 files updated', ctl: '', g: 'finished' }
+  ];
+  const STW = { Running: '<span class="statew"><span class="spinner"></span>Running</span>', Queued: '<span class="statew t2">' + ic('clock', 's') + 'Queued</span>', Paused: '<span class="statew t2">' + ic('pause', 's') + 'Paused</span>', Completed: '<span class="statew status ok">' + ic('check', 's') + 'Completed</span>', Failed: '<span class="statew status error">' + ic('warn', 's') + 'Failed</span>', Cancelled: '<span class="statew t2">' + ic('x', 's') + 'Cancelled</span>' };
+  let scope = 'all', selOp = OPS[0];
+  const inScope = o => scope === 'all' || o.g === scope;
+  function drawOps() {
+    const c = { all: OPS.length, running: 0, attention: 0, finished: 0 }; OPS.forEach(o => c[o.g]++);
+    $$('[data-c]').forEach(n => n.textContent = c[n.dataset.c]);
+    const rows = OPS.filter(inScope); if (!rows.includes(selOp)) selOp = rows[0];
+    const H = (w, l, id, note) => '<th style="' + (w ? 'width:' + w + 'px' : '') + '"' + (id ? fb(id, l + ' column', note) + ' data-fb-api="TableColumn"' : '') + '>' + l + '</th>';
+    $('#ops-tbl').innerHTML = '<table><thead><tr>' + H(92, 'Kind') + H(0, 'Operation', 'P-ACTIVITY-OPS.N11', 'What it is for, in the user’s words, with a link to its subject (playlist, profile, folder, settings tab). Today rows link nowhere.') + H(108, 'State', 'P-ACTIVITY-OPS.E16', 'One of six words: Queued · Running · Paused · Completed · Failed · Cancelled. Always text.') + H(170, 'Progress', 'P-ACTIVITY-OPS.E15', 'n of m with a bar when countable; otherwise the current step or the reason for waiting.') + H(100, 'Started', 'P-ACTIVITY-OPS.E17', 'Clock time today, date before. A finished row no longer shows a duration that keeps growing.') + H(200, 'Result', 'P-ACTIVITY-OPS.N12', 'Counts in a sentence. Stays after the operation ends and after a relaunch.') + H(176, '', 'P-ACTIVITY-OPS.N13', 'Controls: only what is true for this job — Cancel after this track, Pause, Cancel, or nothing. A finished row offers the fix or Run Again.') + '</tr></thead><tbody>' +
+      rows.map(o => '<tr data-op="' + OPS.indexOf(o) + '" class="' + (o === selOp ? 'sel' : '') + '"><td>' + ic(K[o.k][0], 's') + ' ' + K[o.k][1] + '</td><td>' + esc(o.t) + '<small class="sub2"><a href="' + o.s[1] + '">' + esc(o.s[0]) + '</a></small></td><td>' + STW[o.st] + '</td><td>' + (o.pr ? '<span class="num">' + o.pr[0].toLocaleString('en-US') + ' of ' + o.pr[1].toLocaleString('en-US') + '</span><div class="progress" style="margin-top:3px"><i style="width:' + Math.round(o.pr[0] / o.pr[1] * 100) + '%"></i></div>' : '') + (o.pt && !o.pr ? '<span class="t2" style="white-space:normal;font-size:11px;line-height:1.2;display:block">' + esc(o.pt) + '</span>' : '') + '</td><td class="num dim">' + o.at + '</td><td style="white-space:normal;font-size:12px;line-height:1.2">' + (o.res || '<span class="t3">—</span>') + '</td><td><div class="ctl">' + (o.ctl || '') + '</div></td></tr>').join('') + '</tbody></table>';
+    drawDetail();
+  }
+  const tr = MLM.tracks(44, 31);
+  function trackRows(mode) {
+    return tr.map((t, i) => {
+      let out;
+      if (mode === 1) out = i < 11 ? (i === 6 ? 'f' : 'ok') : i === 11 ? 'now' : 'q'; else if (mode === 2) out = 'q'; else out = [3, 8, 13, 17, 22, 29, 33, 38, 41].includes(i) ? 'f2' : i % 9 === 4 ? 'skip' : 'ok';
+      const O = { ok: '<span class="status ok">' + ic('check', 's') + 'Downloaded</span> <span class="t2">· ' + ['FLAC from DAB', 'M4A 256 from SoundCloud', 'M4A 248 from YouTube'][i % 3] + '</span>', f: '<span class="status failed">' + ic('retry', 's') + 'Download failed</span> <span class="t2">· No match found on any source · 2 attempts left</span>', f2: '<span class="status failed">' + ic('retry', 's') + 'Download failed</span> <span class="t2">· Sign-in expired (SoundCloud)</span>', now: '<span class="status"><span class="spinner"></span>Downloading… 62 %</span>', q: '<span class="t2">Queued</span>', skip: '<span class="t2">Skipped — already downloaded</span>' };
+      return '<tr><td class="r num dim">' + (i + 1) + '</td><td><div class="cellt"><span class="cov c' + t.c + '"></span><span class="ttl">' + esc(t.title) + '</span></div></td><td>' + esc(t.artist) + '</td><td>' + O[out] + '</td></tr>';
+    }).join('');
+  }
+  function drawDetail() {
+    const o = selOp, d = $('#ops-detail'); if (!o) { d.innerHTML = ''; return; }
+    let body;
+    if (o.tracks) body = '<div class="table" style="flex:1"><table><thead><tr><th class="r" style="width:34px">#</th><th>Title</th><th style="width:150px">Artist</th><th style="width:330px"' + fb('P-ACTIVITY-OPS.E14', 'Per-track outcome', 'Glossary words with a plain reason and attempts left — not lowercase enum names. Every track of the batch is listed and stays listed after the batch ends.') + '>Outcome</th></tr></thead><tbody>' + trackRows(o.tracks) + '</tbody></table></div>';
+    else body = '<div class="scroll pad"><div class="kv" style="grid-template-columns:110px 1fr"><label>Operation</label><span class="val">' + esc(o.t) + '</span><label>Subject</label><span class="val"><a href="' + o.s[1] + '">' + esc(o.s[0]) + '</a></span><label>State</label><span class="val">' + STW[o.st] + '</span><label>Started</label><span class="val">' + o.at + '</span>' + (o.pt ? '<label>Now</label><span class="val">' + esc(o.pt) + '</span>' : '') + '<label>Result</label><span class="val">' + (o.res || '—') + '</span><label>Survives quit</label><span class="val">' + (o.st === 'Running' || o.st === 'Queued' || o.st === 'Paused' ? (o.k === 'an' || o.k === 'alb' || o.k === 'tag' ? 'Yes — continues at the next launch' : 'Stops at quit and is listed as Cancelled with Run Again') : 'Result is kept in the history') + '</span></div></div>';
+    d.innerHTML = '<div class="dh"><b class="trunc">' + esc(o.t) + '</b><span class="t2 small">' + o.st + (o.pr ? ' · ' + o.pr[0] + ' of ' + o.pr[1] : '') + ' · started ' + o.at + '</span><span class="grow"></span>' + (o.tracks === 3 ? '<button class="btn">Retry Failed (9)</button>' : '') + '<a class="btn" href="' + o.s[1] + '">Show ' + esc(o.s[0].replace(/^Settings ▸ /, '')) + '</a><button class="btn" data-show-logs' + fb('P-ACTIVITY-OPS.N14', 'Show in Logs', 'Switches to Logs, filtered to this operation’s lines and time span.') + '>Show in Logs</button></div>' + body;
+    MLM.refreshBadges();
+  }
+  drawOps();
+  document.addEventListener('mlm:scope', e => { if (e.target.dataset && e.target.dataset.scope) { scope = e.target.dataset.scope; drawOps(); } });
+  $('#ops-tbl').addEventListener('mousedown', e => { const r = e.target.closest('tr[data-op]'); if (r) { selOp = OPS[+r.dataset.op]; $$('#ops-tbl tr[data-op]').forEach(x => x.classList.toggle('sel', x === r)); drawDetail(); } });
+  $('#ops-tbl').addEventListener('keydown', e => { if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return; e.preventDefault(); const rows = OPS.filter(inScope), i = Math.max(0, Math.min(rows.length - 1, rows.indexOf(selOp) + (e.key === 'ArrowDown' ? 1 : -1))); selOp = rows[i]; $$('#ops-tbl tr[data-op]').forEach(x => { const on = OPS[+x.dataset.op] === selOp; x.classList.toggle('sel', on); if (on) x.scrollIntoView({ block: 'nearest' }); }); drawDetail(); });
+  $('#ops-tbl').addEventListener('contextmenu', e => { const r = e.target.closest('tr[data-op]'); if (!r) return; e.preventDefault(); selOp = OPS[+r.dataset.op]; $$('#ops-tbl tr[data-op]').forEach(x => x.classList.toggle('sel', x === r)); drawDetail(); $('#cm-ops-subject').textContent = 'Show ' + selOp.s[0].replace(/^Settings ▸ /, ''); $('#cm-ops-subject').href = selOp.s[1]; MLM.openMenu('cm-ops', e.clientX, e.clientY); });
+  $('#ops-skel').innerHTML = Array.from({ length: 12 }, (_, i) => '<tr class="skel">' + [40, 60, 50, 70, 55].map(w => '<td><span style="width:' + (w + (i * 11) % 30) + '%"></span></td>').join('') + '</tr>').join('');
+
+  /* ───── job-kind map (inventory §10.1) ───── */
+  const KINDS = [
+    ['Downloads, playlist / track batch', 'Yes — one operation per batch, per-track outcomes', 'Playlist header <code>Importing · 12 of 44</code> → <code>Incomplete · 9 failed · Retry all</code>; Status column per track; status bar at start and end', '<code>Cancel after this track</code>; <code>Retry Failed</code> / <code>Retry All</code>. No pause. A second batch is <code>Queued</code>', 'Results and failures yes. A running batch stops at quit → <code>Cancelled</code> with <code>Run Again</code> (remaining tracks stay Not downloaded)'],
+    ['Recommendation (discovery) downloads', 'Yes — own operation, queued behind running batches', 'Discover row: <code>Queued</code> / <code>Downloading…</code> / <code>Downloaded</code>', '<code>Cancel</code> while queued; <code>Cancel after this track</code> while running', 'Result yes; queue no'],
+    ['Reels download queue', 'Yes — same download queue (no separate hidden queue)', 'Reels result row state', 'as above', 'Result yes; queue no'],
+    ['Remote playlist import (fetch / preview)', 'Preview: no (inside the sheet, cancellable, under a minute). Commit: yes — the <code>Import “‹name›”</code> operation covers add + download', 'Import sheet step 2 <code>Loading playlist…</code>; then playlist header', 'Sheet <code>Cancel</code>; then as downloads', 'Playlist yes; preview no'],
+    ['Folder import / scan (Add menu, Settings, setup, ⌘R, Folders banner)', 'Yes — <code>Scan “‹folder›”</code>', 'Folders header line; setup step 3; Settings ▸ Library row', '<code>Cancel</code> (stops after the current file; imported files stay)', 'Result yes; a cancelled scan can be run again'],
+    ['Auto analysis (loudness, fingerprint, embeddings after import/download)', 'Yes — one standing operation <code>Analyse new tracks</code>', 'Inspector ▸ Audio <code>Waiting for analysis</code>; Settings ▸ Maintenance coverage', '<code>Clear Waiting…</code> (A-OPS-CLEARQUEUE). No cancel for the current track (seconds). Pauses itself while downloads / sync plans run — said in words', '<b>Yes</b> — the waiting list is stored and continues'],
+    ['Maintenance analyses (Fingerprint, ReplayGain, Danceability, Similarity)', 'Yes — one operation per run', 'Settings ▸ Maintenance job row (coverage, last run)', '<code>Cancel</code> (done work is kept); <code>Retry Failed</code>', 'Result yes; a run stops at quit → <code>Cancelled</code>'],
+    ['Waveforms', '<b>No.</b> Made on demand for one track in under 2 s (below the DEC-044 threshold); nothing to cancel or retry', 'Player / Inspector ▸ Audio show a placeholder until ready', '—', 'Cached'],
+    ['Recommendations / Similar computation', 'Only when slower than 2 s: <code>Find similar to “‹track›”</code>', 'Similar view placeholder rows', '<code>Cancel</code>', 'No'],
+    ['Artwork backfill (automatic) and artwork fetch (manual)', 'Yes — automatic: one grouped operation per import (<code>Artwork for 14 new tracks</code>); manual: one per run', 'Covers appear in place; Settings ▸ Maintenance row', 'Manual: <code>Cancel</code>. Automatic: none (short)', 'Result yes'],
+    ['Create ML export', 'Yes', 'Genres ▸ export sheet closes on start; status bar', '<code>Cancel</code> (a user cancel is <code>Cancelled</code>, not Failed)', 'Result yes'],
+    ['Sync + transcoding', 'Yes — <b>one</b> row per sync', 'Sync profile header progress; sidebar row second line', '<code>Pause</code> / <code>Resume</code> · <code>Cancel</code> (stops after the current file)', 'Result yes; a sync stops at quit → <code>Cancelled</code>'],
+    ['Transcode-cache relocation', 'Yes', 'Settings ▸ Maintenance cache row', '<code>Cancel</code> = stop after the current file and move back what was moved (the old no-op Cancel is gone)', 'Result yes; not resumed'],
+    ['Device ingest / device scan for ingest', 'Yes — <code>Read playlist changes from “‹device›”</code>', 'Device-changes sheet', '<code>Cancel</code>', 'Result yes until applied'],
+    ['Backups — scheduled', 'Yes (finished row only; no toolbar text while it runs)', 'Popover line <code>Last backup: today 9:02</code>; Settings ▸ Backup list', 'none (seconds). A failure is <code>Needs attention</code>', 'Yes'],
+    ['Backups — manual', 'Yes', 'Settings ▸ Backup <code>Backing up…</code>', 'none', 'Yes'],
+    ['Backups — before update', 'Yes; while the library opens it is the phase line of the loading screen', 'Launch: <code>Backing up before update…</code>', 'none (must finish)', 'Yes'],
+    ['Path migration (organised paths)', 'Yes', 'Settings ▸ Maintenance report', 'none while applying — it can’t stop half-way safely; <code>Roll Back…</code> afterwards. Start is blocked with the reason while downloads run (read from Activity)', 'Yes (manifest + backup)'],
+    ['Library-folder change', 'No job exists (nothing is moved); the consequences sheet in Settings ▸ Library covers it', 'Settings ▸ Library', '—', 'Yes'],
+    ['Library adoption', 'Yes (finished row); phases show in the adoption sheet', 'Adoption sheet', '<code>Not Now</code> before it starts; none while it runs', 'Yes'],
+    ['Storage size calculation', 'Yes when slower than 2 s', 'Settings ▸ Storage Location <code>Calculating…</code>', '<code>Cancel</code>', 'Last sizes are kept'],
+    ['Source refresh (likes / account playlists)', 'Yes — one operation per source', 'Status bar <code>Refreshed SoundCloud — 6 new tracks</code>; Settings ▸ Sources <code>Last refreshed</code>', '<code>Cancel</code>', 'Result yes'],
+    ['Token refresh', 'No (invisible housekeeping). Its failure is the state <code>Sign-in expired</code> in Needs attention', 'Settings ▸ Sources row; import sheet step 1', '<code>Reconnect</code>', '—'],
+    ['Duplicate scan', 'Yes', 'Review header <code>Scanning · Comparing n of m</code>', '<code>Cancel</code> (earlier decisions stay)', 'Result and last-scan time yes'],
+    ['Linked-playlist refresh', 'Yes — <code>Refresh “‹playlist›” from ‹Source›</code>', 'Playlist header line; status bar result with a count', '<code>Cancel</code>', 'Result yes'],
+    ['Playlist cover generation', '<b>No.</b> Automatic, cosmetic, well under 2 s per playlist; covers swap in. Errors go to Logs only', 'All Playlists grid placeholder cover', '—', 'Covers are cached'],
+    ['Sync plan computation', 'Yes when slower than 2 s', 'Sync profile ▸ Plan <code>Updating… n of m</code>', '<code>Cancel</code>', 'No (recomputed)'],
+    ['New: album lookup (Review ▸ Albums)', 'Yes', 'Review ▸ Albums header', '<code>Pause</code> / <code>Resume</code> · <code>Cancel</code>', '<b>Yes</b> — continues'],
+    ['New: writing tags to files', 'Yes when more than a few files; waiting changes show as <code>3 tag changes waiting for “Lexxar”</code>', 'Inspector ▸ File', 'none (seconds per file)', '<b>Yes</b> — waiting changes are stored']
+  ];
+  $('#kinds').innerHTML = '<tr><th style="width:19%">Job (inventory §10.1)</th><th style="width:22%">Activity operation?</th><th style="width:22%">Inline echo where</th><th style="width:20%">Controls</th><th>Survives relaunch</th></tr>' + KINDS.map(r => '<tr>' + r.map((c, i) => '<td>' + (i ? c : '<b>' + c + '</b>') + '</td>').join('') + '</tr>').join('');
+
+  /* ───── logs ───── */
+  const L = [];
+  const add = (tm, lv, src, msg, op) => L.push({ tm, lv, src, msg, op });
+  const D = 'Import “Dekmantel 2024”', Q = 'Import “Liked on SoundCloud”';
+  add('21:40:02.114', 'INFO', 'Sources', 'Refresh from SoundCloud started (likes, 14 playlists)');
+  add('21:40:09.871', 'INFO', 'Sources', 'Refreshed SoundCloud — 6 new tracks, 2 playlists updated');
+  add('21:40:10.020', 'ERROR', 'Sources', 'Refresh from Spotify failed: HTTP 401 {"error":{"status":401,"message":"The access token expired"}}');
+  add('21:40:11.300', 'INFO', 'Download', 'Batch started: ' + D + ' — 62 tracks, chain SoundCloud → DAB → Squid → YouTube', D);
+  for (let i = 0; i < 9; i++) { add('21:4' + (1 + (i >> 1)) + ':' + String(12 + i * 5).padStart(2, '0') + '.4' + i + '0', 'WARN', 'Download', 'SoundCloud returned 401 for track ' + (182233411 + i * 7717) + ' — token refresh failed, trying next source', D); add('21:4' + (1 + (i >> 1)) + ':' + String(14 + i * 5).padStart(2, '0') + '.9' + i + '1', 'ERROR', 'Download', 'All sources exhausted for “' + ['Barker — Paradise Engineering', 'Objekt — Theme from Q', 'Batu — Marius', 'Ploy — Ramos', 'Hodge — Shadows in Blue', 'Pangaea — Installation', 'Call Super — Arpo', 'Lone — Echo Paths', 'DJ Python — Angel'][i] + '” — reason: Sign-in expired (SoundCloud)', D); }
+  add('21:58:44.008', 'INFO', 'Download', 'Batch finished: ' + D + ' — 53 downloaded, 9 failed', D);
+  add('21:50:00.512', 'INFO', 'Albums', 'Album lookup started for 6,341 tracks without album');
+  add('22:09:13.377', 'INFO', 'Sync', 'Sync “iPod Classic” started — plan: add 214, remove 12, skip 9');
+  add('22:09:14.020', 'DEBUG', 'Sync', 'ffmpeg -i "/Volumes/Lexxar/Music/Skee Mask/Compro/03 Rev8617.flac" -c:a aac -b:a 248k -c:v copy -disposition:v attached_pic "/Volumes/IPOD/Music/Skee Mask/Compro/03 Rev8617.m4a"');
+  add('22:14:01.650', 'INFO', 'Download', 'Batch started: ' + Q + ' — 44 tracks', Q);
+  add('22:14:01.702', 'INFO', 'Analysis', 'Queue paused while downloads run — 212 waiting');
+  const T = ['Skee Mask — Rev8617', 'Overmono — Good Lies (Extended Mix)', 'Shanti Celeste — Tangerine', 'Bicep — Glue', 'Four Tet — Two Thousand and Seventeen', 'Joy Orbison — better', 'Barker — Paradise Engineering', 'Avalon Emerson — One More Fluorescent Rush', 'Burial — Archangel', 'DJ Koze — Pick Up', 'Floating Points — Vocoder (Club Mix)'];
+  T.forEach((t, i) => { const m = 14 + i, s = String(8 + i * 3).padStart(2, '0'); add('22:' + m + ':' + s + '.210', 'DEBUG', 'Download', 'yt-dlp --no-playlist -x --audio-format best "ytsearch1:' + t + '"', Q); if (i === 6) { add('22:' + m + ':' + s + '.900', 'WARN', 'Download', 'DAB: no match for artist+title “' + t + '”', Q); add('22:' + m + ':' + s + '.955', 'ERROR', 'Download', 'All sources exhausted for “' + t + '” — reason: No match found on any source (attempt 1 of 3)', Q); } else add('22:' + m + ':' + s + '.880', 'INFO', 'Download', 'Downloaded “' + t + '” from ' + ['DAB (FLAC)', 'SoundCloud (M4A 256)', 'YouTube (M4A 248)'][i % 3] + ' → Lexxar/Music/' + t.split(' — ')[0] + '/', Q); });
+  add('22:21:30.118', 'INFO', 'Backup', 'Next scheduled backup: tomorrow 9:00 (daily, keep 10)');
+  add('22:26:41.300', 'INFO', 'Download', 'Queued behind running batch: recommendation “Glass Circuit (Club Edit)”');
+  add('22:30:12.904', 'INFO', 'Import', 'Import “Late night rollers” accepted — queued behind ' + Q);
+  add('22:31:05.556', 'INFO', 'Sync', 'Computing plan for “Car USB stick” (1,902 tracks)');
+  add('22:31:40.019', 'WARN', 'Artwork', 'MusicBrainz cover lookup rate-limited — retrying in 2 s');
+  add('22:32:02.731', 'DEBUG', 'Library', 'Mount event: /Volumes/Lexxar reachable, 412.3 GB used');
+  L.sort((a, b) => a.tm < b.tm ? -1 : 1);
+  const LV = { all: () => true, info: l => l.lv !== 'DEBUG', warn: l => l.lv === 'WARN' || l.lv === 'ERROR', error: l => l.lv === 'ERROR', debug: l => l.lv === 'DEBUG' };
+  const SKEY = 'mlm-b1-logs-filters';
+  let F = { lv: 'all', src: '', q: '', wrap: false, op: '' }, paused = false, held = 0, cleared = false;
+  try { Object.assign(F, JSON.parse(localStorage.getItem(SKEY) || '{}')); } catch (e) { /* private mode */ }
+  F.op = '';
+  const save = () => { try { localStorage.setItem(SKEY, JSON.stringify({ lv: F.lv, src: F.src, wrap: F.wrap })); } catch (e) { /* ignore */ } };
+  function drawLogs() {
+    const st = document.body.dataset.state, base = (cleared || st === 'empty') ? [] : L;
+    const cnt = k => base.filter(LV[k]).length;
+    $$('#lv-seg button').forEach(b => { b.classList.toggle('on', b.dataset.lv === F.lv); b.innerHTML = { all: 'All', info: 'Info+', warn: 'Warnings+', error: 'Errors', debug: 'Debug' }[b.dataset.lv] + ' <span class="t2 num">' + cnt(b.dataset.lv) + '</span>'; });
+    const srcs = [...new Set(L.map(l => l.src))].sort();
+    $('#m-logsrc').innerHTML = '<a class="mi ' + (F.src ? 'nochk' : 'chk') + '" data-src="">All sources</a><hr>' + srcs.map(s => '<a class="mi ' + (F.src === s ? 'chk' : 'nochk') + '" data-src="' + s + '">' + s + '</a>').join('');
+    $('#src-pop').textContent = F.src || 'All sources'; $('#log-q').value = F.q; $('#log-wrap').classList.toggle('on', F.wrap); $('#logview').classList.toggle('wrap', F.wrap);
+    const q = F.q.toLowerCase(), rows = base.filter(l => LV[F.lv](l) && (!F.src || l.src === F.src) && (!F.op || l.op === F.op) && (!q || (l.msg + ' ' + l.src).toLowerCase().includes(q)));
+    $('#logview').innerHTML = rows.map(l => '<span class="tm">' + l.tm + '</span>  <span class="lv ' + l.lv + '">' + l.lv + '</span> <span class="src">' + l.src + '</span> ' + esc(l.msg)).join('\n');
+    $('#logview').hidden = !rows.length; $('#log-empty').hidden = !!rows.length;
+    $('#log-empty-h').textContent = base.length ? 'No lines match' : 'No log lines'; $('#log-empty-p').textContent = base.length ? 'No log lines match the current filters.' : 'What MLM does is written here as it happens.'; $('#log-reset').hidden = !base.length;
+    $('#log-link').hidden = !F.op; if (F.op) { const o = base.filter(l => l.op === F.op); $('#log-link-t').innerHTML = 'Showing the <b>' + rows.length + '</b> lines of <b>' + esc(F.op) + '</b>' + (o.length ? ' · ' + o[0].tm.slice(0, 5) + '–' + o[o.length - 1].tm.slice(0, 5) : ''); }
+    $('#log-count').textContent = 'Showing ' + rows.length + ' of ' + (base.length ? '5,000' : '0') + ' lines kept in memory · older lines are in the log file';
+    $('#log-live').innerHTML = paused ? '<span class="status failed">' + ic('pause', 's') + 'Paused · ' + held + ' new lines held</span>' : '<span class="status ok">Live</span>'; $('#log-pause').textContent = paused ? 'Resume' : 'Pause';
+    if (!paused) $('#logview').scrollTop = 1e6;
+    MLM.refreshBadges();
+  }
+  const logMsg = t => { $('#log-msg').textContent = t; setTimeout(() => { if ($('#log-msg').textContent === t) $('#log-msg').textContent = ''; }, 4000); };
+  const copyShown = () => { const s = String(getSelection()); const t = s || $('#logview').textContent; try { navigator.clipboard.writeText(t); } catch (e) { /* file:// */ } logMsg(s ? 'Copied the selection.' : 'Copied ' + t.split('\n').length + ' shown lines.'); };
+  function showInLogs(op) { F.op = op || ''; F.lv = 'all'; F.src = ''; F.q = ''; MLM.goto('logs'); drawLogs(); document.getElementById('win').scrollIntoView({ behavior: 'smooth' }); }
+  document.addEventListener('click', e => {
+    const t = e.target; let hit = true;
+    if (t.closest('#lv-seg button')) F.lv = t.closest('#lv-seg button').dataset.lv;
+    else if (t.closest('#m-logsrc [data-src]')) F.src = t.closest('[data-src]').dataset.src;
+    else if (t.closest('#log-wrap')) F.wrap = $('#log-wrap').classList.contains('on');
+    else if (t.closest('#log-pause')) { paused = !paused; held = paused ? 14 : 0; }
+    else if (t.closest('#log-unlink')) F.op = '';
+    else if (t.closest('#log-reset')) F = { lv: 'all', src: '', q: '', wrap: F.wrap, op: '' };
+    else if (t.closest('#log-clear-go')) cleared = true;
+    else if (t.closest('#log-copy') || t.closest('[data-log-copy]')) copyShown();
+    else if (t.closest('[data-log-all]')) { const r = document.createRange(); r.selectNodeContents($('#logview')); getSelection().removeAllRanges(); getSelection().addRange(r); }
+    else if (t.closest('#log-export')) logMsg('Exported 5,000 lines to “MLM Log 2026-10-05.txt”.');
+    else if (t.closest('[data-log-src]')) F.src = t.closest('[data-log-src]').dataset.logSrc;
+    else if (t.closest('[data-log-op]')) F.op = Q;
+    else if (t.closest('[data-show-logs]')) return showInLogs(selOp && L.some(l => l.op === selOp.t) ? selOp.t : (selOp && selOp.tracks ? Q : ''));
+    else if (t.closest('[data-oplink]')) return showInLogs(t.closest('[data-oplink]').dataset.oplink);
+    else hit = false;
+    if (hit) { save(); setTimeout(drawLogs, 0); }
+  });
+  $('#log-q').addEventListener('input', e => { F.q = e.target.value; drawLogs(); $('#log-q').focus(); });
+  document.addEventListener('mlm:state', () => setTimeout(drawLogs, 0));
+  drawLogs();
+
+  /* deep link: activity.html#logs opens the Logs tab (goto handles data-view; make sure the window is in view) */
+  if (location.hash === '#logs') { MLM.goto('logs'); drawLogs(); document.getElementById('win').scrollIntoView(); }
+});
+</script>
+</body></html>

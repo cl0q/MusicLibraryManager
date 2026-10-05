@@ -1,0 +1,235 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Player and preview — MLM B1</title>
+<link rel="stylesheet" href="assets/mlm.css"><script src="assets/app.js"></script>
+<style>
+  .ex-wide { grid-column: 1 / -1; }
+  #ex-states, #ex-more { grid-template-columns: repeat(auto-fill, minmax(560px, 1fr)); }
+  .statusbar.sbx { height: auto; min-height: 24px; }
+  .spec .demo.colx { flex-direction: column; align-items: stretch; gap: 8px; }
+  .spec .demo .player { flex: 1 1 auto; min-width: 0; max-width: 520px; margin: 0 auto; }
+  .player .scrub { position: relative; }
+  .player .scrub .hot { position: absolute; top: -3px; bottom: -3px; width: 2px; border-radius: 1px; background: var(--text); display: none; }
+  .player.preview .scrub .hot { display: block; }
+  .player .meta a { color: var(--accent-text); }
+  .player.droptop { box-shadow: inset 0 0 0 2px var(--accent); }
+  .sbx { border-radius: 6px; border: .5px solid var(--sep); }
+  .pvbar { display: flex; align-items: center; gap: 10px; padding: 7px 14px; border-top: .5px solid var(--sep); background: var(--content-alt); flex: none; }
+  .pvbar .tag { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 8px; background: var(--accent); color: var(--on-accent); }
+  .pvbar .bigwave { flex: 1; height: 30px; display: flex; align-items: center; gap: 1px; position: relative; min-width: 120px; }
+  .pvbar .bigwave b { flex: 1; min-width: 1px; border-radius: 1px; background: var(--text3); } .pvbar .bigwave b.p { background: var(--accent); }
+  .pvbar .bigwave .hot { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text); border-radius: 1px; }
+  .pvbar .bigwave .hl { position: absolute; top: -13px; font-size: 9px; color: var(--text2); transform: translateX(-50%); white-space: nowrap; }
+  .slider { height: 4px; border-radius: 2px; background: var(--fill2); position: relative; width: 150px; }
+  .slider i { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 2px; }
+  .slider u { position: absolute; top: -6px; width: 16px; height: 16px; border-radius: 50%; background: var(--control); box-shadow: 0 0 0 .5px var(--sep-strong), 0 1px 3px rgba(0,0,0,.25); margin-left: -8px; }
+  .bigcov { width: 300px; height: 300px; border-radius: 8px; display: block; }
+</style></head>
+<body data-screen="P-PLAYER" data-title="Player and preview" data-nav="tracks"
+      data-states="default,paused,not-playing,not-downloaded,file-missing,unsupported,end-of-queue"
+      data-variants="A,B" data-variant-rec="A" data-variant-dec="DEC-010">
+
+<div class="note">
+  <h3>Player and Space-bar preview — Tier 1</h3>
+  <p><b>Try:</b> click a row, press <kbd>Space</kbd> → the toolbar player switches to <b>Preview</b> (waveform, starts at the hot spot, the playing track pauses) · <kbd>↑</kbd>/<kbd>↓</kbd> moves the preview with the selection · <kbd>Space</kbd> or <kbd>Esc</kbd> ends it and resumes · <kbd>Return</kbd> plays for real (on a “Not downloaded” row it starts the download; on “File missing” it offers Locate…) · click the cover in the player (large cover) and the speaker (volume).</p>
+  <p><b>State</b> switcher: puts the live toolbar player into each state. <b>Drive → Not connected</b>: the player says so; switch back and the status bar offers <b>Resume</b>. <b>Variant B</b> (DEC-010): the preview is a bar above the status bar and the toolbar keeps the paused track — press Space again to compare.</p>
+  <p>Every state is also drawn as a static block below the window. Decisions: DEC-009 (Space), DEC-010 (where the preview shows), DEC-045 (skip unplayable), DEC-047 (arrow keys seek only while previewing).</p>
+</div>
+
+<div id="content">
+  <div class="vhead"><h1>All Tracks</h1><span class="sub">Main Library</span></div>
+  <div class="scopebar"><button class="scope on" data-status-filter="">All</button><button class="scope" data-status-filter="local">Local</button><button class="scope" data-status-filter="notdl,downloading">Not downloaded</button><button class="scope" data-status-filter="failed">Download failed</button><button class="scope" data-status-filter="missing">File missing</button></div>
+  <div id="tbl"></div>
+  <div data-variant="B"><div class="pvbar" id="pvbar" hidden data-fb-id="P-PREVIEW.N05" data-fb-label="Preview bar (variant B)" data-fb-note="Variant B: the preview is a bar docked above the status bar with a wider waveform; the toolbar player keeps showing the paused main track. Not recommended: a second place to look, and it changes the height of the list." data-fb-dec="DEC-010" data-fb-api="safeAreaInset(edge: .bottom) { PreviewBar() } + Canvas waveform">
+    <span class="tag">Preview</span><span class="cov" id="pv-cov" style="width:30px;height:30px;border-radius:5px"></span>
+    <div style="width:190px;line-height:1.25;min-width:0"><div class="trunc" style="font-weight:600" id="pv-ti"></div><div class="t2 small trunc" id="pv-ar"></div></div>
+    <div class="bigwave" id="pv-wave"></div>
+    <span class="t2 small num" id="pv-time"></span>
+    <span class="caption" style="white-space:nowrap">Space to stop · Return to play</span>
+  </div></div>
+</div>
+
+<!-- overlays for the live window -->
+<div class="popover" id="p-cover" hidden data-fb-id="S-PLAYER-COVER" data-fb-label="Large cover popover" data-fb-note="Click the cover in the player. The cover at 300 pt, the track’s names, and the way to its album. Click outside or press Esc to close. System popover, no custom background." data-fb-dec="DEC-010" data-fb-api=".popover(isPresented:, arrowEdge: .top)">
+  <span class="cov c3 bigcov" id="pc-cov"></span>
+  <div style="margin-top:8px;width:300px"><div style="font-weight:600;white-space:normal" id="pc-ti">Not playing</div><div class="t2 trunc" id="pc-ar"></div>
+  <div class="row" style="margin-top:6px"><a class="btn plain" href="albums.html#detail" style="padding:0">Go to Album</a><span class="grow"></span><a class="btn plain" style="padding:0" data-say-l>Go to Current Track<span class="t2" style="margin-left:5px">⌘L</span></a></div></div>
+</div>
+<div class="popover" id="p-volume" hidden style="width:232px" data-fb-id="P-PLAYER.N09" data-fb-label="Volume popover" data-fb-note="Opens from the speaker button. The level is remembered across launches (today it resets to 100 %). ⌘↑ / ⌘↓ change it without opening the popover; the button’s symbol shows the level." data-fb-api=".popover + Slider(value: $volume) + @AppStorage">
+  <div class="row"><i data-i="speaker" class="s"></i><div class="slider grow"><i style="width:70%"></i><u style="left:70%"></u></div><span class="t2 small num" style="width:30px;text-align:right">70 %</span></div>
+  <div class="caption" style="margin-top:8px">⌘↑ / ⌘↓ · remembered between launches</div>
+</div>
+
+<!-- ───────────── Exhibits ───────────── -->
+<h2 class="cat-h">Every player state</h2>
+<div class="cat wide" id="ex-states"></div>
+
+<h2 class="cat-h">Popovers and status-bar messages</h2>
+<div class="cat wide" id="ex-more"></div>
+
+<h2 class="cat-h">Rules</h2>
+<div class="cat wide">
+  <div class="spec ex-wide">
+    <h4>Space-bar rules <code>K-LIB-SPACE</code> <code>DEC-009</code></h4>
+    <p>Space previews what is selected; when there is nothing to preview it is Play/Pause. One setting switches it to “always Play/Pause”.</p>
+    <table class="plain" data-fb-id="K-LIB-SPACE" data-fb-label="Space-bar rules" data-fb-note="The missing key of the daily loop. Preview semantics copied from Quick Look; the Quick Look panel itself is not used." data-fb-dec="DEC-009" data-fb-api=".onKeyPress(.space) on the focused Table; Playback ▸ Play/Pause .keyboardShortcut(.space)">
+      <tr><th style="width:38%">Situation</th><th>Space does</th></tr>
+      <tr><td>One local track selected in any list (tracks, queue, similar, recommendations)</td><td><b>Preview</b> it from its hot spot (the analysed drop, otherwise 0:30). The playing track pauses and keeps its position. The queue is untouched.</td></tr>
+      <tr><td>A preview is running</td><td><b>End the preview</b> and resume what was playing, where it was. <kbd>Esc</kbd> does the same.</td></tr>
+      <tr><td>A preview is running, then <kbd>↑</kbd> / <kbd>↓</kbd></td><td>The preview moves with the selection (each track from its own hot spot).</td></tr>
+      <tr><td>A preview is running, then <kbd>←</kbd> / <kbd>→</kbd></td><td>Seek ±5 s inside the preview. Outside a preview the arrows belong to the focused control; seeking the main track is <kbd>⌥⌘←</kbd> / <kbd>⌥⌘→</kbd> (DEC-047).</td></tr>
+      <tr><td>A preview is running, then <kbd>Return</kbd></td><td>Play that track for real from the previewed position; the rows after it become the queue. The preview ends.</td></tr>
+      <tr><td>Nothing selected, or focus is in the sidebar / on the player</td><td><b>Play/Pause</b> the main playback.</td></tr>
+      <tr><td>Several tracks selected</td><td>Nothing plays. Status bar: <code>Space previews one track. Select a single track.</code></td></tr>
+      <tr><td>The selected track is Not downloaded / Download failed</td><td>Nothing plays. Status bar: <code>Can’t preview — not downloaded. Press ⌘D to download.</code></td></tr>
+      <tr><td>The selected track’s file is missing</td><td>Status bar: <code>Can’t preview — file missing.</code></td></tr>
+      <tr><td>The drive is not connected</td><td>Status bar: <code>Can’t preview — “Lexxar” is not connected.</code></td></tr>
+      <tr><td>A text field has focus (search, rename, Info)</td><td>Types a space. Never playback.</td></tr>
+      <tr><td>An online result is selected (Search ▸ Online, Similar ▸ Online)</td><td>Preview a 30 s stream; same player state, label <code>Preview · from YouTube</code>.</td></tr>
+      <tr data-fb-id="P-PREVIEW.N06" data-fb-label="Setting: Space bar" data-fb-note="Settings ▸ General. Default: previews. The other choice restores the Music convention for muscle memory; preview then lives on ⌥Space." data-fb-dec="DEC-009" data-fb-api="Picker in Settings ▸ General; @AppStorage(&quot;spaceBarAction&quot;)"><td><b>Settings ▸ General ▸ Space bar:</b> <span class="popup">Previews the selected track</span></td><td>Default — the rows above. Choosing <code>Plays or pauses</code> makes Space always Play/Pause and moves the preview to <kbd>⌥Space</kbd>. <a href="settings.html">Settings</a></td></tr>
+      <tr><td>Media key ⏯, Playback ▸ Play/Pause, Dock menu</td><td>Always Play/Pause, whatever is selected.</td></tr>
+    </table>
+  </div>
+
+  <div class="spec ex-wide">
+    <h4>Player elements, before and after <code>P-PLAYER.E01…E10</code></h4>
+    <table class="plain">
+      <tr><th style="width:22%">Element</th><th>Today</th><th>After</th></tr>
+      <tr><td><code>E01</code> Previous</td><td>Restarts after 7 s, else previous from history</td><td>Same rule, 3 s like Music. <kbd>⌘←</kbd></td></tr>
+      <tr><td><code>E02</code> Play/Pause</td><td>No shortcut</td><td>Space (see rules), media key. Enabled with nothing loaded: plays the current view from the selection.</td></tr>
+      <tr><td><code>E03</code> Next</td><td>Stalls on an unplayable track</td><td>Skips unplayable tracks and says so in the status bar (DEC-045). <kbd>⌘→</kbd></td></tr>
+      <tr><td><code>E04</code> Cover</td><td>40 pt, popover with the cover only</td><td>28 pt; popover with cover, names, Go to Album. Draggable as the track.</td></tr>
+      <tr><td><code>E05</code> Title / artist</td><td>80–160 pt wide; album may read “YouTube”</td><td>Takes the remaining width; <code>Artist — Album</code>, no album shown as nothing (DEC-013). Click = Go to Current Track <kbd>⌘L</kbd>.</td></tr>
+      <tr><td><code>E06</code> Idle text</td><td><code>Not Playing</code></td><td><code>Not playing</code> (sentence case)</td></tr>
+      <tr><td><code>E07</code> Error line</td><td>Red triangle + raw text + <code>Retry</code></td><td>A sentence that names the real cause and its one fix (the “Can’t play” states above).</td></tr>
+      <tr><td><code>E08</code> Times</td><td><code>—:——</code> when idle</td><td>Hidden when idle; <code>elapsed / duration</code>.</td></tr>
+      <tr><td><code>E09</code> Scrubber</td><td>Plain slider</td><td>Thin scrubber; a waveform while previewing.</td></tr>
+      <tr><td><code>E10</code> Volume</td><td>76 pt slider, resets every launch</td><td>Speaker button + popover, remembered. <kbd>⌘↑</kbd> / <kbd>⌘↓</kbd></td></tr>
+      <tr><td><code>N01</code> Queue button</td><td>—</td><td>Opens the Queue column <kbd>⌥⌘U</kbd> (<a href="queue.html">queue.html</a>).</td></tr>
+    </table>
+  </div>
+</div>
+
+<script>
+document.addEventListener('mlm:ready', () => {
+  const I = MLM.icon, esc = MLM.esc, S = MLM.shell;
+  const waveBars = (n, from, to, cls) => Array.from({ length: n }, (_, i) => '<b class="' + (i >= from && i < to ? 'p' : '') + '" style="height:' + Math.max(2, (3 + Math.abs(Math.sin(i * 1.7) * 9 + Math.sin(i * 0.37) * 3) + (i > from ? 3 : 0)) * (cls || 1) | 0) + 'px"></b>').join('');
+
+  /* ── Live window ── */
+  const rows = MLM.tracks(300, 7);
+  const t = MLM.table('#tbl', { rows, sort: 'addedSort', desc: true });
+  const live = document.querySelector('.window .player');
+  // preview waveform in the live player: starts at the hot spot, not at 0
+  live.querySelector('.wave').innerHTML = waveBars(56, 13, 22);
+  live.querySelector('.scrub').insertAdjacentHTML('beforeend', '<u class="hot" style="left:23%" title="Hot spot"></u>');
+  live.querySelector('.cover').dataset.popover = 'p-cover';
+  const firstLocal = () => t.view().find(r => r.status === 'local');
+  const first = k => t.view().find(r => r.status === k) || firstLocal();
+  const setIcon = n => { const b = document.querySelector('.window [data-act="playpause"]'); if (b) b.innerHTML = I(n); };
+  const cant = (tr, html) => { S.previewing = null; S.setPlayer(Object.assign({}, tr, { cant: html }), 'cant'); };
+  const lk = s => '<a>' + s + '</a>';
+  function paused(tr) { S.setPlayer(tr, 'play'); setIcon('play'); }
+  function applyState(s) {
+    if (document.documentElement.dataset.drive === 'off') return driveChanged();
+    const cur = S.current || firstLocal();
+    if (s === 'default') { S.play(cur, t); }
+    else if (s === 'paused') { S.current = cur; paused(cur); t.markPlaying(cur); }
+    else if (s === 'not-playing') { S.current = null; S.previewing = null; S.setPlayer(null); t.markPlaying(null); }
+    else if (s === 'not-downloaded') cant(first('notdl'), 'Can’t play — not downloaded · ' + lk('Download'));
+    else if (s === 'file-missing') cant(first('missing'), 'Can’t play — file missing · ' + lk('Locate…'));
+    else if (s === 'unsupported') cant(Object.assign({}, cur, { title: 'Liquid Shore — Live at Dekmantel 2024' }), 'Opus isn’t supported by macOS audio · ' + lk('Convert…'));
+    else if (s === 'end-of-queue') { S.current = null; S.setPlayer(null); t.markPlaying(null); live.querySelector('.ar').textContent = 'End of the queue — “All Tracks” finished'; MLM.say('Reached the end of the queue.'); }
+  }
+  document.addEventListener('mlm:state', e => applyState(e.detail));
+  function driveChanged(clicked) {
+    const off = document.documentElement.dataset.drive === 'off';
+    if (off) { const cur = S.current || firstLocal(); cant(cur, 'Can’t play — “Lexxar” is not connected'); if (clicked) MLM.say(I('drive', 's') + ' “Lexxar” was disconnected — playback paused at 1:12.'); }
+    else if (clicked) { const cur = S.current || firstLocal(); S.current = cur; paused(cur); MLM.say('“Lexxar” connected. <a class="btn plain" style="height:16px" id="resume">Resume</a>'); }
+  }
+  document.addEventListener('click', e => {
+    if (e.target.closest('.reviewbar [data-drive], [data-drive-on]')) setTimeout(() => driveChanged(true), 0);
+    if (e.target.closest('#resume')) { S.play(S.current, t); MLM.say('Resumed “' + esc(S.current.title) + '”.'); }
+    if (e.target.closest('[data-say-l]')) MLM.say('Selected the current track in All Tracks.');
+    const vol = e.target.closest('.window .player [data-fb-id="P-PLAYER.E10"]');
+    if (vol) { const r = vol.getBoundingClientRect(); MLM.openMenu('p-volume', r.left + r.width / 2 - 116, r.bottom + 8); }
+    if (e.target.closest('.window .player .cover')) { const c = S.current; document.getElementById('pc-cov').className = 'cov bigcov ' + (c ? 'c' + c.c : 'none'); document.getElementById('pc-ti').textContent = c ? c.title : 'Not playing'; document.getElementById('pc-ar').textContent = c ? c.artist + (c.album ? ' — ' + c.album : '') : ''; }
+  });
+  applyState('default');
+
+  /* Variant B: preview bar above the status bar; the toolbar keeps the paused main track */
+  const bar = document.getElementById('pvbar'); let shown = null;
+  document.getElementById('pv-wave').innerHTML = waveBars(150, 34, 58, 2) + '<u class="hot" style="left:22.6%"></u><span class="hl" style="left:22.6%">hot spot</span>';
+  setInterval(() => {
+    const p = S.previewing, B = document.body.dataset.variant === 'B';
+    if (B && p) {
+      if (shown !== p.id) { shown = p.id; bar.hidden = false; document.getElementById('pv-cov').className = 'cov c' + p.c; document.getElementById('pv-ti').textContent = p.title; document.getElementById('pv-ar').textContent = p.artist; document.getElementById('pv-time').textContent = '1:24 / ' + MLM.fmtTime(p.time); MLM.refreshBadges(); }
+      if (live.classList.contains('preview')) { if (S.current) paused(S.current); else S.setPlayer(null); }
+    } else {
+      if (!bar.hidden) { bar.hidden = true; shown = null; MLM.refreshBadges(); }
+      if (p && !live.classList.contains('preview')) S.setPlayer(p, 'preview');
+    }
+  }, 120);
+
+  /* ── Static exhibits ── */
+  const A = (id, label, note, dec, api) => ' data-fb-id="' + id + '" data-fb-label="' + esc(label) + '" data-fb-note="' + esc(note) + '"' + (dec ? ' data-fb-dec="' + dec + '"' : '') + (api ? ' data-fb-api="' + esc(api) + '"' : '');
+  const btn = (ic, dis) => '<button class="tb-btn"' + (dis ? ' disabled' : '') + '>' + I(ic) + '</button>';
+  function P(o, attrs) {
+    const idle = o.mode === 'idle';
+    return '<div class="player' + (o.mode === 'preview' ? ' preview' : '') + (o.mode === 'cant' ? ' cant' : '') + (o.cls ? ' ' + o.cls : '') + '"' + (attrs || '') + '>' +
+      btn('prev', o.noPrev) + btn(o.mode === 'play' || o.mode === 'preview' ? 'pause' : 'play') + btn('next', o.noNext) +
+      '<span class="cover cov ' + (o.cov ? 'c' + o.cov : 'none') + '">' + (o.cov ? '' : I('note', 's')) + '</span>' +
+      '<div class="meta"><div class="ti trunc">' + (o.mode === 'preview' ? '<span class="tag"' + (o.tagAttrs || '') + '>Preview</span>' : '') + o.title + '</div><div class="ar trunc"' + (o.subAttrs || '') + '>' + (o.sub || '') + '</div>' +
+      (o.mode === 'cant' ? '' : '<div class="scrub"' + (o.scrubAttrs || '') + '><i style="width:' + (idle ? 0 : o.pos || 34) + '%"></i><div class="wave">' + waveBars(56, 13, 22) + '</div><u class="hot" style="left:23%"' + (o.hotAttrs || '') + '></u></div>') + '</div>' +
+      '<span class="time">' + (o.time || '') + '</span>' + btn('speaker') + btn('queue') + '</div>';
+  }
+  const T = 'Glass Circuit (Overmono Remix)', AR = 'Skee Mask — Compro';
+  const card = (name, id, desc, html, wide) => '<div class="spec' + (wide ? ' ex-wide' : '') + '"><h4>' + name + ' <code>' + id + '</code></h4><p>' + desc + '</p><div class="demo colx">' + html + '</div></div>';
+  const sbar = (html, attrs) => '<div class="statusbar sbx"' + (attrs || '') + '><span class="msg">' + html + '</span></div>';
+
+  document.getElementById('ex-states').innerHTML = [
+    card('Not playing', 'P-PLAYER.E06', 'Nothing loaded. Times are hidden (not <code>—:——</code>). Play is enabled: it plays the current view from the selection, or from the top. Previous/Next are disabled.',
+      P({ mode: 'idle', title: 'Not playing', noPrev: 1, noNext: 1 }, A('P-PLAYER.E06', 'Not playing', 'Idle state in words, sentence case. The player never disappears from the toolbar, so the toolbar never changes shape.', 'DEC-048', 'ToolbarItem(placement: .principal)'))),
+    card('Playing', 'P-PLAYER.N02', 'Title, then <code>Artist — Album</code> (no album = nothing, never “YouTube”). The row of the playing track is marked in every list. Click the title = Go to Current Track (⌘L).',
+      P({ mode: 'play', cov: 3, title: T, sub: AR, time: '2:06 / 6:12' }, A('P-PLAYER.N02', 'Playing', 'The text column takes the width that is left (today 80–160 pt). Long titles truncate at the tail; the full text is the help tag.', 'DEC-013', '.contentTransition(.symbolEffect(.replace)) on play/pause'))),
+    card('Paused', 'P-PLAYER.N03', 'Same as playing with the Play symbol; the scrubber keeps its position. Paused playback survives a relaunch (track and position are restored, paused).',
+      P({ mode: 'pause', cov: 3, title: T, sub: AR, time: '2:06 / 6:12' }, A('P-PLAYER.N03', 'Paused', 'No extra label: the Play symbol and the still scrubber say it. Position is persisted with the queue.', 'DEC-006'))),
+    card('Preview', 'P-PREVIEW', 'Space on a selected row. Label <code>Preview</code>, the previewed title, a waveform scrubber that starts at the hot spot, and the way out. The main track is paused underneath and comes back when the preview ends.',
+      P({ mode: 'preview', cov: 5, title: 'Northern Tide', sub: 'Space to stop · Return to play', time: '1:24 / 5:48',
+        tagAttrs: A('P-PREVIEW.N01', 'Preview label', 'Accent capsule with the word. The only place the accent colour fills something in the player; it marks a temporary mode.', 'DEC-010'),
+        subAttrs: A('P-PREVIEW.N04', 'Hint line', 'Replaces the artist line while previewing: the two keys that matter. The artist is in the selected row right below.', 'DEC-009'),
+        scrubAttrs: A('P-PREVIEW.N02', 'Waveform scrubber', 'The scrubber becomes the track’s waveform so a drop or break can be found by eye. Click or drag to seek; ← / → seek 5 s.', 'DEC-047', 'Canvas (cached peaks) + DragGesture'),
+        hotAttrs: A('P-PREVIEW.N03', 'Hot-spot marker', 'Where the preview started: the analysed drop, or 0:30 for tracks that are not analysed. Click it to jump back.', 'DEC-010') },
+        A('P-PREVIEW', 'Preview state of the player', 'Variant A (recommended): no new surface. The toolbar player is where sound is controlled, so the preview shows there.', 'DEC-010', '.onKeyPress(.space) → PlaybackViewModel.preview(track); second AVAudioPlayerNode'))),
+    card('Can’t play — not downloaded', 'P-PLAYER.E07', 'Shown when a not-downloaded track is asked to play directly from the player or the queue row. From a list, Return starts the download instead (see the status-bar messages). One fix: <code>Download</code>.',
+      P({ mode: 'cant', title: 'Paper Engine [FREE DL]', sub: 'Can’t play — not downloaded · <a>Download</a>', noPrev: 0 }, A('P-PLAYER.E07', 'Can’t play — not downloaded', 'Replaces “Playback unavailable: … file could not be found on disk” for a track that never had a file. The previous track is stopped, not left playing under a foreign error.', 'DEC-045', 'Text + Button(.link)'))),
+    card('Can’t play — file missing', 'P-PLAYER.N04', 'The track has a location but the file isn’t there (the drive is connected). Fix: <code>Locate…</code>; Download Again is in the track’s menu and in Info ▸ File.',
+      P({ mode: 'cant', cov: 2, title: 'Velvet Hours (Extended Mix)', sub: 'Can’t play — file missing · <a>Locate…</a>' }, A('P-PLAYER.N04', 'Can’t play — file missing', 'Only used when the drive is connected. “File missing” is never used for an unplugged drive.', 'DEC-014', '.fileImporter for Locate…'))),
+    card('Can’t play — drive not connected', 'P-PLAYER.N05', 'Playback pauses when “Lexxar” goes away and the player says why. No button: the fix is plugging the drive in. The track and position are kept.',
+      P({ mode: 'cant', cov: 3, title: T, sub: 'Can’t play — “Lexxar” is not connected' }, A('P-PLAYER.N05', 'Can’t play — drive not connected', 'Window-level cause named in the player; the banner and the sidebar footer say the same. Play stays enabled and repeats this message in the status bar.', 'DEC-014', 'NSWorkspace.didUnmountNotification → PlaybackViewModel.pause()'))),
+    card('Unsupported format', 'P-PLAYER.N06', 'Opus, Vorbis and WebM can’t be decoded by macOS audio. One sentence, one fix: <code>Convert…</code> makes an M4A copy (an Activity operation) and plays it when ready.',
+      P({ mode: 'cant', cov: 6, title: 'Liquid Shore — Live at Dekmantel 2024', sub: 'Opus isn’t supported by macOS audio · <a>Convert…</a>' }, A('P-PLAYER.N06', 'Unsupported format', 'Replaces three long format-specific sentences. In a queue the track is skipped like any unplayable one; this state appears when it was started directly.', 'DEC-045'))),
+    card('End of the queue', 'P-PLAYER.N08', 'After the last track the player returns to <code>Not playing</code> and names what finished. History keeps the tracks. Play starts the current view again.',
+      P({ mode: 'idle', title: 'Not playing', sub: 'End of the queue — “Warm-up” finished', noNext: 1 }, A('P-PLAYER.N08', 'End of the queue', 'Today the player silently unloads. The second line stays until something else plays or the view changes.', 'DEC-006')))
+  ].join('');
+
+  document.getElementById('ex-more').innerHTML = [
+    card('Large cover', 'S-PLAYER-COVER', 'Click the cover in the player. Cover at 300 pt, names, <code>Go to Album</code>, <code>Go to Current Track</code>. Missing artwork shows the neutral placeholder. Click outside or Esc closes.',
+      '<div class="popover static" style="flex-direction:column;align-self:center"' + A('S-PLAYER-COVER', 'Large cover popover', 'A glance, so a popover. The cover can be dragged out as the track (to a playlist, the queue, Finder).', 'DEC-010', '.popover(arrowEdge: .top); .draggable(track)') + '><span class="cov c3 bigcov" style="width:220px;height:220px"></span><div style="margin-top:8px;width:220px"><div style="font-weight:600;white-space:normal">' + T + '</div><div class="t2 trunc">' + AR + '</div><div class="row" style="margin-top:6px"><a class="btn plain" style="padding:0" href="albums.html#detail">Go to Album</a><span class="grow"></span><a class="btn plain" style="padding:0">Go to Current Track</a></div></div></div>'),
+    card('Volume', 'P-PLAYER.N09', 'Speaker button → popover with one slider. The level is remembered. The button’s symbol shows mute / low / high.',
+      '<div class="popover static" style="width:232px;display:block;align-self:center"' + A('P-PLAYER.N09', 'Volume popover', 'A popover instead of a permanent 76 pt slider frees toolbar width for the title. ⌘↑ / ⌘↓ work without opening it.', '', 'Slider + @AppStorage("volume")') + '><div class="row">' + I('speaker', 's') + '<div class="slider grow"><i style="width:70%"></i><u style="left:70%"></u></div><span class="t2 small num" style="width:30px;text-align:right">70 %</span></div><div class="caption" style="margin-top:8px">⌘↑ / ⌘↓ · remembered between launches</div></div>'),
+    card('Skipped unplayable tracks', 'P-PLAYER.N07', 'When the queue reaches tracks that can’t play, it moves on and says so once, in the status bar, with the fix. Playback never stalls (DEC-045).',
+      sbar('Skipped 2 tracks that aren’t downloaded · <a class="btn plain" style="height:16px">Download</a>', A('P-PLAYER.N07', 'Skipped message', 'One message per run of skipped tracks, grouped by cause. Other causes: “Skipped 1 track — file missing · Show”, “Skipped 3 tracks — format not supported · Convert…”.', 'DEC-045', 'status bar (safeAreaInset bottom)')) +
+      sbar('Skipped 1 track — file missing · <a class="btn plain" style="height:16px">Show</a>') +
+      sbar('Nothing left to play — the next 12 tracks aren’t downloaded · <a class="btn plain" style="height:16px">Download 12</a>')),
+    card('Return on a track that isn’t local', 'P-PLAYER.N11', 'From a list, Return never produces a player error: it does the useful thing and says it (DEC-008).',
+      sbar('Downloading “Paper Engine [FREE DL]” — it will play when it’s ready · <a class="btn plain" style="height:16px">Cancel</a>', A('P-PLAYER.N11', 'Download-then-play message', 'Not downloaded / Download failed rows: Return downloads (retries) and plays when ready, unless something else was started meanwhile.', 'DEC-008')) +
+      sbar(I('missing', 's') + ' File missing — <a class="btn plain" style="height:16px">Locate…</a> <a class="btn plain" style="height:16px">Download Again</a>') +
+      sbar(I('drive', 's') + ' Can’t play — “Lexxar” is not connected.')),
+    card('The drive came back', 'P-PLAYER.N10', 'Playback does not restart on its own (P3). The status bar offers <code>Resume</code> for 8 s; the player shows the paused track at its old position. Try it with the Drive switch.',
+      P({ mode: 'pause', cov: 3, title: T, sub: AR, time: '1:12 / 6:12', pos: 19 }) + sbar('“Lexxar” connected · <a class="btn plain" style="height:16px">Resume</a>', A('P-PLAYER.N10', 'Drive came back', 'Today playback just stays paused with no hint. Queued downloads and waiting tag changes continue by themselves and are reported by Activity.', 'DEC-014', 'NSWorkspace.didMountNotification'))),
+    card('Tracks dragged onto the player', 'D-LIB-TO-QUEUE', 'The player is a drop target: drop = Play Next. The Queue column takes Play Next (top half) and Add to Queue (bottom half): <a href="queue.html">queue.html</a>.',
+      P({ mode: 'play', cov: 3, title: T, sub: 'Drop to play next', time: '2:06 / 6:12', cls: 'droptop' }))
+  ].join('');
+  MLM.refreshBadges();
+});
+</script>
+</body></html>

@@ -1,0 +1,308 @@
+W-MAIN	Main window ("MLM")	Shell, launch & menus
+W-SETTINGS	Settings window (shell only; tabs ST-* belong to settings.md)	Shell, launch & menus
+V-LAUNCH-NOLIB	"No library open"	Shell, launch & menus
+V-LAUNCH-CANTOPEN	"‹name›" can't be opened (window-content form)	Shell, launch & menus
+V-LAUNCH-INVALID	"‹name›" isn't a valid library file.	Shell, launch & menus
+V-LAUNCH-LOADING	"Loading Library..."	Shell, launch & menus
+V-LAUNCH-FAILED	"Failed to Initialize"	Shell, launch & menus
+V-MAIN-LAYOUT	Main window content (what fills W-MAIN)	Main window, sidebar, toolbar, player, search
+P-SIDEBAR	Sidebar	Main window, sidebar, toolbar, player, search
+P-PINNED	Pinned playlists (nested under "Playlists" in the sidebar)	Main window, sidebar, toolbar, player, search
+P-TOOLBAR	Window toolbar	Main window, sidebar, toolbar, player, search
+P-PLAYER	Player bar (in the toolbar)	Main window, sidebar, toolbar, player, search
+V-QUEUE	Queue	Main window, sidebar, toolbar, player, search
+V-SEARCH	Toolbar search field and search results pane	Main window, sidebar, toolbar, player, search
+V-LIB	Library	Library & track table
+V-TRACK-TABLE	Shared track table (component, not a sidebar view)	Library & track table
+V-TRACK-PRIMITIVES	Track presentation primitives (component catalogue)	Library & track table
+P-INSPECTOR	Track inspector ("detail panel")	Track inspector & Genre Workshop
+P-INSPECTOR-WAVEFORM	Waveform strip (top of the inspector)	Track inspector & Genre Workshop
+P-INSPECTOR-GENERAL	General tab (tag editing + playlist membership)	Track inspector & Genre Workshop
+P-INSPECTOR-AUDIO	Audio tab (analysis values, manual analysis, waveform options)	Track inspector & Genre Workshop
+P-INSPECTOR-FILE	File tab (paths, availability, source, duplicate hint)	Track inspector & Genre Workshop
+P-INSPECTOR-SIMILAR	Similar tab	Track inspector & Genre Workshop
+P-INSPECTOR-DEBUG	Debug tab (ffmpeg diagnostics)	Track inspector & Genre Workshop
+ST-STUDIO-GRID	Genre Workshop: genre grid (Settings → Advanced)	Track inspector & Genre Workshop
+ST-STUDIO-GENRE	Genre Workshop: genre detail (reference track, suggestions, staged tagging)	Track inspector & Genre Workshop
+ST-STUDIO-MERGE	Genre Workshop: Consolidate genres	Track inspector & Genre Workshop
+ST-STUDIO-EXPORT	Genre Workshop: Export CreateML training set	Track inspector & Genre Workshop
+V-PL	Playlists (grid)	Playlists & Folders
+V-PLD	Playlist detail	Playlists & Folders
+V-FOLD	Folders (disk folder browser)	Playlists & Folders
+V-SYNC	Sync (profile list)	Sync & devices
+V-SYNC-DETAIL	Sync profile detail	Sync & devices
+W-REMOTE	Remote playlists window (SoundCloud Playlists / Spotify Playlists / Import YouTube Playlis	Sources & Review
+V-SRC	Sources	Sources & Review
+V-REV	Review (duplicates & metadata conflicts)	Sources & Review
+V-DISC	Discover	Discover & Reels
+V-INBOX	Recommendations (Discovery inbox)	Discover & Reels
+V-REELS	Reels (Reels inbox)	Discover & Reels
+ST-LIB	Library	Settings
+ST-SRC	Sources	Settings
+ST-MAINT	Maintenance	Settings
+ST-BACKUP	Backup	Settings
+ST-STORAGE	Storage Location	Settings
+ST-PLAYBACK	Playback	Settings
+ST-ADV	Advanced (Genre Workshop)	Settings
+P-ACTIVITY	Activity	Activity
+P-ACTIVITY-OPS	Operations	Activity
+P-ACTIVITY-LOGS	Logs	Activity
+CM-SIDEBAR-PINNED	Pinned playlist row	Main window, sidebar, toolbar, player, search
+CM-SIDEBAR-PINNEDRENAME	Row in rename mode	Main window, sidebar, toolbar, player, search
+CM-TRACK	Track context menu (shared)	Library & track table
+CM-STUDIO-SUGGESTION	Suggestion row (ST-STUDIO-GENRE left column)	Track inspector & Genre Workshop
+CM-STUDIO-GENRETRACK	Genre track row (ST-STUDIO-GENRE right column)	Track inspector & Genre Workshop
+CM-STUDIO-MERGETABLE	Merge preview table (ST-STUDIO-MERGE)	Track inspector & Genre Workshop
+CM-PL-CARD	Playlist card context menu	Playlists & Folders
+CM-FOLD-TREE	Folder tree row	Playlists & Folders
+CM-FOLD-SUBFOLDER	Subfolders table row	Playlists & Folders
+CM-FOLD-SEARCHRESULT	Folder search results row	Playlists & Folders
+CM-SYNC-PROFILE	profile row	Sync & devices
+CM-SYNC-PLROW	playlist row in profile	Sync & devices
+CM-SYNC-TRACKROW	track row in profile	Sync & devices
+CM-SYNC-PREVIEWFILE	file in preview list	Sync & devices
+CM-SYNC-FAILED	failed track row	Sync & devices
+CM-REELS-ADDPL	"Add to playlist" pull-down on a search result	Discover & Reels
+CM-REELS-TEXTPILL	recognized-text pill menu	Discover & Reels
+CM-LOGS-TEXT	standard text menu in the log view	Activity
+S-LIBFILE-OPEN	Open Library… file panel	Shell, launch & menus
+S-WIZ-FOLDER	library folder panel	Shell, launch & menus
+S-ADOPT	"Set up your library file"	Shell, launch & menus
+S-NEWLIB	"New Library"	Shell, launch & menus
+S-WIZARD	First-run wizard (window overlay)	Shell, launch & menus
+A-LIB-SWITCH	"Switch to "‹name›"?"	Shell, launch & menus
+A-LIB-COPY	"‹name›" is a copy of "‹original›" (library-file copy prompt)	Shell, launch & menus
+A-LIBFILE-CANTOPEN	can't be opened (alert form, while a library is open)	Shell, launch & menus
+A-LIBFILE-INVALID	isn't a valid library file (alert form)	Shell, launch & menus
+S-SEARCH-UNIVERSAL	Universal search panel ("Paste a URL or search for music…")	Main window, sidebar, toolbar, player, search
+S-PLAYER-COVER	Large cover popover	Main window, sidebar, toolbar, player, search
+A-SIDEBAR-DELETEPL	"Delete playlist?"	Main window, sidebar, toolbar, player, search
+A-SIDEBAR-RENAMEFAIL	"Could not rename playlist"	Main window, sidebar, toolbar, player, search
+S-SEL-NEWPLAYLIST	New playlist from selection	Library & track table
+S-SEL-NEWSYNCPROFILE	New sync profile from selection	Library & track table
+A-TRACK-REMOVE	Remove from Library confirmation	Library & track table
+A-TRACK-REMOVE-FAILED	Could not remove all tracks	Library & track table
+S-GROOVE-SIMILAR	Similar tracks sheet (code: `GrooveView`)	Track inspector & Genre Workshop
+A-GROOVE-DELETEFILE	"Delete file?" confirmation	Track inspector & Genre Workshop
+A-META-SAVEERROR	"Could not save metadata"	Track inspector & Genre Workshop
+S-STUDIO-EXPORTFOLDER	Choose CreateML destination (NSOpenPanel)	Track inspector & Genre Workshop
+S-PL-NEWPLAYLIST	New Playlist popover	Playlists & Folders
+A-PL-DELETE	Delete playlist confirmation	Playlists & Folders
+S-PL-BANNER-PINLIMIT	Pin-limit banner (inline panel)	Playlists & Folders
+S-PL-BANNER-COVERDROP	Cover drop rejected banner (inline panel)	Playlists & Folders
+S-PLD-LINK	Link Playlist Source sheet	Playlists & Folders
+A-PLD-LINKMISMATCH	"Different tracks"	Playlists & Folders
+A-PLD-LINKDONE	"Link Updated"	Playlists & Folders
+S-PLD-M3U-OPEN	M3U file chooser (system open panel)	Playlists & Folders
+S-PLD-M3U-PREVIEW	Import Playlist preview sheet (component shared with sync.md device ingest)	Playlists & Folders
+A-PLD-IMPORTDONE	"Import Complete"	Playlists & Folders
+A-PLD-REMOVE	"Remove tracks"	Playlists & Folders
+S-SYNC-DEVICEINGEST	Read Playlist Changes (device ingest results sheet)	Sync & devices
+S-SYNC-NEWPROFILE	New Sync Profile sheet	Sync & devices
+S-SYNC-OPENPANEL	Output folder chooser (file dialog)	Sync & devices
+S-SYNC-RENAME	Rename sync profile sheet	Sync & devices
+S-SYNC-PLAYLISTPICKER	Add playlists to profile sheet	Sync & devices
+S-SYNC-INGESTPREVIEW	Import Playlist (m3u diff preview sheet)	Sync & devices
+S-SYNC-TOAST	"device defaults" toast	Sync & devices
+A-SYNC-DELETEPROFILE	Delete sync profile?	Sync & devices
+A-SYNC-REMOVECONTENT	Remove from profile?	Sync & devices
+S-REV-UNDOTOAST	Review undo toast	Sources & Review
+S-SRC-OAUTH	Sign-in in the web browser (external)	Sources & Review
+A-SRC-KEYCHAIN	macOS keychain permission prompt (system)	Sources & Review
+A-INBOX-DELETE	"Delete file?"	Discover & Reels
+A-INBOX-ERROR	"Recommendations" error alert	Discover & Reels
+S-REELS-OPENFOLDER	folder picker (NSOpenPanel)	Discover & Reels
+S-REELS-KEYFRAME	keyframe detail sheet	Discover & Reels
+A-REELS-DELETE	"Delete 1 reel?" / "Delete N reels?"	Discover & Reels
+A-REELS-DELETEERROR	"Deletion Error"	Discover & Reels
+S-SET-LIBROOT	Select Music Library Folder (NSOpenPanel)	Settings
+S-SET-IMPORTFOLDER	Import Audio Files (NSOpenPanel)	Settings
+S-SET-CACHEFOLDER	Choose transcode cache location (NSOpenPanel)	Settings
+S-SET-BACKUPFOLDER	Choose backup folder (NSOpenPanel)	Settings
+S-SET-EXPORTFOLDER	CreateML destination (NSOpenPanel)	Settings
+A-SET-DISCONNECT	Disconnect source	Settings
+A-SET-RESTORE	Restore backup	Settings
+A-SET-RESTOREFAILED	Restore didn't finish	Settings
+A-SET-PATHAPPLY	Update organized paths? (confirmation dialog)	Settings
+A-SET-PATHROLLBACK	Roll back last path migration? (confirmation dialog)	Settings
+A-OPS-CLEARQUEUE	Clear Pending Jobs	Activity
+M-APP	"MLM" (application menu)	Shell, launch & menus
+M-FILE	"File"	Shell, launch & menus
+M-EDIT	"Edit"	Shell, launch & menus
+M-VIEW	"View"	Shell, launch & menus
+M-NAVIGATE	"Navigate"	Shell, launch & menus
+M-PLAYBACK	"Playback"	Shell, launch & menus
+M-LIBRARY	"Library"	Shell, launch & menus
+M-WINDOW	"Window"	Shell, launch & menus
+M-HELP	"Help"	Shell, launch & menus
+M-DOCK	Dock menu	Shell, launch & menus
+K-APP-SETTINGS	⌘, · `Settings…`	Shell, launch & menus
+K-FILE-NEWPLAYLIST	⌘N · `New Playlist`	Shell, launch & menus
+K-FILE-OPENLIB	⌘O · `Open Library…`	Shell, launch & menus
+K-NAV-LIBRARY	⌘1 · `Library`	Shell, launch & menus
+K-NAV-PLAYLISTS	⌘2 · `Playlists`	Shell, launch & menus
+K-NAV-FOLDERS	⌘3 · `Folders`	Shell, launch & menus
+K-NAV-SYNC	⌘4 · `Sync`	Shell, launch & menus
+K-NAV-SOURCES	⌘5 · `Sources`	Shell, launch & menus
+K-NAV-REVIEW	⌘6 · `Review`	Shell, launch & menus
+K-NAV-DISCOVER	⌘7 · `Discover`	Shell, launch & menus
+K-NAV-QUEUE	⌘8 · `Queue`	Shell, launch & menus
+K-PLAYBACK-STOP	⌘. · `Stop`	Shell, launch & menus
+K-PLAYBACK-SKIPBACK	⌘← · `Skip Back 10s`	Shell, launch & menus
+K-PLAYBACK-SKIPFWD	⌘→ · `Skip Forward 10s`	Shell, launch & menus
+K-LIBRARY-IMPORT	⌘⇧I · `Import from Folder…`	Shell, launch & menus
+K-LIBRARY-MOREINFO	⌘I · `More Info`	Shell, launch & menus
+K-WIN-SEEKBACK	← (hold repeats) · — (no menu item)	Shell, launch & menus
+K-WIN-SEEKFWD	→ (hold repeats) · —	Shell, launch & menus
+K-SEARCH-CMDF	⌘F (no ⌥/⌃/⇧) · `Focus search field`	Main window, sidebar, toolbar, player, search
+K-SEARCH-RETURN	Return in the search field	Main window, sidebar, toolbar, player, search
+K-SEARCH-ESC	Escape in the search pane	Main window, sidebar, toolbar, player, search
+K-SIDEBAR-QUEUE8	⌘8 · `Queue`	Main window, sidebar, toolbar, player, search
+K-SIDEBAR-NAV	(relation only; M-NAVIGATE is owned by shell.md): ⌘1 `Library`, ⌘2 `Playlists`, ⌘3 `Folder	Main window, sidebar, toolbar, player, search
+K-SIDEBAR-RENAME	Return commits, Escape cancels, in P-PINNED.E04	Main window, sidebar, toolbar, player, search
+K-SEARCH-UNIVERSAL-KEYS	Return re-submits, Escape closes (S-SEARCH-UNIVERSAL). The advertised ⌘K and "tab to navig	Main window, sidebar, toolbar, player, search
+K-LIB-RESCAN	⌘R · `Re-scan Library` (toolbar button in V-LIB)	Library & track table
+K-LIB-SPACE	Space · *expected, missing*: preview/play the selected track (`.planning/REQUIREMENTS.md:1	Library & track table
+K-LIB-DELETE	⌫ / ⌘⌫ · *expected, missing*: remove selection (Finder/Music convention). No delete comman	Library & track table
+K-LIB-INFO	⌘I `More Info` (M-LIBRARY, owned by shell.md)	Library & track table
+K-LIB-RETURN	Return on a selected row: whether the table's primary action (play + inspector) fires is n	Library & track table
+K-META-EDIT-RETURN	Return · save the field being edited	Track inspector & Genre Workshop
+K-META-EDIT-ESC	Esc · cancel the inline edit (value discarded)	Track inspector & Genre Workshop
+K-WAVE-PINCH	trackpad pinch · zoom the waveform 0.5×–8×	Track inspector & Genre Workshop
+K-STUDIO-MERGE-PRIMARY	double-click (table primary action)	Track inspector & Genre Workshop
+K-PL-NEW	⌘N · button `New Playlist`	Playlists & Folders
+K-PL-NEWPOPOVER-ESC	Esc · `Cancel` in S-PL-NEWPLAYLIST	Playlists & Folders
+K-PL-NEWPOPOVER-RETURN	Return · `Create` in S-PL-NEWPLAYLIST (default action)	Playlists & Folders
+K-PL-RENAME	Return saves / Esc cancels the inline card rename	Playlists & Folders
+K-SYNC-REFRESH	⌘R · `Refresh`	Sync & devices
+K-SYNC-NEWPROFILE-KEYS	Escape = `Cancel`, Return = `Create` in S-SYNC-NEWPROFILE	Sync & devices
+K-SYNC-RENAME-KEYS	Escape = `Cancel`, Return = `Rename` in S-SYNC-RENAME	Sync & devices
+K-SYNC-PICKER-RETURN	Return = `Add (n)` in S-SYNC-PLAYLISTPICKER (no Escape binding for Cancel)	Sync & devices
+K-REMOTE-DONE	toolbar `Done` in W-REMOTE with `.cancellationAction` placement	Sources & Review
+K-DISC-NAV	⌘7 · `Discover` in menu `Navigate` (M-NAVIGATE, owned by shell.md)	Discover & Reels
+K-REELS-RETURN	Return in V-REELS.E08 search field	Discover & Reels
+K-REELS-LISTNAV	↑/↓ in the reel list (system list selection)	Discover & Reels
+K-REELS-DELETE	list deletion via SwiftUI `.onDelete` (on macOS presumably ⌫ / Edit ▸ Delete on the select	Discover & Reels
+K-REELS-KEYFRAME-ESC	Esc · S-REELS-KEYFRAME open	Discover & Reels
+K-SET-COOKIE-RETURN	Return · label: none (text field submit)	Settings
+K-SET-GW-TABLE-RETURN	*(inferred)* — Return / double-click	Settings
+K-ACT-ESC	Escape collapses the Activity panel	Activity
+K-LOGS-COPY	Select all / Copy in the log view	Activity
+D-LIBFILE-OPEN	Finder → MLM: double-click / Open With / drop a `.mlibm` on the MLM Dock icon. Payload: fi	Shell, launch & menus
+D-SIDEBAR-SPRINGLOAD	a track drag (`UTType.trackDrag`) hovering over a sidebar row (P-SIDEBAR rows, the P-PINNE	Main window, sidebar, toolbar, player, search
+D-QUEUE-ROWS	V-QUEUE rows can be dragged out as `TrackDragData` (track id, no source playlist) to any t	Main window, sidebar, toolbar, player, search
+D-SEARCH-ROWS	V-SEARCH results can be dragged out the same way	Main window, sidebar, toolbar, player, search
+D-LIB-TRACK-OUT	source: rows in V-LIB, V-SEARCH, V-QUEUE (all `TrackTable`) and V-FOLD → targets: Playlist	Library & track table
+D-LIB-SPRING	Spring-loaded sidebar: while a track drag hovers ≥ 0.6 s over any sidebar section row, the	Library & track table
+D-PL-TRACKS-TO-CARD	source: track rows from V-LIB (library.md), V-PLD, V-FOLD, or the Library table in another	Playlists & Folders
+D-PL-COVER-TO-CARD	source: an image file from Finder, or an image dragged from another app	Playlists & Folders
+D-PL-SPRINGLOAD-CARD	hovering a track drag over a card for 0.6 s opens that playlist's detail mid-drag, so the 	Playlists & Folders
+D-PLD-REORDER	source: rows of V-PLD.E15 (multi-row)	Playlists & Folders
+D-PLD-INSERT	source: track rows from elsewhere (Library, Folders, another playlist) arriving via spring	Playlists & Folders
+D-PLD-ROWS-OUT	rows in V-PLD are draggable carrying their source playlist id …	Playlists & Folders
+D-FOLD-TRACKS-OUT	rows of V-FOLD.E10 are draggable (`MLM/Views/Folders/FoldersView.swift:629-632`). They rea	Playlists & Folders
+D-REELS-IMPORT	Finder video files/folders → Reels	Discover & Reels
+D-LOGS-TEXTDRAG	drag selected log text out	Activity
+D-LIBFILE-WINDOWDROP	*expected, missing*: dropping a `.mlibm` onto the main window (esp. V-LAUNCH-NOLIB) does n	Shell, launch & menus
+D-WIZ-FOLDERDROP	*expected, missing*: dropping a music folder onto S-WIZARD step 2 is not supported …	Shell, launch & menus
+D-LIB-FINDER-IN	*expected, missing*: drag audio files/folders from Finder onto the Library table to import	Library & track table
+D-LIB-TO-FINDER	*expected, missing*: drag tracks out to Finder, DJ software or a mail/chat app as files. T	Library & track table
+D-LIB-TO-SIDEBAR-NEWPL	*expected, missing*: drop a selection on the sidebar (or a sidebar playlist) to create/add	Library & track table
+D-LIB-TO-QUEUE	*expected, missing*: drag tracks onto the player bar or Queue to queue them (`Play Next` e	Library & track table
+D-LIB-TO-SYNC	*expected, missing*: drop tracks on a sync profile (Sync spring-loads but has no drop targ	Library & track table
+D-TD-TRACK-OUT	*(missing)* — drag the inspected track (cover/title) onto a sidebar playlist or into Finde	Track inspector & Genre Workshop
+D-GROOVE-ROW-TO-PLAYLIST	*(missing)* — drag a local match / recommendation row from S-GROOVE-SIMILAR or P-INSPECTOR	Track inspector & Genre Workshop
+D-TD-ARTWORK-IN	*(missing)* — drop an image onto the inspector cover to set artwork (standard in Music/Get	Track inspector & Genre Workshop
+D-STUDIO-TRACK-TO-GENRE	*(missing)* — drag suggestions onto the genre column instead of thumbs-up staging.	Track inspector & Genre Workshop
+D-PL-TRACKS-TO-PINNED	(missing) — dropping tracks directly on a pinned sidebar playlist adds them. Today pinned 	Playlists & Folders
+D-PL-SELECTION-TO-NEW	(missing) — drop a selection on the sidebar or grid background to create a new playlist fr	Playlists & Folders
+D-PL-PLAYLIST-TO-FOLDER	(missing) — group playlists into playlist folders; no playlist folders exist.	Playlists & Folders
+D-PL-CARD-REORDER	(missing) — arrange cards or pinned playlists manually.	Playlists & Folders
+D-PLD-COVER-TO-HEADER	(missing) — drop an image on the 64 pt detail cover.	Playlists & Folders
+D-PLD-M3U-FROM-FINDER	(missing) — drop an .m3u/.m3u8 file on the grid or detail.	Playlists & Folders
+D-FOLD-FOLDER-TO-PLAYLIST	(missing) — drag a disk folder onto a playlist to add all its tracks.	Playlists & Folders
+D-FOLD-FILES-FROM-FINDER	(missing) — drop audio files on a folder to import them.	Playlists & Folders
+D-PLD-ROWS-TO-FINDER	(missing) — drag tracks out to Finder or another app as files.	Playlists & Folders
+D-SYNC-PLAYLIST-TO-PROFILE	(expected, missing) — drag playlists from V-PL / sidebar pins onto a profile row or the Pl	Sync & devices
+D-SYNC-TRACKS-TO-PROFILE	(expected, missing) — drag tracks from V-LIB / V-PLD / V-FOLD onto a profile. Today only C	Sync & devices
+D-SYNC-FOLDER-TO-OUTPUT	(expected, missing) — drop a Finder folder or mounted volume onto `Output folder`.	Sync & devices
+D-SYNC-REORDER-PROFILES	(expected, missing) — reorder profiles in V-SYNC (list order is DB order).	Sync & devices
+D-REMOTE-URL-DROP	(expected, missing) — a playlist URL dragged from the browser onto V-SRC's YouTube card, o	Sources & Review
+D-REMOTE-PLAYLIST-TO-SIDEBAR	(expected, missing) — drag a remote playlist row to the sidebar/Playlists to import it.	Sources & Review
+D-REV-TRACK-OUT	(expected, missing) — drag a Review version row into a playlist or Finder.	Sources & Review
+D-INBOX-TO-PLAYLIST	(missing) — drag a recommendation row onto a sidebar playlist / P-PINNED. Evidence: daily-	Discover & Reels
+D-REELS-RESULT-TO-PLAYLIST	(missing) — drag a search result onto a playlist instead of the ⊕ menu.	Discover & Reels
+D-REELS-URL	(missing) — drop an Instagram/TikTok link (text/URL) to fetch the reel; today only local f	Discover & Reels
+D-REELS-OUT	(missing) — drag a reel row out to Finder / reveal; rows are not draggable.	Discover & Reels
+D-SET-FOLDER-TO-LIBROOT	(expected, missing) — Finder folder → ST-LIB.E06 to set the music folder, or → ST-LIB `Imp	Settings
+D-SET-GW-TRACK-TO-GENRE	(expected, missing) — track row (ST-ADV.E11/E14 or a V-LIB selection) → genre card / `Trac	Settings
+D-SET-GW-TRACK-OUT	(expected, missing) — Genre Workshop rows → sidebar playlist (build-playlist flow; CM-TRAC	Settings
+D-SET-FOLDER-TO-DESTINATION	(expected, missing) — Finder folder → backup folder row / transcode cache row / CreateML d	Settings
+G-LIB-RESOLVING	Deciding which library to open (order: interrupted adoption → file opened from Finder → le	`MLM/Services/Library/LibraryLaunchCoordinator.swi
+G-LIB-LOADING	Library DB and services starting	`MLM/App/DependencyContainer.swift:147-417`
+G-LIB-FAILED	Library failed to open	`MLM/App/DependencyContainer.swift:99-107`
+G-LIB-NONE	No library open	`MLM/Services/Library/LibraryLaunchCoordinator.swi
+G-LIB-NOTFOUND	Library file not at its last location / on a disk that isn't connected	`MLM/Services/Library/LibraryRegistry.swift:119-12
+G-LIB-MISMATCH	Library-file identity doesn't match registry/DB	`MLM/Services/Library/LibraryPackage.swift:230-241
+G-LIB-INVALID	Not a valid library file	`MLM/Services/Library/LibraryLaunchCoordinator.swi
+G-LIB-COPY	Library file is a Finder copy of another (same `library_id`)	`MLM/Services/Library/LibraryLaunchCoordinator.swi
+G-LIB-ADOPT-PENDING	Old single-DB layout not yet turned into a library file	`MLM/Services/Library/LibraryLaunchResolver.swift:
+G-LIB-ADOPT-INTERRUPTED	Adoption journal found at launch	`MLM/Services/Library/LibraryAdoption.swift:88-91`
+G-LIB-LEGACY	Running on the old layout after `Not now`	`MLM/Services/Library/ActiveLibrary.swift:31`
+G-LIB-SWITCH-PENDING	User picked another library; app must relaunch	`MLM/Services/Library/LibraryLaunchCoordinator.swi
+G-LIB-CURRENT	Which library is open	`MLM/Services/Library/ActiveLibrary.swift`
+G-ROOT-NONE	No library folder configured	`MLM/App/DependencyContainer.swift:86,376-378`
+G-DRIVE-OFFLINE	Library folder's volume not mounted	`MLM/Services/Mount/MountObserver.swift:46-50,109-
+G-DRIVE-BOOT	Library folder on the boot volume	`MLM/Services/Mount/MountObserver.swift:170-176`
+G-DEVICE-OFFLINE	A sync target (device/folder) is not connected	see `inventory/sync.md` "Global-state touchpoints"
+G-SRC-CONNECTED	Signed in	`Connected` (green)
+G-SRC-DISCONNECTED	Not signed in	`Disconnected` (muted)
+G-SRC-EXPIRED	Sign-in expired	`Sign-in expired` (amber) + `Reconnect`
+G-SRC-KEYCHAIN	Token stored but keychain unreadable	—
+G-SRC-CREDS-MISSING	Client ID missing from the credentials file	—
+G-SRC-APPLEMUSIC	Apple Music not implemented	—
+G-SRC-QOBUZ-COOKIE	Squid/Qobuz captcha cookie state	—
+G-TRK-LOCAL	`local`	*(no chip)*
+G-TRK-DOWNLOADING	`downloading`	`Downloading…`
+G-TRK-NOTDOWNLOADED	`notDownloaded`	`Not downloaded`
+G-TRK-FAILED	`failed(reason, date, attempts)`	`Download failed`
+G-TRK-MISSING	`fileMissing`	`File missing`
+G-TRK-PLACEHOLDER	metadata placeholder	muted italic + tooltip `Placeholder from import — 
+G-TRK-DUPLICATE	Track marked as possible duplicate after a Review decision	—
+G-PL-LOCAL	nothing extra	nothing extra
+G-PL-LINKED	source name as text	Card subtitle source label (V-PL), provenance line
+G-PL-IMPORTING	`Importing · 12 of 44`	Card chip `Importing · n of m`; header `Downloadin
+G-PL-INCOMPLETE	`Incomplete · 9 failed`	Card chip `Incomplete · n failed`; header `n of m 
+G-PL-NOTDOWNLOADED	— (not in §1.6)	A linked playlist whose tracks were saved without 
+G-PL-SRC-DISCONNECTED	`SoundCloud disconnected — reconnect in Settings`	**Not implemented**; surfaces as `Sync failed: ‹ra
+G-PL-DRIVE-OFFLINE	—	Card healthy; detail a wall of `File missing`, Pla
+G-BG-ACTIVE	Something is running	`Running` (blue, determinate where countable)
+G-JOB-STATUS	Job lifecycle	`Queued` · `Running` · `Paused` · `Completed` · `F
+G-JOB-SILENT	Work with lasting effects but no UI	(§1.1.2: "Automation is visible")
+G-TOOL-MISSING	External tool missing (yt-dlp, ffmpeg, fpcalc, scdl)	—
+G-PLAYBACK-ERROR	Track can't be played	`mlmError` + text
+F-01	First launch with no library	rare
+F-02	First launch of an A3 build: turn the old install into a library file	rare (once)
+F-03	Daily listening session: browse → preview with Space → play → queue	daily
+F-04	Find a track fast (search)	daily
+F-05	Import a YouTube / SoundCloud / Spotify playlist and download it	weekly
+F-06	Download one track from a pasted URL	weekly (wish)
+F-07	Fix failed downloads	weekly
+F-08	Create and fill a playlist (drag & drop, multi-select)	daily/weekly
+F-09	Organize via folders	weekly
+F-10	Sync a profile to a device and handle failures	weekly
+F-11	Pull playlist changes back from a device (device ingest)	rare
+F-12	Review duplicates and metadata conflicts	weekly
+F-13	Edit metadata in the inspector	weekly
+F-14	Discover: get recommendations, listen, keep or delete	weekly
+F-15	Reels: identify the song in a saved video and get it	weekly
+F-16	Back up and restore	rare
+F-17	Switch / create / open a library file (incl. Finder double-click)	rare
+F-18	External drive unplugged mid-session	daily
+F-19	Settings changes: library folder, sources sign-in, transcode cache	rare
+F-20	A source sign-in has expired	weekly
+F-21	Genre tagging and ML export (Genre Workshop)	rare
+F-22	Run an analysis batch (Maintenance)	rare
+F-23	Link a playlist to a source / import an M3U file	rare
+F-24	Albums (future flow)	—
+G-LIB-NOTCONNECTED	Library file not at its last location / on a disk that isn't connected	

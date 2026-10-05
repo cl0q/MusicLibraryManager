@@ -1,0 +1,327 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Queue — MLM B1</title>
+<link rel="stylesheet" href="assets/mlm.css"><script src="assets/app.js"></script>
+<style>
+  .ex-wide { grid-column: 1 / -1; }
+  .spec .demo.colx { flex-direction: column; align-items: stretch; gap: 8px; }
+  .spec .demo.gap { gap: 18px; align-items: flex-start; }
+  #qlist { outline: none; }
+  .qh { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: var(--text2); margin: 14px 0 4px; }
+  .qh:first-child { margin-top: 0; } .qh .n { font-weight: 400; } .qh.ctx { font-weight: 400; margin: 8px 0 2px; }
+  .qrow { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 6px 0 2px; border-radius: 6px; position: relative; }
+  .qrow:hover { background: var(--fill); }
+  .qrow.sel { background: var(--sel-inactive); }
+  #qlist:focus .qrow.sel { background: var(--sel); color: var(--on-accent); } #qlist:focus .qrow.sel * { color: var(--on-accent) !important; }
+  .qrow .h { width: 12px; flex: none; color: var(--text3); opacity: 0; cursor: grab; display: flex; }
+  .qrow:hover .h { opacity: 1; } .qrow.fixed .h { visibility: hidden; }
+  .qrow .cov { width: 26px; height: 26px; } .qrow .tx { line-height: 1.2; }
+  .qrow.un .cov, .qrow.un .tt, .qrow.un .tm { opacity: .45; }
+  .qrow.now { height: 50px; } .qrow.now .cov { width: 40px; height: 40px; border-radius: 6px; } .qrow.now .tt { font-weight: 600; }
+  .qrow.drop-before::before, .qrow.drop-after::after { content: ""; position: absolute; left: 14px; right: 0; height: 2px; border-radius: 1px; background: var(--accent); }
+  .qrow.drop-before::before { top: -1px; } .qrow.drop-after::after { bottom: -1px; }
+  .qempty { padding: 10px 4px 6px; color: var(--text2); font-size: 12px; white-space: normal; } .qempty b { display: block; color: var(--text); font-weight: 600; }
+  .qfoot { margin-top: 16px; padding-top: 10px; border-top: .5px solid var(--sep); }
+  .trx { height: auto; min-height: 120px; border-radius: 10px; border: 0; box-shadow: 0 0 0 .5px var(--sep-strong); overflow: hidden; position: relative; }
+  .zone { position: absolute; left: 0; right: 0; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 12px; color: var(--accent-text); pointer-events: none; }
+  .zone.on { background: color-mix(in srgb, var(--accent) 12%, transparent); box-shadow: inset 0 0 0 2px var(--accent); }
+  .ghost { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 6px; background: var(--sel); color: var(--on-accent); font-size: 12px; box-shadow: var(--pop-shadow); position: absolute; z-index: 3; }
+  .ghost .n { background: var(--red); border-radius: 8px; padding: 0 5px; font-size: 10px; font-weight: 600; }
+  .insline { height: 2px; background: var(--accent); border-radius: 1px; margin: 0 0 0 14px; }
+  .sbx { border-radius: 6px; border: .5px solid var(--sep); }
+  .spec .demo .player { flex: 1 1 auto; min-width: 0; max-width: 480px; margin: 0 auto; } .player.droptop { box-shadow: inset 0 0 0 2px var(--accent); }
+</style></head>
+<body data-screen="P-QUEUE" data-title="Queue" data-nav="pl1" data-states="default,next-empty,empty,error">
+
+<div class="note">
+  <h3>Queue — a mode of the trailing column — Tier 1</h3>
+  <p><b>Try:</b> the column opens with <kbd>⌥⌘U</kbd> or the queue button in the player (here it is open on load) · <kbd>Return</kbd> / double-click a row in “Warm-up”: it plays and the rows after it become <b>From “Warm-up”</b> (Play Next items stay) · right-click rows in the table → <b>Play Next</b> / <b>Add to Queue</b> · in the queue: click a row, <kbd>↑</kbd>/<kbd>↓</kbd>, <kbd>⌫</kbd> removes (Undo in the status bar), drag a row by its handle to reorder (drop line), double-click to jump to it, right-click for its menu · <b>Clear</b> · <b>Save as Playlist…</b> · the player’s <b>Next</b> button skips rows that can’t play and says so.</p>
+  <p><b>State</b> switcher: default · Next empty · everything empty · playback not available. <b>Drive → Not connected</b>: the queue is kept and says why it is paused.</p>
+  <p>Decisions: DEC-006 (queue is a column mode, not a destination), DEC-039 (menu order, no Remove from Library here), DEC-045 (skip unplayable). Old V-QUEUE elements E01–E05 keep their IDs.</p>
+</div>
+
+<div id="content">
+  <div class="dhead" style="padding:16px 20px 14px">
+    <div class="art" style="width:96px;height:96px"><i data-i="list" class="xl"></i></div>
+    <div><div class="kind">Playlist</div><h1>Warm-up</h1><div class="t2" id="pl-sub"></div>
+      <div class="acts"><button class="btn primary" id="pl-play"><i data-i="play" class="s"></i>Play</button><button class="btn"><i data-i="shuffle" class="s"></i>Shuffle</button></div></div>
+  </div>
+  <div id="tbl"></div>
+</div>
+
+<!-- menus and popovers -->
+<div class="menu" id="cm-queue" hidden data-fb-id="CM-QUEUE" data-fb-label="Queue row context menu" data-fb-note="The shared order (Primary · Queue · Add to · Info · Fix · Locate/Share · Remove). The last item is Remove from Queue. Remove from Library is not offered here: the queue is a play order, not a place to delete music." data-fb-dec="DEC-039" data-fb-api="contextMenu(forSelectionType:menu:primaryAction:)">
+  <div class="mi hdr" data-cm-count></div>
+  <a class="mi" data-q="play"><i data-i="play"></i>Play<span class="k">↩</span></a><a class="mi" data-q="preview"><i data-i="wave"></i>Preview<span class="k">Space</span></a><hr>
+  <a class="mi" data-q="top">Play Next<span class="k">⌥↩</span></a><a class="mi" data-q="end">Move to End of Queue</a><hr>
+  <a class="mi sub">Add to Playlist</a><a class="mi sub">Add to Sync Profile</a><hr>
+  <a class="mi" data-act="info-open">Get Info<span class="k">⌘I</span></a><a class="mi" href="albums.html#detail">Go to Album</a><a class="mi">Go to Artist</a><a class="mi" href="discover.html#similar">Find Similar</a><a class="mi" data-q="show">Show in “Warm-up”</a><hr>
+  <a class="mi" data-q="dl"><i data-i="download"></i>Download<span class="k">⌘D</span></a><hr>
+  <a class="mi">Show in Finder<span class="k">⇧⌘R</span></a><a class="mi sub">Copy</a><a class="mi">Share…</a><hr>
+  <a class="mi" data-q="remove">Remove from Queue<span class="k">⌫</span></a>
+</div>
+<div class="menu" id="cm-queue-hist" hidden data-fb-id="CM-QUEUE.N01" data-fb-label="History / Now playing row menu" data-fb-note="Same order. Playing something from History keeps what is in Next (today it silently discards it)." data-fb-dec="DEC-039">
+  <a class="mi" data-q="play"><i data-i="play"></i>Play<span class="k">↩</span></a><hr>
+  <a class="mi" data-q="requeue-top">Play Next<span class="k">⌥↩</span></a><a class="mi" data-q="requeue-end">Add to Queue<span class="k">⌥⇧↩</span></a><hr>
+  <a class="mi sub">Add to Playlist</a><a class="mi sub">Add to Sync Profile</a><hr>
+  <a class="mi" data-act="info-open">Get Info<span class="k">⌘I</span></a><a class="mi" href="albums.html#detail">Go to Album</a><a class="mi" href="discover.html#similar">Find Similar</a><hr>
+  <a class="mi">Show in Finder<span class="k">⇧⌘R</span></a><a class="mi sub">Copy</a><hr>
+  <a class="mi" data-q="clear-hist">Clear History</a>
+</div>
+<div class="popover" id="p-saveq" hidden style="width:270px" data-fb-id="P-QUEUE.N15" data-fb-label="Save as Playlist popover" data-fb-note="A name, one button. Saves Now playing + Next in order as a new playlist; the queue itself is unchanged. The new playlist appears in the sidebar; the view does not change." data-fb-dec="DEC-006" data-fb-api=".popover { TextField; Button(&quot;Create&quot;).keyboardShortcut(.defaultAction) }">
+  <div style="font-weight:600;margin-bottom:6px">Save queue as playlist</div>
+  <input class="field" id="saveq-name" value="Queue — Oct 5, 2026" style="width:100%">
+  <div class="caption" style="margin-top:6px" id="saveq-n"></div>
+  <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn" id="saveq-cancel">Cancel</button><button class="btn primary" id="saveq-ok">Create</button></div>
+</div>
+
+<!-- ───────────── Exhibits ───────────── -->
+<h2 class="cat-h">Getting tracks into the queue by dragging</h2>
+<div class="cat wide">
+  <div class="spec">
+    <h4>Drop on the player <code>P-QUEUE.N11</code> <code>D-LIB-TO-QUEUE</code></h4>
+    <p>The toolbar player is a drop target even when the Queue column is closed: drop = <b>Play Next</b>. Status bar: <code>Playing next: 3 tracks · Undo</code>.</p>
+    <div class="demo colx" id="ex-drop-player"></div>
+  </div>
+  <div class="spec ex-wide">
+    <h4>Drop on the Queue column <code>P-QUEUE.N12</code></h4>
+    <p>Two halves, one rule. <b>Top half</b> (Now playing and above the first row): the whole area highlights and the drop is <b>Play Next</b>. <b>Bottom half</b>: an insertion line follows the pointer between rows and the drop is <b>Add to Queue</b> at that place; below the last queued row it appends. Dropping on an empty queue starts nothing — it queues.</p>
+    <div class="demo gap" id="ex-drop-queue"></div>
+  </div>
+  <div class="spec">
+    <h4>Dragging rows out of the queue <code>D-QUEUE-ROWS</code></h4>
+    <p>Queue and History rows drag like any track: onto a sidebar playlist (append), a sync profile, or to Finder as files. In the live window, drag a Next row onto a playlist in the sidebar.</p>
+  </div>
+</div>
+
+<h2 class="cat-h">When something can’t play</h2>
+<div class="cat wide">
+  <div class="spec">
+    <h4>Unplayable items are skipped <code>P-QUEUE.N13</code></h4>
+    <p>Rows that can’t play stay visible in Next with their state in words, dimmed. When playback reaches them it moves on and reports once (DEC-045). Press the player’s Next button in the live window to see it.</p>
+    <div class="demo colx" id="ex-skip"></div>
+  </div>
+  <div class="spec">
+    <h4>Queue with the drive not connected <code>P-QUEUE.N14</code></h4>
+    <p>Playback pauses; the queue and the position are kept. One line at the top says why; rows are dimmed without a per-row status (the banner speaks, DEC-014). Not-downloaded rows keep their own word. Editing the queue still works.</p>
+    <div class="demo" id="ex-drive"></div>
+  </div>
+  <div class="spec">
+    <h4>Empty states <code>V-QUEUE.E04</code></h4>
+    <p>Sentences that say how to fill it. No full-pane placeholder: the three section titles stay so the column keeps its shape.</p>
+    <div class="demo" id="ex-empty"></div>
+  </div>
+  <div class="spec">
+    <h4>From V-QUEUE to P-QUEUE</h4>
+    <table class="plain">
+      <tr><th>Today (sidebar destination, three 13-column tables)</th><th>After</th></tr>
+      <tr><td><code>V-QUEUE.E02</code> <code>Currently playing</code></td><td><code>Now playing</code>, first section</td></tr>
+      <tr><td><code>V-QUEUE.E03</code> <code>Next up</code></td><td><code>Next</code>: Play Next items, then <code>From “‹context›”</code></td></tr>
+      <tr><td><code>V-QUEUE.E01</code> <code>History</code> (on top)</td><td><code>History</code>, last section, most recent first</td></tr>
+      <tr><td><code>V-QUEUE.E04</code> three empty texts</td><td>Two sentences (above)</td></tr>
+      <tr><td><code>V-QUEUE.E05</code> <code>No Playback</code></td><td>Error state with cause and actions (State ▸ Error)</td></tr>
+      <tr><td>13 columns, inert sort headers</td><td>Cover, title, artist, time; state word only when unplayable</td></tr>
+      <tr><td>No editing; lost on quit</td><td>Reorder, ⌫, Clear, Save as Playlist…; persisted</td></tr>
+      <tr><td>CM-TRACK incl. Remove from Library</td><td>CM-QUEUE, ends with Remove from Queue</td></tr>
+      <tr><td>⌘8, sidebar footer row</td><td>⌥⌘U, queue button in the player</td></tr>
+    </table>
+  </div>
+</div>
+
+<script>
+document.addEventListener('mlm:ready', () => {
+  const I = MLM.icon, esc = MLM.esc, S = MLM.shell, fmt = MLM.fmtTime;
+  const A = (id, label, note, dec, api) => ' data-fb-id="' + id + '" data-fb-label="' + esc(label) + '" data-fb-note="' + esc(note) + '"' + (dec ? ' data-fb-dec="' + dec + '"' : '') + (api ? ' data-fb-api="' + esc(api) + '"' : '');
+  const WORD = { notdl: 'Not downloaded', failed: 'Download failed', missing: 'File missing', downloading: 'Downloading…' };
+  const unplayable = (t, off) => t.status !== 'local' || off;
+  let kseq = 0; const item = (t, pn) => ({ t, pn: !!pn, k: 'q' + (++kseq) });
+
+  /* ── The playlist in the content column ── */
+  const plRows = MLM.tracks(38, 21); plRows.forEach((r, i) => { r.num = i + 1; });
+  const tbl = MLM.table('#tbl', { rows: plRows, cols: ['num', 'title', 'artist', 'album', 'time', 'bpm', 'status'] });
+  document.getElementById('pl-sub').textContent = plRows.length + ' tracks · ' + MLM.fmtDur(plRows.reduce((a, r) => a + r.time, 0)) + ' · ' + plRows.filter(r => r.status !== 'local').length + ' not playable yet';
+
+  /* ── Queue model ── */
+  const Q = { now: null, next: [], hist: [], sel: new Set(), ctx: 'Warm-up' };
+  let snapshot = null, firstNote = true;
+  const snap = () => { snapshot = { now: Q.now, next: Q.next.slice(), hist: Q.hist.slice() }; };
+  function seed(state) {
+    Q.sel.clear(); kseq = 0;
+    const extra = MLM.tracks(8, 99, { allLocal: true });
+    if (state === 'empty') { Q.now = null; Q.next = []; Q.hist = []; }
+    else {
+      let start = plRows.findIndex((r, i) => r.status === 'local' && plRows[i + 1] && plRows[i + 1].status === 'local' && plRows.slice(i + 2, i + 4).some(x => x.status !== 'local')); if (start < 0) start = plRows.findIndex(r => r.status === 'local');
+      Q.now = item(plRows[start]);
+      Q.next = state === 'next-empty' ? [] : [item(extra[0], 1), item(extra[1], 1)].concat(plRows.slice(start + 1, start + 15).map(r => item(r)));
+      Q.hist = extra.slice(3, 8).map(r => item(r));
+    }
+  }
+
+  /* ── Rendering (used by the live column and by the static exhibits) ── */
+  function row(it, sec, o) {
+    const t = it.t, off = o.off && (t.status === 'local' || t.status === 'missing'), un = sec !== 'hist' && (t.status !== 'local' || off);
+    const word = t.status !== 'local' && !(off) ? ' · <span class="status' + (t.status === 'failed' ? ' failed' : t.status === 'missing' ? ' missing' : '') + '"' + (o.ids ? A('P-QUEUE.N04', 'State word on an unplayable row', 'Only rows that can’t play carry a word. They stay in the queue (the user may download them before they come up) and are skipped otherwise.', 'DEC-045') : '') + '>' + WORD[t.status] + '</span>' : '';
+    return '<div class="qrow' + (sec === 'now' ? ' now fixed' : '') + (un ? ' un' : '') + (o.sel && o.sel.has(it.k) ? ' sel' : '') + (o.mark === it.k ? ' ' + o.markCls : '') + '" data-k="' + it.k + '" data-sec="' + sec + '"' + (sec === 'next' ? ' draggable="true"' : '') + (un ? ' title="Will be skipped"' : '') +
+      (o.ids && sec === 'next' && it === o.first ? A('P-QUEUE.N01', 'Queue row', 'Cover, title, artist, time. No columns to sort. Click selects, double-click jumps to it, ⌫ removes, drag reorders, Space previews.', 'DEC-006', 'List row; .onMove; .onDelete; .draggable') : '') + '>' +
+      '<span class="h"' + (o.ids && sec === 'next' && it === o.first ? A('P-QUEUE.N07', 'Reorder handle and drop line', 'The handle appears on hover; the whole row drags. A 2 pt accent line shows where it will land. Dragging a “From …” row above the divider turns it into a Play Next item.', 'DEC-040', '.onMove(perform:)') : '') + '>' + I('lines', 's') + '</span>' +
+      '<span class="cov c' + t.c + (t.status === 'notdl' || t.status === 'failed' ? ' none' : '') + '">' + (t.status === 'notdl' || t.status === 'failed' ? I('note', 's') : '') + '</span>' +
+      '<div class="grow tx"><div class="trunc tt">' + esc(t.title) + '</div><div class="t2 small trunc">' + esc(t.artist) + word + (sec === 'now' && o.ctx ? ' · <a data-q="show"' + (o.ids ? A('P-QUEUE.N08', 'Context link', 'Where the playing track comes from. Click = Go to Current Track (⌘L): selects it in that playlist.', 'DEC-006') : '') + '>from “' + esc(o.ctx) + '”</a>' : '') + '</div></div>' +
+      '<span class="t2 small num tm">' + fmt(t.time) + '</span></div>';
+  }
+  function queueHTML(m, o) {
+    o = o || {}; const ids = o.ids, pn = m.next.filter(x => x.pn), cx = m.next.filter(x => !x.pn); o.first = m.next[0];
+    const dur = m.next.filter(x => !unplayable(x.t, o.off)).reduce((a, x) => a + x.t.time, 0);
+    let h = '';
+    if (o.off) h += '<div class="caption" style="white-space:normal;margin-bottom:10px"' + (ids ? A('P-QUEUE.N14', 'Drive not connected line', 'Says why nothing advances. The queue is kept and continues from the same position when the drive returns (status bar: “Lexxar” connected · Resume).', 'DEC-014') : '') + '>' + I('drive', 's') + ' “Lexxar” is not connected. The queue is kept; playback continues when the drive is back.</div>';
+    h += '<div class="qh"' + (ids ? A('V-QUEUE.E02', 'Now playing section', 'Was “Currently playing”, a one-row 13-column table. Now the first section, with the context it plays from.', 'DEC-006', 'Section("Now playing")') : '') + '>Now playing</div>';
+    h += m.now ? row(m.now, 'now', Object.assign({ ctx: m.ctx }, o)) : '<div class="qempty"' + (ids ? A('V-QUEUE.E04', 'Empty texts', '“Nothing playing” and one sentence that says how the queue fills. Replaces three icon placeholders.', 'DEC-006', 'ContentUnavailableView-style text inside the List') : '') + '><b>Nothing playing</b></div>';
+    h += '<div class="qh"' + (ids ? A('V-QUEUE.E03', 'Next section', 'Was “Next up”. Play Next / Add to Queue items first, then the rest of the context the playing track came from.', 'DEC-006', 'Section("Next")') : '') + '><span>Next</span>' + (m.next.length ? '<span class="n"' + (ids ? A('P-QUEUE.N09', 'Count and time left', 'How much is queued; unplayable rows are not counted in the time.') : '') + '>' + m.next.length + ' · ' + MLM.fmtDur(dur) + '</span>' : '') + '<span class="grow"></span>' +
+      (m.next.length ? '<a class="btn plain small" data-q="clear"' + (ids ? A('P-QUEUE.N03', 'Clear', 'Empties Next (queued items and the context). The playing track continues. Undoable.', 'DEC-041', 'Button("Clear")') : '') + '>Clear</a>' : '') + '</div>';
+    if (!m.next.length) h += '<div class="qempty"' + (ids && m.now ? A('V-QUEUE.E04', 'Empty texts', 'One sentence that says how the queue fills.', 'DEC-006') : '') + '><b>Queue is empty</b>Return plays the selected track and queues what follows. Play Next (⌥↩) puts tracks here without interrupting.' + (m.now ? ' Playback stops after this track.' : '') + '</div>';
+    h += pn.map(x => row(x, 'next', o)).join('');
+    if (cx.length) h += '<div class="qh ctx"' + (ids ? A('P-QUEUE.N02', 'Context divider', 'Below this line is the automatic continuation: the rows after the played track in the view it was started from (up to 100). Above it are tracks the user queued by hand; they survive starting another track.', 'DEC-006') : '') + '>From “' + esc(m.ctx) + '”</div>' + cx.slice(0, o.cap || 100).map(x => row(x, 'next', o)).join('') + (o.cap && cx.length > o.cap ? '<div class="caption" style="padding:4px 0 0 46px">and ' + (cx.length - o.cap) + ' more</div>' : '');
+    h += '<div class="qh"' + (ids ? A('V-QUEUE.E01', 'History section', 'Most recent first, the last 50 (Settings ▸ Playback). Double-click plays a track again and keeps Next as it is.', 'DEC-006', 'Section("History")') : '') + '>History</div>';
+    h += m.hist.length ? m.hist.slice(0, o.hcap || 6).map(x => row(x, 'hist', o)).join('') : '<div class="qempty">No history yet.</div>';
+    if (!o.nofoot) h += '<div class="qfoot"><div class="row"><button class="btn" data-popover="p-saveq"' + (m.now || m.next.length ? '' : ' disabled') + (ids ? A('P-QUEUE.N05', 'Save as Playlist…', 'Keeps a queue that turned out well. Now playing + Next, in order.', 'DEC-006', 'Button + .popover') : '') + '>Save as Playlist…</button></div><div class="caption" style="margin-top:8px;white-space:normal"' + (ids ? A('P-QUEUE.N06', 'Persisted-queue note', 'The queue, the history and the position survive quitting MLM; it reopens paused. Today everything is lost on relaunch.', 'DEC-006', 'Codable queue stored per library (SwiftData / app-support JSON)') : '') + '>Kept when you quit. MLM reopens with this queue, paused.</div></div>';
+    return h;
+  }
+
+  /* ── Live column ── */
+  const host = document.getElementById('queue-auto');
+  host.innerHTML = '<div id="qlist" tabindex="0"></div>';
+  const list = document.getElementById('qlist');
+  const errHTML = '<div class="empty" style="padding:30px 6px"' + A('V-QUEUE.E05', 'Playback not available', 'Was “No Playback / Playback is not available.” with no way out. Now: cause in a sentence, a retry and the way to the log.', 'DEC-044', 'ContentUnavailableView + Buttons') + '>' + I('warn', 'xl') + '<h2>Playback isn’t available</h2><p>The audio engine didn’t start. Your queue is kept.</p><div class="acts"><button class="btn primary" data-q="retry-engine">Try Again</button><a class="btn" href="activity.html#logs">Show Logs</a></div></div>';
+  function render() {
+    const off = document.documentElement.dataset.drive === 'off';
+    list.innerHTML = document.body.dataset.state === 'error' ? errHTML : queueHTML(Q, { ids: true, sel: Q.sel, off, cap: 12 });
+    document.getElementById('saveq-n').textContent = ((Q.now ? 1 : 0) + Q.next.length) + ' tracks, in queue order';
+    MLM.refreshBadges();
+  }
+  function syncPlayer(mode) {
+    if (!Q.now) { S.current = null; S.setPlayer(null); tbl.markPlaying(null); return; }
+    S.current = Q.now.t; S.setPlayer(Q.now.t, 'play'); tbl.markPlaying(Q.now.t);
+    if (document.documentElement.dataset.drive === 'off') S.setPlayer(Object.assign({}, Q.now.t, { cant: 'Can’t play — “Lexxar” is not connected' }), 'cant');
+  }
+  const find = k => Q.next.find(x => x.k === k) || Q.hist.find(x => x.k === k) || (Q.now && Q.now.k === k ? Q.now : null);
+  const selItems = () => Q.next.concat(Q.hist, Q.now ? [Q.now] : []).filter(x => Q.sel.has(x.k));
+  const names = a => a.length === 1 ? '“' + esc(a[0].t.title) + '”' : a.length + ' tracks';
+  const skipMsg = sk => { const nd = sk.filter(x => x.t.status !== 'missing').length, ms = sk.length - nd; return (nd ? 'Skipped ' + nd + ' track' + (nd > 1 ? 's' : '') + ' that ' + (nd > 1 ? 'aren’t' : 'isn’t') + ' downloaded · <a class="btn plain" style="height:16px">Download</a>' : '') + (nd && ms ? ' &nbsp; ' : '') + (ms ? 'Skipped ' + ms + ' track' + (ms > 1 ? 's' : '') + ' — file missing · <a class="btn plain" style="height:16px">Show</a>' : ''); };
+  function advance() {
+    if (!Q.now && !Q.next.length) return;
+    if (document.documentElement.dataset.drive === 'off') { MLM.say(I('drive', 's') + ' Can’t play — “Lexxar” is not connected.'); return; }
+    snap();
+    if (Q.now) Q.hist.unshift(Q.now); const sk = [];
+    while (Q.next.length && unplayable(Q.next[0].t)) sk.push(Q.next.shift());
+    Q.now = Q.next.shift() || null; Q.sel.clear(); syncPlayer(); render();
+    if (!Q.now) { const ar = document.querySelector('.window .player .ar'); if (ar) ar.textContent = 'End of the queue — “' + Q.ctx + '” finished'; }
+    if (sk.length) MLM.say(skipMsg(sk)); else if (!Q.now) MLM.say('Reached the end of the queue.');
+  }
+  function back() { if (!Q.hist.length) return; snap(); if (Q.now) Q.next.unshift(Object.assign(Q.now, { pn: true })); Q.now = Q.hist.shift(); syncPlayer(); render(); }
+  function playItem(it, sec) {
+    if (unplayable(it.t, document.documentElement.dataset.drive === 'off')) { MLM.say(document.documentElement.dataset.drive === 'off' ? I('drive', 's') + ' Can’t play — “Lexxar” is not connected.' : it.t.status === 'missing' ? I('missing', 's') + ' File missing — <a class="btn plain" style="height:16px">Locate…</a> <a class="btn plain" style="height:16px">Download Again</a>' : 'Downloading “' + esc(it.t.title) + '” — it will play when it’s ready. <a class="btn plain" style="height:16px">Cancel</a>'); return; }
+    snap();
+    if (sec === 'next') { const i = Q.next.indexOf(it), dropped = Q.next.splice(0, i); Q.next.shift(); if (Q.now) Q.hist.unshift(Q.now); Q.now = it; if (dropped.length) MLM.say('Jumped ahead — ' + dropped.length + ' track' + (dropped.length > 1 ? 's' : '') + ' left the queue', true); }
+    else if (sec === 'hist') { Q.hist.splice(Q.hist.indexOf(it), 1); if (Q.now) Q.hist.unshift(Q.now); Q.now = it; MLM.say('Playing “' + esc(it.t.title) + '” again — Next is unchanged.'); }
+    Q.sel.clear(); syncPlayer(); render();
+  }
+  function remove(items) { items = items.filter(x => Q.next.includes(x)); if (!items.length) return; snap(); Q.next = Q.next.filter(x => !items.includes(x)); Q.sel.clear(); render(); MLM.say('Removed ' + names(items) + ' from the queue', true); }
+  function addNext(ts, end) {
+    if (!ts.length) return; snap(); const its = ts.map(t => item(t, 1));
+    if (end) { const i = Q.next.filter(x => x.pn).length; Q.next.splice(i, 0, ...its); } else Q.next.unshift(...its);
+    render(); MLM.say((end ? 'Added to queue: ' : 'Playing next: ') + names(its), true);
+  }
+
+  list.addEventListener('mousedown', e => {
+    const r = e.target.closest('.qrow'); if (!r) { if (!e.target.closest('a,button')) { Q.sel.clear(); render(); } return; }
+    const k = r.dataset.k; if (e.button === 2 && Q.sel.has(k)) return;
+    if (e.metaKey || e.ctrlKey) { Q.sel.has(k) ? Q.sel.delete(k) : Q.sel.add(k); } else { Q.sel.clear(); Q.sel.add(k); }
+    list.querySelectorAll('.qrow').forEach(x => x.classList.toggle('sel', Q.sel.has(x.dataset.k)));
+  });
+  list.addEventListener('dblclick', e => { const r = e.target.closest('.qrow'); if (r && r.dataset.sec !== 'now') playItem(find(r.dataset.k), r.dataset.sec); });
+  list.addEventListener('contextmenu', e => { const r = e.target.closest('.qrow'); if (!r) return; e.preventDefault(); const its = selItems(); const dl = document.querySelector('#cm-queue [data-q="dl"]'); const need = its.some(x => x.t.status === 'notdl' || x.t.status === 'failed'); dl.hidden = !need; dl.nextElementSibling.hidden = !need; MLM.openMenu(r.dataset.sec === 'next' ? 'cm-queue' : 'cm-queue-hist', e.clientX, e.clientY, { rows: its }); });
+  list.addEventListener('keydown', e => {
+    const order = Array.from(list.querySelectorAll('.qrow')).map(x => x.dataset.k), cur = order.findIndex(k => Q.sel.has(k));
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const n = Math.max(0, Math.min(order.length - 1, cur + (e.key === 'ArrowDown' ? 1 : -1))); Q.sel.clear(); Q.sel.add(order[n]); render(); const it = find(order[n]); if (S.previewing && it) S.preview(it.t); }
+    else if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); remove(selItems()); }
+    else if (e.key === 'Enter') { e.preventDefault(); const it = selItems()[0]; if (!it) return; if (e.altKey && Q.next.includes(it)) { snap(); Q.next.splice(Q.next.indexOf(it), 1); it.pn = true; Q.next.unshift(it); render(); MLM.say('Playing next: ' + names([it]), true); } else if (it !== Q.now) playItem(it, Q.next.includes(it) ? 'next' : 'hist'); }
+    else if (e.key === ' ') { e.preventDefault(); const it = selItems()[0]; if (S.previewing) { S.endPreview(); } else if (it) S.preview(it.t); }
+    else if (e.key === 'Escape' && S.previewing) S.endPreview();
+  });
+  /* reorder by drag, and drag out to a sidebar playlist */
+  let dragK = null; const clearMarks = () => document.querySelectorAll('.drop-before,.drop-after,.sb-row.drop').forEach(x => x.classList.remove('drop-before', 'drop-after', 'drop'));
+  list.addEventListener('dragstart', e => { const r = e.target.closest('.qrow[data-sec="next"]'); if (!r) { e.preventDefault(); return; } dragK = r.dataset.k; e.dataTransfer.effectAllowed = 'copyMove'; e.dataTransfer.setData('text/plain', dragK); });
+  list.addEventListener('dragover', e => { const r = e.target.closest('.qrow[data-sec="next"]'); if (!r || !dragK) return; e.preventDefault(); clearMarks(); const b = r.getBoundingClientRect(); r.classList.add(e.clientY > b.top + b.height / 2 ? 'drop-after' : 'drop-before'); });
+  list.addEventListener('drop', e => {
+    const r = e.target.closest('.qrow[data-sec="next"]'); if (!r || !dragK) return; e.preventDefault();
+    const it = find(dragK), target = find(r.dataset.k), after = r.classList.contains('drop-after'); clearMarks(); if (!it || it === target) return;
+    snap(); Q.next.splice(Q.next.indexOf(it), 1); it.pn = target.pn; Q.next.splice(Q.next.indexOf(target) + (after ? 1 : 0), 0, it);
+    Q.next.sort((a, b) => (b.pn ? 1 : 0) - (a.pn ? 1 : 0)); render(); MLM.say('Moved “' + esc(it.t.title) + '”', true);
+  });
+  document.addEventListener('dragend', () => { dragK = null; clearMarks(); });
+  document.querySelectorAll('.window .sb-row[data-nav^="pl"]').forEach(sb => {
+    sb.addEventListener('dragover', e => { if (!dragK || sb.dataset.nav === 'plf') return; e.preventDefault(); clearMarks(); sb.classList.add('drop'); });
+    sb.addEventListener('dragleave', () => sb.classList.remove('drop'));
+    sb.addEventListener('drop', e => { e.preventDefault(); const it = find(dragK); clearMarks(); if (it) MLM.say('Added “' + esc(it.t.title) + '” to “' + sb.querySelector('.lbl').firstChild.textContent + '”', true); });
+  });
+
+  /* clicks: queue buttons, menu items, table menu items, player transport, Undo */
+  document.addEventListener('click', e => {
+    const x = e.target.closest('[data-q]'), its = selItems();
+    if (x) {
+      const a = x.dataset.q;
+      if (a === 'clear') { snap(); const n = Q.next.length; Q.next = []; render(); MLM.say('Cleared ' + n + ' tracks from the queue', true); }
+      else if (a === 'remove') remove(its);
+      else if (a === 'play' && its[0] && its[0] !== Q.now) playItem(its[0], Q.next.includes(its[0]) ? 'next' : 'hist');
+      else if (a === 'preview' && its[0]) S.preview(its[0].t);
+      else if (a === 'top' || a === 'end') { const mv = its.filter(i => Q.next.includes(i)); if (mv.length) { snap(); Q.next = Q.next.filter(i => !mv.includes(i)); mv.forEach(i => { i.pn = a === 'top'; }); if (a === 'top') Q.next.unshift(...mv); else Q.next.push(...mv); render(); MLM.say(a === 'top' ? 'Playing next: ' + names(mv) : 'Moved ' + names(mv) + ' to the end of the queue', true); } }
+      else if (a === 'requeue-top' || a === 'requeue-end') addNext(its.map(i => i.t), a === 'requeue-end');
+      else if (a === 'clear-hist') { snap(); Q.hist = []; render(); MLM.say('History cleared', true); }
+      else if (a === 'dl') MLM.say('Download started — ' + its.filter(i => i.t.status !== 'local').length + ' tracks');
+      else if (a === 'show') { if (Q.now) { tbl.select([Q.now.t.id]); MLM.say('Selected the current track in “' + Q.ctx + '”.'); } }
+      else if (a === 'retry-engine') document.querySelector('.reviewbar [data-set-state="default"]').click();
+      return;
+    }
+    if (e.target.closest('.statusbar .msg a') && e.target.textContent === 'Undo' && snapshot) { Q.now = snapshot.now; Q.next = snapshot.next; Q.hist = snapshot.hist; snapshot = null; syncPlayer(); render(); MLM.say('Undone.'); return; }
+    if (e.target.closest('[data-fb-id="CM-TRACK.E03"], .selbar [data-fb-id="P-SELBAR.N01"]')) return addNext(tbl.selection(), false);
+    if (e.target.closest('[data-fb-id="CM-TRACK.N02"]')) return addNext(tbl.selection(), true);
+    if (e.target.closest('.window .player [data-fb-id="P-PLAYER.E03"]')) return advance();
+    if (e.target.closest('.window .player [data-fb-id="P-PLAYER.E01"]')) return back();
+    if (e.target.closest('#saveq-ok')) { const p = document.getElementById('p-saveq'); p.hidden = true; p.classList.remove('open'); MLM.say('Created playlist “' + esc(document.getElementById('saveq-name').value) + '” with ' + ((Q.now ? 1 : 0) + Q.next.length) + ' tracks · <a class="btn plain" style="height:16px" href="playlists.html#detail">Show</a>'); }
+    if (e.target.closest('#saveq-cancel')) { const p = document.getElementById('p-saveq'); p.hidden = true; p.classList.remove('open'); }
+    if (e.target.closest('#pl-play')) { const f = tbl.view().find(r => r.status === 'local'); if (f) S.play(f, tbl); }
+    if (e.target.closest('.reviewbar [data-drive], [data-drive-on]')) setTimeout(() => { syncPlayer(); render(); }, 0);
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.altKey && e.target.closest && e.target.closest('#tbl')) addNext(tbl.selection(), e.shiftKey); });
+
+  /* Return / double-click in the playlist: play, and the rows after it become the context */
+  const origPlay = S.play;
+  S.play = function (t, table) {
+    origPlay(t, table);
+    if (S.current !== t || (Q.now && Q.now.t === t)) return;
+    if (Q.now) Q.hist.unshift(Q.now); Q.now = item(t);
+    if (table) { const v = table.view(), i = v.indexOf(t); Q.next = Q.next.filter(x => x.pn).concat(v.slice(i + 1, i + 101).map(r => item(r))); }
+    render();
+    if (firstNote) { firstNote = false; MLM.say('Playing “' + esc(t.title) + '” — the ' + Q.next.filter(x => !x.pn).length + ' rows after it are queued. Play Next items stayed.'); }
+  };
+
+  document.addEventListener('mlm:state', e => { seed(e.detail); syncPlayer(); render(); });
+  seed(document.body.dataset.state || 'default'); syncPlayer(); render();
+  const qb = document.querySelector('.window [data-act="queue"]'); if (qb) qb.click();
+
+  /* ── Static exhibits ── */
+  const col = (inner, extra) => '<aside class="trailing trx"' + (extra || '') + '><div class="tr-head"><div class="seg"><button>Info</button><button class="on">Queue</button></div></div><div class="tr-body">' + inner + '</div></aside>';
+  const ex = MLM.tracks(9, 99, { allLocal: true }), mixed = plRows.filter(r => r.status !== 'local').slice(0, 2);
+  const base = { now: item(ex[0]), next: [item(ex[1], 1), item(ex[2])].concat(mixed.map(r => item(r)), [item(ex[3])]), hist: [item(ex[5]), item(ex[6])], ctx: 'Warm-up' };
+  const btn = ic => '<button class="tb-btn">' + I(ic) + '</button>';
+  document.getElementById('ex-drop-player').innerHTML = '<div style="position:relative"><div class="player droptop"' + A('P-QUEUE.N11', 'Player as drop target', 'Accent ring while a track drag hovers. Drop = Play Next. Works with tracks, albums, playlists and folders.', 'DEC-040', '.dropDestination(for: TrackRef.self) on the .principal toolbar item') + '>' + btn('prev') + btn('pause') + btn('next') + '<span class="cover cov c3"></span><div class="meta"><div class="ti trunc">' + esc(ex[0].title) + '</div><div class="ar trunc">Drop to play next</div><div class="scrub"><i></i></div></div><span class="time">2:06 / ' + fmt(ex[0].time) + '</span>' + btn('speaker') + btn('queue') + '</div><span class="ghost" style="right:40px;top:26px">' + I('note', 's') + esc(ex[4].title) + '<span class="n">3</span></span></div><div style="height:16px"></div>';
+  const m2 = Object.assign({}, base, { next: base.next.slice(0, 2).concat([base.next[4]]) });
+  const withLine = (html, n) => { let i = 0; return html.replace(/<div class="qrow(?! now)/g, s => (++i === n ? '<div class="insline"></div>' : '') + s); };
+  document.getElementById('ex-drop-queue').innerHTML =
+    '<div><div class="caption" style="margin-bottom:6px"><b>Top half</b> — drop = Play Next</div>' + col(queueHTML(m2, { nofoot: 1 }) + '<div class="zone on" style="top:42px;height:50%">Play Next</div><span class="ghost" style="left:120px;top:96px">' + I('note', 's') + '3 tracks<span class="n">3</span></span>', A('P-QUEUE.N12', 'Drop zones of the Queue column', 'Top half = Play Next (area highlight). Bottom half = Add to Queue at the insertion line. The same two verbs as the menu items and ⌥↩ / ⌥⇧↩.', 'DEC-040', '.dropDestination + List insertion (onInsert)')) + '</div>' +
+    '<div><div class="caption" style="margin-bottom:6px"><b>Bottom half</b> — insertion line, drop = Add to Queue here</div>' + col(withLine(queueHTML(m2, { nofoot: 1 }), 3) + '<span class="ghost" style="left:110px;top:222px">' + I('note', 's') + '3 tracks<span class="n">3</span></span>') + '</div>';
+  document.getElementById('ex-skip').innerHTML = '<div style="display:flex;justify-content:center">' + col(queueHTML(Object.assign({}, base, { hist: [] }), { nofoot: 1, hcap: 0 })) + '</div><div class="statusbar sbx"' + A('P-QUEUE.N13', 'Skipped message', 'Appears in the status bar when playback passes unplayable rows; one message per run, grouped by cause, with the fix.', 'DEC-045') + '><span class="msg">Skipped 2 tracks that aren’t downloaded · <a class="btn plain" style="height:16px">Download</a></span></div>';
+  document.getElementById('ex-drive').innerHTML = col(queueHTML(base, { nofoot: 1, off: true, hcap: 1 }));
+  document.getElementById('ex-empty').innerHTML = col(queueHTML({ now: null, next: [], hist: [], ctx: '' }, {}));
+  MLM.refreshBadges();
+});
+</script>
+</body></html>
