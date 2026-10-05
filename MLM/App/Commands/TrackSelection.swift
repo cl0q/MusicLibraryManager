@@ -25,6 +25,9 @@ struct TrackListContext: Equatable, Sendable {
 
     static let allTracks = TrackListContext(container: .library, viewName: "All Tracks", isAllTracksTable: true)
     static let unnamed = TrackListContext(container: .none, viewName: nil)
+    /// The Queue column's tables: no Remove from Library (UC-CM-07); Remove from Queue arrives
+    /// with W2-D's queue target.
+    static let queue = TrackListContext(container: .queue, viewName: nil)
 
     static func playlist(id: Int64, name: String) -> TrackListContext {
         TrackListContext(container: .playlist(id: id, name: name), viewName: "“\(name)”")
