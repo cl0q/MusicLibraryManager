@@ -94,6 +94,31 @@ struct ShellLayoutTests {
     }
 
     @Test
+    func shortcuts_haveOneMeaningEach() throws {
+        let app = try readSource("MLM/App/MLMApp.swift")
+        let source = try #require(app.range(of: "Button(\"Import Playlist from Source…\")"))
+        #expect(String(app[source.upperBound...].prefix(250)).contains(".keyboardShortcut(\"i\", modifiers: [.command, .shift])"),
+                "⇧⌘I belongs to Import Playlist from Source… (UC-KEY-22)")
+        #expect(!app.contains("Button(\"Import from Folder…\")"))
+        #expect(app.contains("Button(\"Import Files or Folder…\")"))
+        #expect(!app.contains("Button(\"Sources…\")"), "Sources pushes a page: no ellipsis (UC-COPY-05)")
+        let grid = try readSource("MLM/Views/Playlists/PlaylistsView.swift")
+        #expect(!grid.contains(".keyboardShortcut(\"n\""), "File ▸ New Playlist owns ⌘N")
+    }
+
+    @Test
+    func searchPane_isDrawnAboveTheNavigationStack() throws {
+        let src = try readSource("MLM/Views/ContentView/ContentView.swift")
+        let column = try #require(src.range(of: "private var detailColumn: some View {"))
+        let stack = try #require(src.range(of: "private var navigationStack: some View {"))
+        let detail = String(src[column.upperBound..<stack.lowerBound])
+        #expect(detail.contains("GlobalSearchPresentationView("),
+                "The search pane is a sibling above the stack, so pushed routes can't cover it")
+        #expect(!src[stack.upperBound...].contains("GlobalSearchPresentationView("))
+        #expect(!src.contains(".disabled(!isAllTracks"), "The kept-alive All Tracks subtree is not disabled")
+    }
+
+    @Test
     func addMenu_hasExactlyTheDesignedItems() throws {
         let src = try readSource("MLM/Views/Shell/ShellToolbar.swift")
         let start = try #require(src.range(of: "struct AddMenu: View"))

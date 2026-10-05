@@ -251,6 +251,6 @@ struct ShellSidebarModelTests {
         #expect(StatusBarText.tracks(1) == "1 track")
         #expect(StatusBarText.playlists(0) == "0 playlists")
         #expect(StatusBarText.tracks(12_935) == "\(12_935.formatted(.number)) tracks")
-        #expect(ShellActions.importFinishedMessage(imported: 35, skipped: 0, failed: 2) == "Import finished — 35 imported · 2 failed")
+        #expect(ShellActions.importFinishedMessage(imported: 35, skipped: 0, failed: 2) == "Import finished — 35 imported, 2 failed")
     }
 }

@@ -204,15 +204,23 @@ struct MLMApp: App {
 
                 Divider()
 
-                // Was posting a notification nobody observed; now runs the shell's import.
-                Button("Import from Folder…") {
-                    shellActions?.chooseImportFolder()
+                // ⇧⌘I belongs to Import Playlist from Source… (UC-KEY-22). Until W3-ADD's
+                // import sheet it opens the Sources page, like the Add menu item.
+                Button("Import Playlist from Source…") {
+                    shellActions?.showSources()
                 }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
                 .disabled(shellActions == nil)
 
+                // Was "Import from Folder…", posting a notification nobody observed.
+                Button("Import Files or Folder…") {
+                    shellActions?.chooseImportFolder()
+                }
+                .disabled(shellActions == nil)
+
                 // Temporary home of the former Sources sidebar section (W3-SET / W3-ADD).
-                Button("Sources…") {
+                // Pushes a page, asks nothing: no ellipsis (UC-COPY-05).
+                Button("Sources") {
                     shellActions?.showSources()
                 }
                 .disabled(shellActions == nil)
