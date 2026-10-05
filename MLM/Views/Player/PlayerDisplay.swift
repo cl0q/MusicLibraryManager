@@ -23,14 +23,18 @@ struct PlayerDisplay: Equatable {
     /// The cover shown (main or previewed track).
     let coverTrackID: Int64?
 
-    static func make(current: Track?, preview: Track?, previewSource: String? = nil, cantPlay: CantPlayState?) -> PlayerDisplay {
+    /// - Parameter currentCantPlay: why the loaded (paused) main track can't play now — its
+    ///   disk went away; the sentence replaces its artist line.
+    static func make(current: Track?, preview: Track?, previewSource: String? = nil, cantPlay: CantPlayState?,
+                     currentCantPlay: PlaybackWords.CantPlay? = nil) -> PlayerDisplay {
         if let preview {
             return PlayerDisplay(mode: .preview(tag: PlaybackWords.previewTag(fromSource: previewSource)),
                                  title: preview.title, secondLine: PlaybackWords.previewHint, fixTitle: nil,
                                  showsTimes: true, coverTrackID: preview.id)
         }
         if let current {
-            return PlayerDisplay(mode: .track, title: current.title, secondLine: artistAlbum(current), fixTitle: nil,
+            return PlayerDisplay(mode: .track, title: current.title,
+                                 secondLine: currentCantPlay?.playerSentence ?? artistAlbum(current), fixTitle: nil,
                                  showsTimes: true, coverTrackID: current.id)
         }
         if let cantPlay {

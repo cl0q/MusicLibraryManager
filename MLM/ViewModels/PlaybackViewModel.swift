@@ -441,6 +441,7 @@ final class PlaybackViewModel {
             preview.togglePause()
             return
         }
+        if playbackState != .playing, refuseResumeWhileDiskAway() { return }
         do {
             try audioPlayer.togglePlayPause()
             playbackState = audioPlayer.state
@@ -463,6 +464,7 @@ final class PlaybackViewModel {
             if preview.isPaused { preview.togglePause() }
             return
         }
+        if playbackState != .playing, refuseResumeWhileDiskAway() { return }
         do {
             try audioPlayer.play()
             playbackState = audioPlayer.state == .playing ? .playing : playbackState
@@ -471,6 +473,23 @@ final class PlaybackViewModel {
         } catch {
             AppLogger.shared.log("Playback: resume failed: \(error.localizedDescription)", level: .error, source: "Playback")
         }
+    }
+
+    /// Why the loaded main track can't play now, from persisted state and the drive (§15.7);
+    /// `nil` when it can. The player shows it under the paused track's title.
+    @MainActor
+    var currentTrackCantPlay: PlaybackWords.CantPlay? {
+        guard let track = currentTrack else { return nil }
+        guard PlaybackPlayability.of(track, offlineVolumePath: environment.offlineVolumePath()) == .driveNotConnected else { return nil }
+        return .driveNotConnected(volumeName: environment.volumeName())
+    }
+
+    /// Resuming a track whose disk is away would play silence: say so instead (UC-STATUS-07).
+    @MainActor
+    private func refuseResumeWhileDiskAway() -> Bool {
+        guard case .driveNotConnected(let name)? = currentTrackCantPlay else { return false }
+        notify(PlaybackWords.cantPlayDriveMessage(name), action: nil)
+        return true
     }
 
     /// Pause.

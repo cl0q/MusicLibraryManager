@@ -282,6 +282,24 @@ struct PlaybackViewModelSkipTests {
         #expect(!(r.vm.notice?.text.contains("Error") ?? true))
     }
 
+    @Test func resumingATrackWhoseDiskIsAwayIsRefusedInWords() async {
+        let r = rig(root: true)
+        var a = notDownloaded(1)
+        a.organizedPath = "A/1.m4a"
+        try? FileManager.default.createDirectory(at: r.folder.url.appendingPathComponent("A"), withIntermediateDirectories: true)
+        r.folder.file("A/1.m4a")
+        await r.vm.playTrack(a)
+        r.vm.pause()
+        r.env.offlineVolumePath = "/Volumes/Lexxar"
+        #expect(r.vm.currentTrackCantPlay == .driveNotConnected(volumeName: "Lexxar"))
+        r.vm.togglePlayPause()
+        #expect(r.main.state == .paused, "no silent resume from a disk that is away")
+        #expect(r.vm.notice?.text == "Can’t play — “Lexxar” is not connected.")
+        r.env.offlineVolumePath = nil
+        r.vm.play()
+        #expect(r.main.state == .playing)
+    }
+
     // MARK: Previous (UC-TB-09)
 
     @Test func previousRestartsAfterThreeSecondsElseGoesBack() async {

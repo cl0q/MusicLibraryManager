@@ -43,6 +43,14 @@ struct PlayerSurfaceTests {
         }
     }
 
+    @Test func aPausedTrackOnADiskThatIsAwaySaysSo() {
+        let display = PlayerDisplay.make(current: track(1), preview: nil, cantPlay: nil,
+                                         currentCantPlay: .driveNotConnected(volumeName: "Lexxar"))
+        #expect(display.title == "Glass Circuit")
+        #expect(display.secondLine == "Can’t play — “Lexxar” is not connected")
+        #expect(display.showsTimes, "it is paused at its position")
+    }
+
     @Test func aSourceNameAsAlbumShowsNothing() {
         #expect(PlayerDisplay.artistAlbum(track(1, album: "youtube")) == "Mosca", "DEC-013")
         #expect(PlayerDisplay.artistAlbum(track(1, artist: "", album: "")) == nil)
