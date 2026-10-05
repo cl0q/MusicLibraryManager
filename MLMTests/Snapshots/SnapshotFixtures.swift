@@ -361,6 +361,8 @@ enum SnapshotFixtures {
         "Shell/TrailingColumnState.swift": "Non-view: trailing column mode state.",
         "Shell/StatusBarCenter.swift": "Non-view: status bar message and loading model; rendered by ContentScaffold.",
         "Shell/Spacing.swift": "Non-view: layout constants.",
+        "Shell/ScopeBar.swift": "Deferred: scope bar (W2-B) is re-recorded with the wave's snapshot pass; its rules are unit-tested (ScopeBarRulesTests).",
+        "TrackList/DownloadFailureReasonText.swift": "Non-view: plain words for stored download-failure reasons (W2-B).",
         "Shell/SidebarModel.swift": "Non-view: sidebar data and sync row state.",
         "Shell/ShellActions.swift": "Non-view: window-level command actions.",
         "Shell/ShellEdits.swift": "Non-view: undoable playlist and sync-profile edits (W2-F).",
@@ -434,6 +436,7 @@ Shared/TrackMetadataPresentation.swift
 Shell/ContentScaffold.swift
 Shell/DestinationView.swift
 Shell/NavigationModel.swift
+Shell/ScopeBar.swift
 Shell/ShellActions.swift
 Shell/ShellEdits.swift
 Shell/ShellSearch.swift
@@ -466,6 +469,7 @@ TrackDetail/MetadataPanel.swift
 TrackDetail/TrackDetailView.swift
 TrackDetail/WaveformHelpers.swift
 TrackDetail/WaveformView.swift
+TrackList/DownloadFailureReasonText.swift
 TrackList/TrackCell.swift
 TrackList/TrackColumn.swift
 TrackList/TrackListActions.swift

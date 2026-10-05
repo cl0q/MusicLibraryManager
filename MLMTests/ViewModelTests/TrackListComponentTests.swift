@@ -124,7 +124,8 @@ struct TrackListComponentTests {
 
     @Test func failureDetailIsReasonAndAttemptsLeft() {
         let built = row(track(1, path: nil, failure: Self.failureJSON))
-        #expect(built.failureDetail == "Source timed out · 1 attempt left")
+        // The stored reason in plain words (W2-B, `DownloadFailureReasonText`).
+        #expect(built.failureDetail == "The source didn’t answer · 1 attempt left")
         #expect(row(track(2)).failureDetail == nil)
     }
 
