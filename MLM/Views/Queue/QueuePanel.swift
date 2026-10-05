@@ -41,6 +41,8 @@ private struct QueuePanelList: View {
     @Environment(ShellActions.self) private var shell: ShellActions?
     @Environment(NavigationModel.self) private var navigation: NavigationModel?
     @FocusedValue(\.toolbarSearch) private var search
+    /// When the last letter of a type-select was typed (a Space right after belongs to it).
+    @State private var typeSelect = TrackListPreviewKeys.TypeSelectClock()
 
     /// The preview owner of this panel (its selection moves the preview).
     static let previewOwner: PreviewOwner = "queue-panel"
@@ -49,13 +51,16 @@ private struct QueuePanelList: View {
 
     var body: some View {
         let live = TrackTableLiveState.drive(container)
+        let sources = TrackMenuSources.shared
         let content = QueuePanelContent.make(
             current: playback.currentTrack,
             currentEntryID: playback.currentEntryID,
             queue: playback.queueSnapshot,
             history: playback.historyEntries,
             origin: validatedOrigin,
-            live: live
+            live: live,
+            repeatsAll: playback.repeatMode == .all,
+            listNames: QueuePanelContent.ListNames(playlists: sources.playlists, syncProfiles: sources.syncProfiles)
         )
         List(selection: $selection) {
             Section(QueuePanelWords.nowPlaying) {
@@ -65,7 +70,8 @@ private struct QueuePanelList: View {
                 }
                 // The top of the panel: tracks dropped here play next (P-QUEUE.N12).
                 .dropDestination(for: QueueRowDrag.self) { items, _ in
-                    QueueEditCommands.drop(items, at: .top, playback: playback, undo: undo, container: container)
+                    QueueEditCommands.drop(items, at: QueueDropTarget.position(.top), playback: playback, undo: undo,
+                                           container: container)
                 }
                 if content.nowPlaying == nil {
                     QueueEmptyText(title: QueuePanelWords.notPlaying, sentence: nil)
@@ -75,8 +81,9 @@ private struct QueuePanelList: View {
                 ForEach(content.nextItems) { item in
                     nextRow(item, content: content, live: live)
                 }
+                // Named by the row the line sits next to, resolved when the drop applies.
                 .dropDestination(for: QueueRowDrag.self) { items, offset in
-                    QueueEditCommands.drop(items, at: content.position(forDropAt: offset), playback: playback,
+                    QueueEditCommands.drop(items, at: content.dropTarget(forDropAt: offset), playback: playback,
                                            undo: undo, container: container)
                 }
             } header: {
@@ -102,8 +109,19 @@ private struct QueuePanelList: View {
         .onDeleteCommand {
             remove(content.rows(selection).filter(\.isInNext).map(\.id))
         }
+        // Letters typed into the list's type-select (a Space within 0.9 s belongs to it, IMP-034).
+        .onKeyPress(characters: .alphanumerics.union(.punctuationCharacters), phases: .down) { press in
+            if press.modifiers.isDisjoint(with: [.command, .control, .option]) { typeSelect.last = Date() }
+            return .ignored
+        }
         .onKeyPress(keys: [.space, .leftArrow, .rightArrow], phases: [.down, .repeat]) { press in
             previewKey(press, content: content, live: live)
+        }
+        // ⌘C: one `Title — Artist` line per selected row (UC-CM-13).
+        .onCopyCommand {
+            let rows = content.rows(selection)
+            guard !rows.isEmpty else { return [] }
+            return [NSItemProvider(object: TrackCommandActions.titleArtistLines(rows.map(\.track)) as NSString)]
         }
         .focusedValue(\.trackSelection, trackSelection(content: content, live: live))
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -121,10 +139,9 @@ private struct QueuePanelList: View {
         }
         .onChange(of: selection) { _, ids in
             let rows = content.rows(ids)
-            InspectedTrackSelection.shared.update(rows.map(\.row.id), from: "queue")
+            InspectedTrackSelection.shared.update(ShellEdits.uniqued(rows.map(\.row.id)), from: "queue")
             if playback.preview.isActive {
-                playback.preview.selectionChanged(owner: Self.previewOwner,
-                                                  candidate: PreviewCandidate.make(rows: rows.map(\.row), live: live))
+                playback.preview.selectionChanged(owner: Self.previewOwner, candidate: previewCandidate(rows, live: live))
             }
         }
         .onDisappear {
@@ -148,7 +165,7 @@ private struct QueuePanelList: View {
             QueueEmptyText(
                 title: QueuePanelWords.queueEmptyTitle,
                 sentence: QueuePanelWords.queueEmptySentence
-                    + (content.nowPlaying != nil ? " " + QueuePanelWords.stopsAfterThisTrack : "")
+                    + (content.playbackStopsAfterCurrent ? " " + QueuePanelWords.stopsAfterThisTrack : "")
             )
             .selectionDisabled()
         }
@@ -165,11 +182,11 @@ private struct QueuePanelList: View {
             }
             Spacer(minLength: Spacing.xs)
             Button(QueuePanelWords.clear) {
-                QueueEditCommands.perform({ await $0.clearNext() }, playback: playback, undo: undo)
+                QueueEditCommands.perform({ $0.clearNext() }, playback: playback, undo: undo)
             }
             .buttonStyle(.borderless)
             .disabled(content.isNextEmpty)
-            .help(content.isNextEmpty ? QueuePanelWords.clearDisabledHelp : "")
+            .help(optional: content.isNextEmpty ? QueuePanelWords.clearDisabledHelp : nil)
         }
     }
 
@@ -215,7 +232,7 @@ private struct QueuePanelList: View {
         return VStack(alignment: .leading, spacing: Spacing.xs) {
             Button(QueuePanelWords.saveAsPlaylist) { showsSave = true }
                 .disabled(tracks.isEmpty)
-                .help(tracks.isEmpty ? QueuePanelWords.saveDisabledHelp : "")
+                .help(optional: tracks.isEmpty ? QueuePanelWords.saveDisabledHelp : nil)
                 .popover(isPresented: $showsSave, arrowEdge: .top) {
                     SaveQueueAsPlaylistPopover(trackCount: ShellEdits.uniqued(tracks.compactMap(\.id)).count) { name in
                         showsSave = false
@@ -267,7 +284,7 @@ private struct QueuePanelList: View {
 
     private func remove(_ ids: [UUID]) {
         guard !ids.isEmpty else { return }
-        QueueEditCommands.perform({ await $0.removeEntries(Set(ids)) }, playback: playback, undo: undo)
+        QueueEditCommands.perform({ $0.removeEntries(Set(ids)) }, playback: playback, undo: undo)
     }
 
     private func previewKey(_ press: KeyPress, content: QueuePanelContent, live: TrackTableLiveState) -> KeyPress.Result {
@@ -284,12 +301,15 @@ private struct QueuePanelList: View {
             isRepeat: press.phase == .repeat,
             hasCommandModifiers: !press.modifiers.isDisjoint(with: [.command, .control, .option, .shift]),
             isPreviewing: preview.isActive,
-            secondsSinceTypeSelect: nil
+            secondsSinceTypeSelect: typeSelect.last.map { Date().timeIntervalSince($0) }
         )
         switch decision {
         case .togglePreview:
-            preview.toggle(owner: Self.previewOwner,
-                           candidate: PreviewCandidate.make(rows: content.rows(selection).map(\.row), live: live))
+            typeSelect.last = nil
+            let rows = content.rows(selection)
+            // Space on the playing row does nothing: it is already playing.
+            if !preview.isActive, rows.count == 1, rows[0].place == .nowPlaying { return .handled }
+            preview.toggle(owner: Self.previewOwner, candidate: previewCandidate(rows, live: live))
             return .handled
         case .endPreview:
             preview.escape()
@@ -302,6 +322,12 @@ private struct QueuePanelList: View {
         case .passOn:
             return .ignored
         }
+    }
+
+    /// What Space previews: the selected row — never the playing row itself.
+    private func previewCandidate(_ rows: [QueuePanelRow], live: TrackTableLiveState) -> PreviewCandidate {
+        if rows.count == 1, rows[0].place == .nowPlaying { return .nothing }
+        return PreviewCandidate.make(rows: rows.map(\.row), live: live)
     }
 
     // MARK: Menu (CM-QUEUE)
@@ -338,8 +364,7 @@ private struct QueuePanelList: View {
                                      container: container, navigation: navigation),
             play: { play(Set(subject.map(\.id)), content: content) },
             preview: {
-                playback.preview.toggle(owner: Self.previewOwner,
-                                        candidate: PreviewCandidate.make(rows: subject.map(\.row), live: live))
+                playback.preview.toggle(owner: Self.previewOwner, candidate: previewCandidate(subject, live: live))
             },
             navigation: navigation
         )
@@ -374,7 +399,8 @@ private struct QueuePanelList: View {
                 addToSyncProfile: { profile, _ in actions.addToSyncProfile(profile, subject.map(\.row)) },
                 preview: { actions.preview(nil) },
                 recordOrigin: nil,
-                playNext: { actions.playNext(subject.map(\.row)) }
+                playNext: { actions.playNext(subject.map(\.row)) },
+                addToQueueDisabledReason: nextIDs.isEmpty ? nil : QueueWords.alreadyQueuedReason
             ),
             rows: { tracks }
         )
@@ -435,7 +461,7 @@ private struct QueueRowView: View {
                     if let status = presentation.status {
                         Text("·")
                         TrackStatusLabel(status: status)
-                            .help(item.row.failureDetail ?? "")
+                            .help(optional: item.row.failureDetail)
                     }
                 }
                 .font(.subheadline)
@@ -472,6 +498,14 @@ private struct QueueRowView: View {
             parts.append("Not reachable — “\(name)” is not connected")
         }
         return parts.joined(separator: ", ")
+    }
+}
+
+private extension View {
+    /// The reason as help text on a disabled control; nothing on an enabled one.
+    @ViewBuilder
+    func help(optional reason: String?) -> some View {
+        if let reason { help(reason) } else { self }
     }
 }
 
@@ -537,7 +571,7 @@ struct QueuePanelMenuActions: TrackMenuActions {
         if ids.isEmpty {
             QueueEditCommands.queue(subject.map(\.track), as: .playNext, playback: playback, undo: undo)
         } else {
-            QueueEditCommands.perform({ await $0.moveEntriesToTop(ids) }, playback: playback, undo: undo)
+            QueueEditCommands.perform({ $0.moveEntriesToTop(ids) }, playback: playback, undo: undo)
         }
     }
 
@@ -548,17 +582,17 @@ struct QueuePanelMenuActions: TrackMenuActions {
     func moveToEndOfQueue(_ rows: [TrackRow]) {
         let ids = nextIDs
         guard !ids.isEmpty else { return }
-        QueueEditCommands.perform({ await $0.moveEntriesToEnd(ids) }, playback: playback, undo: undo)
+        QueueEditCommands.perform({ $0.moveEntriesToEnd(ids) }, playback: playback, undo: undo)
     }
 
     func removeFromContainer(_ rows: [TrackRow]) {
         let ids = Set(nextIDs)
         guard !ids.isEmpty else { return }
-        QueueEditCommands.perform({ await $0.removeEntries(ids) }, playback: playback, undo: undo)
+        QueueEditCommands.perform({ $0.removeEntries(ids) }, playback: playback, undo: undo)
     }
 
     func clearHistory() {
-        QueueEditCommands.perform({ await $0.clearHistory() }, playback: playback, undo: undo)
+        QueueEditCommands.perform({ $0.clearHistory() }, playback: playback, undo: undo)
     }
 
     /// `Show in “‹context›”`: the row in the list it plays from (navigates, like ⌘L).

@@ -112,10 +112,11 @@ struct PlaybackQueueMigrationTests {
         #expect(try await repository.load() == nil, "nothing saved yet")
         let twice = SavedPlaybackQueue.Entry(id: UUID(), trackID: ids[1])
         let current = SavedPlaybackQueue.Entry(id: UUID(), trackID: ids[0])
+        let context = [SavedPlaybackQueue.Entry(id: UUID(), trackID: ids[2]), .init(id: UUID(), trackID: ids[3])]
         let saved = SavedPlaybackQueue(
             playNext: [twice, .init(id: UUID(), trackID: ids[1])],
-            context: [.init(id: UUID(), trackID: ids[2]), .init(id: UUID(), trackID: ids[3])],
-            cycle: [ids[0], ids[2], ids[3]],
+            context: context,
+            cycle: [.init(id: UUID(), trackID: ids[0])] + context,
             history: [.init(id: UUID(), trackID: ids[3]), .init(id: UUID(), trackID: ids[3]), current],
             currentEntryID: current.id,
             position: 72.5,

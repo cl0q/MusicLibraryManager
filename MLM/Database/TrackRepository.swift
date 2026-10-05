@@ -494,7 +494,12 @@ final class TrackRepository: Sendable {
         try await database.write { db in
             // Foreign-key enforcement is deliberately disabled for compatibility
             // with the shared database, so remove every dependent row ourselves.
+            // The saved playback queue (v43, W2-D) — absent in databases before it.
+            let hasSavedQueue = try db.tableExists("playback_queue_entries")
             for id in uniqueIDs {
+                if hasSavedQueue {
+                    try db.execute(sql: "DELETE FROM playback_queue_entries WHERE track_id = ?", arguments: [id])
+                }
                 try db.execute(sql: "DELETE FROM track_sources WHERE track_id = ?", arguments: [id])
                 try db.execute(sql: "DELETE FROM playlist_tracks WHERE track_id = ?", arguments: [id])
                 try db.execute(sql: "DELETE FROM sync_profile_tracks WHERE track_id = ?", arguments: [id])

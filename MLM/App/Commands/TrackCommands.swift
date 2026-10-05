@@ -52,7 +52,8 @@ struct TrackCommands: Commands {
                     TrackCommandActions.playNext(tracks(), undo: undoCenter)
                 }
             }
-            CommandButton(.addToQueue, enabled: state.canPlayNext) {
+            CommandButton(.addToQueue, enabled: state.canPlayNext && target.addToQueueDisabledReason == nil,
+                          disabledReason: target.addToQueueDisabledReason) {
                 guard !KeyEquivalentGuard.keyBelongsToText(
                     .textCommand(#selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)))
                 ) else { return }

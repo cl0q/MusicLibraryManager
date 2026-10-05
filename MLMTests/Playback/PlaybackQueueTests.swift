@@ -85,14 +85,18 @@ struct PlaybackQueueTests {
         #expect(q.context == [b, c])
     }
 
+    /// W2-D review: with entry identity the context keeps its own entry of a track that is
+    /// also a Play Next item (the same track twice is allowed).
     @Test
-    func replaceContext_dedupesAgainstPlayNext() {
+    func replaceContext_keepsItsOwnEntryOfAPlayNextTrack() {
         let a = makeTrack(id: 1, title: "A")
         let b = makeTrack(id: 2, title: "B")
         var q = PlaybackQueue()
         q.insertPlayNext([a])
-        q.replaceContext([a, b], cap: 100) // a is in playNext, should be excluded from context
-        #expect(q.context == [b])
+        q.replaceContext([a, b], cap: 100)
+        #expect(q.playNext == [a])
+        #expect(q.context == [a, b])
+        #expect(q.playNextEntries[0].id != q.contextEntries[0].id)
     }
 
     // MARK: - insertPlayNext
