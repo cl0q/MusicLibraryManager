@@ -39,11 +39,11 @@ struct TrackCommands: Commands {
             Divider()
 
             CommandSubmenu(.addToPlaylist, enabled: state.canAddTo) {
-                Button("New Playlist…") { TrackCommandActions.newPlaylistFromSelection(tracks()) }
+                Button("New Playlist…") { TrackCommandActions.newPlaylistFromSelection(tracks(), shell: shellActions) }
                 if !target.playlists.isEmpty { Divider() }
                 ForEach(target.playlists) { playlist in
                     Button(playlist.name) {
-                        if let id = playlist.id { TrackCommandActions.addToPlaylist(id, tracks: tracks()) }
+                        if let id = playlist.id { TrackCommandActions.addToPlaylist(id, tracks: tracks(), shell: shellActions) }
                     }
                 }
             }

@@ -24,7 +24,8 @@ struct SidebarView: View {
     @State private var isCommittingRename = false
     @FocusState private var renameFocused: Bool
 
-    @State private var pendingPlaylistDeletion: Playlist?
+    /// The playlist waiting for the Delete Playlist confirmation, with its wording.
+    @State private var pendingPlaylistDeletion: PendingPlaylistDeletion?
     @State private var pendingProfileDeletion: SyncProfile?
     @State private var deviceIngestProfile: SyncProfile?
 
@@ -138,44 +139,55 @@ struct SidebarView: View {
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didUnmountNotification)) { _ in
             model.refreshReachability(syncProfiles)
         }
+        .onChange(of: model.renameRequest) { _, _ in
+            beginRequestedRename()
+        }
+        .onChange(of: model.playlists.compactMap(\.id)) { _, _ in
+            beginRequestedRename()
+        }
         .onChange(of: syncProfiles.compactMap(\.id)) { old, new in
             model.refreshReachability(syncProfiles)
             for removed in Set(old).subtracting(new) {
                 navigation.removeSyncProfile(removed)
             }
         }
-        .confirmationDialog(
-            "Delete playlist?",
+        // A-PL-DELETE: asked because the playlist also leaves its sync profiles, and still
+        // restorable with Undo until MLM quits (UC-UNDO-05, DEC-049). Cancel is the default.
+        .alert(
+            pendingPlaylistDeletion?.confirmation.title ?? "",
             isPresented: Binding(
                 get: { pendingPlaylistDeletion != nil },
                 set: { if !$0 { pendingPlaylistDeletion = nil } }
             ),
-            titleVisibility: .visible
-        ) {
-            Button("Delete Playlist", role: .destructive) {
-                deletePendingPlaylist()
+            presenting: pendingPlaylistDeletion
+        ) { pending in
+            Button(PlaylistDeletionConfirmation.confirmTitle, role: .destructive) {
+                deletePlaylist(pending)
             }
             Button("Cancel", role: .cancel) {
                 pendingPlaylistDeletion = nil
             }
-        } message: {
-            Text("Delete “\(pendingPlaylistDeletion?.name ?? "")”? Its music files will remain in your library.")
+            .keyboardShortcut(.defaultAction)
+        } message: { pending in
+            Text(pending.confirmation.message)
         }
+        // A-SYNC-DELETEPROFILE: not undoable, so confirmed (UC-UNDO-03). Cancel is the default.
         .alert(
-            "Delete sync profile?",
+            "Delete the sync profile “\(pendingProfileDeletion?.name ?? "")”?",
             isPresented: Binding(
                 get: { pendingProfileDeletion != nil },
                 set: { if !$0 { pendingProfileDeletion = nil } }
             )
         ) {
-            Button("Cancel", role: .cancel) {
-                pendingProfileDeletion = nil
-            }
             Button("Delete Sync Profile", role: .destructive) {
                 deletePendingProfile()
             }
+            Button("Cancel", role: .cancel) {
+                pendingProfileDeletion = nil
+            }
+            .keyboardShortcut(.defaultAction)
         } message: {
-            Text("Delete “\(pendingProfileDeletion?.name ?? "")”? This removes the sync profile but does not delete any music files.")
+            Text("The profile, its plan and its sync history are removed. Music on the device and in your library is not touched.")
         }
         .sheet(item: $deviceIngestProfile) { profile in
             DeviceIngestResultsView(profile: profile)
@@ -239,7 +251,7 @@ struct SidebarView: View {
                         if playlist.isLiked == 0 {
                             Divider()
                             Button("Delete Playlist…", role: .destructive) {
-                                pendingPlaylistDeletion = playlist
+                                askToDelete(playlist)
                             }
                         }
                     }
@@ -415,47 +427,49 @@ struct SidebarView: View {
             defer { isCommittingRename = false }
             switch target {
             case .playlist(let id):
-                guard name != model.playlistName(id) else { return cancelRename() }
+                // Esc and an unchanged name keep the name: nothing to undo (UC §23 C6).
+                guard let oldName = model.playlistName(id), name != oldName else { return cancelRename() }
                 do {
-                    try await container.playlistRepository?.rename(id: id, name: name)
-                    NotificationCenter.default.post(name: .playlistDidChange, object: nil)
-                    await reloadPlaylists()
+                    try await actions.edits.renamePlaylist(id, from: oldName, to: name)
                     cancelRename()
                 } catch {
-                    AppLogger.shared.error("Renaming a playlist failed: \(error.localizedDescription)", source: "Sidebar")
-                    renameError = "Couldn’t rename the playlist. The library file didn’t accept the change."
+                    renameError = ShellEdits.renameFailure(error, kind: "playlist")
                     renameFocused = true
                 }
             case .syncProfile(let id):
-                guard let vm = container.syncViewModel,
-                      let profile = vm.profiles.first(where: { $0.id == id }) else { return cancelRename() }
-                guard name != profile.name else { return cancelRename() }
-                vm.clearError()
-                await vm.renameProfile(profile, name: name)
-                if let error = vm.errorMessage {
-                    renameError = error
-                    renameFocused = true
-                } else {
+                guard let profile = syncProfiles.first(where: { $0.id == id }),
+                      name != profile.name else { return cancelRename() }
+                do {
+                    try await actions.edits.renameSyncProfile(id, from: profile.name, to: name)
                     cancelRename()
+                } catch {
+                    renameError = ShellEdits.renameFailure(error, kind: "sync profile")
+                    renameFocused = true
                 }
             }
         }
     }
 
+    /// A playlist just created (⌘N, New Playlist from Selection) gets its name edited inline
+    /// once its row is listed (S-PL-NEWPLAYLIST).
+    private func beginRequestedRename() {
+        guard let playlist = model.takeRenameRequest(), let id = playlist.id else { return }
+        startRename(.playlist(id), currentName: playlist.name)
+    }
+
     // MARK: - Deleting
 
-    private func deletePendingPlaylist() {
-        guard let id = pendingPlaylistDeletion?.id else { return }
-        pendingPlaylistDeletion = nil
+    private func askToDelete(_ playlist: Playlist) {
         Task {
-            do {
-                try await container.playlistRepository?.delete(id: id)
-                navigation.removePlaylist(id)
-                NotificationCenter.default.post(name: .playlistDidChange, object: nil)
-            } catch {
-                AppLogger.shared.error("Could not delete playlist: \(error.localizedDescription)", source: "Sidebar")
-            }
+            let confirmation = await actions.edits.deletionConfirmation(for: playlist)
+            pendingPlaylistDeletion = PendingPlaylistDeletion(playlist: playlist, confirmation: confirmation)
         }
+    }
+
+    private func deletePlaylist(_ pending: PendingPlaylistDeletion) {
+        pendingPlaylistDeletion = nil
+        guard let id = pending.playlist.id else { return }
+        Task { await actions.edits.deletePlaylist(id, name: pending.playlist.name) }
     }
 
     private func deletePendingProfile() {
@@ -481,6 +495,12 @@ struct SidebarView: View {
             analysisRepository: container.analysisRepository
         )
     }
+}
+
+/// A Delete Playlist question on screen.
+private struct PendingPlaylistDeletion {
+    let playlist: Playlist
+    let confirmation: PlaylistDeletionConfirmation
 }
 
 /// System section header with a ＋ that appears on hover (UC-SIDE-03). The header text stays
