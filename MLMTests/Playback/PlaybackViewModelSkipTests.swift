@@ -278,6 +278,7 @@ struct PlaybackViewModelSkipTests {
         let a = local(1, r)
         await r.vm.playTrack(a)
         #expect(r.vm.notice?.text == "Couldn’t play “T1” — the file can’t be read")
+        #expect(r.vm.notice?.action == .showInFinder(URL(fileURLWithPath: a.organizedPath ?? "")), "one action that helps")
         #expect(!(r.vm.notice?.text.contains("Error") ?? true))
     }
 

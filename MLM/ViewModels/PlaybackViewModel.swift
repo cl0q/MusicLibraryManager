@@ -214,6 +214,8 @@ final class PlaybackViewModel {
     @ObservationIgnored private var pendingOrigin: (trackID: Int64, origin: PlaybackOrigin)?
     /// Return during a preview: the next `playTrack` of this track starts here.
     @ObservationIgnored private var pendingStart: (trackID: Int64, position: TimeInterval)?
+    /// The file macOS couldn't decode last (`Show in Finder` in its note).
+    @ObservationIgnored private var lastUnreadableURL: URL?
     /// The running queue advance (advances are serialized).
     @ObservationIgnored private var advanceChain: Task<Void, Never>?
 
@@ -347,6 +349,7 @@ final class PlaybackViewModel {
             // `loadFile` stops and clears the previous file before it can throw.
             clearStoppedPlaybackState()
             postStateDidChange()
+            lastUnreadableURL = url
             return .unavailable(.unreadable)
         }
         audioPlayer.applyLUFSCompensation(lufsI: track?.lufsI)
@@ -384,7 +387,8 @@ final class PlaybackViewModel {
         if currentTrack == nil {
             cantPlay = CantPlayState(track: track, reason: words)
         }
-        notify(PlaybackWords.couldntPlay(track.title, words), action: Self.fix(for: words, track: track, url: nil))
+        let url = reason == .unreadable ? lastUnreadableURL : nil
+        notify(PlaybackWords.couldntPlay(track.title, words), action: Self.fix(for: words, track: track, url: url))
     }
 
     private static func fix(for reason: PlaybackWords.CantPlay, track: Track, url: URL?) -> PlaybackNotice.Action? {
