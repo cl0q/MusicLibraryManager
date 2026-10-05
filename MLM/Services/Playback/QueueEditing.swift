@@ -348,7 +348,9 @@ enum QueueEditing {
                        historyCap: Int, limits: QueueRestoreLimits = .none) -> (queue: PlaybackQueue, history: [QueueEntry], changed: Bool) {
         var result = transform(queue, from: receipt.after, to: receipt.before, receipt: receipt, limits: limits)
         if receipt.kind == .clearNext {
-            if let cycle = receipt.cycleBefore, !cycle.isEmpty, result.cycleEntries.isEmpty, result.contextID == receipt.contextID {
+            // The pass comes back with the entries (not on its own: nothing else came back).
+            if let cycle = receipt.cycleBefore, !cycle.isEmpty, result.cycleEntries.isEmpty, result.contextID == receipt.contextID,
+               result != queue {
                 result.setCycle(cycle.filter { $0.track.id.map { !limits.deletedTrackIDs.contains($0) } ?? true })
             }
         } else {

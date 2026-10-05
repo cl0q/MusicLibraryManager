@@ -78,17 +78,24 @@ enum QueueEditCommands {
     /// (W2-D review S6). The target is resolved against the queue when the drop applies.
     static func drop(_ items: [QueueRowDrag], at target: QueueDropTarget, playback: PlaybackViewModel,
                      undo: UndoCenter, container: DependencyContainer = .shared) {
-        guard !items.isEmpty else { return }
+        drop(items, at: target, playback: playback, undo: undo, tracks: { await orderedTracks($0, container: container) })
+    }
+
+    /// `drop`, with the library rows of dragged track ids from `tracks` (tests).
+    @discardableResult
+    static func drop(_ items: [QueueRowDrag], at target: QueueDropTarget, playback: PlaybackViewModel,
+                     undo: UndoCenter, tracks fetch: @escaping @MainActor ([Int64]) async -> [Track]) -> Task<Void, Never>? {
+        guard !items.isEmpty else { return nil }
         let queued = Set(playback.queueSnapshot.upcomingEntries.map(\.id))
         let moving = items.compactMap(\.queueEntryId).filter(queued.contains)
         let others = items.filter { item in !(item.queueEntryId.map(queued.contains) ?? false) }
         if others.isEmpty {
             perform({ $0.moveEntries(moving, to: target) }, playback: playback, undo: undo)
-            return
+            return nil
         }
         let ids = others.map(\.trackId)
-        Task {
-            let tracks = await orderedTracks(ids, container: container)
+        return Task {
+            let tracks = await fetch(ids)
             let queueable = tracks.filter(\.isLocal)
             let leftOut = tracks.count - queueable.count
             guard !queueable.isEmpty || !moving.isEmpty else {
