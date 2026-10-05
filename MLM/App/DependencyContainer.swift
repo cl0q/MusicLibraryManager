@@ -39,6 +39,11 @@ final class DependencyContainer {
     /// "token inaccessible" notice in the Sources view.
     private(set) var tokenAccessStatus: TokenAccessStatus?
     private(set) var mountObserver: MountObserver?
+    /// Observers replaced by a library-folder change, kept alive so a DiskArbitration callback
+    /// already in flight never reaches a freed object.
+    @ObservationIgnored private var retiredMountObservers: [MountObserver] = []
+    /// Keeps persisted track availability fresh (W2-A, UC-TABLE-20).
+    private(set) var availabilityMonitor: LibraryAvailabilityMonitor?
     /// Cover-image orchestrator (Phase 36 Plan 02). Observes `.playlistDidChange`
     /// and regenerates auto covers (skips rows with `cover_is_custom = 1`).
     private(set) var playlistCoverService: PlaylistCoverService?
@@ -375,16 +380,26 @@ final class DependencyContainer {
 
         // Check if library root is configured
         if let root = try await configRepository?.getLibraryRoot(), !root.isEmpty {
-            hasLibraryRoot = true
-
-            // Start mount observer for external drives
-            let mount = MountObserver(libraryRoot: root)
-            self.mountObserver = mount
-            mount.start()
-            isLibraryDriveMounted = mount.isLibraryMounted
+            // Start the mount observer for the library's disk (window-level drive state).
+            await MainActor.run { self.applyLibraryRoot(root) }
 
             // Configure download orchestrator
             downloadViewModel?.configure(libraryRoot: root, tokenStorage: tokens)
+        }
+
+        // Persisted availability (W2-A): checks files on open, after scans, mounts and
+        // downloads — only while the library folder is reachable.
+        if let trackRepo = self.trackRepository, let cfRepo = self.configRepository {
+            let reconciler = TrackAvailabilityReconciler(repository: trackRepo)
+            self.availabilityMonitor = await MainActor.run {
+                let monitor = LibraryAvailabilityMonitor(
+                    reconciler: reconciler,
+                    repository: trackRepo,
+                    libraryRoot: { (try? await cfRepo.getLibraryRoot()) ?? nil }
+                )
+                monitor.start()
+                return monitor
+            }
         }
 
         // Reconfigure the download pipeline whenever the library root is
@@ -397,6 +412,8 @@ final class DependencyContainer {
             let newRoot = (notification.userInfo?["path"] as? String) ?? ""
             guard !newRoot.isEmpty else { return }
             Task { @MainActor in
+                // The drive state follows a folder chosen after launch (fixes PP-SHELL-10/11).
+                DependencyContainer.shared.applyLibraryRoot(newRoot)
                 guard let tokens = DependencyContainer.shared.tokenStorage else { return }
                 DependencyContainer.shared.downloadViewModel?.configure(
                     libraryRoot: newRoot,
@@ -414,6 +431,37 @@ final class DependencyContainer {
             "App initialized — DB at \(dbManager.databasePath.path)",
             source: "boot"
         )
+    }
+
+    /// Points the drive state at `root` — at launch and whenever the library folder is set or
+    /// changed later (`.libraryRootDidChange`; before W2-A the observer was created only at
+    /// launch, PP-SHELL-10/11). Replaces the mount observer, so `LibraryDriveState` (which
+    /// reads `mountObserver`) follows. A folder on the Mac's own disk is always connected.
+    /// No mount/unmount notification is posted: choosing another folder is not a disk event.
+    ///
+    /// - Parameter startMonitoring: `false` in tests (no DiskArbitration session).
+    @MainActor
+    func applyLibraryRoot(_ root: String?, startMonitoring: Bool = true) {
+        let trimmed = root?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if let current = mountObserver {
+            if current.watchedLibraryRoot == trimmed {
+                isLibraryDriveMounted = current.checkMountStatus()
+                return
+            }
+            current.stop()
+            retiredMountObservers.append(current)
+        }
+        guard !trimmed.isEmpty else {
+            mountObserver = nil
+            hasLibraryRoot = false
+            isLibraryDriveMounted = true
+            return
+        }
+        let observer = MountObserver(libraryRoot: trimmed)
+        mountObserver = observer
+        hasLibraryRoot = true
+        isLibraryDriveMounted = observer.isLibraryMounted
+        if startMonitoring { observer.start() }
     }
 
     /// Relocates the transcode cache folder to a new path in the background.

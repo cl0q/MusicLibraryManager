@@ -42,11 +42,35 @@ final class MountObserver: @unchecked Sendable {
 
     /// Initialize with the library root path.
     ///
-    /// - Parameter libraryRoot: The full path to the library root directory.
-    init(libraryRoot: String) {
+    /// A library folder on the Mac's own disk is always connected (§15.2); one under
+    /// `/Volumes/<name>` is connected while that volume is mounted. (A missing folder on a
+    /// connected disk is "Not found" in Settings ▸ Library, not "not connected".)
+    ///
+    /// - Parameters:
+    ///   - libraryRoot: The full path to the library root directory.
+    ///   - isVolumeMounted: injectable for tests.
+    init(libraryRoot: String, isVolumeMounted: (String) -> Bool = MountObserver.isVolumeMounted) {
         self.libraryRoot = libraryRoot
         self.libraryVolumePath = Self.extractVolumePath(from: libraryRoot)
-        self.isLibraryMounted = FileManager.default.fileExists(atPath: libraryRoot)
+        self.isLibraryMounted = Self.isConnected(libraryRoot: libraryRoot, isVolumeMounted: isVolumeMounted)
+    }
+
+    /// The library root this observer watches.
+    var watchedLibraryRoot: String { libraryRoot }
+
+    /// Connected = on the boot disk, or its `/Volumes/<name>` volume is mounted.
+    static func isConnected(libraryRoot: String, isVolumeMounted: (String) -> Bool = MountObserver.isVolumeMounted) -> Bool {
+        guard let volume = extractVolumePath(from: libraryRoot) else { return true }
+        return isVolumeMounted(volume)
+    }
+
+    /// `true` when `volumePath` (`/Volumes/<name>`) is a mounted volume — not merely a
+    /// leftover empty directory on the boot disk (whose volume is `/`).
+    static func isVolumeMounted(_ volumePath: String) -> Bool {
+        let url = URL(fileURLWithPath: volumePath, isDirectory: true)
+        guard let values = try? url.resourceValues(forKeys: [.volumeURLKey]),
+              let volume = values.volume else { return false }
+        return volume.standardizedFileURL.path == url.standardizedFileURL.path
     }
 
     deinit {
@@ -192,11 +216,11 @@ final class MountObserver: @unchecked Sendable {
         return "/\(components[0])/\(components[1])"
     }
 
-    /// Manually check if the library volume is currently accessible.
+    /// Manually check if the library volume is currently connected (`Try Again` on the banner).
     func checkMountStatus() -> Bool {
-        let exists = FileManager.default.fileExists(atPath: libraryRoot)
-        isLibraryMounted = exists
-        return exists
+        let connected = Self.isConnected(libraryRoot: libraryRoot)
+        isLibraryMounted = connected
+        return connected
     }
 }
 
