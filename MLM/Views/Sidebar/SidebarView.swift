@@ -1,77 +1,133 @@
+import AppKit
 import SwiftUI
 
-// MARK: Accessibility labels for shotty UI automation (snake_case literals)
-
-/// Sidebar navigation for the native macOS app shell.
+/// The main window's sidebar (P-SIDEBAR, UC-SIDE-01…12): a system sidebar `List` with four
+/// collapsible sections — Library · Inbox · Playlists · Sync — and the library footer.
 ///
-/// Provides navigation items with ⌘1–⌘7 keyboard shortcuts
-/// (wired via CommandMenu in MLMApp) and a Settings footer.
+/// No Sources, Queue, Settings or Search rows (DEC-004, DEC-006). Playlists are listed flat
+/// in the repository's order until playlist folders and manual order arrive (W3-PL).
+/// Rows are destinations of `NavigationModel`; ⌘1…⌘6 live in the Go menu.
 struct SidebarView: View {
-    @Binding var selectedSection: SidebarSection
     @Environment(\.container) private var container
-    @State private var pendingDuplicatesCount: Int = 0
-    @State private var pendingConflictsCount: Int = 0
-    @State private var pendingRecommendationsCount: Int = 0
-    @State private var hasExpiredSource = false
+    @Environment(NavigationModel.self) private var navigation
+    @Environment(SidebarModel.self) private var model
+    @Environment(ShellActions.self) private var actions
+
+    private enum RenameTarget: Hashable {
+        case playlist(Int64)
+        case syncProfile(Int64)
+    }
+
+    @State private var renaming: RenameTarget?
+    @State private var renameText = ""
+    @State private var renameError: String?
+    @FocusState private var renameFocused: Bool
+
     @State private var pendingPlaylistDeletion: Playlist?
+    @State private var pendingProfileDeletion: SyncProfile?
+    @State private var deviceIngestProfile: SyncProfile?
+
+    private var syncProfiles: [SyncProfile] { container.syncViewModel?.profiles ?? [] }
 
     var body: some View {
-        List(selection: $selectedSection) {
-            Section {
-                sidebarRow(.library)
-                    .accessibilityIdentifier("sidebar_library_row")
-                    .accessibilityLabel("sidebar_library_row")
-                pinnedPlaylistsRow
-                    .accessibilityIdentifier("sidebar_playlists_row")
-                    .accessibilityLabel("sidebar_playlists_row")
-                sidebarRow(.folders)
-                    .accessibilityIdentifier("sidebar_folders_row")
-                    .accessibilityLabel("sidebar_folders_row")
-                sidebarRow(.sync)
-                    .accessibilityIdentifier("sidebar_sync_row")
-                    .accessibilityLabel("sidebar_sync_row")
-                sidebarRow(.sources)
-                    .accessibilityIdentifier("sidebar_sources_row")
-                    .accessibilityLabel("sidebar_sources_row")
+        List(selection: selectionBinding) {
+            Section(isExpanded: expansion(.library)) {
+                ForEach(SidebarDestination.librarySection, id: \.self) { destination in
+                    fixedRow(destination)
+                }
             } header: {
-                Text("LIBRARY")
-                    .font(MLMFont.sectionLabel)
-                    .foregroundColor(.mlmInkMuted)
+                Text(SidebarSectionID.library.title)
             }
 
-            Section {
-                sidebarRow(.review)
-                    .accessibilityIdentifier("sidebar_review_row")
-                    .accessibilityLabel("sidebar_review_row")
-                sidebarRow(.discover)
-                    .accessibilityIdentifier("sidebar_discover_row")
-                    .accessibilityLabel("sidebar_discover_row")
+            Section(isExpanded: expansion(.inbox)) {
+                fixedRow(.discover)
+                    .badge(badgeText(model.discoverCount))
+                fixedRow(.review)
+                    .badge(badgeText(model.reviewCount))
             } header: {
-                Text("WORK")
-                    .font(MLMFont.sectionLabel)
-                    .foregroundColor(.mlmInkMuted)
+                Text(SidebarSectionID.inbox.title)
+            }
+
+            Section(isExpanded: expansion(.playlists)) {
+                fixedRow(.allPlaylists)
+                ForEach(model.playlists) { playlist in
+                    playlistRow(playlist)
+                }
+            } header: {
+                SidebarSectionHeader(title: SidebarSectionID.playlists.title) {
+                    Menu {
+                        Button("New Playlist") {
+                            actions.newPlaylist()
+                        }
+                        Button("New Playlist Folder") {}
+                            .disabled(true)
+                            .help(AddMenu.Unavailable.playlistFolder)
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .menuStyle(.button)
+                    .menuIndicator(.hidden)
+                    .buttonStyle(.borderless)
+                    .help("New Playlist")
+                    .accessibilityLabel("Add Playlist")
+                }
+            }
+
+            Section(isExpanded: expansion(.sync)) {
+                ForEach(syncProfiles) { profile in
+                    syncProfileRow(profile)
+                }
+            } header: {
+                SidebarSectionHeader(title: SidebarSectionID.sync.title) {
+                    Button {
+                        actions.newSyncProfile()
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("New Sync Profile…")
+                    .accessibilityLabel("New Sync Profile")
+                }
             }
         }
         .listStyle(.sidebar)
-        .safeAreaInset(edge: .bottom) {
-            bottomInset
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            LibraryFooter()
         }
-        .background(Color.mlmSurface)
         .task {
-            updatePendingDuplicatesCount()
-            updatePendingRecommendationsCount()
-            updateSourceStatus()
+            model.useLibrary(id: container.activeLibrary?.libraryId)
+            await model.reloadPlaylists(container.playlistRepository)
+            await reloadBadges()
+            model.refreshReachability(syncProfiles)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { note in
+            // Cover regeneration posts are noise for the sidebar.
+            guard note.userInfo?["coverRevalidation"] == nil else { return }
+            Task { await reloadPlaylists() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .reviewQueueDidChange)) { _ in
-            updatePendingDuplicatesCount()
+            Task { await reloadBadges() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .libraryDidImport)) { _ in
-            updatePendingDuplicatesCount()
-            updatePendingRecommendationsCount()
-            updateSourceStatus()
+            Task { await reloadBadges() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .downloadDidComplete)) { _ in
-            updatePendingRecommendationsCount()
+            Task { await reloadBadges() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .syncProfileDidChange)) { _ in
+            Task { await container.syncViewModel?.loadProfiles() }
+        }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didMountNotification)) { _ in
+            model.refreshReachability(syncProfiles)
+        }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didUnmountNotification)) { _ in
+            model.refreshReachability(syncProfiles)
+        }
+        .onChange(of: syncProfiles.compactMap(\.id)) { old, new in
+            model.refreshReachability(syncProfiles)
+            for removed in Set(old).subtracting(new) {
+                navigation.removeSyncProfile(removed)
+            }
         }
         .confirmationDialog(
             "Delete playlist?",
@@ -82,19 +138,7 @@ struct SidebarView: View {
             titleVisibility: .visible
         ) {
             Button("Delete Playlist", role: .destructive) {
-                guard let id = pendingPlaylistDeletion?.id else { return }
-                pendingPlaylistDeletion = nil
-                Task {
-                    do {
-                        try await container.playlistRepository?.delete(id: id)
-                        NotificationCenter.default.post(name: .playlistDidChange, object: nil)
-                    } catch {
-                        AppLogger.shared.error(
-                            "Could not delete playlist: \(error.localizedDescription)",
-                            source: "Sidebar"
-                        )
-                    }
-                }
+                deletePendingPlaylist()
             }
             Button("Cancel", role: .cancel) {
                 pendingPlaylistDeletion = nil
@@ -102,180 +146,293 @@ struct SidebarView: View {
         } message: {
             Text("Delete “\(pendingPlaylistDeletion?.name ?? "")”? Its music files will remain in your library.")
         }
+        .alert(
+            "Delete sync profile?",
+            isPresented: Binding(
+                get: { pendingProfileDeletion != nil },
+                set: { if !$0 { pendingProfileDeletion = nil } }
+            )
+        ) {
+            Button("Cancel", role: .cancel) {
+                pendingProfileDeletion = nil
+            }
+            Button("Delete", role: .destructive) {
+                deletePendingProfile()
+            }
+        } message: {
+            Text("Delete “\(pendingProfileDeletion?.name ?? "")”? This removes the sync profile but does not delete any music files.")
+        }
+        .sheet(item: $deviceIngestProfile) { profile in
+            DeviceIngestResultsView(profile: profile)
+        }
     }
 
-    @ViewBuilder
-    private var pinnedPlaylistsRow: some View {
-        PinnedPlaylistsDisclosure(
-            topLevelLabel: SidebarSection.playlists.label,
-            topLevelIcon: SidebarSection.playlists.icon,
-            topLevelSection: .playlists,
-            onUnpin: { pid in
-                Task {
-                    try? await container.playlistRepository?.togglePin(id: pid)
-                    NotificationCenter.default.post(name: .playlistDidChange, object: nil)
-                }
-            },
-            onDelete: { playlist in
-                pendingPlaylistDeletion = playlist
-            },
-            onSelectSection: { targetSection in
-                selectedSection = targetSection
+    // MARK: - Selection and expansion
+
+    private var selectionBinding: Binding<SidebarDestination?> {
+        Binding(
+            get: { navigation.selection },
+            set: { newValue in
+                if let newValue { navigation.select(newValue) }
             }
         )
     }
 
-    private func sidebarRow(_ section: SidebarSection) -> some View {
-        Button {
-            selectedSection = section
-        } label: {
-            HStack {
-                Label(section.label, systemImage: section.icon)
+    private func expansion(_ section: SidebarSectionID) -> Binding<Bool> {
+        Binding(
+            get: { model.isExpanded(section) },
+            set: { model.setExpanded(section, $0) }
+        )
+    }
 
-            if section == .library && !container.isLibraryDriveMounted {
-                Spacer()
-                Circle()
-                    .fill(Color.mlmError)
-                    .frame(width: 7, height: 7)
-                    .help("Library drive disconnected")
-                    .accessibilityIdentifier("sidebar_library_drive_disconnected")
-                    .accessibilityLabel("Library drive disconnected")
-            }
+    private func badgeText(_ count: Int) -> Text? {
+        count > 0 ? Text(count.formatted(.number)) : nil
+    }
 
-            if section == .sync, container.syncViewModel?.isSyncing == true {
-                Spacer()
-                ProgressView()
-                    .controlSize(.mini)
-                    .tint(.mlmActive)
-                    .help("Sync in progress")
-                    .accessibilityIdentifier("sidebar_sync_in_progress")
-                    .accessibilityLabel("Sync in progress")
-            }
+    // MARK: - Rows
 
-            if section == .sources && hasExpiredSource {
-                Spacer()
-                Circle()
-                    .fill(Color.mlmAttention)
-                    .frame(width: 7, height: 7)
-                    .help("A source sign-in has expired")
-                    .accessibilityIdentifier("sidebar_source_expired")
-                    .accessibilityLabel("A source sign-in has expired")
-            }
-
-            if section == .review && (pendingDuplicatesCount > 0 || pendingConflictsCount > 0) {
-                Spacer()
-                Text("\(pendingDuplicatesCount) dup · \(pendingConflictsCount) conf")
-                    .font(MLMFont.badge)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(Color.mlmAttention))
-                    .help("\(pendingDuplicatesCount) duplicate groups and \(pendingConflictsCount) metadata conflicts need review")
-                    .accessibilityIdentifier("sidebar_review_pending_counts")
-                    .accessibilityLabel("\(pendingDuplicatesCount) duplicate groups and \(pendingConflictsCount) metadata conflicts need review")
-            }
-
-            if section == .discover && pendingRecommendationsCount > 0 {
-                Spacer()
-                Text("\(pendingRecommendationsCount)")
-                    .font(MLMFont.badge)
-                    .foregroundColor(.mlmInkMuted)
-                    .help("\(pendingRecommendationsCount) recommendations pending")
-                    .accessibilityIdentifier("sidebar_discover_pending_count")
-                    .accessibilityLabel("\(pendingRecommendationsCount) recommendations pending")
-            }
-        }
+    private func fixedRow(_ destination: SidebarDestination) -> some View {
+        Label(destination.fixedTitle, systemImage: destination.systemImage)
+            .tag(destination)
             .springLoadableHover {
-                selectedSection = section
+                navigation.select(destination)
+            }
+    }
+
+    @ViewBuilder
+    private func playlistRow(_ playlist: Playlist) -> some View {
+        if let id = playlist.id {
+            let icon = playlist.isLiked == 1 ? "heart" : "music.note.list"
+            if renaming == .playlist(id) {
+                renameField(systemImage: icon)
+            } else {
+                Label(playlist.name, systemImage: icon)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(playlist.name)
+                    .tag(SidebarDestination.playlist(id))
+                    .contextMenu {
+                        Button("Rename") {
+                            startRename(.playlist(id), currentName: playlist.name)
+                        }
+                        if playlist.isLiked == 0 {
+                            Divider()
+                            Button("Delete Playlist…", role: .destructive) {
+                                pendingPlaylistDeletion = playlist
+                            }
+                        }
+                    }
+                    .springLoadableHover {
+                        navigation.select(.playlist(id))
+                    }
             }
         }
-        .buttonStyle(.plain)
-        .tag(section)
     }
 
-    // MARK: - Queue footer
-
-    private var queueFooter: some View {
-        Button {
-            selectedSection = .queue
-        } label: {
-            HStack {
-                Label(SidebarSection.queue.label, systemImage: SidebarSection.queue.icon)
-                    .font(MLMFont.body)
-                    .foregroundColor(selectedSection == .queue ? .white : .mlmInkSecondary)
-                Spacer()
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(selectedSection == .queue ? Color.accentColor : Color.clear)
-            )
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 8)
-        .padding(.top, 8)
-        .keyboardShortcut("8")
-        .accessibilityIdentifier("sidebar_queue_footer")
-        .accessibilityLabel("sidebar_queue_footer")
-    }
-
-    // MARK: - Settings footer
-
-    private var settingsFooter: some View {
-        Button {
-            AppDelegate.shared?.showSettingsWindow()
-        } label: {
-            Label("Settings", systemImage: "gearshape")
-                .font(MLMFont.body)
-                .foregroundColor(.mlmInkSecondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 8)
-        .padding(.bottom, 8)
-        .accessibilityIdentifier("settings_button")
-        .accessibilityLabel("settings_button")
-    }
-
-    /// Bottom safeAreaInset content: queue footer above settings.
-    private var bottomInset: some View {
-        VStack(spacing: 0) {
-            queueFooter
-            Divider()
-            settingsFooter
-        }
-    }
-
-    private func updatePendingDuplicatesCount() {
-        guard let analysisRepo = container.analysisRepository else { return }
-        Task {
-            if let counts = try? await analysisRepo.pendingReviewCounts() {
-                await MainActor.run {
-                    self.pendingDuplicatesCount = counts.duplicates
-                    self.pendingConflictsCount = counts.conflicts
+    @ViewBuilder
+    private func syncProfileRow(_ profile: SyncProfile) -> some View {
+        if let id = profile.id {
+            if renaming == .syncProfile(id) {
+                renameField(systemImage: "externaldrive")
+            } else {
+                let state = rowState(for: profile, id: id)
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(profile.name)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Text(state.text())
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                        if let progress = state.progress {
+                            ProgressView(value: progress)
+                                .progressViewStyle(.linear)
+                                .controlSize(.mini)
+                        }
+                    }
+                } icon: {
+                    Image(systemName: "externaldrive")
+                }
+                .help(profile.outputFolder)
+                .tag(SidebarDestination.syncProfile(id))
+                .contextMenu {
+                    syncProfileMenu(profile, id: id)
                 }
             }
         }
     }
 
-    private func updatePendingRecommendationsCount() {
-        guard let trackRepo = container.trackRepository else { return }
-        Task {
-            let count = (try? await trackRepo.fetchDiscoveryInboxTracks().count) ?? 0
-            await MainActor.run {
-                pendingRecommendationsCount = count
+    @ViewBuilder
+    private func syncProfileMenu(_ profile: SyncProfile, id: Int64) -> some View {
+        Button("Rename") {
+            startRename(.syncProfile(id), currentName: profile.name)
+        }
+        Button("Duplicate") {
+            Task { await container.syncViewModel?.duplicateProfile(profile) }
+        }
+        Button("Read Playlist Changes from Device…") {
+            deviceIngestProfile = profile
+            Task { await container.syncViewModel?.scanDeviceForPlaylistChanges(profile: profile) }
+        }
+        Divider()
+        Button("Delete Sync Profile…", role: .destructive) {
+            pendingProfileDeletion = profile
+        }
+    }
+
+    private func rowState(for profile: SyncProfile, id: Int64) -> SyncProfileRowState {
+        guard let vm = container.syncViewModel else {
+            return .make(isSyncing: false, processed: 0, total: 0,
+                         isReachable: model.reachableProfileIDs.contains(id),
+                         pendingAdds: nil, lastSynced: nil)
+        }
+        let isSelected = vm.selectedProfile?.id == id
+        let pendingAdds: Int? = {
+            guard isSelected, let preview = vm.preview, preview.isDeviceConnected else { return nil }
+            return preview.filesToAdd.count
+        }()
+        return .make(
+            isSyncing: isSelected && vm.isSyncing,
+            processed: vm.syncProcessed,
+            total: vm.syncTotal,
+            isReachable: model.reachableProfileIDs.contains(id),
+            pendingAdds: pendingAdds,
+            lastSynced: vm.profileLastSynced[id]
+        )
+    }
+
+    // MARK: - Inline rename (UC-SIDE-09)
+
+    private func renameField(systemImage: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: systemImage)
+                    .foregroundStyle(.secondary)
+                TextField("Name", text: $renameText)
+                    .textFieldStyle(.plain)
+                    .focused($renameFocused)
+                    .onSubmit { commitRename() }
+                    .onExitCommand { cancelRename() }
+                    .onAppear { renameFocused = true }
+            }
+            if let renameError {
+                Text(renameError)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
-    private func updateSourceStatus() {
-        guard let tokenStorage = container.tokenStorage else { return }
-        hasExpiredSource = TokenStorage.Service.allCases.contains { service in
-            let credentials = try? tokenStorage.getCredentials(service: service)
-            return credentials?.isExpired ?? false
+    private func startRename(_ target: RenameTarget, currentName: String) {
+        renameError = nil
+        renameText = currentName
+        renaming = target
+    }
+
+    private func cancelRename() {
+        renaming = nil
+        renameText = ""
+        renameError = nil
+        renameFocused = false
+    }
+
+    private func commitRename() {
+        guard let target = renaming else { return }
+        let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            cancelRename()
+            return
         }
+        Task {
+            switch target {
+            case .playlist(let id):
+                guard name != model.playlistName(id) else { return cancelRename() }
+                do {
+                    try await container.playlistRepository?.rename(id: id, name: name)
+                    NotificationCenter.default.post(name: .playlistDidChange, object: nil)
+                    await reloadPlaylists()
+                    cancelRename()
+                } catch {
+                    renameError = "Couldn’t rename the playlist. \(error.localizedDescription)"
+                }
+            case .syncProfile(let id):
+                guard let vm = container.syncViewModel,
+                      let profile = vm.profiles.first(where: { $0.id == id }) else { return cancelRename() }
+                guard name != profile.name else { return cancelRename() }
+                vm.clearError()
+                await vm.renameProfile(profile, name: name)
+                if let error = vm.errorMessage {
+                    renameError = error
+                } else {
+                    cancelRename()
+                }
+            }
+        }
+    }
+
+    // MARK: - Deleting
+
+    private func deletePendingPlaylist() {
+        guard let id = pendingPlaylistDeletion?.id else { return }
+        pendingPlaylistDeletion = nil
+        Task {
+            do {
+                try await container.playlistRepository?.delete(id: id)
+                navigation.removePlaylist(id)
+                NotificationCenter.default.post(name: .playlistDidChange, object: nil)
+            } catch {
+                AppLogger.shared.error("Could not delete playlist: \(error.localizedDescription)", source: "Sidebar")
+            }
+        }
+    }
+
+    private func deletePendingProfile() {
+        guard let profile = pendingProfileDeletion, let vm = container.syncViewModel else { return }
+        pendingProfileDeletion = nil
+        Task {
+            await vm.deleteProfile(profile)
+            if let id = profile.id { navigation.removeSyncProfile(id) }
+        }
+    }
+
+    // MARK: - Loading
+
+    private func reloadPlaylists() async {
+        let before = Set(model.playlists.compactMap(\.id))
+        await model.reloadPlaylists(container.playlistRepository)
+        let after = Set(model.playlists.compactMap(\.id))
+        for removed in before.subtracting(after) {
+            navigation.removePlaylist(removed)
+        }
+    }
+
+    private func reloadBadges() async {
+        await model.reloadBadges(
+            trackRepository: container.trackRepository,
+            analysisRepository: container.analysisRepository
+        )
+    }
+}
+
+/// System section header with a ＋ that appears on hover (UC-SIDE-03). The header text stays
+/// the system style (UC-TYPE-02); the button stays reachable for VoiceOver and keyboard.
+private struct SidebarSectionHeader<Accessory: View>: View {
+    let title: String
+    @ViewBuilder let accessory: () -> Accessory
+
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack {
+            Text(title)
+            Spacer()
+            accessory()
+                .opacity(isHovering ? 1 : 0)
+        }
+        .contentShape(Rectangle())
+        .onHover { isHovering = $0 }
     }
 }
