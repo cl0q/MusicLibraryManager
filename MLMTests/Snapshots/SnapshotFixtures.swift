@@ -340,6 +340,8 @@ enum SnapshotFixtures {
         "Player/PlayerDisplay.swift": "Non-view: the player's state words, pure (W2-C).",
         "Player/GoToCurrentTrack.swift": "Non-view: Go to Current Track and the table reveal request (W2-C).",
         "TrackList/TrackListPreviewKeys.swift": "Non-view: preview key decisions and the focused table's key handler (W2-C).",
+        "TrackList/SelectionBarState.swift": "Non-view: what the selection bar shows for a selection, and when (W2-G).",
+        "TrackList/SelectionBarHosting.swift": "Non-view: the channel between a scaffold's track table and its selection bar (W2-G).",
         "Playlists/PlaylistDetailView.swift": "Deferred: lifecycle reloads, source sync and cover work not isolated by table fixture.",
         "Playlists/PlaylistDetailViewLoader.swift": "Deferred: loader async outcomes require controlled ready/not-found/failure injection.",
         "Playlists/PlaylistsView.swift": "Deferred: live playlist/cover loading and root view state need a preloaded composition.",
@@ -486,6 +488,8 @@ TrackDetail/GrooveView.swift
 TrackDetail/WaveformHelpers.swift
 TrackDetail/WaveformView.swift
 TrackList/DownloadFailureReasonText.swift
+TrackList/SelectionBarHosting.swift
+TrackList/SelectionBarState.swift
 TrackList/TrackCell.swift
 TrackList/TrackColumn.swift
 TrackList/TrackListActions.swift

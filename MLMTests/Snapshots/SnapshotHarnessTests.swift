@@ -32,7 +32,8 @@ final class SnapshotsTests: XCTestCase {
         // debug-no-local-file fixture) by the 8 files of Inspector/ (4 non-view, 4 deferred).
         // W2-C added Player/{GoToCurrentTrack,PlayerDisplay}.swift and TrackList/TrackListPreviewKeys
         // (non-view) and Player/{LocateFile,PreviewWaveformScrubber}.swift (deferred with PlayerBar).
-        XCTAssertEqual(paths.count, 103, "Re-audit inventory changes explicitly.")
+        // W2-G added TrackList/{SelectionBarState,SelectionBarHosting}.swift (non-view).
+        XCTAssertEqual(paths.count, 105, "Re-audit inventory changes explicitly.")
         XCTAssertEqual(Set(SnapshotFixtures.inventory.map(\.path)), paths)
         XCTAssertEqual(SnapshotFixtures.inventory.count, paths.count)
         XCTAssertFalse(SnapshotFixtures.inventory.contains { $0.disposition.isEmpty })
@@ -40,7 +41,7 @@ final class SnapshotsTests: XCTestCase {
         XCTAssertFalse(SnapshotFixtures.fixtures.isEmpty)
         XCTAssertEqual(SnapshotFixtures.fixtures.count, 28)
         XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 24)
-        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 31)
+        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 33)
         XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 48)
         for fixture in SnapshotFixtures.fixtures where fixture.expectedTableRows != nil {
             if case .swiftUI = fixture.backend {
