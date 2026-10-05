@@ -175,7 +175,7 @@ final class LibraryAvailabilityMonitor {
         // takes longer than a moment; Cancel stops it (no file is flagged by a partial run).
         let job = ActivityCenter.shared.begin(
             .fileCheck, title: "Check files", subject: .allTracks, itemNoun: .file,
-            controls: ActivityControls(cancel: { Task { @MainActor [weak self] in self?.cancelRunningCheck() } }),
+            controls: ActivityControls(cancel: { [weak self] in Task { @MainActor in self?.cancelRunningCheck() } }),
             automatic: true, graceful: true)
         let reconciler = self.reconciler
         let libraryRoot = self.libraryRoot

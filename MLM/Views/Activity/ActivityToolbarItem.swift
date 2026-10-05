@@ -159,7 +159,7 @@ struct ActivityPopover: View {
                     ActivityRouter.shared.tab = .operations
                     openWindow(id: ActivityWindow.id)
                 } label: {
-                    Text("Open Activity Window") + Text("  ⌥⌘0").foregroundStyle(.secondary)
+                    Text("Open Activity Window  \(Text("⌥⌘0").foregroundStyle(.secondary))")
                 }
                 .buttonStyle(.borderless)
                 Spacer()
