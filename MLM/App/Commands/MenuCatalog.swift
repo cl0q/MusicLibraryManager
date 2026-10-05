@@ -300,11 +300,12 @@ enum MenuCommand: String, CaseIterable, Sendable {
         case .skipBack: Entry(menu: .playback, title: "Skip Back 10 Seconds", shortcut: .cmd(.leftArrow, .option), wiring: .app)
         case .volumeUp: Entry(menu: .playback, title: "Volume Up", shortcut: .cmd(.upArrow), wiring: .app)
         case .volumeDown: Entry(menu: .playback, title: "Volume Down", shortcut: .cmd(.downArrow), wiring: .app)
-        case .shuffleView: Entry(menu: .playback, title: "Shuffle All Tracks", shortcut: nil, wiring: .app)
+        // `Shuffle ‹view›` / `Play ‹view›` at run time; the plain verb when no list is named.
+        case .shuffleView: Entry(menu: .playback, title: "Shuffle", shortcut: nil, wiring: .app)
         case .repeatMode:
             Entry(menu: .playback, title: "Repeat", shortcut: nil,
                   wiring: .pending(owner: "W2-C", reason: "Repeat arrives with the new player."))
-        case .playView: Entry(menu: .playback, title: "Play All Tracks", shortcut: nil, wiring: .app)
+        case .playView: Entry(menu: .playback, title: "Play", shortcut: nil, wiring: .app)
 
         // MARK: Library (M-LIBRARY)
         case .refreshFromSources:

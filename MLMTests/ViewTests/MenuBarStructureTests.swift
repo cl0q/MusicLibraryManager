@@ -134,7 +134,7 @@ struct MenuBarStructureTests {
                      "Download", "Locate File…", "Refresh from Source",
                      "Show in Finder", "Copy", "Share…", "Remove from Playlist", "Remove from Library…"],
             .playback: ["Play", "Stop", "Next", "Previous", "Skip Forward 10 Seconds", "Skip Back 10 Seconds",
-                        "Volume Up", "Volume Down", "Shuffle All Tracks", "Repeat", "Play All Tracks"],
+                        "Volume Up", "Volume Down", "Shuffle", "Repeat", "Play"],
             .library: ["Refresh from Sources", "Scan Library Folder", "Find Duplicates", "Find Albums",
                        "Maintenance", "Fingerprint All Tracks", "ReplayGain Analysis", "Danceability Analysis",
                        "Similarity Analysis", "Refresh Embedded Artwork", "Fetch Artwork from MusicBrainz",
@@ -241,6 +241,19 @@ struct MenuBarStructureTests {
         }
         #expect(!app.contains("CommandMenu(") && !app.contains("Button("), "MLMApp only composes scenes and commands")
         #expect(app.contains("Window(KeyboardShortcutsWindow.title, id: KeyboardShortcutsWindow.id)"))
+    }
+
+    /// Review S2: Get Info shows the selection's first track in Info, through the existing
+    /// Show Details path; S3: menus enable from the published summary, not from resolved rows.
+    @Test func trackMenuReadsTheSummaryAndGetInfoShowsTheSelection() throws {
+        let track = try source("MLM/App/Commands/TrackCommands.swift")
+        #expect(track.contains("summary: selection?.summary,"))
+        #expect(track.contains("let tracks: () -> [Track] = { selection?.selectedTracks ?? [] }"))
+        #expect(track.contains("NotificationCenter.default.post(name: .openTrackDetailForTrack, object: nil, userInfo: [\"trackId\": id])"))
+        let file = try source("MLM/App/Commands/FileCommands.swift")
+        #expect(!file.contains("let selected = "), "File menu enables from the selected IDs")
+        let playback = try source("MLM/App/Commands/PlaybackCommands.swift")
+        #expect(playback.contains("activate: shellActions?.activateTrack"), "All Tracks plays through the window's activation")
     }
 
     @Test func viewMenuUsesSystemSidebarAndToolbarCommands() throws {

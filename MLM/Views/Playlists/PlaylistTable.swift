@@ -172,12 +172,14 @@ struct PlaylistTable: View {
     /// `Remove from “‹name›”` through the page's removal flow.
     private var menuSelection: TrackSelection {
         let viewModel = self.viewModel
-        let rows = cachedRows
         let onRemoveTracks = self.onRemoveTracks
         let container = self.container
         return TrackSelection(
             selectedIDs: viewModel.selectedTrackIDs,
-            rows: { rows.map(\.track) },
+            rows: cachedRows,
+            id: \.id,
+            isPlayable: { $0.track.isLocal },
+            track: \.track,
             context: playlist.id.map { .playlist(id: $0, name: playlist.name) } ?? .unnamed,
             target: TrackCommandTarget(
                 activate: onTrackDoubleClick,

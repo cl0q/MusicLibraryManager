@@ -261,6 +261,7 @@ struct ContentView: View {
                 SearchPlace(navigation).hasLocalTable
             }
             container.searchCoordinator.context = searchPlace.context
+            shell.actions.activateTrack = handleTrackDoubleClick
         }
         // ⌘F is Edit ▸ Find ▸ Search, a menu key of this window (W1-2); no app-wide key monitor.
     }

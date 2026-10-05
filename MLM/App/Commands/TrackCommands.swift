@@ -15,53 +15,57 @@ struct TrackCommands: Commands {
     var body: some Commands {
         CommandMenu(MenuBarMenu.track.rawValue) {
             let selection = TrackSelection.usable(focusedSelection, navigation: navigation)
-            let tracks = selection?.selectedTracks ?? []
+            // Enabling reads the published summary; tracks are resolved only when an item runs.
+            let tracks: () -> [Track] = { selection?.selectedTracks ?? [] }
             let target = selection?.target ?? TrackCommandTarget()
             let state = TrackCommandState(
-                summary: selection.map { TrackSelectionSummary(tracks: tracks, container: $0.context.container) },
+                summary: selection?.summary,
                 capabilities: TrackListCapabilities(target),
                 isDownloadBusy: DependencyContainer.shared.downloadViewModel?.isDownloading ?? false
             )
 
             CommandButton(.play, enabled: state.canPlay) {
-                if let first = tracks.first, let rows = selection?.rows { target.activate?(first, rows) }
+                if let first = tracks().first, let rows = selection?.rows { target.activate?(first, rows) }
             }
             CommandButton(.preview)
             CommandButton(.playNext, enabled: state.canPlayNext) {
                 guard !KeyEquivalentGuard.keyBelongsToText(
                     .textCommand(#selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)))
                 ) else { return }
-                TrackCommandActions.playNext(tracks)
+                TrackCommandActions.playNext(tracks())
             }
             CommandButton(.addToQueue)
 
             Divider()
 
             CommandSubmenu(.addToPlaylist, enabled: state.canAddTo) {
-                Button("New Playlist…") { TrackCommandActions.newPlaylistFromSelection(tracks) }
+                Button("New Playlist…") { TrackCommandActions.newPlaylistFromSelection(tracks()) }
                 if !target.playlists.isEmpty { Divider() }
                 ForEach(target.playlists) { playlist in
                     Button(playlist.name) {
-                        if let id = playlist.id { TrackCommandActions.addToPlaylist(id, tracks: tracks) }
+                        if let id = playlist.id { TrackCommandActions.addToPlaylist(id, tracks: tracks()) }
                     }
                 }
             }
             CommandSubmenu(.addToSyncProfile, enabled: state.canAddTo) {
                 ForEach(target.syncProfiles) { profile in
                     Button(profile.name) {
-                        target.addToSyncProfile?(profile, Set(tracks.compactMap(\.id)))
+                        target.addToSyncProfile?(profile, selection?.selectedIDs ?? [])
                     }
                     .disabled(!state.canAddToSyncProfile)
                 }
                 if !target.syncProfiles.isEmpty { Divider() }
-                Button("New Sync Profile…") { TrackCommandActions.newSyncProfileFromSelection(tracks) }
+                Button("New Sync Profile…") { TrackCommandActions.newSyncProfileFromSelection(tracks()) }
             }
 
             Divider()
 
-            // ⌘I is View ▸ Show Info's key; this is the same command for the selection.
+            // ⌘I is View ▸ Show Info's key; this is the same command for the selection: Info
+            // shows the first selected track and opens (the existing Show Details path).
             CommandButton(.getInfo, enabled: state.canGetInfo && trailingColumn != nil) {
-                if trailingColumn?.isShowing(.info) == false { trailingColumn?.toggle(.info) }
+                if let id = selection?.summary.firstID {
+                    NotificationCenter.default.post(name: .openTrackDetailForTrack, object: nil, userInfo: ["trackId": id])
+                }
             }
             CommandButton(.goToAlbum)
             CommandButton(.goToArtist)
@@ -71,7 +75,7 @@ struct TrackCommands: Commands {
 
             CommandButton(.download, title: state.downloadTitle, enabled: state.canDownload,
                           disabledReason: state.downloadDisabledReason) {
-                TrackCommandActions.download(tracks)
+                TrackCommandActions.download(tracks())
             }
             CommandButton(.locateFile)
             rereadItem
@@ -79,11 +83,11 @@ struct TrackCommands: Commands {
             Divider()
 
             CommandButton(.showInFinder, enabled: state.canShowInFinder) {
-                TrackCommandActions.showInFinder(tracks)
+                TrackCommandActions.showInFinder(tracks())
             }
             CommandSubmenu(.copyTrack, enabled: state.canCopy) {
-                Button("Title — Artist") { TrackCommandActions.copyTitleAndArtist(tracks) }
-                Button("File Path") { TrackCommandActions.copyFilePaths(tracks) }
+                Button("Title — Artist") { TrackCommandActions.copyTitleAndArtist(tracks()) }
+                Button("File Path") { TrackCommandActions.copyFilePaths(tracks()) }
                     .disabled(!state.canCopyFilePath)
             }
             CommandButton(.share)
@@ -92,12 +96,12 @@ struct TrackCommands: Commands {
 
             CommandButton(.removeFromContainer, title: state.removeFromContainerTitle,
                           enabled: state.canRemoveFromContainer,
-                          disabledReason: "Tracks can be removed from a playlist, the queue or a sync profile.") {
-                target.removeFromContainer?(Set(tracks.compactMap(\.id)))
+                          disabledReason: TrackCommandState.removeDisabledReason(selection?.context.container ?? .none)) {
+                target.removeFromContainer?(selection?.selectedIDs ?? [])
             }
             CommandButton(.removeFromLibrary, enabled: state.canRemoveFromLibrary) {
                 guard !KeyEquivalentGuard.keyBelongsToText(.textCommand(#selector(NSResponder.deleteToBeginningOfLine(_:)))) else { return }
-                TrackCommandActions.removeFromLibrary(tracks)
+                TrackCommandActions.removeFromLibrary(tracks())
             }
         }
     }

@@ -53,50 +53,88 @@ struct TrackCommandTarget {
     var addToSyncProfile: ((SyncProfile, Set<Int64>) -> Void)?
 }
 
-/// The focused track list as the menu bar sees it: the selection in display order, the list's
-/// rows and context, and its `TrackCommandTarget`.
+/// The focused track list as the menu bar sees it — cheap to publish and to compare.
+///
+/// It carries the selected IDs, a `TrackSelectionSummary` computed **once** by the publisher
+/// from the selected rows only, whether the list has a playable row, the list's context and its
+/// `TrackCommandTarget`. Full `Track` rows are produced only inside an action (`rows`,
+/// `selectedTracks`), never to decide what is enabled — a 12,000-row table costs one pass over
+/// row IDs per publish, not 12,000 `Track` copies per command.
+///
+/// Equality ignores the closures and compares IDs, summary, context and `rowsToken` (which
+/// changes when the rows or their order change), so an unchanged selection doesn't re-run the
+/// menus, and a changed list never leaves an action holding stale rows.
 ///
 /// **Publishing (any track list):**
 /// ```swift
 /// Table(selection: $selection) { … }
 ///     .focusedValue(\.trackSelection, TrackSelection(
-///         selectedIDs: selection, rows: tracksInDisplayOrder,
+///         selectedIDs: selection, rows: rowsInDisplayOrder,
+///         id: \.id, isPlayable: { $0.track.isLocal }, track: \.track,
 ///         context: .playlist(id: id, name: name),
 ///         target: TrackCommandTarget(activate: onDoubleClick, removeFromContainer: remove, …)))
 /// ```
 /// `.focusedValue` (not the scene variant): the Track menu follows keyboard focus, so it acts
 /// on the list the user is in (UC-SEL-02) and is disabled in Settings, the Activity window and
 /// sheets (UC-MENU-04). W2-A's track table publishes this from its single component.
-struct TrackSelection {
+struct TrackSelection: Equatable {
     let selectedIDs: Set<Int64>
+    /// The selection's counts, in display order (first selected track first).
+    let summary: TrackSelectionSummary
     let context: TrackListContext
+    /// The list has a row that can play (Playback ▸ Play / Shuffle ‹view›).
+    let hasPlayableRows: Bool
+    /// Changes whenever the rows or their order change.
+    let rowsToken: Int
     let target: TrackCommandTarget
-    /// Produces the rows only when a command needs them, so publishing costs nothing per
-    /// render even for a 12,000-row table.
     private let loadRows: () -> [Track]
 
-    init(selectedIDs: Set<Int64>, rows: @escaping () -> [Track], context: TrackListContext, target: TrackCommandTarget) {
+    /// Builds the value from the list's rows in display order without copying a `Track` that
+    /// isn't selected.
+    init<Rows: RandomAccessCollection>(
+        selectedIDs: Set<Int64>,
+        rows: Rows,
+        id: @escaping (Rows.Element) -> Int64,
+        isPlayable: (Rows.Element) -> Bool,
+        track: @escaping (Rows.Element) -> Track,
+        context: TrackListContext,
+        target: TrackCommandTarget
+    ) {
+        var hasher = Hasher()
+        hasher.combine(rows.count)
+        var selected: [Track] = []
+        for row in rows {
+            let rowID = id(row)
+            hasher.combine(rowID)
+            if !selectedIDs.isEmpty, selectedIDs.contains(rowID) { selected.append(track(row)) }
+        }
         self.selectedIDs = selectedIDs
-        self.loadRows = rows
+        self.summary = TrackSelectionSummary(tracks: selected, container: context.container)
         self.context = context
+        self.hasPlayableRows = rows.contains(where: isPlayable)
+        self.rowsToken = hasher.finalize()
         self.target = target
+        self.loadRows = { rows.map(track) }
     }
 
+    /// Plain tracks (tests, small lists).
     init(selectedIDs: Set<Int64>, rows: [Track], context: TrackListContext, target: TrackCommandTarget) {
-        self.init(selectedIDs: selectedIDs, rows: { rows }, context: context, target: target)
+        self.init(selectedIDs: selectedIDs, rows: rows, id: { $0.id ?? -1 }, isPlayable: \.isLocal,
+                  track: { $0 }, context: context, target: target)
     }
 
-    /// Every row of the list in display order.
+    static func == (lhs: TrackSelection, rhs: TrackSelection) -> Bool {
+        lhs.selectedIDs == rhs.selectedIDs && lhs.summary == rhs.summary && lhs.context == rhs.context
+            && lhs.hasPlayableRows == rhs.hasPlayableRows && lhs.rowsToken == rhs.rowsToken
+    }
+
+    /// Every row of the list in display order — for actions only.
     var rows: [Track] { loadRows() }
 
-    /// Selected tracks in display order.
+    /// Selected tracks in display order — for actions only.
     var selectedTracks: [Track] {
         guard !selectedIDs.isEmpty else { return [] }
         return rows.filter { track in track.id.map(selectedIDs.contains) ?? false }
-    }
-
-    func summary() -> TrackSelectionSummary {
-        TrackSelectionSummary(tracks: selectedTracks, container: context.container)
     }
 
     /// The selection the menu may act on: the kept-alive All Tracks table keeps keyboard focus
@@ -134,6 +172,8 @@ struct TrackSelectionSummary: Equatable, Sendable {
     var notDownloadedCount = 0
     var failedCount = 0
     var firstIsLocal = false
+    /// The first selected track in display order (Get Info).
+    var firstID: Int64?
     var container: TrackListContainer = .none
 
     init(count: Int = 0, localCount: Int = 0, notDownloadedCount: Int = 0, failedCount: Int = 0,
@@ -149,6 +189,7 @@ struct TrackSelectionSummary: Equatable, Sendable {
     init(tracks: [Track], container: TrackListContainer) {
         self.count = tracks.count
         self.firstIsLocal = tracks.first?.isLocal ?? false
+        self.firstID = tracks.first?.id
         self.container = container
         for track in tracks {
             if track.isLocal {
@@ -260,6 +301,16 @@ struct TrackCommandState: Equatable, Sendable {
         if count > 1 { return "Download \(count.formatted(.number)) Tracks" }
         if count == 1, summary.failedCount == 1 { return "Retry Download" }
         return MenuCommand.download.title
+    }
+
+    /// Help text of a disabled `Remove from ‹Container›` (UC-COPY-13), short and user-facing.
+    static func removeDisabledReason(_ container: TrackListContainer) -> String {
+        switch container {
+        case .library: "All Tracks has nothing to remove tracks from. Remove from Library… deletes them."
+        case .queue: "Removing tracks from the queue isn’t available yet."
+        case .playlist, .syncProfile: "These tracks can’t be removed here yet."
+        case .none: "This list has nothing to remove tracks from."
+        }
     }
 
     /// `Remove from “Warm-up”` · `Remove from Queue` · `Remove from “iPod Classic”`

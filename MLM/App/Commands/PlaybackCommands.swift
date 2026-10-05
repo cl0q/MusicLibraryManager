@@ -10,6 +10,7 @@ struct PlaybackCommands: Commands {
     @FocusedValue(\.playbackViewModel) private var playback
     @FocusedValue(\.trackSelection) private var focusedSelection
     @FocusedValue(\.navigationModel) private var navigation
+    @FocusedValue(\.shellActions) private var shellActions
 
     var body: some Commands {
         CommandMenu(MenuBarMenu.playback.rawValue) {
@@ -17,7 +18,7 @@ struct PlaybackCommands: Commands {
             let list = PlayableList.current(
                 selection: TrackSelection.usable(focusedSelection, navigation: navigation),
                 navigation: navigation,
-                playback: playback
+                activate: shellActions?.activateTrack
             )
 
             // With nothing loaded, Play plays the current view (UC-MENU-05).
@@ -69,7 +70,7 @@ struct PlaybackCommands: Commands {
             Divider()
 
             CommandButton(.shuffleView,
-                          title: list.map { "Shuffle \($0.name)" } ?? MenuCommand.shuffleView.title,
+                          title: PlayableList.title(MenuCommand.shuffleView.title, list),
                           enabled: list?.canPlay == true) {
                 list?.shuffle()
             }
@@ -78,7 +79,7 @@ struct PlaybackCommands: Commands {
             Divider()
 
             CommandButton(.playView,
-                          title: list.map { "Play \($0.name)" } ?? MenuCommand.playView.title,
+                          title: PlayableList.title(MenuCommand.playView.title, list),
                           enabled: list?.canPlay == true) {
                 list?.play()
             }
@@ -105,44 +106,61 @@ enum PlaybackStep {
 
 // MARK: - The current view as a playable list
 
-/// The list Playback ▸ Play ‹view› / Shuffle ‹view› act on: the focused track list when it is
-/// named, else All Tracks while it is the visible place.
+/// The list Playback ▸ Play ‹view› / Shuffle ‹view› act on: the focused named list, else All
+/// Tracks while it is the visible place. Deciding costs no row copies; rows are resolved only
+/// when the item runs, and playing goes through the list's own activation (double-click / Return).
 @MainActor
 struct PlayableList {
     let name: String
-    /// Rows in display order.
-    let rows: [Track]
-    /// The selection in display order (Play starts there when there is one).
-    let selected: [Track]
+    let canPlay: Bool
+    /// Rows in display order and the selection in display order — resolved on demand.
+    let rows: () -> [Track]
+    let selected: () -> [Track]
     let activate: (Track, [Track]) -> Void
 
-    var canPlay: Bool { rows.contains(where: \.isLocal) }
+    /// `Play “Warm-up”` / `Shuffle All Tracks`; the plain verb when no named list is known
+    /// (UC-MENU-03).
+    static func title(_ verb: String, _ list: PlayableList?) -> String {
+        list.map { "\(verb) \($0.name)" } ?? verb
+    }
 
     /// Play from the first selected playable track, else from the first playable row; the rows
     /// after it are the queue context.
     func play() {
-        guard let first = selected.first(where: \.isLocal) ?? rows.first(where: \.isLocal) else { return }
+        let rows = rows()
+        guard let first = selected().first(where: \.isLocal) ?? rows.first(where: \.isLocal) else { return }
         activate(first, rows)
     }
 
     func shuffle() {
-        let playable = rows.filter(\.isLocal)
+        let playable = rows().filter(\.isLocal)
         guard !playable.isEmpty, let playback = DependencyContainer.shared.playbackViewModel else { return }
         Task { await playback.playShuffled(playable) }
     }
 
-    static func current(selection: TrackSelection?, navigation: NavigationModel?, playback: PlaybackViewModel?) -> PlayableList? {
-        if let selection, let name = selection.context.viewName, let activate = selection.target.activate {
-            return PlayableList(name: name, rows: selection.rows, selected: selection.selectedTracks, activate: activate)
+    /// - Parameter activate: the main window's track activation (`ShellActions.activateTrack`),
+    ///   the same path double-click / Return take in All Tracks.
+    static func current(
+        selection: TrackSelection?,
+        navigation: NavigationModel?,
+        activate: ((Track, [Track]) -> Void)?
+    ) -> PlayableList? {
+        if let selection, let name = selection.context.viewName, let listActivate = selection.target.activate {
+            return PlayableList(name: name, canPlay: selection.hasPlayableRows, rows: { selection.rows },
+                                selected: { selection.selectedTracks }, activate: listActivate)
         }
         guard let navigation, navigation.isAllTracksVisible,
               !DependencyContainer.shared.searchCoordinator.isPresented,
               let library = DependencyContainer.shared.libraryViewModel,
-              let playback else { return nil }
-        let rows = library.displayedTracks
-        let selected = rows.filter { track in track.id.map(library.selectedTrackIDs.contains) ?? false }
-        return PlayableList(name: TrackListContext.allTracks.viewName ?? "All Tracks", rows: rows, selected: selected) { track, queue in
-            Task { await playback.playTrack(track, queue: queue) }
-        }
+              let activate else { return nil }
+        return PlayableList(
+            name: TrackListContext.allTracks.viewName ?? "All Tracks",
+            canPlay: library.displayedTracks.contains(where: \.isLocal),
+            rows: { library.displayedTracks },
+            selected: {
+                library.displayedTracks.filter { track in track.id.map(library.selectedTrackIDs.contains) ?? false }
+            },
+            activate: activate
+        )
     }
 }

@@ -275,10 +275,12 @@ struct TrackTable: View {
     /// This list as the Track menu sees it (`TrackSelection`, W1-2).
     private var menuSelection: TrackSelection {
         let selection = $selection
-        let rows = self.rows
         return TrackSelection(
             selectedIDs: selection.wrappedValue,
-            rows: { rows.map(\.track) },
+            rows: rows,
+            id: \.id,
+            isPlayable: { $0.track.isLocal },
+            track: \.track,
             context: listContext,
             target: TrackCommandTarget(
                 activate: onDoubleClick,
