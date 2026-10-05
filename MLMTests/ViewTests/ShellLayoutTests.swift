@@ -153,6 +153,9 @@ struct ShellLayoutTests {
         let player = try readSource("MLM/Views/Player/PlayerBar.swift")
         #expect(player.contains("ViewThatFits(in: .horizontal)"))
         #expect(player.contains("playerRow(showsTrackInfo: true)") && player.contains("playerRow(showsTrackInfo: false)"))
+        // The column's width is fixed, so the choice can't flip with the title's length (review S4).
+        #expect(player.contains(".frame(width: Self.trackInfoWidth, alignment: .leading)"))
+        #expect(!player.contains("minWidth: 80, maxWidth: 160"))
     }
 
     @Test
