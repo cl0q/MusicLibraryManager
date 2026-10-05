@@ -387,17 +387,28 @@ struct TrackTagWriter: Sendable {
         let streams: [ProbeStream]
     }
 
+    /// Probe into a private file (`-o`), not a pipe: a pipe read racing the process exit could
+    /// hand back partial JSON under load.
     func probe(_ url: URL, ffprobe: String) async throws -> ProbeResult {
+        let output = Self.scratchFile("probe", ext: "json")
+        defer { try? FileManager.default.removeItem(at: output) }
         let result = try await tools.run(ffprobe, arguments: [
             "-v", "error",
             "-show_entries", "format=duration:format_tags:stream=index,codec_type,codec_name,sample_rate,channels:stream_disposition=attached_pic",
             "-of", "json",
+            "-o", output.path,
             Self.ffmpegPath(url),
         ])
-        guard result.isSuccess, let probe = Self.parseProbe(result.stdout) else {
-            throw TagWriteFailure.rewriteFailed("ffprobe couldn’t read \(url.lastPathComponent): \(result.stderr.suffix(200))")
+        guard result.isSuccess, let json = try? String(contentsOf: output, encoding: .utf8),
+              let probe = Self.parseProbe(json) else {
+            throw TagWriteFailure.rewriteFailed("ffprobe couldn’t read \(url.lastPathComponent): exit \(result.exitCode) \(result.stderr.suffix(200))")
         }
         return probe
+    }
+
+    /// A file of our own in the system temporary folder (never the library folder).
+    static func scratchFile(_ kind: String, ext: String) -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("mlm-tags-\(kind)-\(UUID().uuidString).\(ext)")
     }
 
     static func parseProbe(_ json: String) -> ProbeResult? {
@@ -424,15 +435,18 @@ struct TrackTagWriter: Sendable {
 
     /// One `index,type,MD5=…` line per stream: the packets as stored (no decoding).
     func streamHashes(_ url: URL, ffmpeg: String) async throws -> [String] {
+        let output = Self.scratchFile("hash", ext: "txt")
+        defer { try? FileManager.default.removeItem(at: output) }
         let result = try await tools.run(ffmpeg, arguments: [
-            "-nostdin", "-hide_banner", "-v", "error",
+            "-nostdin", "-hide_banner", "-v", "error", "-y",
             "-i", Self.ffmpegPath(url),
             "-map", "0", "-c", "copy",
-            "-f", "streamhash", "-hash", "md5", "-",
+            "-f", "streamhash", "-hash", "md5", Self.ffmpegPath(output),
         ])
-        let lines = result.stdout.split(whereSeparator: \.isNewline).map(String.init).filter { !$0.isEmpty }
+        let text = (try? String(contentsOf: output, encoding: .utf8)) ?? ""
+        let lines = text.split(whereSeparator: \.isNewline).map(String.init).filter { !$0.isEmpty }
         guard result.isSuccess, !lines.isEmpty else {
-            throw TagWriteFailure.rewriteFailed("couldn’t hash \(url.lastPathComponent): \(result.stderr.suffix(200))")
+            throw TagWriteFailure.rewriteFailed("couldn’t hash \(url.lastPathComponent): exit \(result.exitCode) \(result.stderr.suffix(200))")
         }
         return lines
     }
