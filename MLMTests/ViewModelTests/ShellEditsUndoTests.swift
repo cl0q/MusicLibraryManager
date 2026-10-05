@@ -62,12 +62,13 @@ struct ShellEditsUndoTests {
         }
     }
 
-    private func rows(_ env: Env, _ playlistID: Int64) async throws -> [Row] {
+    /// Each row's values, in column order (`Row` itself isn't Sendable).
+    private func rows(_ env: Env, _ playlistID: Int64) async throws -> [[DatabaseValue]] {
         try await env.db.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT id, track_id, position, added_at FROM playlist_tracks WHERE playlist_id = ?
                 ORDER BY position, added_at, id
-            """, arguments: [playlistID])
+            """, arguments: [playlistID]).map { Array($0.databaseValues) }
         }
     }
 

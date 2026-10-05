@@ -24,12 +24,13 @@ struct PlaylistUndoRepositoryTests {
         }
     }
 
-    private func entries(_ db: DatabaseQueue, playlist: Int64) async throws -> [Row] {
+    /// Each row's values, in column order (`Row` itself isn't Sendable).
+    private func entries(_ db: DatabaseQueue, playlist: Int64) async throws -> [[DatabaseValue]] {
         try await db.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT id, playlist_id, track_id, position, added_at FROM playlist_tracks
                 WHERE playlist_id = ? ORDER BY position, added_at, id
-            """, arguments: [playlist])
+            """, arguments: [playlist]).map { Array($0.databaseValues) }
         }
     }
 
@@ -96,6 +97,7 @@ struct PlaylistUndoRepositoryTests {
         let entriesBefore = try await entries(db, playlist: id)
         let syncSnapshotsBefore = try await db.read { db in
             try Row.fetchAll(db, sql: "SELECT * FROM playlist_sync_snapshots WHERE playlist_id = ?", arguments: [id])
+                .map { Array($0.databaseValues) }
         }
 
         let snapshot = try await repo.deleteReturningSnapshot(id: id)
@@ -120,6 +122,7 @@ struct PlaylistUndoRepositoryTests {
         } == profiles.sorted())
         #expect(try await db.read { db in
             try Row.fetchAll(db, sql: "SELECT * FROM playlist_sync_snapshots WHERE playlist_id = ?", arguments: [id])
+                .map { Array($0.databaseValues) }
         } == syncSnapshotsBefore)
     }
 
