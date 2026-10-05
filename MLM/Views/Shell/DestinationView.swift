@@ -37,13 +37,13 @@ struct DestinationView: View {
             PendingDestinationView(
                 title: "Albums",
                 systemImage: SidebarDestination.albums.systemImage,
-                description: "Albums arrive in a later update of this redesign."
+                description: "Albums aren’t available yet."
             )
         case .genres:
             PendingDestinationView(
                 title: "Genres",
                 systemImage: SidebarDestination.genres.systemImage,
-                description: "Genres arrive in a later update of this redesign."
+                description: "Genres aren’t available yet."
             )
         case .folders:
             FoldersView(onTrackDoubleClick: onTrackActivated)
@@ -102,19 +102,19 @@ struct RouteView: View {
             PendingDestinationView(
                 title: "Album",
                 systemImage: "square.stack",
-                description: "Album pages arrive in a later update of this redesign."
+                description: "Album pages aren’t available yet."
             )
         case .genre(let name):
             PendingDestinationView(
                 title: name,
                 systemImage: "guitars",
-                description: "Genre pages arrive in a later update of this redesign."
+                description: "Genre pages aren’t available yet."
             )
         case .similar:
             PendingDestinationView(
                 title: "Similar",
                 systemImage: "point.3.connected.trianglepath.dotted",
-                description: "Similar tracks arrive in a later update of this redesign."
+                description: "Similar tracks aren’t available yet."
             )
         case .sources:
             SourcesView()
@@ -139,28 +139,53 @@ struct PendingDestinationView: View {
     }
 }
 
-/// A sync profile as a sidebar destination: the existing profile detail, with the profile
-/// made current in `SyncViewModel` (its preview and Sync Now act on the selected profile).
+/// A sync profile as a sidebar destination: the existing profile detail. `SyncViewModel`
+/// acts on its `selectedProfile` (preview, Sync Now, settings edits), so page and selection
+/// are kept in agreement (`SyncProfilePageAgreement`), and the detail is only shown while
+/// they agree — it can never show profile A while its buttons act on profile B.
 private struct SyncProfileHost: View {
     let profileID: Int64
 
     @Environment(\.container) private var container
+    @Environment(NavigationModel.self) private var navigation
 
     var body: some View {
         if let vm = container.syncViewModel,
            let profile = vm.profiles.first(where: { $0.id == profileID }) {
-            SyncProfileDetailView(profile: profile)
-                .task(id: profileID) {
-                    if vm.selectedProfile?.id != profileID {
-                        await vm.selectProfile(profile)
-                    }
+            Group {
+                if vm.selectedProfile?.id == profileID {
+                    SyncProfileDetailView(profile: profile)
+                } else {
+                    Color.clear
                 }
+            }
+            .task(id: profileID) {
+                reconcile(vm, selected: vm.selectedProfile?.id, page: profile)
+            }
+            .onChange(of: vm.selectedProfile?.id) { _, selected in
+                reconcile(vm, selected: selected, page: profile)
+            }
         } else {
             ContentUnavailableView(
                 "Sync profile not found",
                 systemImage: "externaldrive",
                 description: Text("It may have been deleted.")
             )
+        }
+    }
+
+    private func reconcile(_ vm: SyncViewModel, selected: Int64?, page: SyncProfile) {
+        switch SyncProfilePageAgreement.reconcile(
+            pageProfileID: profileID,
+            selectedProfileID: selected,
+            profileIDs: vm.profiles.compactMap(\.id)
+        ) {
+        case .agree:
+            break
+        case .followSelection(let id):
+            navigation.select(.syncProfile(id))
+        case .selectPage:
+            Task { await vm.selectProfile(page) }
         }
     }
 }
