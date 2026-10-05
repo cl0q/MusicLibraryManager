@@ -117,7 +117,10 @@ enum TrackRowBuilder {
         }
         let failureDetail: String?
         if case .failed(let reason, _, _) = availability {
-            failureDetail = "\(reason) · \(DownloadRetryBudget.remainingText(for: track.downloadFailureRecord))"
+            // Plain words for any stored reason, never the raw text (W2-B, UC-TABLE-13).
+            failureDetail = DownloadFailureReasonText.detail(
+                reason, failure: track.downloadFailureRecord,
+                sourceHint: DownloadFailureReasonText.sourceHint(for: track))
         } else {
             failureDetail = nil
         }
