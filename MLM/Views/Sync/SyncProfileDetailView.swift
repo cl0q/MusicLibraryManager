@@ -141,7 +141,7 @@ struct SyncProfileDetailView: View {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
                 .disabled(v.isPreviewUpdating)
-                .keyboardShortcut("r", modifiers: .command)
+                // ⌘R is Track ▸ Recompute Plan — the one ⌘R (UC-KEY-15/39).
                 .help("Refresh the preview and profile content (Command-R)")
 
                 Button("Sync now") {

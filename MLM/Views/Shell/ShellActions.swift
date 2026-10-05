@@ -122,6 +122,27 @@ final class ShellActions {
         }
     }
 
+    // MARK: Scan
+
+    /// A `Scan Library Folder` is running (All Tracks header button, Library menu, ⌘R).
+    private(set) var isScanningLibraryFolder = false
+
+    /// `Scan Library Folder` (Library menu, ⌘R in All Tracks / Albums / Genres, the All Tracks
+    /// header button): re-reads the library folder through the existing import pipeline, then
+    /// refreshes All Tracks. One scan at a time.
+    func scanLibraryFolder() {
+        guard !isScanningLibraryFolder, let viewModel = makeImportViewModel() else { return }
+        isScanningLibraryFolder = true
+        Task {
+            // The import view model only knows the library folder after loading it; without
+            // this the scan stopped with "No library root configured".
+            await viewModel.loadLibraryRoot()
+            await viewModel.importLibrary()
+            await container.libraryViewModel?.refresh()
+            isScanningLibraryFolder = false
+        }
+    }
+
     // MARK: Sources (temporary)
 
     /// Shows the former Sources section (accounts, playlist import) as a pushed page until

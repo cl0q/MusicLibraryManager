@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+@testable import MLM
 
 @Suite
 struct TransportStructureTests {
@@ -37,16 +38,26 @@ struct TransportStructureTests {
 
     // MARK: - MLMApp
 
+    /// ⌘← Previous, ⌥⌘← Skip Back 10 Seconds (UC-KEY-07/08); plain ← is not window-wide (W1-2).
+    @MainActor
     @Test
-    func mlmApp_containsLeftArrowShortcut() throws {
+    func playbackMenu_containsLeftArrowShortcuts() throws {
+        #expect(MenuCommand.previous.shortcut == .cmd(.leftArrow))
+        #expect(MenuCommand.skipBack.shortcut == .cmd(.leftArrow, .option))
         let src = try readSource("MLM/App/MLMApp.swift")
-        #expect(src.contains(".leftArrow"))
+        #expect(!src.contains("onKeyPress"), "no window-wide arrow-key seek (DEC-047)")
+        #expect(!src.contains("SeekHoldState"))
     }
 
+    /// ⌘→ Next, ⌥⌘→ Skip Forward 10 Seconds (UC-KEY-07/08).
+    @MainActor
     @Test
-    func mlmApp_containsRightArrowShortcut() throws {
-        let src = try readSource("MLM/App/MLMApp.swift")
-        #expect(src.contains(".rightArrow"))
+    func playbackMenu_containsRightArrowShortcuts() throws {
+        #expect(MenuCommand.next.shortcut == .cmd(.rightArrow))
+        #expect(MenuCommand.skipForward.shortcut == .cmd(.rightArrow, .option))
+        let src = try readSource("MLM/App/Commands/PlaybackCommands.swift")
+        #expect(src.contains("CommandButton(.next, enabled: hasTrack)"))
+        #expect(src.contains("CommandButton(.skipForward, enabled: hasTrack)"))
     }
 
     // MARK: - TrackContextMenu
