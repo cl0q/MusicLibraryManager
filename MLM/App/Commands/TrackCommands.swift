@@ -4,7 +4,7 @@ import SwiftUI
 /// `TrackSelection` (UC-SEL-02). Enabling and titles come from `TrackCommandState`; the
 /// list-specific actions from the list's `TrackCommandTarget`, the shared ones from
 /// `TrackCommandActions`. Play and Preview register no key: ↩ and Space belong to the focused
-/// list (UC-KEY-37).
+/// list (UC-KEY-37). Preview and Locate File… arrived with W2-C.
 struct TrackCommands: Commands {
     @FocusedValue(\.trackSelection) private var focusedSelection
     @FocusedValue(\.navigationModel) private var navigation
@@ -27,7 +27,14 @@ struct TrackCommands: Commands {
             CommandButton(.play, enabled: state.canPlay) {
                 if let first = tracks().first, let rows = selection?.rows { target.activate?(first, rows) }
             }
-            CommandButton(.preview)
+            // The list's Space: starts / ends the preview of the selection (never Play/Pause).
+            let previewing = DependencyContainer.shared.playbackViewModel?.preview.isActive == true
+            CommandButton(.preview,
+                          title: previewing ? "Stop Preview" : MenuCommand.preview.title,
+                          enabled: target.preview != nil && (previewing || TrackPreviewCommand.canPreview(selection?.summary)),
+                          disabledReason: TrackPreviewCommand.disabledReason) {
+                target.preview?()
+            }
             CommandButton(.playNext, enabled: state.canPlayNext) {
                 guard !KeyEquivalentGuard.keyBelongsToText(
                     .textCommand(#selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)))
@@ -75,7 +82,11 @@ struct TrackCommands: Commands {
                           disabledReason: state.downloadDisabledReason) {
                 TrackCommandActions.download(tracks())
             }
-            CommandButton(.locateFile)
+            CommandButton(.locateFile,
+                          enabled: TrackPreviewCommand.canLocate(selection?.summary),
+                          disabledReason: TrackPreviewCommand.locateDisabledReason) {
+                if let track = tracks().first { LocateFileRequest.shared.begin(track) }
+            }
             rereadItem
 
             Divider()
@@ -143,4 +154,22 @@ struct TrackCommands: Commands {
                               : "This place can’t be refreshed yet.") {}
         }
     }
+}
+
+/// Enabling of Track ▸ Preview and Track ▸ Locate File… (W2-C) from the published summary.
+enum TrackPreviewCommand {
+    /// One track whose file can be used now (Local, its disk connected).
+    static func canPreview(_ summary: TrackSelectionSummary?) -> Bool {
+        guard let summary else { return false }
+        return summary.count == 1 && summary.firstIsLocal
+    }
+
+    /// One track that is File missing or Download failed.
+    static func canLocate(_ summary: TrackSelectionSummary?) -> Bool {
+        guard let summary else { return false }
+        return summary.count == 1 && (summary.missingCount == 1 || summary.failedCount == 1)
+    }
+
+    static let disabledReason = "Select one downloaded track to preview it."
+    static let locateDisabledReason = "Select one track whose file is missing."
 }

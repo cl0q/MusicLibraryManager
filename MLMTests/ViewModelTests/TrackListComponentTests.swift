@@ -166,7 +166,7 @@ struct TrackListComponentTests {
     @Test func localTrackInTheLibraryFollowsTheGroupOrder() {
         let model = menu([track(1)], library)
         #expect(model.sections == [
-            [.play(enabled: true)],
+            [.play(enabled: true), .preview(enabled: true)],
             [.playNext],
             [.addToPlaylist, .addToSyncProfile],
             [.getInfo],
@@ -186,7 +186,7 @@ struct TrackListComponentTests {
         #expect(!items.contains { if case .removeFromContainer = $0 { true } else { false } })
     }
 
-    @Test func notDownloadedFailedAndMissingVariants() {
+    @Test func notDownloadedFailedAndMissingVariants() throws {
         let notDownloaded = menu([track(1, path: nil)], library).items
         #expect(notDownloaded.first == .play(enabled: true))
         #expect(notDownloaded.contains(.download(title: "Download")))
@@ -199,7 +199,13 @@ struct TrackListComponentTests {
 
         let missing = menu([track(3, missing: true)], library).items
         #expect(!missing.contains { if case .play = $0 { true } else { false } }, "nothing plays")
+        #expect(!missing.contains { if case .preview = $0 { true } else { false } }, "nothing previews")
+        // Fix group: Locate File… · Download Again (W2-C, CM-TRACK File missing).
         #expect(missing.contains(.downloadAgain))
+        let locate = try #require(missing.firstIndex(of: .locateFile))
+        #expect(locate < (missing.firstIndex(of: .downloadAgain) ?? 0))
+        #expect(failed.contains(.locateFile), "Download failed: Retry Download ⌘D · Locate File…")
+        #expect(!notDownloaded.contains(.locateFile))
         let missingImported = menu([track(4, missing: true, original: "/Users/o/import.m4a")], library).items
         #expect(!missingImported.contains(.downloadAgain), "Download Again needs a source")
     }
@@ -217,6 +223,7 @@ struct TrackListComponentTests {
         let model = menu([track(1)], library, live: offline)
         #expect(model.sections.first == [.driveHeader(volumeName: "Lexxar")])
         #expect(model.items.contains(.play(enabled: false)))
+        #expect(model.items.contains(.preview(enabled: false)), "Preview is a file action (UC-CM-05)")
         #expect(model.items.contains(.showInFinder(enabled: false)))
         #expect(model.items.contains(.removeFromLibrary(enabled: false)))
         #expect(!model.items.contains(.playNext))
@@ -227,12 +234,16 @@ struct TrackListComponentTests {
     }
 
     @Test func noDeadItemsFromLaterPackages() {
-        // Preview, Add to Queue, Go to …, Find Similar, Locate File…, Share… don't exist yet.
+        // Add to Queue, Go to …, Find Similar, Share… don't exist yet (Preview and Locate File…
+        // arrived with W2-C).
         let all = menu([track(1)], playlist).items + menu([track(2, missing: true)], library).items
         let titles = all.map { "\($0)" }.joined(separator: " ")
-        for absent in ["preview", "addToQueue", "goTo", "findSimilar", "locate", "share"] {
+        for absent in ["addToQueue", "goTo", "findSimilar", "share"] {
             #expect(!titles.contains(absent))
         }
+        #expect(all.contains(.preview(enabled: true)) && all.contains(.locateFile))
+        // Preview needs exactly one track (UC-CM-04).
+        #expect(!menu([track(1), track(2)], library).items.contains { if case .preview = $0 { true } else { false } })
     }
 
     // MARK: - Sorting (UC-TABLE-04)

@@ -39,6 +39,11 @@ struct TrackMenu: View {
                 Label("Play", systemImage: "play.fill")
             }
             .disabled(!enabled, reason: offlineVolumeName.map(TrackPrimaryAction.driveNotConnectedHelp))
+        case .preview(let enabled):
+            // Space is the focused list's key, never a key equivalent here (UC-KEY-37,
+            // IMP-023): it would fire instead of the highlighted item while the menu is open.
+            Button("Preview") { actions.preview(rows) }
+                .disabled(!enabled, reason: offlineVolumeName.map { "Can’t preview — “\($0)” is not connected" })
         case .playNext:
             Button("Play Next") { actions.playNext(rows) }
                 .keyboardShortcut(.return, modifiers: .option)
@@ -75,6 +80,8 @@ struct TrackMenu: View {
             .keyboardShortcut("d", modifiers: .command)
         case .downloadAgain:
             Button("Download Again") { actions.downloadAgain(rows) }
+        case .locateFile:
+            Button("Locate File…") { actions.locateFile(rows) }
         case .showInFinder(let enabled):
             Button("Show in Finder") { actions.showInFinder(rows) }
                 .keyboardShortcut("r", modifiers: [.command, .shift])

@@ -109,23 +109,9 @@ struct ViewCommands: Commands {
         }
     }
 
-    /// Go to Current Track ⌘L (M-VIEW.N07): selects the playing track in All Tracks — the one
-    /// place every playing track is listed in today. Selecting it in the context it plays from
-    /// and scrolling it into view arrive with W2-C's playing context and W2-A's table.
+    /// Go to Current Track ⌘L (M-VIEW.N07): selects the playing track in the list it plays
+    /// from and scrolls to it (W2-C, `GoToCurrentTrack`; All Tracks when no list recorded it).
     private func goToCurrentTrack() {
-        guard let navigation, let track = playback?.currentTrack, let id = track.id,
-              let library = DependencyContainer.shared.libraryViewModel else { return }
-        if !navigation.isAllTracksVisible {
-            if navigation.selection == .allTracks {
-                navigation.popToRoot()
-            } else {
-                navigation.select(.allTracks)
-            }
-        }
-        // The scope stays when it lists the track, else All (W2-B); a filter that hides it goes.
-        library.reveal(trackID: id, availability: track.availability())
-        if !library.displayedTracks.contains(where: { $0.id == id }) {
-            search?.reset()
-        }
+        GoToCurrentTrack.perform(playback: playback, navigation: navigation, search: search)
     }
 }

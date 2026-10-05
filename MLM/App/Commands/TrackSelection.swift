@@ -51,6 +51,9 @@ struct TrackCommandTarget {
     /// Sync profiles offered in Add to Sync Profile ▸ and how to add to one.
     var syncProfiles: [SyncProfile] = []
     var addToSyncProfile: ((SyncProfile, Set<Int64>) -> Void)?
+    /// Track ▸ Preview: the list's Space (start / end the preview of its selection, W2-C).
+    /// `nil`: the list can't preview.
+    var preview: (() -> Void)?
 }
 
 /// The focused track list as the menu bar sees it — cheap to publish and to compare.

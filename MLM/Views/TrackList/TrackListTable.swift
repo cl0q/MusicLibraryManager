@@ -27,6 +27,7 @@ struct TrackListTable<EmptyContent: View>: View {
     @Environment(StatusBarCenter.self) private var statusBar: StatusBarCenter?
     @Environment(UndoCenter.self) private var undo: UndoCenter?
     @Environment(ShellActions.self) private var shell: ShellActions?
+    @Environment(NavigationModel.self) private var navigation: NavigationModel?
 
     init(
         model: TrackListModel,
@@ -43,7 +44,8 @@ struct TrackListTable<EmptyContent: View>: View {
 
     private var actions: TrackListActions {
         TrackListActions(model: model, configuration: configuration, live: live,
-                         statusBar: statusBar, undo: undo, shell: shell, container: container)
+                         statusBar: statusBar, undo: undo, shell: shell, container: container,
+                         navigation: navigation)
     }
 
     var body: some View {
@@ -79,6 +81,10 @@ struct TrackListTable<EmptyContent: View>: View {
         ))
         .background {
             TrackTableLiveObserver(live: live)
+        }
+        // Go to Current Track ⌘L selects the playing row here when this is its list (W2-C).
+        .background {
+            TrackListRevealTaker(model: model, configuration: configuration)
         }
         .task {
             TrackMenuSources.shared.loadIfNeeded(container: container)
@@ -169,6 +175,16 @@ private struct TrackTableCore: View {
     let live: TrackTableLive
 
     var body: some View {
+        ScrollViewReader { proxy in
+            table
+                .onChange(of: model.scrollTarget) { _, target in
+                    // Instant, never animated (UC-MOTION-03).
+                    if let target { proxy.scrollTo(target.rowID, anchor: .center) }
+                }
+        }
+    }
+
+    private var table: some View {
         Table(of: TrackRow.self, selection: $model.selection, sortOrder: sortOrder, columnCustomization: $columnCustomization) {
             TableColumnForEach(configuration.columns) { column in
                 TrackTableColumns.column(column)
@@ -192,6 +208,9 @@ private struct TrackTableCore: View {
             { remove(Set(model.selectedRows().map(\.id))) }
         })
         .onCopyCommand { actions.copyItems() }
+        // Space previews, Esc ends it, ←/→ seek while previewing — only while this table has
+        // keyboard focus (UC-KEY-01/04/05, W2-C). Never Play/Pause.
+        .modifier(TrackListPreviewKeys(actions: actions))
         .alternatingRowBackgrounds()
         .redacted(reason: model.isLoaded ? [] : .placeholder)
         .allowsHitTesting(model.isLoaded)
@@ -309,6 +328,8 @@ private struct TrackTablePublisher: ViewModifier {
             .onChange(of: model.selection) { _, _ in
                 guard isVisiblePlace else { return }
                 InspectedTrackSelection.shared.update(model.selectedRows().map(\.id), from: configuration.persistenceKey)
+                // A running preview moves with the selection (UC-KEY-06).
+                actions.previewSelectionDidChange()
             }
             .onChange(of: visible) { _, nowVisible in
                 if !nowVisible { TrackTableVisibility.resignTableFocus() }
@@ -340,7 +361,8 @@ private struct TrackTablePublisher: ViewModifier {
                 syncProfiles: sources.syncProfiles,
                 addToSyncProfile: { profile, ids in
                     actions.addToSyncProfile(profile, model.selectedRows(ids))
-                }
+                },
+                preview: { actions.preview() }
             ),
             rows: { model.tracks }
         )
@@ -386,7 +408,8 @@ private struct TrackTableLiveObserver: View {
         }
         return TrackTableLiveState(
             nowPlayingID: playback?.currentTrack?.id,
-            isPlaying: playback?.isPlaying ?? false,
+            // The main track's own state: a preview pauses it (W2-C).
+            isPlaying: playback?.isMainPlaying ?? false,
             activeDownloadIDs: downloading,
             offlineVolumePath: drive.isOffline ? container.mountObserver?.libraryVolumePath : nil,
             offlineVolumeName: drive.isOffline ? drive.volumeName : nil
@@ -414,5 +437,34 @@ enum TrackTableVisibility {
     static func resignTableFocus() {
         guard let window = NSApp.keyWindow, window.firstResponder is NSTableView else { return }
         window.makeFirstResponder(nil)
+    }
+}
+
+// MARK: - Go to Current Track (W2-C)
+
+/// Takes a `TrackListReveal` request meant for this list: once the row is shown, select it
+/// and scroll it into view. Reads the rows only while a request is pending for this list.
+private struct TrackListRevealTaker: View {
+    let model: TrackListModel
+    let configuration: TrackListConfiguration
+
+    var body: some View {
+        let request = TrackListReveal.shared.request.flatMap { request in
+            request.matches(listKey: configuration.persistenceKey, container: configuration.listContext.container) ? request : nil
+        }
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .task(id: RevealKey(requestID: request?.id, rowsLoaded: request == nil ? 0 : model.rows.count)) {
+                guard let request, model.isLoaded, model.row(id: request.trackID) != nil else { return }
+                model.selection = [request.trackID]
+                model.scrollTo(request.trackID)
+                TrackListReveal.shared.done(request.id)
+            }
+    }
+
+    private struct RevealKey: Equatable {
+        let requestID: UUID?
+        let rowsLoaded: Int
     }
 }
