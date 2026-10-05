@@ -2,7 +2,8 @@ import Testing
 import Foundation
 
 /// Source-scan tests verifying that:
-/// 1. The detail pane follows the now-playing track (onChange on currentTrack with pane-open guard).
+/// 1. Info never follows the now-playing track (UC-TRAIL-03 / DEC-007, W1-1 replaced the old
+///    "detail pane follows the playing track" behaviour).
 /// 2. All three track tables (TrackTable, PlaylistTable, FoldersView) apply the accent highlight.
 /// 3. Existing invariants (speaker icon, double-click detail wiring) remain intact.
 @Suite("NowPlayingSyncTests")
@@ -26,36 +27,23 @@ struct NowPlayingSyncTests {
     private static let playlistTablePath = "MLM/Views/Playlists/PlaylistTable.swift"
     private static let foldersViewPath = "MLM/Views/Folders/FoldersView.swift"
 
-    // MARK: - Task B: detail pane follows the playing track
+    // MARK: - Task B (revised): Info never follows the playing track
 
     @Test
-    func contentView_containsOnChangeOfCurrentTrack() throws {
+    func contentView_infoDoesNotFollowNowPlaying() throws {
         let src = try readSource(Self.contentViewPath)
-        #expect(src.contains(".onChange(of: container.playbackViewModel?.currentTrack)"),
-                "ContentView must observe playbackViewModel.currentTrack changes")
+        #expect(!src.contains(".onChange(of: container.playbackViewModel?.currentTrack)"),
+                "Info follows the selection, never the playing track (UC-TRAIL-03)")
+        #expect(!src.contains("selectedTrackForDetail = newTrack"))
     }
 
     @Test
-    func contentView_detailSyncGuardsOnPaneOpen() throws {
+    func contentView_trackActivationNeverOpensTheColumn() throws {
         let src = try readSource(Self.contentViewPath)
-        #expect(src.contains("selectedTrackForDetail != nil"),
-                "Detail sync onChange must guard on selectedTrackForDetail != nil (pane-open guard)")
-    }
-
-    @Test
-    func contentView_detailSyncDoesNotClearOnNil() throws {
-        // The onChange body must NOT assign nil to selectedTrackForDetail.
-        // The guard `newTrack != nil` ensures the nil path (stop/queue exhausted) is a no-op.
-        let src = try readSource(Self.contentViewPath)
-        #expect(src.contains("newTrack != nil"),
-                "Detail sync onChange must guard on newTrack != nil so stop/nil does not clear detail")
-    }
-
-    @Test
-    func contentView_detailSyncAssignsNewTrack() throws {
-        let src = try readSource(Self.contentViewPath)
-        #expect(src.contains("selectedTrackForDetail = newTrack"),
-                "Detail sync onChange must assign the new track to selectedTrackForDetail")
+        let start = try #require(src.range(of: "private func handleTrackDoubleClick"))
+        let body = String(src[start.lowerBound...].prefix(600))
+        #expect(!body.contains("isPresented = true") && !body.contains("toggle("),
+                "Double-click / Return must not open the trailing column (UC-TRAIL-02)")
     }
 
     // MARK: - Task A: accent highlight in all three tables

@@ -1,8 +1,9 @@
 import Testing
 import Foundation
 
-/// Source-scan tests verifying the global search bar has a clear (x) button
-/// that resets query, dismisses search, and clears focus.
+/// Source-scan tests for the toolbar search field. Since W1-1 it is the system `.searchable`
+/// field (its clear button is the system's); clearing resets the query, dismisses the search
+/// pane, and leaving a place drops focus.
 @Suite("SearchClearButtonTests")
 struct SearchClearButtonTests {
 
@@ -19,60 +20,46 @@ struct SearchClearButtonTests {
         return try String(contentsOf: url, encoding: .utf8)
     }
 
-    private static let contentViewPath = "MLM/Views/ContentView/ContentView.swift"
+    private static let searchPath = "MLM/Views/Shell/ShellSearch.swift"
 
-    // MARK: - Clear button presence
+    // MARK: - System search field
 
     @Test
-    func contentView_containsSearchClearButton() throws {
-        let src = try readSource(Self.contentViewPath)
-        #expect(src.contains("search_clear_button"),
-                "ContentView must contain the search_clear_button accessibility identifier")
+    func shell_usesTheSystemSearchField() throws {
+        let src = try readSource(Self.searchPath)
+        #expect(src.contains(".searchable(text:"),
+                "The toolbar search field is the system .searchable field (UC-SEARCH-01)")
+    }
+
+    // MARK: - Clearing
+
+    @Test
+    func clearing_callsDismiss() throws {
+        let src = try readSource(Self.searchPath)
+        #expect(src.contains("coordinator.dismiss()"),
+                "Clearing the field must dismiss the search pane")
     }
 
     @Test
-    func contentView_containsXmarkCircleFillIcon() throws {
-        let src = try readSource(Self.contentViewPath)
-        #expect(src.contains("xmark.circle.fill"),
-                "ContentView search clear button must use xmark.circle.fill icon")
-    }
-
-    // MARK: - Three-part clear action
-
-    @Test
-    func contentView_clearButton_callsDismiss() throws {
-        let src = try readSource(Self.contentViewPath)
-        #expect(src.contains("searchCoordinator.dismiss()"),
-                "Clear button action must call searchCoordinator.dismiss()")
+    func clearing_resetsQuery() throws {
+        let src = try readSource(Self.searchPath)
+        #expect(src.contains("coordinator.query = \"\""),
+                "Clearing the field must reset SearchCoordinator.query to an empty string")
     }
 
     @Test
-    func contentView_clearButton_resetsQuery() throws {
-        let src = try readSource(Self.contentViewPath)
-        #expect(src.contains("searchCoordinator.query = \"\""),
-                "Clear button action must reset searchCoordinator.query to empty string")
+    func reset_dropsFocus() throws {
+        let src = try readSource(Self.searchPath)
+        #expect(src.contains("isPresented = false"),
+                "Leaving search must drop the field's focus")
     }
 
-    @Test
-    func contentView_clearButton_resetsFocus() throws {
-        let src = try readSource(Self.contentViewPath)
-        #expect(src.contains("isGlobalSearchFocused = false"),
-                "Clear button action must set isGlobalSearchFocused to false")
-    }
-
-    // MARK: - Existing search elements preserved
+    // MARK: - Return
 
     @Test
-    func contentView_stillContainsSearchField() throws {
-        let src = try readSource(Self.contentViewPath)
-        #expect(src.contains("search_field"),
-                "ContentView must still contain the search_field accessibility identifier")
-    }
-
-    @Test
-    func contentView_stillContainsOnSubmit() throws {
-        let src = try readSource(Self.contentViewPath)
-        #expect(src.contains(".onSubmit"),
-                "ContentView must still contain .onSubmit for the search field")
+    func shell_containsOnSubmit() throws {
+        let src = try readSource(Self.searchPath)
+        #expect(src.contains(".onSubmit(of: .search)"),
+                "Return in the search field must submit")
     }
 }

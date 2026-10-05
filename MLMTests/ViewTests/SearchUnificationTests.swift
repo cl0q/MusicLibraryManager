@@ -46,10 +46,10 @@ struct SearchUnificationTests {
 
     // MARK: - ContentView
 
-    @Test func contentViewContainsOnSubmit() {
-        let source = readSource("MLM/Views/ContentView/ContentView.swift")
+    @Test func toolbarSearchContainsOnSubmit() {
+        let source = readSource("MLM/Views/Shell/ShellSearch.swift")
         #expect(source.contains(".onSubmit"),
-                "ContentView should contain .onSubmit for the toolbar search field")
+                "The shell's toolbar search field should contain .onSubmit")
     }
 
     @Test func contentViewDoesNotContainGlobalSearchQuery() {

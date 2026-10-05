@@ -371,8 +371,20 @@ enum SnapshotFixtures {
         "Settings/MaintenanceView.swift": "Deferred: reads shared BatchControl/maintenance queues and paths; inject passive state.",
         "Settings/SettingsView.swift": "Deferred: AppStorage selection and PlaybackSettings read real defaults; inject preference store.",
         "Settings/SourcesSetupView.swift": "Deferred: AppStorage cookie and credential state require isolated preferences and auth provider.",
-        "Sidebar/PinnedPlaylistsDisclosure.swift": "Deferred: async list/rename state requires preloaded pinned model and readiness assertion.",
-        "Sidebar/SidebarView.swift": "Deferred: composes live badge/pinned state; needs immutable sidebar presentation fixture.",
+        "Sidebar/LibraryFooter.swift": "Deferred: reads the launch coordinator singleton and live library counts; needs injected library identity.",
+        "Sidebar/SidebarView.swift": "Deferred: composes shell environment (navigation, sidebar model, actions) and live sync state; needs a shell fixture.",
+        "Shell/NavigationModel.swift": "Non-view: navigation state (destinations, pushed routes, history).",
+        "Shell/TrailingColumnState.swift": "Non-view: trailing column mode state.",
+        "Shell/StatusBarCenter.swift": "Non-view: status bar message and loading model; rendered by ContentScaffold.",
+        "Shell/Spacing.swift": "Non-view: layout constants.",
+        "Shell/SidebarModel.swift": "Non-view: sidebar data and sync row state.",
+        "Shell/ShellActions.swift": "Non-view: window-level command actions.",
+        "Shell/ShellSearch.swift": "Deferred: attaches .searchable to the window shell; needs application-level fixture composition.",
+        "Shell/ContentScaffold.swift": "Deferred: shell scaffold reads the status-bar centre and mount state from the environment; re-recorded per wave.",
+        "Shell/ShellToolbar.swift": "Deferred: toolbar content needs a window toolbar host and the live playback VM.",
+        "Shell/DestinationView.swift": "Deferred: routes to container-backed destination views; needs application-level fixture composition.",
+        "Shell/TrailingColumnView.swift": "Deferred: hosts TrackDetailView and PlaybackQueueView, which need live playback state.",
+        "Sync/NewSyncProfileSheet.swift": "Deferred: concrete SyncViewModel and device detection; needs passive sync model.",
         "Sources/RemotePlaylistsView.swift": "Deferred: concrete remote providers fetch on presentation; inject provider clients.",
         "Sources/SourcesView.swift": "Deferred: source model requires OAuth/token clients; needs inert account-status composition.",
         "Sync/Pickers/PlaylistPickerSheet.swift": "Deferred: concrete SyncViewModel requires filesystem TranscodeCache and standard-default-reading SyncService.",
@@ -434,12 +446,24 @@ Shared/StatusChip.swift
 Shared/TrackCoverView.swift
 Shared/TrackMetadataPresentation.swift
 Shared/TrackPresentationAvailability.swift
-Sidebar/PinnedPlaylistsDisclosure.swift
+Shell/ContentScaffold.swift
+Shell/DestinationView.swift
+Shell/NavigationModel.swift
+Shell/ShellActions.swift
+Shell/ShellSearch.swift
+Shell/ShellToolbar.swift
+Shell/SidebarModel.swift
+Shell/Spacing.swift
+Shell/StatusBarCenter.swift
+Shell/TrailingColumnState.swift
+Shell/TrailingColumnView.swift
+Sidebar/LibraryFooter.swift
 Sidebar/SidebarView.swift
 Sources/RemotePlaylistsView.swift
 Sources/SourcesView.swift
 Sync/DeviceIngestResultsView.swift
 Sync/IngestPreviewView.swift
+Sync/NewSyncProfileSheet.swift
 Sync/Pickers/PlaylistPickerModel.swift
 Sync/Pickers/PlaylistPickerSheet.swift
 Sync/SyncContentSections.swift
