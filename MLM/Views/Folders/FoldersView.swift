@@ -8,7 +8,7 @@ struct FoldersView: View {
     @State private var viewModel: FolderViewModel?
     @State private var availablePlaylists: [Playlist] = []
     @State private var availableSyncProfiles: [SyncProfile] = []
-    @FocusState private var isSearchFocused: Bool
+    @Environment(ToolbarSearchModel.self) private var search: ToolbarSearchModel?
 
     var onTrackDoubleClick: ((Track, [Track]) -> Void)?
 
@@ -25,6 +25,8 @@ struct FoldersView: View {
         .task {
             initializeViewModel()
             await viewModel?.loadRootFolders()
+            applySearch(container.searchCoordinator.filter(for: .folders))
+            openRequestedFolder()
             await reloadPlaylists()
             await reloadSyncProfiles()
         }
@@ -42,8 +44,14 @@ struct FoldersView: View {
         .onReceive(NotificationCenter.default.publisher(for: .syncProfileDidChange)) { _ in
             Task { await reloadSyncProfiles() }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .focusFolderSearchField)) { _ in
-            isSearchFocused = true
+        // In-place filter (W2-I): the toolbar field filters the folders by name; the view's
+        // own filter field is gone (one search field, UC-SEARCH-01).
+        .onChange(of: container.searchCoordinator.filter(for: .folders)) { _, filter in
+            applySearch(filter)
+        }
+        // A folder chosen in the search field's Library results.
+        .onChange(of: FolderOpenRequest.shared.path) { _, _ in
+            openRequestedFolder()
         }
         .onChange(of: viewModel?.selectedFolderPath) { _, _ in
             viewModel?.persistLastSelection()
@@ -92,42 +100,25 @@ struct FoldersView: View {
 
             Spacer()
 
-            HStack(spacing: 4) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 12))
-                    .foregroundColor(.mlmInkMuted)
-
-                TextField("Filter folders…", text: Binding(
-                    get: { viewModel.searchQuery },
-                    set: { viewModel.searchQuery = $0 }
-                ))
-                .textFieldStyle(.plain)
-                .font(MLMFont.body)
-                .frame(width: 180)
-                .focused($isSearchFocused)
-                .accessibilityIdentifier("folder_filter_field")
-                .accessibilityLabel("folder_filter_field")
-
-                if !viewModel.searchQuery.isEmpty {
-                    Button {
-                        viewModel.searchQuery = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 12))
-                            .foregroundColor(.mlmInkMuted)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("folder_filter_clear_button")
-                    .accessibilityLabel("folder_filter_clear_button")
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.mlmRaised)
-            .cornerRadius(6)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+    }
+
+    // MARK: - Search (W2-I)
+
+    private func applySearch(_ filter: SearchFilter) {
+        let text = filter.parsed.freeText
+        guard let viewModel, viewModel.searchQuery != text else { return }
+        viewModel.searchQuery = text
+    }
+
+    private func openRequestedFolder() {
+        guard let viewModel, let path = FolderOpenRequest.shared.take() else { return }
+        Task {
+            await viewModel.ensureAncestorsLoaded(for: path)
+            viewModel.selectedFolderPath = path
+        }
     }
 
     // MARK: - Split Pane
@@ -195,7 +186,9 @@ struct FoldersView: View {
                         viewModel: viewModel,
                         onDoubleClick: { node in
                             viewModel.selectedFolderPath = node.id
-                            viewModel.searchQuery = "" // Clear search to open folder
+                            // Opening a found folder ends the filter (the field clears too).
+                            search?.clear()
+                            viewModel.searchQuery = ""
                         }
                     )
                 }

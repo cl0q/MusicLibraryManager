@@ -548,11 +548,24 @@ struct ReviewQueueView: View {
     }
 
     private func duplicateGroups(in viewModel: ReviewQueueViewModel) -> [ReviewGroup] {
-        viewModel.pendingGroups.filter { !$0.isMetadataConflict }
+        viewModel.pendingGroups.filter { !$0.isMetadataConflict && matchesSearch($0, viewModel: viewModel) }
     }
 
     private func conflictGroups(in viewModel: ReviewQueueViewModel) -> [ReviewGroup] {
-        viewModel.pendingGroups.filter(\.isMetadataConflict)
+        viewModel.pendingGroups.filter { $0.isMetadataConflict && matchesSearch($0, viewModel: viewModel) }
+    }
+
+    /// In-place filter (W2-I): the toolbar field's words against the titles and artists of a
+    /// group's versions.
+    private func matchesSearch(_ group: ReviewGroup, viewModel: ReviewQueueViewModel) -> Bool {
+        let filter = container.searchCoordinator.filter(for: .review)
+        guard !filter.isEmpty else { return true }
+        let names = group.memberTrackIDs.map { id -> String in
+            let track = viewModel.track(for: id)
+            let snapshot = group.details?.tracks.first { $0.id == id }
+            return "\(track?.title ?? snapshot?.title ?? "") \(track?.artist ?? snapshot?.artist ?? "")"
+        }
+        return filter.matchesName(names.joined(separator: " "))
     }
 
     private func focus(on trackID: Int64?, in viewModel: ReviewQueueViewModel) {

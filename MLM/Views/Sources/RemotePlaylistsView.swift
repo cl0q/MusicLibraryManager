@@ -8,6 +8,15 @@ enum RemotePlaylistSource: Equatable {
 }
 
 extension RemotePlaylistSource {
+    /// The search field's link source for this browser (W2-I).
+    var linkSource: LinkSource {
+        switch self {
+        case .soundcloud: .soundcloud
+        case .spotify: .spotify
+        case .youtube: .youtube
+        }
+    }
+
     var windowTitle: String {
         switch self {
         case .soundcloud: "SoundCloud Playlists"
@@ -56,8 +65,21 @@ struct RemotePlaylistsView: View {
         }
         .task {
             initialize()
+            takeLinkRequest()
             await viewModel?.loadPlaylists()
         }
+        .onChange(of: RemotePlaylistLinkRequest.shared.pending) { _, _ in
+            takeLinkRequest()
+        }
+    }
+
+    /// A playlist link pasted into the search field (W2-I, interim until W3-ADD's S-IMPORT):
+    /// fill the link field and load the preview.
+    private func takeLinkRequest() {
+        guard let viewModel, viewModel.showsURLField,
+              let url = RemotePlaylistLinkRequest.shared.take(source.linkSource) else { return }
+        urlInput = url
+        Task { await viewModel.importFromURL(url) }
     }
 
     @ViewBuilder

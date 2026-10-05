@@ -57,7 +57,8 @@ struct ShellLayoutTests {
         #expect(src.contains(".focusedSceneValue(\\.toolbarSearch"), "Edit ▸ Find reaches the main window's field")
         let edit = try readSource("MLM/App/Commands/EditCommands.swift")
         #expect(edit.contains("CommandButton(.search, enabled: search != nil)"))
-        #expect(edit.contains("search?.isPresented = true"))
+        #expect(edit.contains("search?.focus(scope: .thisView)"))
+        #expect(edit.contains("search?.focus(scope: .library)"), "⌥⌘F searches the library (W2-I)")
     }
 
     @Test
@@ -120,9 +121,11 @@ struct ShellLayoutTests {
         let column = try #require(src.range(of: "private var detailColumn: some View {"))
         let stack = try #require(src.range(of: "private var navigationStack: some View {"))
         let detail = String(src[column.upperBound..<stack.lowerBound])
-        #expect(detail.contains("GlobalSearchPresentationView("),
-                "The search pane is a sibling above the stack, so pushed routes can't cover it")
-        #expect(!src[stack.upperBound...].contains("GlobalSearchPresentationView("))
+        #expect(detail.contains("SearchResultsView("),
+                "Library / Online results are a sibling above the stack, so pushed routes can't cover them")
+        #expect(!src[stack.upperBound...].contains("SearchResultsView("))
+        #expect(!src.contains("GlobalSearchPresentationView") && !src.contains("UniversalSearch"),
+                "The old results pane and the universal panel are gone (W2-I)")
         #expect(!src.contains(".disabled(!isAllTracks"), "The kept-alive All Tracks subtree is not disabled")
     }
 
@@ -182,9 +185,9 @@ struct ShellLayoutTests {
 
     @Test
     func searchVM_containsNonisolated() throws {
-        let src = try readSource("MLM/ViewModels/GlobalSearchPresentationViewModel.swift")
+        let src = try readSource("MLM/ViewModels/OnlineSearchModel.swift")
         #expect(src.contains("nonisolated"),
-                "GlobalSearchPresentationViewModel must contain nonisolated helpers for off-main work")
+                "OnlineSearchModel asks its sources off the main actor")
     }
 
     @Test

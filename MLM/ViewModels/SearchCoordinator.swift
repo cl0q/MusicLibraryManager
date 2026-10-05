@@ -1,61 +1,61 @@
 import Foundation
 
-/// Coordinates the single toolbar search entry point across all detail contexts.
+/// The committed state of the one toolbar search field, shared by the views that apply it
+/// (DEC-017, UC-SEARCH-01/02/06):
 ///
-/// The toolbar `TextField` binds to `query`. Each context decides whether
-/// typing live-filters a local table (library, playlist detail) or opens
-/// the global search pane (other sections). Return / submit always opens
-/// the global search pane.
+/// - **One filter per place.** The query belongs to the view: every place keeps the filter it
+///   was given for the session (`filters[key]`), so leaving a view and coming back restores it.
+///   A view reads only its own: `filter(for: .allTracks)`, `filter(for: .playlist(id))`.
+/// - **The scope.** `This view` filters the visible place in place. `Library` and `Online`
+///   show their results over the place (`isPresented`) — only on request (the scope bar,
+///   ⌥⌘F, the escalation buttons), never by typing or Return.
 ///
-/// IMPORTANT: The toolbar search bar is for LOCAL LIBRARY search only.
-/// URL-based / remote / universal search lives in `UniversalSearchView`,
-/// opened via a separate toolbar button.
+/// The per-keystroke text lives in the window's `ToolbarSearchModel`, which commits here
+/// (debounced). Nothing here ever writes to the library.
 @Observable
 final class SearchCoordinator {
+    /// Committed filters per place (only non-empty ones are kept).
+    private(set) var filters: [SearchPlaceKey: SearchFilter] = [:]
 
-    // MARK: - Search context
+    /// The scope chosen in the scope bar.
+    private(set) var scope: SearchScope = .thisView
 
-    /// Which detail pane is currently visible — drives whether typing
-    /// live-filters a local table or opens the global search pane.
-    enum SearchContext: Equatable {
-        case library
-        case playlist(Int64)
-        case other
+    /// The place the field currently belongs to.
+    private(set) var activePlace: SearchPlace = .allTracks
+
+    /// Bumped by Return in the field: the Online scope asks its sources now instead of after
+    /// the typing pause.
+    private(set) var submitCount = 0
+
+    /// Whether the results of a wider scope (`Library`, `Online`) are shown over the place.
+    /// The place's own table is then hidden: its menus and selection bar step back.
+    var isPresented: Bool { scope != .thisView }
+
+    /// The filter committed for `key` (empty when none).
+    func filter(for key: SearchPlaceKey) -> SearchFilter {
+        filters[key] ?? .empty
     }
 
-    // MARK: - State
+    /// The filter of the place the field belongs to (what `Library` / `Online` search with).
+    var activeFilter: SearchFilter { filter(for: activePlace.key) }
 
-    /// The current search query bound to the toolbar TextField.
-    var query: String = ""
-
-    /// Whether the global search pane is presented in the detail area.
-    private(set) var isPresented: Bool = false
-
-    /// The current navigation context — updated by ContentView on section change.
-    var context: SearchContext = .library
-
-    // MARK: - Actions
-
-    /// Return was pressed — always open the global search pane.
-    func submit() {
-        isPresented = true
+    func commit(_ filter: SearchFilter, for key: SearchPlaceKey) {
+        let stored: SearchFilter? = filter.hasInput ? filter : nil
+        guard filters[key] != stored else { return }
+        filters[key] = stored
     }
 
-    /// Dismiss the global search pane.
-    func dismiss() {
-        isPresented = false
+    func setScope(_ scope: SearchScope) {
+        guard self.scope != scope else { return }
+        self.scope = scope
     }
 
-    /// Called when the query text changes.
-    ///
-    /// - Parameter hasLocalTable: `true` when the current section has its own
-    ///   table that live-filters (library, playlist detail). In that case the
-    ///   coordinator does NOT present the global pane — the view pushes the
-    ///   query into its view model instead.
-    func queryChanged(hasLocalTable: Bool) {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !hasLocalTable && !trimmed.isEmpty {
-            isPresented = true
-        }
+    func setActivePlace(_ place: SearchPlace) {
+        guard activePlace != place else { return }
+        activePlace = place
+    }
+
+    func noteSubmit() {
+        submitCount += 1
     }
 }

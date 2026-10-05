@@ -356,8 +356,8 @@ final class PlaylistViewModel {
         displayedPlaylists = playlists.filter { playlist in
             // Name search predicate
             if !searchQuery.isEmpty {
-                let query = searchQuery.lowercased()
-                guard playlist.name.lowercased().contains(query) else { return false }
+                // Every word of the toolbar field, ignoring case and diacritics (W2-I).
+                guard SearchFilter(text: searchQuery).matchesName(playlist.name) else { return false }
             }
 
             // Source predicate

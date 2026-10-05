@@ -62,6 +62,14 @@ struct PlaylistsView: View {
             await viewModel?.loadPlaylists()
             await reloadSyncProfiles()
         }
+        // In-place filter (W2-I): the toolbar field filters the grid by name; the grid's own
+        // search field is gone (one search field, UC-SEARCH-01).
+        .onChange(of: container.searchCoordinator.filter(for: .allPlaylists), initial: true) { _, filter in
+            viewModel?.searchQuery = filter.parsed.freeText
+        }
+        .onChange(of: viewModel != nil) { _, _ in
+            viewModel?.searchQuery = container.searchCoordinator.filter(for: .allPlaylists).parsed.freeText
+        }
         .onChange(of: selectedPlaylist?.id) { _, id in
             guard let navigation, let id else { return }
             navigation.push(.playlist(id, showFailedTracks: showFailedTracksWhenOpened))
@@ -200,40 +208,6 @@ struct PlaylistsView: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("playlist_incomplete_filter")
             .accessibilityLabel("playlist_incomplete_filter")
-
-            // Search field
-            HStack(spacing: 4) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 12))
-                    .foregroundColor(.mlmInkMuted)
-                TextField("Search playlists…", text: Binding(
-                    get: { viewModel.searchQuery },
-                    set: { viewModel.searchQuery = $0 }
-                ))
-                .textFieldStyle(.plain)
-                .font(MLMFont.body)
-                .foregroundColor(.mlmInk)
-                .frame(width: 160)
-                .accessibilityIdentifier("playlist_search_field")
-                .accessibilityLabel("playlist_search_field")
-
-                if !viewModel.searchQuery.isEmpty {
-                    Button {
-                        viewModel.searchQuery = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 11))
-                            .foregroundColor(.mlmInkMuted)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("playlist_search_clear_button")
-                    .accessibilityLabel("playlist_search_clear_button")
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(Color.mlmRaised)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
 
             // New playlist button
             Button {

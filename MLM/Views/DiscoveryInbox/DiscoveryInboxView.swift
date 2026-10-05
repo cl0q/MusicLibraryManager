@@ -57,7 +57,9 @@ struct DiscoveryInboxView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
-                    ForEach(inboxItems, id: \.track.id) { item in
+                    // In-place filter (W2-I): the toolbar field's words against title and artist.
+                    ForEach(inboxItems.filter { container.searchCoordinator.filter(for: .discover).matchesName("\($0.track.title) \($0.track.artist)") },
+                            id: \.track.id) { item in
                         DiscoveryInboxRow(
                             track: item.track,
                             log: item.log,

@@ -27,6 +27,7 @@ struct PlaylistDetailView: View {
     @Environment(\.container) private var container
     @Environment(\.openSettings) private var openSettings
     @Environment(UndoCenter.self) private var undo: UndoCenter?
+    @Environment(ToolbarSearchModel.self) private var search: ToolbarSearchModel?
     @State private var viewModel: PlaylistDetailViewModel?
     @State private var showM3UImporter = false
     @State private var showAddFromLibrary = false
@@ -75,7 +76,7 @@ struct PlaylistDetailView: View {
         }
         .task {
             initializeViewModel()
-            viewModel?.searchQuery = container.searchCoordinator.query
+            viewModel?.searchFilter = container.searchCoordinator.filter(for: .playlist(playlist.id ?? -1))
             failureDisclosureExpanded = initiallyShowFailedTracks
             // Run track loading and sidebar data fetches concurrently —
             // the table doesn't depend on playlists/profiles, so loading
@@ -84,9 +85,10 @@ struct PlaylistDetailView: View {
             async let loadPlaylists: () = loadPlaylistsAndProfiles()
             _ = await (loadTracks, loadPlaylists)
         }
-        .onChange(of: container.searchCoordinator.query) { _, q in
-            guard q != viewModel?.searchQuery else { return }
-            viewModel?.searchQuery = q
+        // In-place filter (W2-I): this playlist's own filter, text and tokens.
+        .onChange(of: container.searchCoordinator.filter(for: .playlist(playlist.id ?? -1))) { _, filter in
+            guard filter != viewModel?.searchFilter else { return }
+            viewModel?.searchFilter = filter
         }
         .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { note in
             // Cover-revalidation noise (tagged by PlaylistDetailView.onAppear /
@@ -657,7 +659,25 @@ struct PlaylistDetailView: View {
 
     // MARK: - Empty State
 
+    @ViewBuilder
     private func emptyState(_ viewModel: PlaylistDetailViewModel) -> some View {
+        if !viewModel.searchFilter.isEmpty {
+            // Filtered-empty (UC-EMPTY-02, UC-SEARCH-07): the search variant, never an empty playlist.
+            ContentUnavailableView {
+                Label("No Results for “\(viewModel.searchFilter.displayText)”", systemImage: "magnifyingglass")
+            } description: {
+                Text("Check the spelling or try a new search.")
+            } actions: {
+                Button("Clear Filters") { search?.clear() }
+                Button("Search the Library") { search?.focus(scope: .library) }
+                Button("Search Online") { search?.focus(scope: .online) }
+            }
+        } else {
+            unfilteredEmptyState(viewModel)
+        }
+    }
+
+    private func unfilteredEmptyState(_ viewModel: PlaylistDetailViewModel) -> some View {
         VStack(spacing: 16) {
             Spacer()
 
@@ -665,7 +685,7 @@ struct PlaylistDetailView: View {
                 .font(.system(size: 40))
                 .foregroundColor(.mlmInkMuted)
 
-            if viewModel.searchQuery.isEmpty {
+            if viewModel.searchFilter.isEmpty {
                 Text("No Tracks")
                     .font(MLMFont.sectionHeader)
                     .foregroundColor(.mlmInk)

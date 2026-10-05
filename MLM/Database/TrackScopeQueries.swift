@@ -48,6 +48,12 @@ struct TrackScopeQueries: Sendable {
     /// against the folded `search_text`, AND-ed).
     func scopeSummary(search: String? = nil) async throws -> TrackScopeSummary {
         let (searchSQL, arguments) = Self.searchPredicate(search)
+        return try await scopeSummary(predicate: searchSQL, arguments: arguments)
+    }
+
+    /// The same aggregate for any row predicate over `tracks` — the search field's tokens
+    /// (`TrackSearchSQL.predicate(for:)`, W2-I) as well as plain text.
+    func scopeSummary(predicate searchSQL: String, arguments: StatementArguments) async throws -> TrackScopeSummary {
         let scopes = TrackAvailabilityScope.allCases.filter { $0 != .all }
         var columns = [
             "COUNT(*) AS library_count",
