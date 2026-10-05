@@ -231,8 +231,10 @@ enum SnapshotFixtures {
         Fixture(id: "track-cover-placeholder", size: .init(width: 220, height: 220), makeView: { _ in
             AnyView(TrackCoverView(trackId: 1, size: .small).frame(width: 180, height: 180).padding(20))
         }),
-        Fixture(id: "spring-hover-resting", size: .init(width: 300, height: 100), makeView: { _ in
-            AnyView(Text("Snapshot drop target").padding(20).springLoadableHover(onTrigger: {}))
+        // W2-H: the shared drop target (ring only while a drag hovers) replaced the pulsing
+        // spring-load modifier.
+        Fixture(id: "drop-target-resting", size: .init(width: 300, height: 100), makeView: { _ in
+            AnyView(Text("Snapshot drop target").padding(20).mlmDropTarget(.fixedRow))
         }),
         Fixture(id: "first-run-welcome", size: .init(width: 560, height: 460), makeView: { _ in
             AnyView(FirstRunWizard(onComplete: {}).padding(20))
@@ -299,7 +301,7 @@ enum SnapshotFixtures {
         "Playlists/PlaylistTable.swift", "Queue/QueuePanel.swift",
         "ReviewQueue/ReviewQueueView.swift",
         "Shared/SelectionCreationSheets.swift", "Shared/StatusChip.swift",
-        "Shared/TrackCoverView.swift", "Shared/SpringLoadableHover.swift", "Shared/FirstRunWizard.swift",
+        "Shared/TrackCoverView.swift", "DragDrop/DropTargetModifier.swift", "Shared/FirstRunWizard.swift",
         "Shared/TrackMetadataPresentation.swift", "Sync/DeviceIngestResultsView.swift",
         "Sync/IngestPreviewView.swift", "Sync/SyncToast.swift",
         "TrackDetail/WaveformView.swift",
@@ -408,6 +410,7 @@ Activity/OperationsTab.swift
 ContentView/ContentView.swift
 Discover/DiscoverView.swift
 DiscoveryInbox/DiscoveryInboxView.swift
+DragDrop/DropTargetModifier.swift
 Folders/FoldersView.swift
 Folders/FolderTreeView.swift
 Inspector/InfoTrackRequest.swift
@@ -457,7 +460,6 @@ Shared/LibraryAdoptionSheet.swift
 Shared/LibraryLaunchStateView.swift
 Shared/NewLibrarySheet.swift
 Shared/SelectionCreationSheets.swift
-Shared/SpringLoadableHover.swift
 Shared/StatusChip.swift
 Shared/TrackCoverView.swift
 Shared/TrackMetadataPresentation.swift

@@ -96,6 +96,67 @@ final class ShellActions {
         }
     }
 
+    /// Finder files and folders dropped on MLM (D-LIB-FINDER-IN, W2-H): the same import as
+    /// Import Files or Folder… — one Activity operation, start and finish in the status bar.
+    /// Folders are read for their audio files; other files are left out.
+    ///
+    /// - Returns: the dropped tracks' ids in drop order — imported now or already in the
+    ///   library — so a drop on a playlist can add them; empty when nothing could be imported.
+    @discardableResult
+    func importDropped(_ urls: [URL], intoPlaylist playlistName: String? = nil) async -> [Int64] {
+        let files = await Task.detached(priority: .userInitiated) { Self.audioFiles(in: urls) }.value
+        guard !files.isEmpty else {
+            statusBar.post(DropWords.notAudio(urls.map(\.lastPathComponent)))
+            return []
+        }
+        let isOneFolder = urls.count == 1 && (try? urls[0].resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+        let folder = isOneFolder ? urls[0].lastPathComponent : nil
+        guard let viewModel = makeImportViewModel() else {
+            statusBar.post(Self.importUnavailableMessage(folder: folder ?? urls[0].lastPathComponent))
+            return []
+        }
+        statusBar.post(DropWords.importStarted(files: files.count, folderName: folder, playlist: playlistName),
+                       actions: [Self.showActivityAction()])
+        await viewModel.importFiles(files, title: folder.map { "“\($0)”" } ?? StatusBarText.count(files.count, "file", "files"))
+        let message = Self.importMessage(folder: folder ?? urls[0].lastPathComponent, result: viewModel.lastResult)
+        statusBar.post(message.text, actions: message.offersShow ? [Self.showActivityAction()] : [])
+        guard viewModel.lastResult != nil, let tracks = container.trackRepository else { return [] }
+        let known = (try? await tracks.fetchTracksByOriginalPaths(files.map(\.path))) ?? []
+        return Self.orderedIDs(of: known, paths: files.map(\.path))
+    }
+
+    /// The audio files of dropped items, in drop order: a folder's files sorted by path, a file
+    /// itself when it is audio. Reads only the dropped files and folders.
+    nonisolated static func audioFiles(in urls: [URL]) -> [URL] {
+        var files: [URL] = []
+        for url in urls {
+            let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+            if isDirectory, url.pathExtension.lowercased() != "mlibm" {
+                files.append(contentsOf: (try? ImportService.scanDirectory(url)) ?? [])
+            } else if MetadataExtractor.isAudioFile(url) {
+                files.append(url)
+            }
+        }
+        var seen = Set<String>()
+        return files.filter { seen.insert($0.standardizedFileURL.path).inserted }
+    }
+
+    /// Track ids in the order of `paths` (a track's original path, standardized).
+    nonisolated static func orderedIDs(of tracks: [Track], paths: [String]) -> [Int64] {
+        var byPath: [String: Int64] = [:]
+        for track in tracks {
+            guard let id = track.id else { continue }
+            let path = URL(fileURLWithPath: track.originalPath).standardizedFileURL.path
+            byPath[path] = id
+            byPath[path.precomposedStringWithCanonicalMapping] = id
+        }
+        var seen = Set<Int64>()
+        return paths.compactMap { path -> Int64? in
+            let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
+            return byPath[standardized] ?? byPath[standardized.precomposedStringWithCanonicalMapping]
+        }.filter { seen.insert($0).inserted }
+    }
+
     /// The status-bar sentence after an import (UC-STATUS-05 shape, UC-COPY-11: no raw error
     /// text — the cause is in Activity and the logs).
     static func importMessage(folder: String, result: ImportService.ImportResult?) -> (text: String, offersShow: Bool) {

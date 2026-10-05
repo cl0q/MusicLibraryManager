@@ -73,6 +73,8 @@ struct SidebarView: View {
                     .help("New Playlist")
                     .accessibilityLabel("Add Playlist")
                 }
+                // Tracks dropped on the header make a new playlist, named inline (IMP-018).
+                .mlmDropTarget(.playlistsSection)
             }
 
             Section(isExpanded: expansion(.sync)) {
@@ -106,6 +108,8 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
+        // The empty area below the rows: a new playlist from the drop (D-PL-SELECTION-TO-NEW).
+        .mlmDropTarget(.playlistsSection)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             LibraryFooter()
         }
@@ -223,12 +227,13 @@ struct SidebarView: View {
     private func fixedRow(_ destination: SidebarDestination) -> some View {
         Label(destination.fixedTitle, systemImage: destination.systemImage)
             .tag(destination)
-            .springLoadableHover {
-                springLoad(destination)
-            }
+            // Views, not containers: no ring for tracks; Finder files import (UC-SIDE-11).
+            // All Playlists stands for the Playlists section: a drop there makes a playlist.
+            .mlmDropTarget(destination == .allPlaylists ? .playlistsSection : .fixedRow)
     }
 
-    /// Spring-loading opens a row while a drag hovers over it; on the row that is already
+    /// Spring-loading opens a playlist row while a track drag rests on it (offered, never
+    /// required — the row takes the drop itself, UC-DND-04); on the row that is already
     /// selected it does nothing (re-selecting would pop that place's pushed details mid-drag).
     private func springLoad(_ destination: SidebarDestination) {
         guard destination != navigation.selection else { return }
@@ -257,9 +262,14 @@ struct SidebarView: View {
                             }
                         }
                     }
-                    .springLoadableHover {
-                        springLoad(.playlist(id))
-                    }
+                    // A playlist row takes tracks, playlists, Finder files, M3U files and links
+                    // directly (UC-DND-04) and drags as the playlist (UC-DND-01).
+                    .mlmDropTarget(
+                        .sidebarPlaylist(id: id, name: playlist.name),
+                        isShown: navigation.selection == .playlist(id),
+                        springLoad: { springLoad(.playlist(id)) }
+                    )
+                    .draggable(PlaylistDragItem(playlistId: id, libraryId: container.activeLibrary?.libraryId))
             }
         }
     }
@@ -320,6 +330,8 @@ struct SidebarView: View {
                 .contextMenu {
                     syncProfileMenu(profile, id: id)
                 }
+                // Tracks and playlists add to the profile; the open page doesn't switch.
+                .mlmDropTarget(.syncProfile(id: id, name: profile.name))
             }
         }
     }

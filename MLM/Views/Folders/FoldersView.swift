@@ -617,7 +617,9 @@ struct FolderTracksTable: View {
         } rows: {
             ForEach(rows) { row in
                 TableRow(row)
-                    .draggable(TrackDragData(trackId: row.id, sourcePlaylistId: nil))
+                    // The shared track payload: ids + the local file (W2-H, D-FOLD-TRACKS-OUT).
+                    .draggable(TrackDragContext.current(.shared).item(for: row.track)
+                        ?? TrackDragItem(trackId: row.id, libraryId: nil))
             }
         }
         .contextMenu(forSelectionType: Int64.self) { selectedIDs in

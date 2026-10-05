@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// The undoable edits the shell offers today (W2-F adoptions of `UndoCenter`): New Playlist,
@@ -16,6 +17,12 @@ final class ShellEdits {
         var syncProfiles: @MainActor () -> SyncRepository?
         /// Reload what shows sync profiles after the profile with this id changed.
         var syncProfileDidChange: @MainActor (Int64) async -> Void
+        /// The library's tracks (drops check that dropped tracks still exist, W2-H).
+        var tracks: @MainActor () -> TrackRepository? = { nil }
+        /// Reload what shows a sync profile's content after it changed (W2-H drops).
+        var syncContentDidChange: @MainActor (Int64) async -> Void = { _ in }
+        /// Playlist covers (cover drops, W2-H).
+        var covers: @MainActor () -> PlaylistCoverService? = { nil }
 
         static func live(_ container: DependencyContainer) -> Dependencies {
             Dependencies(
@@ -27,7 +34,17 @@ final class ShellEdits {
                     if sync.selectedProfile?.id == id {
                         sync.selectedProfile = sync.profiles.first { $0.id == id }
                     }
-                }
+                },
+                tracks: { container.trackRepository },
+                syncContentDidChange: { id in
+                    NotificationCenter.default.post(name: .syncProfileDidChange, object: nil, userInfo: ["profileId": id])
+                    // The open profile page shows the new content and a fresh plan; the
+                    // selection is not changed (D-SYNC-TRACKS-TO-PROFILE: nothing switches).
+                    guard let sync = container.syncViewModel, let profile = sync.selectedProfile, profile.id == id else { return }
+                    await sync.loadProfileContent(profileId: id)
+                    sync.schedulePreviewRefresh(for: profile)
+                },
+                covers: { container.playlistCoverService }
             )
         }
     }
@@ -104,7 +121,7 @@ final class ShellEdits {
 
     /// Appends the tracks (display order) after the playlist's last track. Undo removes
     /// exactly the rows this added — never a track that was already in the playlist.
-    func addTracks(_ trackIDs: [Int64], toPlaylist playlistID: Int64) async {
+    func addTracks(_ trackIDs: [Int64], toPlaylist playlistID: Int64, messageSuffix: String = "") async {
         let ordered = Self.uniqued(trackIDs)
         guard !ordered.isEmpty, let repository = dependencies.playlists() else { return }
         let name = await playlistName(playlistID, repository: repository)
@@ -136,7 +153,7 @@ final class ShellEdits {
                     await effects.changed(playlistID, repository: repository)
                     return PlaylistAppendResult(entries: restored, alreadyPresent: 0)
                 },
-                message: { Self.addedMessage(added: $0.entries.count, alreadyPresent: $0.alreadyPresent, playlist: name) }
+                message: { Self.addedMessage(added: $0.entries.count, alreadyPresent: $0.alreadyPresent, playlist: name) + messageSuffix }
             )
             if result == nil {
                 effects.window.statusBar?.post(Self.alreadyPresentMessage(count: ordered.count, playlist: name))
@@ -408,4 +425,285 @@ struct NameTaken: PlainCauseError {
     let kind: String
     let name: String
     var plainCause: String { "another \(kind) is called “\(name)”" }
+}
+
+// MARK: - Drops (W2-H, DEC-040)
+
+/// The undoable edits a drop makes that no menu made before: tracks placed at a position in a
+/// playlist (reorder and insert, exact positions on undo), sync-profile content, playlist
+/// covers, a new playlist named after a dropped folder. Every drop is one undo step
+/// (UC-UNDO-08) with its UC-UNDO-07 name and status-bar confirmation; nothing here asks.
+extension ShellEdits {
+    // MARK: Place in a playlist (D-PLD-REORDER, D-PLD-INSERT)
+
+    /// A track's position before and after a placement.
+    struct PlacementMove: Equatable, Sendable {
+        let trackID: Int64
+        let from: String
+        let to: String
+    }
+
+    /// What a placement did: members moved, rows inserted, and where the first track landed.
+    struct PlacementDone: Sendable {
+        let moves: [PlacementMove]
+        let inserted: [PlaylistTrack]
+        /// 1-based position of the first placed track afterwards.
+        let position: Int
+    }
+
+    /// What its undo did (for redo).
+    struct PlacementUndone: Sendable {
+        let moves: [PlacementMove]
+        let removed: [PlaylistTrack]
+    }
+
+    /// Places `plan.trackIDs` before `plan.beforeTrackID` (or at the end) in the playlist —
+    /// members move, others are inserted — as one step. Undo puts every moved track back at its
+    /// exact earlier position and removes exactly the rows this inserted; Redo restores those
+    /// rows (same row ids, positions, added dates) and the new positions.
+    func placeTracks(_ plan: PlaylistDropPlan, inPlaylist playlistID: Int64, name: String) async {
+        guard let repository = dependencies.playlists() else { return }
+        let effects = self.effects
+        let tracks = dependencies.tracks()
+        let isReorder = plan.kind == .reorder
+        _ = try? await undo.perform(
+            isReorder ? DropWords.reorderActionName(name) : DropWords.addActionName(name),
+            failure: isReorder ? "Couldn’t reorder “\(name)”" : "Couldn’t add \(StatusBarText.tracks(plan.trackIDs.count)) to “\(name)”",
+            do: { () async throws -> PlacementDone? in
+                guard let before = try await repository.snapshot(id: playlistID) else {
+                    throw UndoTargetMissing(quotedName: "“\(name)”")
+                }
+                let members = Set(before.entries.map(\.trackId))
+                var ids = plan.trackIDs
+                // Never a row for a track that left the library meanwhile.
+                let newIDs = ids.filter { !members.contains($0) }
+                if !newIDs.isEmpty, let tracks {
+                    let existing = Set(try await tracks.fetchTracks(ids: Set(newIDs)).compactMap(\.id))
+                    ids = ids.filter { members.contains($0) || existing.contains($0) }
+                }
+                guard !ids.isEmpty else { return nil }
+                let placements = PlaylistPlacement.positions(
+                    for: ids, before: plan.beforeTrackID,
+                    in: before.entries.map { (trackID: $0.trackId, position: Optional($0.position)) }
+                )
+                try await repository.placeTracks(playlistId: playlistID, placements: placements)
+                guard let after = try await repository.snapshot(id: playlistID) else { return nil }
+                let oldPosition = Dictionary(before.entries.map { ($0.trackId, $0.position) }, uniquingKeysWith: { first, _ in first })
+                let moves = placements.compactMap { placement in
+                    oldPosition[placement.trackId].map { PlacementMove(trackID: placement.trackId, from: $0, to: placement.position) }
+                }
+                let placed = Set(ids)
+                let inserted = after.entries.filter { placed.contains($0.trackId) && !members.contains($0.trackId) }
+                let first = after.entries.firstIndex { placed.contains($0.trackId) } ?? 0
+                await effects.changed(playlistID, repository: repository)
+                return PlacementDone(moves: moves, inserted: inserted, position: first + 1)
+            },
+            undo: { done in
+                let removed = try await repository.removeEntries(done.inserted)
+                let moves = try await Self.presentMoves(done.moves, playlistID: playlistID, repository: repository)
+                try await repository.placeTracks(playlistId: playlistID, placements: moves.map { ($0.trackID, $0.from) })
+                guard !removed.isEmpty || !moves.isEmpty else {
+                    throw UndoNothingLeft(note: "Nothing to undo — the tracks are no longer in “\(name)”")
+                }
+                await effects.changed(playlistID, repository: repository)
+                return PlacementUndone(moves: moves, removed: removed)
+            },
+            redo: { undone in
+                let restored = try await repository.restoreEntries(undone.removed)
+                let moves = try await Self.presentMoves(undone.moves, playlistID: playlistID, repository: repository)
+                try await repository.placeTracks(playlistId: playlistID, placements: moves.map { ($0.trackID, $0.to) })
+                guard !restored.isEmpty || !moves.isEmpty else {
+                    throw UndoNothingLeft(note: "Nothing to redo — the tracks can’t go back into “\(name)”")
+                }
+                await effects.changed(playlistID, repository: repository)
+                return PlacementDone(moves: moves, inserted: restored, position: 1)
+            },
+            message: { done in
+                isReorder
+                    ? DropWords.reorderedMessage(count: done.moves.count, position: done.position, playlist: name)
+                    : DropWords.insertedMessage(added: done.inserted.count, moved: done.moves.count,
+                                                position: done.position, playlist: name)
+            }
+        )
+    }
+
+    /// The moves whose track is still in the playlist (only those go back or forth: a moved
+    /// position is never written for a track that was removed meanwhile — that would add it).
+    private static func presentMoves(_ moves: [PlacementMove], playlistID: Int64,
+                                     repository: PlaylistRepository) async throws -> [PlacementMove] {
+        guard !moves.isEmpty else { return [] }
+        guard let current = try await repository.snapshot(id: playlistID) else {
+            throw UndoTargetMissing(quotedName: "the playlist")
+        }
+        let present = Set(current.entries.map(\.trackId))
+        return moves.filter { present.contains($0.trackID) }
+    }
+
+    /// The tracks of `playlistIDs`, each playlist in its order, one after the other, each once.
+    func tracks(ofPlaylists playlistIDs: [Int64]) async -> [Int64] {
+        guard let repository = dependencies.playlists() else { return [] }
+        var ids: [Int64] = []
+        for id in playlistIDs {
+            let tracks = (try? await repository.fetchTracks(playlistId: id)) ?? []
+            ids.append(contentsOf: tracks.compactMap(\.id))
+        }
+        return Self.uniqued(ids)
+    }
+
+    // MARK: New playlist named after a dropped folder
+
+    /// Like New Playlist from Selection, named `name` (numbered when taken; `Untitled Playlist`
+    /// without one) and put into rename mode in the sidebar. Doesn't navigate.
+    @discardableResult
+    func newPlaylist(named name: String?, fromTrackIDs trackIDs: [Int64]) async -> Playlist? {
+        guard let name, !name.isEmpty else { return await newPlaylist(fromTrackIDs: trackIDs) }
+        let ordered = Self.uniqued(trackIDs)
+        guard !ordered.isEmpty, let repository = dependencies.playlists() else { return nil }
+        let effects = self.effects
+        let created = try? await undo.perform(
+            "New Playlist",
+            failure: "Couldn’t create the playlist",
+            do: { () async throws -> Playlist? in
+                let playlist = try await repository.createNumbered(baseName: name, trackIds: ordered)
+                await effects.changed(playlist.id, repository: repository)
+                return playlist
+            },
+            undo: { playlist in try await effects.delete(playlist.id, repository: repository) },
+            redo: { snapshot in try await effects.restore(snapshot, repository: repository).playlist },
+            message: { "Created “\($0.name)” with \(StatusBarText.tracks(ordered.count))" }
+        )
+        if let id = created?.id {
+            effects.window.sidebar?.requestRename(playlist: id)
+        }
+        return created
+    }
+
+    // MARK: Sync profile content (D-LIB-TO-SYNC, D-SYNC-*-TO-PROFILE)
+
+    /// Adds the tracks to the profile's content; tracks already in it are skipped and counted.
+    /// Undo removes exactly the ones this added. The open profile page is not switched.
+    func addTracks(_ trackIDs: [Int64], toSyncProfile profileID: Int64, name: String) async {
+        let ordered = Self.uniqued(trackIDs)
+        guard !ordered.isEmpty, let repository = dependencies.syncProfiles() else { return }
+        let didChange = dependencies.syncContentDidChange
+        do {
+            let added = try await undo.perform(
+                DropWords.addActionName(name),
+                failure: "Couldn’t add \(StatusBarText.tracks(ordered.count)) to “\(name)”",
+                do: { () async throws -> [Int64]? in
+                    let present = Set(try await repository.fetchProfileTracks(profileId: profileID).compactMap(\.id))
+                    let new = ordered.filter { !present.contains($0) }
+                    guard !new.isEmpty else { return nil }
+                    for id in new { try await repository.addTrack(profileId: profileID, trackId: id) }
+                    await didChange(profileID)
+                    return new
+                },
+                undo: { added in
+                    for id in added { try await repository.removeTrack(profileId: profileID, trackId: id) }
+                    await didChange(profileID)
+                    return added
+                },
+                redo: { removed in
+                    for id in removed { try await repository.addTrack(profileId: profileID, trackId: id) }
+                    await didChange(profileID)
+                    return removed
+                },
+                message: { DropWords.addedToProfile(tracks: $0.count, alreadyPresent: ordered.count - $0.count, profile: name) }
+            )
+            if added == nil {
+                effects.window.statusBar?.post(DropWords.alreadyInProfile(count: ordered.count, kind: "track", profile: name))
+            }
+        } catch {
+            // Reported in the status bar by the center.
+        }
+    }
+
+    /// Adds the playlists to the profile (the playlist itself, so later changes sync too).
+    func addPlaylists(_ playlistIDs: [Int64], toSyncProfile profileID: Int64, name: String) async {
+        let ordered = Self.uniqued(playlistIDs)
+        guard !ordered.isEmpty, let repository = dependencies.syncProfiles(),
+              let playlists = dependencies.playlists() else { return }
+        let didChange = dependencies.syncContentDidChange
+        var names: [Int64: String] = [:]
+        for id in ordered { names[id] = await playlistName(id, repository: playlists) }
+        let nameByID = names
+        do {
+            let added = try await undo.perform(
+                DropWords.addActionName(name),
+                failure: "Couldn’t add \(StatusBarText.playlists(ordered.count)) to “\(name)”",
+                do: { () async throws -> [Int64]? in
+                    let present = Set(try await repository.fetchProfilePlaylists(profileId: profileID).compactMap(\.id))
+                    let new = ordered.filter { !present.contains($0) }
+                    guard !new.isEmpty else { return nil }
+                    for id in new { try await repository.addPlaylist(profileId: profileID, playlistId: id) }
+                    await didChange(profileID)
+                    return new
+                },
+                undo: { added in
+                    for id in added { try await repository.removePlaylist(profileId: profileID, playlistId: id) }
+                    await didChange(profileID)
+                    return added
+                },
+                redo: { removed in
+                    for id in removed { try await repository.addPlaylist(profileId: profileID, playlistId: id) }
+                    await didChange(profileID)
+                    return removed
+                },
+                message: { added in DropWords.addedPlaylistsToProfile(names: added.map { nameByID[$0] ?? "the playlist" }, profile: name) }
+            )
+            if added == nil {
+                effects.window.statusBar?.post(DropWords.alreadyInProfile(count: ordered.count, kind: "playlist", profile: name))
+            }
+        } catch {
+            // Reported in the status bar by the center.
+        }
+    }
+
+    // MARK: Playlist cover (D-PL-COVER-TO-CARD, D-PLD-COVER-TO-HEADER)
+
+    /// Sets a custom cover from a dropped image as one step (`Set Cover`). Undo puts the earlier
+    /// cover back exactly — its picture and whether it was automatic or chosen. Returns the
+    /// refusal sentence when the image can't be used (shown on the cover, UC-SURF-04); nothing
+    /// is registered then.
+    func setCover(_ source: CoverSource, ofPlaylist playlistID: Int64, name: String) async -> String? {
+        guard let covers = dependencies.covers() else { return nil }
+        let image: NSImage?
+        let fileName: String?
+        switch source {
+        case .file(let url):
+            image = NSImage(contentsOf: url)
+            fileName = url.lastPathComponent
+        case .data(let data):
+            image = NSImage(data: data)
+            fileName = nil
+        }
+        guard let image, image.isValid, image.size.width > 0, image.size.height > 0 else {
+            return DropWords.notACover(fileName: fileName)
+        }
+        do {
+            _ = try await undo.perform(
+                DropWords.setCoverActionName,
+                failure: "Couldn’t set the cover of “\(name)”",
+                do: { () async throws -> PlaylistCoverService.CoverState? in
+                    let before = try await covers.coverState(playlistId: playlistID)
+                    try await covers.applyCustomCover(playlistId: playlistID, image: image)
+                    return before
+                },
+                undo: { before in
+                    let after = try await covers.coverState(playlistId: playlistID)
+                    try await covers.restoreCoverState(before, playlistId: playlistID)
+                    return after
+                },
+                redo: { after in
+                    let before = try await covers.coverState(playlistId: playlistID)
+                    try await covers.restoreCoverState(after, playlistId: playlistID)
+                    return before
+                },
+                message: { _ in DropWords.coverSetMessage(name) }
+            )
+        } catch {
+            // Reported in the status bar by the center.
+        }
+        return nil
+    }
 }

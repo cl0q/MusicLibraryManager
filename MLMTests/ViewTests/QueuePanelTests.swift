@@ -169,9 +169,10 @@ struct QueuePanelTests {
     @Test func aQueueRowDragsAsATrackForEveryTrackDropTarget() throws {
         let entry = UUID()
         let data = try JSONEncoder().encode(QueueRowDrag(trackId: 4, sourcePlaylistId: nil, queueEntryId: entry))
-        let asTrack = try JSONDecoder().decode(TrackDragData.self, from: data)
-        #expect(asTrack.trackId == 4 && asTrack.sourcePlaylistId == nil)
-        let fromTable = try JSONEncoder().encode(TrackDragData(trackId: 9, sourcePlaylistId: 2))
+        // W2-H: the one track payload (`TrackDragItem`) reads a queue row and vice versa.
+        let asTrack = try JSONDecoder().decode(TrackDragItem.self, from: data)
+        #expect(asTrack.trackId == 4 && asTrack.sourcePlaylistId == nil && asTrack.queueEntryId == entry)
+        let fromTable = try JSONEncoder().encode(TrackDragItem(trackId: 9, sourcePlaylistId: 2, libraryId: "library"))
         let asDrop = try JSONDecoder().decode(QueueRowDrag.self, from: fromTable)
         #expect(asDrop.trackId == 9 && asDrop.queueEntryId == nil)
     }

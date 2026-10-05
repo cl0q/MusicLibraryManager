@@ -123,6 +123,17 @@ final class ImportViewModel {
         )
     }
 
+    /// Import audio files dropped from Finder (W2-H) — the same operation as a folder import.
+    @MainActor
+    func importFiles(_ files: [URL], title: String) async {
+        await runImport(
+            directory: files.first?.deletingLastPathComponent() ?? URL(fileURLWithPath: "/"),
+            files: files,
+            title: "Import: \(title)",
+            detail: "Reading \(title)…"
+        )
+    }
+
     /// Cancel the in-flight import (used by Settings-side Cancel and Activity panel).
     func cancelImport() {
         importTaskBox.task?.cancel()
@@ -138,7 +149,7 @@ final class ImportViewModel {
     // MARK: - Private
 
     @MainActor
-    private func runImport(directory: URL, title: String, detail: String) async {
+    private func runImport(directory: URL, files: [URL]? = nil, title: String, detail: String) async {
         isImporting = true
         errorMessage = nil
         lastResult = nil
@@ -155,7 +166,7 @@ final class ImportViewModel {
         let task = Task { [weak self] in
             guard let self else { return }
             do {
-                let result = try await self.importService.importDirectory(directory) { [weak self] progress in
+                let onProgress: @Sendable (ImportService.ImportProgress) -> Void = { [weak self] progress in
                     Task { @MainActor in
                         guard let self else { return }
                         self.progress = progress
@@ -167,6 +178,11 @@ final class ImportViewModel {
                             )
                         }
                     }
+                }
+                let result = if let files {
+                    try await self.importService.importFiles(files, onProgress: onProgress)
+                } else {
+                    try await self.importService.importDirectory(directory, onProgress: onProgress)
                 }
 
                 await MainActor.run {

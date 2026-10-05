@@ -551,6 +551,9 @@ final class PlaylistDetailViewModel {
     ///
     /// On success the in-memory state is updated optimistically — no
     /// `loadTracks()` round-trip, so the UI never flickers.
+    ///
+    /// Not undoable: drops on the playlist table go through `ShellEdits.placeTracks` (W2-H),
+    /// one undo step with exact positions; this stays for callers without an undo center.
     @MainActor
     func placeTracks(_ trackIDs: [Int64], at insertionIndex: Int) async {
         guard let playlistId = playlist.id else { return }
@@ -609,7 +612,8 @@ final class PlaylistDetailViewModel {
 
         for track in resolvedTracks {
             guard let id = track.id else { continue }
-            let pos = FractionalIndexer.positionBetween(left: previousPosition, right: right)
+            // Strict: `positionBetween` can return its left bound (W2-H fix).
+            let pos = PlaylistPlacement.strictlyBetween(previousPosition, right)
             placements.append((trackId: id, position: pos))
             previousPosition = pos
         }

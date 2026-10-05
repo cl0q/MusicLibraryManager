@@ -10,7 +10,6 @@ import SwiftUI
 /// (UC-GLASS-01/08). Space never reaches it (§10 Q1).
 struct PlayerBar: View {
     let viewModel: PlaybackViewModel
-    @Environment(UndoCenter.self) private var undoCenter: UndoCenter?
 
     var body: some View {
         // Narrow windows give way in a fixed order (UC-TB-03): the title / artist column goes
@@ -22,11 +21,10 @@ struct PlayerBar: View {
         .padding(.horizontal, Spacing.m)
         .padding(.vertical, Spacing.xs)
         .frame(minWidth: Self.minimumWidth, idealWidth: 620, maxWidth: 800)
-        // Tracks dropped on the player play next, confirmed with Undo (UC-TB-08, W2-D).
-        .dropDestination(for: QueueRowDrag.self) { items, _ in
-            QueueEditCommands.dropOnPlayer(items, playback: viewModel, undo: undoCenter ?? .main)
-            return !items.isEmpty
-        }
+        // Tracks (and playlists) dropped on the player play next, confirmed with Undo — through
+        // the queue's own entry point `QueueEditCommands.dropOnPlayer` (UC-TB-08, W2-D, W2-H).
+        // Anything else: no ring, the not-allowed cursor.
+        .mlmDropTarget(.player, cornerRadius: 9)
         // No background of its own: the toolbar's system glass is the player's surface
         // (UC-TB-06, UC-GLASS-01/08).
         // The status-bar notes, the Locate File… panel and window-wide Esc live on the window
@@ -90,6 +88,22 @@ struct PlayerBar: View {
     }
 }
 
+// MARK: - The cover as a drag source (UC-TB-06, W2-H)
+
+enum PlayerCoverDrag {
+    /// The shown track as a drag item: the preview's track while previewing, else the current
+    /// track; ids + its file when local and reachable. Nil while nothing is shown.
+    @MainActor
+    static func item(viewModel: PlaybackViewModel, display: PlayerDisplay, container: DependencyContainer) -> TrackDragItem? {
+        guard let id = display.coverTrackID else { return nil }
+        let candidates = [viewModel.preview.isActive ? viewModel.preview.track : nil, viewModel.currentTrack]
+        guard let track = candidates.compactMap({ $0 }).first(where: { $0.id == id }) else {
+            return TrackDragItem(trackId: id, libraryId: container.activeLibrary?.libraryId)
+        }
+        return TrackDragContext.current(container).item(for: track)
+    }
+}
+
 // MARK: - Transport (E01–E03)
 
 private struct PlayerTransport: View {
@@ -144,8 +158,21 @@ private struct PlayerCover: View {
     let viewModel: PlaybackViewModel
     let display: PlayerDisplay
     @State private var showsLargeCover = false
+    @Environment(\.container) private var container
 
     var body: some View {
+        // Draggable as the track it shows (UC-TB-06, S-PLAYER-COVER): onto a playlist, the
+        // queue, Finder — the same payload as a row. Nothing to drag while idle.
+        if let item = PlayerCoverDrag.item(viewModel: viewModel, display: display, container: container) {
+            cover
+                .draggable(item)
+                .dragConfiguration(TrackDragConfiguration.copyOnly)
+        } else {
+            cover
+        }
+    }
+
+    private var cover: some View {
         Button {
             showsLargeCover.toggle()
         } label: {
@@ -177,14 +204,23 @@ private struct LargeCoverPopover: View {
     @Environment(NavigationModel.self) private var navigation: NavigationModel?
     @FocusedValue(\.toolbarSearch) private var search
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.container) private var container
 
     static let size: CGFloat = 300
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.m) {
             if let id = display.coverTrackID {
-                TrackCoverView(trackId: id, size: .large, cornerRadius: 9)
+                let cover = TrackCoverView(trackId: id, size: .large, cornerRadius: 9)
                     .frame(width: Self.size, height: Self.size)
+                // The large cover drags out as the track too (UC-SHEET-10).
+                if let item = PlayerCoverDrag.item(viewModel: viewModel, display: display, container: container) {
+                    cover
+                        .draggable(item)
+                        .dragConfiguration(TrackDragConfiguration.copyOnly)
+                } else {
+                    cover
+                }
             }
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text(display.title)

@@ -42,6 +42,10 @@ struct PlaylistDetailView: View {
     @State private var showIngestPreview = false
     @State private var ingestSuccessMessage: String?
     @State private var coverImage: NSImage?
+    /// A refused cover drop's sentence, in the header for 5 s (UC-SURF-04, W2-H).
+    @State private var coverRefusal: String?
+    /// Bumped when the cover service rewrote this playlist's picture (same file name).
+    @State private var coverRevision = 0
 
     // Source-linking sheet state
     @State private var showLinkSheet = false
@@ -61,6 +65,10 @@ struct PlaylistDetailView: View {
 
                     if viewModel.displayedTracks.isEmpty && !viewModel.isLoading {
                         emptyState(viewModel)
+                            // Drop targets stay active on an empty state (UC-EMPTY-01): what
+                            // lands here is added like on the playlist's sidebar row.
+                            .mlmDropTarget(.sidebarPlaylist(id: playlist.id ?? -1, name: viewModel.playlist.name),
+                                           cornerRadius: 0)
                     } else {
                         trackList(viewModel)
                     }
@@ -91,6 +99,11 @@ struct PlaylistDetailView: View {
             viewModel?.searchFilter = filter
         }
         .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { note in
+            // A new picture under the same file name (custom cover, its undo): reload it.
+            if (note.userInfo?["origin"] as? String) == "coverService",
+               note.userInfo?["playlistId"] as? Int64 == playlist.id {
+                coverRevision += 1
+            }
             // Cover-revalidation noise (tagged by PlaylistDetailView.onAppear /
             // PlaylistsView.onAppear / PlaylistCoverService) must NOT trigger a
             // track refetch. Only real mutations (untagged or with a playlistId
@@ -241,7 +254,7 @@ struct PlaylistDetailView: View {
         .task(id: playlist.id) {
             coverImage = nil
         }
-        .task(id: playlist.coverImagePath) {
+        .task(id: "\(playlist.coverImagePath ?? "")#\(coverRevision)") {
             let path = playlist.coverImagePath
             let coversDir = PlaylistCard.coversDirectory
             let cgImage: CGImage? = try? await Task.detached(priority: .userInitiated) {
@@ -407,6 +420,10 @@ struct PlaylistDetailView: View {
                             .foregroundColor(playlist.isLiked == 1 || playlist.isSmart == 1 || playlist.sourceId != nil ? .white.opacity(0.9) : .mlmAccent)
                     }
                 }
+                // The header cover takes an image (D-PLD-COVER-TO-HEADER): one undo step; a
+                // refused file says so in the header for 5 s (UC-SURF-04).
+                .mlmDropTarget(.playlistCover(id: playlist.id ?? -1, name: viewModel.playlist.name),
+                               cornerRadius: 6, sayRefusal: { coverRefusal = $0 })
 
                 VStack(alignment: .leading, spacing: 3) {
                     // Playlist name
@@ -423,6 +440,19 @@ struct PlaylistDetailView: View {
                             .help(provenanceHelp(for: viewModel))
                             .accessibilityIdentifier("playlist_detail_provenance_help")
                             .accessibilityLabel(provenanceHelp(for: viewModel))
+                    }
+                    if let coverRefusal {
+                        Label {
+                            Text(coverRefusal)
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.red)
+                        }
+                        .font(.callout)
+                        .task(id: coverRefusal) {
+                            try? await Task.sleep(for: .seconds(5))
+                            if !Task.isCancelled { self.coverRefusal = nil }
+                        }
                     }
                 }
 

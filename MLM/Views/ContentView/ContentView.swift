@@ -61,6 +61,8 @@ struct ContentView: View {
     var body: some View {
         notificationHandlers(
             rootContent
+                // The window as the last drop target: files, links, .mlibm, .m3u (W2-H).
+                .mainWindowDrops()
                 .modifier(LibraryFilePresentation(launch: launch))
                 // Remove from Library… — one confirmation for the Track menu and context menus.
                 .modifier(LibraryRemovalAlert())

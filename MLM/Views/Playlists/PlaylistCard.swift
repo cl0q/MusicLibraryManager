@@ -37,19 +37,13 @@ struct PlaylistCard: View {
     var onCancelRename: () -> Void
     var onTogglePin: () -> Void
     var onDelete: () -> Void
+    /// Opens the playlist while a track drag rests on the card (D-PL-SPRINGLOAD-CARD: system
+    /// timing, never required — the card takes the drop itself).
     var onSpringLoad: (() -> Void)? = nil
-
-    /// Forwards a resolved local image URL to the parent for `setCustomCover`.
-    /// Defaults to a no-op so SwiftUI Previews + non-grid callers keep compiling.
-    var onCoverDropped: (URL) async -> Void = { _ in }
 
     /// Triggered by the "Reset to Auto Cover" context-menu entry. Parent calls
     /// `PlaylistCoverService.resetToAuto`.
     var onResetCover: () -> Void = {}
-
-    /// Bubbles up to the parent so `PlaylistViewModel.flagCoverDropRejected()`
-    /// can show the UI-SPEC line 174 banner.
-    var onCoverDropRejected: () -> Void = {}
 
     /// Sync profiles available for the "Sync to" submenu (Phase 38 D-05).
     var availableSyncProfiles: [SyncProfile] = []
@@ -58,18 +52,16 @@ struct PlaylistCard: View {
     /// Provides the chosen profile and the playlist's DB id.
     var onAddToSyncProfile: ((SyncProfile, Int64) -> Void)?
 
-    /// Called when tracks are dropped directly onto the card.
-    var onTracksDropped: (([Int64]) async -> Void)? = nil
     var onDownloadMissing: (() async -> Void)? = nil
     var onShowFailedTracks: (() -> Void)? = nil
 
     @State private var isHovered = false
-
-    /// `true` while a Finder/in-app drag is hovering over the card. Drives
-    /// the accent stroke + thicker line per UI-SPEC §"Cover-Card states".
-    @State private var isDropTargeted = false
-    @State private var timer: Timer? = nil
     @State private var coverImage: NSImage?
+    /// A refused cover drop's sentence, shown on the card for 5 s (UC-SURF-04).
+    @State private var coverRefusal: String?
+    /// Bumped when the cover service rewrote this playlist's picture (same file name).
+    @State private var coverRevision = 0
+    @Environment(\.container) private var container
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -94,9 +86,8 @@ struct PlaylistCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(strokeColor, lineWidth: isDropTargeted ? 2 : 1)
+                .stroke(strokeColor, lineWidth: 1)
         )
-        .animation(.easeInOut(duration: 0.12), value: isDropTargeted)
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {
                 isHovered = hovering
@@ -110,30 +101,28 @@ struct PlaylistCard: View {
         .contextMenu {
             contextMenuItems
         }
-        .onDrop(of: [.trackDrag, .fileURL, .image], isTargeted: $isDropTargeted) { providers in
-            handleDrop(providers: providers)
-        }
-        .onChange(of: isDropTargeted) { _, targeted in
-            if targeted {
-                timer?.invalidate()
-                timer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: false) { _ in
-                    Task { @MainActor in
-                        if isDropTargeted {
-                            onSpringLoad?()
-                        }
-                    }
-                }
-            } else {
-                timer?.invalidate()
-                timer = nil
-            }
+        // Tracks, playlists, Finder files and links as on its sidebar row; an image sets the
+        // cover (undoable); a refused image says so on the card (W2-H, DEC-040).
+        .mlmDropTarget(
+            .playlistCard(id: playlist.id ?? -1, name: playlist.name),
+            cornerRadius: 8,
+            springLoad: onSpringLoad,
+            sayRefusal: { coverRefusal = $0 }
+        )
+        .inPlaceRefusal($coverRefusal)
+        // Drags as the playlist (UC-DND-01).
+        .draggable(PlaylistDragItem(playlistId: playlist.id ?? -1, libraryId: container.activeLibrary?.libraryId))
+        .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { note in
+            guard (note.userInfo?["origin"] as? String) == "coverService",
+                  note.userInfo?["playlistId"] as? Int64 == playlist.id else { return }
+            coverRevision += 1
         }
         .accessibilityIdentifier("playlist_card")
         .accessibilityLabel("playlist_card_\(playlist.id ?? -1)")
         .task(id: playlist.id) {
             coverImage = nil
         }
-        .task(id: playlist.coverImagePath) {
+        .task(id: "\(playlist.coverImagePath ?? "")#\(coverRevision)") {
             guard let path = playlist.coverImagePath else {
                 coverImage = nil
                 return
@@ -394,96 +383,12 @@ struct PlaylistCard: View {
             ?? DatabaseManager.playlistCoversDirectory(forDatabaseAt: DatabaseManager.legacyDatabaseURL)
     }
 
-    // MARK: - Drop Target
+    // MARK: - Stroke
 
-    /// Combines hover + drop-target states into a single stroke color.
-    /// During a drop drag, the accent color wins; otherwise hover toggles
-    /// between mlmEdge (hover) and mlmEdgeSubtle (resting).
+    /// The card's edge: hover only. A drag over the card gets the shared drop ring
+    /// (`mlmDropTarget`, W2-H) instead of a stroke of its own.
     private var strokeColor: Color {
-        if isDropTargeted { return .mlmAccent }
-        return isHovered ? .mlmEdge : .mlmEdgeSubtle
-    }
-
-    /// Resolves the dropped provider to a local image URL and forwards it
-    /// to `onCoverDropped`. Falls through to `onCoverDropRejected` when no
-    /// loadable image data is present (UI-SPEC §"Drop-Target Acceptance Rules").
-    private func handleDrop(providers: [NSItemProvider]) -> Bool {
-        // Track drag branch:
-        let trackProviders = providers.filter { $0.hasItemConformingToTypeIdentifier("com.musiclibrary.trackdrag") }
-        if !trackProviders.isEmpty {
-            let group = DispatchGroup()
-            // Load callbacks run on arbitrary queues; collect behind a lock.
-            let collected = OSAllocatedUnfairLock<[Int64]>(initialState: [])
-            
-            for provider in trackProviders {
-                group.enter()
-                _ = provider.loadDataRepresentation(for: UTType("com.musiclibrary.trackdrag")!) { data, _ in
-                    defer { group.leave() }
-                    guard let data else { return }
-                    do {
-                        let dragData = try JSONDecoder().decode(TrackDragData.self, from: data)
-                        collected.withLock { $0.append(dragData.trackId) }
-                    } catch {
-                        // ignore malformed items
-                    }
-                }
-            }
-            
-            group.notify(queue: .main) {
-                let trackIds = collected.withLock { $0 }
-                if !trackIds.isEmpty, let onTracksDropped = self.onTracksDropped {
-                    Task {
-                        await onTracksDropped(trackIds)
-                    }
-                }
-            }
-            return true
-        }
-
-        // Cover file/image drop branch:
-        guard let provider = providers.first else {
-            onCoverDropRejected()
-            return false
-        }
-
-        // Branch 1: Finder file drop — load as .fileURL.
-        if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-            _ = provider.loadDataRepresentation(for: .fileURL) { data, _ in
-                guard let data,
-                      let url = URL(dataRepresentation: data, relativeTo: nil, isAbsolute: true)
-                          ?? URL(string: String(decoding: data, as: UTF8.self))
-                else {
-                    Task { @MainActor in onCoverDropRejected() }
-                    return
-                }
-                Task { await onCoverDropped(url) }
-            }
-            return true
-        }
-
-        // Branch 2: In-app image drag (NSImage) — load raw image data,
-        // persist to a temp file so the service has a uniform URL input.
-        if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
-            _ = provider.loadDataRepresentation(for: .image) { data, _ in
-                guard let data else {
-                    Task { @MainActor in onCoverDropRejected() }
-                    return
-                }
-                let tmp = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("inapp_cover_\(UUID().uuidString)")
-                do {
-                    try data.write(to: tmp)
-                    Task { await onCoverDropped(tmp) }
-                } catch {
-                    Task { @MainActor in onCoverDropRejected() }
-                }
-            }
-            return true
-        }
-
-        // Anything else (text, folder, multi-format payload without image): reject.
-        onCoverDropRejected()
-        return false
+        isHovered ? .mlmEdge : .mlmEdgeSubtle
     }
 
     // MARK: - Category Styling

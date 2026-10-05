@@ -304,6 +304,99 @@ final class PlaylistCoverService {
         }
     }
 
+    // MARK: - Undoable cover changes (W2-H: cover drops, UC-UNDO-02)
+
+    /// A playlist's cover as stored: the database reference, the lock, and the bytes of its
+    /// PNG — what an undo needs to put back exactly (auto or custom, same picture).
+    struct CoverState: Equatable, Sendable {
+        let path: String?
+        let isCustom: Bool
+        /// The PNG `path` names, nil when there is none.
+        let png: Data?
+    }
+
+    /// Why a cover couldn't be set.
+    enum CoverError: Error, PlainCauseError {
+        case unreadableImage
+        case playlistMissing
+
+        var plainCause: String {
+            switch self {
+            case .unreadableImage: "the image can’t be read"
+            case .playlistMissing: "the playlist no longer exists"
+            }
+        }
+    }
+
+    /// The cover as it is now.
+    func coverState(playlistId: Int64) async throws -> CoverState {
+        guard let playlist = try await playlistRepository.fetch(id: playlistId) else { throw CoverError.playlistMissing }
+        let png = PlaylistCoverService.safeFileURL(playlist.coverImagePath, in: coversDirectory)
+            .flatMap { try? Data(contentsOf: $0) }
+        return CoverState(path: playlist.coverImagePath, isCustom: playlist.coverIsCustom == 1, png: png)
+    }
+
+    /// Put a cover back exactly as `state` describes it (file bytes, reference, lock).
+    func restoreCoverState(_ state: CoverState, playlistId: Int64) async throws {
+        try await withThrowingPlaylistOperation(playlistId) {
+            guard try await playlistRepository.fetch(id: playlistId) != nil else { throw CoverError.playlistMissing }
+            let file = PlaylistCoverService.safeFileURL(state.path, in: coversDirectory)
+                ?? coversDirectory.appendingPathComponent("\(playlistId).png")
+            if let png = state.png {
+                _ = try ensureCoversDir()
+                try png.write(to: file, options: .atomic)
+            } else {
+                // There was no picture: none comes back (the card shows its placeholder).
+                try? FileManager.default.removeItem(at: file)
+            }
+            try await playlistRepository.setCoverPath(id: playlistId, path: state.path, isCustom: state.isCustom)
+            NotificationCenter.default.post(
+                name: .playlistDidChange,
+                object: nil,
+                userInfo: ["origin": "coverService", "playlistId": playlistId]
+            )
+        }
+    }
+
+    /// `setCustomCover`, but saying when the image can't be used (a drop shows that in place).
+    func applyCustomCover(playlistId: Int64, image: NSImage) async throws {
+        try await withThrowingPlaylistOperation(playlistId) {
+            guard try await playlistRepository.fetch(id: playlistId) != nil else { throw CoverError.playlistMissing }
+            let coversDir = try ensureCoversDir()
+            let pngURL = coversDir.appendingPathComponent("\(playlistId).png")
+            try await Task.detached(priority: .userInitiated) {
+                try MosaicCompositor.composeSingleCoverPNG(image: image, outputURL: pngURL)
+            }.value
+            try await playlistRepository.setCoverPath(
+                id: playlistId,
+                path: "\(DatabaseManager.playlistCoversFolderName)/\(playlistId).png",
+                isCustom: true
+            )
+            NotificationCenter.default.post(
+                name: .playlistDidChange,
+                object: nil,
+                userInfo: ["origin": "coverService", "playlistId": playlistId]
+            )
+        }
+    }
+
+    /// The cover file a stored reference names, inside the covers folder only.
+    nonisolated static func safeFileURL(_ coverImagePath: String?, in coversDirectory: URL) -> URL? {
+        guard let coverImagePath, !coverImagePath.isEmpty else { return nil }
+        return coversDirectory.appendingPathComponent((coverImagePath as NSString).lastPathComponent)
+    }
+
+    private func withThrowingPlaylistOperation(_ playlistId: Int64, operation: () async throws -> Void) async throws {
+        await operationGate.acquire(playlistId)
+        do {
+            try await operation()
+        } catch {
+            await operationGate.release(playlistId)
+            throw error
+        }
+        await operationGate.release(playlistId)
+    }
+
     // MARK: - Private helpers
 
     private func withPlaylistOperation(
