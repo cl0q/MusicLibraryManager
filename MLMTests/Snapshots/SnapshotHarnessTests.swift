@@ -22,15 +22,17 @@ final class SnapshotsTests: XCTestCase {
             }
         }
         // W1-2 added Settings/GeneralSettingsView.swift (deferred) and Settings/SettingsTab.swift (non-view).
-        XCTAssertEqual(paths.count, 81, "Re-audit inventory changes explicitly.")
+        // W2-F added Shell/UndoCenter.swift and Shell/ShellEdits.swift (non-view) and removed the
+        // new-playlist sheet fixture (S-SEL-NEWPLAYLIST: no sheet).
+        XCTAssertEqual(paths.count, 83, "Re-audit inventory changes explicitly.")
         XCTAssertEqual(Set(SnapshotFixtures.inventory.map(\.path)), paths)
         XCTAssertEqual(SnapshotFixtures.inventory.count, paths.count)
         XCTAssertFalse(SnapshotFixtures.inventory.contains { $0.disposition.isEmpty })
         XCTAssertEqual(Set(SnapshotFixtures.fixtures.map(\.id)).count, SnapshotFixtures.fixtures.count)
         XCTAssertFalse(SnapshotFixtures.fixtures.isEmpty)
-        XCTAssertEqual(SnapshotFixtures.fixtures.count, 30)
+        XCTAssertEqual(SnapshotFixtures.fixtures.count, 29)
         XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 24)
-        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 15)
+        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 17)
         XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 42)
         for fixture in SnapshotFixtures.fixtures where fixture.expectedTableRows != nil {
             if case .swiftUI = fixture.backend {

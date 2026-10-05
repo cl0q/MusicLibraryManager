@@ -16,8 +16,9 @@ struct StatusAction: Identifiable {
         self.perform = perform
     }
 
-    /// The `Undo` button. Bind it to the same undo step as Edit ▸ Undo (UC-STATUS-04);
-    /// W2-F supplies the `UndoManager` integration, this is only the hook.
+    /// The `Undo` button (UC-STATUS-04). Undoable actions don't build it themselves: they go
+    /// through `UndoCenter.perform`, which posts the message with this button bound to the
+    /// same step as Edit ▸ Undo (UC-UNDO-09).
     static func undo(_ perform: @escaping @MainActor () -> Void) -> StatusAction {
         StatusAction("Undo", perform: perform)
     }
@@ -43,8 +44,10 @@ struct StatusMessage: Identifiable {
 ///
 /// **Messages** (UC-STATUS-04):
 /// ```swift
-/// statusBar.post("Added 3 tracks to “Warm-up”", actions: [.undo { undoManager?.undo() }])
+/// statusBar.post("Import started — “Sets”")
 /// ```
+/// An undoable action's confirmation (`… · Undo`) comes from `UndoCenter`, never from a
+/// direct `post` (one confirmation per step, its `Undo` tied to that step).
 /// - A message replaces the default text for 8 s (`messageLifetime`), then the default returns.
 /// - A newer message replaces the current one at once (and restarts the 8 s).
 /// - At most two actions are kept; extra ones are dropped.

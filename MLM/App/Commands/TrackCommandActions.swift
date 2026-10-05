@@ -57,25 +57,18 @@ enum TrackCommandActions {
         }
     }
 
-    /// Add to Playlist ▸ ‹playlist›: appends the tracks (existing repository call).
-    static func addToPlaylist(_ playlistID: Int64, tracks: [Track], container: DependencyContainer = .shared) {
-        let ids = tracks.compactMap(\.id)
-        guard !ids.isEmpty, let repository = container.playlistRepository else { return }
-        Task {
-            do {
-                try await repository.appendTracks(playlistId: playlistID, trackIds: ids)
-                NotificationCenter.default.post(name: .playlistDidChange, object: nil, userInfo: ["playlistId": playlistID])
-            } catch {
-                AppLogger.shared.error("Adding tracks to a playlist failed: \(error.localizedDescription)", source: "Library")
-            }
-        }
+    /// Add to Playlist ▸ ‹playlist›: appends the tracks in display order as one undoable step
+    /// (`Added 3 tracks to “Warm-up” · Undo`; Edit ▸ Undo Add to “Warm-up”). `shell` is the
+    /// main window's `ShellActions` (`@FocusedValue(\.shellActions)`).
+    static func addToPlaylist(_ playlistID: Int64, tracks: [Track], shell: ShellActions?) {
+        shell?.addToPlaylist(playlistID, trackIDs: tracks.compactMap(\.id))
     }
 
-    /// New Playlist from Selection / Add to Playlist ▸ New Playlist…: the existing sheet.
-    static func newPlaylistFromSelection(_ tracks: [Track]) {
-        let ids = tracks.compactMap(\.id)
-        guard !ids.isEmpty else { return }
-        NotificationCenter.default.post(name: .triggerNewPlaylistFromSelection, object: nil, userInfo: ["trackIds": ids])
+    /// New Playlist from Selection ⇧⌘N / Add to Playlist ▸ New Playlist…: creates `Untitled
+    /// Playlist` with the tracks in display order and names it inline in the sidebar — one
+    /// undoable step, no sheet (S-SEL-NEWPLAYLIST).
+    static func newPlaylistFromSelection(_ tracks: [Track], shell: ShellActions?) {
+        shell?.newPlaylistFromSelection(trackIDs: tracks.compactMap(\.id))
     }
 
     /// Add to Sync Profile ▸ New Sync Profile…: the existing sheet with the selection.
