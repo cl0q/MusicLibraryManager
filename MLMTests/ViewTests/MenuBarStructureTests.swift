@@ -247,13 +247,14 @@ struct MenuBarStructureTests {
         #expect(app.contains("Window(KeyboardShortcutsWindow.title, id: KeyboardShortcutsWindow.id)"))
     }
 
-    /// Review S2: Get Info shows the selection's first track in Info, through the existing
-    /// Show Details path; S3: menus enable from the published summary, not from resolved rows.
+    /// Get Info shows or hides Info, which follows the selection (W2-E, UC-KEY-12; was the
+    /// Show Details path, review S2); S3: menus enable from the published summary.
     @Test func trackMenuReadsTheSummaryAndGetInfoShowsTheSelection() throws {
         let track = try source("MLM/App/Commands/TrackCommands.swift")
         #expect(track.contains("summary: selection?.summary,"))
         #expect(track.contains("let tracks: () -> [Track] = { selection?.selectedTracks ?? [] }"))
-        #expect(track.contains("NotificationCenter.default.post(name: .openTrackDetailForTrack, object: nil, userInfo: [\"trackId\": id])"))
+        #expect(track.contains("trailingColumn?.toggle(.info)"))
+        #expect(!track.contains(".openTrackDetailForTrack"), "Info follows the selection; no last-activated track")
         let file = try source("MLM/App/Commands/FileCommands.swift")
         #expect(!file.contains("let selected = "), "File menu enables from the selected IDs")
         let playback = try source("MLM/App/Commands/PlaybackCommands.swift")

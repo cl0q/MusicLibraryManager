@@ -60,12 +60,10 @@ struct TrackCommands: Commands {
 
             Divider()
 
-            // ⌘I is View ▸ Show Info's key; this is the same command for the selection: Info
-            // shows the first selected track and opens (the existing Show Details path).
+            // ⌘I is View ▸ Show Info's key; this is the same command: Info already follows the
+            // selection (W2-E), so Get Info only shows or hides the column (UC-KEY-12).
             CommandButton(.getInfo, enabled: state.canGetInfo && trailingColumn != nil) {
-                if let id = selection?.summary.firstID {
-                    NotificationCenter.default.post(name: .openTrackDetailForTrack, object: nil, userInfo: ["trackId": id])
-                }
+                trailingColumn?.toggle(.info)
             }
             CommandButton(.goToAlbum)
             CommandButton(.goToArtist)

@@ -1,6 +1,8 @@
 import Testing
 import Foundation
 
+/// Info ▸ Details ▸ In playlists (P-INSPECTOR-GENERAL.E07, W2-E): remove is undoable and takes
+/// exactly the selection's rows; no confirmation (UC-UNDO-06).
 @Suite("DetailPlaylistsSectionTests")
 struct DetailPlaylistsSectionTests {
 
@@ -17,60 +19,29 @@ struct DetailPlaylistsSectionTests {
         return try String(contentsOf: url, encoding: .utf8)
     }
 
-    // MARK: - MetadataPanel source-scan
+    private static let detailsPath = "MLM/Views/Inspector/InspectorDetailsTab.swift"
 
-    @Test func metadataPanel_containsGeneralTabContent() throws {
-        let src = try readSource("MLM/Views/TrackDetail/MetadataPanel.swift")
-        #expect(src.contains("private var generalTabContent"))
+    @Test func inPlaylistsSectionListsMembershipOfTheSelection() throws {
+        let src = try readSource(Self.detailsPath)
+        #expect(src.contains("Section(\"In playlists\")"))
+        #expect(src.contains("memberships(trackIDs: trackIDs)"))
+        #expect(src.contains("Not in any playlist."))
     }
 
-    @Test func metadataPanel_containsPlaylistsSection() throws {
-        let src = try readSource("MLM/Views/TrackDetail/MetadataPanel.swift")
-        #expect(src.contains("playlistsSection"))
-    }
-
-    @Test func metadataPanel_containsAccessibilityIdentifiers() throws {
-        let src = try readSource("MLM/Views/TrackDetail/MetadataPanel.swift")
-        #expect(src.contains("detail_playlists_section"))
-        #expect(src.contains("detail_playlist_row"))
-        #expect(src.contains("detail_playlist_remove_button"))
-        #expect(src.contains("detail_playlists_empty"))
-    }
-
-    @Test func metadataPanel_containsEmptyStateText() throws {
-        let src = try readSource("MLM/Views/TrackDetail/MetadataPanel.swift")
-        #expect(src.contains("Not in any playlist"))
-    }
-
-    @Test func metadataPanel_containsTrackPlaylistsState() throws {
-        let src = try readSource("MLM/Views/TrackDetail/MetadataPanel.swift")
-        #expect(src.contains("trackPlaylists"))
-    }
-
-    @Test func metadataPanel_containsFetchAndRemove() throws {
-        let src = try readSource("MLM/Views/TrackDetail/MetadataPanel.swift")
-        #expect(src.contains("fetchPlaylists(forTrackId:"))
-        #expect(src.contains("removeTrack(playlistId:"))
-    }
-
-    @Test func metadataPanel_containsXmarkIcon() throws {
-        let src = try readSource("MLM/Views/TrackDetail/MetadataPanel.swift")
-        #expect(src.contains("xmark.circle.fill"))
-    }
-
-    @Test func metadataPanel_preservesExistingEditableRows() throws {
-        let src = try readSource("MLM/Views/TrackDetail/MetadataPanel.swift")
-        #expect(src.contains("editableRow(label: \"Title\""))
-        #expect(src.contains("editableRow(label: \"Artist\""))
-        #expect(src.contains("editableRow(label: \"Album Artist\""))
-        #expect(src.contains("editableRow(label: \"Album\""))
-        #expect(src.contains("editableRow(label: \"Genre\""))
-        #expect(src.contains("editableRow(label: \"Year\""))
-    }
-
-    @Test func metadataPanel_noConfirmationDialog() throws {
-        let src = try readSource("MLM/Views/TrackDetail/MetadataPanel.swift")
+    @Test func removeIsUndoableAndExact() throws {
+        let src = try readSource(Self.detailsPath)
+        #expect(src.contains("PlaylistTrackRemoval.remove(Set(trackIDs), fromPlaylist: membership.playlistID"),
+                "exact rows of the selection, one undo step (W2-F contract)")
+        #expect(!src.contains("removeTrack(playlistId:"), "the old non-undoable removal is gone")
         #expect(!src.contains("confirmationDialog"))
+        #expect(src.contains(".help(\"Remove from “\\(membership.name)”\")"))
+    }
+
+    @Test func addToPlaylistReplacesTheOldFooter() throws {
+        let src = try readSource(Self.detailsPath)
+        #expect(src.contains("Menu(\"Add to Playlist\")"))
+        #expect(src.contains("shell?.addToPlaylist(id, trackIDs: trackIDs)"))
+        #expect(!src.contains("999000"), "no fixed position string (inventory P-INSPECTOR pain point)")
     }
 
     // MARK: - PlaylistRepository source-scan

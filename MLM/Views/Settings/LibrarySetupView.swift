@@ -16,6 +16,8 @@ struct LibrarySetupView: View {
     @State private var trackCount: Int = 0
     @State private var libraryRoot: String?
     @State private var isLoaded = false
+    /// `Write tags to files` (W2-E; THOUGHTS §10 Q7: on by default). Per library.
+    @State private var writesTags = true
 
     var body: some View {
         Form {
@@ -38,6 +40,17 @@ struct LibrarySetupView: View {
                 Text("The root folder containing your music files. MLM will scan this folder recursively for audio files.")
                     .font(MLMFont.muted)
                     .foregroundColor(.mlmInkMuted)
+            }
+
+            // MARK: - Tags (W2-E; restyled with the pane by W3-SET)
+            Section {
+                Toggle("Write tags to files", isOn: Binding(
+                    get: { writesTags },
+                    set: { setWritesTags($0) }
+                ))
+                .disabled(container.configRepository == nil)
+            } footer: {
+                Text("Tag edits also go into the audio files, so copies outside MLM show them. A track’s source is never written.")
             }
 
             // MARK: - Statistics Section
@@ -301,8 +314,19 @@ struct LibrarySetupView: View {
         )
     }
 
+    private func setWritesTags(_ enabled: Bool) {
+        writesTags = enabled
+        guard let config = container.configRepository else { return }
+        Task {
+            try? await TagWriteSetting.setEnabled(enabled, config: config)
+            // Waiting changes are written once it is on again (nothing is written while off).
+            if enabled { TagWriteQueue.shared.requestFlush() }
+        }
+    }
+
     private func loadState() {
         Task {
+            writesTags = await TagWriteSetting.isEnabled(container.configRepository)
             await viewModel?.loadLibraryRoot()
             libraryRoot = viewModel?.libraryRoot
 

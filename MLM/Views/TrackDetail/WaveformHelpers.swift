@@ -21,24 +21,12 @@ enum WaveformHelpers {
         return min(max(Int(duration * binsPerSecond), minBins), maxBins)
     }
 
-    // MARK: - Amplitude Color
+    // MARK: - Bar shading
 
-    /// Map a normalized amplitude (0…1) to a DJ-style HSB color.
-    ///
-    /// Color ramp (hue in degrees):
-    ///   0.0 (quiet)  → 220° steel blue  (hue ≈ 0.611 in 0-1 scale)
-    ///   1.0 (loud)   →  30° orange-red  (hue ≈ 0.083 in 0-1 scale)
-    ///
-    /// Played bars are brighter; unplayed bars are dimmed and semi-transparent.
-    static func amplitudeColor(for peak: Float, played: Bool) -> Color {
-        let t = Double(peak)
-        let hue        = 0.611 - t * 0.528          // 220° → 30°
-        let saturation = 0.4 + t * 0.6              // desaturate quiet bars
-        let brightness = played
-            ? (0.55 + t * 0.45)                     // 0.55–1.00 when played
-            : (0.35 + t * 0.30)                     // 0.35–0.65 when unplayed
-        let opacity    = played ? 1.0 : 0.55
-        return Color(hue: hue, saturation: saturation, brightness: brightness, opacity: opacity)
+    /// Waveform bars use neutral semantic styles only (UC-COLOR-08, DEC-046 — the old blue-to-
+    /// orange ramp is gone): played bars `.secondary`, the rest `.tertiary`.
+    static func barShading(played: Bool) -> GraphicsContext.Shading {
+        played ? .style(.secondary) : .style(.tertiary)
     }
 
     // MARK: - Seek Fraction

@@ -47,9 +47,6 @@ struct ContentView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var showFirstRunWizard = false
 
-    /// The track Info shows: the one last activated in a list (W2-E switches Info to the
-    /// table selection). Setting it never opens the column (UC-TRAIL-02).
-    @State private var selectedTrackForDetail: Track?
     @State private var reviewFocusTrackID: Int64?
 
     /// Selection-based sheet state
@@ -163,17 +160,6 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .navigateToCreateSyncProfile)) { _ in
                 shell.actions.newSyncProfile()
             }
-            .onReceive(NotificationCenter.default.publisher(for: .libraryDidImport)) { _ in
-                if let selected = selectedTrackForDetail, let id = selected.id {
-                    Task {
-                        if let freshTrack = try? await container.trackRepository?.fetchTrack(id: id) {
-                            await MainActor.run {
-                                self.selectedTrackForDetail = freshTrack
-                            }
-                        }
-                    }
-                }
-            }
             .onReceive(NotificationCenter.default.publisher(for: .showReview)) { notification in
                 if let trackID = notification.userInfo?["trackId"] as? Int64 {
                     reviewFocusTrackID = trackID
@@ -227,7 +213,7 @@ struct ContentView: View {
                 } detail: {
                     detailColumn
                         .inspector(isPresented: $trailing.isPresented) {
-                            TrailingColumnView(infoTrack: selectedTrackForDetail)
+                            TrailingColumnView()
                                 .inspectorColumnWidth(
                                     min: ShellMetrics.trailingMinWidth,
                                     ideal: ShellMetrics.trailingIdealWidth,
@@ -350,12 +336,10 @@ struct ContentView: View {
 
     // MARK: - Track activation and Info
 
-    /// Double-click / Return on a track: play it with the visible rows as the queue and make
-    /// it the Info track. Never opens the trailing column (DEC-008, UC-TRAIL-02; fixes
-    /// PP-INSPECTOR-01/03).
+    /// Double-click / Return on a track: play it with the visible rows as the queue. Never opens
+    /// the trailing column and never changes what Info shows — Info follows the selection
+    /// (DEC-008, UC-TRAIL-02/03; fixes PP-INSPECTOR-01/03).
     private func handleTrackDoubleClick(_ track: Track, queue: [Track]) {
-        selectedTrackForDetail = track
-
         if track.isLocal, let playbackVM = container.playbackViewModel {
             Task {
                 await playbackVM.playTrack(track, queue: queue)
@@ -363,8 +347,10 @@ struct ContentView: View {
         }
     }
 
-    /// `.openTrackDetailForTrack` (sync failure rows): `Play` plays without opening anything;
-    /// `Show Details` is an explicit request for Info, so it opens the column in Info mode.
+    /// `.openTrackDetailForTrack` — Get Info from a track's context menu and `Show Details` /
+    /// double-click on a failed sync row. `play` plays without opening anything; otherwise Info
+    /// opens for the selection, or for this track when it isn't selected in a track list (a sync
+    /// row): Info shows what was asked for, never the playing track.
     private func openTrackDetail(_ userInfo: [AnyHashable: Any]?) {
         let trackId: Int64?
         if let raw = userInfo?["trackId"] as? Int64 {
@@ -376,16 +362,21 @@ struct ContentView: View {
         }
         let play = userInfo?["play"] as? Bool ?? false
         guard let trackId else { return }
-        Task {
-            guard let track = try? await container.trackRepository?.fetchTrack(id: trackId) else { return }
-            selectedTrackForDetail = track
-            if play {
+        if play {
+            Task {
+                guard let track = try? await container.trackRepository?.fetchTrack(id: trackId) else { return }
                 if track.isLocal, let playbackVM = container.playbackViewModel {
                     await playbackVM.playTrack(track)
                 }
-            } else if !shell.trailing.isShowing(.info) {
-                shell.trailing.toggle(.info)
             }
+            return
+        }
+        let selection = InspectedTrackSelection.shared.trackIDs
+        if !selection.contains(trackId) {
+            InfoTrackRequest.shared.show([trackId], over: selection)
+        }
+        if !shell.trailing.isShowing(.info) {
+            shell.trailing.toggle(.info)
         }
     }
 

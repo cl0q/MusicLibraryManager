@@ -5,7 +5,7 @@ import Foundation
 /// 1. Info never follows the now-playing track (UC-TRAIL-03 / DEC-007, W1-1 replaced the old
 ///    "detail pane follows the playing track" behaviour).
 /// 2. All three track tables (TrackTable, PlaylistTable, FoldersView) apply the accent highlight.
-/// 3. Existing invariants (speaker icon, double-click detail wiring) remain intact.
+/// 3. Existing invariants (speaker icon) remain intact; Info follows the selection (W2-E).
 @Suite("NowPlayingSyncTests")
 struct NowPlayingSyncTests {
 
@@ -121,10 +121,14 @@ struct NowPlayingSyncTests {
                 "FoldersView must still contain the isNowPlaying helper")
     }
 
+    /// W2-E: Info follows the selection (`InspectedTrackSelection`); playing a track never
+    /// changes what Info shows (UC-TRAIL-03).
     @Test
-    func contentView_stillContainsDoubleClickDetailAssignment() throws {
+    func infoFollowsTheSelectionNotTheActivatedTrack() throws {
         let src = try readSource(Self.contentViewPath)
-        #expect(src.contains("selectedTrackForDetail = track"),
-                "ContentView handleTrackDoubleClick must still assign selectedTrackForDetail = track")
+        #expect(!src.contains("selectedTrackForDetail"))
+        let column = try readSource("MLM/Views/Shell/TrailingColumnView.swift")
+        #expect(column.contains("InspectorView(selection: request.effectiveSelection(inspected.trackIDs))"))
+        #expect(!src.contains("InspectedTrackSelection.shared.update"), "the table selection is never written here")
     }
 }

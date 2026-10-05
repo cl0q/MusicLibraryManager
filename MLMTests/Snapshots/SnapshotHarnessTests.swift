@@ -28,16 +28,18 @@ final class SnapshotsTests: XCTestCase {
         // Shared/TrackPresentationAvailability.swift by the 11 files of TrackList/ (3 rendered,
         // 7 non-view, TrackMenu deferred); the error-state table fixture became the first-load one.
         // W2-B added Shell/ScopeBar.swift (deferred) and TrackList/DownloadFailureReasonText.swift (non-view).
-        XCTAssertEqual(paths.count, 93, "Re-audit inventory changes explicitly.")
+        // W2-E replaced TrackDetail/TrackDetailView, MetadataPanel and DebugTabView (and the
+        // debug-no-local-file fixture) by the 8 files of Inspector/ (4 non-view, 4 deferred).
+        XCTAssertEqual(paths.count, 98, "Re-audit inventory changes explicitly.")
         XCTAssertEqual(Set(SnapshotFixtures.inventory.map(\.path)), paths)
         XCTAssertEqual(SnapshotFixtures.inventory.count, paths.count)
         XCTAssertFalse(SnapshotFixtures.inventory.contains { $0.disposition.isEmpty })
         XCTAssertEqual(Set(SnapshotFixtures.fixtures.map(\.id)).count, SnapshotFixtures.fixtures.count)
         XCTAssertFalse(SnapshotFixtures.fixtures.isEmpty)
-        XCTAssertEqual(SnapshotFixtures.fixtures.count, 29)
-        XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 25)
-        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 24)
-        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 44)
+        XCTAssertEqual(SnapshotFixtures.fixtures.count, 28)
+        XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 24)
+        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 28)
+        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 46)
         for fixture in SnapshotFixtures.fixtures where fixture.expectedTableRows != nil {
             if case .swiftUI = fixture.backend {
                 XCTFail("\(fixture.id): table readiness requires the AppKit backend.")

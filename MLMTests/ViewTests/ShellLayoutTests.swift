@@ -5,7 +5,7 @@ import Foundation
 /// Source-scan tests verifying the shell layout structure:
 /// - PlayerBar lives in a native ToolbarItem(placement: .principal) of the shell toolbar
 /// - The trailing column is the system `.inspector`, not an HSplitView (W1-1, DEC-007)
-/// - TrackDetailView puts waveform above header
+/// - Info ▸ Audio shows the inspected track's waveform (W2-E)
 /// - ⌘F is Edit ▸ Find ▸ Search, not a key monitor (W1-2)
 /// - Search VM uses nonisolated helpers for off-main work
 /// - TrackRepository.search supports a limit parameter
@@ -158,16 +158,14 @@ struct ShellLayoutTests {
         #expect(!player.contains("minWidth: 80, maxWidth: 160"))
     }
 
+    /// W2-E: the waveform is the inspected track's, on Info ▸ Audio (P-INSPECTOR-WAVEFORM),
+    /// no longer a strip above the header showing the player's track.
     @Test
-    func trackDetailView_waveformBeforeHeader() throws {
-        let src = try readSource("MLM/Views/TrackDetail/TrackDetailView.swift")
-        guard let waveformIdx = src.range(of: "waveformSection")?.lowerBound,
-              let headerIdx = src.range(of: "headerSection")?.lowerBound else {
-            Issue.record("TrackDetailView must contain both waveformSection and headerSection")
-            return
-        }
-        #expect(waveformIdx < headerIdx,
-                "waveformSection must appear before headerSection in TrackDetailView body")
+    func inspectorWaveformLivesOnTheAudioTab() throws {
+        let audio = try readSource("MLM/Views/Inspector/InspectorAudioTab.swift")
+        #expect(audio.contains("InspectorWaveform(track: track"))
+        let info = try readSource("MLM/Views/Inspector/InspectorView.swift")
+        #expect(!info.contains("WaveformView("))
     }
 
     // MARK: - Task 3: ⌘F and ⌥⌘F in Edit ▸ Find (W1-2)

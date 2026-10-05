@@ -27,20 +27,11 @@ struct WaveformTests {
         #expect(WaveformHelpers.adaptiveBinCount(duration: 300) == 600)
     }
 
-    // MARK: - amplitudeColor
+    // MARK: - bar shading (UC-COLOR-08: no colour ramp)
 
-    @Test func amplitudeColorQuietDoesNotCrash() {
-        // peak = 0.0 → steel-blue range; function must not crash
-        let color = WaveformHelpers.amplitudeColor(for: 0.0, played: true)
-        _ = color  // compile + runtime check
-        #expect(Bool(true))
-    }
-
-    @Test func amplitudeColorLoudDoesNotCrash() {
-        // peak = 1.0 → orange-red range; function must not crash
-        let color = WaveformHelpers.amplitudeColor(for: 1.0, played: false)
-        _ = color
-        #expect(Bool(true))
+    @Test func barShadingIsNeutralForPlayedAndUnplayed() {
+        _ = WaveformHelpers.barShading(played: true)
+        _ = WaveformHelpers.barShading(played: false)
     }
 
     // MARK: - seekFraction

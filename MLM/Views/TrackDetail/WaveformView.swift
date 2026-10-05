@@ -201,28 +201,28 @@ struct WaveformView: View {
                     height: bottomHeight
                 )
 
-                // DJ-style amplitude color coding — opacity already baked into amplitudeColor
+                // Neutral colours only (UC-COLOR-08, DEC-046): the played part darker.
                 let played = x < progressX
-                let barColor = WaveformHelpers.amplitudeColor(for: peak, played: played)
+                let shading = WaveformHelpers.barShading(played: played)
 
                 context.fill(
                     Path(roundedRect: topRect, cornerRadius: max(currentBarWidth * 0.25, 0.5)),
-                    with: .color(barColor)
+                    with: shading
                 )
                 context.fill(
                     Path(roundedRect: bottomRect, cornerRadius: max(currentBarWidth * 0.25, 0.5)),
-                    with: .color(barColor.opacity(0.6))
+                    with: shading
                 )
             }
 
-            // Draw Premium playhead line
+            // Playhead in the accent (UC-COLOR-04), only for the playing track.
             if progress > 0 && progress < 1.0 {
                 var playheadPath = Path()
                 playheadPath.move(to: CGPoint(x: progressX, y: 0))
                 playheadPath.addLine(to: CGPoint(x: progressX, y: height))
                 context.stroke(
                     playheadPath,
-                    with: .color(.mlmAccent),
+                    with: .style(.tint),
                     lineWidth: 1.5
                 )
 
@@ -232,8 +232,8 @@ struct WaveformView: View {
                 // scroll/zoom because both are drawn in content space.
                 if let label = needleTimeLabel {
                     let text = Text(label)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(.mlmAccent)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tint)
                     let resolved = context.resolve(text)
                     let labelSize = resolved.measure(in: CGSize(width: 80, height: 20))
                     // Center horizontally on progressX, clamp to content bounds
@@ -249,34 +249,29 @@ struct WaveformView: View {
 
     // MARK: - Placeholder States
 
+    /// Static quiet bars while peaks load (no bespoke animation, UC-MOTION-01).
     private var loadingPlaceholder: some View {
         HStack(spacing: barGap) {
             ForEach(0..<40, id: \.self) { index in
                 RoundedRectangle(cornerRadius: 1)
-                    .fill(Color.mlmEdge.opacity(0.3))
+                    .fill(.quaternary)
                     .frame(width: barWidth)
-                    .scaleEffect(y: randomHeight(for: index), anchor: .center)
+                    .scaleEffect(y: placeholderHeight(for: index), anchor: .center)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .opacity(0.5)
-        .animation(
-            .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
-            value: isLoading
-        )
+        .accessibilityLabel("Loading waveform")
     }
 
     private var emptyPlaceholder: some View {
-        HStack(spacing: 0) {
-            Rectangle()
-                .fill(Color.mlmEdge.opacity(0.2))
-                .frame(height: 1)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        Rectangle()
+            .fill(.quaternary)
+            .frame(height: 1)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
-    /// Pseudo-random height for loading placeholder bars.
-    private func randomHeight(for index: Int) -> CGFloat {
+    /// Fixed heights for the loading placeholder bars.
+    private func placeholderHeight(for index: Int) -> CGFloat {
         let heights: [CGFloat] = [0.3, 0.5, 0.8, 0.6, 0.4, 0.9, 0.7, 0.35, 0.65, 0.55]
         return heights[index % heights.count]
     }
