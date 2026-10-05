@@ -73,6 +73,8 @@ struct SidebarView: View {
                     .help("New Playlist")
                     .accessibilityLabel("Add Playlist")
                 }
+                // Tracks dropped on the header make a new playlist, named inline (IMP-018).
+                .dropTarget(.playlistsSection)
             }
 
             Section(isExpanded: expansion(.sync)) {
@@ -104,6 +106,11 @@ struct SidebarView: View {
                     .accessibilityLabel("New Sync Profile")
                 }
             }
+
+            // The empty area below the last row: a new playlist from the drop
+            // (D-PL-SELECTION-TO-NEW). Only here, the Playlists header and All Playlists — the
+            // Library, Inbox and Sync headers take no tracks.
+            SidebarEmptyDropArea()
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -223,12 +230,13 @@ struct SidebarView: View {
     private func fixedRow(_ destination: SidebarDestination) -> some View {
         Label(destination.fixedTitle, systemImage: destination.systemImage)
             .tag(destination)
-            .springLoadableHover {
-                springLoad(destination)
-            }
+            // Views, not containers: no ring for tracks; Finder files import (UC-SIDE-11).
+            // All Playlists stands for the Playlists section: a drop there makes a playlist.
+            .dropTarget(destination == .allPlaylists ? .playlistsSection : .fixedRow)
     }
 
-    /// Spring-loading opens a row while a drag hovers over it; on the row that is already
+    /// Spring-loading opens a playlist row while a track drag rests on it (offered, never
+    /// required — the row takes the drop itself, UC-DND-04); on the row that is already
     /// selected it does nothing (re-selecting would pop that place's pushed details mid-drag).
     private func springLoad(_ destination: SidebarDestination) {
         guard destination != navigation.selection else { return }
@@ -257,9 +265,14 @@ struct SidebarView: View {
                             }
                         }
                     }
-                    .springLoadableHover {
-                        springLoad(.playlist(id))
-                    }
+                    // A playlist row takes tracks, playlists, Finder files, M3U files and links
+                    // directly (UC-DND-04) and drags as the playlist (UC-DND-01).
+                    .dropTarget(
+                        .sidebarPlaylist(id: id, name: playlist.name),
+                        isShown: navigation.selection == .playlist(id),
+                        springLoad: { springLoad(.playlist(id)) }
+                    )
+                    .draggable(PlaylistDragItem(playlistId: id, libraryId: container.activeLibrary?.libraryId))
             }
         }
     }
@@ -320,6 +333,8 @@ struct SidebarView: View {
                 .contextMenu {
                     syncProfileMenu(profile, id: id)
                 }
+                // Tracks and playlists add to the profile; the open page doesn't switch.
+                .dropTarget(.syncProfile(id: id, name: profile.name))
             }
         }
     }
@@ -503,6 +518,23 @@ struct SidebarView: View {
 private struct PendingPlaylistDeletion {
     let playlist: Playlist
     let confirmation: PlaylistDeletionConfirmation
+}
+
+/// The space below the sidebar's last row as a drop target (new playlist). Not a row: it can't
+/// be selected, has no background and is hidden from VoiceOver (New Playlist from Selection
+/// ⇧⌘N is the same without dragging).
+private struct SidebarEmptyDropArea: View {
+    static let height: CGFloat = 60
+
+    var body: some View {
+        Color.clear
+            .frame(maxWidth: .infinity, minHeight: Self.height)
+            .contentShape(Rectangle())
+            .dropTarget(.playlistsSection)
+            .selectionDisabled()
+            .listRowBackground(Color.clear)
+            .accessibilityHidden(true)
+    }
 }
 
 /// System section header with a ＋ that appears on hover (UC-SIDE-03). The header text stays

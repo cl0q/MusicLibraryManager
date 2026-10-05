@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// How one track table behaves in its context — the only thing a host writes besides feeding
 /// rows into a `TrackListModel`.
@@ -62,7 +63,8 @@ struct TrackListConfiguration {
     var removeFromContainer: ((Set<Int64>) -> Void)?
     /// The playlist rows are dragged from (reorder-aware drop targets).
     var dragSourcePlaylistID: Int64?
-    /// Drops/reorder into the list at a display index (W3-PL / W2-H seam).
+    /// Drops/reorder into the list at a display index (W3-PL / W2-H seam): the providers of
+    /// `insertableTypes`; load them with `DropLoader` and decide with `DropRules`.
     var onInsert: ((Int, [NSItemProvider], [TrackRow]) -> Void)?
     /// `Album` values link to the album (UC-TABLE-18). Seam: `nil` until W4-2's album pages.
     var openAlbum: ((TrackRow) -> Void)?
@@ -73,6 +75,28 @@ struct TrackListTotals: Equatable, Sendable {
     var count: Int
     /// Seconds.
     var duration: Int
+}
+
+// MARK: - Drag and drop (W2-H)
+
+extension TrackListConfiguration {
+    /// What a list with `onInsert` takes at the insertion line: tracks, playlists, Finder files,
+    /// links (the UC-DND matrix column "Playlist detail table").
+    static let insertableTypes: [UTType] = [.draggedTracks, .legacyTrackDrag, .draggedPlaylist, .fileURL, .url, .plainText]
+}
+
+/// The operations a drag out of a track list allows: inside MLM copy or move (reorder); outside
+/// MLM copy only — Finder copies, never moves or deletes a library file (UC-DND-02, data safety).
+enum TrackDragConfiguration {
+    static let rows = DragConfiguration(
+        operationsWithinApp: .init(allowCopy: true, allowMove: true, allowDelete: false),
+        operationsOutsideApp: .init(allowCopy: true, allowMove: false, allowDelete: false)
+    )
+    /// Single things (the player's cover, a playlist row): copy only.
+    static let copyOnly = DragConfiguration(
+        operationsWithinApp: .init(allowCopy: true, allowMove: false, allowDelete: false),
+        operationsOutsideApp: .init(allowCopy: true, allowMove: false, allowDelete: false)
+    )
 }
 
 // MARK: - Contexts

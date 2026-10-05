@@ -318,7 +318,6 @@ struct GrooveStudioView: View {
                                 .shadow(color: Color.black.opacity(0.03), radius: 4, x: 0, y: 2)
                             }
                             .buttonStyle(.plain)
-                            .springLoadableHover {}
                         }
                     }
                     .padding(24)
@@ -848,7 +847,6 @@ struct GrooveStudioView: View {
                         }
                         .buttonStyle(.plain)
                         .help("Remove reference track")
-                        .springLoadableHover {}
                     }
                     .padding(12)
                     .background(

@@ -126,6 +126,31 @@ final class ImportViewModel {
         await runImport(directory: directory, title: "Scan “\(directory.lastPathComponent)”")
     }
 
+    /// Import audio files dropped from Finder (W2-H): the same `Scan` operation as a folder,
+    /// counted in files. Queues behind a running import (one import lane).
+    ///
+    /// - Returns: the result, or nil when it didn't run (cancelled while queued, or failed).
+    @MainActor
+    @discardableResult
+    func importFiles(_ files: [URL], title: String) async -> ImportService.ImportResult? {
+        guard !files.isEmpty else { return nil }
+        return await runImport(directory: Self.commonFolder(of: files), files: files, title: title)
+    }
+
+    /// Imports run one at a time; a second one is `Queued` behind the running one instead of
+    /// overwriting its state (UC-JOB-03, PP-ACTIVITY-05).
+    static let lane = ActivityLane("imports")
+
+    /// The deepest folder that holds every file (the Activity subject of a file drop).
+    static func commonFolder(of files: [URL]) -> URL {
+        let paths = files.map { $0.deletingLastPathComponent().standardizedFileURL.pathComponents }
+        guard var common = paths.first else { return URL(fileURLWithPath: "/") }
+        for components in paths.dropFirst() {
+            common = zip(common, components).prefix { $0 == $1 }.map(\.0)
+        }
+        return URL(fileURLWithPath: NSString.path(withComponents: common.isEmpty ? ["/"] : common))
+    }
+
     /// Cancel the in-flight import (used by Settings-side Cancel and Activity panel).
     func cancelImport() {
         importTaskBox.task?.cancel()
@@ -141,32 +166,47 @@ final class ImportViewModel {
     // MARK: - Private
 
     @MainActor
-    private func runImport(directory: URL, title: String) async {
+    @discardableResult
+    private func runImport(directory: URL, files: [URL]? = nil, title: String) async -> ImportService.ImportResult? {
+        // Activity (W3-ACT): `Scan “‹folder›”`; Cancel stops after the current file and keeps
+        // what was imported (`ImportService` checks cancellation per file). One box per run, so
+        // cancelling a queued import never stops the running one (W2-H).
+        let box = TaskBox()
+        let job = activity?.begin(
+            .folderScan, title: title, subject: .folder(directory),
+            progress: files.map { ActivityProgress(completed: 0, total: $0.count, currentItem: nil) } ?? .indeterminate,
+            itemNoun: .file,
+            controls: ActivityControls(cancelStyle: .afterThisFile, cancel: { box.task?.cancel() }),
+            lane: Self.lane
+        )
+        // A second import waits for its turn instead of overwriting this view model's state.
+        if let job, !(await job.waitForTurn()) { return nil }
+
         isImporting = true
         errorMessage = nil
         lastResult = nil
         progress = nil
-
-        // Activity (W3-ACT): `Scan “‹folder›”`; Cancel stops after the current file and keeps
-        // what was imported (`ImportService` checks cancellation per file).
-        let box = importTaskBox
-        let job = activity?.begin(
-            .folderScan, title: title, subject: .folder(directory), itemNoun: .file,
-            controls: ActivityControls(cancelStyle: .afterThisFile, cancel: { box.task?.cancel() })
-        )
+        importTaskBox = box
         currentOperationID = job?.id
+        let outcome = ResultBox()
 
         let task = Task { [weak self] in
             guard let self else { return }
             do {
-                let result = try await self.importService.importDirectory(directory) { [weak self] progress in
+                let onProgress: @Sendable (ImportService.ImportProgress) -> Void = { [weak self] progress in
                     job?.update(ActivityProgress(completed: progress.processed, total: progress.total > 0 ? progress.total : nil,
                                                  currentItem: progress.currentFile ?? progress.phase))
                     Task { @MainActor in self?.progress = progress }
                 }
+                let result = if let files {
+                    try await self.importService.importFiles(files, onProgress: onProgress)
+                } else {
+                    try await self.importService.importDirectory(directory, onProgress: onProgress)
+                }
 
                 await MainActor.run {
                     self.lastResult = result
+                    outcome.result = result
                     self.progress = nil
 
                     if result.cancelled {
@@ -207,10 +247,25 @@ final class ImportViewModel {
         box.task = task
         job?.setControls(ActivityControls(
             cancelStyle: .afterThisFile, cancel: { box.task?.cancel() },
-            runAgain: { [weak self] in Task { @MainActor in await self?.importFromDirectory(directory) } }
+            runAgain: { [weak self] in
+                Task { @MainActor in
+                    if let files {
+                        await self?.importFiles(files, title: title)
+                    } else {
+                        await self?.importFromDirectory(directory)
+                    }
+                }
+            }
         ))
 
         await task.value
+        return outcome.result
+    }
+
+    /// The result of one run, read after its task ends (a queued run may already have reset
+    /// `lastResult` by the time a caller reads it).
+    private final class ResultBox: @unchecked Sendable {
+        var result: ImportService.ImportResult?
     }
 
     /// A failure in plain words: a missing folder (usually its drive) or the cause.

@@ -20,9 +20,10 @@ struct PlaylistTableReorderTests {
     // MARK: - PlaylistTable source-scan
 
     @Test func playlistTable_containsOnInsert() throws {
-        // W2-A: the shared table accepts track drops where the context hooks `onInsert`.
+        // W2-A: the shared table accepts drops where the context hooks `onInsert`; W2-H: tracks,
+        // playlists, Finder files and links (`insertableTypes`).
         let table = try readSource("MLM/Views/TrackList/TrackListTable.swift")
-        #expect(table.contains(".onInsert(of: configuration.onInsert == nil ? [] : [.trackDrag])"))
+        #expect(table.contains(".onInsert(of: configuration.onInsert == nil ? [] : TrackListConfiguration.insertableTypes)"))
         #expect(try readSource("MLM/Views/Playlists/PlaylistTable.swift").contains("onInsert: { index, providers, rows in"))
     }
 

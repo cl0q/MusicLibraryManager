@@ -95,6 +95,65 @@ final class ShellActions {
         }
     }
 
+    /// Finder files and folders dropped on MLM (D-LIB-FINDER-IN, W2-H): the same import as
+    /// Import Files or Folder… — one Activity operation (`Scan`, the import lane: it queues
+    /// behind a running import), whose start and end messages come from Activity (UC-JOB-08).
+    /// Folders are read for their audio files; other files are left out.
+    ///
+    /// - Returns: the dropped tracks' ids in drop order — imported now or already in the
+    ///   library — so a drop on a playlist can add them; empty when nothing could be imported.
+    @discardableResult
+    func importDropped(_ urls: [URL], intoPlaylist playlistName: String? = nil) async -> [Int64] {
+        let files = await Task.detached(priority: .userInitiated) { Self.audioFiles(in: urls) }.value
+        guard !files.isEmpty else {
+            statusBar.post(DropWords.notAudio(urls.map(\.lastPathComponent)))
+            return []
+        }
+        let isOneFolder = urls.count == 1 && (try? urls[0].resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+        let name = isOneFolder ? urls[0].lastPathComponent : nil
+        guard let viewModel = makeImportViewModel() else {
+            statusBar.post(Self.importUnavailableMessage(folder: name ?? urls[0].lastPathComponent))
+            return []
+        }
+        let title = DropWords.importTitle(files: files.count, folderName: name, playlist: playlistName)
+        guard await viewModel.importFiles(files, title: title) != nil,
+              let tracks = container.trackRepository else { return [] }
+        let known = (try? await tracks.fetchTracksByOriginalPaths(files.map(\.path))) ?? []
+        return Self.orderedIDs(of: known, paths: files.map(\.path))
+    }
+
+    /// The audio files of dropped items, in drop order: a folder's files sorted by path, a file
+    /// itself when it is audio. Reads only the dropped files and folders.
+    nonisolated static func audioFiles(in urls: [URL]) -> [URL] {
+        var files: [URL] = []
+        for url in urls {
+            let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+            if isDirectory, url.pathExtension.lowercased() != "mlibm" {
+                files.append(contentsOf: (try? ImportService.scanDirectory(url)) ?? [])
+            } else if MetadataExtractor.isAudioFile(url) {
+                files.append(url)
+            }
+        }
+        var seen = Set<String>()
+        return files.filter { seen.insert($0.standardizedFileURL.path).inserted }
+    }
+
+    /// Track ids in the order of `paths` (a track's original path, standardized).
+    nonisolated static func orderedIDs(of tracks: [Track], paths: [String]) -> [Int64] {
+        var byPath: [String: Int64] = [:]
+        for track in tracks {
+            guard let id = track.id else { continue }
+            let path = URL(fileURLWithPath: track.originalPath).standardizedFileURL.path
+            byPath[path] = id
+            byPath[path.precomposedStringWithCanonicalMapping] = id
+        }
+        var seen = Set<Int64>()
+        return paths.compactMap { path -> Int64? in
+            let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
+            return byPath[standardized] ?? byPath[standardized.precomposedStringWithCanonicalMapping]
+        }.filter { seen.insert($0).inserted }
+    }
+
     static func importUnavailableMessage(folder: String) -> String {
         "Couldn’t import “\(folder)” — the library isn’t ready yet"
     }

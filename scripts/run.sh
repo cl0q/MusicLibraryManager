@@ -126,6 +126,36 @@ cat > "${APP_BUNDLE}/Contents/Info.plist" <<'PLIST'
         </array>
       </dict>
     </dict>
+    <!-- Drag & drop payloads (W2-H, DEC-040, UC-DND-01): ids of tracks / a playlist inside
+         MLM. Files leave MLM as public.file-url, never under these types. -->
+    <dict>
+      <key>UTTypeIdentifier</key><string>com.ilczuk.mlm.track</string>
+      <key>UTTypeDescription</key><string>MLM Tracks</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>public.data</string>
+      </array>
+    </dict>
+    <dict>
+      <key>UTTypeIdentifier</key><string>com.ilczuk.mlm.playlist</string>
+      <key>UTTypeDescription</key><string>MLM Playlist</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>public.data</string>
+      </array>
+    </dict>
+  </array>
+  <!-- The track drag of builds before W2-H: still read, never written. -->
+  <key>UTImportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key><string>com.musiclibrary.trackdrag</string>
+      <key>UTTypeDescription</key><string>MLM Tracks (earlier version)</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>public.data</string>
+      </array>
+    </dict>
   </array>
   <!-- TODO(B1): dedicated .mlibm document icon; until then macOS derives one from the app icon. -->
   <key>CFBundleDocumentTypes</key>

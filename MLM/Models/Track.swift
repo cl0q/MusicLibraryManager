@@ -322,20 +322,13 @@ extension Track {
     }
 }
 
-// MARK: - Drag and Drop Transferable
+// MARK: - Drag and Drop
 
-/// Transferable representation for dragging tracks.
-struct TrackDragData: Codable, Transferable {
-    let trackId: Int64
-    let sourcePlaylistId: Int64? // nil if dragged from Library or Folders
-
-    static var transferRepresentation: some TransferRepresentation {
-        CodableRepresentation(contentType: .trackDrag)
-    }
-}
+// Track drags are `TrackDragItem` (MLM/Services/DragDrop/DragPayloads.swift, W2-H): internal
+// ids under the declared `com.ilczuk.mlm.track` plus the file URL of a local track.
 
 extension UTType {
-    static var trackDrag: UTType {
-        UTType("com.musiclibrary.trackdrag") ?? .data
-    }
+    /// The pre-W2-H track drag type, now declared (imported) in Info.plist. Read only: new
+    /// drags carry `UTType.draggedTracks`; `TrackDragItem` still decodes this shape.
+    static var trackDrag: UTType { .legacyTrackDrag }
 }

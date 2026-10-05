@@ -70,36 +70,64 @@ struct PlaylistTable: View {
         )
     }
 
-    // MARK: - Reorder and drops (kept from before W2-A)
+    // MARK: - Reorder and drops (D-PLD-REORDER, D-PLD-INSERT, W2-H)
+
+    @Environment(\.container) private var container
+    @Environment(ShellActions.self) private var shell: ShellActions?
+    @Environment(StatusBarCenter.self) private var statusBar: StatusBarCenter?
 
     private var isPlaylistOrder: Bool {
         list.sortOrder?.isContainerOrder ?? true
     }
 
-    private func handleInsert(at insertionIndex: Int, providers: [NSItemProvider], displayRows: [TrackRow]) {
-        Task { @MainActor in
-            var payloads: [TrackDragData] = []
-            for provider in providers {
-                let payload: TrackDragData? = await withCheckedContinuation { (continuation: CheckedContinuation<TrackDragData?, Never>) in
-                    _ = provider.loadTransferable(type: TrackDragData.self) { result in
-                        continuation.resume(returning: try? result.get())
-                    }
-                }
-                if let payload { payloads.append(payload) }
-            }
-            guard !payloads.isEmpty else { return }
+    /// The column the table is sorted by when it isn't in playlist order.
+    private var sortedBy: String? {
+        guard let order = list.sortOrder, !order.isContainerOrder else { return nil }
+        return order.column.title
+    }
 
-            let draggedIDs = payloads.map(\.trackId)
-            let allMembers = draggedIDs.allSatisfy { id in viewModel.tracks.contains { $0.id == id } }
-            // Reordering is off while sorted or filtered (UC-TABLE-05); drops from elsewhere
-            // still land (at the end when sorted).
-            if allMembers {
-                guard isPlaylistOrder, viewModel.searchFilter.isEmpty else { return }
+    /// A drop at the insertion line: the matrix column "Playlist detail table". Tracks and
+    /// playlists land at the line (or at the end while sorted) as one undo step with exact
+    /// positions; Finder files import and land there; an M3U shows its preview; a link goes to
+    /// Add from Link…. Reordering is off while sorted or filtered (UC-TABLE-05).
+    private func handleInsert(at insertionIndex: Int, providers: [NSItemProvider], displayRows: [TrackRow]) {
+        guard let playlistID = playlist.id else { return }
+        let name = viewModel.playlist.name
+        let target = DropTarget.playlistTable(id: playlistID, name: name, sortedBy: sortedBy)
+        let order = viewModel.tracks.compactMap(\.id)
+        let shown = displayRows.map(\.id)
+        let isPlaylistOrder = self.isPlaylistOrder
+        let isFiltered = !viewModel.searchFilter.isEmpty
+        let sortedBy = self.sortedBy
+        let performer = DropPerformer(container: container, shell: shell, statusBar: statusBar, undo: undo ?? .main)
+        Task { @MainActor in
+            guard let content = await DropLoader.load(providers) else { return }
+            let decision = DropRules.decide(content, onto: target, context: DropContext.current(container))
+            let place: ([Int64]) async -> Void = { ids in
+                guard let edits = shell?.edits, let plan = PlaylistDropPlan.make(
+                    trackIDs: ids, playlistOrder: order, displayRows: shown, insertionIndex: insertionIndex,
+                    isPlaylistOrder: isPlaylistOrder, isFiltered: isFiltered
+                ) else { return }
+                if plan.kind == .append {
+                    await edits.addTracks(plan.trackIDs, toPlaylist: playlistID,
+                                          messageSuffix: sortedBy.map(DropWords.appendedWhileSorted) ?? "")
+                } else {
+                    await edits.placeTracks(plan, inPlaylist: playlistID, name: name)
+                }
             }
-            let target = isPlaylistOrder
-                ? Self.targetTrackIndex(for: insertionIndex, displayRows: displayRows, tracks: viewModel.tracks)
-                : viewModel.tracks.count
-            await viewModel.placeTracks(draggedIDs, at: target)
+            switch decision {
+            case .placeTracks(let payload, _, _):
+                await place(payload.trackIDs)
+            case .placePlaylists(let ids, _, _):
+                guard let edits = shell?.edits else { return }
+                await place(await edits.tracks(ofPlaylists: ids))
+            case .importFilesAndPlace(let urls, _, _):
+                guard let shell else { return }
+                let ids = await shell.importDropped(urls, intoPlaylist: name)
+                if !ids.isEmpty { await place(ids) }
+            default:
+                performer.perform(decision)
+            }
         }
     }
 

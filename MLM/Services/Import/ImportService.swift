@@ -7,6 +7,23 @@ protocol ImportServicing: Sendable {
         _ directory: URL,
         onProgress: (@Sendable (ImportService.ImportProgress) -> Void)?
     ) async throws -> ImportService.ImportResult
+
+    /// Import these audio files (Finder files dropped on MLM, W2-H) — the same pipeline as a
+    /// directory after its scan.
+    func importFiles(
+        _ audioFiles: [URL],
+        onProgress: (@Sendable (ImportService.ImportProgress) -> Void)?
+    ) async throws -> ImportService.ImportResult
+}
+
+extension ImportServicing {
+    /// Services that only import directories (test fakes) import no loose files.
+    func importFiles(
+        _ audioFiles: [URL],
+        onProgress: (@Sendable (ImportService.ImportProgress) -> Void)?
+    ) async throws -> ImportService.ImportResult {
+        throw ImportService.ImportError.noAudioFiles
+    }
 }
 
 /// Recursive directory scanner and batch importer.
@@ -140,7 +157,15 @@ final class ImportService: Sendable {
         onProgress?(ImportProgress(total: 0, processed: 0, phase: "Scanning...", currentFile: nil))
         let audioFiles = try Self.scanDirectory(directory)
         try Task.checkCancellation()
+        return try await importFiles(audioFiles, onProgress: onProgress)
+    }
 
+    /// Phases 2–4 for a list of audio files (a scanned directory, or files dropped from Finder):
+    /// extract, sanitize, insert. Files already in the library are skipped and counted.
+    func importFiles(
+        _ audioFiles: [URL],
+        onProgress: (@Sendable (ImportProgress) -> Void)? = nil
+    ) async throws -> ImportResult {
         guard !audioFiles.isEmpty else {
             return ImportResult(succeeded: 0, failed: 0, skipped: 0, failures: [], totalScanned: 0, cancelled: false, committed: 0)
         }

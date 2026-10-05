@@ -193,13 +193,18 @@ private struct TrackTableCore: View {
             }
         } rows: {
             ForEach(model.isLoaded ? model.rows : TrackTablePlaceholders.rows) { row in
+                // Ids + the file URL of a local, reachable track (UC-DND-01/02), built when the
+                // drag starts (the payload is an autoclosure): no disk access. A drag of a
+                // selected row carries every selected row, in display order (one item each).
                 TableRow(row)
-                    .draggable(TrackDragData(trackId: row.id, sourcePlaylistId: configuration.dragSourcePlaylistID))
+                    .draggable(dragItem(row))
             }
-            .onInsert(of: configuration.onInsert == nil ? [] : [.trackDrag]) { index, providers in
+            .onInsert(of: configuration.onInsert == nil ? [] : TrackListConfiguration.insertableTypes) { index, providers in
                 configuration.onInsert?(index, providers, model.rows)
             }
         }
+        // Out of MLM a drag copies — Finder, Mail and DJ software never move a library file.
+        .dragConfiguration(TrackDragConfiguration.rows)
         .contextMenu(forSelectionType: Int64.self) { ids in
             menu(for: ids)
         } primaryAction: { ids in
@@ -217,6 +222,13 @@ private struct TrackTableCore: View {
         .redacted(reason: model.isLoaded ? [] : .placeholder)
         .allowsHitTesting(model.isLoaded)
         .accessibilityIdentifier(configuration.accessibilityID)
+    }
+
+    @Environment(\.container) private var container
+
+    private func dragItem(_ row: TrackRow) -> TrackDragItem {
+        TrackDragContext.current(container).item(for: row, sourcePlaylistID: configuration.dragSourcePlaylistID)
+            ?? TrackDragItem(trackId: row.id, sourcePlaylistId: configuration.dragSourcePlaylistID, libraryId: nil)
     }
 
     @ViewBuilder

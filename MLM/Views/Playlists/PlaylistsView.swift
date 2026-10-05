@@ -145,13 +145,6 @@ struct PlaylistsView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            // UI-SPEC line 174: drop-rejected banner — appears when a non-image
-            // payload is dropped on a card; auto-clears after 4s.
-            if let dropError = viewModel.coverDropErrorMessage {
-                coverDropErrorBanner(message: dropError)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-
             Divider()
                 .background(Color.mlmEdge)
 
@@ -164,7 +157,6 @@ struct PlaylistsView: View {
         }
         .background(Color.mlmBase)
         .animation(.easeInOut(duration: 0.2), value: viewModel.pinLimitHintMessage)
-        .animation(.easeInOut(duration: 0.2), value: viewModel.coverDropErrorMessage)
     }
 
     // MARK: - Header
@@ -352,6 +344,9 @@ struct PlaylistsView: View {
             }
             .padding(16)
         }
+        // The grid's background: a new playlist from dropped tracks (D-PL-SELECTION-TO-NEW);
+        // the cards take their own drops.
+        .dropTarget(.playlistsSection, cornerRadius: 0)
     }
 
     // MARK: - Empty State
@@ -431,35 +426,6 @@ struct PlaylistsView: View {
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("pin_limit_banner")
         .accessibilityLabel("Pin limit reached (8). Unpin one first.")
-    }
-
-    /// Drop-rejected banner (UI-SPEC line 174). Same visual structure as the
-    /// pin-limit banner, single line of body, octagon-X glyph. Auto-dismiss
-    /// is owned by `PlaylistViewModel.flagCoverDropRejected` (4s).
-    @ViewBuilder
-    private func coverDropErrorBanner(message: String) -> some View {
-        HStack(spacing: 8) {
-            Rectangle()
-                .fill(Color.mlmWarning)
-                .frame(width: 3)
-                .frame(maxHeight: .infinity)
-
-            Image(systemName: "xmark.octagon.fill")
-                .font(.system(size: 14))
-                .foregroundColor(.mlmWarning)
-                .padding(.leading, 4)
-
-            Text(message)
-                .font(MLMFont.body)
-                .foregroundColor(.mlmInk)
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.mlmRaised)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("cover_drop_banner")
-        .accessibilityLabel("Cover drop rejected. \(message)")
     }
 
     // MARK: - Initialization
@@ -574,52 +540,17 @@ private struct PlaylistsGridCard: View {
                 showFailedTracksWhenOpened = false
                 selectedPlaylist = playlist
             },
-            onCoverDropped: { url in
-                guard let pid = playlist.id else { return }
-                await container.playlistCoverService?.setCustomCover(
-                    playlistId: pid,
-                    sourceURL: url
-                )
-            },
             onResetCover: {
                 guard let pid = playlist.id else { return }
                 Task {
                     await container.playlistCoverService?.resetToAuto(playlistId: pid)
                 }
             },
-            onCoverDropRejected: {
-                viewModel.flagCoverDropRejected()
-            },
             availableSyncProfiles: availableSyncProfiles,
             onAddToSyncProfile: { profile, playlistId in
                 Task {
                     container.syncViewModel?.selectedProfile = profile
                     await container.syncViewModel?.addPlaylists([playlistId])
-                }
-            },
-            onTracksDropped: { trackIds in
-                guard let pid = playlist.id,
-                      let playlistRepo = container.playlistRepository else { return }
-                do {
-                    let existingTracks = try await playlistRepo.fetchTracks(playlistId: pid)
-                    let lastPos = existingTracks.last?.playlistPosition
-                    let nextPos = FractionalIndexer.positionBetween(left: lastPos, right: nil)
-                    
-                    try await playlistRepo.addTracks(
-                        playlistId: pid,
-                        trackIds: trackIds,
-                        startPosition: nextPos
-                    )
-                    
-                    NotificationCenter.default.post(
-                        name: .playlistDidChange,
-                        object: nil,
-                        userInfo: ["playlistId": pid]
-                    )
-                    
-                    await viewModel.loadPlaylists()
-                } catch {
-                    AppLogger.shared.error("Failed to add dropped tracks: \(error.localizedDescription)", source: "PlaylistsView")
                 }
             },
             onDownloadMissing: {

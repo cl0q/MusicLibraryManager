@@ -69,8 +69,9 @@ private struct QueuePanelList: View {
                         .itemProvider { Self.provider(for: item) }
                 }
                 // The top of the panel: tracks dropped here play next (P-QUEUE.N12).
-                .dropDestination(for: QueueRowDrag.self) { items, _ in
-                    QueueEditCommands.drop(items, at: QueueDropTarget.position(.top), playback: playback, undo: undo,
+                .dropDestination(for: TrackDragItem.self) { items, _ in
+                    QueueEditCommands.drop(TrackDragPayload.queueRows(items, container: container),
+                                           at: QueueDropTarget.position(.top), playback: playback, undo: undo,
                                            container: container)
                 }
                 if content.nowPlaying == nil {
@@ -82,8 +83,9 @@ private struct QueuePanelList: View {
                     nextRow(item, content: content, live: live)
                 }
                 // Named by the row the line sits next to, resolved when the drop applies.
-                .dropDestination(for: QueueRowDrag.self) { items, offset in
-                    QueueEditCommands.drop(items, at: content.dropTarget(forDropAt: offset), playback: playback,
+                .dropDestination(for: TrackDragItem.self) { items, offset in
+                    QueueEditCommands.drop(TrackDragPayload.queueRows(items, container: container),
+                                           at: content.dropTarget(forDropAt: offset), playback: playback,
                                            undo: undo, container: container)
                 }
             } header: {
@@ -411,8 +413,10 @@ private struct QueuePanelList: View {
     /// A row drags as its track (playlists, the sidebar) and, inside the panel, as its entry.
     static func provider(for item: QueuePanelRow) -> NSItemProvider {
         let provider = NSItemProvider()
-        let payload = QueueRowDrag(trackId: item.row.id, sourcePlaylistId: nil, queueEntryId: item.id)
-        provider.register(payload)
+        // W2-H: the shared track payload (ids + the entry + the local file, UC-DND-01).
+        let context = MainActor.assumeIsolated { TrackDragContext.current(.shared) }
+        provider.register(context.item(for: item.row.track, availability: item.row.availability, queueEntryID: item.id)
+            ?? TrackDragItem(trackId: item.row.id, queueEntryId: item.id, libraryId: nil))
         return provider
     }
 }
