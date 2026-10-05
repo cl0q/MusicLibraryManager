@@ -39,6 +39,10 @@ struct TagWriteRulesTests {
             try await db.write { try $0.execute(sql: "INSERT INTO app_config (key, value) VALUES ('write_tags_to_files', '1')") }
         }
         let ids = try TrackTagRepositoryTests.seed(db, count: 1) { _ in "Artist/0.\(kind.fileExtension)" }
+        // The row describes this file (format, duration) — the writer checks it is the track's (S2).
+        var columns = columns
+        columns["format"] = columns["format"] ?? kind.fileExtension
+        columns["duration"] = columns["duration"] ?? 2
         for (column, value) in columns {
             try await db.write { try $0.execute(sql: "UPDATE tracks SET \(column) = ? WHERE id = ?", arguments: [value, ids[0]]) }
         }
@@ -54,7 +58,6 @@ struct TagWriteRulesTests {
             libraryRoot: { root.path },
             isEnabled: { await TagWriteSetting.isEnabled(config) },
             writer: TrackTagWriter(),
-            fileMissing: { _ in },
             statusBar: { status }
         ))
         let edit = TrackTagEdit(dependencies: .init(
