@@ -29,6 +29,9 @@ struct PlaybackEnvironment {
     var dropOffset: @MainActor (Int64) async -> Double?
     /// Volume, Repeat, history size and context cap live here (app-wide).
     var defaults: UserDefaults
+    /// Listen to the app's disk and availability notifications (live only — tests call
+    /// `reevaluateCantPlay` themselves, so a parallel test's notification can't reach them).
+    var observesNotifications = true
 
     static func live(configRepository: ConfigRepository?) -> PlaybackEnvironment {
         PlaybackEnvironment(
@@ -49,7 +52,8 @@ struct PlaybackEnvironment {
                 return byID
             },
             dropOffset: { id in (try? await TrackLocateRepository.live()?.dropOffset(trackID: id)) ?? nil },
-            defaults: .standard
+            defaults: .standard,
+            observesNotifications: true
         )
     }
 }
@@ -271,7 +275,9 @@ final class PlaybackViewModel {
         }
         // `Can’t play — …` is judged again when the disk returns or availability changes (S10).
         // (The disk going away is decided by the window's drive handling, `endPreviewForDiskLoss`.)
-        for name in [Notification.Name.libraryDriveDidMount, .trackAvailabilityDidChange] {
+        let names: [Notification.Name] = self.environment.observesNotifications
+            ? [.libraryDriveDidMount, .trackAvailabilityDidChange] : []
+        for name in names {
             observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
                 let diskReturned = note.name == .libraryDriveDidMount
                 MainActor.assumeIsolated { self?.reevaluateCantPlay(diskReturned: diskReturned) }

@@ -123,7 +123,8 @@ final class PlaybackTestEnvironment {
                 return self.fresh.filter { ids.contains($0.key) }
             },
             dropOffset: { [unowned self] id in self.drops[id] },
-            defaults: defaults
+            defaults: defaults,
+            observesNotifications: false
         )
     }
 }
