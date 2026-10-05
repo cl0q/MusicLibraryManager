@@ -1,57 +1,12 @@
 import SwiftUI
 
-/// 5-bar energy visualization for the library table.
-///
-/// Renders the LUFS-derived `energyBucket` (1–5) as accent-color bars.
-///
-/// - Level 1: accent at 25% opacity
-/// - Level 5: accent at 100% opacity
-///
-/// Nil energy shows "—" placeholder.
+/// Energy (the LUFS-derived `energyBucket`, 1–5) as the quiet meter of UC-TABLE-14 / DEC-046:
+/// number + 5 steps in `.secondary` / `.quaternary`, `—` when not analysed. Track tables use
+/// `TrackMeter` directly; this name stays for Folders and Info.
 struct EnergyBars: View {
     let level: Int?
 
-    /// Bar heights for the 5 positions (symmetric mountain shape).
-    private static let barHeights: [CGFloat] = [8, 12, 16, 12, 8]
-
-    /// Width of each bar.
-    private static let barWidth: CGFloat = 4
-
-    /// Spacing between bars.
-    private static let barSpacing: CGFloat = 2
-
     var body: some View {
-        if let level, level >= 1, level <= 5 {
-            HStack(alignment: .bottom, spacing: Self.barSpacing) {
-                ForEach(0..<5, id: \.self) { index in
-                    RoundedRectangle(cornerRadius: 1)
-                        .fill(index < level ? colorForLevel(level) : Color(nsColor: .quaternaryLabelColor))
-                        .frame(width: Self.barWidth, height: Self.barHeights[index])
-                }
-            }
-            .frame(height: 16)
-        } else {
-            Text("—").foregroundStyle(.tertiary)
-        }
+        TrackMeter(level: level)
     }
-
-    /// Color for the entire bar group based on its energy level.
-    private func colorForLevel(_ level: Int) -> Color {
-        .mlmAccent.opacity(Color.mlmEnergyOpacity(for: level))
-    }
-}
-
-// MARK: - Preview
-
-#Preview("Energy Bars") {
-    VStack(alignment: .leading, spacing: 12) {
-        ForEach(0..<6, id: \.self) { level in
-            HStack {
-                Text("Level \(level)")
-                    .frame(width: 60, alignment: .leading)
-                EnergyBars(level: level == 0 ? nil : level)
-            }
-        }
-    }
-    .padding()
 }

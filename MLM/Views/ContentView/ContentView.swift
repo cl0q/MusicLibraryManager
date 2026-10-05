@@ -532,24 +532,12 @@ private struct AllTracksHost: View {
     let onTrackActivated: TrackActivation
 
     var body: some View {
+        // The status-bar text (counts, selection) is declared by the track table (W2-A).
         ContentScaffold(showsDriveBanner: true) {
             LibraryHost(onTrackDoubleClick: onTrackActivated)
                 .equatable()
-                .background {
-                    LibraryCountsReporter()
-                }
         }
         .modifier(WindowTitleModifier())
-    }
-}
-
-/// Declares All Tracks' status-bar text from the library view model's loaded rows.
-private struct LibraryCountsReporter: View {
-    @Environment(\.container) private var container
-
-    var body: some View {
-        Color.clear
-            .statusBarText(container.libraryViewModel.map { StatusBarText.tracks($0.displayedTracks.count) })
     }
 }
 

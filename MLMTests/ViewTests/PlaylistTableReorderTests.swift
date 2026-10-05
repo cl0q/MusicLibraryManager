@@ -20,8 +20,10 @@ struct PlaylistTableReorderTests {
     // MARK: - PlaylistTable source-scan
 
     @Test func playlistTable_containsOnInsert() throws {
-        let src = try readSource("MLM/Views/Playlists/PlaylistTable.swift")
-        #expect(src.contains(".onInsert(of: [.trackDrag])"))
+        // W2-A: the shared table accepts track drops where the context hooks `onInsert`.
+        let table = try readSource("MLM/Views/TrackList/TrackListTable.swift")
+        #expect(table.contains(".onInsert(of: configuration.onInsert == nil ? [] : [.trackDrag])"))
+        #expect(try readSource("MLM/Views/Playlists/PlaylistTable.swift").contains("onInsert: { index, providers, rows in"))
     }
 
     @Test func playlistTable_containsPlaceTracks() throws {
@@ -30,8 +32,10 @@ struct PlaylistTableReorderTests {
     }
 
     @Test func playlistTable_containsAccessibilityIdentifier() throws {
-        let src = try readSource("MLM/Views/Playlists/PlaylistTable.swift")
-        #expect(src.contains("playlist_track_table"))
+        // The playlist context of the shared table carries the id (W2-A).
+        let configuration = try readSource("MLM/Views/TrackList/TrackListConfiguration.swift")
+        #expect(configuration.contains("accessibilityID: \"playlist_track_table\""))
+        #expect(try readSource("MLM/Views/Playlists/PlaylistTable.swift").contains("return .playlist("))
     }
 
     @Test func playlistTable_doesNotContainDropDestination() throws {

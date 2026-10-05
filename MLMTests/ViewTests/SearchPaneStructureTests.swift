@@ -28,7 +28,9 @@ struct SearchPaneStructureTests {
 
     @Test func viewUsesTrackTable() throws {
         let source = try read(Self.viewPath)
-        #expect(source.contains("TrackTable("))
+        // W2-A: the shared track table in its search-results context.
+        #expect(source.contains("TrackListTable("))
+        #expect(source.contains(".searchResults"))
     }
 
     @Test func viewUsesTopAlignment() throws {
@@ -37,8 +39,12 @@ struct SearchPaneStructureTests {
     }
 
     @Test func viewUsesSearchResultsTableAccessibilityID() throws {
-        let source = try read(Self.viewPath)
-        #expect(source.contains("search_results_table"))
+        // The id belongs to the search-results configuration of the shared table (W2-A).
+        let configuration = try read(
+            URL(fileURLWithPath: Self.viewPath).deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("TrackList/TrackListConfiguration.swift").path)
+        #expect(configuration.contains("accessibilityID: \"search_results_table\""))
+        #expect(try read(Self.viewPath).contains(".searchResults"))
     }
 
     @Test func viewDoesNotContainDownloadArrowIcon() throws {

@@ -23,8 +23,10 @@ struct NowPlayingSyncTests {
     }
 
     private static let contentViewPath = "MLM/Views/ContentView/ContentView.swift"
-    private static let trackTablePath = "MLM/Views/Library/TrackTable.swift"
-    private static let playlistTablePath = "MLM/Views/Playlists/PlaylistTable.swift"
+    /// W2-A: every track list (All Tracks, playlist, search, queue) draws its rows with the
+    /// shared `TrackCell`, so the now-playing rules are checked there once (UC-TABLE-16).
+    private static let trackTablePath = "MLM/Views/TrackList/TrackCell.swift"
+    private static let playlistTablePath = "MLM/Views/TrackList/TrackCell.swift"
     private static let foldersViewPath = "MLM/Views/Folders/FoldersView.swift"
 
     // MARK: - Task B (revised): Info never follows the playing track
@@ -51,19 +53,19 @@ struct NowPlayingSyncTests {
     @Test
     func trackTable_appliesAccentForegroundStyle() throws {
         let src = try readSource(Self.trackTablePath)
-        #expect(src.contains("Color.mlmAccent"),
-                "TrackTable must use Color.mlmAccent for now-playing highlight")
-        #expect(src.contains("foregroundStyle(isNowPlaying(track)"),
-                "TrackTable title must apply conditional foregroundStyle based on isNowPlaying")
+        #expect(src.contains(".foregroundStyle(.tint)"),
+                "The now-playing glyph uses the accent (.tint, UC-TABLE-16)")
+        #expect(src.contains("if presentation.isNowPlaying { return AnyShapeStyle(.tint) }"),
+                "The now-playing title is drawn in the accent")
     }
 
     @Test
     func playlistTable_appliesAccentForegroundStyle() throws {
         let src = try readSource(Self.playlistTablePath)
-        #expect(src.contains("Color.mlmAccent"),
-                "PlaylistTable must use Color.mlmAccent for now-playing highlight")
-        #expect(src.contains("foregroundStyle(isPlaying"),
-                "PlaylistTable title cell must apply conditional foregroundStyle based on isPlaying")
+        #expect(src.contains(".symbolEffect(.variableColor.iterative, isActive: live.isPlaying)"),
+                "The glyph animates while playing and is static while paused (UC-TABLE-16)")
+        #expect(try readSource("MLM/Views/Playlists/PlaylistTable.swift").contains("TrackListTable("),
+                "The playlist table is the shared table")
     }
 
     @Test

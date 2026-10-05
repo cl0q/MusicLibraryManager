@@ -64,7 +64,8 @@ struct TransportStructureTests {
 
     @Test
     func trackContextMenu_containsPlayNext() throws {
-        let src = try readSource("MLM/Views/Library/TrackContextMenu.swift")
+        // The one track menu builder (W2-A).
+        let src = try readSource("MLM/Views/TrackList/TrackMenu.swift")
         #expect(src.contains("Play Next"))
     }
 }

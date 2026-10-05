@@ -1585,6 +1585,19 @@ final class TrackRepository: Sendable {
         }
     }
 
+    /// Count and total duration of what All Tracks shows for a tab and search (status bar).
+    func libraryTotals(tab: LibraryTab, search: String? = nil) async throws -> TrackListTotals {
+        var (conditions, arguments) = Self.searchConditions(search)
+        conditions.insert(tab == .local ? "organized_path IS NOT NULL" : "organized_path IS NULL", at: 0)
+        let sql = "SELECT COUNT(*) AS n, COALESCE(SUM(COALESCE(duration, 0)), 0) AS d FROM tracks WHERE "
+            + conditions.joined(separator: " AND ")
+        let finalArguments = arguments
+        return try await database.read { db in
+            let row = try Row.fetchOne(db, sql: sql, arguments: finalArguments)
+            return TrackListTotals(count: row?["n"] ?? 0, duration: row?["d"] ?? 0)
+        }
+    }
+
     /// Tracks of one availability scope (W2-B's scope bar), optionally searched. Order is the
     /// table's job (in-memory sort, `TrackListModel`); rows come back by id.
     func fetchTracks(scope: TrackAvailabilityScope, search: String? = nil) async throws -> [Track] {
@@ -1696,6 +1709,21 @@ final class TrackRepository: Sendable {
                 arguments: [stamp, trackId]
             )
             return db.changesCount > 0
+        }
+    }
+
+    /// The membership rows of these tracks in a playlist (for an undoable removal: exactly
+    /// these rows go, `PlaylistRepository.restoreEntries` brings them back).
+    func fetchPlaylistEntries(playlistId: Int64, trackIds: Set<Int64>) async throws -> [PlaylistTrack] {
+        guard !trackIds.isEmpty else { return [] }
+        let ids = Array(trackIds).sorted()
+        let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ", ")
+        return try await database.read { db in
+            try PlaylistTrack.fetchAll(
+                db,
+                sql: "SELECT * FROM playlist_tracks WHERE playlist_id = ? AND track_id IN (\(placeholders)) ORDER BY position, id",
+                arguments: StatementArguments([playlistId] + ids)
+            )
         }
     }
 

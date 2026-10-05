@@ -144,23 +144,11 @@ enum SnapshotFixtures {
             backend: .appKit,
             expectedTableRows: 5,
             makeView: { store in
-                let tracks = try store.tracksForRendering()
-                let availability = SnapshotFixtureData.availability(for: tracks)
-                let model = LibraryViewModel(
-                    trackRepository: try SnapshotFixtures.require(
-                        store.container.trackRepository, named: "track repository"
-                    ),
-                    configRepository: try SnapshotFixtures.require(
-                        store.container.configRepository, named: "config repository"
-                    ),
-                    preloadedTracks: tracks,
-                    selectedTab: .local,
-                    availabilityByTrackID: availability
-                )
-                return AnyView(LibraryTable(
-                    viewModel: model,
-                    availablePlaylists: try store.playlists()
-                ))
+                let model = TrackListModel(sortOrder: nil)
+                model.setTracksNow(SnapshotFixtureData.persisted(try store.tracksForRendering()))
+                return AnyView(TrackListTable(model: model, configuration: .allTracks(activate: nil, totals: nil)) {
+                    EmptyView()
+                })
             }
         ),
         Fixture(
@@ -169,16 +157,11 @@ enum SnapshotFixtures {
             backend: .appKit,
             expectedTableRows: 5,
             makeView: { store in
-                let tracks = try store.tracksForRendering()
-                return AnyView(TrackTable(
-                    rows: tracks.compactMap { track in
-                        track.id.map { TrackTable.Row(id: $0, track: track) }
-                    },
-                    selection: .constant([]),
-                    availabilityByTrackID: SnapshotFixtureData.availability(for: tracks),
-                    availablePlaylists: try store.playlists(),
-                    emptyContent: { EmptyView() }
-                ))
+                let model = TrackListModel(sortOrder: nil)
+                model.setTracksNow(SnapshotFixtureData.persisted(try store.tracksForRendering()))
+                return AnyView(TrackListTable(model: model, configuration: .searchResults(activate: nil)) {
+                    EmptyView()
+                })
             }
         ),
         Fixture(
@@ -206,12 +189,7 @@ enum SnapshotFixtures {
                     preloadedTracks: tracks,
                     availabilityByTrackID: SnapshotFixtureData.availability(for: tracks)
                 )
-                return AnyView(PlaylistTable(
-                    playlist: playlist,
-                    viewModel: model,
-                    availablePlaylists: try store.playlists(),
-                    onRemoveTracks: { _ in }
-                ))
+                return AnyView(PlaylistTable(playlist: playlist, viewModel: model))
             }
         ),
         Fixture(
@@ -274,16 +252,17 @@ enum SnapshotFixtures {
             return AnyView(DebugTabView(track: track, preloadedMissingLocalFile: true).padding(16))
         }),
         Fixture(id: "track-table-empty", size: .init(width: 900, height: 400), makeView: { _ in
-            AnyView(TrackTable(rows: [], selection: .constant([]), emptyContent: {
+            let model = TrackListModel(sortOrder: nil)
+            model.setTracksNow([])
+            return AnyView(TrackListTable(model: model, configuration: .searchResults(activate: nil)) {
                 ContentUnavailableView("No tracks", systemImage: "music.note")
-            }))
+            })
         }),
-        Fixture(id: "track-table-error", size: .init(width: 900, height: 400), makeView: { _ in
-            AnyView(TrackTable(
-                rows: [], selection: .constant([]),
-                errorMessage: "The library could not be read. Try again.",
-                emptyContent: { EmptyView() }
-            ))
+        // First load: redacted placeholder rows under the real header (UC-TABLE-09), no spinner.
+        Fixture(id: "track-table-first-load", size: .init(width: 900, height: 400), backend: .appKit, makeView: { _ in
+            AnyView(TrackListTable(model: TrackListModel(sortOrder: nil), configuration: .searchResults(activate: nil)) {
+                EmptyView()
+            })
         }),
         Fixture(id: "status-chip-download-failed", size: .init(width: 300, height: 100), makeView: { _ in
             AnyView(try require(StatusChip(availability: .failed(
@@ -306,8 +285,7 @@ enum SnapshotFixtures {
                 let model = LibraryViewModel(
                     trackRepository: try require(store.container.trackRepository, named: "track repository"),
                     configRepository: try require(store.container.configRepository, named: "config repository"),
-                    preloadedTracks: localTracks,
-                    availabilityByTrackID: SnapshotFixtureData.availability(for: localTracks),
+                    preloadedTracks: SnapshotFixtureData.persisted(localTracks),
                     localCount: allTracks.filter(\.isLocal).count,
                     remoteCount: allTracks.filter(\.isRemote).count
                 )
@@ -327,8 +305,9 @@ enum SnapshotFixtures {
     static let renderedPaths: Set<String> = [
         "Discover/DiscoverView.swift", "DiscoveryInbox/DiscoveryInboxView.swift",
         "Folders/FoldersView.swift", "Library/DanceabilitySteps.swift",
-        "Library/EnergyBars.swift", "Library/LibraryTable.swift", "Library/LibraryView.swift",
-        "Library/TrackTable.swift", "Playlists/PlaylistCard.swift",
+        "Library/EnergyBars.swift", "Library/LibraryView.swift",
+        "TrackList/TrackListTable.swift", "TrackList/TrackCell.swift", "TrackList/TrackRowPresentation.swift",
+        "Playlists/PlaylistCard.swift",
         "Playlists/PlaylistTable.swift", "Queue/PlaybackQueueView.swift",
         "ReviewQueue/ReviewQueueView.swift",
         "Shared/SelectionCreationSheets.swift", "Shared/StatusChip.swift",
@@ -344,7 +323,14 @@ enum SnapshotFixtures {
         "Activity/LogFeed.swift": "Non-view: log query model.",
         "Activity/LogTextRenderer.swift": "Non-view: attributed-text helper.",
         "Shared/DownloadRetryBudget.swift": "Non-view: retry helper.",
-        "Shared/TrackPresentationAvailability.swift": "Non-view: availability mapper; explicit states are rendered by tables/chips.",
+        "TrackList/TrackColumn.swift": "Non-view: track-table column ids and sort order (W2-A).",
+        "TrackList/TrackRow.swift": "Non-view: track-table row model, builder and sorter (W2-A).",
+        "TrackList/TrackListModel.swift": "Non-view: track-table rows, sort and selection (W2-A).",
+        "TrackList/TrackListConfiguration.swift": "Non-view: per-context table configuration and focused values (W2-A).",
+        "TrackList/TrackListActions.swift": "Non-view: track-table actions and undoable playlist removal (W2-A).",
+        "TrackList/TrackMenuModel.swift": "Non-view: track menu items in DEC-039 order (W2-A).",
+        "TrackList/TrackPrimaryAction.swift": "Non-view: primary action per row kind and play-when-ready (W2-A).",
+        "TrackList/TrackMenu.swift": "Deferred: menus require interactive presentation; current bitmap hosts do not open them.",
         "Sync/Pickers/PlaylistPickerModel.swift": "Non-view: selection model.",
         "TrackDetail/WaveformHelpers.swift": "Non-view: waveform math; production WaveformView is captured.",
         "Activity/ActivityPanel.swift": "Deferred: persisted AppStorage and live global operation state need injected preferences/feed.",
@@ -415,10 +401,8 @@ Folders/FoldersView.swift
 Folders/FolderTreeView.swift
 Library/DanceabilitySteps.swift
 Library/EnergyBars.swift
-Library/LibraryTable.swift
 Library/LibraryView.swift
 Library/TrackContextMenu.swift
-Library/TrackTable.swift
 Player/PlayerBar.swift
 Playlists/PlaylistCard.swift
 Playlists/PlaylistDetailView.swift
@@ -448,7 +432,6 @@ Shared/SpringLoadableHover.swift
 Shared/StatusChip.swift
 Shared/TrackCoverView.swift
 Shared/TrackMetadataPresentation.swift
-Shared/TrackPresentationAvailability.swift
 Shell/ContentScaffold.swift
 Shell/DestinationView.swift
 Shell/NavigationModel.swift
@@ -484,6 +467,17 @@ TrackDetail/MetadataPanel.swift
 TrackDetail/TrackDetailView.swift
 TrackDetail/WaveformHelpers.swift
 TrackDetail/WaveformView.swift
+TrackList/TrackCell.swift
+TrackList/TrackColumn.swift
+TrackList/TrackListActions.swift
+TrackList/TrackListConfiguration.swift
+TrackList/TrackListModel.swift
+TrackList/TrackListTable.swift
+TrackList/TrackMenu.swift
+TrackList/TrackMenuModel.swift
+TrackList/TrackPrimaryAction.swift
+TrackList/TrackRow.swift
+TrackList/TrackRowPresentation.swift
 """.split(separator: "\n").map(String.init)
 
     private static func require<T>(_ value: T?, named name: String) throws -> T {
@@ -507,6 +501,18 @@ enum SnapshotFixtureError: LocalizedError {
 
 @MainActor
 private enum SnapshotFixtureData {
+    /// The fixture's tracks with the persisted file fact the availability states need (v42):
+    /// `Offline File` is File missing.
+    static func persisted(_ tracks: [Track]) -> [Track] {
+        tracks.map { track in
+            var track = track
+            if track.title == "Offline File", track.organizedPath != nil {
+                track.fileMissingSince = "2026-10-05T10:00:00Z"
+            }
+            return track
+        }
+    }
+
     static func availability(for tracks: [Track]) -> [Int64: TrackAvailability] {
         Dictionary(uniqueKeysWithValues: tracks.compactMap { track in
             guard let id = track.id else { return nil }

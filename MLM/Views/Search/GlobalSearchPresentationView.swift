@@ -12,9 +12,8 @@ struct GlobalSearchPresentationView: View {
 
     @State private var viewModel: GlobalSearchPresentationViewModel?
     @State private var scope: GlobalSearchPresentationViewModel.Scope = .library
-    @State private var selection: Set<Int64> = []
-    @State private var availablePlaylists: [Playlist] = []
-    @State private var availableSyncProfiles: [SyncProfile] = []
+    /// The results table's rows, sort and selection (Add to ▸ menus come from `TrackMenuSources`).
+    @State private var results = TrackListModel(sortOrder: nil)
 
     var body: some View {
         Group {
@@ -56,10 +55,6 @@ struct GlobalSearchPresentationView: View {
         }
         .task(id: requestID) {
             await viewModel.search(query: query, scope: scope)
-        }
-        .task {
-            await reloadPlaylists()
-            await reloadSyncProfiles()
         }
     }
 
@@ -119,27 +114,22 @@ struct GlobalSearchPresentationView: View {
                 }
             }
 
-            TrackTable(
-                rows: viewModel.results.compactMap { track in
-                    track.id.map { TrackTable.Row(id: $0, track: track) }
-                },
-                selection: $selection,
-                onDoubleClick: { track, queue in
+            // The shared track table (W2-A); W2-I replaces this pane with in-place filtering.
+            TrackListTable(
+                model: results,
+                configuration: .searchResults { track, queue in
                     if let onTrackDoubleClick {
                         onTrackDoubleClick(track, queue)
                     } else {
                         defaultPlay(track, queue: queue)
                     }
-                },
-                availablePlaylists: availablePlaylists,
-                availableSyncProfiles: availableSyncProfiles,
-                isLoading: viewModel.isSearching,
-                emptyContent: {
-                    ContentUnavailableView.search(text: query)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                },
-                accessibilityID: "search_results_table"
-            )
+                }
+            ) {
+                ContentUnavailableView.search(text: query)
+            }
+            .task(id: viewModel.results.compactMap(\.id)) {
+                await results.setTracks(viewModel.results)
+            }
         }
     }
 
@@ -147,20 +137,6 @@ struct GlobalSearchPresentationView: View {
         guard let playbackViewModel = container.playbackViewModel else { return }
         Task {
             await playbackViewModel.playTrack(track, queue: queue)
-        }
-    }
-
-    private func reloadPlaylists() async {
-        guard let repo = container.playlistRepository else { return }
-        availablePlaylists = (try? await repo.fetchAll()) ?? []
-    }
-
-    private func reloadSyncProfiles() async {
-        if let syncVM = container.syncViewModel {
-            if syncVM.profiles.isEmpty {
-                await syncVM.loadProfiles()
-            }
-            availableSyncProfiles = syncVM.profiles
         }
     }
 

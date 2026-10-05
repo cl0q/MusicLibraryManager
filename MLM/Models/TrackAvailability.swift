@@ -135,8 +135,8 @@ enum TrackAvailability: Codable, Equatable, Hashable, Sendable {
         return .notDownloaded
     }
 
-    /// Persisted availability per track id — no disk access (replaces the per-load
-    /// `fileExists` mapper `TrackPresentationAvailability`, removed in W2-A).
+    /// Persisted availability per track id — no disk access (replaces the per-load disk
+    /// probing mapper `TrackPresentationAvailability`, removed in W2-A).
     static func byTrackID(_ tracks: [Track]) -> [Int64: TrackAvailability] {
         var result: [Int64: TrackAvailability] = [:]
         result.reserveCapacity(tracks.count)

@@ -40,15 +40,20 @@ struct SyncToContextMenuContractTests {
         return (db, vm)
     }
 
+    /// W2-A: `Sync to ▸` is `Add to Sync Profile ▸` (CM-SUB-SYNC, UC-COPY-07) in the one track menu.
     @Test func syncToSubmenuStillExistsInTrackContextMenu() throws {
-        let src = try source("MLM/Views/Library/TrackContextMenu.swift")
-        #expect(src.contains("Sync to"))
-        #expect(src.contains("addToSyncProfile(profile)"))
+        let src = try source("MLM/Views/TrackList/TrackMenu.swift")
+        #expect(src.contains("Menu(\"Add to Sync Profile\")"))
+        #expect(src.contains("actions.addToSyncProfile(profile, rows)"))
+        #expect(src.contains("New Sync Profile…"))
+        #expect(!src.contains("Sync to"))
     }
 
     @Test func libraryTableWiresSyncToAction() throws {
-        let src = try source("MLM/Views/Library/LibraryTable.swift")
-        #expect(src.contains("addToSyncProfile: { profile, ids in"))
+        let actions = try source("MLM/Views/TrackList/TrackListActions.swift")
+        #expect(actions.contains("await sync?.addTracks(ids)"))
+        // The Track menu reaches the same action through the published selection.
+        #expect(try source("MLM/Views/TrackList/TrackListTable.swift").contains("addToSyncProfile: { profile, ids in"))
     }
 
     @Test func addTracksLinksTrackToProfile() async throws {

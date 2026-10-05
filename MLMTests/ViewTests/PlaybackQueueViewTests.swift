@@ -48,9 +48,9 @@ struct PlaybackQueueViewTests {
     @Test
     func playbackQueueView_usesTrackTable() throws {
         let src = try readSource("MLM/Views/Queue/PlaybackQueueView.swift")
-        // Count TrackTable usages — should be 3 (history, now playing, up next)
-        let count = src.components(separatedBy: "TrackTable(").count - 1
-        #expect(count == 3, "PlaybackQueueView must use TrackTable exactly 3 times, found \(count)")
+        // Count shared track-table usages — should be 3 (history, now playing, up next)
+        let count = src.components(separatedBy: "TrackListTable(").count - 1
+        #expect(count == 3, "PlaybackQueueView must use TrackListTable exactly 3 times, found \(count)")
     }
 
     @Test

@@ -1,13 +1,17 @@
 import SwiftUI
 
-/// A compact, text-labeled status indicator for track and job states.
+/// A text-labeled status: `.secondary` words plus an SF Symbol, the symbol tinted only for
+/// "needs action" / error states (UC-COLOR-05). No capsule, no fill (N3). The track table's
+/// Status column uses `TrackStatusLabel`; this stays for the other places that show a
+/// state word (playlist header, cards, Folders).
 @MainActor
 struct StatusChip: View {
     let text: String
     let systemImage: String
-    let tint: Color
+    let tint: Color?
 
-    init(text: String, systemImage: String, tint: Color) {
+    /// - Parameter tint: the symbol's tint (system orange / red / green), `nil` = `.secondary`.
+    init(text: String, systemImage: String, tint: Color? = nil) {
         self.text = text
         self.systemImage = systemImage
         self.tint = tint
@@ -15,32 +19,25 @@ struct StatusChip: View {
 
     /// Returns no chip for the default local state.
     init?(availability: TrackAvailability) {
-        switch availability {
-        case .local:
-            return nil
-        case .downloading:
-            self.init(text: "Downloading…", systemImage: "arrow.down.circle", tint: .mlmActive)
-        case .notDownloaded:
-            self.init(text: "Not downloaded", systemImage: "icloud", tint: .mlmInkMuted)
-        case .failed:
-            self.init(
-                text: "Download failed",
-                systemImage: "exclamationmark.arrow.circlepath",
-                tint: .mlmAttention
-            )
-        case .fileMissing:
-            self.init(text: "File missing", systemImage: "doc.questionmark", tint: .mlmError)
+        guard let status = TrackStatusDisplay.forAvailability(availability) else { return nil }
+        let tint: Color? = switch status.tint {
+        case .none: nil
+        case .attention: .orange
+        case .error: .red
         }
+        self.init(text: status.text, systemImage: status.systemImage, tint: tint)
     }
 
     var body: some View {
-        Label(text, systemImage: systemImage)
-            .font(MLMFont.badge)
-            .foregroundStyle(tint)
-            .padding(.vertical, 4)
-            .padding(.horizontal, 8)
-            .background(tint.opacity(0.15), in: Capsule())
-            .accessibilityIdentifier("status_chip")
-            .accessibilityLabel(text)
+        Label {
+            Text(text)
+                .foregroundStyle(.secondary)
+        } icon: {
+            Image(systemName: systemImage)
+                .foregroundStyle(tint.map(AnyShapeStyle.init) ?? AnyShapeStyle(.secondary))
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("status_chip")
+        .accessibilityLabel(text)
     }
 }
