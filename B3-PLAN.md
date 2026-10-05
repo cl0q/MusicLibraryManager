@@ -56,7 +56,7 @@ Spec: `library.html`, `player.html`, `queue.html`, `inspector.html`, `search.htm
 
 | ID | Package | Depends on | Migration | Status |
 |---|---|---|---|---|
-| W2-F | **Undo infrastructure + status-bar confirmation API** (DEC-041, DEC-016) — contract first, used by everything after | W1 | — | in progress (Opus, `b3/w2-f-undo`) |
+| W2-F | **Undo infrastructure + status-bar confirmation API** (DEC-041, DEC-016) — contract first, used by everything after | W1 | — | in review — merged, independent review running |
 | W2-A | **Track table component + persisted availability** (DEC-012, DEC-014, DEC-051): column set + `TableColumnCustomization`, sortable Status, in-place refresh, `contextMenu(forSelectionType:primaryAction:)`, type-select; availability persisted, refreshed by scans and mount events; `MountObserver` wired for folders set after launch; drive-not-connected window banner | W1 | `v42_track_availability` | in progress (Opus, `b3/w2-a-track-table`) |
 | W2-B | **All Tracks** (DEC-002, DEC-011, DEC-013): availability scope bar with live counts, no-album rendering, status bar counts | W2-A | — | planned |
 | W2-C | **Playback** (DEC-008, DEC-009 as revised by §10 Q1, DEC-010, DEC-045, DEC-047): Return/double-click = play only; Space = preview only with the toolbar player's Preview state and resume; player state words; queue skips unplayable tracks (PP-MAIN-01); volume persisted; arrow-seek only during preview; media keys keep working | W2-A | — | planned |
@@ -128,6 +128,9 @@ Latest existing: `v41_remote_provider_identity`. Reserved (a number is only used
 | ID | Question | Choice | Why | Affected |
 |---|---|---|---|---|
 | IMP-001 | Which models run the workers? | Opus 5.5 at most; Sonnet for mechanical packages | Oliver, 2026-10-05 (cost) | all packages |
+| IMP-017 | Undo contract details not fixed by UC §13 | Action names `New Playlist`, `New Playlist from Selection`, `Rename Sync Profile`; a failed undo/redo drops the step and posts `Couldn’t undo ‹action› — ‹cause›`; the status-bar `Undo` only acts while its step is on top of the stack; a restore that can't be exact (name taken, tracks gone) posts a note without `Undo`; adding only tracks already present registers no step (`All 3 tracks were already in “X”`); undo steps are scoped to the library id and dropped when the main window closes | Smallest behaviour consistent with UC-UNDO-08/09 and P8 | `UndoCenter`, all later packages |
+| IMP-018 | New Playlist from Selection | No sheet: the playlist is created with the selection in display order and named inline in the sidebar; the window does not navigate | S-SEL-NEWPLAYLIST on `patterns-sheets-alerts.html`; P3 | S-SEL-NEWPLAYLIST |
+| IMP-019 | Playlist names | One name space in the sidebar: rename refuses a name another playlist already has in any letter case | Avoids two rows reading the same | P-SIDEBAR |
 | IMP-012 | Closing the main window | Does not quit (UC-WIN-01); every library flow, the Dock icon and Window ▸ MLM bring the one main window back | Convention; needed for the Activity and Settings windows to outlive the main window | W-MAIN, AppDelegate |
 | IMP-013 | `InspectorCommands` | Not used: Info and Queue are two modes of one inspector with their own View-menu items (⌘I, ⌥⌘U); the system group would add a mode-less toggle on ⌃⌘I | One meaning per command | M-VIEW |
 | IMP-014 | ⌫ in menus | Edit ▸ Delete and Remove from ‹Container› carry no ⌫ key equivalent; ⌫ is handled by the focused list (`onDeleteCommand`, W2-A) | A plain-⌫ menu key equivalent would take backspace from text fields | M-EDIT, M-TRACK, K-* |
@@ -157,6 +160,12 @@ Latest existing: `v41_remote_provider_identity`. Reserved (a number is only used
 ## 6. Wave log
 
 _(per wave: merged packages with commits, contract file paths, what Oliver should check, feedback by ID)_
+
+### Wave 2
+
+- **W2-F** merged (branch `b3/w2-f-undo`, 7 commits). Tests on the merge result: Swift Testing 1774 tests / 176 suites passed; XCTest 14 tests, 3 skipped, 0 failures. Independent review running.
+- **W2-F contract:** `MLM/Views/Shell/UndoCenter.swift` (`UndoCenter.perform` / `performGroup` / `record`, `FocusedValues.undoCenter`, usage example in the file's doc comment), `MLM/Views/Shell/ShellEdits.swift`, `PlaylistRepository` undo section (snapshot / restore / exact-row helpers). Adoption owed: W2-A (context menu add-to-playlist, remove from playlist), W2-D (queue edits), W2-E (tag edits), W2-G, W2-H, W3-PL, W3-SYNC, W3-REV, W3-DISC, W3-GEN, W4-2.
+- Open: ⌘⌫ on the destructive button of the sidebar delete alerts (UC-KEY-34) is not set — decide after Oliver has tried the `Remove from Library…` alert (key-repeat risk).
 
 ### Wave 1
 
