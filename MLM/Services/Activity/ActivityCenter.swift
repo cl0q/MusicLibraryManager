@@ -563,11 +563,37 @@ final class ActivityCenter {
         await refreshFailing()
     }
 
+    /// Keeps the open library's history current: deleted playlists / sync profiles turn their
+    /// links into plain text; downloads, retries and Locate File… update which failures still
+    /// fail. Called once by the app after `attachLibrary`.
+    func observeLibraryChanges(center notifications: NotificationCenter = .default) {
+        guard libraryObservers.isEmpty else { return }
+        for name in [Notification.Name.playlistDidChange, .syncProfileDidChange] {
+            libraryObservers.append(notifications.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { guard let self else { return }; Task { await self.refreshSubjects() } }
+            })
+        }
+        for name in [Notification.Name.downloadDidComplete, .trackAvailabilityDidChange] {
+            libraryObservers.append(notifications.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.scheduleFailingRefresh()
+            })
+        }
+    }
+
+    @ObservationIgnored private var libraryObservers: [NSObjectProtocol] = []
+
     /// Re-check subjects after something was deleted (playlist, sync profile).
     func refreshSubjects() async {
         guard let libraryStore else { return }
         let changed = (try? await libraryStore.markMissingSubjects()) ?? 0
-        if changed > 0, let currentLibraryID { await loadHistory(from: libraryStore, libraryID: currentLibraryID) }
+        guard changed > 0, let currentLibraryID else { return }
+        await loadHistory(from: libraryStore, libraryID: currentLibraryID)
+        // This session's operations too: their rows were written when they started.
+        let missing = Set(((try? await libraryStore.load(now: scheduler.now())) ?? [])
+            .filter(\.subject.isMissing).map(\.id))
+        for index in operations.indices where missing.contains(operations[index].id) {
+            operations[index].subject.isMissing = true
+        }
     }
 
     private func persist(_ operation: ActivityOperation) {

@@ -156,6 +156,29 @@ struct ActivityPersistenceTests {
         #expect(loaded[profile.id]?.subject.isMissing == true)
     }
 
+    @Test func deletingAPlaylistTurnsItsLinksIntoPlainText() async throws {
+        let db = try DatabaseManager.inMemory()
+        let playlists = PlaylistRepository(database: db)
+        let playlist = try await playlists.create(name: "Warm-up")
+        let id = try #require(playlist.id)
+        let repo = ActivityOperationRepository(database: db)
+        let center = ActivityCenter(scheduler: ManualActivityScheduler(), progressInterval: 0)
+        await center.attachLibrary(id: "lib", store: repo, failureSource: repo)
+        let notifications = NotificationCenter()
+        center.observeLibraryChanges(center: notifications)
+        let job = center.begin(.download, title: "Import “Warm-up”", subject: .playlist(id, name: "Warm-up"))
+        job.finish()
+        await center.flushPersistence()
+        #expect(center.operation(id: job.id)?.subject.isLinkable == true)
+
+        try await playlists.delete(id: id)
+        await center.refreshSubjects()
+        let op = try #require(center.operation(id: job.id))
+        #expect(op.subject.isMissing)
+        #expect(op.subject.showLabel == nil, "no Show Playlist for a deleted playlist")
+        #expect(op.subject.linkLabel == "“Warm-up”", "the name stays as plain text")
+    }
+
     // MARK: Center + stores
 
     @Test func centerPersistsAndRestoresAcrossRelaunch() async throws {

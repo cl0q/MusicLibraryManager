@@ -272,6 +272,7 @@ final class DependencyContainer {
         let activityRepository = ActivityOperationRepository(database: dbPool)
         await ActivityCenter.shared.attachLibrary(id: library.libraryId, store: activityRepository,
                                                   failureSource: activityRepository)
+        await MainActor.run { ActivityCenter.shared.observeLibraryChanges() }
 
         self.downloadViewModel = DownloadViewModel(
             trackRepository: self.trackRepository,
