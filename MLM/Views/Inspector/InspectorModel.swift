@@ -84,6 +84,10 @@ final class InspectorModel {
     /// A new selection is loading: fields are disabled, the previous content stays (no
     /// full-pane spinner, UC-EMPTY-04).
     private(set) var isLoadingSelection = false
+    /// The selection couldn't be read: shown instead of the form, editing is off (S4).
+    private(set) var loadError: String?
+    /// The generation `tracks` were loaded for; drafts only capture tracks of the current one.
+    private(set) var loadedGeneration = -1
     private(set) var drafts: [TrackTagField: Draft] = [:]
     private(set) var issues: [TrackTagField: FieldIssue] = [:]
     private(set) var saving: Set<TrackTagField> = []
@@ -99,7 +103,10 @@ final class InspectorModel {
     // MARK: Selection
 
     /// Nothing selected (or every selected track is gone).
-    var isEmpty: Bool { trackIDs.isEmpty || (!isLoadingSelection && tracks.isEmpty) }
+    var isEmpty: Bool { trackIDs.isEmpty || (!isLoadingSelection && tracks.isEmpty && loadError == nil) }
+
+    /// Fields accept typing: the loaded tracks belong to the current selection.
+    var canEdit: Bool { !isLoadingSelection && loadError == nil && loadedGeneration == generation && !tracks.isEmpty }
     var isMultiple: Bool { trackIDs.count > 1 }
 
     /// Fields the form offers: Title only for one track (P-INSPECTOR.N01: left out for many).
@@ -121,8 +128,21 @@ final class InspectorModel {
         trackIDs = ids
         generation += 1
         isLoadingSelection = !ids.isEmpty
+        loadError = nil
         if ids.isEmpty { tracks = [] }
         load()
+    }
+
+    /// Another library opened: forget everything (the ids belong to the old library).
+    func reset() {
+        loadTask?.cancel()
+        drafts = [:]
+        issues = [:]
+        trackIDs = []
+        tracks = []
+        loadError = nil
+        generation += 1
+        isLoadingSelection = false
     }
 
     /// Re-read the shown tracks (after an edit, or when something else changed them). Drafts
@@ -146,11 +166,17 @@ final class InspectorModel {
                 loaded = try await self.dependencies.loadTracks(ids)
             } catch {
                 guard !Task.isCancelled, generation == self.generation else { return }
+                // Never leave another selection's tracks on screen to type into (S4).
+                AppLogger.shared.error("Info couldn’t read the selected tracks: \(error)", source: "Inspector")
+                self.tracks = []
+                self.loadError = "Couldn’t read the selected tracks — \(UndoFailure.cause(of: error))."
                 self.isLoadingSelection = false
                 return
             }
             guard !Task.isCancelled, generation == self.generation, ids == self.trackIDs else { return }
             self.tracks = loaded
+            self.loadedGeneration = generation
+            self.loadError = nil
             self.isLoadingSelection = false
         }
     }
@@ -183,7 +209,7 @@ final class InspectorModel {
     /// Typed text for `field`, from a field rendered for `generation`. Text of an earlier
     /// selection is ignored.
     func setText(_ text: String, for field: TrackTagField, generation: Int) {
-        guard generation == self.generation, !isLoadingSelection, !trackIDs.isEmpty, !tracks.isEmpty else { return }
+        guard generation == self.generation, canEdit, !trackIDs.isEmpty else { return }
         if var draft = drafts[field] {
             guard draft.text != text else { return }
             draft.text = text
@@ -193,7 +219,8 @@ final class InspectorModel {
             guard text != original else { return }
             drafts[field] = Draft(
                 field: field,
-                trackIDs: tracks.compactMap(\.id),
+                // The selection's ids that were loaded for this generation — never more (S4).
+                trackIDs: trackIDs.filter(Set(tracks.compactMap(\.id)).contains),
                 generation: generation,
                 original: original,
                 text: text,
@@ -244,7 +271,12 @@ final class InspectorModel {
         let value: TrackTagValue
         switch draft.field.parse(draft.text) {
         case .failure(let error):
-            if current { issues[draft.field] = FieldIssue(kind: .invalid, message: error.message) }
+            if current {
+                issues[draft.field] = FieldIssue(kind: .invalid, message: error.message)
+            } else {
+                // Dropped with the selection change: say so once.
+                dependencies.reportFailure("\(draft.field.label) wasn’t changed — \(error.shortReason)")
+            }
             return .invalid
         case .success(let parsed):
             value = parsed

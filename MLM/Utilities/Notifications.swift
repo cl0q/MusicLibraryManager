@@ -19,6 +19,13 @@ extension Notification.Name {
     /// - `userInfo["skipped"]`: `Int` — number of tracks skipped (already in DB)
     static let libraryDidImport = Notification.Name("MLMLibraryDidImport")
 
+    /// Posted (main thread) when tag values of tracks changed in the database — a tag edit in
+    /// Info, its undo/redo, an analysis result (W2-E). Track lists refresh those rows in place;
+    /// nothing re-reads files.
+    ///
+    /// - `userInfo["trackIds"]`: `[Int64]` — the changed tracks
+    static let trackMetadataDidChange = Notification.Name("MLMTrackMetadataDidChange")
+
     /// Posted when tracks are deleted from the library.
     ///
     /// Observers should reload their track data.

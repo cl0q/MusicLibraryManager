@@ -25,9 +25,13 @@ struct InspectorView: View {
     /// Selected track ids in display order.
     let selection: [Int64]
 
+    @Environment(\.container) private var container
     @Environment(UndoCenter.self) private var undo: UndoCenter?
     @Environment(StatusBarCenter.self) private var statusBar: StatusBarCenter?
     @State private var model: InspectorModel?
+
+    /// `InspectedTrackSelection` source of the reset when another library opens.
+    static let libraryChangeKey = "libraryChange"
     @SceneStorage("inspector.tab") private var tab: InspectorTab = .details
 
     var body: some View {
@@ -44,8 +48,15 @@ struct InspectorView: View {
             model.select(selection)
         }
         .onChange(of: selection) { _, ids in model?.select(ids) }
+        .onChange(of: container.activeLibrary?.libraryId) { _, _ in
+            // Another library: its track ids mean other tracks (S4).
+            model?.reset()
+            InfoTrackRequest.shared.clear()
+            InspectedTrackSelection.shared.update([], from: Self.libraryChangeKey)
+        }
         .onDisappear { model?.commitAll() }
         // Rows changed elsewhere (another edit, a download, a file check): show the stored values.
+        .onReceive(NotificationCenter.default.publisher(for: .trackMetadataDidChange)) { _ in model?.reload() }
         .onReceive(NotificationCenter.default.publisher(for: .trackAvailabilityDidChange)) { _ in model?.reload() }
         .onReceive(NotificationCenter.default.publisher(for: .libraryDidImport)) { _ in model?.reload() }
         .onReceive(NotificationCenter.default.publisher(for: .downloadDidComplete)) { _ in model?.reload() }
@@ -60,6 +71,14 @@ struct InspectorView: View {
                 systemImage: "info.circle",
                 description: Text("Select a track to see and edit its details.")
             )
+        } else if let loadError = model.loadError {
+            ContentUnavailableView {
+                Label("Couldn’t show the selection", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(loadError)
+            } actions: {
+                Button("Try Again") { model.reload() }
+            }
         } else {
             VStack(spacing: 0) {
                 InspectorHeader(tracks: model.tracks, count: model.trackIDs.count)

@@ -55,7 +55,7 @@ struct TrackTagWriterTests {
     ]
 
     private func expectRoundTrip(_ trip: RoundTrip, keeps unrelated: [String: String], bpmKey: String?) {
-        #expect(trip.outcome == .written)
+        #expect(trip.outcome == .written, "\(trip.outcome)")
         #expect(trip.after["title"] == "New Title")
         #expect(trip.after["genre"] == "Techno")
         #expect(trip.after["date"] == "2019")
@@ -163,11 +163,8 @@ struct TrackTagWriterTests {
         #expect(try await F.tags(of: file)["mycustom"] == "zzz")
         let bytes = try Data(contentsOf: file)
         let outcome = await writer().write(TagWriteRequest(fileURL: file, libraryRoot: folder, values: [.title: "New"]))
-        guard case .failed(.verificationFailed(let detail)) = outcome else {
-            Issue.record("expected a verification failure, got \(outcome)")
-            return
-        }
-        #expect(detail.contains("mycustom"))
+        // The raw inventory sees the `mdta` keys box before anything is written (B2).
+        #expect(outcome == .failed(.cannotPreserve("MP4 metadata keys (mdta)")), "\(outcome)")
         #expect(try Data(contentsOf: file) == bytes, "original untouched")
         #expect(try F.strayFiles(in: folder, expected: ["track.m4a"]).isEmpty)
     }
@@ -293,31 +290,115 @@ struct TrackTagWriterTests {
         #expect(try Data(contentsOf: file) == Data("not really audio".utf8))
     }
 
+    // MARK: Review S1, S2, S7
+
+    @Test(.enabled(if: F.toolsAvailable, F.skipReason))
+    func extendedAttributesAndCreationDateSurviveAndHardLinksAreRefused() async throws {
+        let folder = try F.makeFolder()
+        defer { F.remove(folder) }
+        let file = try await F.audio(.flac, in: folder, tags: ["title": "Old"])
+        let created = Date(timeIntervalSince1970: 1_500_000_000)
+        try FileManager.default.setAttributes([.creationDate: created], ofItemAtPath: file.path)
+        let value = Data("Finder comment".utf8)
+        let name = "com.apple.metadata:kMDItemFinderComment"
+        #expect(value.withUnsafeBytes { setxattr(file.path, name, $0.baseAddress, value.count, 0, 0) } == 0)
+        #expect(await writer().write(TagWriteRequest(fileURL: file, libraryRoot: folder, values: [.title: "New"])) == .written)
+        var buffer = [UInt8](repeating: 0, count: 64)
+        let length = getxattr(file.path, name, &buffer, buffer.count, 0, 0)
+        #expect(length == value.count && Data(buffer.prefix(max(length, 0))) == value, "the extended attribute was copied")
+        let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
+        #expect((attributes[.creationDate] as? Date).map { abs($0.timeIntervalSince(created)) < 1 } == true)
+        // A second hard link: refused, untouched.
+        try FileManager.default.linkItem(at: file, to: folder.appendingPathComponent("link.flac"))
+        let bytes = try Data(contentsOf: file)
+        #expect(await writer().write(TagWriteRequest(fileURL: file, libraryRoot: folder, values: [.title: "Again"])) == .failed(.hardLinked))
+        #expect(try Data(contentsOf: file) == bytes)
+    }
+
+    @Test(.enabled(if: F.toolsAvailable, F.skipReason))
+    func aFileThatIsntTheTracksIsRefused() async throws {
+        let folder = try F.makeFolder()
+        defer { F.remove(folder) }
+        let file = try await F.audio(.mp3, in: folder, tags: ["title": "Old"]) // 2 s
+        let bytes = try Data(contentsOf: file)
+        var longer = TagWriteRequest(fileURL: file, libraryRoot: folder, values: [.title: "New"])
+        longer.expectedDuration = 300
+        guard case .failed(.notThisTracksFile) = await writer().write(longer) else {
+            Issue.record("a 2 s file for a 300 s track must be refused")
+            return
+        }
+        var otherFormat = TagWriteRequest(fileURL: file, libraryRoot: folder, values: [.title: "New"])
+        otherFormat.expectedFormat = "flac"
+        guard case .failed(.notThisTracksFile) = await writer().write(otherFormat) else {
+            Issue.record("an MP3 for a FLAC track must be refused")
+            return
+        }
+        #expect(TagWriteFailure.notThisTracksFile("x").isPermanent)
+        #expect(try Data(contentsOf: file) == bytes)
+        var matching = TagWriteRequest(fileURL: file, libraryRoot: folder, values: [.title: "New"])
+        matching.expectedDuration = 3
+        matching.expectedFormat = "mp3"
+        #expect(await writer().write(matching) == .written, "within 2 s and the same format")
+    }
+
+    @Test(.enabled(if: F.toolsAvailable, F.skipReason))
+    func aCopyThatCantBeCheckedIsATransientFailure() async throws {
+        let folder = try F.makeFolder()
+        defer { F.remove(folder) }
+        let file = try await F.audio(.flac, in: folder, tags: ["title": "Old"])
+        let bytes = try Data(contentsOf: file)
+        // ffprobe times out on the rewritten copy.
+        let flaky = ScriptedTagToolRunner(before: { _, arguments in
+            guard arguments.contains("-show_entries"), arguments.last?.contains(TrackTagWriter.temporaryMarker) == true else { return nil }
+            return ProcessRunner.ProcessResult(exitCode: 15, stdout: "", stderr: "", timedOut: true, processIdentifier: 0)
+        })
+        let outcome = await writer(flaky).write(TagWriteRequest(fileURL: file, libraryRoot: folder, values: [.title: "New"]))
+        guard case .failed(let failure) = outcome, case .checkFailed = failure else {
+            Issue.record("expected a check failure, got \(outcome)")
+            return
+        }
+        #expect(!failure.isPermanent, "tried again later, never blocked")
+        #expect(try Data(contentsOf: file) == bytes)
+        #expect(!TagWriteFailure.toolMissing.isPermanent && !TagWriteFailure.cancelled.isPermanent)
+    }
+
+    @Test(.enabled(if: F.toolsAvailable, F.skipReason))
+    func oneWriterPerPath() async throws {
+        let folder = try F.makeFolder()
+        defer { F.remove(folder) }
+        let file = try await F.audio(.flac, in: folder, tags: ["title": "Old"])
+        let path = file.standardizedFileURL.resolvingSymlinksInPath().path
+        await LibraryFileLock.shared.acquire(path)
+        let pending = Task { await writer().write(TagWriteRequest(fileURL: file, libraryRoot: folder, values: [.title: "New"])) }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(try await F.tags(of: file)["title"] == "Old", "waits while another rewriter holds the path")
+        await LibraryFileLock.shared.release(path)
+        #expect(await pending.value == .written)
+        #expect(await LibraryFileLock.shared.isHeld(path) == false)
+    }
+
     // MARK: Values from the database
 
-    @Test func valuesNeverCarryPlaceholdersOrProvenance() {
-        var track = Track(artist: "Skee Mask", album: "unknown album", title: "Glass Circuit", format: "m4a",
-                          originalPath: "https://soundcloud.com/skee/glass-circuit")
-        track.albumArtist = ""
-        track.genre = "  "
-        track.year = 0
-        track.bpm = 128
-        let all = TrackTagWriter.values(for: track, fields: Set(TrackTagField.allCases))
-        #expect(all[.album] == .some(nil), "a placeholder album is written as no album tag")
-        #expect(all[.albumArtist] == .some(nil))
-        #expect(all[.genre] == .some(nil))
-        #expect(all[.year] == .some(nil))
-        #expect(all[.bpm] == .some("128"))
-        #expect(all[.title] == .some("Glass Circuit"))
-        for value in all.values.compactMap({ $0 }) {
-            #expect(!value.lowercased().contains("soundcloud"), "never the source")
-        }
-        track.album = "SoundCloud Likes"
-        #expect(TrackTagWriter.values(for: track, fields: [.album])[.album] == .some(nil))
-        track.album = "Compro"
-        #expect(TrackTagWriter.values(for: track, fields: [.album]) == [.album: "Compro"], "only the stale fields")
-        track.artist = "unknown artist"
-        #expect(TrackTagWriter.values(for: track, fields: [.artist]).isEmpty, "a placeholder artist isn't written")
+    @Test func typedValuesAreWrittenAsTypedAndClearedFieldsAsNoTag() {
+        #expect(TagFileIntent.typedValue(.text("Unknown")) == .typed("Unknown"), "a typed placeholder literal is the user's value")
+        #expect(TagFileIntent.typedValue(.text("SoundCloud")) == .typed("SoundCloud"))
+        #expect(TagFileIntent.typedValue(.text("")) == .typed(nil), "a cleared field is no tag")
+        #expect(TagFileIntent.typedValue(.text(nil)) == .typed(nil))
+        #expect(TagFileIntent.typedValue(.number(2019)) == .typed("2019"))
+        #expect(TagFileIntent.typedValue(.number(nil)) == .typed(nil))
+    }
+
+    @Test func changesSkipEqualValuesAndKeepAFullDateForTheSameYear() {
+        let current: [TrackTagField: String?] = [.year: "2019-05-03", .title: "Same", .album: nil]
+        let keep = TrackTagWriter.changes([.year: .typed("2019"), .title: .typed("Same")], current: current, format: .flac)
+        #expect(keep.isEmpty, "same year keeps the full date; an equal title isn't rewritten")
+        let year = TrackTagWriter.changes([.year: .typed("2020")], current: current, format: .flac)
+        #expect(year.map(\.key) == ["date"] && year.first?.value == "2020")
+        let restore = TrackTagWriter.changes([.year: .restore("2019-05-03")], current: [.year: "2020"], format: .flac)
+        #expect(restore.first?.value == "2019-05-03", "a restore writes the exact original")
+        let cleared = TrackTagWriter.changes([.album: .typed(nil)], current: [.album: "Old"], format: .mp3)
+        #expect(cleared.count == 1 && cleared.first?.value == nil)
+        #expect(TrackTagWriter.changes([.bpm: .typed("128")], current: [:], format: .m4a).isEmpty, "BPM can't go into M4A")
     }
 
     @Test func verifyRejectsAnyDifferenceButTheRequestedTags() {

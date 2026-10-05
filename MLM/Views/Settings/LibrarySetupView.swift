@@ -16,8 +16,8 @@ struct LibrarySetupView: View {
     @State private var trackCount: Int = 0
     @State private var libraryRoot: String?
     @State private var isLoaded = false
-    /// `Write tags to files` (W2-E; THOUGHTS §10 Q7: on by default). Per library.
-    @State private var writesTags = true
+    /// `Write tags to files` (W2-E). Per library; off unless turned on (fails closed).
+    @State private var writesTags = false
 
     var body: some View {
         Form {
@@ -50,7 +50,7 @@ struct LibrarySetupView: View {
                 ))
                 .disabled(container.configRepository == nil)
             } footer: {
-                Text("Tag edits also go into the audio files, so copies outside MLM show them. A track’s source is never written.")
+                Text("Tag edits in Info are also written into the audio files. Files with tag data MLM can’t keep intact (such as DJ cue points) are left unchanged, and a track’s source is never written.")
             }
 
             // MARK: - Statistics Section
@@ -316,6 +316,8 @@ struct LibrarySetupView: View {
 
     private func setWritesTags(_ enabled: Bool) {
         writesTags = enabled
+        // Off stops a running write at once (the current file finishes or is left untouched).
+        if !enabled { TagWriteQueue.shared.cancel() }
         guard let config = container.configRepository else { return }
         Task {
             try? await TagWriteSetting.setEnabled(enabled, config: config)

@@ -74,9 +74,16 @@ private struct InspectorSingleFile: View {
             }
             .accessibilityElement(children: .contain)
             if let echo = InspectorFileStatus.tagWriteEcho(details.pending, offlineVolumeName: offline?.name) {
-                Label(echo, systemImage: details.pending?.blocked == true ? "exclamationmark.triangle" : "clock")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                HStack(alignment: .firstTextBaseline) {
+                    Label(echo, systemImage: details.pending?.blocked == true ? "exclamationmark.triangle" : "clock")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    if details.pending?.blocked == true, let id = track.id {
+                        // After a change outside MLM (markers removed, file replaced) (S1).
+                        Button("Try Again") { Task { await TagWriteQueue.shared.retry(trackID: id) } }
+                            .buttonStyle(.link)
+                    }
+                }
             }
         }
 
@@ -319,9 +326,15 @@ struct InspectorDiagnostics: View {
     let fileURL: URL?
     let offlineName: String?
 
-    @State private var result: TrackDiagnosticsService.TrackDiagnostics?
-    @State private var isRunning = false
-    @State private var toolMissing = false
+    /// Results belong to the track they ran for: another track never shows them.
+    @State private var result: (trackID: Int64?, diagnostics: TrackDiagnosticsService.TrackDiagnostics?)?
+    @State private var runningFor: Int64??
+
+    private var isRunning: Bool { runningFor == .some(track.id) }
+    private var ownResult: TrackDiagnosticsService.TrackDiagnostics?? {
+        guard let result, result.trackID == track.id else { return nil }
+        return .some(result.diagnostics)
+    }
 
     var body: some View {
         Group {
@@ -339,10 +352,10 @@ struct InspectorDiagnostics: View {
                     ProgressView().controlSize(.small)
                     Text("Checking the file…").foregroundStyle(.secondary)
                 }
-            } else if toolMissing {
+            } else if case .some(.none) = ownResult {
                 InspectorIssueLine(message: "Can’t check the file — ffmpeg not found")
-            } else if let result {
-                report(result)
+            } else if case .some(.some(let diagnostics)) = ownResult {
+                report(diagnostics)
             } else {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     Text("Decodes the whole file to find damage. Takes a few seconds for long mixes.")
@@ -351,10 +364,6 @@ struct InspectorDiagnostics: View {
                     Button("Check File") { run() }
                 }
             }
-        }
-        .task(id: track.id) {
-            result = nil
-            toolMissing = false
         }
     }
 
@@ -384,12 +393,12 @@ struct InspectorDiagnostics: View {
 
     private func run() {
         guard let fileURL else { return }
-        isRunning = true
+        let trackID = track.id
+        runningFor = .some(trackID)
         Task {
             let diagnostics = await TrackDiagnosticsService.diagnose(fileURL: fileURL)
-            isRunning = false
-            result = diagnostics
-            toolMissing = diagnostics == nil
+            if runningFor == .some(trackID) { runningFor = nil }
+            result = (trackID, diagnostics)
         }
     }
 }

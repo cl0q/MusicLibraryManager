@@ -14,7 +14,7 @@ final class RecordingTagWriter: TagWriting, @unchecked Sendable {
 
     var requests: [TagWriteRequest] { lock.withLock { _requests } }
 
-    func write(_ request: TagWriteRequest) async -> TagWriteOutcome {
+    func write(_ request: TagWriteRequest, captureOriginals: @escaping TagOriginalsCapture) async -> TagWriteOutcome {
         onWrite(request)
         lock.withLock { _requests.append(request) }
         return answers[request.fileURL.lastPathComponent] ?? .written
@@ -48,6 +48,8 @@ struct TrackTagEditTests {
 
     private func makeEnv(rootExists: Bool = true, writer: (any TagWriting)? = nil) throws -> Env {
         let db = try DatabaseManager.inMemory()
+        // Writing is off unless turned on (fails closed); these tests are about writing.
+        try db.write { try $0.execute(sql: "INSERT INTO app_config (key, value) VALUES ('write_tags_to_files', '1')") }
         let repository = TrackTagRepository(database: db)
         let config = ConfigRepository(database: db)
         let manager = UndoManager()
@@ -64,7 +66,6 @@ struct TrackTagEditTests {
             libraryRoot: { root.path },
             isEnabled: { await TagWriteSetting.isEnabled(config) },
             writer: writer ?? recording,
-            fileMissing: { _ in },
             statusBar: { status }
         ))
         let reachable = Reachability()
@@ -177,9 +178,25 @@ struct TrackTagEditTests {
         #expect(try await env.repository.pendingCount() == 0)
         #expect(env.status.message?.text == "Changed genre of 4 tracks")
         // Something queued earlier isn't written while it's off.
-        try await env.repository.markStale(trackIDs: ids, fields: [.genre])
+        try await env.repository.queueTypedValue(.text("Dub"), field: .genre, trackIDs: ids)
         #expect(await env.queue.flushNow().outcome == .disabled)
         #expect(env.writer.requests.isEmpty)
+    }
+
+    @Test func turningTheSettingOffStopsARunningFlush() async throws {
+        let env = try makeEnv()
+        defer { TagTestFixtures.remove(env.root.deletingLastPathComponent()) }
+        let ids = try TrackTagRepositoryTests.seed(env.db, count: 4)
+        env.reachable.value = false
+        try await env.edit.perform(.text("Dub"), field: .genre, trackIDs: ids)
+        let db = env.db
+        env.writer.onWrite = { _ in
+            try? db.write { try $0.execute(sql: "UPDATE app_config SET value = '0' WHERE key = 'write_tags_to_files'") }
+        }
+        let report = await env.queue.flushNow()
+        #expect(report.outcome == .disabled)
+        #expect(env.writer.requests.count == 1, "nothing after it was turned off")
+        #expect(try await env.repository.pendingCount() == 3)
     }
 
     @Test func unsupportedFilesAreSaidOnce() async throws {
@@ -206,8 +223,8 @@ struct TrackTagEditTests {
         let requests = env.writer.requests
         #expect(requests.count == 2, "one write per track, however many edits")
         let first = try #require(requests.first { $0.fileURL.lastPathComponent == "0.mp3" })
-        #expect(first.values[.genre] == .some("Latest"))
-        #expect(first.values[.title] == .some("New Title"))
+        #expect(first.targets[.genre] == .typed("Latest"))
+        #expect(first.targets[.title] == .typed("New Title"))
         #expect(first.fileURL.path.hasPrefix(env.root.path))
         #expect(try await env.repository.pendingCount() == 0)
     }
@@ -251,10 +268,10 @@ struct TrackTagEditTests {
         let report = await env.queue.flushNow()
         #expect(report.written == 2)
         #expect(report.missing == 1)
-        #expect(report.failureMessage == "Tags of 1 file couldn’t be written — the file is missing")
-        #expect(env.status.message?.text == "Tags of 1 file couldn’t be written — the file is missing")
+        #expect(report.failureMessage == "Tags of 1 file couldn’t be written — file not found")
+        #expect(env.status.message?.text == "Tags of 1 file couldn’t be written — file not found")
         let waiting = try #require(try await env.repository.pendingWrite(trackID: ids[0]))
-        #expect(!waiting.blocked && waiting.lastError == "the file is missing")
+        #expect(!waiting.blocked && waiting.lastError == "file not found")
         // It is tried again next time; once found, written.
         env.writer.answers["0.mp3"] = nil
         #expect(await env.queue.flushNow().written == 1)
@@ -274,6 +291,98 @@ struct TrackTagEditTests {
         try await env.edit.perform(.text("Techno"), field: .genre, trackIDs: ids)
         _ = await env.queue.flushNow()
         #expect(env.writer.requests.count == 2, "a new edit deserves a new attempt")
+    }
+
+    /// A queue over `env`'s database and folder with its own extra dependencies.
+    private func queue(_ env: Env, playing: Int64? = nil, onFileChecks: ((@escaping @MainActor (Bool) -> Void) -> Void)? = nil) -> TagWriteQueue {
+        TagWriteQueue(dependencies: queueDependencies(env, playing: playing, onFileChecks: onFileChecks))
+    }
+
+    private func queueDependencies(_ env: Env, playing: Int64? = nil, onFileChecks: ((@escaping @MainActor (Bool) -> Void) -> Void)? = nil) -> TagWriteQueue.Dependencies {
+        let repository = env.repository
+        let root = env.root
+        let config = env.config
+        let status = env.status
+        return TagWriteQueue.Dependencies(
+            repository: { repository },
+            libraryRoot: { root.path },
+            isEnabled: { await TagWriteSetting.isEnabled(config) },
+            writer: env.writer,
+            statusBar: { status },
+            playingTrackID: { playing },
+            observeFileChecks: { onFileChecks?($0) }
+        )
+    }
+
+    @Test func missingToolsStopTheRunWithoutCountingAnything() async throws {
+        let env = try makeEnv()
+        defer { TagTestFixtures.remove(env.root.deletingLastPathComponent()) }
+        let ids = try TrackTagRepositoryTests.seed(env.db, count: 3)
+        env.reachable.value = false
+        try await env.edit.perform(.text("Dub"), field: .genre, trackIDs: ids)
+        env.writer.answers["0.mp3"] = .failed(.toolMissing)
+        for _ in 0..<4 {
+            let report = await env.queue.flushNow()
+            #expect(report.outcome == .toolMissing)
+        }
+        #expect(env.writer.requests.count == 4, "one try per run, the rest untouched")
+        let rows = try await env.repository.pendingWrites(limit: 10)
+        #expect(rows.count == 3 && rows.allSatisfy { $0.attempts == 0 && !$0.blocked })
+        #expect(env.status.message?.text == "Tag changes are waiting — ffmpeg isn’t installed")
+    }
+
+    @Test func transientFailuresNeverBlockAndTryAgainUnblocks() async throws {
+        let env = try makeEnv()
+        defer { TagTestFixtures.remove(env.root.deletingLastPathComponent()) }
+        let ids = try TrackTagRepositoryTests.seed(env.db, count: 1)
+        env.reachable.value = false
+        try await env.edit.perform(.text("Dub"), field: .genre, trackIDs: ids)
+        env.writer.answers["0.mp3"] = .failed(.checkFailed("ffprobe timed out"))
+        for _ in 0..<4 { _ = await env.queue.flushNow() }
+        let row = try #require(try await env.repository.pendingWrite(trackID: ids[0]))
+        #expect(!row.blocked && row.attempts == 4)
+        env.writer.answers["0.mp3"] = .failed(.cannotPreserve("Serato markers"))
+        _ = await env.queue.flushNow()
+        #expect(try await env.repository.pendingWrite(trackID: ids[0])?.blocked == true)
+        env.writer.answers["0.mp3"] = nil
+        await env.queue.retry(trackID: ids[0])
+        #expect(await env.queue.flushNow().written == 1, "Try Again gives a refused write another attempt")
+    }
+
+    @Test func theFileThatIsPlayingIsPutOff() async throws {
+        let env = try makeEnv()
+        defer { TagTestFixtures.remove(env.root.deletingLastPathComponent()) }
+        let ids = try TrackTagRepositoryTests.seed(env.db, count: 2)
+        env.reachable.value = false
+        try await env.edit.perform(.text("Dub"), field: .genre, trackIDs: ids)
+        let playingQueue = queue(env, playing: ids[0])
+        let report = await playingQueue.flushNow()
+        playingQueue.cancel() // the retry it scheduled
+        #expect(report.deferred == 1 && report.written == 1)
+        #expect(env.writer.requests.map(\.fileURL.lastPathComponent) == ["1.mp3"])
+        #expect(try await env.repository.pendingWrite(trackID: ids[0]) != nil, "still waiting")
+    }
+
+    @Test func afterAFolderChangeWritesWaitForACompletedFileCheck() async throws {
+        let env = try makeEnv()
+        defer { TagTestFixtures.remove(env.root.deletingLastPathComponent()) }
+        let ids = try TrackTagRepositoryTests.seed(env.db, count: 1)
+        env.reachable.value = false
+        try await env.edit.perform(.text("Dub"), field: .genre, trackIDs: ids)
+        var finish: (@MainActor (Bool) -> Void)?
+        let gated = TagWriteQueue()
+        gated.start(queueDependencies(env, onFileChecks: { finish = $0 }), initialDelay: .seconds(3_600))
+        defer { gated.stop() }
+        NotificationCenter.default.post(name: .libraryRootDidChange, object: nil, userInfo: ["path": env.root.path])
+        #expect(gated.awaitingFileCheck)
+        #expect(await gated.flushNow().outcome == .waitingForFileCheck)
+        finish?(false) // aborted as suspicious: still waiting
+        #expect(gated.awaitingFileCheck)
+        finish?(true)
+        #expect(!gated.awaitingFileCheck)
+        gated.cancel()
+        #expect(await gated.flushNow().written == 1)
+        #expect(env.writer.requests.count == 1)
     }
 
     @Test func deletedTracksLeaveNoPendingRow() async throws {

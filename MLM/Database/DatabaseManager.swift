@@ -1169,6 +1169,32 @@ final class DatabaseManager: Sendable {
             """)
         }
 
+        // ──────────────────────────────────────────────────────────────
+        // Migration v53_tag_write_originals (W2-E review B1): what each file
+        // should carry per field, so a file only ever receives a value the
+        // user typed or — on undo — the exact value it had before MLM's
+        // first write. `intent` 'typed' (typed_value, NULL = cleared) or
+        // 'original'; `original_state` 'unknown' (not captured yet),
+        // 'absent' or 'present' (original_value). Captured from the file
+        // itself right before MLM's first write of that field. Never derived
+        // from an import-normalised column. No foreign key (foreign keys
+        // stay disabled); orphans go with `removeOrphanedPendingWrites`.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v53_tag_write_originals") { db in
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS tag_write_fields (
+                    track_id INTEGER NOT NULL,
+                    field TEXT NOT NULL,
+                    intent TEXT NOT NULL,
+                    typed_value TEXT,
+                    original_state TEXT NOT NULL DEFAULT 'unknown',
+                    original_value TEXT,
+                    original_captured_at TEXT,
+                    PRIMARY KEY (track_id, field)
+                )
+            """)
+        }
+
         return migrator
     }
 
