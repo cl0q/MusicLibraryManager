@@ -82,8 +82,11 @@ final class StatusBarCenter {
 
     /// The pending expiry of the current message (exposed for tests).
     @ObservationIgnored private(set) var expiryTask: Task<Void, Never>?
-    /// The pending 300 ms reveal of the loading indicator (exposed for tests).
-    @ObservationIgnored private(set) var loadingRevealTask: Task<Void, Never>?
+    /// Each running load's own 300 ms reveal timer.
+    @ObservationIgnored private var revealTasks: [LoadingToken: Task<Void, Never>] = [:]
+
+    /// The pending 300 ms reveal of a load (exposed for tests).
+    func revealTask(for token: LoadingToken) -> Task<Void, Never>? { revealTasks[token] }
 
     /// - Parameters:
     ///   - sleep: suspends for a duration; injectable so tests control time.
@@ -143,23 +146,23 @@ final class StatusBarCenter {
 
     // MARK: Loading
 
-    /// Start a loading phase for the visible view. Shows after 300 ms if not ended by then.
+    /// Start a loading phase for the visible view. The spinner shows once *some* running
+    /// load has itself run for 300 ms — a load that starts late never borrows an earlier
+    /// load's timer.
     func beginLoading(_ phase: String) -> LoadingToken {
         let token = LoadingToken()
         activeLoads[token] = phase
         loadOrder.append(token)
         loadingPhase = phase
-        if loadingRevealTask == nil, !isLoadingVisible {
-            let sleep = self.sleep
-            loadingRevealTask = Task { [weak self] in
-                do {
-                    try await sleep(Self.loadingDelay)
-                } catch {
-                    return
-                }
-                guard !Task.isCancelled else { return }
-                self?.revealLoading()
+        let sleep = self.sleep
+        revealTasks[token] = Task { [weak self] in
+            do {
+                try await sleep(Self.loadingDelay)
+            } catch {
+                return
             }
+            guard !Task.isCancelled else { return }
+            self?.reveal(token)
         }
         return token
     }
@@ -167,20 +170,19 @@ final class StatusBarCenter {
     /// End a loading phase started with `beginLoading(_:)`. Unknown tokens are ignored.
     func endLoading(_ token: LoadingToken) {
         guard activeLoads.removeValue(forKey: token) != nil else { return }
+        revealTasks.removeValue(forKey: token)?.cancel()
         loadOrder.removeAll { $0 == token }
         if let latest = loadOrder.last {
             loadingPhase = activeLoads[latest]
         } else {
             loadingPhase = nil
             isLoadingVisible = false
-            loadingRevealTask?.cancel()
-            loadingRevealTask = nil
         }
     }
 
-    private func revealLoading() {
-        loadingRevealTask = nil
-        if !activeLoads.isEmpty { isLoadingVisible = true }
+    private func reveal(_ token: LoadingToken) {
+        revealTasks[token] = nil
+        if activeLoads[token] != nil { isLoadingVisible = true }
     }
 }
 

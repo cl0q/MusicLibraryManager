@@ -3,8 +3,8 @@ import Testing
 @testable import MLM
 
 /// A sleep that only returns when the test releases it — the injectable clock of
-/// `StatusBarCenter`.
-private actor ManualSleeper {
+/// `StatusBarCenter` and `ToolbarSearchModel`, and a gate for async fetches.
+actor ManualSleeper {
     private var waiters: [(duration: Duration, continuation: CheckedContinuation<Void, Never>)] = []
 
     func sleep(_ duration: Duration) async {
@@ -19,6 +19,11 @@ private actor ManualSleeper {
     func releaseFirst() {
         guard !waiters.isEmpty else { return }
         waiters.removeFirst().continuation.resume()
+    }
+
+    func releaseLast() {
+        guard !waiters.isEmpty else { return }
+        waiters.removeLast().continuation.resume()
     }
 
     func releaseAll() {
@@ -121,8 +126,9 @@ struct StatusBarCenterTests {
         await sleeper.waitForPending(1)
         #expect(await sleeper.durations == [.milliseconds(300)])
 
+        let reveal = center.revealTask(for: token)
         await sleeper.releaseAll()
-        await center.loadingRevealTask?.value
+        await reveal?.value
         #expect(center.isLoadingVisible)
 
         center.endLoading(token)
@@ -134,7 +140,7 @@ struct StatusBarCenterTests {
         let center = makeCenter()
         let token = center.beginLoading("Reading…")
         await sleeper.waitForPending(1)
-        let reveal = center.loadingRevealTask
+        let reveal = center.revealTask(for: token)
         center.endLoading(token)
         await sleeper.releaseAll()
         await reveal?.value
@@ -145,9 +151,10 @@ struct StatusBarCenterTests {
         let center = makeCenter()
         let first = center.beginLoading("First…")
         let second = center.beginLoading("Second…")
-        await sleeper.waitForPending(1)
+        await sleeper.waitForPending(2)
+        let reveals = [center.revealTask(for: first), center.revealTask(for: second)]
         await sleeper.releaseAll()
-        await center.loadingRevealTask?.value
+        for reveal in reveals { await reveal?.value }
         #expect(center.isLoadingVisible)
         center.endLoading(second)
         #expect(center.isLoadingVisible)
@@ -155,5 +162,47 @@ struct StatusBarCenterTests {
         center.endLoading(first)
         #expect(!center.isLoadingVisible)
         center.endLoading(first) // unknown token: ignored
+    }
+
+    @Test func aLoadStartedAfterTheFirstWasRevealedKeepsTheSpinnerUntilItEnds() async {
+        let center = makeCenter()
+        let first = center.beginLoading("First…")
+        await sleeper.waitForPending(1)
+        let firstReveal = center.revealTask(for: first)
+        await sleeper.releaseAll()
+        await firstReveal?.value
+        #expect(center.isLoadingVisible)
+
+        let second = center.beginLoading("Second…")
+        #expect(center.isLoadingVisible, "Already visible: a new load doesn't hide it")
+        #expect(center.loadingPhase == "Second…")
+        center.endLoading(first)
+        #expect(center.isLoadingVisible, "The second load still runs")
+        center.endLoading(second)
+        #expect(!center.isLoadingVisible)
+        await sleeper.releaseAll()
+    }
+
+    @Test func aLateLoadWaitsItsOwnThreeHundredMilliseconds() async {
+        // A starts; B starts shortly after; A ends before its 300 ms. A's timer firing must
+        // not reveal B early — B shows only when its own timer fires.
+        let center = makeCenter()
+        let first = center.beginLoading("First…")
+        await sleeper.waitForPending(1)
+        let second = center.beginLoading("Second…")
+        await sleeper.waitForPending(2)
+        let firstReveal = center.revealTask(for: first)
+        let secondReveal = center.revealTask(for: second)
+        center.endLoading(first)
+
+        await sleeper.releaseFirst()
+        await firstReveal?.value
+        #expect(!center.isLoadingVisible, "B has not run for 300 ms yet")
+
+        await sleeper.releaseAll()
+        await secondReveal?.value
+        #expect(center.isLoadingVisible)
+        center.endLoading(second)
+        #expect(!center.isLoadingVisible)
     }
 }
