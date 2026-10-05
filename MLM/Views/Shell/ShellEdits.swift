@@ -6,8 +6,8 @@ import Foundation
 /// confirmation; nothing here asks before acting except Delete Playlist (UC-UNDO-05).
 ///
 /// Owned by `ShellActions` (`actions.edits`). The undo and redo closures capture only the
-/// repositories and the window's navigation and sidebar models — never this object — so the
-/// undo stack keeps no shell alive.
+/// repositories and a `ShellWindowModels` box — never this object or one window's models —
+/// so a step undone after the main window was closed and reopened updates the new window.
 @MainActor
 final class ShellEdits {
     /// Where the edits read and write; `live(_:)` in the app, temporary databases in tests.
@@ -37,20 +37,13 @@ final class ShellEdits {
 
     private let dependencies: Dependencies
     private let undo: UndoCenter
-    private let statusBar: StatusBarCenter
     private let effects: PlaylistEffects
 
-    init(
-        dependencies: Dependencies,
-        undo: UndoCenter,
-        statusBar: StatusBarCenter,
-        navigation: NavigationModel,
-        sidebar: SidebarModel
-    ) {
+    /// - Parameter window: the current main window's models (`ShellWindowModels.main` in the app).
+    init(dependencies: Dependencies, undo: UndoCenter, window: ShellWindowModels) {
         self.dependencies = dependencies
         self.undo = undo
-        self.statusBar = statusBar
-        effects = PlaylistEffects(navigation: navigation, sidebar: sidebar, statusBar: statusBar)
+        effects = PlaylistEffects(window: window)
     }
 
     // MARK: New Playlist (⌘N, S-PL-NEWPLAYLIST)
@@ -74,8 +67,8 @@ final class ShellEdits {
             message: { "Created “\($0.name)”" }
         )
         if let id = created?.id {
-            effects.navigation.select(.playlist(id))
-            effects.sidebar.requestRename(playlist: id)
+            effects.window.navigation?.select(.playlist(id))
+            effects.window.sidebar?.requestRename(playlist: id)
         }
         return created
     }
@@ -102,7 +95,7 @@ final class ShellEdits {
             message: { "Created “\($0.name)” with \(StatusBarText.tracks(ordered.count))" }
         )
         if let id = created?.id {
-            effects.sidebar.requestRename(playlist: id)
+            effects.window.sidebar?.requestRename(playlist: id)
         }
         return created
     }
@@ -128,18 +121,25 @@ final class ShellEdits {
                 },
                 undo: { added in
                     let removed = try await repository.removeEntries(added.entries)
+                    // Removed meanwhile by something else: nothing left to undo (no empty Redo).
+                    guard !removed.isEmpty else {
+                        throw UndoNothingLeft(note: "Nothing to undo — the tracks are no longer in “\(name)”")
+                    }
                     await effects.changed(playlistID, repository: repository)
                     return removed
                 },
                 redo: { removed in
                     let restored = try await repository.restoreEntries(removed)
+                    guard !restored.isEmpty else {
+                        throw UndoNothingLeft(note: "Nothing to redo — the tracks can’t go back into “\(name)”")
+                    }
                     await effects.changed(playlistID, repository: repository)
                     return PlaylistAppendResult(entries: restored, alreadyPresent: 0)
                 },
                 message: { Self.addedMessage(added: $0.entries.count, alreadyPresent: $0.alreadyPresent, playlist: name) }
             )
             if result == nil {
-                statusBar.post(Self.alreadyPresentMessage(count: ordered.count, playlist: name))
+                effects.window.statusBar?.post(Self.alreadyPresentMessage(count: ordered.count, playlist: name))
             }
         } catch {
             // Reported in the status bar by the center.
@@ -186,10 +186,11 @@ final class ShellEdits {
     }
 
     private static func rename(_ id: Int64, to name: String, currentName: String, repository: PlaylistRepository) async throws {
-        guard let playlist = try await repository.fetch(id: id) else {
+        guard try await repository.fetch(id: id) != nil else {
             throw UndoTargetMissing(quotedName: "“\(currentName)”")
         }
-        if let other = try await repository.findByName(name), other.id != id, other.category == playlist.category {
+        // One name space in any letter case; a case change of its own name is fine.
+        if let other = try await repository.findByName(name), other.id != id {
             throw NameTaken(kind: "playlist", name: other.name)
         }
         try await repository.rename(id: id, name: name)
@@ -262,7 +263,7 @@ final class ShellEdits {
     // MARK: -
 
     private func playlistName(_ id: Int64, repository: PlaylistRepository) async -> String {
-        if let name = effects.sidebar.playlistName(id) { return name }
+        if let name = effects.window.sidebar?.playlistName(id) { return name }
         return (try? await repository.fetch(id: id))?.name ?? "the playlist"
     }
 
@@ -274,13 +275,34 @@ final class ShellEdits {
 
 // MARK: - Effects shared by do / undo / redo
 
+/// The current main window's models, for undo and redo closures that may run after the window
+/// that started them closed. The app has one (`main`), filled by the window when it appears.
+@MainActor
+final class ShellWindowModels {
+    static let main = ShellWindowModels()
+
+    private(set) weak var navigation: NavigationModel?
+    private(set) weak var sidebar: SidebarModel?
+    private(set) weak var statusBar: StatusBarCenter?
+
+    init(navigation: NavigationModel? = nil, sidebar: SidebarModel? = nil, statusBar: StatusBarCenter? = nil) {
+        self.navigation = navigation
+        self.sidebar = sidebar
+        self.statusBar = statusBar
+    }
+
+    func use(navigation: NavigationModel, sidebar: SidebarModel, statusBar: StatusBarCenter) {
+        self.navigation = navigation
+        self.sidebar = sidebar
+        self.statusBar = statusBar
+    }
+}
+
 /// What every playlist change must update in the window: the sidebar rows, routes to a
 /// deleted playlist, and everyone listening for `.playlistDidChange` (detail views, covers).
 @MainActor
 struct PlaylistEffects {
-    let navigation: NavigationModel
-    let sidebar: SidebarModel
-    let statusBar: StatusBarCenter
+    let window: ShellWindowModels
 
     func changed(_ playlistID: Int64?, repository: PlaylistRepository) async {
         NotificationCenter.default.post(
@@ -288,8 +310,9 @@ struct PlaylistEffects {
             object: nil,
             userInfo: playlistID.map { ["playlistId": $0] }
         )
+        guard let sidebar = window.sidebar else { return }
         for removed in await sidebar.reloadPlaylists(repository) {
-            navigation.removePlaylist(removed)
+            window.navigation?.removePlaylist(removed)
         }
     }
 
@@ -297,7 +320,7 @@ struct PlaylistEffects {
     func delete(_ playlistID: Int64?, repository: PlaylistRepository) async throws -> PlaylistSnapshot {
         guard let playlistID else { throw PlaylistRepositoryError.playlistNotFound }
         let snapshot = try await repository.deleteReturningSnapshot(id: playlistID)
-        navigation.removePlaylist(playlistID)
+        window.navigation?.removePlaylist(playlistID)
         await changed(playlistID, repository: repository)
         return snapshot
     }
@@ -307,22 +330,40 @@ struct PlaylistEffects {
         let result = try await repository.restore(snapshot)
         await changed(result.playlist.id, repository: repository)
         if let note = Self.restoreNote(original: snapshot.playlist.name, result: result) {
-            statusBar.post(note)
+            window.statusBar?.post(note)
         }
         return result
     }
 
-    /// `Restored “Warm-up 2” — “Warm-up” was taken` · `Restored “Warm-up” — 2 of its tracks
-    /// are no longer in the library`; nil when the restore was exact.
+    /// `Restored “Warm-up 2” — “Warm-up” was taken` · `… — 2 of its tracks are no longer in the
+    /// library` · `… — 1 of its sync profiles no longer exists` · `… — “Warm-up” was imported
+    /// again, so this copy is no longer linked to SoundCloud`; nil when the restore was exact.
     static func restoreNote(original: String, result: PlaylistRestoreResult) -> String? {
         var causes: [String] = []
+        if let unlinked = result.unlinked {
+            causes.append("“\(unlinked.otherPlaylistName)” was imported again, so this copy is no longer linked to \(sourceDisplayName(unlinked.sourceName))")
+        }
         if result.wasRenamed { causes.append("“\(original)” was taken") }
         if result.droppedTrackCount > 0 {
             let n = result.droppedTrackCount
             causes.append("\(n.formatted(.number)) of its tracks \(n == 1 ? "is" : "are") no longer in the library")
         }
+        if result.droppedSyncProfileCount > 0 {
+            let n = result.droppedSyncProfileCount
+            causes.append("\(n.formatted(.number)) of its sync profiles no longer \(n == 1 ? "exists" : "exist")")
+        }
         guard !causes.isEmpty else { return nil }
         return "Restored “\(result.playlist.name)” — " + causes.joined(separator: ", ")
+    }
+
+    /// Glossary name of a stored source name (`soundcloud` → `SoundCloud`, UC-GLOSS-01).
+    static func sourceDisplayName(_ raw: String) -> String {
+        let lowered = raw.lowercased()
+        let names: [(String, String)] = [
+            ("soundcloud", "SoundCloud"), ("spotify", "Spotify"), ("youtube", "YouTube"),
+            ("apple", "Apple Music"), ("dab", "DAB"), ("qobuz", "Qobuz"), ("last", "Last.fm"),
+        ]
+        return names.first { lowered.contains($0.0) }?.1 ?? raw
     }
 }
 

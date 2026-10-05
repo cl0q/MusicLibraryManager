@@ -21,7 +21,7 @@ final class ShellActions {
     @ObservationIgnored private let statusBar: StatusBarCenter
     @ObservationIgnored private var importViewModel: ImportViewModel?
 
-    /// The undoable playlist and sync-profile edits (W2-F), on the window's `UndoCenter`.
+    /// The undoable playlist and sync-profile edits (W2-F), on the library's `UndoCenter`.
     @ObservationIgnored let edits: ShellEdits
 
     init(
@@ -35,13 +35,7 @@ final class ShellActions {
         self.navigation = navigation
         self.sidebar = sidebar
         self.statusBar = statusBar
-        edits = ShellEdits(
-            dependencies: .live(container),
-            undo: undo,
-            statusBar: statusBar,
-            navigation: navigation,
-            sidebar: sidebar
-        )
+        edits = ShellEdits(dependencies: .live(container), undo: undo, window: .main)
     }
 
     var hasLibrary: Bool { container.isInitialized }

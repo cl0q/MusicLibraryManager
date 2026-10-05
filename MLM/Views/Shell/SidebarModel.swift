@@ -92,6 +92,8 @@ final class SidebarModel {
         let before = Set(playlists.compactMap(\.id))
         playlists = loaded
         let after = Set(loaded.compactMap(\.id))
+        // A requested inline rename never outlives its playlist (undone, deleted).
+        if let requested = renameRequest, !after.contains(requested) { renameRequest = nil }
         return before.subtracting(after).sorted()
     }
 
