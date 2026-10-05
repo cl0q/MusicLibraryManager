@@ -122,6 +122,7 @@ Latest existing: `v41_remote_provider_identity`. Reserved (a number is only used
 | v50 | W4-1 | `album_tracks` |
 | v51 | W4-1 | Album dedup |
 | v52 | W4-3 | Album suggestions / confirmed `No album` |
+| v53 | W2-E (fix round) | Original file tag values and typed values for tag writes |
 
 ## 4. Decisions during implementation
 
@@ -168,6 +169,8 @@ Latest existing: `v41_remote_provider_identity`. Reserved (a number is only used
 | 3 | Does `Remove from List` in the library picker need a confirmation? | W3-LAUNCH | open |
 | 4 | History size of the Activity window | W3-ACT | open |
 | 5 | May a partial re-import ever remove tracks from a linked playlist? (design: add-only) | W3-ADD / W3-PL | open |
+| 6 | Tag writing (§10 Q7 said on by default): an ffmpeg remux can lose tag data MLM can't see (Serato markers, ratings, MusicBrainz IDs). Options: (a) keep OFF by default, write only files whose tag structure is on a verified allow-list, refuse the rest; (b) add an in-place tag library (TagLib, a new C++ dependency) and then turn it ON; (c) database-only edits | W2-E | **asked 2026-10-05** — implementing (a) meanwhile |
+| 7 | Sync never re-copies a file whose tags changed, so device copies keep old tags — should W3-SYNC re-copy tracks whose tags were written since the last sync? | W3-SYNC | open |
 
 ## 6. Wave log
 
@@ -182,7 +185,7 @@ _(per wave: merged packages with commits, contract file paths, what Oliver shoul
 - **Load-sensitive pre-existing tests to harden in W5:** `ArtworkBackfillServiceTests.testCoalescesDuplicateRequests`, `ArtworkResizeTests.transcodeWithArtworkResizeProducesSmallCover`, `PlaylistCoverServiceTests.reentry_guard_skips_self_notifications`, `MlmUuidEmbeddingTests.m4aPreservesCoverArt`.
 - **W2-A contracts:** `MLM/Views/TrackList/` (`TrackListTable(model:configuration:)`, `TrackListModel.setTracks`, `TrackListConfiguration` factories `.allTracks` / `.playlist` / `.searchResults` / `.queue`, `TrackMenu`, `TrackListActions`), `TrackAvailability.derive` + `TrackAvailabilitySQL` + `TrackRepository.availabilityCounts` / `libraryTotals` / `fetchTracks(scope:search:)`, `TrackAvailabilityReconciler` + `LibraryAvailabilityMonitor` (`recordMissingAtUse`, `// W3-ACT:` hook), `InspectedTrackSelection` (seam for W2-E), `FocusedValues.trackTableViewOptions`. Context-menu items omitted until their package: Preview, Locate File… (W2-C), Add to Queue / Remove from Queue (W2-D), Go to Artist (W2-I), Find Similar (W3-DISC), Go to Album (W4-2), Share… (W5-2).
 - **W2-B** merged (branch `b3/w2-b-all-tracks`, 5 commits). Tests on the merge result: Swift Testing 1897 tests / 186 suites passed; XCTest 14 tests, 3 skipped, 0 failures. Contracts: `MLM/Views/Shell/ScopeBar.swift` (`ScopeBar(items:selection:…)`, publishes `FocusedValues.viewScopeMenu` for View ▸ Filter), `MLM/Database/TrackScopeQueries.swift` (`scopeSummary(search:)`), `DownloadFailureReasonText`. Follow-ups: W3-PL playlist detail and W3-ACT use the reason mapper; `LibraryTab`, `fetchForLibrary`, `libraryTotals(tab:)`, `countTracksByAvailability` are unused (delete in W5).
-- **W2-E** merged (branch `b3/w2-e-inspector`, 8 commits; one inventory-count conflict with W2-B resolved by the coordinator). Tests on the merge result: Swift Testing 1955 tests / 191 suites passed; XCTest 14 tests, 3 skipped, 0 failures. Independent review running (file rewriting, offline queue, multi-edit). Contracts: `MLM/Views/Inspector/InspectorModel`, `MLM/Services/Tags/` (`TrackTagEdit.live(undo:).perform(_:field:trackIDs:…)`, `TrackTagWriter`, `TagWriteQueue.shared.requestFlush()`, `TagWriteSetting`), `TrackTagRepository.markStale`, table `pending_tag_writes` (v44). Open: a dedicated `.trackMetadataDidChange` notification (today tag edits post `.trackAvailabilityDidChange` with `reason: "tags"`).
+- **W2-E** merged (branch `b3/w2-e-inspector`, 8 commits; one inventory-count conflict with W2-B resolved by the coordinator). Tests on the merge result: Swift Testing 1955 tests / 191 suites passed; XCTest 14 tests, 3 skipped, 0 failures. Independent review: **2 blockers** — B1 undo/flush wrote import-normalised (lower-cased, placeholder) database values into files; B2 the remux-and-verify approach cannot see tag data outside ffprobe's view (Serato `GEOB`, `POPM`, `UFID`, FLAC seektable, MP4 binary freeform atoms…) and may drop it. Fix round in progress; **`Write tags to files` is OFF unless explicitly enabled** until Oliver decides (see §5 question 6). Contracts: `MLM/Views/Inspector/InspectorModel`, `MLM/Services/Tags/` (`TrackTagEdit.live(undo:).perform(_:field:trackIDs:…)`, `TrackTagWriter`, `TagWriteQueue.shared.requestFlush()`, `TagWriteSetting`), `TrackTagRepository.markStale`, table `pending_tag_writes` (v44). Open: a dedicated `.trackMetadataDidChange` notification (today tag edits post `.trackAvailabilityDidChange` with `reason: "tags"`).
 - Open: ⌘⌫ on the destructive button of the sidebar delete alerts (UC-KEY-34) is not set — decide after Oliver has tried the `Remove from Library…` alert (key-repeat risk).
 
 ### Wave 1
