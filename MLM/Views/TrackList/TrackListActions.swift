@@ -122,32 +122,36 @@ struct TrackListActions {
         statusBar?.post(TrackPrimaryAction.downloadStartedMessage(count: downloadable.count))
     }
 
-    /// Download Again (File missing, has a source): re-check the files first — one may be
-    /// back — then clear the stale path of the ones still missing and download them.
+    /// Download Again (File missing, has a source): see `TrackDownloadAgain`. The stored path
+    /// is never cleared up front; only a finished download replaces it.
     func downloadAgain(_ rows: [TrackRow]) {
         let ids = Set(rows.filter { $0.availability == .fileMissing }.map(\.id))
-        guard !ids.isEmpty, let repository = container.trackRepository, let downloads = container.downloadViewModel else { return }
+        guard !ids.isEmpty, let repository = container.trackRepository, let downloads = container.downloadViewModel,
+              let monitor = container.availabilityMonitor else { return }
         if downloads.isDownloading {
             statusBar?.post(TrackCommandState.downloadBusyReason)
             return
         }
-        let monitor = container.availabilityMonitor
         let statusBar = self.statusBar
+        let volumeName = LibraryDriveState.current(container).volumeName
         Task {
-            await monitor?.checkNow(.tracks(ids))
-            var again: [Int64] = []
-            for id in ids.sorted() {
-                guard let track = try? await repository.fetchTrack(id: id), track.availability() == .fileMissing else { continue }
-                try? await repository.demoteToRemote(trackId: id)
-                again.append(id)
-            }
-            guard !again.isEmpty, let fresh = try? await repository.fetchTracks(ids: Set(again)) else {
+            let prepared = await TrackDownloadAgain.prepare(
+                ids: ids,
+                repository: repository,
+                check: { await monitor.checkNow(.tracks($0)) },
+                isFolderReachable: { await monitor.isLibraryFolderReachable() }
+            )
+            switch prepared {
+            case .ready(let tracks):
+                statusBar?.post(TrackPrimaryAction.downloadStartedMessage(count: tracks.count))
+                await downloads.downloadTracks(tracks)
+            case .notConnected:
+                statusBar?.post(TrackDownloadAgain.notConnectedMessage(volumeName))
+            case .nothingMissing:
                 NotificationCenter.default.post(name: .trackAvailabilityDidChange, object: nil)
-                return
+            case .checkStopped:
+                statusBar?.post(TrackDownloadAgain.checkStoppedMessage)
             }
-            NotificationCenter.default.post(name: .trackAvailabilityDidChange, object: nil)
-            statusBar?.post(TrackPrimaryAction.downloadStartedMessage(count: fresh.count))
-            await downloads.downloadTracks(fresh)
         }
     }
 
@@ -191,6 +195,58 @@ struct TrackListActions {
                 && !TrackRowPresentation.isUnreachable(availability: row.availability, fileLocation: row.fileLocation, live: live.state)
         }.map(\.track)
     }
+}
+
+// MARK: - Download Again (File missing, §15.4)
+
+/// Download Again, made safe (W2-A review S1):
+/// 1. check the files first — one may be back — and go on only when that check completed
+///    (never while the library folder or its disk is away);
+/// 2. check once more that the folder is reachable;
+/// 3. hand the still-missing tracks that have a source to the download pipeline **without
+///    touching the database**: the copies passed in have no `organizedPath` in memory only, so
+///    the pipeline accepts them; a finished download overwrites the stored path and clears
+///    the flag (`TrackRepository.markAsDownloaded`), a failed or cancelled one leaves the row
+///    exactly as it was (File missing, old path kept).
+enum TrackDownloadAgain {
+    enum Prepared: Equatable {
+        case ready([Track])
+        case notConnected
+        case nothingMissing
+        case checkStopped
+    }
+
+    static func prepare(
+        ids: Set<Int64>,
+        repository: TrackRepository,
+        check: (Set<Int64>) async -> TrackAvailabilityReconciler.Report,
+        isFolderReachable: () async -> Bool
+    ) async -> Prepared {
+        let report = await check(ids)
+        switch report.outcome {
+        case .completed: break
+        case .skippedRootUnreachable, .abortedRootLost: return .notConnected
+        case .abortedSuspicious, .cancelled: return .checkStopped
+        }
+        guard await isFolderReachable() else { return .notConnected }
+        var tracks: [Track] = []
+        for id in ids.sorted() {
+            guard var track = try? await repository.fetchTrack(id: id),
+                  track.availability() == .fileMissing,
+                  TrackLinks.hasSource(track) else { continue }
+            track.organizedPath = nil  // in memory only — see above
+            tracks.append(track)
+        }
+        return tracks.isEmpty ? .nothingMissing : .ready(tracks)
+    }
+
+    /// `Can’t download — “Lexxar” is not connected`
+    static func notConnectedMessage(_ volumeName: String?) -> String {
+        guard let volumeName else { return "Can’t download — the library folder can’t be read" }
+        return "Can’t download — “\(volumeName)” is not connected"
+    }
+
+    static let checkStoppedMessage = "Can’t download — the files couldn’t be checked"
 }
 
 /// The live state rows read, as one observable per table so a change re-renders only the

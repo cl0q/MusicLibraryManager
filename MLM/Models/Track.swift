@@ -121,12 +121,13 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
 
     /// Whether this track has a stored local path (without verifying the file on disk).
     var isLocal: Bool {
-        organizedPath != nil
+        // An empty path is no file — the same rule as availability and the SQL (W2-A review).
+        !(organizedPath ?? "").isEmpty
     }
 
     /// Whether this track has no stored local path.
     var isRemote: Bool {
-        organizedPath == nil
+        !isLocal
     }
 
     /// The decoded persisted failure details, if a download previously failed.

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -37,7 +38,7 @@ struct TrackListTable<EmptyContent: View>: View {
         self.emptyContent = emptyContent()
         _columnCustomization = SceneStorage(wrappedValue: TableColumnCustomization<TrackRow>(),
                                             "trackTable.columns.\(configuration.persistenceKey)")
-        _storedSort = SceneStorage(wrappedValue: "", "trackTable.sort.\(configuration.persistenceKey)")
+        _storedSort = SceneStorage(wrappedValue: "", "trackTable.sort.\(configuration.sortPersistenceKey ?? configuration.persistenceKey)")
     }
 
     private var actions: TrackListActions {
@@ -186,8 +187,9 @@ private struct TrackTableCore: View {
         } primaryAction: { ids in
             actions.primary(ids)
         }
+        // ⌫ removes the selected rows that are shown — never ones a search is hiding (S5).
         .onDeleteCommand(perform: configuration.removeFromContainer.map { remove in
-            { remove(model.selection) }
+            { remove(Set(model.selectedRows().map(\.id))) }
         })
         .onCopyCommand { actions.copyItems() }
         .alternatingRowBackgrounds()
@@ -218,7 +220,7 @@ private struct TrackTableCore: View {
                     return true
                 },
                 syncProfiles: sources.syncProfiles,
-                offlineHelp: state.offlineVolumeName.map(TrackPrimaryAction.driveNotConnectedHelp)
+                offlineVolumeName: state.offlineVolumeName
             )
         }
     }
@@ -282,15 +284,34 @@ private struct TrackTablePublisher: ViewModifier {
     let actions: TrackListActions
     let viewOptions: TrackTableViewOptions
 
+    @Environment(NavigationModel.self) private var navigation: NavigationModel?
+    @Environment(\.container) private var container
+
+    /// The kept-alive All Tracks table is in the window while another place shows (opacity 0).
+    /// Hidden, it publishes nothing, writes nothing into Info's selection and takes no keys.
+    private var isVisiblePlace: Bool {
+        TrackTableVisibility.isVisible(
+            isAllTracksTable: configuration.listContext.isAllTracksTable,
+            allTracksVisible: navigation?.isAllTracksVisible ?? true,
+            isSearching: container.searchCoordinator.isPresented
+        )
+    }
+
     func body(content: Content) -> some View {
+        let visible = isVisiblePlace
         let selected = model.selectedRows()
         let summary = TrackSelectionSummary(rows: selected, container: configuration.listContext.container, live: live.state)
         content
-            .focusedValue(\.trackSelection, selection(summary: summary))
-            .focusedValue(\.trackTableViewOptions, viewOptions)
+            .disabled(!visible)
+            .focusedValue(\.trackSelection, visible ? selection(summary: summary) : nil)
+            .focusedValue(\.trackTableViewOptions, visible ? viewOptions : nil)
             .statusBarText(configuration.publishesStatusText ? statusText(selected) : nil)
             .onChange(of: model.selection) { _, _ in
+                guard isVisiblePlace else { return }
                 InspectedTrackSelection.shared.update(model.selectedRows().map(\.id), from: configuration.persistenceKey)
+            }
+            .onChange(of: visible) { _, nowVisible in
+                if !nowVisible { TrackTableVisibility.resignTableFocus() }
             }
     }
 
@@ -303,11 +324,14 @@ private struct TrackTablePublisher: ViewModifier {
             selectedIDs: model.selection,
             summary: summary,
             context: configuration.listContext,
-            hasPlayableRows: model.hasPlayableRows,
+            hasPlayableRows: model.hasPlayableRows(live: live.state),
             rowsToken: model.rowsToken,
             target: TrackCommandTarget(
                 activate: configuration.activate,
-                removeFromContainer: configuration.removeFromContainer,
+                // Track ▸ Remove from ‹Container› acts on the shown selected rows only (S5).
+                removeFromContainer: configuration.removeFromContainer.map { remove in
+                    { ids in remove(Set(model.selectedRows(ids).map(\.id))) }
+                },
                 deselectAll: { model.selection = [] },
                 playlists: sources.playlists.filter { playlist in
                     if case .playlist(let id, _) = configuration.listContext.container { return playlist.id != id }
@@ -371,5 +395,24 @@ private struct TrackTableLiveObserver: View {
 
     private func apply(_ state: TrackTableLiveState) {
         if live.state != state { live.state = state }
+    }
+}
+
+// MARK: - Visibility of kept-alive tables
+
+enum TrackTableVisibility {
+    /// Only the All Tracks table is kept alive while hidden; every other table exists only
+    /// while its place shows.
+    static func isVisible(isAllTracksTable: Bool, allTracksVisible: Bool, isSearching: Bool) -> Bool {
+        !isAllTracksTable || (allTracksVisible && !isSearching)
+    }
+
+    /// A table that just became hidden must not keep the keyboard: ↩, ⌘A and the arrows would
+    /// act on rows nobody sees. The hidden table is disabled; if it still holds first
+    /// responder, the window's first responder is cleared.
+    @MainActor
+    static func resignTableFocus() {
+        guard let window = NSApp.keyWindow, window.firstResponder is NSTableView else { return }
+        window.makeFirstResponder(nil)
     }
 }

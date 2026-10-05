@@ -161,10 +161,10 @@ struct TrackAvailabilityTests {
         try await repo.markAsDownloaded(trackId: id, organizedPath: "A/dl.m4a", format: "m4a", bitrate: 248)
         #expect(try await repo.fetchTrack(id: id)?.fileMissingSince == nil)
         #expect(try await repo.recordFileMissing(trackId: id))
-        try await repo.demoteToRemote(trackId: id)
-        let demoted = try await repo.fetchTrack(id: id)
-        #expect(demoted?.fileMissingSince == nil)
-        #expect(demoted?.availability() == .notDownloaded)
+        try await repo.updateDownloadStatus(trackId: id, status: nil, organizedPath: nil)
+        let cleared = try await repo.fetchTrack(id: id)
+        #expect(cleared?.fileMissingSince == nil)
+        #expect(cleared?.availability() == .notDownloaded)
         // A track without a file can't be flagged missing.
         #expect(try await repo.recordFileMissing(trackId: id) == false)
     }

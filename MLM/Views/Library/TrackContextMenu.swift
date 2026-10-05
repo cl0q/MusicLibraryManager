@@ -58,7 +58,7 @@ struct TrackContextMenu: View {
             actions: actions,
             playlists: availablePlaylists.filter { $0.id != playlist?.id },
             syncProfiles: availableSyncProfiles,
-            offlineHelp: live.state.offlineVolumeName.map(TrackPrimaryAction.driveNotConnectedHelp)
+            offlineVolumeName: live.state.offlineVolumeName
         )
     }
 }

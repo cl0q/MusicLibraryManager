@@ -152,7 +152,7 @@ final class TrackRepository: Sendable {
     func countTracksByAvailability() async throws -> (local: Int, remote: Int) {
         try await database.read { db in
             let sql = """
-                SELECT organized_path IS NOT NULL AS is_local, COUNT(*) AS cnt
+                SELECT (organized_path IS NOT NULL AND organized_path != '') AS is_local, COUNT(*) AS cnt
                 FROM tracks
                 GROUP BY is_local
             """
@@ -216,8 +216,9 @@ final class TrackRepository: Sendable {
         var args: [DatabaseValueConvertible] = []
 
         switch tab {
-        case .local:  conditions.append("organized_path IS NOT NULL")
-        case .remote: conditions.append("organized_path IS NULL")
+        // One rule everywhere: an empty path is no file (TrackAvailabilitySQL).
+        case .local:  conditions.append(TrackAvailabilitySQL.hasFile)
+        case .remote: conditions.append(TrackAvailabilitySQL.noFile)
         }
 
         let trimmed = search?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -622,19 +623,6 @@ final class TrackRepository: Sendable {
             try db.execute(
                 sql: "UPDATE tracks SET organized_path = ?, original_path = ?, file_missing_since = NULL WHERE id = ?",
                 arguments: [organizedPath, originalPath, trackId]
-            )
-        }
-    }
-
-    /// Demote a track back to remote-only by clearing organized_path
-    /// AND download_status together. Used by the repair pass when a row
-    /// carries a stale staging path but the original_path is a streaming
-    /// URL (so there was never a real local file to begin with).
-    func demoteToRemote(trackId: Int64) async throws {
-        try await database.write { db in
-            try db.execute(
-                sql: "UPDATE tracks SET organized_path = NULL, download_status = NULL, file_missing_since = NULL WHERE id = ?",
-                arguments: [trackId]
             )
         }
     }
@@ -1588,7 +1576,7 @@ final class TrackRepository: Sendable {
     /// Count and total duration of what All Tracks shows for a tab and search (status bar).
     func libraryTotals(tab: LibraryTab, search: String? = nil) async throws -> TrackListTotals {
         var (conditions, arguments) = Self.searchConditions(search)
-        conditions.insert(tab == .local ? "organized_path IS NOT NULL" : "organized_path IS NULL", at: 0)
+        conditions.insert(tab == .local ? TrackAvailabilitySQL.hasFile : TrackAvailabilitySQL.noFile, at: 0)
         let sql = "SELECT COUNT(*) AS n, COALESCE(SUM(COALESCE(duration, 0)), 0) AS d FROM tracks WHERE "
             + conditions.joined(separator: " AND ")
         let finalArguments = arguments

@@ -124,8 +124,10 @@ private struct SelectionMirror: View {
         Color.clear
             .frame(width: 0, height: 0)
             .accessibilityHidden(true)
-            .onChange(of: list.selection) { _, ids in
-                if viewModel.selectedTrackIDs != ids { viewModel.selectedTrackIDs = ids }
+            .onChange(of: list.selection) { _, _ in
+                // Only rows that are shown: `Remove n` never touches rows a search hides (S5).
+                let visible = Set(list.selectedRows().map(\.id))
+                if viewModel.selectedTrackIDs != visible { viewModel.selectedTrackIDs = visible }
             }
     }
 }

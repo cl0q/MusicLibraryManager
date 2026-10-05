@@ -69,9 +69,11 @@ struct PlaybackCommands: Commands {
 
             Divider()
 
+            let cantPlayReason = TrackTableLiveState.drive(DependencyContainer.shared).cantPlayReason
             CommandButton(.shuffleView,
                           title: PlayableList.title(MenuCommand.shuffleView.title, list),
-                          enabled: list?.canPlay == true) {
+                          enabled: list?.canPlay == true,
+                          disabledReason: cantPlayReason) {
                 list?.shuffle()
             }
             CommandSubmenu(.repeatMode)
@@ -80,7 +82,8 @@ struct PlaybackCommands: Commands {
 
             CommandButton(.playView,
                           title: PlayableList.title(MenuCommand.playView.title, list),
-                          enabled: list?.canPlay == true) {
+                          enabled: list?.canPlay == true,
+                          disabledReason: cantPlayReason) {
                 list?.play()
             }
         }
@@ -155,7 +158,8 @@ struct PlayableList {
               let activate else { return nil }
         return PlayableList(
             name: TrackListContext.allTracks.viewName ?? "All Tracks",
-            canPlay: library.displayedTracks.contains(where: \.isLocal),
+            // Drive-aware: nothing plays from a disk that is away (W2-A review S7).
+            canPlay: library.list.hasPlayableRows(live: .drive(DependencyContainer.shared)),
             rows: { library.displayedTracks },
             selected: {
                 library.displayedTracks.filter { track in track.id.map(library.selectedTrackIDs.contains) ?? false }
