@@ -55,8 +55,7 @@ struct ContentView: View {
     /// Selection-based sheet state
     @State private var syncProfileSelectionContainer: TrackSelectionContainer? = nil
 
-    /// Bottom Activity panel, shown while expanded (until W3-ACT, see `ActivityPanelHosting`).
-    @AppStorage(ActivityPanelHosting.expandedKey) private var isActivityPanelShown = false
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         notificationHandlers(
@@ -138,6 +137,31 @@ struct ContentView: View {
             } else {
                 loadingView
             }
+        }
+        // Launch states show only the title and the Activity item (UC-WIN-07, UC-JOB-04).
+        .toolbar {
+            if !container.isInitialized {
+                ToolbarItem(placement: .primaryAction) {
+                    ActivityToolbarItem()
+                }
+            }
+        }
+        // Activity's status-bar messages (UC-JOB-08) and window requests (status-bar `Show`).
+        .onAppear { connectActivity() }
+        .onChange(of: ActivityRouter.shared.windowRequest) { _, _ in
+            openWindow(id: ActivityWindow.id)
+        }
+    }
+
+    /// The main window's status bar shows Activity's start and end messages; `Show` opens the
+    /// popover — an explicit action; a finished job itself never opens anything (UC-JOB-12).
+    private func connectActivity() {
+        let statusBar = shell.statusBar
+        ActivityCenter.shared.messageSink = { message in
+            let actions = message.actionTitle.map { title in
+                [StatusAction(title) { ActivityRouter.shared.showPopover() }]
+            } ?? []
+            statusBar.post(message.text, actions: actions)
         }
     }
 
@@ -229,11 +253,6 @@ struct ContentView: View {
                 }
             }
 
-            // Bottom Activity panel — reachable from the toolbar Activity item until W3-ACT.
-            if isActivityPanelShown {
-                Divider()
-                ActivityPanel()
-            }
         }
         // Window-wide Esc for a preview, playback's status-bar notes, Locate File… (W2-C).
         .playbackWindowSupport()

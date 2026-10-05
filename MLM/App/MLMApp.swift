@@ -42,6 +42,14 @@ struct MLMApp: App {
         }
         .windowResizability(.contentMinSize)
 
+        // Window ▸ Activity ⌥⌘0 (DEC-005, UC-WIN-02): operations and logs, in every launch state.
+        Window(ActivityWindow.title, id: ActivityWindow.id) {
+            ActivityWindowView()
+                .environment(\.container, container)
+        }
+        .defaultSize(width: 980, height: 620)
+        .commandsRemoved()
+
         // Help ▸ Keyboard Shortcuts (UC-WIN-02, M-HELP.N02). Not listed as an openable window
         // of its own in the Window menu; it shows in the window list while open.
         Window(KeyboardShortcutsWindow.title, id: KeyboardShortcutsWindow.id) {

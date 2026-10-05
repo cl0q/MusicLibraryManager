@@ -41,6 +41,9 @@ final class SnapshotsTests: XCTestCase {
         // W2-D replaced Queue/PlaybackQueueView.swift (rendered) by Queue/QueuePanel.swift
         // (rendered: the unavailable state), Queue/{QueuePanelModel,QueueEditCommands}.swift
         // (non-view) and Queue/SaveQueueAsPlaylistPopover.swift (deferred).
+        // W3-ACT replaced the bottom panel (ActivityPanel, OperationsTab, LogsTab deferred; ActivityFeed,
+        // ActivityFeedAdapters non-view) by ActivityToolbarItem, ActivityWindow, ActivityLogsView
+        // (deferred) and ActivityRouter, ActivityJobTracking (non-view): counts unchanged.
         XCTAssertEqual(paths.count, 112, "Re-audit inventory changes explicitly.")
         XCTAssertEqual(Set(SnapshotFixtures.inventory.map(\.path)), paths)
         XCTAssertEqual(SnapshotFixtures.inventory.count, paths.count)

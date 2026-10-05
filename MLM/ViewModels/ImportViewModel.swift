@@ -30,11 +30,22 @@ final class ImportViewModel {
     /// ID of the currently registered Activity operation (if any).
     private(set) var currentOperationID: UUID?
 
+    /// The words of an import's result in Activity and the status bar (UC-JOB-08):
+    /// `35 imported · 2 failed · 3 already in the library`.
+    static func activityResult(for result: ImportService.ImportResult) -> ActivityResult {
+        let imported = result.cancelled ? result.committed : result.succeeded
+        return ActivityResult(counts: [
+            ActivityCount(.done, imported, "imported"),
+            ActivityCount(.failed, result.failed, "failed"),
+            ActivityCount(.skipped, result.skipped, "already in the library"),
+        ])
+    }
+
     // MARK: - Dependencies
 
     private let importService: ImportServicing
     private let configRepository: ConfigRepository
-    private let activityViewModel: ActivityViewModel?
+    private let activity: ActivityCenter?
 
     /// Box so the `@Sendable` cancellation closure can reference a Task
     /// that does not yet exist at closure-creation time.
@@ -49,11 +60,11 @@ final class ImportViewModel {
     init(
         importService: ImportServicing,
         configRepository: ConfigRepository,
-        activityViewModel: ActivityViewModel? = nil
+        activity: ActivityCenter? = nil
     ) {
         self.importService = importService
         self.configRepository = configRepository
-        self.activityViewModel = activityViewModel
+        self.activity = activity
     }
 
     // MARK: - Library Root
@@ -106,21 +117,13 @@ final class ImportViewModel {
             return
         }
 
-        await runImport(
-            directory: rootURL,
-            title: "Rescan library",
-            detail: "Scanning \(URL(fileURLWithPath: root).lastPathComponent)…"
-        )
+        await runImport(directory: rootURL, title: "Scan “\(rootURL.lastPathComponent)”")
     }
 
     /// Import from a specific directory (for manual folder selection).
     @MainActor
     func importFromDirectory(_ directory: URL) async {
-        await runImport(
-            directory: directory,
-            title: "Import: \(directory.lastPathComponent)",
-            detail: "Scanning \(directory.lastPathComponent)…"
-        )
+        await runImport(directory: directory, title: "Scan “\(directory.lastPathComponent)”")
     }
 
     /// Cancel the in-flight import (used by Settings-side Cancel and Activity panel).
@@ -138,35 +141,28 @@ final class ImportViewModel {
     // MARK: - Private
 
     @MainActor
-    private func runImport(directory: URL, title: String, detail: String) async {
+    private func runImport(directory: URL, title: String) async {
         isImporting = true
         errorMessage = nil
         lastResult = nil
         progress = nil
 
-        let opID = activityViewModel?.startOperation(
-            type: .import,
-            title: title,
-            detail: detail
-        )
-        currentOperationID = opID
-
+        // Activity (W3-ACT): `Scan “‹folder›”`; Cancel stops after the current file and keeps
+        // what was imported (`ImportService` checks cancellation per file).
         let box = importTaskBox
+        let job = activity?.begin(
+            .folderScan, title: title, subject: .folder(directory), itemNoun: .file,
+            controls: ActivityControls(cancelStyle: .afterThisFile, cancel: { box.task?.cancel() })
+        )
+        currentOperationID = job?.id
+
         let task = Task { [weak self] in
             guard let self else { return }
             do {
                 let result = try await self.importService.importDirectory(directory) { [weak self] progress in
-                    Task { @MainActor in
-                        guard let self else { return }
-                        self.progress = progress
-                        if let opID {
-                            self.activityViewModel?.updateProgress(
-                                id: opID,
-                                progress: progress.fraction,
-                                detail: progress.currentFile ?? progress.phase
-                            )
-                        }
-                    }
+                    job?.update(ActivityProgress(completed: progress.processed, total: progress.total > 0 ? progress.total : nil,
+                                                 currentItem: progress.currentFile ?? progress.phase))
+                    Task { @MainActor in self?.progress = progress }
                 }
 
                 await MainActor.run {
@@ -174,14 +170,9 @@ final class ImportViewModel {
                     self.progress = nil
 
                     if result.cancelled {
-                        if let opID {
-                            self.activityViewModel?.cancelOperation(id: opID, detail: "Cancelled")
-                        }
+                        job?.cancelled(Self.activityResult(for: result))
                     } else {
-                        let summary = "\(result.succeeded) imported, \(result.skipped) skipped"
-                        if let opID {
-                            self.activityViewModel?.completeOperation(id: opID, detail: summary)
-                        }
+                        job?.finish(Self.activityResult(for: result))
                         if result.failed > 0 {
                             self.errorMessage = "\(result.failed) file(s) failed to import"
                         }
@@ -203,13 +194,9 @@ final class ImportViewModel {
                 await MainActor.run {
                     self.progress = nil
                     if error is CancellationError {
-                        if let opID {
-                            self.activityViewModel?.cancelOperation(id: opID, detail: "Cancelled")
-                        }
+                        job?.cancelled()
                     } else {
-                        if let opID {
-                            self.activityViewModel?.failOperation(id: opID, error: error.localizedDescription)
-                        }
+                        job?.fail(cause: Self.plainCause(error, folder: directory), fix: .runAgain)
                         self.errorMessage = error.localizedDescription
                     }
                     self.isImporting = false
@@ -218,13 +205,19 @@ final class ImportViewModel {
             }
         }
         box.task = task
-
-        if let opID {
-            activityViewModel?.registerCancellationToken(id: opID) { [weak self] in
-                self?.cancelImport()
-            }
-        }
+        job?.setControls(ActivityControls(
+            cancelStyle: .afterThisFile, cancel: { box.task?.cancel() },
+            runAgain: { [weak self] in Task { @MainActor in await self?.importFromDirectory(directory) } }
+        ))
 
         await task.value
+    }
+
+    /// A failure in plain words: a missing folder (usually its drive) or the cause.
+    static func plainCause(_ error: Error, folder: URL) -> String {
+        if !FileManager.default.fileExists(atPath: folder.path) {
+            return "“\(folder.lastPathComponent)” isn’t reachable"
+        }
+        return error.localizedDescription
     }
 }

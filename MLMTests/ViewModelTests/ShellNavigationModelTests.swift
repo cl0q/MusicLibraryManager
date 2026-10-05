@@ -251,6 +251,8 @@ struct ShellSidebarModelTests {
         #expect(StatusBarText.tracks(1) == "1 track")
         #expect(StatusBarText.playlists(0) == "0 playlists")
         #expect(StatusBarText.tracks(12_935) == "\(12_935.formatted(.number)) tracks")
-        #expect(ShellActions.importFinishedMessage(imported: 35, skipped: 0, failed: 2) == "Import finished — 35 imported, 2 failed")
+        // W3-ACT: import result words come from Activity's result sentence.
+        #expect(ActivityResult(counts: [.init(.done, 35, "imported"), .init(.failed, 2, "failed")]).statusSentence
+                == "35 imported, 2 failed")
     }
 }

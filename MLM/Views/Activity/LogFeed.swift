@@ -10,10 +10,10 @@ enum LogLevelFilter: String, CaseIterable, Identifiable, Hashable {
     var label: String {
         switch self {
         case .all:       return "All"
-        case .infoPlus:  return "Info+"
-        case .warnPlus:  return "Warn+"
+        case .infoPlus:  return "Info and above"
+        case .warnPlus:  return "Warnings and above"
         case .errors:    return "Errors"
-        case .debugOnly: return "Debug"
+        case .debugOnly: return "Debug only"
         }
     }
 
@@ -61,8 +61,29 @@ struct LogQuery: Hashable {
     var level: LogLevelFilter
     var source: LogSourceFilter
     var searchText: String
+    /// The time span of one operation (`Show in Logs`, P-ACTIVITY-LOGS.N01); `nil` = all lines.
+    var window: DateInterval? = nil
 
     static let initial = LogQuery(level: .all, source: .all, searchText: "")
+}
+
+extension LogSourceFilter {
+    /// Persisted form (`@AppStorage`): `*` = all, empty = no source, else the source name.
+    var storageValue: String {
+        switch self {
+        case .all: "*"
+        case .none: ""
+        case .exact(let value): value
+        }
+    }
+
+    init(storageValue: String) {
+        switch storageValue {
+        case "*": self = .all
+        case "": self = .none
+        default: self = .exact(storageValue)
+        }
+    }
 }
 
 // MARK: - LogFeedResult
@@ -89,6 +110,7 @@ enum LogFeed {
         let hasSearch = !loweredSearch.isEmpty
 
         let rows = entries.filter { entry in
+            if let window = query.window, !window.contains(entry.timestamp) { return false }
             guard query.level.matches(entry.level) else { return false }
             guard query.source.matches(entry.source) else { return false }
             if hasSearch {

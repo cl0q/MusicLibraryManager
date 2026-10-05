@@ -749,7 +749,8 @@ struct PlaylistDetailView: View {
         guard !missingTracks.isEmpty else { return }
         await container.downloadViewModel?.downloadTracks(
             missingTracks,
-            preferredSource: viewModel.downloadPin
+            preferredSource: viewModel.downloadPin,
+            context: viewModel.playlist.id.map { .playlist($0, name: viewModel.playlist.name) }  // W3-ACT
         )
     }
 
@@ -758,7 +759,8 @@ struct PlaylistDetailView: View {
         guard !failedTracks.isEmpty else { return }
         await container.downloadViewModel?.downloadTracks(
             failedTracks,
-            preferredSource: viewModel.downloadPin
+            preferredSource: viewModel.downloadPin,
+            context: viewModel.playlist.id.map { .playlist($0, name: viewModel.playlist.name) }  // W3-ACT
         )
     }
 

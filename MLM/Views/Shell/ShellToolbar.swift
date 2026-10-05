@@ -10,8 +10,8 @@ import SwiftUI
 /// Customizable (UC-TB-04): Add and Activity can be removed; the rest can't.
 ///
 /// Narrow windows give way in a fixed order (UC-TB-03): (1) the player's title / artist column
-/// (`PlayerBar`, `ViewThatFits`), (2) the Activity item's text (W3-ACT gives the item its text;
-/// it then collapses inside the item the same way), (3) Add moves into the overflow menu — the
+/// (`PlayerBar`, `ViewThatFits`), (2) the Activity item's text (`ViewThatFits`
+/// inside `ActivityToolbarItem`), (3) Add moves into the overflow menu — the
 /// lowest visibility priority. Back / Forward, the player and Info have the highest; the search
 /// field is the system's `.searchable` and isn't a toolbar item MLM can rank.
 struct ShellToolbar: CustomizableToolbarContent {
@@ -38,7 +38,7 @@ struct ShellToolbar: CustomizableToolbarContent {
         .visibilityPriority(.high)
 
         ToolbarItem(id: "shell.activity", placement: .primaryAction) {
-            ActivityToolbarButton()
+            ActivityToolbarItem()
         }
         .visibilityPriority(.automatic)
 
@@ -134,65 +134,10 @@ struct AddMenu: View {
     }
 }
 
-// MARK: - Activity item (placeholder until W3-ACT)
+// MARK: - Activity item (W3-ACT)
 
-/// Placeholder for the Activity toolbar item (DEC-005, P-ACTIVITY): toggles the existing
-/// bottom Activity panel until W3-ACT replaces both with the popover and the Activity window.
-/// Shows a spinner while something runs; its help and accessibility value carry the
-/// panel's headline text.
-struct ActivityToolbarButton: View {
-    @AppStorage(ActivityPanelHosting.expandedKey) private var isPanelShown = false
-    @Environment(\.container) private var container
-
-    var body: some View {
-        let headline = ActivityPanelHosting.headline(container)
-        Button {
-            isPanelShown.toggle()
-        } label: {
-            if headline.isBusy {
-                ProgressView()
-                    .controlSize(.small)
-            } else {
-                Label("Activity", systemImage: "list.bullet.rectangle")
-            }
-        }
-        .help(isPanelShown ? "Hide Activity" : (headline.isEmpty ? "Show Activity" : headline.tooltip))
-        .accessibilityLabel("Activity")
-        .accessibilityValue(headline.text)
-    }
-}
-
-/// How the shell hosts the bottom `ActivityPanel` until W3-ACT: the panel is shown only
-/// while expanded (no permanent strip, DEC-005); the toolbar item expands it, the panel's
-/// own header collapses it.
-enum ActivityPanelHosting {
-    /// The panel's own persisted expansion key (`ActivityPanel`).
-    static let expandedKey = "activity.panel.expanded"
-
-    /// The panel's headline, built exactly as `ActivityPanel` builds it.
-    @MainActor
-    static func headline(_ container: DependencyContainer) -> ActivityHeadline {
-        guard let vm = container.activityViewModel else {
-            return ActivityHeadline(text: "", tooltip: "", isBusy: false, isEmpty: true)
-        }
-        let queueService = PerformanceQueueService.shared
-        return ActivityFeed.makeSnapshot(
-            operations: vm.operations,
-            stalledIDs: vm.stalledOperationIDs,
-            recentOperations: vm.recentOperations,
-            recentTruncated: vm.isRecentTruncated,
-            download: container.downloadViewModel.map { $0.sourceState(operationID: nil) },
-            sync: nil,
-            queue: QueueSourceState(
-                activeJobDescription: queueService.activeJobDescription,
-                pendingAnalyses: queueService.pendingAnalysesCount,
-                pendingDownloads: queueService.pendingDownloadsCount
-            ),
-            persistedFailures: [],
-            now: Date()
-        ).headline
-    }
-}
+// `ActivityToolbarItem` (MLM/Views/Activity/ActivityToolbarItem.swift): the toolbar item,
+// its popover and its text that gives way at narrow widths (UC-TB-03 step 2).
 
 // MARK: - Info toggle
 

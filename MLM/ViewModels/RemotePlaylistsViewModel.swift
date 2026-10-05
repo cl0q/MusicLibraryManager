@@ -124,11 +124,13 @@ final class RemotePlaylistsViewModel {
             return
         }
 
-        await downloadViewModel.downloadTracks(
+        // W3-ACT: `Import “‹playlist›”` in Activity; a batch requested while another runs queues
+        // behind it, and this sheet reads its own batch's numbers (was: the previous batch's).
+        let result = await downloadViewModel.downloadTracks(
             newTracks,
-            preferredSource: provider.preferredSource
+            preferredSource: provider.preferredSource,
+            context: preview.map { .playlist(persistence.playlistID, name: $0.title) }
         )
-        let result = downloadViewModel.lastResult
         importResult = RemotePlaylistImportResult(
             playlistID: persistence.playlistID,
             selectedTrackCount: tracks.count,

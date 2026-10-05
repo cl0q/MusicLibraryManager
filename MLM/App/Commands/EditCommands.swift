@@ -13,6 +13,8 @@ struct EditCommands: Commands {
     @FocusedValue(\.trackSelection) private var focusedSelection
     @FocusedValue(\.navigationModel) private var navigation
     @FocusedValue(\.toolbarSearch) private var search
+    /// The Activity window's log search (⌘F there, UC-KEY-25; W3-ACT).
+    @FocusedValue(\.activityLogSearch) private var logSearch
 
     var body: some Commands {
         CommandGroup(after: .pasteboard) {
@@ -24,11 +26,11 @@ struct EditCommands: Commands {
         }
 
         CommandGroup(replacing: .textEditing) {
-            CommandSubmenu(.find, enabled: search != nil) {
+            CommandSubmenu(.find, enabled: search != nil || logSearch != nil) {
                 // Focuses the toolbar search field of the main window, scope `This view`: it
                 // filters the current view in place (UC-KEY-25, K-SEARCH-CMDF).
-                CommandButton(.search, enabled: search != nil) {
-                    search?.focus(scope: .thisView)
+                CommandButton(.search, enabled: search != nil || logSearch != nil) {
+                    if let search { search.focus(scope: .thisView) } else { logSearch?.focus() }
                 }
                 // Focuses the field with the `Library` scope: grouped results from the whole
                 // library (UC-SEARCH-02, W2-I).
