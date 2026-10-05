@@ -242,12 +242,9 @@ enum MenuCommand: String, CaseIterable, Sendable {
         case .toggleSidebar: Entry(menu: .view, title: "Hide Sidebar", shortcut: .cmd("s", .control), wiring: .system)
         case .toggleInfo: Entry(menu: .view, title: "Show Info", shortcut: .cmd("i"), wiring: .app)
         case .toggleQueue: Entry(menu: .view, title: "Show Queue", shortcut: .cmd("u", .option), wiring: .app)
-        case .columns:
-            Entry(menu: .view, title: "Columns", shortcut: nil,
-                  wiring: .pending(owner: "W2-A", reason: "Choosing columns isn’t available yet."))
-        case .sortBy:
-            Entry(menu: .view, title: "Sort By", shortcut: nil,
-                  wiring: .pending(owner: "W2-A", reason: "Click a column header to sort."))
+        // Driven by the focused track table (`FocusedValues.trackTableViewOptions`, W2-A).
+        case .columns: Entry(menu: .view, title: "Columns", shortcut: nil, wiring: .app)
+        case .sortBy: Entry(menu: .view, title: "Sort By", shortcut: nil, wiring: .app)
         case .filter:
             Entry(menu: .view, title: "Filter", shortcut: nil,
                   wiring: .pending(owner: "W2-B", reason: "Filters aren’t available yet."))
