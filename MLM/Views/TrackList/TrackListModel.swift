@@ -199,6 +199,22 @@ final class TrackListModel {
         indexByID[id].map { rows[$0] }
     }
 
+    // MARK: - Scrolling (seam, W2-C)
+
+    /// A request for the table to scroll a row into view (Go to Current Track ⌘L).
+    struct ScrollTarget: Equatable {
+        let rowID: Int64
+        fileprivate let request = UUID()
+    }
+
+    /// The latest scroll request; the table scrolls (instantly) when it changes.
+    private(set) var scrollTarget: ScrollTarget?
+
+    /// Scroll the row with `id` into view (the selection is the caller's).
+    func scrollTo(_ id: Int64) {
+        scrollTarget = ScrollTarget(rowID: id)
+    }
+
     // MARK: - Preparation (pure, off the main actor)
 
     struct Prepared: Sendable {

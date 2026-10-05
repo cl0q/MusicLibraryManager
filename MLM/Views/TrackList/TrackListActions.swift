@@ -13,6 +13,44 @@ struct TrackListActions {
     let undo: UndoCenter?
     let shell: ShellActions?
     var container: DependencyContainer = .shared
+    /// The window's navigation — where a played row came from (⌘L, W2-C).
+    var navigation: NavigationModel? = nil
+
+    // MARK: Preview (Space, W2-C)
+
+    /// This table as the owner of a preview (its selection moves the preview).
+    var previewOwner: PreviewOwner { "\(ObjectIdentifier(model).hashValue)" }
+
+    /// What Space would preview now: the shown selected rows (UC-STATUS-07 refusals).
+    func previewCandidate(_ rows: [TrackRow]? = nil) -> PreviewCandidate {
+        PreviewCandidate.make(rows: rows ?? model.selectedRows(), live: live.state)
+    }
+
+    /// Space on the focused table, or Track ▸ Preview / the context menu's Preview: start a
+    /// preview of the selected track, or end the running one. Never Play/Pause (§10 Q1).
+    func preview(_ rows: [TrackRow]? = nil) {
+        container.playbackViewModel?.preview.toggle(owner: previewOwner, candidate: previewCandidate(rows))
+    }
+
+    /// The selection changed: a preview this table started follows it (debounced).
+    func previewSelectionDidChange() {
+        guard let preview = container.playbackViewModel?.preview, preview.isActive else { return }
+        preview.selectionChanged(owner: previewOwner, candidate: previewCandidate())
+    }
+
+    /// Locate File… (File missing / Download failed, one track).
+    func locateFile(_ rows: [TrackRow]) {
+        guard rows.count == 1, let row = rows.first else { return }
+        LocateFileRequest.shared.begin(row.track)
+    }
+
+    /// Where a row of this list plays from (⌘L) — named lists only; search results and the
+    /// queue fall back to All Tracks.
+    var playbackOrigin: PlaybackOrigin? {
+        guard let navigation, configuration.listContext.viewName != nil else { return nil }
+        return PlaybackOrigin(place: navigation.selection, path: navigation.path,
+                              listKey: configuration.persistenceKey, container: configuration.listContext.container)
+    }
 
     // MARK: Primary action (double-click / ↩)
 
@@ -23,8 +61,19 @@ struct TrackListActions {
     }
 
     func perform(_ action: TrackPrimaryAction, on row: TrackRow) {
+        let playback = container.playbackViewModel
+        if action != .play, playback?.preview.isActive == true {
+            // Return on a row that can't play ends the preview first (it resumes main).
+            playback?.preview.end()
+        }
         switch action {
         case .play:
+            if let playback {
+                // ⌘L returns to this list (W2-C); Return while previewing plays the previewed
+                // track for real from the previewed position (UC-KEY-06).
+                if let origin = playbackOrigin { playback.willActivate(row.id, from: origin) }
+                playback.preview.handOver(row.track)
+            }
             configuration.activate?(row.track, model.tracks)
         case .download:
             guard let downloads = container.downloadViewModel else { return }
@@ -37,8 +86,8 @@ struct TrackListActions {
         case .awaitDownload:
             awaitDownload(row)
         case .fileMissing:
-            var buttons: [StatusAction] = []
-            // `Locate…` arrives with W2-C; only working buttons are offered.
+            // `File missing — Locate… · Download Again` (UC-PRIM-03).
+            var buttons: [StatusAction] = [StatusAction("Locate…") { LocateFileRequest.shared.begin(row.track) }]
             if TrackLinks.hasSource(row.track) {
                 buttons.append(StatusAction("Download Again") { [self] in downloadAgain([row]) })
             }

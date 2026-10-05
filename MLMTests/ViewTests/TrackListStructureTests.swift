@@ -84,7 +84,13 @@ struct TrackListStructureTests {
         #expect(table.contains(".focusedValue(\\.trackTableViewOptions"))
         #expect(table.contains(".statusBarText("))
         #expect(!table.contains("ProgressView()"), "no spinner in the table (UC-TABLE-09)")
-        #expect(!table.contains(".space"), "Space belongs to preview (W2-C), never bound here")
+        // Space is the focused table's preview key (W2-C, UC-KIT-11) — handled with
+        // `.onKeyPress` on the table, never a key equivalent (UC-KEY-37).
+        #expect(!table.contains(".keyboardShortcut(.space"), "Space is never a key equivalent")
+        #expect(table.contains(".modifier(TrackListPreviewKeys(actions: actions))"))
+        let keys = try source("MLM/Views/TrackList/TrackListPreviewKeys.swift")
+        #expect(keys.contains(".onKeyPress(keys: [.space, .escape, .leftArrow, .rightArrow]"))
+        #expect(!keys.contains("togglePlayPause"), "Space never means Play/Pause (§10 Q1)")
         let cell = try source("MLM/Views/TrackList/TrackCell.swift")
         #expect(cell.contains(".typeSelectEquivalent(row.title)"))
         #expect(cell.contains("speaker.wave.2.fill"))

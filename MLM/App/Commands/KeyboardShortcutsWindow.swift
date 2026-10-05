@@ -51,7 +51,7 @@ enum KeyboardMap {
 
     static let groups: [Group] = [
         Group(title: "Track lists", rows: [
-            .key("Space", "Preview the selected track; Space again or Esc ends the preview", owner: "W2-C"),
+            .key("Space", "Preview the selected track; Space again or Esc ends the preview"),
             .key("↩ or double-click", "Play the selected track; the rows after it become the queue"),
             .menu(.playNext),
             .menu(.addToQueue),
@@ -64,10 +64,10 @@ enum KeyboardMap {
             .key("Type a name", "Jump to the first row whose title starts with it", owner: "W2-A"),
         ]),
         Group(title: "While previewing", rows: [
-            .key("← / →", "Seek 5 seconds (hold to repeat)", owner: "W2-C"),
-            .key("↑ / ↓", "Preview the next or previous row", owner: "W2-C"),
-            .key("↩", "Play the previewed track from where the preview is", owner: "W2-C"),
-            .key("Esc", "End the preview and resume", owner: "W2-C"),
+            .key("← / →", "Seek 5 seconds (hold to repeat)"),
+            .key("↑ / ↓", "Preview the next or previous row"),
+            .key("↩", "Play the previewed track from where the preview is"),
+            .key("Esc", "End the preview and resume"),
         ]),
         Group(title: "Playback", rows: [
             .menu(.next),

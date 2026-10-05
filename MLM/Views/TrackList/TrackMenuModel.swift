@@ -6,9 +6,8 @@ import Foundation
 /// rules live in `TrackMenuModel.make` and are unit-tested.
 ///
 /// Items whose feature arrives with a later package are **absent** (context menus never show
-/// dead or placeholder items, UC-CM-01): Preview (W2-C), Add to Queue (W2-D), Go to Album
-/// (W4-2), Go to Artist (W2-I), Find Similar (W3-DISC), Locate File… (W2-C), Share… (W5-2),
-/// Remove from Queue (W2-D).
+/// dead or placeholder items, UC-CM-01): Add to Queue (W2-D), Go to Album (W4-2), Go to Artist
+/// (W2-I), Find Similar (W3-DISC), Share… (W5-2), Remove from Queue (W2-D).
 enum TrackMenuItem: Hashable, Sendable {
     /// Disabled first line: `3 tracks` (UC-CM-04).
     case countHeader(Int)
@@ -16,6 +15,8 @@ enum TrackMenuItem: Hashable, Sendable {
     case driveHeader(volumeName: String)
     /// Play ↩ (single: the primary action — downloads first when needed; several: the playable ones).
     case play(enabled: Bool)
+    /// Preview (Space): one local track; disabled while its disk is away (UC-CM-04/05, W2-C).
+    case preview(enabled: Bool)
     case playNext
     case addToPlaylist
     case addToSyncProfile
@@ -24,6 +25,8 @@ enum TrackMenuItem: Hashable, Sendable {
     case download(title: String)
     /// File missing, has a source: fetch it again.
     case downloadAgain
+    /// File missing / Download failed: point the track at its file (W2-C).
+    case locateFile
     case showInFinder(enabled: Bool)
     case copy(filePath: Bool, link: Bool)
     /// `Remove from Playlist` / `Remove from “Warm-up”` (reversible, normal colour, ⌫).
@@ -46,6 +49,10 @@ struct TrackMenuContext: Equatable, Sendable {
     var canActivate: Bool
     var canRemoveFromContainer: Bool
     var canAddToSyncProfile: Bool
+    /// Space previews a row of this list (every track table, W2-C).
+    var canPreview = true
+    /// Locate File… can re-point a File missing / Download failed row (W2-C).
+    var canLocate = true
 
     /// `Remove from Playlist` inside one playlist (UC-CM-08), `Remove from “‹profile›”`.
     var removeTitle: String {
@@ -107,6 +114,15 @@ struct TrackMenuModel: Equatable, Sendable {
                 primary.append(.play(enabled: false))
             }
         }
+        // Preview needs one track with a file (UC-CM-04); disabled while its disk is away.
+        if single, context.canPreview {
+            let row = rows[0]
+            if unreachable > 0 {
+                primary.append(.preview(enabled: false))
+            } else if row.availability == .local {
+                primary.append(.preview(enabled: true))
+            }
+        }
 
         // 2 Queue — Play Next queues files that can play now.
         var queue: [TrackMenuItem] = []
@@ -124,8 +140,12 @@ struct TrackMenuModel: Equatable, Sendable {
         if single {
             switch rows[0].availability {
             case .notDownloaded where unreachable == 0: fix.append(.download(title: "Download"))
-            case .failed where unreachable == 0: fix.append(.download(title: "Retry Download"))
-            case .fileMissing where unreachable == 0 && TrackLinks.hasSource(rows[0].track): fix.append(.downloadAgain)
+            case .failed where unreachable == 0:
+                fix.append(.download(title: "Retry Download"))
+                if context.canLocate { fix.append(.locateFile) }
+            case .fileMissing where unreachable == 0:
+                if context.canLocate { fix.append(.locateFile) }
+                if TrackLinks.hasSource(rows[0].track) { fix.append(.downloadAgain) }
             default: break
             }
         } else if downloadable > 0 {

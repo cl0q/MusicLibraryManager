@@ -254,9 +254,8 @@ enum MenuCommand: String, CaseIterable, Sendable {
 
         // MARK: Track (M-TRACK) — ↩ and Space belong to the focused list, never to a menu (UC-KEY-37)
         case .play: Entry(menu: .track, title: "Play", shortcut: nil, wiring: .app)
-        case .preview:
-            Entry(menu: .track, title: "Preview", shortcut: nil,
-                  wiring: .pending(owner: "W2-C", reason: "Preview isn’t available yet."))
+        // Space is the focused list's key, never this item's (UC-KEY-37, §10 Q1).
+        case .preview: Entry(menu: .track, title: "Preview", shortcut: nil, wiring: .app)
         case .playNext: Entry(menu: .track, title: "Play Next", shortcut: MenuShortcut(key: .returnKey, modifiers: .option), wiring: .app)
         case .addToQueue:
             Entry(menu: .track, title: "Add to Queue", shortcut: MenuShortcut(key: .returnKey, modifiers: [.option, .shift]),
@@ -275,9 +274,7 @@ enum MenuCommand: String, CaseIterable, Sendable {
             Entry(menu: .track, title: "Find Similar", shortcut: nil,
                   wiring: .pending(owner: "W3-DISC", reason: "Similar tracks aren’t available yet."))
         case .download: Entry(menu: .track, title: "Download", shortcut: .cmd("d"), wiring: .app)
-        case .locateFile:
-            Entry(menu: .track, title: "Locate File…", shortcut: nil,
-                  wiring: .pending(owner: "W2-C", reason: "Locating a moved file isn’t available yet."))
+        case .locateFile: Entry(menu: .track, title: "Locate File…", shortcut: nil, wiring: .app)
         case .refreshFromSource: Entry(menu: .track, title: "Refresh from Source", shortcut: .cmd("r"), wiring: .app)
         case .showInFinder: Entry(menu: .track, title: "Show in Finder", shortcut: .cmd("r", .shift), wiring: .app)
         case .copyTrack: Entry(menu: .track, title: "Copy", shortcut: nil, wiring: .app)
@@ -299,9 +296,7 @@ enum MenuCommand: String, CaseIterable, Sendable {
         case .volumeDown: Entry(menu: .playback, title: "Volume Down", shortcut: .cmd(.downArrow), wiring: .app)
         // `Shuffle ‹view›` / `Play ‹view›` at run time; the plain verb when no list is named.
         case .shuffleView: Entry(menu: .playback, title: "Shuffle", shortcut: nil, wiring: .app)
-        case .repeatMode:
-            Entry(menu: .playback, title: "Repeat", shortcut: nil,
-                  wiring: .pending(owner: "W2-C", reason: "Repeat isn’t available yet."))
+        case .repeatMode: Entry(menu: .playback, title: "Repeat", shortcut: nil, wiring: .app)
         case .playView: Entry(menu: .playback, title: "Play", shortcut: nil, wiring: .app)
 
         // MARK: Library (M-LIBRARY)

@@ -5,7 +5,8 @@ import SwiftUI
 /// keys, the toolbar button, this item and the Dock menu play and pause (§10 Q1, UC-KEY-37).
 /// The arrow keys with ⌘ / ⌥⌘ are ordinary menu keys of the main window; while a text field is
 /// editing they keep their text meaning (`KeyEquivalentGuard`, UC-KEY-38). Plain ←/→ are not
-/// bound anywhere (preview seeking is W2-C).
+/// menu keys: they seek only while previewing, handled by the focused track list (W2-C).
+/// During a preview the transport acts on what is audible (Play/Pause pauses the preview).
 struct PlaybackCommands: Commands {
     @FocusedValue(\.playbackViewModel) private var playback
     @FocusedValue(\.trackSelection) private var focusedSelection
@@ -15,6 +16,7 @@ struct PlaybackCommands: Commands {
     var body: some Commands {
         CommandMenu(MenuBarMenu.playback.rawValue) {
             let hasTrack = playback?.hasTrack == true
+            let previewing = playback?.preview.isActive == true
             let list = PlayableList.current(
                 selection: TrackSelection.usable(focusedSelection, navigation: navigation),
                 navigation: navigation,
@@ -24,14 +26,14 @@ struct PlaybackCommands: Commands {
             // With nothing loaded, Play plays the current view (UC-MENU-05).
             CommandButton(.playPause,
                           title: playback?.isPlaying == true ? "Pause" : "Play",
-                          enabled: hasTrack || list?.canPlay == true) {
-                if let playback, playback.hasTrack {
+                          enabled: hasTrack || previewing || list?.canPlay == true) {
+                if let playback, playback.hasTrack || playback.preview.isActive {
                     playback.togglePlayPause()
                 } else {
                     list?.play()
                 }
             }
-            CommandButton(.stop, enabled: hasTrack) {
+            CommandButton(.stop, enabled: hasTrack || previewing) {
                 guard !KeyEquivalentGuard.stopKeyBelongsElsewhere() else { return }
                 playback?.stop()
             }
@@ -57,7 +59,7 @@ struct PlaybackCommands: Commands {
 
             Divider()
 
-            // Works on the current volume; persisting it is W2-C.
+            // Remembered between launches (W2-C); a tenth per press (IMP-016).
             CommandButton(.volumeUp, enabled: (playback?.volume ?? 1) < 1) {
                 guard !KeyEquivalentGuard.keyBelongsToText(.textCommand(#selector(NSResponder.moveToBeginningOfDocument(_:)))) else { return }
                 if let playback { playback.setVolume(PlaybackStep.volume(after: playback.volume, up: true)) }
@@ -76,7 +78,14 @@ struct PlaybackCommands: Commands {
                           disabledReason: cantPlayReason) {
                 list?.shuffle()
             }
-            CommandSubmenu(.repeatMode)
+            CommandSubmenu(.repeatMode, enabled: playback != nil) {
+                ForEach(PlaybackRepeatMode.allCases, id: \.self) { mode in
+                    Toggle(mode.title, isOn: Binding(
+                        get: { playback?.repeatMode == mode },
+                        set: { if $0 { playback?.setRepeatMode(mode) } }
+                    ))
+                }
+            }
 
             Divider()
 

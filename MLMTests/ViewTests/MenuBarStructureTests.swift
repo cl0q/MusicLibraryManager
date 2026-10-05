@@ -297,10 +297,13 @@ struct MenuBarStructureTests {
         }
         // (⌘↓ stays: it is Volume Down; the Folders meaning is the hidden row.)
         #expect(!shown.contains { $0.action.contains("as the root") })
-        for keys in ["Space", "⌫", "K", "⌘S", "← / →"] {
+        for keys in ["⌫", "K", "⌘S"] {
             #expect(!shown.contains { $0.keys == keys }, "\(keys) doesn't work yet")
         }
-        #expect(!KeyboardMap.visibleGroups.contains { $0.title == "While previewing" })
+        // Space preview and the preview keys work since W2-C.
+        #expect(shown.contains { $0.keys == "Space" })
+        let previewing = KeyboardMap.visibleGroups.first { $0.title == "While previewing" }
+        #expect(previewing?.rows.map(\.keys) == ["← / →", "↑ / ↓", "↩", "Esc"])
         #expect(!KeyboardMap.visibleGroups.contains { $0.rows.isEmpty })
     }
 
