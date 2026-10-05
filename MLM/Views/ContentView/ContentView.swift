@@ -294,7 +294,10 @@ struct ContentView: View {
                         context: searchMergerContext,
                         onTrackDoubleClick: handleTrackDoubleClick
                     )
+                } selectionBar: {
+                    TrackSelectionBar(host: .searchResults)
                 }
+                .hostsTrackSelectionBar()
                 .modifier(WindowTitleModifier())
             }
         }
@@ -535,7 +538,10 @@ private struct AllTracksHost: View {
                 .equatable()
         } scopeBar: {
             AllTracksScopeBar()
+        } selectionBar: {
+            TrackSelectionBar()
         }
+        .hostsTrackSelectionBar()
         .modifier(WindowTitleModifier())
     }
 }

@@ -23,7 +23,11 @@ struct DestinationView: View {
     var body: some View {
         ContentScaffold(showsDriveBanner: destination.listsTracks) {
             content
+        } selectionBar: {
+            // Shown only over a track table that registers (playlist detail; W2-G).
+            TrackSelectionBar()
         }
+        .hostsTrackSelectionBar()
         .modifier(WindowTitleModifier())
     }
 
@@ -82,7 +86,10 @@ struct RouteView: View {
     var body: some View {
         ContentScaffold(showsDriveBanner: route.listsTracks) {
             content
+        } selectionBar: {
+            TrackSelectionBar()
         }
+        .hostsTrackSelectionBar()
         .modifier(WindowTitleModifier())
         .navigationBarBackButtonHidden(true)
     }
