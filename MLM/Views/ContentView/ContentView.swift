@@ -11,6 +11,7 @@ final class ShellState {
     let trailing = TrailingColumnState()
     let statusBar = StatusBarCenter()
     let sidebar = SidebarModel()
+    let drivePlayback = DriveLossPlayback()
     let search: ToolbarSearchModel
     let actions: ShellActions
 
@@ -46,8 +47,6 @@ struct ContentView: View {
     /// table selection). Setting it never opens the column (UC-TRAIL-02).
     @State private var selectedTrackForDetail: Track?
     @State private var reviewFocusTrackID: Int64?
-    /// Whether playback was paused because the library's disk went away (offers `Resume`).
-    @State private var pausedByDriveLoss = false
 
     /// Selection-based sheet states
     @State private var playlistSelectionContainer: TrackSelectionContainer? = nil
@@ -309,9 +308,37 @@ struct ContentView: View {
         }
     }
 
+    /// The content column: the destination's `NavigationStack`, with the search results pane
+    /// drawn above it, so search shows the same on a destination and on a pushed detail.
     private var detailColumn: some View {
-        @Bindable var navigation = shell.navigation
         let searching = container.searchCoordinator.isPresented
+        return ZStack {
+            navigationStack
+                .opacity(searching ? 0 : 1)
+                .allowsHitTesting(!searching)
+                .accessibilityHidden(searching)
+
+            if searching {
+                ContentScaffold(showsDriveBanner: shell.navigation.currentPlaceListsTracks) {
+                    GlobalSearchPresentationView(
+                        query: Bindable(container.searchCoordinator).query,
+                        onExit: {
+                            shell.search.reset()
+                        },
+                        context: searchMergerContext,
+                        onTrackDoubleClick: handleTrackDoubleClick
+                    )
+                }
+                .modifier(WindowTitleModifier())
+            }
+        }
+        .background {
+            PlaybackChangeObserver(drivePlayback: shell.drivePlayback)
+        }
+    }
+
+    private var navigationStack: some View {
+        @Bindable var navigation = shell.navigation
         return NavigationStack(path: Binding(
             get: { navigation.path },
             set: { navigation.setPath($0) }
@@ -319,27 +346,14 @@ struct ContentView: View {
             ZStack {
                 // All Tracks stays alive across switches: rebuilding its ~12,000-row
                 // Table ↔ NSTableView bridge costs ~0.5 s. Hidden when another place shows.
-                // Disabled while hidden so its header's ⌘R doesn't fire in other places
-                // (the old toolbar item leaked into every section, P-TOOLBAR.E04).
+                // Its Scan command is gated by `NavigationModel.isAllTracksVisible`, read only
+                // by that button, so the kept-alive subtree is not re-disabled on every switch.
                 AllTracksHost(onTrackActivated: handleTrackDoubleClick)
-                    .opacity(isAllTracks && !searching ? 1 : 0)
-                    .allowsHitTesting(isAllTracks && !searching)
-                    .disabled(!isAllTracks || searching)
-                    .accessibilityHidden(!isAllTracks || searching)
+                    .opacity(isAllTracks ? 1 : 0)
+                    .allowsHitTesting(isAllTracks)
+                    .accessibilityHidden(!isAllTracks)
 
-                if searching {
-                    ContentScaffold(showsDriveBanner: shell.navigation.currentPlaceListsTracks) {
-                        GlobalSearchPresentationView(
-                            query: Bindable(container.searchCoordinator).query,
-                            onExit: {
-                                shell.search.reset()
-                            },
-                            context: searchMergerContext,
-                            onTrackDoubleClick: handleTrackDoubleClick
-                        )
-                    }
-                    .modifier(WindowTitleModifier())
-                } else if !isAllTracks {
+                if !isAllTracks {
                     DestinationView(
                         destination: shell.navigation.selection,
                         reviewFocusTrackID: reviewFocusTrackID,
@@ -403,26 +417,28 @@ struct ContentView: View {
         if let name = drive.volumeName {
             DriveBanner.announceDisconnected(name)
         }
-        if let playbackVM = container.playbackViewModel, playbackVM.isPlaying {
-            let position = playbackVM.formattedPosition
-            playbackVM.pause()
-            pausedByDriveLoss = true
-            if let name = drive.volumeName {
-                shell.statusBar.post("“\(name)” was disconnected — playback paused at \(position).")
-            }
+        guard let playbackVM = container.playbackViewModel else { return }
+        if let message = shell.drivePlayback.driveDidDisconnect(
+            volumeName: drive.volumeName,
+            isPlaying: playbackVM.isPlaying,
+            position: playbackVM.formattedPosition,
+            pause: { playbackVM.pause() }
+        ) {
+            shell.statusBar.post(message)
         }
     }
 
+    /// A real mount event, and `Try Again` on the banner when the disk is back.
     private func libraryDriveDidMount() {
         container.isLibraryDriveMounted = true
-        guard let name = LibraryDriveState.current(container).volumeName else { return }
-        if pausedByDriveLoss, let playbackVM = container.playbackViewModel {
-            pausedByDriveLoss = false
-            shell.statusBar.post(LibraryDriveState.connectedMessage(name), actions: [
+        let name = LibraryDriveState.current(container).volumeName
+        guard let result = shell.drivePlayback.driveDidConnect(volumeName: name) else { return }
+        if result.offersResume, let playbackVM = container.playbackViewModel {
+            shell.statusBar.post(result.message, actions: [
                 StatusAction("Resume") { playbackVM.play() },
             ])
         } else {
-            shell.statusBar.post(LibraryDriveState.connectedMessage(name))
+            shell.statusBar.post(result.message)
         }
     }
 
@@ -487,6 +503,27 @@ private struct SearchPlace: Equatable {
         case .library, .playlist: true
         case .other: false
         }
+    }
+}
+
+// MARK: - Playback changes (drive-loss bookkeeping)
+
+/// Tells `DriveLossPlayback` when playback changes for another reason, so a later reconnect
+/// doesn't offer a stale `Resume`. A leaf, so playback ticks don't re-render the window.
+private struct PlaybackChangeObserver: View {
+    let drivePlayback: DriveLossPlayback
+    @Environment(\.container) private var container
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onChange(of: container.playbackViewModel?.isPlaying) { _, isPlaying in
+                drivePlayback.playbackDidChange(isPlaying: isPlaying == true)
+            }
+            .onChange(of: container.playbackViewModel?.currentTrack?.id) { _, _ in
+                drivePlayback.trackDidChange()
+            }
+            .accessibilityHidden(true)
     }
 }
 

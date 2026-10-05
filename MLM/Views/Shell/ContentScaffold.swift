@@ -156,6 +156,9 @@ struct LibraryDriveState: Equatable {
 
     /// Status-bar message when the disk returns: `“Lexxar” connected.`
     static func connectedMessage(_ name: String) -> String { "“\(name)” connected." }
+
+    /// `Try Again` while the disk is still away: `“Lexxar” is still not connected.`
+    static func stillNotConnectedMessage(_ name: String) -> String { "“\(name)” is still not connected." }
 }
 
 /// One banner per window, in every view that lists tracks, while the library's disk is away.
@@ -202,11 +205,51 @@ struct DriveBanner: View {
         ).post()
     }
 
+    /// `Try Again`: if the disk is back, take the same path as a real mount event (the window's
+    /// `.libraryDriveDidMount` handler, which offers `Resume`); otherwise say it is still away.
     private func retry(name: String) {
         guard let observer = container.mountObserver else { return }
         if observer.checkMountStatus() {
-            container.isLibraryDriveMounted = true
-            statusBar.post(LibraryDriveState.connectedMessage(name))
+            NotificationCenter.default.post(name: .libraryDriveDidMount, object: nil)
+        } else {
+            statusBar.post(LibraryDriveState.stillNotConnectedMessage(name))
         }
+    }
+}
+
+// MARK: - Playback around drive loss
+
+/// Remembers whether MLM paused playback because the library's disk went away, so its return
+/// can offer `Resume` — and only then (§15.2).
+@MainActor
+final class DriveLossPlayback {
+    /// The pause was MLM's, caused by the disk going away, and nothing has happened since.
+    private(set) var pausedByDriveLoss = false
+
+    /// The disk went away. Pauses if playing and returns the status-bar message for it.
+    func driveDidDisconnect(volumeName: String?, isPlaying: Bool, position: String, pause: () -> Void) -> String? {
+        guard isPlaying else { return nil }
+        pause()
+        pausedByDriveLoss = true
+        guard let volumeName else { return nil }
+        return "“\(volumeName)” was disconnected — playback paused at \(position)."
+    }
+
+    /// The disk is back. Returns the message and whether `Resume` belongs to it.
+    func driveDidConnect(volumeName: String?) -> (message: String, offersResume: Bool)? {
+        let offersResume = pausedByDriveLoss
+        pausedByDriveLoss = false
+        guard let volumeName else { return nil }
+        return (LibraryDriveState.connectedMessage(volumeName), offersResume)
+    }
+
+    /// Playback started again or moved to another track for another reason: the pause is no
+    /// longer the drive's, so a later reconnect must not offer `Resume`.
+    func playbackDidChange(isPlaying: Bool) {
+        if isPlaying { pausedByDriveLoss = false }
+    }
+
+    func trackDidChange() {
+        pausedByDriveLoss = false
     }
 }
