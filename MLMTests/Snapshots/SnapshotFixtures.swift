@@ -340,6 +340,11 @@ enum SnapshotFixtures {
         "Folders/FolderTreeView.swift": "Deferred: NSOutlineView delegate/expansion lifecycle requires hosted outline readiness contract.",
         "Library/TrackContextMenu.swift": "Deferred: menus require interactive presentation; current bitmap hosts do not open them.",
         "Player/PlayerBar.swift": "Deferred: concrete playback VM initializes audio/timer/media state; needs passive transport protocol.",
+        "Player/PreviewWaveformScrubber.swift": "Deferred: drawn inside the deferred PlayerBar while previewing (W2-C).",
+        "Player/LocateFile.swift": "Deferred: Locate File… is a system file panel; bitmap hosts don't present it (W2-C).",
+        "Player/PlayerDisplay.swift": "Non-view: the player's state words, pure (W2-C).",
+        "Player/GoToCurrentTrack.swift": "Non-view: Go to Current Track and the table reveal request (W2-C).",
+        "TrackList/TrackListPreviewKeys.swift": "Non-view: preview key decisions and the focused table's key handler (W2-C).",
         "Playlists/PlaylistDetailView.swift": "Deferred: lifecycle reloads, source sync and cover work not isolated by table fixture.",
         "Playlists/PlaylistDetailViewLoader.swift": "Deferred: loader async outcomes require controlled ready/not-found/failure injection.",
         "Playlists/PlaylistsView.swift": "Deferred: live playlist/cover loading and root view state need a preloaded composition.",
@@ -403,7 +408,11 @@ Library/DanceabilitySteps.swift
 Library/EnergyBars.swift
 Library/LibraryView.swift
 Library/TrackContextMenu.swift
+Player/GoToCurrentTrack.swift
+Player/LocateFile.swift
 Player/PlayerBar.swift
+Player/PlayerDisplay.swift
+Player/PreviewWaveformScrubber.swift
 Playlists/PlaylistCard.swift
 Playlists/PlaylistDetailView.swift
 Playlists/PlaylistDetailViewLoader.swift
@@ -475,6 +484,7 @@ TrackList/TrackListModel.swift
 TrackList/TrackListTable.swift
 TrackList/TrackMenu.swift
 TrackList/TrackMenuModel.swift
+TrackList/TrackListPreviewKeys.swift
 TrackList/TrackPrimaryAction.swift
 TrackList/TrackRow.swift
 TrackList/TrackRowPresentation.swift
