@@ -25,13 +25,14 @@ struct TrackAvailabilityMigrationTests {
         #expect(indexSQL?.contains("WHERE file_missing_since IS NOT NULL") == true)
     }
 
-    @Test func registeredOnceAfterV41AndLast() throws {
+    @Test func registeredOnceAfterV41() throws {
         let migrations = DatabaseManager.buildMigrator().migrations
         #expect(migrations.filter { $0 == Self.v42 }.count == 1)
         let v41Index = try #require(migrations.firstIndex(of: Self.v41))
         let v42Index = try #require(migrations.firstIndex(of: Self.v42))
         #expect(v41Index < v42Index)
-        #expect(migrations.last == Self.v42)
+        // W2-E registers v44_pending_tag_writes after it; v42 is no longer the last one.
+        #expect(migrations.firstIndex(of: "v44_pending_tag_writes").map { $0 > v42Index } ?? true)
     }
 
     @Test func upgradeFromV41KeepsEveryRowAndFlagsNothingMissing() throws {

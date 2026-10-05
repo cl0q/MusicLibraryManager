@@ -1140,6 +1140,35 @@ final class DatabaseManager: Sendable {
             """)
         }
 
+        // ──────────────────────────────────────────────────────────────
+        // Migration v44_pending_tag_writes (W2-E, THOUGHTS §10 Q7, UC-JOB-10):
+        // tag edits are written to the audio files by default; while the
+        // library folder is unreachable (or a file is missing) the write
+        // waits here. One row per track = "this track's file tags are stale
+        // since ‹stale_since› for these fields"; the write always takes the
+        // track's *current* database values. `revision` is bumped by every
+        // new edit, so a write only clears the row it read. `blocked` = the
+        // last failure won't go away by retrying (unsupported format, a
+        // rewrite that couldn't be verified) until the next edit.
+        // No foreign key (foreign keys stay disabled); orphans are removed by
+        // `TrackTagRepository.removeOrphanedPendingWrites` before each flush.
+        // (v43 is reserved for W2-D; numbers need not be contiguous.)
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v44_pending_tag_writes") { db in
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS pending_tag_writes (
+                    track_id INTEGER PRIMARY KEY NOT NULL,
+                    fields TEXT NOT NULL,
+                    stale_since TEXT NOT NULL,
+                    revision INTEGER NOT NULL DEFAULT 1,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    last_attempt_at TEXT,
+                    last_error TEXT,
+                    blocked INTEGER NOT NULL DEFAULT 0
+                )
+            """)
+        }
+
         return migrator
     }
 
