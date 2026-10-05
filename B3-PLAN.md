@@ -75,7 +75,7 @@ Independent review: W2-A (migration), W2-C + W2-D (queue logic), W2-E (tag writi
 |---|---|---|---|---|---|
 | W3-PL | Playlists: sidebar playlists + playlist folders + manual order, All Playlists grid, detail header / More / status sentence / failed scope, `Refresh from ‹Source›`, link + M3U sheets (PP-PLAYLISTS-01) | `playlists.html` | `playlists.md` | `v45_playlist_folders` | planned |
 | W3-FOLD | Folders: hierarchical table, path bar, not-in-library files, import as Activity operation | `folders.html` | `library.md`, `main.md` | — | planned |
-| W3-ACT | Activity: one operation registry for every job of inventory §10.1 (DEC-044), toolbar item states, popover, Activity window (Operations + Logs), results persisted; then remove the bottom panel | `activity.html` | `activity.md` | `v46_activity_operations` | planned |
+| W3-ACT | Activity: one operation registry for every job of inventory §10.1 (DEC-044), toolbar item states, popover, Activity window (Operations + Logs), results persisted; then remove the bottom panel | `activity.html` | `activity.md` | `v46_activity_operations` | in progress (Opus, `b3/w3-act-activity`) |
 | W3-LAUNCH | Launch & libraries: library picker with per-row states, loading phases, failure actions, adoption sheet, switch alert listing running work, in-window setup; library-file icon (variant A `.icns`, wired in `scripts/run.sh`) | `launch.html`, `library-icon.html` | `shell.md` | — | planned |
 | W3-SET | Settings: eight tabs, backup schedule/retention (DEC-036), Sources accounts in place, download-tools status (DEC-037), deep links | `settings.html` | `settings.md` | — | planned |
 | W3-ADD | Add & import: Add menu, Add from Link (⌘U), S-IMPORT sheet replacing the remote-playlists window, `Refresh from Sources`; imports queue instead of being rejected | `import.html` | `sources-review.md`, `main.md` | — | planned |
@@ -173,7 +173,7 @@ Latest existing: `v41_remote_provider_identity`. Reserved (a number is only used
 | 1 | Delete the 60 old snapshot baselines now (recoverable from `v0.9`)? | wave 0 | answered 2026-10-05: yes |
 | 2 | Album metadata source for the backfill (no MusicBrainz client exists) | before W4-3 lookup | open |
 | 3 | Does `Remove from List` in the library picker need a confirmation? | W3-LAUNCH | open |
-| 4 | History size of the Activity window | W3-ACT | open |
+| 4 | History size of the Activity window | W3-ACT | open — default implemented meanwhile: last 200 finished operations or 30 days |
 | 5 | May a partial re-import ever remove tracks from a linked playlist? (design: add-only) | W3-ADD / W3-PL | open |
 | 6 | Tag writing (§10 Q7 said on by default): an ffmpeg remux can lose tag data MLM can't see (Serato markers, ratings, MusicBrainz IDs). Options: (a) keep OFF by default, write only files whose tag structure is on a verified allow-list, refuse the rest; (b) add an in-place tag library (TagLib, a new C++ dependency) and then turn it ON; (c) database-only edits | W2-E | **asked 2026-10-05** — implementing (a) meanwhile |
 | 7 | Sync never re-copies a file whose tags changed, so device copies keep old tags — should W3-SYNC re-copy tracks whose tags were written since the last sync? | W3-SYNC | open |
