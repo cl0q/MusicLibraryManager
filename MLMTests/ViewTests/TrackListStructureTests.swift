@@ -57,7 +57,7 @@ struct TrackListStructureTests {
         for path in [
             "MLM/Views/Library/LibraryView.swift",
             "MLM/Views/Playlists/PlaylistTable.swift",
-            "MLM/Views/Search/GlobalSearchPresentationView.swift",
+            "MLM/Views/Search/SearchResultsView.swift",
         ] {
             #expect(try source(path).contains("TrackListTable("), "\(path) hosts the shared table")
         }
@@ -66,7 +66,7 @@ struct TrackListStructureTests {
         #expect(queue.contains(".frame(height: 64)"), "now playing shows exactly one row")
         // Only the shared component builds a track `Table`.
         for path in ["MLM/Views/Library/LibraryView.swift", "MLM/Views/Playlists/PlaylistTable.swift",
-                     "MLM/Views/Search/GlobalSearchPresentationView.swift", "MLM/Views/Queue/PlaybackQueueView.swift"] {
+                     "MLM/Views/Search/SearchResultsView.swift", "MLM/Views/Queue/PlaybackQueueView.swift"] {
             let text = try source(path)
             #expect(!text.contains("Table(of:") && !text.contains("TableColumn("), "\(path) builds its own table")
         }

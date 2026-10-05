@@ -16,8 +16,8 @@ struct PlaylistTable: View {
 
     var body: some View {
         TrackListTable(model: list, configuration: configuration) {
-            if !viewModel.searchQuery.isEmpty {
-                ContentUnavailableView.search(text: viewModel.searchQuery)
+            if !viewModel.searchFilter.isEmpty {
+                ContentUnavailableView.search(text: viewModel.searchFilter.displayText)
             }
         }
         .task(id: loadKey) { await load() }
@@ -54,13 +54,13 @@ struct PlaylistTable: View {
         var hasher = Hasher()
         hasher.combine(viewModel.tracks)
         hasher.combine(viewModel.displayedTracks.count)
-        hasher.combine(viewModel.searchQuery)
+        hasher.combine(viewModel.searchFilter)
         hasher.combine(viewModel.addedAtByTrackID.count)
         return hasher.finalize()
     }
 
     private func load() async {
-        let visible: Set<Int64>? = viewModel.searchQuery.isEmpty
+        let visible: Set<Int64>? = viewModel.searchFilter.isEmpty
             ? nil
             : Set(viewModel.displayedTracks.compactMap(\.id))
         await list.setTracks(
@@ -94,7 +94,7 @@ struct PlaylistTable: View {
             // Reordering is off while sorted or filtered (UC-TABLE-05); drops from elsewhere
             // still land (at the end when sorted).
             if allMembers {
-                guard isPlaylistOrder, viewModel.searchQuery.isEmpty else { return }
+                guard isPlaylistOrder, viewModel.searchFilter.isEmpty else { return }
             }
             let target = isPlaylistOrder
                 ? Self.targetTrackIndex(for: insertionIndex, displayRows: displayRows, tracks: viewModel.tracks)

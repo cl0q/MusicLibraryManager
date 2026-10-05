@@ -25,16 +25,15 @@ struct EditCommands: Commands {
 
         CommandGroup(replacing: .textEditing) {
             CommandSubmenu(.find, enabled: search != nil) {
-                // Focuses the toolbar search field of the main window; it filters the current view.
+                // Focuses the toolbar search field of the main window, scope `This view`: it
+                // filters the current view in place (UC-KEY-25, K-SEARCH-CMDF).
                 CommandButton(.search, enabled: search != nil) {
-                    search?.isPresented = true
+                    search?.focus(scope: .thisView)
                 }
-                // Until the `Library` search scope (W2-I): focuses the field and, with text in it,
-                // searches the whole library at once (the search pane).
+                // Focuses the field with the `Library` scope: grouped results from the whole
+                // library (UC-SEARCH-02, W2-I).
                 CommandButton(.searchLibrary, enabled: search != nil) {
-                    guard let search else { return }
-                    search.isPresented = true
-                    if !search.text.isEmpty { search.submit() }
+                    search?.focus(scope: .library)
                 }
             }
         }

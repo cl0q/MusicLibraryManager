@@ -40,14 +40,21 @@ final class LibraryViewModel {
         }
     }
 
-    /// Debounced: search changes trigger a refresh after 200 ms idle.
-    var searchQuery: String = "" {
+    /// The toolbar field's filter for All Tracks — text and tokens, applied in SQL (W2-I).
+    /// Debounced: changes trigger a refresh after 200 ms idle.
+    var searchFilter = SearchFilter() {
         didSet {
-            guard oldValue != searchQuery else { return }
+            guard oldValue != searchFilter else { return }
             debouncer.debounce { @MainActor [weak self] in
                 self?.scheduleRefresh()
             }
         }
+    }
+
+    /// The filter's text alone (fixtures and older callers).
+    var searchQuery: String {
+        get { searchFilter.text }
+        set { searchFilter = SearchFilter(text: newValue, tokens: searchFilter.tokens) }
     }
 
     /// Scope counts, durations and the library size; `nil` until the first load (the scope
@@ -88,7 +95,7 @@ final class LibraryViewModel {
     @ObservationIgnored private let debouncer = Debouncer(delay: .milliseconds(200))
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var summaryTask: Task<Void, Never>?
-    @ObservationIgnored private var lastLoaded: (scope: TrackAvailabilityScope, search: String)?
+    @ObservationIgnored private var lastLoaded: (scope: TrackAvailabilityScope, filter: SearchFilter)?
 
     /// - Parameter scopeQueries: the aggregate queries; `nil` = the open library's
     ///   (`TrackScopeQueries.current()`). Tests pass their temporary database's.
@@ -108,7 +115,7 @@ final class LibraryViewModel {
         self.init(trackRepository: trackRepository, configRepository: configRepository)
         self.scope = scope
         list.setTracksNow(preloadedTracks.filter { scope.contains($0.availability()) })
-        lastLoaded = (scope, "")
+        lastLoaded = (scope, SearchFilter())
     }
 
     private var scopeQueries: TrackScopeQueries? { explicitQueries ?? TrackScopeQueries.current() }
@@ -120,23 +127,26 @@ final class LibraryViewModel {
         refreshTask?.cancel()
         summaryTask?.cancel()
         let scope = self.scope
-        let search = searchQuery
-        let trimmed = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        let filter = searchFilter
         let repository = trackRepository
         let queries = scopeQueries
         refreshTask = Task { [weak self] in
             let start = Date()
             do {
-                let filter = trimmed.isEmpty ? nil : trimmed
-                let rows = try await repository.fetchTracks(scope: scope, search: filter)
+                let rows: [Track]
+                if let queries {
+                    rows = try await TrackSearchQueries(database: queries.database).fetchTracks(scope: scope, filter: filter)
+                } else {
+                    rows = try await repository.fetchTracks(scope: scope, search: Self.text(of: filter))
+                }
                 guard !Task.isCancelled else { return }
-                let summary = try await Self.loadSummary(queries: queries, repository: repository, search: filter)
+                let summary = try await Self.loadSummary(queries: queries, repository: repository, filter: filter)
                 guard !Task.isCancelled, let self else { return }
                 await self.list.setTracks(rows)
                 guard !Task.isCancelled else { return }
                 self.summary = summary
                 self.errorMessage = nil
-                self.lastLoaded = (scope, search)
+                self.lastLoaded = (scope, filter)
                 AppLogger.shared.info(
                     "library refresh: \(rows.count) rows in \(Int(Date().timeIntervalSince(start) * 1000))ms (scope=\(scope.rawValue))",
                     source: "perf"
@@ -152,7 +162,7 @@ final class LibraryViewModel {
 
     /// First load (or a no-op when the same scope/search is already loaded).
     func loadTracks() async {
-        if let lastLoaded, lastLoaded.scope == scope, lastLoaded.search == searchQuery, list.isLoaded {
+        if let lastLoaded, lastLoaded.scope == scope, lastLoaded.filter == searchFilter, list.isLoaded {
             return
         }
         scheduleRefresh()
@@ -174,12 +184,12 @@ final class LibraryViewModel {
     /// Re-read only the counts and totals (rows unchanged).
     private func refreshSummary() {
         summaryTask?.cancel()
-        let search = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let filter = searchFilter
         let repository = trackRepository
         let queries = scopeQueries
         summaryTask = Task { [weak self] in
             guard let summary = try? await Self.loadSummary(
-                queries: queries, repository: repository, search: search.isEmpty ? nil : search
+                queries: queries, repository: repository, filter: filter
             ), !Task.isCancelled else { return }
             self?.summary = summary
         }
@@ -194,12 +204,19 @@ final class LibraryViewModel {
     private static func loadSummary(
         queries: TrackScopeQueries?,
         repository: TrackRepository,
-        search: String?
+        filter: SearchFilter
     ) async throws -> TrackScopeSummary {
-        if let queries { return try await queries.scopeSummary(search: search) }
+        if let queries { return try await TrackSearchQueries(database: queries.database).scopeSummary(filter: filter) }
+        let search = text(of: filter)
         let counts = try await repository.availabilityCounts(search: search)
         let library = search == nil ? counts.all : try await repository.availabilityCounts().all
         return TrackScopeSummary(counts: counts, durations: [.all: counts.totalDuration], libraryCount: library)
+    }
+
+    /// Free words only, for the repository fallback without aggregate queries (fixtures).
+    private nonisolated static func text(of filter: SearchFilter) -> String? {
+        let text = filter.parsed.freeText
+        return text.isEmpty ? nil : text
     }
 
     // MARK: - Selection helpers

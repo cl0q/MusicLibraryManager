@@ -2,8 +2,8 @@ import Testing
 import Foundation
 
 /// Source-scan tests for the toolbar search field. Since W1-1 it is the system `.searchable`
-/// field (its clear button is the system's); clearing resets the query, dismisses the search
-/// pane, and leaving a place drops focus.
+/// field (its clear button is the system's); clearing resets the query and returns the scope to
+/// `This view` (W2-I: there is no search pane), and leaving search drops focus.
 @Suite("SearchClearButtonTests")
 struct SearchClearButtonTests {
 
@@ -25,26 +25,24 @@ struct SearchClearButtonTests {
     // MARK: - System search field
 
     @Test
-    func shell_usesTheSystemSearchField() throws {
+    func shell_usesTheSystemSearchFieldWithTokensScopesAndSuggestions() throws {
         let src = try readSource(Self.searchPath)
-        #expect(src.contains(".searchable(text:"),
-                "The toolbar search field is the system .searchable field (UC-SEARCH-01)")
+        #expect(src.contains(".searchable(") && src.contains("tokens: $model.tokens"),
+                "The toolbar search field is the system .searchable field with tokens (UC-SEARCH-01/04)")
+        #expect(src.contains(".searchScopes($model.scope, activation: .onSearchPresentation)"), "UC-SEARCH-02")
+        #expect(src.contains(".searchSuggestions {"), "UC-SEARCH-04/05")
     }
 
     // MARK: - Clearing
 
+    /// W2-I: clearing commits the empty filter at once and returns the scope to `This view`
+    /// (behaviour in ToolbarSearchModelTests); there is no results pane to dismiss.
     @Test
-    func clearing_callsDismiss() throws {
+    func clearing_commitsAtOnceAndEndsTheWiderScope() throws {
         let src = try readSource(Self.searchPath)
-        #expect(src.contains("coordinator.dismiss()"),
-                "Clearing the field must dismiss the search pane")
-    }
-
-    @Test
-    func clearing_resetsQuery() throws {
-        let src = try readSource(Self.searchPath)
-        #expect(src.contains("coordinator.query = \"\""),
-                "Clearing the field must reset SearchCoordinator.query to an empty string")
+        #expect(src.contains("guard hasInput else {"))
+        #expect(src.contains("scope = .thisView"))
+        #expect(!src.contains("coordinator.dismiss()"), "No pane to dismiss (DEC-017)")
     }
 
     @Test

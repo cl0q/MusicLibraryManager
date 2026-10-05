@@ -34,12 +34,18 @@ final class PlaylistDetailViewModel {
     /// Error message from the last failed operation.
     private(set) var errorMessage: String?
 
-    /// Search query for filtering tracks within the playlist.
-    var searchQuery: String = "" {
+    /// The toolbar field's filter for this playlist — text and tokens, in memory (W2-I).
+    var searchFilter = SearchFilter() {
         didSet {
-            guard oldValue != searchQuery else { return }
+            guard oldValue != searchFilter else { return }
             applyFilter()
         }
+    }
+
+    /// The filter's text alone (older callers and tests).
+    var searchQuery: String {
+        get { searchFilter.text }
+        set { searchFilter = SearchFilter(text: newValue, tokens: searchFilter.tokens) }
     }
 
     /// Filtered tracks based on search query.
@@ -668,10 +674,11 @@ final class PlaylistDetailViewModel {
     // MARK: - Filtering
 
     private func applyFilter() {
-        if searchQuery.isEmpty {
+        if searchFilter.isEmpty {
             displayedTracks = tracks
         } else {
-            displayedTracks = tracks.filter { $0.matches(searchQuery: searchQuery) }
+            // Every row here is in a playlist (`is: in no playlist` matches none).
+            displayedTracks = tracks.filter { searchFilter.matches($0, isInAnyPlaylist: { _ in true }) }
         }
     }
 

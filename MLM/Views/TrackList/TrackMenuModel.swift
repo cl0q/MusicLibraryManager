@@ -6,8 +6,8 @@ import Foundation
 /// rules live in `TrackMenuModel.make` and are unit-tested.
 ///
 /// Items whose feature arrives with a later package are **absent** (context menus never show
-/// dead or placeholder items, UC-CM-01): Add to Queue (W2-D), Go to Album (W4-2), Go to Artist
-/// (W2-I), Find Similar (W3-DISC), Share… (W5-2), Remove from Queue (W2-D).
+/// dead or placeholder items, UC-CM-01): Add to Queue (W2-D), Go to Album (W4-2), Find Similar
+/// (W3-DISC), Share… (W5-2), Remove from Queue (W2-D).
 enum TrackMenuItem: Hashable, Sendable {
     /// Disabled first line: `3 tracks` (UC-CM-04).
     case countHeader(Int)
@@ -21,6 +21,8 @@ enum TrackMenuItem: Hashable, Sendable {
     case addToPlaylist
     case addToSyncProfile
     case getInfo
+    /// Go to Artist: All Tracks filtered by `artist: ‹name›` (one track with an artist, W2-I).
+    case goToArtist(String)
     /// `Download` · `Retry Download` · `Download 3 Not-Downloaded Tracks`.
     case download(title: String)
     /// File missing, has a source: fetch it again.
@@ -133,7 +135,10 @@ struct TrackMenuModel: Equatable, Sendable {
         if context.canAddToSyncProfile { addTo.append(.addToSyncProfile) }
 
         // 4 Info
-        let info: [TrackMenuItem] = [.getInfo]
+        var info: [TrackMenuItem] = [.getInfo]
+        if single, let artist = TrackMetadataPresentation.artistDisplay(rows[0].track.artist) {
+            info.append(.goToArtist(artist))
+        }
 
         // 5 Fix
         var fix: [TrackMenuItem] = []
