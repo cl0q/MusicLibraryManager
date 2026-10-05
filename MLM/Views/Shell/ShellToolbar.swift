@@ -8,6 +8,12 @@ import SwiftUI
 /// attached by `ContentView`).
 ///
 /// Customizable (UC-TB-04): Add and Activity can be removed; the rest can't.
+///
+/// Narrow windows give way in a fixed order (UC-TB-03): (1) the player's title / artist column
+/// (`PlayerBar`, `ViewThatFits`), (2) the Activity item's text (W3-ACT gives the item its text;
+/// it then collapses inside the item the same way), (3) Add moves into the overflow menu — the
+/// lowest visibility priority. Back / Forward, the player and Info have the highest; the search
+/// field is the system's `.searchable` and isn't a toolbar item MLM can rank.
 struct ShellToolbar: CustomizableToolbarContent {
     let playbackViewModel: PlaybackViewModel?
 
@@ -16,10 +22,12 @@ struct ShellToolbar: CustomizableToolbarContent {
             BackForwardButtons()
         }
         .customizationBehavior(.disabled)
+        .visibilityPriority(.high)
 
         ToolbarItem(id: "shell.add", placement: .navigation) {
             AddMenu()
         }
+        .visibilityPriority(.low)
 
         ToolbarItem(id: "shell.player", placement: .principal) {
             if let playbackViewModel {
@@ -27,15 +35,18 @@ struct ShellToolbar: CustomizableToolbarContent {
             }
         }
         .customizationBehavior(.disabled)
+        .visibilityPriority(.high)
 
         ToolbarItem(id: "shell.activity", placement: .primaryAction) {
             ActivityToolbarButton()
         }
+        .visibilityPriority(.automatic)
 
         ToolbarItem(id: "shell.info", placement: .primaryAction) {
             InfoToggleButton()
         }
         .customizationBehavior(.disabled)
+        .visibilityPriority(.high)
     }
 }
 
