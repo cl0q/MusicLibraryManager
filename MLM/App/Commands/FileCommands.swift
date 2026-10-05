@@ -12,20 +12,21 @@ struct FileCommands: Commands {
     var body: some Commands {
         // Replaces the system New item: one main window, no documents (UC-WIN-01).
         CommandGroup(replacing: .newItem) {
-            let selected = selectedTracks
+            let selection = TrackSelection.usable(focusedSelection, navigation: navigation)
+            let hasSelection = !(selection?.selectedIDs.isEmpty ?? true)
             CommandButton(.newPlaylist, enabled: shellActions != nil) {
                 shellActions?.newPlaylist()
             }
-            CommandButton(.newPlaylistFromSelection, enabled: !selected.isEmpty) {
-                TrackCommandActions.newPlaylistFromSelection(selected)
+            CommandButton(.newPlaylistFromSelection, enabled: hasSelection) {
+                TrackCommandActions.newPlaylistFromSelection(selection?.selectedTracks ?? [])
             }
             CommandButton(.newPlaylistFolder)
             // With a selection, the selection becomes the new profile's first content (M-FILE.N03).
             CommandButton(.newSyncProfile, enabled: shellActions != nil) {
-                if selected.isEmpty {
+                if !hasSelection {
                     shellActions?.newSyncProfile()
                 } else {
-                    TrackCommandActions.newSyncProfileFromSelection(selected)
+                    TrackCommandActions.newSyncProfileFromSelection(selection?.selectedTracks ?? [])
                 }
             }
 
@@ -51,9 +52,5 @@ struct FileCommands: Commands {
 
             Divider()
         }
-    }
-
-    private var selectedTracks: [Track] {
-        TrackSelection.usable(focusedSelection, navigation: navigation)?.selectedTracks ?? []
     }
 }

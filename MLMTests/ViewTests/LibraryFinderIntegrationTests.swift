@@ -63,7 +63,10 @@ struct LibraryFinderIntegrationTests {
     @Test func appDelegateRoutesOpenedFilesThroughTheCoordinator() throws {
         let src = try source("MLM/App/AppDelegate.swift")
         #expect(src.contains("func application(_ application: NSApplication, open urls: [URL])"))
-        #expect(src.contains("LibraryLaunchCoordinator.shared.handleOpen("))
+        // Through the presenter, which brings the main window forward first (UC-WIN-01).
+        #expect(src.contains("MainWindowPresenter.shared.openLibrary(url, launch: LibraryLaunchCoordinator.shared)"))
+        let presenter = try source("MLM/App/Commands/MainWindowPresenter.swift")
+        #expect(presenter.contains("await launch.handleOpen(url)"))
     }
 
     /// One MLM window only: a `WindowGroup` opens a second window for every library file

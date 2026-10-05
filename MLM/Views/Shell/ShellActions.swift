@@ -35,6 +35,11 @@ final class ShellActions {
 
     var hasLibrary: Bool { container.isInitialized }
 
+    /// The window's track activation — double-click / Return: play with the rows after it as the
+    /// queue, and make it the Info track (installed by `ContentView`). The menu bar uses the same
+    /// path (Playback ▸ Play All Tracks).
+    @ObservationIgnored var activateTrack: ((Track, [Track]) -> Void)?
+
     // MARK: New
 
     /// `New Playlist` ⌘N: creates `Untitled Playlist` (numbered when taken) and selects its

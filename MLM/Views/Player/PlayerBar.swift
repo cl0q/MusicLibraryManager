@@ -30,6 +30,9 @@ struct PlayerBar: View {
     /// player further (transport + cover + scrubber + volume + queue button).
     static let minimumWidth: CGFloat = 340
 
+    /// The title / artist column's width; titles truncate inside it.
+    static let trackInfoWidth: CGFloat = 160
+
     private func playerRow(showsTrackInfo: Bool) -> some View {
         HStack(spacing: 10) {
             transportCluster
@@ -189,7 +192,9 @@ struct PlayerBar: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .frame(minWidth: 80, maxWidth: 160)
+        // A fixed width, so whether the column fits (UC-TB-03) depends only on the window's
+        // width, never on the length of the playing title.
+        .frame(width: Self.trackInfoWidth, alignment: .leading)
     }
 
     @ViewBuilder

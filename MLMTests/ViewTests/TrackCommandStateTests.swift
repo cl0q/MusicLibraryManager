@@ -136,6 +136,68 @@ struct TrackCommandStateTests {
         #expect(TrackListContext.playlist(id: 1, name: "Warm-up").viewName == "“Warm-up”")
     }
 
+    // MARK: Cheap publishing (review S3)
+
+    @Test func publisherComputesTheSummaryOnceFromTheSelectedRows() {
+        let rows = [track(3, local: false), track(1), track(2, local: false, failed: true)]
+        let selection = TrackSelection(selectedIDs: [2, 1], rows: rows, context: .playlist(id: 9, name: "Warm-up"),
+                                       target: TrackCommandTarget())
+        #expect(selection.summary.count == 2)
+        #expect(selection.summary.localCount == 1)
+        #expect(selection.summary.failedCount == 1)
+        #expect(selection.summary.firstID == 1, "display order: 1 comes before 2")
+        #expect(selection.summary.firstIsLocal)
+        #expect(selection.summary.container == .playlist(id: 9, name: "Warm-up"))
+        #expect(selection.hasPlayableRows)
+        let remoteOnly = TrackSelection(selectedIDs: [], rows: [track(4, local: false)], context: .unnamed,
+                                        target: TrackCommandTarget())
+        #expect(!remoteOnly.hasPlayableRows)
+        #expect(remoteOnly.summary == TrackSelectionSummary(container: .none))
+    }
+
+    @Test func rowsAreProducedOnlyWhenAnActionAsks() {
+        var produced = 0
+        let rows = [track(1), track(2)]
+        let selection = TrackSelection(selectedIDs: [2], rows: rows, id: { $0.id ?? -1 }, isPlayable: \.isLocal,
+                                       track: { produced += 1; return $0 }, context: .unnamed, target: TrackCommandTarget())
+        #expect(produced == 1, "only the one selected track is copied while publishing")
+        _ = selection.summary
+        _ = selection.hasPlayableRows
+        #expect(produced == 1, "enabling reads no rows")
+        #expect(selection.rows.count == 2)
+        #expect(produced == 3)
+    }
+
+    @Test func equalityIgnoresClosuresButSeesRowChanges() {
+        let a = TrackSelection(selectedIDs: [1], rows: [track(1), track(2)], context: .unnamed,
+                               target: TrackCommandTarget(activate: { _, _ in }))
+        let same = TrackSelection(selectedIDs: [1], rows: [track(1), track(2)], context: .unnamed,
+                                  target: TrackCommandTarget())
+        #expect(a == same, "an unchanged selection doesn't re-run the menus")
+        let reordered = TrackSelection(selectedIDs: [1], rows: [track(2), track(1)], context: .unnamed,
+                                       target: TrackCommandTarget())
+        #expect(a != reordered, "a re-sorted list never leaves actions with stale rows")
+        let other = TrackSelection(selectedIDs: [2], rows: [track(1), track(2)], context: .unnamed,
+                                   target: TrackCommandTarget())
+        #expect(a != other)
+    }
+
+    @Test func disabledRemoveExplainsItselfWithoutPackageNames() {
+        for container in [TrackListContainer.library, .queue, .none, .playlist(id: 1, name: "A"), .syncProfile(id: 1, name: "B")] {
+            let reason = TrackCommandState.removeDisabledReason(container)
+            #expect(reason.hasSuffix(".") && !reason.hasSuffix("…."))
+            #expect(reason.range(of: #"W\d-"#, options: .regularExpression) == nil)
+        }
+        #expect(TrackCommandState.removeDisabledReason(.queue) == "Removing tracks from the queue isn’t available yet.")
+    }
+
+    @Test @MainActor func playbackViewTitlesNameOnlyAKnownList() {
+        #expect(PlayableList.title("Shuffle", nil) == "Shuffle")
+        #expect(PlayableList.title("Play", nil) == "Play")
+        let list = PlayableList(name: "“Warm-up”", canPlay: true, rows: { [] }, selected: { [] }, activate: { _, _ in })
+        #expect(PlayableList.title("Shuffle", list) == "Shuffle “Warm-up”")
+    }
+
     @Test func capabilitiesComeFromTheTarget() {
         let target = TrackCommandTarget(activate: { _, _ in }, removeFromContainer: nil, deselectAll: {})
         #expect(TrackListCapabilities(target) == TrackListCapabilities(canActivate: true, canDeselect: true))

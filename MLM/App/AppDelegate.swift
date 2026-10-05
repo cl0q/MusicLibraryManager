@@ -31,6 +31,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.applicationIconImage = icon
         }
 
+        // Whatever the library coordinator needs to ask happens in the main window: bring it
+        // forward (reopening it after ⌘W) when a switch alert, problem or New Library sheet appears.
+        MainWindowPresenter.shared.watch(LibraryLaunchCoordinator.shared)
+
         // Choose and open the library for this launch (A3).
         Task { @MainActor in
             await LibraryLaunchCoordinator.shared.start()
@@ -38,12 +42,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Library files opened in Finder (double-click, Open With) — at launch or while running.
-    /// The coordinator decides: launch library, open directly, or ask to switch (A3, A0 D9).
+    /// The main window comes forward; the coordinator decides: launch library, open directly,
+    /// or ask to switch (A3, A0 D9, UC-WIN-01).
     func application(_ application: NSApplication, open urls: [URL]) {
         guard let url = urls.first(where: { $0.pathExtension == LibraryPackage.fileExtension }) else { return }
-        Task { @MainActor in
-            await LibraryLaunchCoordinator.shared.handleOpen(url)
+        MainWindowPresenter.shared.openLibrary(url, launch: LibraryLaunchCoordinator.shared)
+    }
+
+    /// A Dock-icon click with no window open brings the main window back (UC-WIN-01).
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            MainWindowPresenter.shared.show()
         }
+        return true
     }
 
     func applicationWillTerminate(_ notification: Notification) {

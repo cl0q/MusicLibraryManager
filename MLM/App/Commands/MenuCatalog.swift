@@ -200,7 +200,7 @@ enum MenuCommand: String, CaseIterable, Sendable {
         case .newSyncProfile: Entry(menu: .file, title: "New Sync Profile…", shortcut: nil, wiring: .app)
         case .addFromLink:
             Entry(menu: .file, title: "Add from Link…", shortcut: .cmd("u"),
-                  wiring: .pending(owner: "W3-ADD", reason: "Adding a track from a link isn’t available yet. To import a playlist from a link, choose Import Playlist from Source…."))
+                  wiring: .pending(owner: "W3-ADD", reason: "Adding a track from a link isn’t available yet. To import a playlist from a link, use Import Playlist from Source… in this menu."))
         case .importPlaylistFromSource:
             Entry(menu: .file, title: "Import Playlist from Source…", shortcut: .cmd("i", .shift), wiring: .app)
         case .importFilesOrFolder: Entry(menu: .file, title: "Import Files or Folder…", shortcut: nil, wiring: .app)
@@ -244,13 +244,13 @@ enum MenuCommand: String, CaseIterable, Sendable {
         case .toggleQueue: Entry(menu: .view, title: "Show Queue", shortcut: .cmd("u", .option), wiring: .app)
         case .columns:
             Entry(menu: .view, title: "Columns", shortcut: nil,
-                  wiring: .pending(owner: "W2-A", reason: "Choosing columns arrives with the new track table."))
+                  wiring: .pending(owner: "W2-A", reason: "Choosing columns isn’t available yet."))
         case .sortBy:
             Entry(menu: .view, title: "Sort By", shortcut: nil,
                   wiring: .pending(owner: "W2-A", reason: "Click a column header to sort."))
         case .filter:
             Entry(menu: .view, title: "Filter", shortcut: nil,
-                  wiring: .pending(owner: "W2-B", reason: "Filters arrive with the scope bar."))
+                  wiring: .pending(owner: "W2-B", reason: "Filters aren’t available yet."))
         case .goToCurrentTrack: Entry(menu: .view, title: "Go to Current Track", shortcut: .cmd("l"), wiring: .app)
         case .enterFullScreen: Entry(menu: .view, title: "Enter Full Screen", shortcut: .cmd("f", .control), wiring: .system)
         case .customizeToolbar: Entry(menu: .view, title: "Customize Toolbar…", shortcut: nil, wiring: .system)
@@ -259,11 +259,11 @@ enum MenuCommand: String, CaseIterable, Sendable {
         case .play: Entry(menu: .track, title: "Play", shortcut: nil, wiring: .app)
         case .preview:
             Entry(menu: .track, title: "Preview", shortcut: nil,
-                  wiring: .pending(owner: "W2-C", reason: "Preview arrives with the new player."))
+                  wiring: .pending(owner: "W2-C", reason: "Preview isn’t available yet."))
         case .playNext: Entry(menu: .track, title: "Play Next", shortcut: MenuShortcut(key: .returnKey, modifiers: .option), wiring: .app)
         case .addToQueue:
             Entry(menu: .track, title: "Add to Queue", shortcut: MenuShortcut(key: .returnKey, modifiers: [.option, .shift]),
-                  wiring: .pending(owner: "W2-D", reason: "Adding to the end of the queue arrives with the new Queue. Use Play Next."))
+                  wiring: .pending(owner: "W2-D", reason: "Adding to the end of the queue isn’t available yet. Play Next adds right after the current track."))
         case .addToPlaylist: Entry(menu: .track, title: "Add to Playlist", shortcut: nil, wiring: .app)
         case .addToSyncProfile: Entry(menu: .track, title: "Add to Sync Profile", shortcut: nil, wiring: .app)
         // ⌘I is registered once, by View ▸ Show Info (UC-KEY-12); this is the same command.
@@ -273,7 +273,7 @@ enum MenuCommand: String, CaseIterable, Sendable {
                   wiring: .pending(owner: "W4-2", reason: "Album pages aren’t available yet."))
         case .goToArtist:
             Entry(menu: .track, title: "Go to Artist", shortcut: nil,
-                  wiring: .pending(owner: "W2-I", reason: "Going to an artist arrives with search tokens."))
+                  wiring: .pending(owner: "W2-I", reason: "Going to an artist isn’t available yet."))
         case .findSimilar:
             Entry(menu: .track, title: "Find Similar", shortcut: nil,
                   wiring: .pending(owner: "W3-DISC", reason: "Similar tracks aren’t available yet."))
@@ -300,11 +300,12 @@ enum MenuCommand: String, CaseIterable, Sendable {
         case .skipBack: Entry(menu: .playback, title: "Skip Back 10 Seconds", shortcut: .cmd(.leftArrow, .option), wiring: .app)
         case .volumeUp: Entry(menu: .playback, title: "Volume Up", shortcut: .cmd(.upArrow), wiring: .app)
         case .volumeDown: Entry(menu: .playback, title: "Volume Down", shortcut: .cmd(.downArrow), wiring: .app)
-        case .shuffleView: Entry(menu: .playback, title: "Shuffle All Tracks", shortcut: nil, wiring: .app)
+        // `Shuffle ‹view›` / `Play ‹view›` at run time; the plain verb when no list is named.
+        case .shuffleView: Entry(menu: .playback, title: "Shuffle", shortcut: nil, wiring: .app)
         case .repeatMode:
             Entry(menu: .playback, title: "Repeat", shortcut: nil,
-                  wiring: .pending(owner: "W2-C", reason: "Repeat arrives with the new player."))
-        case .playView: Entry(menu: .playback, title: "Play All Tracks", shortcut: nil, wiring: .app)
+                  wiring: .pending(owner: "W2-C", reason: "Repeat isn’t available yet."))
+        case .playView: Entry(menu: .playback, title: "Play", shortcut: nil, wiring: .app)
 
         // MARK: Library (M-LIBRARY)
         case .refreshFromSources:

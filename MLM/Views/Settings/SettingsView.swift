@@ -24,6 +24,7 @@ struct SettingsView: View {
             pane(.advanced) { AdvancedSettingsView() }
         }
         .frame(minWidth: 600, idealWidth: 720, maxWidth: .infinity, minHeight: 500, idealHeight: 560, maxHeight: .infinity)
+        .installsMainWindowPresenter()
     }
 
     /// One tab: the pane, dimmed when it belongs to a library and none is open.
@@ -57,7 +58,7 @@ private struct NoLibraryOpenLine: View {
             Spacer(minLength: Spacing.s)
             Button("Choose Library…") {
                 if let url = LibraryFilePanel.chooseLibraryFile() {
-                    Task { await LibraryLaunchCoordinator.shared.handleOpen(url) }
+                    MainWindowPresenter.shared.openLibrary(url, launch: .shared)
                 }
             }
         }

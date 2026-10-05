@@ -134,7 +134,7 @@ struct MenuBarStructureTests {
                      "Download", "Locate File…", "Refresh from Source",
                      "Show in Finder", "Copy", "Share…", "Remove from Playlist", "Remove from Library…"],
             .playback: ["Play", "Stop", "Next", "Previous", "Skip Forward 10 Seconds", "Skip Back 10 Seconds",
-                        "Volume Up", "Volume Down", "Shuffle All Tracks", "Repeat", "Play All Tracks"],
+                        "Volume Up", "Volume Down", "Shuffle", "Repeat", "Play"],
             .library: ["Refresh from Sources", "Scan Library Folder", "Find Duplicates", "Find Albums",
                        "Maintenance", "Fingerprint All Tracks", "ReplayGain Analysis", "Danceability Analysis",
                        "Similarity Analysis", "Refresh Embedded Artwork", "Fetch Artwork from MusicBrainz",
@@ -243,6 +243,19 @@ struct MenuBarStructureTests {
         #expect(app.contains("Window(KeyboardShortcutsWindow.title, id: KeyboardShortcutsWindow.id)"))
     }
 
+    /// Review S2: Get Info shows the selection's first track in Info, through the existing
+    /// Show Details path; S3: menus enable from the published summary, not from resolved rows.
+    @Test func trackMenuReadsTheSummaryAndGetInfoShowsTheSelection() throws {
+        let track = try source("MLM/App/Commands/TrackCommands.swift")
+        #expect(track.contains("summary: selection?.summary,"))
+        #expect(track.contains("let tracks: () -> [Track] = { selection?.selectedTracks ?? [] }"))
+        #expect(track.contains("NotificationCenter.default.post(name: .openTrackDetailForTrack, object: nil, userInfo: [\"trackId\": id])"))
+        let file = try source("MLM/App/Commands/FileCommands.swift")
+        #expect(!file.contains("let selected = "), "File menu enables from the selected IDs")
+        let playback = try source("MLM/App/Commands/PlaybackCommands.swift")
+        #expect(playback.contains("activate: shellActions?.activateTrack"), "All Tracks plays through the window's activation")
+    }
+
     @Test func viewMenuUsesSystemSidebarAndToolbarCommands() throws {
         let view = try source("MLM/App/Commands/ViewCommands.swift")
         #expect(view.contains("SidebarCommands()"))
@@ -256,13 +269,43 @@ struct MenuBarStructureTests {
     // MARK: Keyboard Shortcuts window
 
     @Test func keyboardShortcutsWindowListsEveryMenuKey() {
-        let listed = Set(KeyboardMap.groups.flatMap(\.rows).compactMap(\.command))
+        let mapped = Set(KeyboardMap.groups.flatMap(\.rows).compactMap(\.command))
+        let shown = Set(KeyboardMap.visibleGroups.flatMap(\.rows).compactMap(\.command))
         for command in MenuCommand.allCases where command.shortcut != nil {
-            #expect(listed.contains(command), "\(command) (\(command.shortcut!)) missing from Help ▸ Keyboard Shortcuts")
+            #expect(mapped.contains(command), "\(command) (\(command.shortcut!)) missing from the keyboard map")
+            #expect(shown.contains(command) == !command.isPending,
+                    "\(command): the window lists a menu key exactly when it works")
         }
-        let keys = KeyboardMap.groups.flatMap(\.rows).map(\.keys)
-        #expect(keys.contains("Space"), "Space = Preview is on the map")
+        let space = KeyboardMap.groups.flatMap(\.rows).first { $0.keys == "Space" }
+        #expect(space?.action.hasPrefix("Preview") == true, "Space = Preview is on the map")
         #expect(!KeyboardMap.groups.flatMap(\.rows).contains { $0.keys == "Space" && $0.action.contains("Pause") },
                 "Space is never Play/Pause (§10 Q1)")
+    }
+
+    /// Review S6: the window never lists a key that doesn't work yet.
+    @Test func keyboardShortcutsWindowListsOnlyWorkingKeys() {
+        let shown = KeyboardMap.visibleGroups.flatMap(\.rows)
+        #expect(!shown.isEmpty)
+        for row in shown {
+            #expect(row.owner == nil, "\(row.keys) is owned by \(row.owner ?? "") and not built yet")
+            #expect(row.command?.isPending != true, "\(row.keys): its menu command is pending")
+            #expect(!row.keys.isEmpty)
+        }
+        // (⌘↓ stays: it is Volume Down; the Folders meaning is the hidden row.)
+        #expect(!shown.contains { $0.action.contains("as the root") })
+        for keys in ["Space", "⌫", "K", "⌘S", "← / →"] {
+            #expect(!shown.contains { $0.keys == keys }, "\(keys) doesn't work yet")
+        }
+        #expect(!KeyboardMap.visibleGroups.contains { $0.title == "While previewing" })
+        #expect(!KeyboardMap.visibleGroups.contains { $0.rows.isEmpty })
+    }
+
+    /// Review nit: help texts of pending items are user words — no package IDs, no `….`.
+    @Test func pendingReasonsAreUserFacing() {
+        for command in MenuCommand.allCases {
+            guard let reason = command.pendingReason else { continue }
+            #expect(reason.range(of: #"W\d-"#, options: .regularExpression) == nil, "\(command): \(reason)")
+            #expect(!reason.contains("…."), "\(command): \(reason)")
+        }
     }
 }
