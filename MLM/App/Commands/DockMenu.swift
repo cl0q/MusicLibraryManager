@@ -65,7 +65,8 @@ struct DockMenuModel: Equatable {
 enum DockMenuBuilder {
     static func model(container: DependencyContainer, launch: LibraryLaunchCoordinator) -> DockMenuModel {
         let playback = container.playbackViewModel
-        let nowPlaying = playback?.currentTrack.map { (title: $0.title, artist: $0.artist) }
+        // The preview while one runs (W2-C): the header and Play / Pause describe the same thing.
+        let nowPlaying = playback?.nowPlaying.map { (title: $0.title, artist: $0.artist) }
         let recents = launch.recentLibraries.map { recent in
             DockMenuModel.RecentLibrary(
                 title: LibraryFooter.recentTitle(recent),

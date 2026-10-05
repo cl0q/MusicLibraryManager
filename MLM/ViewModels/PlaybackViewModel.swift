@@ -6,6 +6,7 @@ import AVFoundation
 
 /// Everything playback reads or reports outside the audio engine, as closures so tests run
 /// without a library, a disk or `UserDefaults.standard`. `live` reads `DependencyContainer`.
+/// Tests always pass their own environment (W2-C review S11).
 struct PlaybackEnvironment {
     /// The library folder (`library_root`).
     var libraryRoot: @MainActor () async -> String?
@@ -13,18 +14,24 @@ struct PlaybackEnvironment {
     var offlineVolumePath: @MainActor () -> String?
     /// The library disk's name (`Lexxar`), for sentences.
     var volumeName: @MainActor () -> String?
-    /// A use-time check of one path (only when a track is about to play).
-    var fileExists: (String) -> Bool
+    /// Use-time file checks (only when a track is about to play; run off the main actor).
+    var probe: PlaybackFileResolver.Probe
     /// Playback met a missing file while its folder was reachable (W2-A contract:
     /// `LibraryAvailabilityMonitor.recordMissingAtUse`).
     var recordMissing: @MainActor (Int64) async -> Void
+    /// Several files went missing in a row: let the file check judge them (`.tracks(ids)` —
+    /// it has the suspicious-abort guard) instead of flagging them here.
+    var checkFiles: @MainActor (Set<Int64>) -> Void
     /// The persisted rows of these tracks now (queued copies may be stale: a download may have
     /// finished since they were queued). Missing ids keep their queued copy.
     var freshTracks: @MainActor (Set<Int64>) async -> [Int64: Track]
     /// The analysed drop for the preview hot spot.
     var dropOffset: @MainActor (Int64) async -> Double?
-    /// Volume and Repeat are remembered here (app-wide).
+    /// Volume, Repeat, history size and context cap live here (app-wide).
     var defaults: UserDefaults
+    /// Listen to the app's disk and availability notifications (live only — tests call
+    /// `reevaluateCantPlay` themselves, so a parallel test's notification can't reach them).
+    var observesNotifications = true
 
     static func live(configRepository: ConfigRepository?) -> PlaybackEnvironment {
         PlaybackEnvironment(
@@ -34,8 +41,9 @@ struct PlaybackEnvironment {
                 return LibraryDriveState.current(container).isOffline ? container.mountObserver?.libraryVolumePath : nil
             },
             volumeName: { LibraryDriveState.current(.shared).volumeName },
-            fileExists: { FileManager.default.fileExists(atPath: $0) },
+            probe: .live,
             recordMissing: { id in await DependencyContainer.shared.availabilityMonitor?.recordMissingAtUse(trackID: id) },
+            checkFiles: { ids in DependencyContainer.shared.availabilityMonitor?.request(.tracks(ids)) },
             freshTracks: { ids in
                 guard !ids.isEmpty, let repository = DependencyContainer.shared.trackRepository,
                       let tracks = try? await repository.fetchTracks(ids: ids) else { return [:] }
@@ -44,13 +52,14 @@ struct PlaybackEnvironment {
                 return byID
             },
             dropOffset: { id in (try? await TrackLocateRepository.live()?.dropOffset(trackID: id)) ?? nil },
-            defaults: .standard
+            defaults: .standard,
+            observesNotifications: true
         )
     }
 }
 
-/// A status-bar note from playback (skips, refusals, failures). The window's player shows it
-/// in the status bar (`PlayerBar`); the view model never builds UI.
+/// A status-bar note from playback (skips, refusals, failures). The window shows it in its
+/// status bar (`PlaybackWindowSupport`); the view model never builds UI.
 struct PlaybackNotice: Identifiable, Equatable {
     let id = UUID()
     let text: String
@@ -81,8 +90,8 @@ struct PlaybackOrigin: Equatable {
     var container: TrackListContainer
 }
 
-/// What Now Playing (Control Center, media keys) shows: the preview while one runs, else the
-/// main track.
+/// What Now Playing (Control Center, media keys, the Dock menu) shows: the preview while one
+/// runs, else the main track.
 struct NowPlayingSnapshot: Equatable {
     let trackID: Int64?
     let title: String
@@ -101,11 +110,15 @@ extension Notification.Name {
 
 /// Playback: the main player, the queue and history, and the transient Space preview.
 ///
-/// - The queue's next track comes from `QueueAdvance` (pure, tested): unplayable tracks are
-///   skipped with one status-bar note per skip run; when nothing playable remains the player
-///   stops and says why — never a retry loop (fixes PP-MAIN-01).
+/// - The queue's next track comes from `QueueAdvance` (pure, tested). A track that can't play
+///   for a reason of its own is passed over (it moves to History with its state word) with
+///   one status-bar note per run; a track whose disk is away is a **wait**: nothing is taken
+///   out of the queue (DEC-014, DEC-045, PP-MAIN-01).
+/// - Every user transport action and every preview start takes a new playback *generation*;
+///   a queue advance that awaited something re-checks it and gives up when the user acted
+///   meanwhile. Advances, Previous and queue jumps run one after another.
 /// - Failures are words (`PlaybackWords`, §15.7); raw error text only goes to the log
-///   (fixes PP-MAIN-15). An unplugged disk is never reported as a file problem (DEC-014).
+///   (PP-MAIN-15). An unplugged disk is never reported as a file problem (DEC-014).
 /// - The preview (`preview`) uses a second, transient player; the main track pauses and
 ///   resumes where it was; the queue and history never change for a preview.
 ///
@@ -151,10 +164,15 @@ final class PlaybackViewModel {
     /// A main track is loaded (playing or paused).
     var hasTrack: Bool { currentTrack != nil }
 
-    /// Nothing can play and the player says why (§15.7); cleared by the next playback or Stop.
+    /// Nothing is loaded but the queue has tracks: Play continues it (e.g. after the disk that
+    /// held the next track came back).
+    var canResumeQueue: Bool { currentTrack == nil && !queueSnapshot.upcoming.isEmpty }
+
+    /// Nothing can play and the player says why (§15.7). Cleared by the next playback, by Stop,
+    /// and re-judged when the disk returns or a track's availability changes (S10).
     private(set) var cantPlay: CantPlayState?
 
-    /// The newest status-bar note (shown once by the window's player).
+    /// The newest status-bar note (shown once by the window).
     private(set) var notice: PlaybackNotice?
 
     /// Waveform peaks of the main track (0…1 per bin).
@@ -183,7 +201,9 @@ final class PlaybackViewModel {
 
     @ObservationIgnored private var queue = PlaybackQueue()
 
-    /// Played tracks, most recent last. Capped by `playback_history_size`.
+    /// The tracks the queue passed, most recent last: the ones that played and the ones it
+    /// passed over because they couldn't play (they keep their state word). Repeat One adds no
+    /// entries. Capped by `playback_history_size`.
     private(set) var history: [Track] = []
 
     /// Upcoming tracks: Play Next items first, then the context.
@@ -210,14 +230,23 @@ final class PlaybackViewModel {
     @ObservationIgnored private var previewAudioRunning = false
     @ObservationIgnored private var previewController: PreviewController?
     @ObservationIgnored private var previewAdapter: PreviewAudioAdapter?
-    /// Set by a list right before it activates a row (⌘L returns to it).
-    @ObservationIgnored private var pendingOrigin: (trackID: Int64, origin: PlaybackOrigin)?
+    /// Set by a list right before it activates a row (⌘L returns to it); `trackID == nil`
+    /// matches the next playback whatever track it starts with (Shuffle).
+    @ObservationIgnored private var pendingOrigin: (trackID: Int64?, origin: PlaybackOrigin)?
     /// Return during a preview: the next `playTrack` of this track starts here.
     @ObservationIgnored private var pendingStart: (trackID: Int64, position: TimeInterval)?
     /// The file macOS couldn't decode last (`Show in Finder` in its note).
     @ObservationIgnored private var lastUnreadableURL: URL?
-    /// The running queue advance (advances are serialized).
-    @ObservationIgnored private var advanceChain: Task<Void, Never>?
+    /// Advances, Previous and queue jumps run one after another.
+    @ObservationIgnored private var transportChain: Task<Void, Never>?
+    /// Taken by every user transport action and preview start (S1).
+    @ObservationIgnored private(set) var generation = 0
+    /// The main track ended and its advance hasn't run yet (a preview may defer it).
+    @ObservationIgnored private var endedAwaitingAdvance = false
+    /// The advance of an ended main track waits for the preview to end.
+    @ObservationIgnored private var advanceAfterPreview = false
+    /// Releases the preview player's engine a while after the last preview (S3).
+    @ObservationIgnored private var previewReleaseToken = 0
 
     // MARK: - Init
 
@@ -244,14 +273,30 @@ final class PlaybackViewModel {
         if let raw = defaults.string(forKey: PlaybackRepeatMode.defaultsKey), let mode = PlaybackRepeatMode(rawValue: raw) {
             repeatMode = mode
         }
-        observers.append(NotificationCenter.default.addObserver(forName: .libraryDriveDidUnmount, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.libraryDiskWentAway() }
-        })
+        // `Can’t play — …` is judged again when the disk returns or availability changes (S10).
+        // (The disk going away is decided by the window's drive handling, `endPreviewForDiskLoss`.)
+        let names: [Notification.Name] = self.environment.observesNotifications
+            ? [.libraryDriveDidMount, .trackAvailabilityDidChange] : []
+        for name in names {
+            observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                let diskReturned = note.name == .libraryDriveDidMount
+                MainActor.assumeIsolated { self?.reevaluateCantPlay(diskReturned: diskReturned) }
+            })
+        }
     }
 
     deinit {
         positionTimer?.invalidate()
         observers.forEach(NotificationCenter.default.removeObserver)
+    }
+
+    /// A user transport action or a preview start: in-flight advances give up (S1).
+    @MainActor
+    @discardableResult
+    private func takeGeneration() -> Int {
+        generation += 1
+        endedAwaitingAdvance = false
+        return generation
     }
 
     // MARK: - Playing a track (explicit)
@@ -266,20 +311,24 @@ final class PlaybackViewModel {
     ///
     /// The track was chosen by the user, so it is opened as asked (also a track without an
     /// organized path whose original file exists). When it can't play, the current playback
-    /// is left alone and the player or the status bar says why.
+    /// (and a running preview) is left as it was and the player or the status bar says why.
     @MainActor
     func playTrack(_ track: Track, queue rows: [Track]) async {
-        previewController?.abandon()
+        let generation = takeGeneration()
         let start = consumePendingStart(for: track)
         let origin = consumePendingOrigin(for: track)
-        let proposed = QueueAdvance.start(track, in: rows, queue: queue, cap: Self.contextCap())
-        switch await open(track, startAt: start) {
+        let proposed = QueueAdvance.start(track, in: rows, queue: queue, cap: contextCap())
+        switch await open(track, startAt: start, generation: generation, recordMissing: true) {
         case .playing:
             setQueue(proposed)
             playingOrigin = origin
+        case .superseded:
+            break
         case .unavailable(let reason):
+            previewController?.end()
             reportUnplayable(track, reason)
         case .outputFailed:
+            previewController?.end()
             notify(PlaybackWords.outputFailed(track.title), action: .tryAgain(track))
         }
     }
@@ -299,14 +348,18 @@ final class PlaybackViewModel {
     @MainActor
     @discardableResult
     func playFile(at url: URL, track: Track? = nil) async -> Bool {
-        previewController?.abandon()
-        switch loadAndStart(url: url, track: track, startAt: nil) {
+        takeGeneration()
+        switch loadAndStart(url: url, track: track, startAt: nil, recordHistory: true) {
         case .playing:
             return true
+        case .superseded:
+            return false
         case .unavailable(let reason):
+            previewController?.end()
             if let track { reportUnplayable(track, reason) }
             return false
         case .outputFailed:
+            previewController?.end()
             if let track { notify(PlaybackWords.outputFailed(track.title), action: .tryAgain(track)) }
             return false
         }
@@ -315,22 +368,29 @@ final class PlaybackViewModel {
     /// The result of trying to open a track.
     enum OpenResult: Equatable {
         case playing
+        /// The user did something else meanwhile; nothing was changed.
+        case superseded
         case unavailable(PlaybackPlayability)
         /// The audio output didn't start — not the track's fault.
         case outputFailed
     }
 
-    /// Find the file (a use-time check), record a missing one, then load and play it.
+    /// Find the file (a use-time check, off the main actor), then load and play it — unless the
+    /// user acted meanwhile (`generation`). A missing file is recorded only when
+    /// `recordMissing` (a queue advance decides itself, see the circuit breaker).
     @MainActor
-    private func open(_ track: Track, startAt: TimeInterval?) async -> OpenResult {
+    private func open(_ track: Track, startAt: TimeInterval?, generation: Int, recordMissing: Bool,
+                      recordHistory: Bool = true) async -> OpenResult {
         let root = await environment.libraryRoot()
-        switch PlaybackFileResolver.lookup(track, libraryRoot: root, fileExists: environment.fileExists) {
+        let lookup = await PlaybackFileResolver.lookupOffMain(track, libraryRoot: root, probe: environment.probe)
+        guard generation == self.generation else { return .superseded }
+        switch lookup {
         case .file(let url):
-            return loadAndStart(url: url, track: track, startAt: startAt)
+            return loadAndStart(url: url, track: track, startAt: startAt, recordHistory: recordHistory)
         case .missing:
             AppLogger.shared.log("Playback: file missing for track id=\(track.id ?? -1) organized='\(track.organizedPath ?? "")'",
                                  level: .warning, source: "Playback")
-            if let id = track.id { await environment.recordMissing(id) }
+            if recordMissing, let id = track.id { await environment.recordMissing(id) }
             return .unavailable(.fileMissing)
         case .driveNotConnected:
             return .unavailable(.driveNotConnected)
@@ -339,19 +399,19 @@ final class PlaybackViewModel {
         }
     }
 
+    /// Load and play. A file that can't be opened leaves the playing one alone (S8); a running
+    /// preview stops only once the new file opened (never two audible sources).
     @MainActor
-    private func loadAndStart(url: URL, track: Track?, startAt: TimeInterval?) -> OpenResult {
+    private func loadAndStart(url: URL, track: Track?, startAt: TimeInterval?, recordHistory: Bool) -> OpenResult {
         do {
             try audioPlayer.loadFile(at: url)
         } catch {
             AppLogger.shared.log("Playback: can’t open \(url.lastPathComponent): \(error.localizedDescription)",
                                  level: .warning, source: "Playback")
-            // `loadFile` stops and clears the previous file before it can throw.
-            clearStoppedPlaybackState()
-            postStateDidChange()
             lastUnreadableURL = url
             return .unavailable(.unreadable)
         }
+        previewController?.abandon()
         audioPlayer.applyLUFSCompensation(lufsI: track?.lufsI)
         if let startAt, startAt > 0, startAt < audioPlayer.duration {
             try? audioPlayer.seek(to: startAt)
@@ -361,6 +421,7 @@ final class PlaybackViewModel {
         } catch {
             AppLogger.shared.log("Playback: audio output didn’t start: \(error.localizedDescription)",
                                  level: .error, source: "Playback")
+            audioPlayer.stop()
             clearStoppedPlaybackState()
             postStateDidChange()
             return .outputFailed
@@ -368,10 +429,11 @@ final class PlaybackViewModel {
         currentTrack = track
         currentURL = url
         cantPlay = nil
+        endedAwaitingAdvance = false
         duration = audioPlayer.duration
         currentPosition = audioPlayer.currentPosition
         playbackState = .playing
-        if let track { recordSuccessfulPlayback(track) }
+        if recordHistory, let track { appendHistory([track]) }
         postTrackDidChange()
         postStateDidChange()
         startPositionTimer()
@@ -383,7 +445,7 @@ final class PlaybackViewModel {
     /// while something plays, that keeps playing and the status bar says it.
     @MainActor
     private func reportUnplayable(_ track: Track, _ reason: PlaybackPlayability) {
-        guard let words = PlaybackWords.CantPlay(reason, volumeName: environment.volumeName()) else { return }
+        guard let words = PlaybackWords.CantPlay(reason, volumeName: volumeName(for: track)) else { return }
         if currentTrack == nil {
             cantPlay = CantPlayState(track: track, reason: words)
         }
@@ -405,16 +467,26 @@ final class PlaybackViewModel {
         notice = PlaybackNotice(text: text, action: action)
     }
 
-    /// Commit history only after the file loaded and playback really started.
-    private func recordSuccessfulPlayback(_ track: Track) {
-        history.append(track)
-        let historyCap = Self.historySize()
+    /// The name of the disk a track's file lives on (`Lexxar`), for sentences.
+    @MainActor
+    private func volumeName(for track: Track) -> String? {
+        if let organized = track.organizedPath, (organized as NSString).isAbsolutePath,
+           let volume = MountObserver.extractVolumePath(from: organized) {
+            return LibraryDriveState.volumeName(fromVolumePath: volume)
+        }
+        return environment.volumeName()
+    }
+
+    /// Add to history (capped).
+    private func appendHistory(_ tracks: [Track]) {
+        history.append(contentsOf: tracks)
+        let historyCap = historySize()
         if history.count > historyCap {
             history.removeFirst(history.count - historyCap)
         }
     }
 
-    /// A throwing load has already stopped the main player. Mirror that cleared state.
+    /// The output failed after loading: mirror the stopped player.
     private func clearStoppedPlaybackState() {
         currentTrack = nil
         currentURL = nil
@@ -434,14 +506,20 @@ final class PlaybackViewModel {
     // MARK: - Transport
 
     /// Play/Pause (toolbar, Playback menu, Dock, media key). During a preview it pauses or
-    /// resumes the preview (IMP-W2C-01); never bound to Space (§10 Q1).
+    /// resumes the preview (IMP-W2C-01); never bound to Space (§10 Q1). With nothing loaded
+    /// and a queue waiting it continues the queue.
     @MainActor
     func togglePlayPause() {
         if let preview = previewController, preview.isActive {
             preview.togglePause()
             return
         }
+        guard currentTrack != nil else {
+            if canResumeQueue { Task { await next() } }
+            return
+        }
         if playbackState != .playing, refuseResumeWhileDiskAway() { return }
+        takeGeneration()
         do {
             try audioPlayer.togglePlayPause()
             playbackState = audioPlayer.state
@@ -464,7 +542,17 @@ final class PlaybackViewModel {
             if preview.isPaused { preview.togglePause() }
             return
         }
+        guard currentTrack != nil else {
+            if canResumeQueue { Task { await next() } }
+            return
+        }
+        resumeMain()
+    }
+
+    @MainActor
+    private func resumeMain() {
         if playbackState != .playing, refuseResumeWhileDiskAway() { return }
+        takeGeneration()
         do {
             try audioPlayer.play()
             playbackState = audioPlayer.state == .playing ? .playing : playbackState
@@ -481,7 +569,7 @@ final class PlaybackViewModel {
     var currentTrackCantPlay: PlaybackWords.CantPlay? {
         guard let track = currentTrack else { return nil }
         guard PlaybackPlayability.of(track, offlineVolumePath: environment.offlineVolumePath()) == .driveNotConnected else { return nil }
-        return .driveNotConnected(volumeName: environment.volumeName())
+        return .driveNotConnected(volumeName: volumeName(for: track))
     }
 
     /// Resuming a track whose disk is away would play silence: say so instead (UC-STATUS-07).
@@ -499,23 +587,36 @@ final class PlaybackViewModel {
             if !preview.isPaused, !preview.isLoading { preview.togglePause() }
             return
         }
+        takeGeneration()
         audioPlayer.pause()
-        playbackState = .paused
+        if currentTrack != nil { playbackState = .paused }
         stopPositionTimerIfIdle()
         updatePosition()
         postStateDidChange()
     }
 
-    /// Stop ⌘.: ends a preview and unloads the main track.
+    /// Stop ⌘.: during a preview it ends the preview only (the main track stays loaded and
+    /// paused); otherwise it unloads the main track (and clears a `Can’t play` line).
     @MainActor
     func stop() {
-        previewController?.abandon()
+        if let preview = previewController, preview.isActive {
+            preview.end(resumeMain: false)
+            return
+        }
+        takeGeneration()
+        stopMain()
+    }
+
+    /// Unload the main track (no new generation: internal use).
+    @MainActor
+    private func stopMain() {
         audioPlayer.stop()
         playbackState = .stopped
         currentPosition = 0
         currentTrack = nil
         currentURL = nil
         cantPlay = nil
+        endedAwaitingAdvance = false
         waveformData = []
         stopPositionTimerIfIdle()
         postTrackDidChange()
@@ -531,7 +632,7 @@ final class PlaybackViewModel {
         }
         do {
             try audioPlayer.seek(to: position)
-            playbackState = audioPlayer.state
+            if currentTrack != nil, audioPlayer.state != .stopped { playbackState = audioPlayer.state }
             updatePosition()
         } catch {
             AppLogger.shared.debug("Playback: seek ignored (\(error.localizedDescription))", source: "Playback")
@@ -546,14 +647,7 @@ final class PlaybackViewModel {
             return
         }
         guard hasTrack, duration > 0 else { return }
-        let target = min(max(0, currentPosition + delta), duration)
-        do {
-            try audioPlayer.seek(to: target)
-            playbackState = audioPlayer.state
-            updatePosition()
-        } catch {
-            AppLogger.shared.debug("Playback: seek ignored (\(error.localizedDescription))", source: "Playback")
-        }
+        seek(to: min(max(0, currentPosition + delta), duration))
     }
 
     /// Seek to a progress fraction (0…1) of the audible track (the scrubber).
@@ -583,7 +677,7 @@ final class PlaybackViewModel {
         environment.defaults.set(mode.rawValue, forKey: PlaybackRepeatMode.defaultsKey)
     }
 
-    // MARK: - Queue advance (DEC-045, UC-TB-09)
+    // MARK: - Queue advance (DEC-045, DEC-014, UC-TB-09)
 
     /// The current track played to its end.
     @MainActor
@@ -593,25 +687,40 @@ final class PlaybackViewModel {
             playbackState = .stopped
             currentPosition = 0
         }
-        Task { await enqueueAdvance(.trackEnded) }
+        endedAwaitingAdvance = true
+        let ended = currentTrack?.id
+        let generation = self.generation
+        enqueueTransport { [weak self] in
+            await self?.advance(.trackEnded, generation: generation, endedTrackID: ended)
+        }
     }
 
     /// Next ⌘→ (also the media key and the toolbar).
     @MainActor
     func next() async {
         previewController?.abandon()
-        await enqueueAdvance(.userNext)
+        let generation = takeGeneration()
+        await enqueueTransport { [weak self] in
+            await self?.advance(.userNext, generation: generation, endedTrackID: nil)
+        }
     }
 
-    /// Advances run one after another (two quick Nexts skip two tracks, never open one twice).
+    /// Advances, Previous and queue jumps run one after another.
     @MainActor
-    private func enqueueAdvance(_ trigger: QueueAdvance.Trigger) async {
-        let previous = advanceChain
-        let task = Task { @MainActor [weak self] in
+    @discardableResult
+    private func enqueueTransport(_ work: @escaping @MainActor () async -> Void) -> Task<Void, Never> {
+        let previous = transportChain
+        let task = Task { @MainActor in
             await previous?.value
-            await self?.advance(trigger)
+            await work()
         }
-        advanceChain = task
+        transportChain = task
+        return task
+    }
+
+    @MainActor
+    private func enqueueTransport(_ work: @escaping @MainActor () async -> Void) async {
+        let task: Task<Void, Never> = enqueueTransport(work)
         await task.value
     }
 
@@ -619,27 +728,62 @@ final class PlaybackViewModel {
     @MainActor
     func back() async {
         previewController?.abandon()
-        let position = audioPlayer.currentPosition
-        let verdict = await playabilityVerdict(for: history)
-        let decision = QueueAdvance.previous(history: history, current: currentTrack, position: position, playability: verdict)
-        switch decision {
-        case .restartCurrent(let skipped):
-            restartCurrent()
-            noteSkipped(skipped)
-        case .play(let previous, let proposedHistory, let skipped):
-            var proposedQueue = queue
-            if let current = currentTrack { proposedQueue.pushToFront(current) }
-            switch await open(previous, startAt: nil) {
-            case .playing:
-                // `open` recorded `previous` again; rebuild history without the passed items.
-                history = proposedHistory
-                recordSuccessfulPlayback(previous)
-                setQueue(proposedQueue)
-                noteSkipped(skipped)
-            case .unavailable(let reason):
-                noteSkipped(skipped + [SkippedTrack(track: previous, reason: reason)])
-            case .outputFailed:
-                notify(PlaybackWords.outputFailed(previous.title), action: .tryAgain(previous))
+        let generation = takeGeneration()
+        await enqueueTransport { [weak self] in
+            await self?.goBack(generation: generation)
+        }
+    }
+
+    @MainActor
+    private func goBack(generation: Int) async {
+        let leaving = currentTrack
+        var position = audioPlayer.currentPosition
+        var working = history
+        var passed: [SkippedTrack] = []
+        let verdict = await playabilityVerdict(for: working)
+        guard generation == self.generation else { return }
+        var failedAtOpen: [Int64: PlaybackPlayability] = [:]
+        while true {
+            let decision = QueueAdvance.previous(history: working, current: leaving, position: position) { track in
+                if let id = track.id, let failed = failedAtOpen[id] { return failed }
+                return verdict(track)
+            }
+            switch decision {
+            case .restartCurrent(let skipped):
+                if !passed.isEmpty { history = working }
+                restartCurrent()
+                noteSkipped(passed + skipped)
+                return
+            case .waitingForDrive(let track):
+                if !passed.isEmpty { history = working }
+                notify(PlaybackWords.cantPlayDriveMessage(volumeName(for: track)), action: nil)
+                return
+            case .play(let previous, let proposedHistory, let skipped):
+                switch await open(previous, startAt: nil, generation: generation, recordMissing: true, recordHistory: false) {
+                case .playing:
+                    history = proposedHistory
+                    appendHistory([previous])
+                    var proposedQueue = queue
+                    if let leaving { proposedQueue.pushToFront(leaving) }
+                    setQueue(proposedQueue)
+                    noteSkipped(passed + skipped)
+                    return
+                case .superseded:
+                    return
+                case .unavailable(.driveNotConnected):
+                    history = working
+                    notify(PlaybackWords.cantPlayDriveMessage(volumeName(for: previous)), action: nil)
+                    return
+                case .unavailable(let reason):
+                    // Drop it and go on to the next earlier one (S8); the leaving track stays.
+                    passed += skipped + [SkippedTrack(track: previous, reason: reason)]
+                    working = proposedHistory
+                    if let id = previous.id { failedAtOpen[id] = reason }
+                    position = 0
+                case .outputFailed:
+                    notify(PlaybackWords.outputFailed(previous.title), action: .tryAgain(previous))
+                    return
+                }
             }
         }
     }
@@ -664,13 +808,21 @@ final class PlaybackViewModel {
     /// Play a specific track from the upcoming queue; everything before it is dropped.
     @MainActor
     func playFromQueue(track: Track) async {
-        previewController?.abandon()
-        var proposed = queue
-        guard proposed.playFromUpcoming(track) != nil else { return }
-        switch await open(track, startAt: nil) {
-        case .playing: setQueue(proposed)
-        case .unavailable(let reason): reportUnplayable(track, reason)
-        case .outputFailed: notify(PlaybackWords.outputFailed(track.title), action: .tryAgain(track))
+        let generation = takeGeneration()
+        await enqueueTransport { [weak self] in
+            guard let self else { return }
+            var proposed = self.queue
+            guard proposed.playFromUpcoming(track) != nil else { return }
+            switch await self.open(track, startAt: nil, generation: generation, recordMissing: true) {
+            case .playing: self.setQueue(proposed)
+            case .superseded: break
+            case .unavailable(let reason):
+                self.previewController?.end()
+                self.reportUnplayable(track, reason)
+            case .outputFailed:
+                self.previewController?.end()
+                self.notify(PlaybackWords.outputFailed(track.title), action: .tryAgain(track))
+            }
         }
     }
 
@@ -681,69 +833,170 @@ final class PlaybackViewModel {
         setQueue(proposed)
     }
 
-    /// One advance run: ask `QueueAdvance` for the next playable track, open it; a track that
-    /// turns out unusable at open time is skipped like the others (and a missing file is
-    /// recorded). Terminates: each round either plays, stops, or marks one more track failed.
+    /// Files missing in a row that stop an advance (a disk returning I/O errors would
+    /// otherwise flag the whole context as missing, S2).
+    static let missingStreakLimit = 2
+
+    /// One advance run (see `QueueAdvance` for the rule). It commits nothing when the user acted
+    /// meanwhile (`generation`) or the ended track is no longer the current one; it waits — and
+    /// changes nothing — when the next track's disk is away; it stops after two files missing in
+    /// a row and lets the file check judge them instead of flagging them.
     @MainActor
-    private func advance(_ trigger: QueueAdvance.Trigger) async {
+    private func advance(_ trigger: QueueAdvance.Trigger, generation: Int, endedTrackID: Int64?) async {
+        guard generation == self.generation else { return }
+        if trigger == .trackEnded {
+            guard endedAwaitingAdvance, currentTrack?.id == endedTrackID else { return }
+        }
         var working = queue
         var failedAtOpen: [Int64: PlaybackPlayability] = [:]
+        var failedWithoutID: [Track] = []
         var skipped: [SkippedTrack] = []
-        let fresh = await environment.freshTracks(Set((working.upcoming + working.cycle + [currentTrack].compactMap { $0 }).compactMap(\.id)))
+        var missingAtOpen: [Track] = []
+        var queueBeforeMissing: PlaybackQueue?
+        let ids = Set((working.upcoming + working.cycle + [currentTrack].compactMap { $0 }).compactMap(\.id))
+        let fresh = await environment.freshTracks(ids)
+        guard generation == self.generation else { return }
         let offline = environment.offlineVolumePath()
         let verdict: (Track) -> PlaybackPlayability = { track in
             if let id = track.id, let failed = failedAtOpen[id] { return failed }
+            if track.id == nil, failedWithoutID.contains(track) { return .unreadable }
             let latest = track.id.flatMap { fresh[$0] } ?? track
             return PlaybackPlayability.of(latest, offlineVolumePath: offline)
         }
-        while true {
+        for _ in 0..<10_000 {
             let result = QueueAdvance.next(queue: working, current: currentTrack, repeatMode: repeatMode,
                                            trigger: trigger, playability: verdict)
+            if let waiting = result.waitingForDrive {
+                commit(working, passed: skipped)
+                waitForDrive(waiting, trigger: trigger)
+                recordMissing(missingAtOpen)
+                return
+            }
             for item in result.skipped where !skipped.contains(where: { $0.track.id != nil && $0.track.id == item.track.id }) {
                 skipped.append(item)
             }
-            working = result.queue
             guard let candidate = result.track else {
-                setQueue(working)
+                commit(result.queue, passed: skipped)
+                recordMissing(missingAtOpen)
                 finishWithNothingPlayable(skipped)
                 return
             }
             let latest = candidate.id.flatMap { fresh[$0] } ?? candidate
-            switch await open(latest, startAt: nil) {
+            let openResult = await open(latest, startAt: nil, generation: generation, recordMissing: false,
+                                        recordHistory: !result.repeatsCurrent)
+            switch openResult {
+            case .superseded:
+                return
             case .playing:
-                setQueue(working)
+                // Passed-over tracks go to History before the one that plays.
+                if !result.repeatsCurrent, let played = history.popLast() {
+                    commit(result.queue, passed: skipped)
+                    appendHistory([played])
+                } else {
+                    commit(result.queue, passed: skipped)
+                }
+                recordMissing(missingAtOpen)
                 noteSkipped(skipped)
                 return
+            case .unavailable(.driveNotConnected):
+                // The persisted state didn't know yet: still a wait — the track stays at the head.
+                var waitingQueue = result.queue
+                waitingQueue.pushToFront(candidate)
+                commit(waitingQueue, passed: skipped)
+                waitForDrive(latest, trigger: trigger)
+                recordMissing(missingAtOpen)
+                return
             case .unavailable(let reason):
-                skipped.append(SkippedTrack(track: latest, reason: reason))
-                guard let id = candidate.id, failedAtOpen[id] == nil else {
-                    setQueue(working)
-                    finishWithNothingPlayable(skipped)
-                    return
+                if reason == .fileMissing {
+                    if queueBeforeMissing == nil {
+                        var beforeMissing = result.queue
+                        beforeMissing.pushToFront(candidate)
+                        queueBeforeMissing = beforeMissing
+                    }
+                    missingAtOpen.append(latest)
+                    if missingAtOpen.count >= Self.missingStreakLimit {
+                        tripMissingBreaker(missingAtOpen, queue: queueBeforeMissing ?? working,
+                                           passed: skipped, trigger: trigger)
+                        return
+                    }
                 }
-                failedAtOpen[id] = reason
+                skipped.append(SkippedTrack(track: latest, reason: reason))
+                if let id = candidate.id { failedAtOpen[id] = reason } else { failedWithoutID.append(candidate) }
+                working = result.queue
             case .outputFailed:
-                setQueue(working)
+                commit(result.queue, passed: skipped)
+                recordMissing(missingAtOpen)
                 notify(PlaybackWords.outputFailed(latest.title), action: .tryAgain(latest))
+                noteSkipped(skipped)
                 return
             }
         }
+        // Unreachable in practice (every round consumes an item); never spin.
+        commit(working, passed: skipped)
+    }
+
+    /// Commit an advance: the queue, and the passed-over tracks into History (they keep their
+    /// state word there — never deleted from what the user queued).
+    @MainActor
+    private func commit(_ newQueue: PlaybackQueue, passed: [SkippedTrack]) {
+        setQueue(newQueue)
+        if !passed.isEmpty { appendHistory(passed.map(\.track)) }
+        endedAwaitingAdvance = false
+    }
+
+    /// Single files found missing in a finished run are recorded (the monitor checks that the
+    /// folder is reachable).
+    @MainActor
+    private func recordMissing(_ tracks: [Track]) {
+        let ids = tracks.compactMap(\.id)
+        guard !ids.isEmpty else { return }
+        let environment = self.environment
+        Task { @MainActor in
+            for id in ids { await environment.recordMissing(id) }
+        }
+    }
+
+    /// The disk of the next track is away: nothing moves (DEC-014). A track still playing from
+    /// a reachable place keeps playing; otherwise the player names the waiting track.
+    @MainActor
+    private func waitForDrive(_ waiting: Track, trigger: QueueAdvance.Trigger) {
+        let name = volumeName(for: waiting)
+        if trigger == .userNext, currentTrack != nil {
+            notify(PlaybackWords.cantPlayDriveMessage(name), action: nil)
+            return
+        }
+        stopMain()
+        cantPlay = CantPlayState(track: waiting, reason: .driveNotConnected(volumeName: name))
+    }
+
+    /// Two files missing in a row: stop, flag nothing, let the file check judge (S2).
+    @MainActor
+    private func tripMissingBreaker(_ missing: [Track], queue: PlaybackQueue, passed: [SkippedTrack],
+                                    trigger: QueueAdvance.Trigger) {
+        // The missing ones stay queued (unflagged); only tracks passed for other reasons move on.
+        commit(queue, passed: passed.filter { item in !missing.contains { $0.id != nil && $0.id == item.track.id } })
+        environment.checkFiles(Set(missing.compactMap(\.id)))
+        let name = missing.first.flatMap { volumeName(for: $0) }
+        if trigger == .trackEnded || currentTrack == nil { stopMain() }
+        notify(PlaybackWords.filesUnreadable(name), action: nil)
+        AppLogger.shared.log("Playback: \(missing.count) files missing in a row — stopped, handed to the file check",
+                             level: .warning, source: "Playback")
     }
 
     /// The queue is exhausted. Nothing skipped: plain end (`Not playing`). Otherwise playback
     /// stops on a defined state and the player names the first track that couldn't play.
     @MainActor
     private func finishWithNothingPlayable(_ skipped: [SkippedTrack]) {
-        stop()
+        stopMain()
         guard let first = skipped.first,
-              let words = PlaybackWords.CantPlay(first.reason, volumeName: environment.volumeName()) else { return }
+              let words = PlaybackWords.CantPlay(first.reason, volumeName: volumeName(for: first.track)) else { return }
         cantPlay = CantPlayState(track: first.track, reason: words)
         noteSkipped(skipped)
     }
 
     @MainActor
     private func noteSkipped(_ skipped: [SkippedTrack]) {
-        guard let note = PlaybackWords.skipNote(skipped, volumeName: environment.volumeName()) else { return }
+        guard let note = PlaybackWords.skipNote(skipped, volumeName: skipped.first.flatMap { volumeName(for: $0.track) }) else { return }
         let action: PlaybackNotice.Action?
         switch note.action {
         case .download(let ids):
@@ -767,6 +1020,28 @@ final class PlaybackViewModel {
         }
     }
 
+    /// `Can’t play — …` is judged again (S10): the disk came back, or a track's availability
+    /// changed (a download finished, Locate File…).
+    @MainActor
+    func reevaluateCantPlay(diskReturned: Bool) {
+        guard let state = cantPlay else { return }
+        if diskReturned, case .driveNotConnected = state.reason {
+            cantPlay = nil
+            return
+        }
+        guard let id = state.track.id else { return }
+        Task { @MainActor in
+            let fresh = await environment.freshTracks([id])[id] ?? state.track
+            guard cantPlay?.track.id == id else { return }
+            let verdict = PlaybackPlayability.of(fresh, offlineVolumePath: environment.offlineVolumePath())
+            if verdict.isPlayable {
+                cantPlay = nil
+            } else if let words = PlaybackWords.CantPlay(verdict, volumeName: volumeName(for: fresh)), words != state.reason {
+                cantPlay = CantPlayState(track: fresh, reason: words)
+            }
+        }
+    }
+
     /// Locate File… pointed a track at its file again: the player stops naming it as missing.
     @MainActor
     func fileWasLocated(trackID: Int64?) {
@@ -776,15 +1051,17 @@ final class PlaybackViewModel {
 
     // MARK: - Playing context (⌘L)
 
-    /// A list records where its row is played from, right before activating it.
+    /// A list records where its row is played from, right before playback starts (every way:
+    /// Return, Track ▸ Play, the menu's Play / Shuffle ‹view›). `trackID == nil` matches the
+    /// next playback whatever it starts with.
     @MainActor
-    func willActivate(_ trackID: Int64, from origin: PlaybackOrigin) {
+    func willActivate(_ trackID: Int64?, from origin: PlaybackOrigin) {
         pendingOrigin = (trackID, origin)
     }
 
     private func consumePendingOrigin(for track: Track) -> PlaybackOrigin? {
         defer { pendingOrigin = nil }
-        guard let pending = pendingOrigin, pending.trackID == track.id else { return nil }
+        guard let pending = pendingOrigin, pending.trackID == nil || pending.trackID == track.id else { return nil }
         return pending.origin
     }
 
@@ -796,7 +1073,7 @@ final class PlaybackViewModel {
 
     // MARK: - Now Playing
 
-    /// What Control Center and the media keys show (the preview while one runs).
+    /// What Control Center, the media keys and the Dock menu show (the preview while one runs).
     @MainActor
     var nowPlaying: NowPlayingSnapshot? {
         if let preview = previewController, preview.isActive, let track = preview.track {
@@ -850,7 +1127,7 @@ final class PlaybackViewModel {
         }
     }
 
-    // MARK: - Waveform
+// MARK: - Waveform
 
     static func waveformCacheURL(in directory: URL, trackID: Int64?, fileURL: URL) -> URL {
         if let id = trackID {
@@ -933,20 +1210,22 @@ final class PlaybackViewModel {
         }
     }
 
-    // MARK: - Helpers
+        // MARK: - Helpers
 
     private func formatTime(_ seconds: TimeInterval) -> String {
         guard seconds.isFinite && seconds >= 0 else { return "—:——" }
         return PlaybackWords.time(seconds)
     }
 
-    private static func historySize() -> Int {
-        let val = UserDefaults.standard.integer(forKey: "playback_history_size")
+    /// `playback_history_size` (Settings ▸ Playback), from the injected defaults.
+    private func historySize() -> Int {
+        let val = environment.defaults.integer(forKey: "playback_history_size")
         return val > 0 ? val : 50
     }
 
-    static func contextCap() -> Int {
-        let val = UserDefaults.standard.integer(forKey: "playback_context_cap")
+    /// `playback_context_cap`, from the injected defaults.
+    func contextCap() -> Int {
+        let val = environment.defaults.integer(forKey: "playback_context_cap")
         return val > 0 ? val : 100
     }
 
@@ -993,11 +1272,14 @@ extension PlaybackViewModel {
         return controller
     }
 
-    /// File and analysed drop of a track to preview (a use-time check).
+    /// The preview player exists (its engine is kept for a while after a preview, S3).
+    var hasPreviewPlayer: Bool { previewPlayer != nil }
+
+    /// File and analysed drop of a track to preview (a use-time check, off the main actor).
     @MainActor
     func resolvePreview(_ track: Track) async -> Result<ResolvedPreview, PreviewResolveFailure> {
         let root = await environment.libraryRoot()
-        switch PlaybackFileResolver.lookup(track, libraryRoot: root, fileExists: environment.fileExists) {
+        switch await PlaybackFileResolver.lookupOffMain(track, libraryRoot: root, probe: environment.probe) {
         case .file(let url):
             let drop = await track.id.asyncFlatMap { await self.environment.dropOffset($0) }
             return .success(ResolvedPreview(url: url, dropOffset: drop))
@@ -1007,7 +1289,7 @@ extension PlaybackViewModel {
         case .driveNotConnected(let volumePath):
             return .failure(.driveNotConnected(volumeName: LibraryDriveState.volumeName(fromVolumePath: volumePath) ?? environment.volumeName()))
         case .noFile:
-            return .failure(.fileMissing)
+            return .failure(.notDownloaded)
         }
     }
 
@@ -1018,29 +1300,61 @@ extension PlaybackViewModel {
             previewWaveform = []
             previewPosition = 0
             previewDuration = 0
+            schedulePreviewRelease()
+        } else {
+            previewReleaseToken += 1
         }
         stopPositionTimerIfIdle()
         NotificationCenter.default.post(name: .playbackPreviewDidChange, object: nil)
         postStateDidChange()
     }
 
-    /// The library disk went away: a running preview ends; the main track is not resumed
-    /// (its file is most likely on the same disk). The window's drive handling says so.
+    /// After the last preview, release the transient player and its audio engine (S3).
     @MainActor
-    func libraryDiskWentAway() {
-        guard let preview = previewController, preview.isActive else { return }
+    private func schedulePreviewRelease() {
+        guard previewPlayer != nil else { return }
+        previewReleaseToken += 1
+        let token = previewReleaseToken
+        previewSchedule(PreviewController.releaseDelay) { [weak self] in
+            guard let self, self.previewReleaseToken == token, self.previewController?.isActive != true else { return }
+            self.previewPlayer?.stop()
+            (self.previewPlayer as? AudioPlayer)?.shutDownEngine()
+            self.previewPlayer = nil
+        }
+    }
+
+    /// The library disk went away (called by the window's drive handling, the one observer):
+    /// a running preview ends without resuming the main track (its file is most likely on the
+    /// same disk). Returns whether the main track was playing under the preview, so the window
+    /// says `“‹Disk›” was disconnected — playback paused at …` and offers Resume later.
+    @MainActor
+    @discardableResult
+    func endPreviewForDiskLoss() -> Bool {
+        guard let preview = previewController, preview.isActive else { return false }
+        let mainWasPlaying = preview.machine.session?.main.wasPlaying ?? false
         preview.end(resumeMain: false)
+        advanceAfterPreview = false
+        return mainWasPlaying
     }
 
     // Port operations (used by `PreviewAudioAdapter`).
 
     @MainActor
     fileprivate func captureMainForPreview() -> MainPlaybackSnapshot {
-        MainPlaybackSnapshot(trackID: currentTrack?.id, position: audioPlayer.currentPosition, wasPlaying: playbackState == .playing)
+        // The main track just ended and its advance hasn't run: it counts as playing, and the
+        // advance runs when the preview ends (not a restart from 0).
+        if endedAwaitingAdvance {
+            advanceAfterPreview = true
+            return MainPlaybackSnapshot(trackID: currentTrack?.id, position: 0, wasPlaying: true)
+        }
+        advanceAfterPreview = false
+        return MainPlaybackSnapshot(trackID: currentTrack?.id, position: audioPlayer.currentPosition, wasPlaying: playbackState == .playing)
     }
 
     @MainActor
     fileprivate func suspendMainForPreview() {
+        // A preview start is a transport action: in-flight advances give up (S1).
+        takeGeneration()
         guard playbackState == .playing else { return }
         audioPlayer.pause()
         playbackState = .paused
@@ -1049,11 +1363,22 @@ extension PlaybackViewModel {
     }
 
     /// Resume the main track if it was playing — unless its file went away meanwhile (then it
-    /// stops and the player says why).
+    /// stops and the player says why). A main track that ended just before the preview advances.
     @MainActor
     fileprivate func restoreMainAfterPreview(_ snapshot: MainPlaybackSnapshot) -> Bool {
+        if advanceAfterPreview {
+            advanceAfterPreview = false
+            guard snapshot.wasPlaying else { return true }
+            endedAwaitingAdvance = true
+            let ended = currentTrack?.id
+            let generation = self.generation
+            enqueueTransport { [weak self] in
+                await self?.advance(.trackEnded, generation: generation, endedTrackID: ended)
+            }
+            return true
+        }
         guard snapshot.wasPlaying, let track = currentTrack, track.id == snapshot.trackID else { return true }
-        if let url = currentURL, !environment.fileExists(url.path) {
+        if let url = currentURL, !environment.probe.fileExists(url.path) {
             let offline = environment.offlineVolumePath()
             let reason: PlaybackPlayability = PlaybackPlayability.of(track, offlineVolumePath: offline) == .driveNotConnected
                 ? .driveNotConnected : .fileMissing
@@ -1079,6 +1404,7 @@ extension PlaybackViewModel {
         if previewPlayer == nil {
             previewPlayer = player
         }
+        previewReleaseToken += 1
         player.setVolume(Float(volume))
         do {
             try player.loadFile(at: resolved.url)
@@ -1133,7 +1459,6 @@ extension PlaybackViewModel {
         let target = min(max(0, previewPlayer.currentPosition + delta), max(previewPlayer.duration - 0.05, 0))
         let wasRunning = previewAudioRunning
         try? previewPlayer.seek(to: target)
-        // `AudioPlayer.seek` keeps a running player running; a paused one stays put.
         previewAudioRunning = wasRunning && previewPlayer.state == .playing
         previewPosition = previewPlayer.currentPosition
     }

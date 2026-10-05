@@ -197,9 +197,8 @@ struct PlaybackPreviewTests {
         let a = local(1, r), b = local(2, r)
         await r.vm.playTrack(a)
         await startPreview(b, r)
-        // What `.libraryDriveDidUnmount` triggers (called directly: posting the notification
-        // would reach every other test's view model too).
-        r.vm.libraryDiskWentAway()
+        // What the window's one drive handler calls on `.libraryDriveDidUnmount`.
+        #expect(r.vm.endPreviewForDiskLoss() == true, "main was playing under the preview: the window says so")
         #expect(!r.vm.preview.isActive)
         #expect(r.preview.state == .stopped)
         #expect(r.main.state == .paused)
@@ -226,5 +225,72 @@ struct PlaybackPreviewTests {
         r.vm.stop()  // ⌘.
         #expect(!r.vm.preview.isActive)
         #expect(r.vm.nowPlaying == nil)
+    }
+
+    // MARK: Review round
+
+    @Test func thePreviewPlayersEngineIsReleasedAfterThePreview() async {
+        let r = rig()
+        let b = local(2, r)
+        await startPreview(b, r)
+        #expect(r.vm.hasPreviewPlayer)
+        r.vm.preview.escape()
+        r.timers.fire()   // the release delay (S3)
+        #expect(!r.vm.hasPreviewPlayer)
+        await startPreview(b, r)
+        #expect(r.vm.hasPreviewPlayer, "a new preview makes a new one")
+    }
+
+    @Test func stopDuringAPreviewEndsOnlyThePreview() async {
+        let r = rig()
+        let a = local(1, r), b = local(2, r)
+        await r.vm.playTrack(a)
+        await startPreview(b, r)
+        r.vm.stop()   // ⌘.
+        #expect(!r.vm.preview.isActive)
+        #expect(r.vm.currentTrack?.id == 1 && r.main.state == .paused, "main stays loaded and paused")
+        r.vm.stop()
+        #expect(r.vm.currentTrack == nil)
+    }
+
+    @Test func aFailedPlayDuringAPreviewEndsThePreviewAndResumesMain() async {
+        let r = rig()
+        let a = local(1, r), b = local(2, r)
+        var gone = local(3, r)
+        gone.organizedPath = r.folder.url.appendingPathComponent("gone.m4a").path
+        await r.vm.playTrack(a)
+        await startPreview(b, r)
+        await r.vm.playTrack(gone)
+        #expect(!r.vm.preview.isActive)
+        #expect(r.vm.currentTrack?.id == 1 && r.main.state == .playing)
+    }
+
+    @Test func previewingATrackWithoutAFileSaysNotDownloaded() async {
+        let r = rig()
+        var remote = local(4, r)
+        remote.organizedPath = nil
+        r.vm.preview.toggle(owner: owner, candidate: .previewable(remote))
+        await waitUntil { !r.vm.preview.isActive }
+        #expect(r.vm.notice?.text == "Can’t preview — not downloaded. Press ⌘D to download.")
+    }
+
+    /// Review nit: Space within one tick of the main track's natural end — after the preview the
+    /// queue advances; the ended track doesn't restart from 0.
+    @Test func aTrackThatEndedJustBeforeThePreviewAdvancesAfterIt() async {
+        let r = rig()
+        let a = local(1, r), b = local(2, r), p = local(5, r)
+        await r.vm.playTrack(a, queue: [a, b])
+        r.env.freshGate.close()
+        r.main.state = .stopped
+        r.vm.trackDidEnd()
+        await waitUntil { r.env.freshGate.waiting == 1 }
+        await startPreview(p, r)
+        r.env.freshGate.open()
+        try? await Task.sleep(for: .milliseconds(30))
+        #expect(r.vm.currentTrack?.id == 1, "nothing advanced under the preview")
+        r.vm.preview.escape()
+        await waitUntil { r.vm.currentTrack?.id == 2 }
+        #expect(r.vm.currentTrack?.id == 2)
+        #expect(!r.main.seeks.contains(0))
     }
 }

@@ -156,6 +156,12 @@ enum PlaybackWords {
         }
     }
 
+    /// Two files in a row were missing in one queue advance: the disk is probably failing; the
+    /// file check judges them instead of flagging them here (UC-COPY-11 shape: what — why).
+    static func filesUnreadable(_ volumeName: String?) -> String {
+        "Playback stopped — files on \(diskName(volumeName)) can’t be read"
+    }
+
     /// The audio output wouldn't start (engine failure).
     static func outputFailed(_ title: String) -> String {
         "Couldn’t play “\(title)” — the audio output didn’t start"

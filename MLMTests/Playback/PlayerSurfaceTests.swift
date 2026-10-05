@@ -124,4 +124,18 @@ struct PlayerSurfaceTests {
         #expect(!bar.contains(".keyboardShortcut("), "the player defines no keys")
         #expect(!bar.contains("\"Not Playing\""), "sentence case (C22)")
     }
+
+    /// Review S6: ⌘L returns to a recorded place only while it exists.
+    @Test @MainActor func goToCurrentTrackFallsBackWhenThePlaceIsGone() {
+        let noPlaylists = TrackMenuSources()
+        let deleted = PlaybackOrigin(place: .playlist(42), path: [], listKey: "playlist",
+                                     container: .playlist(id: 42, name: "Gone"))
+        #expect(GoToCurrentTrack.validated(deleted, sources: noPlaylists) == .allTracks)
+        let pushed = PlaybackOrigin(place: .allPlaylists, path: [.playlist(42, showFailedTracks: false)], listKey: "playlist",
+                                    container: .playlist(id: 42, name: "Gone"))
+        #expect(GoToCurrentTrack.validated(pushed, sources: noPlaylists) == .allTracks)
+        #expect(GoToCurrentTrack.validated(.allTracks, sources: noPlaylists) == .allTracks)
+        #expect(GoToCurrentTrack.validated(nil, sources: noPlaylists) == .allTracks)
+        #expect(TrackListReveal.absentMessage(title: "Glass Circuit") == "“Glass Circuit” isn’t in this list any more")
+    }
 }

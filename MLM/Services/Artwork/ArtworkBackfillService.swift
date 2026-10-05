@@ -330,6 +330,8 @@ final class ArtworkBackfillService {
         let libraryRoot = (try? await configRepository.getLibraryRoot()) ?? nil
         let organizedURL: URL? = track.organizedPath.flatMap { organizedPath in
             guard !organizedPath.isEmpty else { return nil }
+            // An absolute stored path is used as it is (the root + absolute join bug, W2-C).
+            if (organizedPath as NSString).isAbsolutePath { return URL(fileURLWithPath: organizedPath) }
             if let libraryRoot, !libraryRoot.isEmpty {
                 return URL(fileURLWithPath: libraryRoot).appendingPathComponent(organizedPath)
             }

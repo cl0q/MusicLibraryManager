@@ -3,99 +3,6 @@ import GRDB
 import Testing
 @testable import MLM
 
-// MARK: - Fakes shared by the W2-C view-model tests
-
-/// An audio player that plays nothing (no sound reaches the output device).
-@MainActor
-final class SilentAudioPlayer: AudioPlayerControlling {
-    var state: AudioPlayer.PlaybackState = .stopped
-    var duration: TimeInterval = 200
-    var currentPosition: TimeInterval = 0
-    private(set) var loaded: [URL] = []
-    private(set) var seeks: [TimeInterval] = []
-    private(set) var volumes: [Float] = []
-    var failLoad = false
-
-    func loadFile(at url: URL) throws {
-        state = .stopped
-        currentPosition = 0
-        if failLoad { throw NSError(domain: "Silent", code: -1) }
-        loaded.append(url)
-    }
-    func play() throws { state = .playing }
-    func pause() { if state == .playing { state = .paused } }
-    func togglePlayPause() throws { if state == .playing { pause() } else { try play() } }
-    func stop() { state = .stopped; currentPosition = 0 }
-    func seek(to position: TimeInterval) throws { seeks.append(position); currentPosition = position }
-    func setVolume(_ volume: Float) { volumes.append(volume) }
-    func applyLUFSCompensation(lufsI: Double?) {}
-}
-
-/// A temporary folder with real (tiny) files: playback checks a file exists right before it
-/// plays it.
-final class PlaybackFixtureFolder {
-    let url: URL
-
-    init() {
-        url = FileManager.default.temporaryDirectory.appendingPathComponent("mlm-w2c-\(UUID().uuidString)", isDirectory: true)
-        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-    }
-
-    @discardableResult
-    func file(_ name: String) -> String {
-        let path = url.appendingPathComponent(name).path
-        FileManager.default.createFile(atPath: path, contents: Data([0]))
-        return path
-    }
-
-    func remove(_ name: String) {
-        try? FileManager.default.removeItem(at: url.appendingPathComponent(name))
-    }
-
-    deinit { try? FileManager.default.removeItem(at: url) }
-}
-
-@MainActor
-final class PlaybackTestEnvironment {
-    var libraryRoot: String?
-    var offlineVolumePath: String?
-    var volumeName: String? = "Lexxar"
-    var recordedMissing: [Int64] = []
-    var fresh: [Int64: Track] = [:]
-    var drops: [Int64: Double] = [:]
-    let defaults: UserDefaults
-    private let suite: String
-
-    init(libraryRoot: String? = nil) {
-        self.libraryRoot = libraryRoot
-        suite = "mlm.tests.playback.\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suite)!
-    }
-
-    deinit { UserDefaults().removePersistentDomain(forName: suite) }
-
-    var environment: PlaybackEnvironment {
-        PlaybackEnvironment(
-            libraryRoot: { [unowned self] in self.libraryRoot },
-            offlineVolumePath: { [unowned self] in self.offlineVolumePath },
-            volumeName: { [unowned self] in self.volumeName },
-            fileExists: { FileManager.default.fileExists(atPath: $0) },
-            recordMissing: { [unowned self] id in self.recordedMissing.append(id) },
-            freshTracks: { [unowned self] ids in self.fresh.filter { ids.contains($0.key) } },
-            dropOffset: { [unowned self] id in self.drops[id] },
-            defaults: defaults
-        )
-    }
-}
-
-@MainActor
-func waitUntil(_ condition: @MainActor () -> Bool) async {
-    // Condition-based (not a fixed sleep): generous ceiling, returns as soon as it holds.
-    for _ in 0..<500 where !condition() {
-        try? await Task.sleep(for: .milliseconds(10))
-    }
-}
-
 // MARK: - Tests
 
 /// W2-C: the queue never stalls (PP-MAIN-01), failures are words (PP-MAIN-15), the absolute
@@ -156,7 +63,7 @@ struct PlaybackViewModelSkipTests {
         #expect(r.vm.currentTrack?.id == 4)
         #expect(r.vm.notice?.text == "Skipped 2 tracks that aren’t downloaded")
         #expect(r.vm.notice?.action == .download([b, c]))
-        #expect(r.vm.history.map(\.id) == [1, 4], "skipped tracks never enter history")
+        #expect(r.vm.history.map(\.id) == [1, 2, 3, 4], "passed-over tracks move to History, never deleted")
         #expect(r.main.loaded.count == 2, "nothing is opened for tracks that can't play")
     }
 
@@ -184,26 +91,64 @@ struct PlaybackViewModelSkipTests {
         await r.vm.playTrack(a, queue: [a, gone, c])
         await r.vm.next()
         #expect(r.vm.currentTrack?.id == 3)
+        await waitUntil { !r.env.recordedMissing.isEmpty }
         #expect(r.env.recordedMissing == [2], "recordMissingAtUse (the monitor checks the folder is reachable)")
         #expect(r.vm.notice?.text == "Skipped “T2” — file missing")
         #expect(r.vm.notice?.action == .locate(gone))
     }
 
-    @Test func anUnpluggedDriveIsNeverAFileProblem() async {
+    /// Review B1: the disk being away is a wait, never a skip (DEC-014).
+    @Test func nextWithTheDiskAwayKeepsTheQueueAndTheTrackThatPlays() async {
         let r = rig(root: true)
-        // Relative paths on the library disk, which is away.
-        var a = notDownloaded(1); a.organizedPath = "A/1.m4a"
-        var b = notDownloaded(2); b.organizedPath = "A/2.m4a"
-        r.folder.file("seed")  // folder exists, the files don't matter: the drive says no first
-        r.env.offlineVolumePath = "/Volumes/Lexxar"
-        // Persisted verdicts look at where the file lives: relative = the library disk.
+        // Sixty queued tracks on the library disk (relative paths); the current one plays from
+        // this Mac.
+        let onDisk = (Int64(10)..<70).map { id -> Track in
+            var t = notDownloaded(id)
+            t.organizedPath = "A/\(id).m4a"
+            r.folder.file("A/\(id).m4a")
+            return t
+        }
         let current = local(9, r)
-        await r.vm.playTrack(current, queue: [current, a, b])
+        await r.vm.playTrack(current, queue: [current] + onDisk)
+        let queued = r.vm.upcoming
+        r.env.offlineVolumePath = "/Volumes/Lexxar"  // unplugged
         await r.vm.next()
+        #expect(r.vm.currentTrack?.id == 9, "the track that plays keeps playing")
+        #expect(r.vm.isMainPlaying)
+        #expect(r.vm.upcoming == queued, "nothing taken out of the queue")
+        #expect(r.vm.notice?.text == "Can’t play — “Lexxar” is not connected.")
+        #expect(r.env.recordedMissing.isEmpty && r.env.checkedFiles.isEmpty, "never a file problem")
+
+        // The track ends while the disk is still away: the player names the waiting track.
+        r.main.state = .stopped
+        r.vm.trackDidEnd()
+        await waitUntil { r.vm.cantPlay != nil }
         #expect(r.vm.currentTrack == nil)
-        #expect(r.vm.cantPlay?.reason == .driveNotConnected(volumeName: "Lexxar"))
-        #expect(r.vm.notice?.text == "Skipped 2 tracks — “Lexxar” is not connected")
-        #expect(r.env.recordedMissing.isEmpty, "never flagged missing because of the drive (DEC-014)")
+        #expect(r.vm.cantPlay == CantPlayState(track: onDisk[0], reason: .driveNotConnected(volumeName: "Lexxar")))
+        #expect(r.vm.upcoming == queued)
+        #expect(r.vm.canResumeQueue)
+
+        // Replugged: the state clears, Play continues with the first waiting track.
+        r.env.offlineVolumePath = nil
+        r.vm.reevaluateCantPlay(diskReturned: true)
+        #expect(r.vm.cantPlay == nil)
+        r.vm.togglePlayPause()
+        await waitUntil { r.vm.currentTrack?.id == 10 }
+        #expect(r.vm.currentTrack?.id == 10)
+        #expect(r.vm.upcoming.count == queued.count - 1)
+    }
+
+    @Test func aDiskFoundAwayAtOpenTimeIsAWaitToo() async {
+        let r = rig(root: true)
+        // The persisted state still says connected; the file's own volume isn't there.
+        var away = notDownloaded(2)
+        away.organizedPath = "/Volumes/MLMTestsGone-\(UUID().uuidString)/2.m4a"
+        let a = local(1, r)
+        await r.vm.playTrack(a, queue: [a, away])
+        await r.vm.next()
+        #expect(r.vm.currentTrack?.id == 1)
+        #expect(r.vm.upcoming.map(\.id) == [2], "still queued")
+        #expect(r.env.recordedMissing.isEmpty)
     }
 
     @Test func freshPersistedStateWinsOverTheQueuedCopy() async {
@@ -233,18 +178,25 @@ struct PlaybackViewModelSkipTests {
         #expect(PlaybackFileResolver.candidatePaths(relative, libraryRoot: "/x").first == "/x/Artist/1.m4a")
     }
 
-    @Test func lookupTellsMissingFromDiskAway() {
+    @Test func lookupTellsMissingFromDiskAwayWithTheMountCheck() {
+        func probe(files: Set<String> = [], mounted: Set<String> = [], reachableRoots: Set<String> = []) -> PlaybackFileResolver.Probe {
+            PlaybackFileResolver.Probe(fileExists: { files.contains($0) }, isVolumeMounted: { mounted.contains($0) },
+                                       isLibraryRootReachable: { reachableRoots.contains($0) })
+        }
         var t = notDownloaded(1)
         t.organizedPath = "/Volumes/Gone/a.m4a"
-        #expect(PlaybackFileResolver.lookup(t, libraryRoot: nil, fileExists: { _ in false }) == .driveNotConnected(volumePath: "/Volumes/Gone"))
-        #expect(PlaybackFileResolver.lookup(t, libraryRoot: nil, fileExists: { $0 == "/Volumes/Gone" }) == .missing)
+        // An empty leftover `/Volumes/Gone` folder is not a mounted disk (S2).
+        #expect(PlaybackFileResolver.lookup(t, libraryRoot: nil, probe: probe(files: ["/Volumes/Gone"]))
+                == .driveNotConnected(volumePath: "/Volumes/Gone"))
+        #expect(PlaybackFileResolver.lookup(t, libraryRoot: nil, probe: probe(mounted: ["/Volumes/Gone"])) == .missing)
         t.organizedPath = "A/a.m4a"
-        #expect(PlaybackFileResolver.lookup(t, libraryRoot: "/Volumes/Lexxar/Music", fileExists: { _ in false })
+        #expect(PlaybackFileResolver.lookup(t, libraryRoot: "/Volumes/Lexxar/Music", probe: probe())
                 == .driveNotConnected(volumePath: "/Volumes/Lexxar"))
-        #expect(PlaybackFileResolver.lookup(t, libraryRoot: "/Volumes/Lexxar/Music", fileExists: { $0.hasSuffix("Music") || $0 == "/Volumes/Lexxar" })
+        #expect(PlaybackFileResolver.lookup(t, libraryRoot: "/Volumes/Lexxar/Music",
+                                            probe: probe(mounted: ["/Volumes/Lexxar"], reachableRoots: ["/Volumes/Lexxar/Music"]))
                 == .missing)
         t.organizedPath = nil
-        #expect(PlaybackFileResolver.lookup(t, libraryRoot: "/x", fileExists: { _ in false }) == .noFile)
+        #expect(PlaybackFileResolver.lookup(t, libraryRoot: "/x", probe: probe()) == .noFile)
     }
 
     // MARK: Explicit play of something that can't play
@@ -270,6 +222,18 @@ struct PlaybackViewModelSkipTests {
         #expect(display.secondLine == "Can’t play — file missing" && display.fixTitle == "Locate…")
         r.vm.fileWasLocated(trackID: 2)
         #expect(r.vm.cantPlay == nil)
+    }
+
+    /// Review S8: a file that can't be opened never stops what plays.
+    @Test func anUnreadableFileLeavesThePlayingTrackAlone() async {
+        let r = rig()
+        let a = local(1, r), bad = local(2, r)
+        r.main.unreadable = [bad.organizedPath ?? ""]
+        await r.vm.playTrack(a)
+        await r.vm.playTrack(bad)
+        #expect(r.vm.currentTrack?.id == 1)
+        #expect(r.main.state == .playing)
+        #expect(r.vm.notice?.text == "Couldn’t play “T2” — the file can’t be read")
     }
 
     @Test func anUnreadableFileIsWordedNotRaw() async {
@@ -302,6 +266,23 @@ struct PlaybackViewModelSkipTests {
 
     // MARK: Previous (UC-TB-09)
 
+    /// Review S8: Previous over a history entry that can't play drops it and goes on to the next
+    /// earlier one; the track left still comes next.
+    @Test func previousGoesOnPastAnUnavailableEntry() async {
+        let r = rig()
+        let a = local(1, r), b = local(2, r), c = local(3, r)
+        await r.vm.playTrack(a, queue: [a, b, c])
+        await r.vm.next()
+        await r.vm.next()
+        #expect(r.vm.currentTrack?.id == 3)
+        r.folder.remove("2.m4a")
+        r.main.currentPosition = 1
+        await r.vm.back()
+        #expect(r.vm.currentTrack?.id == 1)
+        #expect(r.vm.upcoming.first?.id == 3)
+        #expect(r.vm.notice?.text == "Skipped “T2” — file missing")
+    }
+
     @Test func previousRestartsAfterThreeSecondsElseGoesBack() async {
         let r = rig()
         let a = local(1, r), b = local(2, r)
@@ -328,6 +309,7 @@ struct PlaybackViewModelSkipTests {
         r.vm.trackDidEnd()
         await waitUntil { r.main.loaded.count == 2 }
         #expect(r.vm.currentTrack?.id == 1)
+        #expect(r.vm.history.map(\.id) == [1], "a repeat adds no history entry (S9)")
 
         r.vm.setRepeatMode(.all)
         await r.vm.next()
@@ -371,5 +353,126 @@ struct PlaybackViewModelSkipTests {
             await r.vm.playShuffled(tracks)
             #expect([2, 4].contains(r.vm.currentTrack?.id ?? 0))
         }
+    }
+
+    // MARK: Review S1 — a stale advance never wins over what the user did
+
+    @Test func playingARowWhileAnAdvanceWaitsWins() async {
+        let r = rig()
+        let a = local(1, r), b = local(2, r), x = local(9, r), y = local(10, r)
+        await r.vm.playTrack(a, queue: [a, b])
+        r.env.freshGate.close()
+        r.main.state = .stopped
+        r.vm.trackDidEnd()                       // the advance waits inside its first await
+        await waitUntil { r.env.freshGate.waiting == 1 }
+        await r.vm.playTrack(x, queue: [x, y])   // the user double-clicks another row
+        r.env.freshGate.open()
+        await waitUntil { r.env.freshGate.waiting == 0 }
+        try? await Task.sleep(for: .milliseconds(30))
+        #expect(r.vm.currentTrack?.id == 9, "the stale advance gave up")
+        #expect(r.vm.upcoming.map(\.id) == [10], "the new context stays")
+    }
+
+    @Test func stopWhileAnAdvanceWaitsStaysStopped() async {
+        let r = rig()
+        let a = local(1, r), b = local(2, r)
+        await r.vm.playTrack(a, queue: [a, b])
+        r.env.freshGate.close()
+        let next = Task { await r.vm.next() }
+        await waitUntil { r.env.freshGate.waiting == 1 }
+        r.vm.stop()                              // ⌘.
+        r.env.freshGate.open()
+        await next.value
+        #expect(r.vm.currentTrack == nil, "no track starts after Stop")
+        #expect(r.main.loaded.count == 1)
+    }
+
+    @Test func aPreviewStartedWhileAnAdvanceWaitsIsNeverOverplayed() async {
+        let r = rig()
+        let a = local(1, r), b = local(2, r), p = local(5, r)
+        await r.vm.playTrack(a, queue: [a, b])
+        r.env.freshGate.close()
+        let next = Task { await r.vm.next() }
+        await waitUntil { r.env.freshGate.waiting == 1 }
+        r.vm.preview.toggle(owner: "t", candidate: .previewable(p))
+        r.env.freshGate.open()
+        await next.value
+        await waitUntil { r.vm.preview.isActive && !r.vm.preview.isLoading }
+        #expect(r.vm.currentTrack?.id == 1, "the advance gave up")
+        #expect(r.main.state != .playing, "never two audible sources")
+    }
+
+    @Test func anEndedTrackAdvanceDropsItselfWhenTheTrackChanged() async {
+        let r = rig()
+        let a = local(1, r), b = local(2, r), c = local(3, r)
+        await r.vm.playTrack(a, queue: [a, b, c])
+        r.env.freshGate.close()
+        r.main.state = .stopped
+        r.vm.trackDidEnd()
+        await waitUntil { r.env.freshGate.waiting == 1 }
+        let before = r.vm.generation
+        let next = Task { await r.vm.next() }    // Next in the last moment of the track
+        await waitUntil { r.vm.generation > before }
+        r.env.freshGate.open()
+        await next.value
+        await waitUntil { r.env.freshGate.waiting == 0 }
+        #expect(r.vm.currentTrack?.id == 2, "one advance, not two")
+        #expect(r.vm.upcoming.map(\.id) == [3])
+    }
+
+    // MARK: Review S2 — a failing disk doesn't flag the whole context
+
+    @Test func twoMissingFilesInARowStopAndHandTheJudgementToTheFileCheck() async {
+        let r = rig()
+        let a = local(1, r), g1 = local(2, r, exists: false), g2 = local(3, r, exists: false), g3 = local(4, r, exists: false)
+        await r.vm.playTrack(a, queue: [a, g1, g2, g3])
+        r.main.state = .stopped
+        r.vm.trackDidEnd()
+        await waitUntil { !r.env.checkedFiles.isEmpty }
+        #expect(r.env.checkedFiles == [[2, 3]])
+        try? await Task.sleep(for: .milliseconds(30))
+        #expect(r.env.recordedMissing.isEmpty, "nothing flagged by playback")
+        #expect(r.vm.notice?.text == "Playback stopped — files on “Lexxar” can’t be read")
+        #expect(r.vm.upcoming.map(\.id) == [2, 3, 4], "the unjudged tracks stay queued")
+        #expect(r.vm.currentTrack == nil)
+    }
+
+    // MARK: Review nits
+
+    @Test func aQueuedTrackWithoutAnIDDoesntEndTheRun() async {
+        let r = rig()
+        let a = local(1, r)
+        var noID = local(2, r)
+        noID.id = nil
+        r.main.unreadable = [noID.organizedPath ?? ""]
+        let c = local(3, r)
+        await r.vm.playTrack(a, queue: [a, noID, c])
+        await r.vm.next()
+        #expect(r.vm.currentTrack?.id == 3)
+    }
+
+    @Test func historyAndContextCapComeFromTheInjectedDefaults() async {
+        let r = rig()
+        r.env.defaults.set(2, forKey: "playback_history_size")
+        r.env.defaults.set(1, forKey: "playback_context_cap")
+        let tracks = (Int64(1)...4).map { local($0, r) }
+        await r.vm.playTrack(tracks[0], queue: tracks)
+        #expect(r.vm.upcoming.map(\.id) == [2])
+        await r.vm.playTrack(tracks[2])
+        await r.vm.playTrack(tracks[3])
+        #expect(r.vm.history.map(\.id) == [3, 4])
+    }
+
+    @Test func aStuckCantPlayClearsWhenTheTrackBecomesPlayable() async {
+        let r = rig()
+        let b = notDownloaded(2)
+        await r.vm.playTrack(b)
+        #expect(r.vm.cantPlay?.reason == .notDownloaded)
+        var downloaded = b
+        downloaded.organizedPath = r.folder.file("2.m4a")
+        r.env.fresh[2] = downloaded
+        r.vm.reevaluateCantPlay(diskReturned: false)   // `.trackAvailabilityDidChange`
+        await waitUntil { r.vm.cantPlay == nil }
+        #expect(r.vm.cantPlay == nil)
     }
 }

@@ -34,7 +34,8 @@ final class SnapshotsTests: XCTestCase {
         // (non-view) and Player/{LocateFile,PreviewWaveformScrubber}.swift (deferred with PlayerBar).
         // W2-G added TrackList/SelectionBar.swift (deferred: glass) and
         // TrackList/{SelectionBarState,SelectionBarHosting}.swift (non-view).
-        XCTAssertEqual(paths.count, 106, "Re-audit inventory changes explicitly.")
+        // W2-C review added Player/PlaybackWindowSupport.swift (deferred).
+        XCTAssertEqual(paths.count, 107, "Re-audit inventory changes explicitly.")
         XCTAssertEqual(Set(SnapshotFixtures.inventory.map(\.path)), paths)
         XCTAssertEqual(SnapshotFixtures.inventory.count, paths.count)
         XCTAssertFalse(SnapshotFixtures.inventory.contains { $0.disposition.isEmpty })
@@ -43,6 +44,7 @@ final class SnapshotsTests: XCTestCase {
         XCTAssertEqual(SnapshotFixtures.fixtures.count, 28)
         XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 24)
         XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 33)
+        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 50)
         XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 49)
         for fixture in SnapshotFixtures.fixtures where fixture.expectedTableRows != nil {
             if case .swiftUI = fixture.backend {

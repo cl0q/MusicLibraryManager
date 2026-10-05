@@ -232,6 +232,8 @@ struct ContentView: View {
                 ActivityPanel()
             }
         }
+        // Window-wide Esc for a preview, playback's status-bar notes, Locate File… (W2-C).
+        .playbackWindowSupport()
         .fileImporter(isPresented: $actions.isChoosingImportFolder, allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result {
                 shell.actions.importFolder(url)
@@ -392,9 +394,12 @@ struct ContentView: View {
             DriveBanner.announceDisconnected(name)
         }
         guard let playbackVM = container.playbackViewModel else { return }
+        // One decision (W2-C): a running preview ends first without resuming the main track;
+        // a main track that was playing under it counts as playing.
+        let mainPlayedUnderPreview = playbackVM.endPreviewForDiskLoss()
         if let message = shell.drivePlayback.driveDidDisconnect(
             volumeName: drive.volumeName,
-            isPlaying: playbackVM.isPlaying,
+            isPlaying: mainPlayedUnderPreview || playbackVM.isMainPlaying,
             position: playbackVM.formattedPosition,
             pause: { playbackVM.pause() }
         ) {
