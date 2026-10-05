@@ -99,6 +99,10 @@ struct MenuBarStructureTests {
             let text = try String(contentsOf: file, encoding: .utf8)
             #expect(!text.contains("addLocalMonitorForEvents"), "\(file.lastPathComponent): no NSEvent key monitors (UC-KIT-36)")
             guard !file.path.contains("/MLM/App/") else { continue }
+            // The track context menu shows the keys next to its items (UC-CM-06, W2-A): those
+            // key equivalents live only while that menu is open; each one mirrors the menu-bar
+            // command's key (or the focused list's ↩ / ⌫), checked in `TrackListStructureTests`.
+            guard !file.path.hasSuffix("/MLM/Views/TrackList/TrackMenu.swift") else { continue }
             for line in text.components(separatedBy: "\n") where line.contains(".keyboardShortcut(") {
                 #expect(allowed.contains { line.contains($0) },
                         "\(file.lastPathComponent): \(line.trimmingCharacters(in: .whitespaces)) — menu keys belong in .commands")

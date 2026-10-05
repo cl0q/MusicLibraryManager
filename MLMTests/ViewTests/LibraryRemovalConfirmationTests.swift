@@ -65,9 +65,11 @@ struct LibraryRemovalConfirmationTests {
         #expect(actions.contains("Button(request.confirmation.confirmTitle, role: .destructive)"))
         #expect(actions.contains("Button(\"Cancel\", role: .cancel)"))
         #expect(actions.contains(".keyboardShortcut(.defaultAction)"))
-        let menu = try source("MLM/Views/Library/TrackContextMenu.swift")
-        #expect(menu.contains("TrackLibraryRemoval.request(selectedTracks, container: container)"))
-        #expect(!menu.contains("NSAlert"), "the context menu has no confirmation of its own")
+        // W2-A: the track menu (`TrackMenu` → `TrackListActions`) asks through the same path.
+        let menuActions = try source("MLM/Views/TrackList/TrackListActions.swift")
+        #expect(menuActions.contains("TrackCommandActions.removeFromLibrary(rows.map(\\.track), container: container)"))
+        #expect(try source("MLM/Views/TrackList/TrackMenu.swift").contains("actions.removeFromLibrary(rows)"))
+        #expect(!menuActions.contains("NSAlert"), "the context menu has no confirmation of its own")
         let content = try source("MLM/Views/ContentView/ContentView.swift")
         #expect(content.contains(".modifier(LibraryRemovalAlert())"))
     }

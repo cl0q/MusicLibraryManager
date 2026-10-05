@@ -123,6 +123,27 @@ struct TrackSelection: Equatable {
                   track: { $0 }, context: context, target: target)
     }
 
+    /// From precomputed parts — the track table (`TrackListTable`) publishes this way: the
+    /// summary comes from the selected rows only and `rowsToken` / `hasPlayableRows` were
+    /// computed once per load, so a selection change or an arrow step costs O(selection).
+    init(
+        selectedIDs: Set<Int64>,
+        summary: TrackSelectionSummary,
+        context: TrackListContext,
+        hasPlayableRows: Bool,
+        rowsToken: Int,
+        target: TrackCommandTarget,
+        rows: @escaping () -> [Track]
+    ) {
+        self.selectedIDs = selectedIDs
+        self.summary = summary
+        self.context = context
+        self.hasPlayableRows = hasPlayableRows
+        self.rowsToken = rowsToken
+        self.target = target
+        self.loadRows = rows
+    }
+
     static func == (lhs: TrackSelection, rhs: TrackSelection) -> Bool {
         lhs.selectedIDs == rhs.selectedIDs && lhs.summary == rhs.summary && lhs.context == rhs.context
             && lhs.hasPlayableRows == rhs.hasPlayableRows && lhs.rowsToken == rhs.rowsToken
@@ -168,9 +189,15 @@ extension FocusedValues {
 /// (UC-TABLE-20: availability of a track without a file comes from its stored state).
 struct TrackSelectionSummary: Equatable, Sendable {
     var count = 0
+    /// Tracks whose file can be used now: Local, and not on a disk that is away. Play, Play
+    /// Next, Show in Finder and Copy ▸ File Path need one (UC-CM-05).
     var localCount = 0
     var notDownloadedCount = 0
     var failedCount = 0
+    /// `File missing` (persisted; never because of the drive).
+    var missingCount = 0
+    /// Local / file-missing tracks on the library's disk while it is not connected.
+    var unreachableCount = 0
     var firstIsLocal = false
     /// The first selected track in display order (Get Info).
     var firstID: Int64?
@@ -186,22 +213,41 @@ struct TrackSelectionSummary: Equatable, Sendable {
         self.container = container
     }
 
+    /// From tracks alone (persisted availability; no drive context).
     init(tracks: [Track], container: TrackListContainer) {
         self.count = tracks.count
-        self.firstIsLocal = tracks.first?.isLocal ?? false
         self.firstID = tracks.first?.id
         self.container = container
-        for track in tracks {
-            if track.isLocal {
-                localCount += 1
-                continue
-            }
-            // No organized path: `availability()` reads only stored state here.
-            switch track.availability() {
-            case .failed: failedCount += 1
-            case .downloading: break
-            default: notDownloadedCount += 1
-            }
+        for (index, track) in tracks.enumerated() {
+            add(track.availability(), unreachable: false, isFirst: index == 0)
+        }
+    }
+
+    /// From a track table's selected rows in display order, with the window's drive state.
+    init(rows: [TrackRow], container: TrackListContainer, live: TrackTableLiveState) {
+        self.count = rows.count
+        self.firstID = rows.first?.id
+        self.container = container
+        for (index, row) in rows.enumerated() {
+            let unreachable = TrackRowPresentation.isUnreachable(
+                availability: row.availability, fileLocation: row.fileLocation, live: live)
+            add(row.availability, unreachable: unreachable, isFirst: index == 0)
+        }
+    }
+
+    private mutating func add(_ availability: TrackAvailability, unreachable: Bool, isFirst: Bool) {
+        if unreachable {
+            unreachableCount += 1
+            return
+        }
+        switch availability {
+        case .local:
+            localCount += 1
+            if isFirst { firstIsLocal = true }
+        case .fileMissing: missingCount += 1
+        case .failed: failedCount += 1
+        case .downloading: break
+        case .notDownloaded: notDownloadedCount += 1
         }
     }
 

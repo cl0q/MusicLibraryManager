@@ -78,13 +78,103 @@ struct TrackDownloadFailure: Codable, Equatable, Hashable, Sendable {
     }
 }
 
-/// A track's user-visible availability, derived from persisted track fields.
+/// A track's user-visible availability, derived **only** from persisted track fields
+/// (UC-TABLE-20, DEC-014, migration `v42_track_availability`). Nothing here touches the disk:
+/// whether a local file is present is the persisted `file_missing_since` fact, refreshed by
+/// `TrackAvailabilityReconciler` while the library folder is reachable.
+///
+/// "The library's disk is not connected" is **not** a track state — it is window-level
+/// (`LibraryDriveState`); rows of local tracks are dimmed with an empty Status then
+/// (`TrackRowPresentation`), never `File missing` (N17).
 enum TrackAvailability: Codable, Equatable, Hashable, Sendable {
     case local
     case downloading
     case notDownloaded
     case failed(reason: String, date: Date, attempts: Int)
     case fileMissing
+
+    /// Download states that mean "a download for this track is running or queued now".
+    static let activeDownloadStatuses: Set<String> = ["downloading", "queued", "in_progress", "in-progress"]
+    /// Legacy status words that mean "the last download failed" (no structured record).
+    static let legacyFailedStatuses: Set<String> = ["failed", "error"]
+
+    /// The one derivation of a track's availability from its persisted columns. Pure; the SQL
+    /// aggregates in `TrackRepository.availabilityCounts` mirror it case for case.
+    ///
+    /// - Parameters:
+    ///   - organizedPath: `organized_path` — `NULL`/empty = no file (not downloaded).
+    ///   - fileMissingSince: `file_missing_since` — set only by a reconciliation that saw the
+    ///     library folder reachable and the file absent (or by a use-time miss).
+    ///   - downloadStatus: `download_status` (`downloading` while a batch runs).
+    ///   - downloadFailure: `download_failure` JSON (`TrackDownloadFailure`).
+    static func derive(
+        organizedPath: String?,
+        fileMissingSince: String?,
+        downloadStatus: String?,
+        downloadFailure: String?
+    ) -> TrackAvailability {
+        if let organizedPath, !organizedPath.isEmpty {
+            if let fileMissingSince, !fileMissingSince.isEmpty { return .fileMissing }
+            return .local
+        }
+        let status = downloadStatus?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        // A retry keeps the prior failure record until it succeeds or fails again, but the
+        // running download is the truthful state.
+        if activeDownloadStatuses.contains(status) { return .downloading }
+        if let downloadFailure, !downloadFailure.isEmpty {
+            if let failure = try? TrackDownloadFailure.decodeJSON(downloadFailure) {
+                return .failed(reason: failure.reason, date: failure.date, attempts: failure.attempts)
+            }
+            // Unreadable legacy record: still a failure the user can retry.
+            return .failed(reason: "Download failed", date: .distantPast, attempts: 1)
+        }
+        if legacyFailedStatuses.contains(status) {
+            return .failed(reason: "Download failed", date: .distantPast, attempts: 1)
+        }
+        // nil / "remote" before a download; a path is the source of truth for locality.
+        return .notDownloaded
+    }
+
+    /// Persisted availability per track id — no disk access (replaces the per-load disk
+    /// probing mapper `TrackPresentationAvailability`, removed in W2-A).
+    static func byTrackID(_ tracks: [Track]) -> [Int64: TrackAvailability] {
+        var result: [Int64: TrackAvailability] = [:]
+        result.reserveCapacity(tracks.count)
+        for track in tracks {
+            guard let id = track.id else { continue }
+            result[id] = track.availability()
+        }
+        return result
+    }
+
+    /// The track has a stored file path (Local or File missing).
+    var hasFile: Bool {
+        switch self {
+        case .local, .fileMissing: true
+        case .downloading, .notDownloaded, .failed: false
+        }
+    }
+
+    /// A download (or retry) would fetch it.
+    var isDownloadable: Bool {
+        switch self {
+        case .notDownloaded, .failed: true
+        case .local, .downloading, .fileMissing: false
+        }
+    }
+
+    /// Sort rank of the Status column (UC-TABLE-04), ascending in the order of the All Tracks
+    /// scope bar (UC-SCOPE-02): Local · (Downloading…) · Not downloaded · Download failed ·
+    /// File missing. *(IMP-017, proposed)*
+    var statusSortRank: Int {
+        switch self {
+        case .local: 0
+        case .downloading: 1
+        case .notDownloaded: 2
+        case .failed: 3
+        case .fileMissing: 4
+        }
+    }
 
     private enum CodingKeys: String, CodingKey {
         case state

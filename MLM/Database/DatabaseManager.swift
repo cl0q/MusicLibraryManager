@@ -1117,6 +1117,29 @@ final class DatabaseManager: Sendable {
             try db.execute(sql: "DROP TABLE remote_track_duplicates")
         }
 
+        // ──────────────────────────────────────────────────────────────
+        // Migration v42_track_availability (W2-A, UC-TABLE-20, DEC-014):
+        // persisted file presence, so no row ever probes the disk.
+        // `file_missing_since` = ISO 8601 time a reconciliation (or a
+        // use-time miss) found the file absent *while the library folder
+        // was reachable*. NULL = present / never found missing.
+        // Backfill: none — every existing row starts as present; nothing is
+        // ever flagged missing because the drive is away.
+        // The partial index serves the File missing scope and its count.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v42_track_availability") { db in
+            if try !db.columns(in: "tracks").contains(where: { $0.name == "file_missing_since" }) {
+                try db.alter(table: "tracks") { table in
+                    table.add(column: "file_missing_since", .text)
+                }
+            }
+            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS idx_tracks_file_missing_since
+                ON tracks(file_missing_since)
+                WHERE file_missing_since IS NOT NULL
+            """)
+        }
+
         return migrator
     }
 

@@ -568,17 +568,12 @@ struct PlaylistDetailView: View {
     // MARK: - Track List
 
     private func trackList(_ viewModel: PlaylistDetailViewModel) -> some View {
+        // The shared track table (W2-A): ⌫ / Remove from Playlist is one undo step there.
         PlaylistTable(
             playlist: playlist,
             viewModel: viewModel,
-            availablePlaylists: availablePlaylists,
-            availableSyncProfiles: availableSyncProfiles,
-            onTrackDoubleClick: onTrackDoubleClick,
-            onRemoveTracks: { ids in
-                requestTrackRemoval(ids, using: viewModel)
-            }
+            onTrackDoubleClick: onTrackDoubleClick
         )
-        .background(Color.mlmBase)
     }
 
     @ViewBuilder

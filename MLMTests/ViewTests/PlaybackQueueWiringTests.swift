@@ -33,18 +33,20 @@ struct PlaybackQueueWiringTests {
 
     @Test
     func trackContextMenu_playSelectedTrack_passesQueue() throws {
-        let src = try readSource("MLM/Views/Library/TrackContextMenu.swift")
-        #expect(src.contains("playTrack(track, queue: selectedTracks)"),
-                "TrackContextMenu.playSelectedTrack must pass selectedTracks as the queue")
+        // W2-A: menu Play with several rows plays the playable selected tracks as the queue.
+        let src = try readSource("MLM/Views/TrackList/TrackListActions.swift")
+        #expect(src.contains("configuration.activate?(first.track, playable.map(\\.track))"),
+                "Play on a multi-selection must pass the selected playable tracks as the queue")
     }
 
-    // MARK: - PlaylistTable
+    // MARK: - Shared track table (playlist, All Tracks, search)
 
     @Test
     func playlistTable_passesDisplayedTracksAsQueue() throws {
-        let src = try readSource("MLM/Views/Playlists/PlaylistTable.swift")
-        // PlaylistTable forwards displayedTracks via onTrackDoubleClick
-        #expect(src.contains("onTrackDoubleClick?(track, viewModel.displayedTracks)"),
-                "PlaylistTable must pass viewModel.displayedTracks as the queue to onTrackDoubleClick")
+        // W2-A: every track table's primary action plays with its rows in display order.
+        let src = try readSource("MLM/Views/TrackList/TrackListActions.swift")
+        #expect(src.contains("configuration.activate?(row.track, model.tracks)"),
+                "The primary action must pass the displayed rows as the queue")
+        #expect(try readSource("MLM/Views/Playlists/PlaylistTable.swift").contains("activate: onTrackDoubleClick"))
     }
 }

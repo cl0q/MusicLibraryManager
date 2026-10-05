@@ -70,7 +70,7 @@ struct FinderActionCopyTests {
     @Test func formerViolationsUseShowInFinder() throws {
         for path in [
             "MLM/Views/Settings/LibrarySetupView.swift",
-            "MLM/Views/Library/TrackContextMenu.swift",
+            "MLM/Views/TrackList/TrackMenu.swift",
             "MLM/Views/Sync/SyncFailedDisclosure.swift",
             "MLM/Views/Sync/SyncProfileDetailView.swift",
         ] {

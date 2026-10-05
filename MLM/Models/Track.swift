@@ -38,6 +38,11 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
     var playlistPosition: String? = nil
     /// Stable UUID identity for iOS sidecar sync (lazy UUIDv4 uppercase string).
     var mlmUuid: String? = nil
+    /// `file_missing_since` (v42): ISO 8601 time a reconciliation found the file absent while
+    /// the library folder was reachable; `nil` = present or never checked. Read-only here:
+    /// it is deliberately **not** written by `encode(to:)`, so saving a track never clobbers
+    /// the reconciler's fact — `TrackRepository` writes it.
+    var fileMissingSince: String? = nil
 
     static let databaseTableName = "tracks"
 
@@ -72,6 +77,7 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
         static let albumId = Column(CodingKeys.albumId)
         static let searchText = Column(CodingKeys.searchText)
         static let mlmUuid = Column(CodingKeys.mlmUuid)
+        static let fileMissingSince = Column(CodingKeys.fileMissingSince)
     }
 
     // MARK: - Snake case mapping
@@ -105,6 +111,7 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
         case searchText = "search_text"
         case playlistPosition = "playlist_position"
         case mlmUuid = "mlm_uuid"
+        case fileMissingSince = "file_missing_since"
     }
 
     // MARK: - Computed Properties
@@ -133,60 +140,16 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
         downloadFailure = try failure?.encodedJSON()
     }
 
-    /// Derives availability from the current persisted path, download state, and failure data.
-    /// Supply `libraryRoot` for the library-relative paths stored in `organized_path`.
-    func availability(
-        libraryRoot: URL? = nil,
-        fileExists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
-    ) -> TrackAvailability {
-        if let organizedPath, !organizedPath.isEmpty {
-            let organizedURL: URL?
-            if (organizedPath as NSString).isAbsolutePath {
-                organizedURL = URL(fileURLWithPath: organizedPath)
-            } else {
-                organizedURL = libraryRoot?.appendingPathComponent(organizedPath)
-            }
-
-            if let organizedURL, fileExists(organizedURL) {
-                return .local
-            }
-
-            // Fallback: stale organized_path rows from the old Tauri app may point
-            // at a location that no longer exists, while the original import path
-            // is still valid (mirrors PlaybackViewModel.loadAndPlay fallback).
-            if !originalPath.isEmpty {
-                let expanded = (originalPath as NSString).expandingTildeInPath
-                let originalURL = URL(fileURLWithPath: expanded)
-                if fileExists(originalURL) {
-                    return .local
-                }
-            }
-
-            return .fileMissing
-        }
-
-        switch downloadStatus?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "downloading", "queued", "in_progress", "in-progress":
-            // A retry keeps the prior failure record until it succeeds or
-            // fails again, but the active operation is the truthful state.
-            return .downloading
-        default:
-            break
-        }
-
-        if let failure = downloadFailureRecord {
-            return .failed(reason: failure.reason, date: failure.date, attempts: failure.attempts)
-        }
-
-        switch downloadStatus?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "failed", "error":
-            // Legacy status values did not include structured failure data.
-            return .failed(reason: "Download failed", date: .distantPast, attempts: 1)
-        default:
-            // Current rows use nil or "remote" before download, and a timestamp
-            // or "completed" after it. A path is the source of truth for locality.
-            return .notDownloaded
-        }
+    /// The track's availability from its persisted columns only — never the disk
+    /// (UC-TABLE-20). `libraryRoot` is accepted for source compatibility and ignored: whether
+    /// the file is present is the persisted `file_missing_since` fact.
+    func availability(libraryRoot _: URL? = nil) -> TrackAvailability {
+        TrackAvailability.derive(
+            organizedPath: organizedPath,
+            fileMissingSince: fileMissingSince,
+            downloadStatus: downloadStatus,
+            downloadFailure: downloadFailure
+        )
     }
 
     /// Formatted duration string (e.g., "3:24")

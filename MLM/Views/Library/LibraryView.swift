@@ -2,17 +2,17 @@ import SwiftUI
 
 // MARK: Accessibility labels for shotty UI automation (snake_case literals)
 
-/// All Tracks — header with the Local/Remote picker, Shuffle and Scan Library Folder, and
-/// the sortable `LibraryTable` for the rows. Hosted in the shell's content scaffold.
+/// All Tracks — header with the Local/Remote picker (until W2-B's scope bar), Shuffle and Scan
+/// Library Folder, and the shared track table (`TrackListTable`). Hosted in the shell's
+/// content scaffold, which shows the drive banner; rows refresh in place.
 struct LibraryView: View {
     @Environment(\.container) private var container
+    @Environment(ShellActions.self) private var shell: ShellActions?
 
-    /// Callback when a track is double-clicked.
+    /// Play a track with the visible rows as queue context (the window's activation).
     var onTrackDoubleClick: ((Track, [Track]) -> Void)?
 
     @State private var viewModel: LibraryViewModel?
-    @State private var availablePlaylists: [Playlist] = []
-    @State private var availableSyncProfiles: [SyncProfile] = []
     private let usesPreloadedModel: Bool
 
     init(
@@ -29,26 +29,23 @@ struct LibraryView: View {
             if let viewModel {
                 libraryContent(viewModel)
             } else {
-                ProgressView("Initializing…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // A frame at most: the model exists from launch. Never a full-pane spinner.
+                Color.clear
             }
         }
         .task {
             guard !usesPreloadedModel else { return }
-            initializeViewModel()
+            if viewModel == nil { viewModel = container.libraryViewModel }
             viewModel?.searchQuery = container.searchCoordinator.query
-            // Run track loading and sidebar data fetches concurrently —
-            // the table doesn't depend on playlists/profiles, so loading
-            // them sequentially added ~100-200ms of fixed latency.
-            async let loadTracks: () = viewModel?.loadTracks() ?? ()
-            async let loadPlaylists: () = reloadPlaylists()
-            async let loadProfiles: () = reloadSyncProfiles()
-            _ = await (loadTracks, loadPlaylists, loadProfiles)
+            await viewModel?.loadTracks()
         }
         .onReceive(NotificationCenter.default.publisher(for: .libraryDidImport)) { _ in
             Task { await viewModel?.refresh() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .libraryRootDidChange)) { _ in
+            Task { await viewModel?.refresh() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .trackAvailabilityDidChange)) { _ in
             Task { await viewModel?.refresh() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .libraryDidDeleteTracks)) { note in
@@ -59,28 +56,23 @@ struct LibraryView: View {
         .onReceive(NotificationCenter.default.publisher(for: .downloadDidComplete)) { _ in
             Task { await viewModel?.refresh() }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { _ in
-            Task { await reloadPlaylists() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .syncProfileDidChange)) { _ in
-            Task { await reloadSyncProfiles() }
+        .background {
+            AvailabilityCheckStatus()
         }
     }
 
     // MARK: - Content
 
     private func libraryContent(_ viewModel: LibraryViewModel) -> some View {
-        // The drive-not-connected banner is the shell's (ContentScaffold, UC-LAYOUT-02);
-        // the view's own "Library drive is disconnected" strip is gone.
         VStack(spacing: 0) {
             libraryHeader(viewModel)
             Divider()
-            LibraryTable(
-                viewModel: viewModel,
-                onDoubleClick: onTrackDoubleClick,
-                availablePlaylists: availablePlaylists,
-                availableSyncProfiles: availableSyncProfiles
-            )
+            TrackListTable(
+                model: viewModel.list,
+                configuration: .allTracks(activate: onTrackDoubleClick, totals: viewModel.totals)
+            ) {
+                emptyState(viewModel)
+            }
         }
         .onChange(of: container.searchCoordinator.query) { _, q in
             guard q != viewModel.searchQuery else { return }
@@ -88,14 +80,31 @@ struct LibraryView: View {
         }
     }
 
+    @ViewBuilder
+    private func emptyState(_ viewModel: LibraryViewModel) -> some View {
+        if !viewModel.searchQuery.isEmpty {
+            ContentUnavailableView.search(text: viewModel.searchQuery)
+        } else if viewModel.selectedTab == .local {
+            ContentUnavailableView {
+                Label("No tracks yet", systemImage: "music.note")
+            } description: {
+                Text("Import music from a folder, or import a playlist from SoundCloud, YouTube or Spotify.")
+            } actions: {
+                Button("Import Files or Folder…") { shell?.chooseImportFolder() }
+                Button("Import Playlist from Source…") { shell?.showSources() }
+            }
+        } else {
+            ContentUnavailableView("Every track is downloaded", systemImage: "checkmark.circle")
+        }
+    }
+
     /// Content header: the Local/Remote segment control, then the view's own actions —
-    /// `Shuffle` and `Scan Library Folder` ⌘R moved here from the window toolbar, which is
-    /// constant in every place (UC-TB-02, DEC-048). The place's name is the window title.
+    /// `Shuffle` and `Scan Library Folder` ⌘R (UC-TB-02, DEC-048). Counts come from SQL.
     private func libraryHeader(_ viewModel: LibraryViewModel) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: Spacing.m) {
             Picker("Source", selection: Bindable(viewModel).selectedTab) {
                 ForEach(LibraryTab.allCases) { tab in
-                    Text("\(tab.label) (\(countFor(tab, viewModel: viewModel)))")
+                    Text("\(tab.label) (\(countFor(tab, viewModel: viewModel).formatted(.number)))")
                         .tag(tab)
                 }
             }
@@ -110,20 +119,20 @@ struct LibraryView: View {
             Button {
                 Task {
                     if let pvm = container.playbackViewModel {
-                        await pvm.playShuffled(viewModel.displayedTracks)
+                        await pvm.playShuffled(viewModel.displayedTracks.filter { $0.availability() == .local })
                     }
                 }
             } label: {
                 Label("Shuffle", systemImage: "shuffle")
             }
-            .help("Shuffle play library")
-            .disabled(viewModel.displayedTracks.isEmpty)
+            .help("Shuffle All Tracks")
+            .disabled(!viewModel.list.hasPlayableRows || LibraryDriveState.current(container).isOffline)
             .accessibilityIdentifier("library_shuffle_button")
 
             ScanLibraryFolderButton()
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, Spacing.l)
+        .padding(.vertical, Spacing.s)
     }
 
     private func countFor(_ tab: LibraryTab, viewModel: LibraryViewModel) -> Int {
@@ -132,30 +141,30 @@ struct LibraryView: View {
         case .remote: viewModel.remoteCount
         }
     }
+}
 
-    // MARK: - Actions
+/// The file check's status-bar phase (UC-STATUS-06): `Checking files…` with the small
+/// spinner after 300 ms while `LibraryAvailabilityMonitor` runs. Lives in All Tracks, which
+/// stays alive, so the phase shows in every place's status bar.
+private struct AvailabilityCheckStatus: View {
+    @Environment(\.container) private var container
+    @Environment(StatusBarCenter.self) private var statusBar: StatusBarCenter?
+    @State private var token: StatusBarCenter.LoadingToken?
 
-    private func reloadPlaylists() async {
-        guard let repo = container.playlistRepository else { return }
-        availablePlaylists = (try? await repo.fetchAll()) ?? []
-    }
-
-    private func reloadSyncProfiles() async {
-        if let syncVM = container.syncViewModel {
-            if syncVM.profiles.isEmpty {
-                await syncVM.loadProfiles()
+    var body: some View {
+        let checking = container.availabilityMonitor?.isChecking ?? false
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .onChange(of: checking, initial: true) { _, running in
+                if running, token == nil {
+                    token = statusBar?.beginLoading(LibraryAvailabilityMonitor.loadingPhase)
+                } else if !running, let current = token {
+                    statusBar?.endLoading(current)
+                    token = nil
+                }
             }
-            availableSyncProfiles = syncVM.profiles
-        }
     }
-
-    // MARK: - Initialization
-
-    private func initializeViewModel() {
-        guard viewModel == nil else { return }
-        viewModel = container.libraryViewModel
-    }
-
 }
 
 /// `Scan Library Folder` — the shell's scan (`ShellActions.scanLibraryFolder()`), also in the
