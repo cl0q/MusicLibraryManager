@@ -107,6 +107,9 @@ struct PlaybackViewModelQueueTests {
             originalPath: path
         )
         t.id = id
+        // A Local track (W2-C: the queue decides from persisted availability — a track without
+        // an organized path is Not downloaded and is skipped).
+        t.organizedPath = path
         return t
     }
 
@@ -150,8 +153,8 @@ struct PlaybackViewModelQueueTests {
         // Simulate end of track b: fake goes to stopped while VM thinks playing
         fake.state = .stopped
         vm.trackDidEnd()
-        // trackDidEnd fires a Task — give it a tick to resolve
-        try? await Task.sleep(for: .milliseconds(50))
+        // trackDidEnd fires a Task — wait for it (condition-based, not a fixed sleep).
+        await waitUntil { vm.currentTrack == c }
         #expect(vm.currentTrack == c)
     }
 
@@ -164,7 +167,7 @@ struct PlaybackViewModelQueueTests {
         // b is last — simulate end
         fake.state = .stopped
         vm.trackDidEnd()
-        try? await Task.sleep(for: .milliseconds(50))
+        await waitUntil { vm.currentTrack == nil }
         #expect(vm.currentTrack == nil)
         #expect(vm.playbackState == .stopped)
     }
@@ -195,7 +198,7 @@ struct PlaybackViewModelQueueTests {
     // MARK: - back()
 
     @Test
-    func back_below7Seconds_goesToPreviousTrack() async {
+    func back_below3Seconds_goesToPreviousTrack() async {
         let (vm, fake, fx) = makeVM()
         let a = makeTrack(id: 1, path: fx.createFile("1.mp3"), title: "A")
         let b = makeTrack(id: 2, path: fx.createFile("2.mp3"), title: "B")
@@ -207,7 +210,7 @@ struct PlaybackViewModelQueueTests {
     }
 
     @Test
-    func back_above7Seconds_restartsCurrentTrack() async {
+    func back_above3Seconds_restartsCurrentTrack() async {
         let (vm, fake, fx) = makeVM()
         let a = makeTrack(id: 1, path: fx.createFile("1.mp3"), title: "A")
         let b = makeTrack(id: 2, path: fx.createFile("2.mp3"), title: "B")

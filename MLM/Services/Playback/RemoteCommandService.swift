@@ -26,6 +26,7 @@ final class RemoteCommandService {
 
     private var trackObserver: NSObjectProtocol?
     private var stateObserver: NSObjectProtocol?
+    private var previewObserver: NSObjectProtocol?
     private var positionTimer: Timer?
 
     /// Track id of the most recent artwork fetch, used to discard stale
@@ -56,8 +57,10 @@ final class RemoteCommandService {
         unregisterCommands()
         if let trackObserver { NotificationCenter.default.removeObserver(trackObserver) }
         if let stateObserver { NotificationCenter.default.removeObserver(stateObserver) }
+        if let previewObserver { NotificationCenter.default.removeObserver(previewObserver) }
         trackObserver = nil
         stateObserver = nil
+        previewObserver = nil
         positionTimer?.invalidate()
         positionTimer = nil
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
@@ -150,15 +153,28 @@ final class RemoteCommandService {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.refreshNowPlayingInfo()
+            MainActor.assumeIsolated { self?.refreshNowPlayingInfo() }
         }
         stateObserver = NotificationCenter.default.addObserver(
             forName: .playbackStateDidChange,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.refreshNowPlayingInfo()
-            self?.updatePositionTimer()
+            MainActor.assumeIsolated {
+                self?.refreshNowPlayingInfo()
+                self?.updatePositionTimer()
+            }
+        }
+        // A preview shows the previewed track and returns to the main track after (W2-C).
+        previewObserver = NotificationCenter.default.addObserver(
+            forName: .playbackPreviewDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.refreshNowPlayingInfo()
+                self?.updatePositionTimer()
+            }
         }
         updatePositionTimer()
     }
@@ -170,35 +186,38 @@ final class RemoteCommandService {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
             return
         }
-        guard let track = viewModel.currentTrack else {
+        // The previewed track while a preview runs, else the main track (W2-C).
+        guard let now = viewModel.nowPlaying else {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
             positionTimer?.invalidate()
             positionTimer = nil
             artworkTrackId = nil
             return
         }
-
-        var info: [String: Any] = [
-            MPMediaItemPropertyTitle: track.title,
-            MPMediaItemPropertyArtist: track.artist,
-            MPMediaItemPropertyAlbumTitle: track.album,
-            MPMediaItemPropertyPlaybackDuration: viewModel.duration,
-            MPNowPlayingInfoPropertyElapsedPlaybackTime: viewModel.currentPosition,
-            MPNowPlayingInfoPropertyPlaybackRate: viewModel.isPlaying ? 1.0 : 0.0
-        ]
-
-        if !track.albumArtist.isEmpty {
-            info[MPMediaItemPropertyAlbumArtist] = track.albumArtist
-        }
-
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = Self.info(for: now)
 
         // Kick off async artwork fetch for the new track.
-        if let trackId = track.id {
+        if let trackId = now.trackID {
             loadArtwork(forTrackId: trackId)
         } else {
             artworkTrackId = nil
         }
+    }
+
+    /// The Now Playing dictionary for a snapshot (pure, tested).
+    nonisolated static func info(for now: NowPlayingSnapshot) -> [String: Any] {
+        var info: [String: Any] = [
+            MPMediaItemPropertyTitle: now.title,
+            MPMediaItemPropertyArtist: now.artist,
+            MPMediaItemPropertyAlbumTitle: now.album,
+            MPMediaItemPropertyPlaybackDuration: now.duration,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: now.position,
+            MPNowPlayingInfoPropertyPlaybackRate: now.isPlaying ? 1.0 : 0.0
+        ]
+        if !now.albumArtist.isEmpty {
+            info[MPMediaItemPropertyAlbumArtist] = now.albumArtist
+        }
+        return info
     }
 
     // MARK: - Artwork
@@ -319,10 +338,12 @@ final class RemoteCommandService {
         // Update every second; the VM already owns the authoritative
         // position, we just re-publish it.
         positionTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let self, let viewModel = self.viewModel else { return }
-            var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
-            info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = viewModel.currentPosition
-            MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+            MainActor.assumeIsolated {
+                guard let self, let now = self.viewModel?.nowPlaying else { return }
+                var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+                info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = now.position
+                MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+            }
         }
     }
 }
