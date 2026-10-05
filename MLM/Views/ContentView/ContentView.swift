@@ -371,17 +371,14 @@ struct ContentView: View {
             }
             return
         }
-        let inspected = InspectedTrackSelection.shared
-        if !inspected.trackIDs.contains(trackId) {
-            inspected.update([trackId], from: Self.detailRequestSelectionKey)
+        let selection = InspectedTrackSelection.shared.trackIDs
+        if !selection.contains(trackId) {
+            InfoTrackRequest.shared.show([trackId], over: selection)
         }
         if !shell.trailing.isShowing(.info) {
             shell.trailing.toggle(.info)
         }
     }
-
-    /// `InspectedTrackSelection` source of a one-track Info request outside a track list.
-    static let detailRequestSelectionKey = "trackDetailRequest"
 
     // MARK: - Library drive
 

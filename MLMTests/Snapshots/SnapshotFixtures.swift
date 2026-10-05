@@ -368,6 +368,7 @@ enum SnapshotFixtures {
         "Shell/DestinationView.swift": "Deferred: routes to container-backed destination views; needs application-level fixture composition.",
         "Shell/TrailingColumnView.swift": "Deferred: hosts InspectorView and PlaybackQueueView, which need live playback state.",
         "Inspector/InspectorModel.swift": "Non-view: Info's selection-keyed edit model (W2-E).",
+        "Inspector/InfoTrackRequest.swift": "Non-view: one-track Show Details request (W2-E).",
         "Inspector/InspectorFileStatus.swift": "Non-view: availability sentence and fix per state (W2-E).",
         "Inspector/InspectorAnalysis.swift": "Non-view: single-track analysis runs (W2-E).",
         "Inspector/InspectorView.swift": "Deferred: Info reads the database, undo center and shell environment; re-recorded with wave 2.",
@@ -400,6 +401,7 @@ Discover/DiscoverView.swift
 DiscoveryInbox/DiscoveryInboxView.swift
 Folders/FoldersView.swift
 Folders/FolderTreeView.swift
+Inspector/InfoTrackRequest.swift
 Inspector/InspectorAnalysis.swift
 Inspector/InspectorAudioTab.swift
 Inspector/InspectorDetailsTab.swift

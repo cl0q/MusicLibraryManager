@@ -239,4 +239,17 @@ struct InspectorModelTests {
         #expect(env.model.drafts.isEmpty)
         await env.model.waitUntilIdle()
     }
+
+    // MARK: Show Details of an unselected track
+
+    @Test func aDetailsRequestLastsUntilTheSelectionChanges() {
+        let request = InfoTrackRequest()
+        #expect(request.effectiveSelection([1, 2]) == [1, 2])
+        request.show([9], over: [1, 2])
+        #expect(request.effectiveSelection([1, 2]) == [9])
+        #expect(request.effectiveSelection([3]) == [3], "a new selection wins at once")
+        request.selectionDidChange([3])
+        #expect(request.trackIDs == nil)
+        #expect(request.effectiveSelection([1, 2]) == [1, 2])
+    }
 }

@@ -128,6 +128,7 @@ struct NowPlayingSyncTests {
         let src = try readSource(Self.contentViewPath)
         #expect(!src.contains("selectedTrackForDetail"))
         let column = try readSource("MLM/Views/Shell/TrailingColumnView.swift")
-        #expect(column.contains("InspectorView(selection: inspected.trackIDs)"))
+        #expect(column.contains("InspectorView(selection: request.effectiveSelection(inspected.trackIDs))"))
+        #expect(!src.contains("InspectedTrackSelection.shared.update"), "the table selection is never written here")
     }
 }
