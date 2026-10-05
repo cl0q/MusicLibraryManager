@@ -21,6 +21,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var remotePlaylistsWindowSource: RemotePlaylistSource?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Activity's app-level history and the opt-in notifier (W3-ACT).
+        ActivityCenter.shared.startForApp()
+
         // Set app icon at runtime — ensures Dock shows the correct icon
         // even when macOS icon caches are stale after a rebuild.
         if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),

@@ -306,6 +306,7 @@ enum SnapshotFixtures {
     ]
 
     private static let exclusions: [String: String] = [
+        "Activity/ActivityJobTracking.swift": "Non-view: Maintenance job adapter (a modifier without UI of its own).",
         "Activity/ActivityRouter.swift": "Non-view: popover/window routing and subject navigation.",
         "Activity/LogFeed.swift": "Non-view: log query model.",
         "Activity/LogTextRenderer.swift": "Non-view: attributed-text helper.",
@@ -394,6 +395,7 @@ enum SnapshotFixtures {
     ]
 
     private static let inventoryPaths = """
+Activity/ActivityJobTracking.swift
 Activity/ActivityLogsView.swift
 Activity/ActivityRouter.swift
 Activity/ActivityToolbarItem.swift

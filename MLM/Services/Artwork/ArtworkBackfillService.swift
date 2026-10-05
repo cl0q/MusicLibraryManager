@@ -249,6 +249,14 @@ final class ArtworkBackfillService {
         progress = (0, total)
         
         let tracker = MaintenanceProgressTracker(total: total, turboMode: turboMode, progressHandler: progressHandler)
+        // Activity (W3-ACT): the automatic run is `Artwork for ‹n› tracks` (Automatic; no Cancel —
+        // nothing can stop it). The manual run registers in Settings ▸ Maintenance.
+        let job: ActivityOperationHandle? = progressHandler == nil
+            ? ActivityCenter.shared.begin(.artwork, title: "Artwork for \(ActivityNoun.track.counted(total))",
+                                          subject: .allTracks, progress: ActivityProgress(total: total),
+                                          itemNoun: .track, automatic: true)
+            : nil
+        defer { job?.finish(ActivityResult(counts: [ActivityCount(.done, tracker.currentState.current, "checked")])) }
         
         AppLogger.shared.info("ArtworkBackfill: starting \(total) tracks (turbo: \(turboMode))", source: "ArtworkBackfill")
 
@@ -293,6 +301,7 @@ final class ArtworkBackfillService {
                         break
                     }
                     progress.current = tracker.currentState.current
+                    job?.update(completed: progress.current, total: total)
                     if let track = pending.next() {
                         guard let trackId = track.id else { continue }
                         inFlight.insert(trackId)

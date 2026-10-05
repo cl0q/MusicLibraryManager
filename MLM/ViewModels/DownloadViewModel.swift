@@ -184,19 +184,20 @@ final class DownloadViewModel {
     ///
     /// - Parameter preferredSource: pin the download to a specific source
     ///   (e.g. `.soundcloud` for SoundCloud playlists). Defaults to `.auto`.
+    @discardableResult
     func downloadTracks(
         _ tracks: [Track],
         preferredSource: DownloadOrchestrator.PreferredSource = .auto,
         artworkURL: String? = nil,
         context: DownloadActivityContext? = nil
-    ) async {
+    ) async -> DownloadOrchestrator.BatchResult? {
         guard let runner = activeBatchRunner else {
             AppLogger.shared.log("Download orchestrator not configured", level: .error, source: "Download")
-            return
+            return nil
         }
 
         let remoteTracks = tracks.filter { $0.isRemote }
-        guard !remoteTracks.isEmpty else { return }
+        guard !remoteTracks.isEmpty else { return nil }
 
         // Activity (W3-ACT): one operation per batch. A second batch waits for its turn instead
         // of being rejected (fixes PP-ACTIVITY-05); Cancel says the truth — it stops after the
@@ -212,11 +213,11 @@ final class DownloadViewModel {
             controls: batchControls(control),
             lane: .downloads
         )
-        guard await job.waitForTurn() else { return }
+        guard await job.waitForTurn() else { return nil }
         // Work that needs the drive waits while it is away and says so (UC-JOB-10).
         guard await waitForLibraryFolder(job: job, control: control) else {
             job.cancelled(ActivityResult(counts: [ActivityCount(.done, 0, "downloaded")]))
-            return
+            return nil
         }
         let batchID = UUID()
         activeBatchID = batchID
@@ -351,8 +352,12 @@ final class DownloadViewModel {
             job.update(completed: finalResult.succeeded, total: remoteTracks.count)
             if await waitForLibraryFolder(job: job, control: control) {
                 job.finish(Self.activityResult(finalResult, tracks: remoteTracks, wasCancelled: false))
-                await downloadTracks(waiting, preferredSource: preferredSource, artworkURL: artworkURL, context: context)
-                return
+                var merged = finalResult
+                if let rest = await downloadTracks(waiting, preferredSource: preferredSource, artworkURL: artworkURL, context: context) {
+                    merged.succeeded += rest.succeeded
+                    merged.failed += rest.failed
+                }
+                return merged
             }
         }
         let activityResult = Self.activityResult(finalResult, tracks: remoteTracks,
@@ -363,6 +368,7 @@ final class DownloadViewModel {
             job.finish(activityResult)
         }
         activity.scheduleFailingRefresh()
+        return finalResult
     }
 
     // MARK: - Activity (W3-ACT)
@@ -800,8 +806,8 @@ final class DownloadViewModel {
         // Each track keeps its own source link (pinned SoundCloud / YouTube downloads).
         let groups = Dictionary(grouping: tracks, by: preferredSource(for:))
         for (source, group) in groups.sorted(by: { $0.value.count > $1.value.count }) {
-            await downloadTracks(group, preferredSource: source,
-                                 context: DownloadActivityContext(title: "Retry \(ActivityNoun.track.counted(group.count))"))
+            _ = await downloadTracks(group, preferredSource: source,
+                                     context: DownloadActivityContext(title: "Retry \(ActivityNoun.track.counted(group.count))"))
         }
     }
 

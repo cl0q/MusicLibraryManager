@@ -39,9 +39,7 @@ final class InspectorAnalysis {
     func analyze(_ track: Track, fileURL: URL, container: DependencyContainer = .shared) {
         guard let id = track.id, phases[id] == nil else { return }
         problems[id] = nil
-        // W3-ACT: register this as an Activity operation (`Analyze “‹title›”`, cancellable
-        // between phases, result persisted) and echo its phase here; until then the phase
-        // below is the only progress.
+        InspectorAnalysisActivity.follow(track, id: id, in: self)  // W3-ACT: `Analyse “‹title›”`
         phases[id] = "Analyzing… loudness"
         Task {
             defer { phases[id] = nil }

@@ -171,9 +171,12 @@ final class LibraryAvailabilityMonitor {
         guard runningTask == nil, let scope = pendingScope else { return }
         pendingScope = nil
         isChecking = true
-        // W3-ACT: register an Activity operation for the file check here (DEC-044) — start it
-        // with the scope, report `checked of total` from the progress callback, finish it with
-        // the report's counts. Until then the status-bar loading phase is the only feedback.
+        // Activity (W3-ACT, DEC-044): an automatic `Check files` operation, visible only when it
+        // takes longer than a moment; Cancel stops it (no file is flagged by a partial run).
+        let job = ActivityCenter.shared.begin(
+            .fileCheck, title: "Check files", subject: .allTracks, itemNoun: .file,
+            controls: ActivityControls(cancel: { Task { @MainActor [weak self] in self?.cancelRunningCheck() } }),
+            automatic: true, graceful: true)
         let reconciler = self.reconciler
         let libraryRoot = self.libraryRoot
         runningTask = Task { [weak self] in
@@ -181,9 +184,33 @@ final class LibraryAvailabilityMonitor {
             let root = await libraryRoot() ?? ""
             if !root.isEmpty {
                 // The reconciler is an actor: the disk work runs off the main actor.
-                report = await reconciler.reconcile(libraryRoot: root, scope: scope)
+                report = await reconciler.reconcile(libraryRoot: root, scope: scope) { done, total in
+                    job.update(completed: done, total: total)
+                }
             }
+            Self.end(job, with: report)
             self?.finish(report, root: root)
+        }
+    }
+
+    /// The file check's result in Activity: `12,935 checked · 3 missing · 2 back`. A check that
+    /// couldn't run because the folder is away leaves no trace (it isn't a failure, UC-JOB-10).
+    nonisolated static func end(_ job: ActivityOperationHandle, with report: TrackAvailabilityReconciler.Report) {
+        let result = ActivityResult(counts: [
+            ActivityCount(.done, report.checked, "checked"),
+            ActivityCount(.done, report.flaggedMissing, "missing"),
+            ActivityCount(.done, report.cleared, "back"),
+            ActivityCount(.skipped, report.skipped, "on a disk that isn’t connected"),
+        ])
+        switch report.outcome {
+        case .completed: job.finish(result)
+        case .skippedRootUnreachable: job.discard()
+        case .cancelled: job.cancelled(result)
+        case .abortedRootLost:
+            job.cancelled(ActivityResult(summary: "The library folder went away — nothing was flagged"))
+        case .abortedSuspicious:
+            job.fail(cause: "Too many files looked missing at once — nothing was flagged. Check the library folder in Settings ▸ Library.",
+                     fix: .openSettings(SettingsTab.library.rawValue))
         }
     }
 

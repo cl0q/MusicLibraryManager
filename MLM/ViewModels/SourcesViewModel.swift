@@ -297,6 +297,15 @@ final class SourcesViewModel {
 
         errors.removeValue(forKey: service)
         syncingServices.insert(service)
+        // Activity (W3-ACT): `Refresh from ‹Source›` — one operation per source, no Cancel (none
+        // exists for it).
+        let sourceName: String = switch service {
+        case .soundcloud: "SoundCloud"
+        case .spotify: "Spotify"
+        case .appleMusic: "Apple Music"
+        }
+        let job = ActivityCenter.shared.begin(.sourceRefresh, title: "Refresh from \(sourceName)",
+                                              subject: .settings(.sources), messageName: "Refresh")
 
         do {
             var newTracks = 0
@@ -320,6 +329,7 @@ final class SourcesViewModel {
 
             // Reload counts
             await loadSources()
+            job.finish(ActivityResult(counts: [ActivityCount(.done, newTracks, newTracks == 1 ? "new track" : "new tracks")]))
 
             if newTracks > 0 {
                 // Notify library to refresh the Remote tab
@@ -334,8 +344,10 @@ final class SourcesViewModel {
             // so the Connect button reappears.
             connectionStatus[service] = false
             errors[service] = SoundCloudClient.SoundCloudError.tokenExpired.errorDescription
+            job.fail(cause: "Sign-in expired (\(sourceName))", fix: .reconnect(source: sourceName))
         } catch {
             errors[service] = error.localizedDescription
+            job.fail(cause: error.localizedDescription, fix: .runAgain)
         }
 
         syncingServices.remove(service)

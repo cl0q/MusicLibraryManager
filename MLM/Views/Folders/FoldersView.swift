@@ -506,10 +506,11 @@ struct FoldersView: View {
     }
 
     private func importUnindexedFiles(from path: String, viewModel: FolderViewModel) async {
-        guard let importService = container.importService else { return }
-        _ = try? await importService.importDirectory(URL(fileURLWithPath: path))
-        NotificationCenter.default.post(name: .libraryDidImport, object: nil)
-        NotificationCenter.default.post(name: .libraryFilesDidChange, object: nil)
+        guard let importService = container.importService, let config = container.configRepository else { return }
+        // W3-ACT: through the registered import — `Scan “‹folder›”` with progress, Cancel and its
+        // result in Activity (was silent, errors swallowed). It posts the import notifications.
+        let importer = ImportViewModel(importService: importService, configRepository: config, activity: .shared)
+        await importer.importFromDirectory(URL(fileURLWithPath: path))
         await viewModel.refresh()
     }
 

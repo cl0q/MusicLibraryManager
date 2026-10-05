@@ -185,6 +185,8 @@ final class ActivityCenter {
     ///   - quiet: no toolbar text and no status-bar messages (scheduled backup, file check);
     ///     it still appears in the popover, the window and the history.
     ///   - persists: write the result into the history (default `true`).
+    ///   - appLevel: keep it in the app-level history, not the open library's (a restore that
+    ///     replaces the library file, library adoption).
     nonisolated func begin(
         _ kind: ActivityKind,
         title: String,
@@ -197,7 +199,8 @@ final class ActivityCenter {
         automatic: Bool = false,
         graceful: Bool = false,
         quiet: Bool = false,
-        persists: Bool = true
+        persists: Bool = true,
+        appLevel: Bool = false
     ) -> ActivityOperationHandle {
         let id = UUID()
         let startedAt = scheduler.now()
@@ -206,7 +209,7 @@ final class ActivityCenter {
                 id: id, kind: kind, title: title, subject: subject, progress: progress,
                 itemNoun: itemNoun, messageName: messageName ?? kind.messageName, controls: controls,
                 lane: lane, automatic: automatic, graceful: graceful, quiet: quiet,
-                persists: persists, startedAt: startedAt
+                persists: persists, appLevel: appLevel, startedAt: startedAt
             )
         }
         return ActivityOperationHandle(id: id, center: self)
@@ -216,7 +219,7 @@ final class ActivityCenter {
         id: UUID, kind: ActivityKind, title: String, subject: ActivitySubject,
         progress: ActivityProgress, itemNoun: ActivityNoun, messageName: String,
         controls: ActivityControls, lane: ActivityLane?, automatic: Bool, graceful: Bool,
-        quiet isQuiet: Bool, persists: Bool, startedAt: Date
+        quiet isQuiet: Bool, persists: Bool, appLevel: Bool, startedAt: Date
     ) {
         var state = ActivityState.running
         var wait: ActivityWait?
@@ -232,7 +235,7 @@ final class ActivityCenter {
         let operation = ActivityOperation(
             id: id, kind: kind, title: title, subject: subject, state: state, wait: wait,
             progress: progress, result: nil, startedAt: startedAt, endedAt: nil,
-            isAutomatic: automatic, libraryID: currentLibraryID, needsAttention: false,
+            isAutomatic: automatic, libraryID: appLevel ? nil : currentLibraryID, needsAttention: false,
             dismissedAt: nil, itemNoun: itemNoun, messageName: messageName, controls: controls,
             isFromHistory: false
         )

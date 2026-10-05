@@ -274,9 +274,8 @@ final class TagWriteQueue {
         guard let root, isReachable(root) else { return TagFlushReport(outcome: .unreachable) }
         let rootURL = URL(fileURLWithPath: root, isDirectory: true)
 
-        // W3-ACT: register this flush as an Activity operation (`Write tags`, Automatic) with
-        // `written of total` progress, per-file outcomes and the persisted result; until then the
-        // status bar's loading phase is the only progress.
+        let activityJob = TagWriteActivity.begin()  // W3-ACT: `Write tags to files`, Automatic
+        defer { TagWriteActivity.end(activityJob, with: report) }
         let token = deps.statusBar()?.beginLoading(loadingPhase)
         defer { if let token { deps.statusBar()?.endLoading(token) } }
 

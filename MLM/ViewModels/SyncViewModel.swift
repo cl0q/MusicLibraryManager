@@ -666,7 +666,18 @@ final class SyncViewModel {
             }
         }
 
-        for (url, displayName) in m3u8URLs {
+        // Activity (W3-ACT): `Read playlist changes from “‹profile›”` — shown when slower than
+        // ~2 s; no Cancel (the scan has none).
+        let job = ActivityCenter.shared.begin(
+            .deviceScan, title: "Read playlist changes from “\(profile.name)”",
+            subject: .syncProfile(profileId, name: profile.name),
+            progress: ActivityProgress(total: m3u8URLs.count), itemNoun: .playlist, graceful: true)
+        defer {
+            job.finish(ActivityResult(counts: [ActivityCount(.done, results.count,
+                results.count == 1 ? "playlist changed on the device" : "playlists changed on the device")]))
+        }
+        for (index, (url, displayName)) in m3u8URLs.enumerated() {
+            job.update(completed: index, total: m3u8URLs.count, currentItem: displayName)
             guard !seenPaths.contains(url.path) else { continue }
             seenPaths.insert(url.path)
 
@@ -696,9 +707,14 @@ final class SyncViewModel {
     @MainActor
     func applyDeviceIngest(fileName: String, profile: SyncProfile, fileURL: URL) async -> Int64? {
         guard let ingestService, let profileId = profile.id else { return nil }
+        // Activity (W3-ACT): applying one device playlist (usually instant: graceful).
+        let job = ActivityCenter.shared.begin(
+            .deviceScan, title: "Apply “\(fileName)” from “\(profile.name)”",
+            subject: .syncProfile(profileId, name: profile.name), graceful: true)
 
         do {
             let result = try await ingestService.ingest(url: fileURL, profileId: profileId)
+            job.finish()
             // Remove by stable identity after the await: other applies may have
             // mutated the list while this ingest was in flight, so a captured
             // index would be stale (out of bounds or the wrong row).
@@ -708,6 +724,7 @@ final class SyncViewModel {
             return result.playlistId
         } catch {
             deviceScanError = "Failed to apply \(fileName): \(error.localizedDescription)"
+            job.fail(cause: error.localizedDescription)
             return nil
         }
     }

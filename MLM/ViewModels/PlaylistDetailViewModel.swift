@@ -245,6 +245,10 @@ final class PlaylistDetailViewModel {
 
         isSyncingSource = true
         errorMessage = nil
+        // Activity (W3-ACT): `Refresh “‹playlist›”` — no Cancel (none exists for it).
+        let job = ActivityCenter.shared.begin(
+            .playlistRefresh, title: "Refresh “\(playlist.name)”",
+            subject: .playlist(playlistId, name: playlist.name), messageName: "Refresh")
 
         do {
             // 1. Fetch fresh playlist from DB to update any stale in-memory fields (e.g. from reauth)
@@ -363,6 +367,7 @@ final class PlaylistDetailViewModel {
 
             // Reload the tracks in this playlist
             await loadTracks()
+            job.finish(ActivityResult(counts: [ActivityCount(.done, newTracks, newTracks == 1 ? "new track" : "new tracks")]))
 
             if newTracks > 0 {
                 // Post notification to refresh library
@@ -382,6 +387,7 @@ final class PlaylistDetailViewModel {
 
         } catch {
             errorMessage = "Sync failed: \(error.localizedDescription)"
+            job.fail(cause: error.localizedDescription, fix: .runAgain)
         }
 
         isSyncingSource = false

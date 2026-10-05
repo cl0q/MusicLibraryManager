@@ -102,11 +102,16 @@ final class ReviewQueueViewModel {
         scanProgress = nil
         scanResult = nil
         errorMessage = nil
+        // Activity (W3-ACT): `Scan for duplicates`; Cancel is real (earlier decisions stay).
+        let job = ActivityCenter.shared.begin(
+            .duplicateScan, title: "Scan for duplicates", subject: .review,
+            controls: ActivityControls(cancel: { [weak self] in Task { @MainActor in self?.cancelDeepScan() } }))
 
         scanTask = Task { [weak self] in
             guard let self else { return }
             do {
                 let result = try await self.deepScanService.deepScan(turboMode: false) { [weak self] state in
+                    job.update(completed: state.current, total: state.total)
                     Task { @MainActor in
                         self?.scanProgress = state
                     }
@@ -115,15 +120,22 @@ final class ReviewQueueViewModel {
                     self.scanWasCancelled = true
                     self.isScanning = false
                     self.scanTask = nil
+                    job.cancelled()
                     return
                 }
+                job.finish(ActivityResult(counts: [
+                    ActivityCount(.done, result.duplicatesFound, result.duplicatesFound == 1 ? "duplicate group" : "duplicate groups"),
+                    ActivityCount(.done, result.conflictsFlagged, result.conflictsFlagged == 1 ? "conflict" : "conflicts"),
+                ]))
                 self.scanResult = result
                 await self.loadReviews()
                 self.publishChanges()
             } catch is CancellationError {
                 self.scanWasCancelled = true
+                job.cancelled()
             } catch {
                 self.errorMessage = error.localizedDescription
+                job.fail(cause: error.localizedDescription, fix: .runAgain)
             }
             self.isScanning = false
             self.scanTask = nil
