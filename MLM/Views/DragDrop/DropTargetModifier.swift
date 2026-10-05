@@ -300,6 +300,8 @@ private struct InPlaceRefusal: ViewModifier {
                     .padding(Spacing.xs)
                     .accessibilityAddTraits(.isStaticText)
                     .task(id: message) {
+                        // Said for VoiceOver too: the sentence appears where nothing has focus.
+                        AccessibilityNotification.Announcement(message).post()
                         try? await Task.sleep(for: Self.duration)
                         if !Task.isCancelled { self.message = nil }
                     }
