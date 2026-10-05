@@ -64,7 +64,7 @@ Spec: `library.html`, `player.html`, `queue.html`, `inspector.html`, `search.htm
 | W2-E | **Inspector** (DEC-007): `Form`, tabs Details · Audio · File, follows selection, multi-edit with `Mixed`, commit keyed to the selection (PP-INSPECTOR-04), tag writing to files by default, queued while the drive is away | W2-A, W2-F | `v44_pending_tag_writes` | in review — merged, independent review running |
 | W2-G | **Selection bar** (DEC-015, the one custom glass surface) + batch actions | W2-A, W2-F | — | merged |
 | W2-H | **Drag & drop** (DEC-040): `Transferable` with internal IDs + file URLs; sidebar rows accept drops | W2-A, W2-G | — | planned |
-| W2-I | **Search** (DEC-017, DEC-018): filter in place, scopes `This view · Library · Online`, tokens, link detection → quick add entry; online results never auto-saved (PP-MAIN-04); delete `UniversalSearchView` | W2-B | — | planned |
+| W2-I | **Search** (DEC-017, DEC-018): filter in place, scopes `This view · Library · Online`, tokens, link detection → quick add entry; online results never auto-saved (PP-MAIN-04); delete `UniversalSearchView` | W2-B | — | in progress (Opus, `b3/w2-i-search`) |
 
 Parallelism: W2-F first (small). W2-A alone. Then W2-B ‖ W2-C ‖ W2-E (disjoint directories: Library / Player+Playback / TrackDetail). Then W2-D ‖ W2-G, then W2-H ‖ W2-I.
 Independent review: W2-A (migration), W2-C + W2-D (queue logic), W2-E (tag writing).
