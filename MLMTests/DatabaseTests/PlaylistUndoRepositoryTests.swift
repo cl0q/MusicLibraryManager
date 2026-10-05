@@ -74,18 +74,67 @@ struct PlaylistUndoRepositoryTests {
 
     // MARK: Coverage of the schema
 
+    /// Any column that can point at a playlist: a declared foreign key to `playlists`, or a
+    /// column whose name says it holds a playlist's id or uuid (most references here have no
+    /// declared key). Configuration columns such as `sync_profiles.playlist_format` are not ids.
     @Test func theSnapshotCoversEveryTableThatRefersToAPlaylist() async throws {
         let (db, _) = try makeRepo()
         let referencing = try await db.read { db -> Set<String> in
             let tables = try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
             var found: Set<String> = []
             for table in tables where table != "playlists" {
-                let columns = try db.columns(in: table).map(\.name)
-                if columns.contains("playlist_id") { found.insert(table) }
+                let keys = try Row.fetchAll(db, sql: "SELECT \"table\" AS target FROM pragma_foreign_key_list(?)", arguments: [table])
+                if keys.contains(where: { ($0["target"] as String?) == "playlists" }) { found.insert(table) }
+                for column in try db.columns(in: table).map({ $0.name.lowercased() }) where column.contains("playlist") {
+                    if column.hasSuffix("_id") || column.hasSuffix("_uuid") || column.hasSuffix("id") {
+                        found.insert(table)
+                    }
+                }
             }
             return found
         }
         #expect(referencing == Set(PlaylistRepository.dependentTables))
+    }
+
+    @Test func mergingPlaylistsLeavesNoRowsOfTheMergedAwayPlaylist() async throws {
+        let (db, repo) = try makeRepo()
+        let (victim, _) = try await seedFullPlaylist(db, repo: repo)
+        let survivor = try await repo.create(name: "Liked from SoundCloud").id!
+        try await repo.mergePlaylists(survivorId: survivor, victimId: victim)
+        #expect(try await repo.fetch(id: victim) == nil)
+        for table in PlaylistRepository.dependentTables {
+            #expect(try await count(db, table, playlist: victim) == 0, "\(table) left behind")
+        }
+    }
+
+    @Test func aRestoreOfASourcePlaylistImportedAgainComesBackUnlinked() async throws {
+        let (db, repo) = try makeRepo()
+        let (id, _) = try await seedFullPlaylist(db, repo: repo)
+        let snapshot = try await repo.deleteReturningSnapshot(id: id)
+        let sourceID = try #require(snapshot.playlist.sourceId)
+        // Imported again from the same source playlist while the deleted one waited in Undo.
+        let again = try await repo.findOrCreateSourcePlaylist(name: "Warm-up", sourceId: sourceID, externalId: "ext-1")
+        let result = try await repo.restore(snapshot)
+        #expect(result.unlinked == .init(otherPlaylistName: "Warm-up", sourceName: "soundcloud"))
+        #expect(result.playlist.sourceId == nil && result.playlist.externalId == nil)
+        #expect(result.playlist.name == "Warm-up 2")
+        let linked = try await db.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM playlists WHERE source_id = ? AND external_id = 'ext-1'", arguments: [sourceID])
+        }
+        #expect(linked == 1)
+        #expect(try await repo.fetch(id: again.id!)?.sourceId == sourceID)
+    }
+
+    @Test func aRestoreTreatsNamesCaseInsensitivelyAcrossCategories() async throws {
+        let (db, repo) = try makeRepo()
+        let (id, _) = try await seedFullPlaylist(db, repo: repo)
+        let snapshot = try await repo.deleteReturningSnapshot(id: id)
+        try await db.write { db in
+            try db.execute(sql: "INSERT INTO playlists (name, category) VALUES ('WARM-UP', 'synced')")
+        }
+        let result = try await repo.restore(snapshot)
+        #expect(result.wasRenamed)
+        #expect(result.playlist.name == "Warm-up 2")
     }
 
     // MARK: Delete → restore
@@ -177,6 +226,7 @@ struct PlaylistUndoRepositoryTests {
         }
         let result = try await repo.restore(snapshot)
         #expect(result.droppedTrackCount == 1)
+        #expect(result.droppedSyncProfileCount == 1)
         #expect(try await repo.fetchTracks(playlistId: id).compactMap(\.id) == [3, 1])
         #expect(try await count(db, "sync_profile_playlists", playlist: id) == 1)
         #expect(try await count(db, "playlist_sync_snapshots", playlist: id) == 0)

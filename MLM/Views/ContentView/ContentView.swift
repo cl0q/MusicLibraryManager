@@ -18,7 +18,8 @@ final class ShellState {
 
     init(container: DependencyContainer) {
         search = ToolbarSearchModel(coordinator: container.searchCoordinator)
-        undo = UndoCenter(statusBar: statusBar)
+        // One center per open library, outliving this window (DEC-049: restorable until quit).
+        undo = UndoCenter.main
         actions = ShellActions(
             container: container,
             navigation: navigation,
@@ -77,7 +78,7 @@ struct ContentView: View {
                 // Edit ▸ Find (⌘F, main window only) and Go ▸ Playlists (W1-2).
                 .focusedSceneValue(\.toolbarSearch, container.isInitialized ? shell.search : nil)
                 .focusedSceneValue(\.sidebarModel, container.isInitialized ? shell.sidebar : nil)
-                .modifier(UndoCenterInstallation(center: shell.undo, isLibraryOpen: container.isInitialized,
+                .modifier(UndoCenterInstallation(shell: shell, isLibraryOpen: container.isInitialized,
                                                  libraryID: container.activeLibrary?.libraryId))
         )
     }
@@ -458,19 +459,23 @@ struct ContentView: View {
 
 // MARK: - Undo
 
-/// The window's `UndoCenter` in the environment and as a focused value, attached to the
-/// window's `UndoManager`; its steps end with the window or when another library opens
-/// (UC-UNDO-01, W2-F).
+/// The library's `UndoCenter` in the environment and as a focused value, attached to this
+/// window's `UndoManager` and status bar; undo closures reach this window's models through
+/// `ShellWindowModels.main`. Steps outlive the window and end when another library opens
+/// (UC-UNDO-01, DEC-049, W2-F).
 private struct UndoCenterInstallation: ViewModifier {
-    let center: UndoCenter
+    let shell: ShellState
     let isLibraryOpen: Bool
     let libraryID: String?
 
     func body(content: Content) -> some View {
         content
-            .environment(center)
-            .focusedSceneValue(\.undoCenter, isLibraryOpen ? center : nil)
-            .undoCenter(center, scope: libraryID)
+            .environment(shell.undo)
+            .focusedSceneValue(\.undoCenter, isLibraryOpen ? shell.undo : nil)
+            .undoCenter(shell.undo, statusBar: shell.statusBar, scope: libraryID)
+            .onAppear {
+                ShellWindowModels.main.use(navigation: shell.navigation, sidebar: shell.sidebar, statusBar: shell.statusBar)
+            }
     }
 }
 

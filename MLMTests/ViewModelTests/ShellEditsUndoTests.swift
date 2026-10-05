@@ -19,6 +19,7 @@ struct ShellEditsUndoTests {
         let undo: UndoCenter
         let navigation: NavigationModel
         let sidebar: SidebarModel
+        let window: ShellWindowModels
         let edits: ShellEdits
     }
 
@@ -36,6 +37,7 @@ struct ShellEditsUndoTests {
         let navigation = NavigationModel()
         let defaults = UserDefaults(suiteName: "ShellEditsUndoTests-\(UUID().uuidString)")!
         let sidebar = SidebarModel(defaults: defaults)
+        let window = ShellWindowModels(navigation: navigation, sidebar: sidebar, statusBar: status)
         let edits = ShellEdits(
             dependencies: ShellEdits.Dependencies(
                 playlists: { playlists },
@@ -43,12 +45,10 @@ struct ShellEditsUndoTests {
                 syncProfileDidChange: { _ in }
             ),
             undo: undo,
-            statusBar: status,
-            navigation: navigation,
-            sidebar: sidebar
+            window: window
         )
         return Env(db: db, playlists: playlists, sync: sync, manager: manager, status: status,
-                   undo: undo, navigation: navigation, sidebar: sidebar, edits: edits)
+                   undo: undo, navigation: navigation, sidebar: sidebar, window: window, edits: edits)
     }
 
     private func seedTracks(_ env: Env, _ ids: [Int64]) async throws {
@@ -277,6 +277,17 @@ struct ShellEditsUndoTests {
         #expect(PlaylistDeletionConfirmation.confirmTitle == "Delete Playlist")
     }
 
+    @Test func aRestoreNoteNamesUnlinkingAndLostSyncProfiles() {
+        var result = PlaylistRestoreResult(playlist: Playlist.createNative(name: "Warm-up 2"), droppedTrackCount: 0, wasRenamed: true)
+        result.unlinked = .init(otherPlaylistName: "Warm-up", sourceName: "soundcloud")
+        #expect(PlaylistEffects.restoreNote(original: "Warm-up", result: result)
+            == "Restored “Warm-up 2” — “Warm-up” was imported again, so this copy is no longer linked to SoundCloud, “Warm-up” was taken")
+        let profiles = PlaylistRestoreResult(playlist: Playlist.createNative(name: "Sets"), droppedTrackCount: 0,
+                                             wasRenamed: false, droppedSyncProfileCount: 1)
+        #expect(PlaylistEffects.restoreNote(original: "Sets", result: profiles)
+            == "Restored “Sets” — 1 of its sync profiles no longer exists")
+    }
+
     @Test func aRestoreThatCouldNotBeExactSaysWhy() {
         let playlist = Playlist.createNative(name: "Warm-up 2")
         let renamed = PlaylistRestoreResult(playlist: playlist, droppedTrackCount: 0, wasRenamed: true)
@@ -292,5 +303,102 @@ struct ShellEditsUndoTests {
         await env.edits.deletePlaylist(999, name: "Ghost")
         #expect(env.status.message?.text == "Couldn’t delete “Ghost” — the playlist no longer exists")
         #expect(!env.manager.canUndo)
+    }
+
+    // MARK: Review round
+
+    @Test func aChainOfStepsUndoesAndRedoesToTheExactRowsAtEveryStage() async throws {
+        let env = try makeEnv()
+        try await seedTracks(env, [1, 2, 3])
+        struct Stage: Equatable {
+            let playlists: [[DatabaseValue]]
+            let entries: [[DatabaseValue]]
+        }
+        func stage() async throws -> Stage {
+            try await env.db.read { db in
+                Stage(
+                    playlists: try Row.fetchAll(db, sql: "SELECT * FROM playlists ORDER BY id").map { Array($0.databaseValues) },
+                    entries: try Row.fetchAll(db, sql: "SELECT * FROM playlist_tracks ORDER BY id").map { Array($0.databaseValues) }
+                )
+            }
+        }
+        let empty = try await stage()
+        let id = try #require(await env.edits.newPlaylist()?.id)
+        let created = try await stage()
+        await env.edits.addTracks([3, 1, 2], toPlaylist: id)
+        let filled = try await stage()
+        await env.edits.deletePlaylist(id, name: "Untitled Playlist")
+        let deleted = try await stage()
+        #expect(deleted == empty)
+
+        await undo(env)
+        #expect(try await stage() == filled)
+        await undo(env)
+        #expect(try await stage() == created)
+        await undo(env)
+        #expect(try await stage() == empty)
+        #expect(!env.manager.canUndo)
+
+        await redo(env)
+        #expect(try await stage() == created)
+        await redo(env)
+        #expect(try await stage() == filled)
+        #expect(try await env.playlists.fetchTracks(playlistId: id).compactMap(\.id) == [3, 1, 2])
+        await redo(env)
+        #expect(try await stage() == deleted)
+        #expect(!env.manager.canRedo)
+    }
+
+    @Test func undoAfterTheWindowWasReopenedUpdatesTheNewWindow() async throws {
+        let env = try makeEnv()
+        let id = try await env.playlists.create(name: "Warm-up").id!
+        await env.edits.deletePlaylist(id, name: "Warm-up")
+        // The main window closes and opens again: new models, same center and steps.
+        env.undo.attach(nil)
+        let navigation = NavigationModel()
+        let sidebar = SidebarModel(defaults: UserDefaults(suiteName: "ShellEditsUndoTests-\(UUID().uuidString)")!)
+        let status = StatusBarCenter(sleep: { _ in try await Task.sleep(for: .seconds(3600)) }, announce: { _ in })
+        env.window.use(navigation: navigation, sidebar: sidebar, statusBar: status)
+        let reopened = UndoManager()
+        reopened.groupsByEvent = false
+        env.undo.attach(reopened, statusBar: status)
+        #expect(reopened.undoMenuItemTitle == "Undo Delete “Warm-up”")
+        reopened.undo()
+        await env.undo.waitUntilIdle()
+        #expect(sidebar.playlists.map(\.id) == [id])
+        #expect(try await env.playlists.fetch(id: id)?.name == "Warm-up")
+    }
+
+    @Test func undoingAnAddWhoseRowsAreGoneLeavesNoEmptyRedo() async throws {
+        let env = try makeEnv()
+        try await seedTracks(env, [1])
+        let id = try await env.playlists.create(name: "Warm-up").id!
+        await env.sidebar.reloadPlaylists(env.playlists)
+        await env.edits.addTracks([1], toPlaylist: id)
+        try await env.playlists.removeTrack(playlistId: id, trackId: 1) // removed by another route
+        await undo(env)
+        #expect(env.status.message?.text == "Nothing to undo — the tracks are no longer in “Warm-up”")
+        #expect(!env.manager.canRedo)
+    }
+
+    @Test func renamingIsCaseInsensitiveAcrossThePlaylistsButAllowsAOwnCaseChange() async throws {
+        let env = try makeEnv()
+        let id = try await env.playlists.create(name: "warm-up").id!
+        try await env.db.write { db in
+            try db.execute(sql: "INSERT INTO playlists (name, category) VALUES ('Sets', 'synced')")
+        }
+        try await env.edits.renamePlaylist(id, from: "warm-up", to: "Warm-up")
+        #expect(try await env.playlists.fetch(id: id)?.name == "Warm-up")
+        await #expect(throws: NameTaken.self) {
+            try await env.edits.renamePlaylist(id, from: "Warm-up", to: "SETS")
+        }
+    }
+
+    @Test func aRequestedInlineRenameGoesWithItsPlaylist() async throws {
+        let env = try makeEnv()
+        let id = try #require(await env.edits.newPlaylist()?.id)
+        #expect(env.sidebar.renameRequest == id)
+        await undo(env)
+        #expect(env.sidebar.renameRequest == nil)
     }
 }

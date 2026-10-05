@@ -113,6 +113,8 @@ struct SidebarView: View {
             model.useLibrary(id: container.activeLibrary?.libraryId)
             await model.reloadSources(container.sourceRepository)
             await reloadPlaylists()
+            // A playlist created while the sidebar wasn't on screen still gets its name edited.
+            beginRequestedRename()
             await reloadBadges()
             model.refreshReachability(syncProfiles)
         }

@@ -26,12 +26,18 @@ struct StatusAction: Identifiable {
 
 /// One transient message: what happened, plus at most two buttons.
 struct StatusMessage: Identifiable {
-    let id = UUID()
+    let id: UUID
     /// Sentence fragment without a final period (UC-COPY-04), e.g.
     /// `Removed 9 tracks from “Warm-up” — the files stay in the library`.
     let text: String
     /// Zero to two buttons, in display order.
     let actions: [StatusAction]
+
+    init(id: UUID = UUID(), text: String, actions: [StatusAction]) {
+        self.id = id
+        self.text = text
+        self.actions = actions
+    }
 }
 
 /// The window's status bar centre: transient "it happened" messages and the delayed
@@ -131,6 +137,14 @@ final class StatusBarCenter {
         message = nil
         expiryTask?.cancel()
         expiryTask = nil
+    }
+
+    /// Replace the buttons of the message with `id` while it is on screen, keeping its text and
+    /// its remaining time (e.g. `UndoCenter` removes `Undo` once that step is no longer the one
+    /// ⌘Z would undo). Not announced again.
+    func replaceActions(of id: StatusMessage.ID, with actions: [StatusAction]) {
+        guard let current = message, current.id == id else { return }
+        message = StatusMessage(id: id, text: current.text, actions: Array(actions.prefix(Self.maximumActions)))
     }
 
     /// Run a button of the current message and clear the message.
