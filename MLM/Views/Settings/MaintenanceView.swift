@@ -759,6 +759,8 @@ struct MaintenanceView: View {
             showPathMigrationReport = false
             resultMessage = "Path migration: \(result.updatedCount) organized paths updated. Manifest: \(result.manifestURL.path) · Backup: \(result.backupURL.path)"
             NotificationCenter.default.post(name: .libraryDidImport, object: nil)
+            // Files were re-pointed: check them (W2-A).
+            NotificationCenter.default.post(name: .libraryFilesDidChange, object: nil)
         } catch {
             resultMessage = "Path migration cancelled: \(error.localizedDescription)"
         }
@@ -776,6 +778,8 @@ struct MaintenanceView: View {
             let warning = result.manifestFinalizationWarning.map { " Warning: \($0)" } ?? ""
             resultMessage = "Rollback: \(result.restoredCount) organized paths restored. Manifest: \(result.manifestURL.path) · Backup: \(result.rollbackBackupURL.path)\(warning)"
             NotificationCenter.default.post(name: .libraryDidImport, object: nil)
+            // Files were re-pointed: check them (W2-A).
+            NotificationCenter.default.post(name: .libraryFilesDidChange, object: nil)
         } catch {
             resultMessage = "Rollback cancelled: \(error.localizedDescription)"
         }

@@ -39,9 +39,6 @@ final class DependencyContainer {
     /// "token inaccessible" notice in the Sources view.
     private(set) var tokenAccessStatus: TokenAccessStatus?
     private(set) var mountObserver: MountObserver?
-    /// Observers replaced by a library-folder change, kept alive so a DiskArbitration callback
-    /// already in flight never reaches a freed object.
-    @ObservationIgnored private var retiredMountObservers: [MountObserver] = []
     /// Keeps persisted track availability fresh (W2-A, UC-TABLE-20).
     private(set) var availabilityMonitor: LibraryAvailabilityMonitor?
     /// Cover-image orchestrator (Phase 36 Plan 02). Observes `.playlistDidChange`
@@ -391,7 +388,10 @@ final class DependencyContainer {
         // downloads — only while the library folder is reachable.
         if let trackRepo = self.trackRepository, let cfRepo = self.configRepository {
             let reconciler = TrackAvailabilityReconciler(repository: trackRepo)
+            let previous = self.availabilityMonitor
             self.availabilityMonitor = await MainActor.run {
+                // A second `initialize` (another library) must not leave the old one running.
+                previous?.stop()
                 let monitor = LibraryAvailabilityMonitor(
                     reconciler: reconciler,
                     repository: trackRepo,
@@ -448,8 +448,8 @@ final class DependencyContainer {
                 isLibraryDriveMounted = current.checkMountStatus()
                 return
             }
+            // `stop()` unregisters and drains its callbacks, so it can go at once.
             current.stop()
-            retiredMountObservers.append(current)
         }
         guard !trimmed.isEmpty else {
             mountObserver = nil

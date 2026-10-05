@@ -149,13 +149,23 @@ struct LibraryView: View {
 private struct AvailabilityCheckStatus: View {
     @Environment(\.container) private var container
     @Environment(StatusBarCenter.self) private var statusBar: StatusBarCenter?
+    @Environment(\.openSettings) private var openSettings
     @State private var token: StatusBarCenter.LoadingToken?
 
     var body: some View {
         let checking = container.availabilityMonitor?.isChecking ?? false
+        let suspiciousStops = container.availabilityMonitor?.suspiciousStops ?? 0
         Color.clear
             .frame(width: 0, height: 0)
             .accessibilityHidden(true)
+            // A check that stopped because most files weren't found says so once (S3).
+            .onChange(of: suspiciousStops) { old, new in
+                guard new > old else { return }
+                let folder = container.availabilityMonitor?.suspiciousFolder ?? ""
+                statusBar?.post(LibraryAvailabilityMonitor.suspiciousStopMessage(folder: folder), actions: [
+                    StatusAction("Open Settings") { openSettings(tab: .library) },
+                ])
+            }
             .onChange(of: checking, initial: true) { _, running in
                 if running, token == nil {
                     token = statusBar?.beginLoading(LibraryAvailabilityMonitor.loadingPhase)

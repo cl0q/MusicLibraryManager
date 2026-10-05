@@ -617,7 +617,7 @@ final class OrganizedPathMigrationService {
                 throw MigrationError.rowMismatch(change.trackID)
             }
             try db.execute(
-                sql: "UPDATE tracks SET organized_path = ? WHERE id = ? AND organized_path = ?",
+                sql: "UPDATE tracks SET organized_path = ?, file_missing_since = NULL WHERE id = ? AND organized_path = ?",
                 arguments: [replacement, change.trackID, expected]
             )
             guard db.changesCount == 1 else {

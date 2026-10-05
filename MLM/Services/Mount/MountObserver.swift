@@ -3,21 +3,18 @@ import Foundation
 
 /// Monitors disk mount/unmount events using the DiskArbitration framework.
 ///
-/// Phase 18 — Detects when the library drive is ejected or reconnected,
-/// and posts notifications so the app can:
-/// - Pause playback on unmount
-/// - Show a disconnected indicator in the sidebar
-/// - Resume gracefully on remount
+/// Detects when the library drive is ejected or reconnected and posts
+/// `.libraryDriveDidUnmount` / `.libraryDriveDidMount` (main thread) so the window can pause
+/// playback, show the drive banner and check the files again.
+///
+/// One observer per library folder: `DependencyContainer.applyLibraryRoot` replaces it when
+/// the folder changes. `stop()` unregisters both callbacks and drains the callback queue, so
+/// a stopped observer can be released at once and never posts again.
 ///
 /// ## Usage
 /// ```swift
 /// let observer = MountObserver(libraryRoot: "/Volumes/MusicDisk/Library")
 /// observer.start()
-///
-/// // Listen for mount/unmount
-/// NotificationCenter.default.addObserver(
-///     forName: .libraryDriveDidUnmount, ...
-/// )
 /// ```
 final class MountObserver: @unchecked Sendable {
 
@@ -27,16 +24,42 @@ final class MountObserver: @unchecked Sendable {
     private let libraryRoot: String
 
     /// The volume path that contains the library root (e.g., "/Volumes/MusicDisk").
-    private(set) var libraryVolumePath: String?
+    let libraryVolumePath: String?
+
+    /// Guards `mounted` and `isActive` (DA callbacks run on `daQueue`, readers on main).
+    private let lock = NSLock()
+    private var mounted: Bool
+    /// `false` after `stop()`: late callbacks post nothing.
+    private var isActive = true
 
     /// Whether the library volume is currently mounted.
-    private(set) var isLibraryMounted: Bool = true
+    var isLibraryMounted: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return mounted
+    }
+
+    /// Whether the observer has not been stopped.
+    var isMonitoring: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return isActive && session != nil
+    }
 
     /// DiskArbitration session.
     private var session: DASession?
 
     /// Dispatch queue for DA callbacks.
     private let daQueue = DispatchQueue(label: "com.mlm.mount-observer", qos: .utility)
+    private static let queueKey = DispatchSpecificKey<Bool>()
+
+    /// The C callbacks — fixed function pointers, so `stop()` unregisters exactly these.
+    private static let appeared: DADiskAppearedCallback = { disk, context in
+        guard let context else { return }
+        Unmanaged<MountObserver>.fromOpaque(context).takeUnretainedValue().handleDiskAppeared(disk)
+    }
+    private static let disappeared: DADiskDisappearedCallback = { disk, context in
+        guard let context else { return }
+        Unmanaged<MountObserver>.fromOpaque(context).takeUnretainedValue().handleDiskDisappeared(disk)
+    }
 
     // MARK: - Init
 
@@ -52,7 +75,8 @@ final class MountObserver: @unchecked Sendable {
     init(libraryRoot: String, isVolumeMounted: (String) -> Bool = MountObserver.isVolumeMounted) {
         self.libraryRoot = libraryRoot
         self.libraryVolumePath = Self.extractVolumePath(from: libraryRoot)
-        self.isLibraryMounted = Self.isConnected(libraryRoot: libraryRoot, isVolumeMounted: isVolumeMounted)
+        self.mounted = Self.isConnected(libraryRoot: libraryRoot, isVolumeMounted: isVolumeMounted)
+        daQueue.setSpecific(key: Self.queueKey, value: true)
     }
 
     /// The library root this observer watches.
@@ -81,49 +105,40 @@ final class MountObserver: @unchecked Sendable {
 
     /// Start monitoring disk events.
     func start() {
-        guard session == nil else { return }
+        guard session == nil, isMonitoringAllowed else { return }
 
         guard let session = DASessionCreate(kCFAllocatorDefault) else {
-            print("[MountObserver] Failed to create DiskArbitration session")
+            AppLogger.shared.error("Mount observer: no DiskArbitration session", source: "Mount")
             return
         }
 
         self.session = session
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        DARegisterDiskAppearedCallback(session, nil, Self.appeared, context)
+        DARegisterDiskDisappearedCallback(session, nil, Self.disappeared, context)
         DASessionSetDispatchQueue(session, daQueue)
-
-        // Register for disk appeared (mount) events
-        DARegisterDiskAppearedCallback(
-            session,
-            nil, // Match all disks
-            { disk, context in
-                guard let context else { return }
-                let observer = Unmanaged<MountObserver>.fromOpaque(context).takeUnretainedValue()
-                observer.handleDiskAppeared(disk)
-            },
-            Unmanaged.passUnretained(self).toOpaque()
-        )
-
-        // Register for disk disappeared (unmount) events
-        DARegisterDiskDisappearedCallback(
-            session,
-            nil, // Match all disks
-            { disk, context in
-                guard let context else { return }
-                let observer = Unmanaged<MountObserver>.fromOpaque(context).takeUnretainedValue()
-                observer.handleDiskDisappeared(disk)
-            },
-            Unmanaged.passUnretained(self).toOpaque()
-        )
-
-        print("[MountObserver] Started monitoring for library at: \(libraryRoot)")
     }
 
-    /// Stop monitoring disk events.
+    private var isMonitoringAllowed: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return isActive
+    }
+
+    /// Stop monitoring disk events for good: unregister both callbacks, detach the session
+    /// and wait for a callback already running on the queue, so nothing reaches this object
+    /// afterwards.
     func stop() {
-        if let session {
-            DASessionSetDispatchQueue(session, nil)
-            DAUnregisterCallback(session, Unmanaged.passUnretained(self).toOpaque(), nil)
-            self.session = nil
+        lock.lock()
+        isActive = false
+        lock.unlock()
+        guard let session else { return }
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        DAUnregisterCallback(session, unsafeBitCast(Self.appeared, to: UnsafeMutableRawPointer.self), context)
+        DAUnregisterCallback(session, unsafeBitCast(Self.disappeared, to: UnsafeMutableRawPointer.self), context)
+        DASessionSetDispatchQueue(session, nil)
+        self.session = nil
+        if DispatchQueue.getSpecific(key: Self.queueKey) != true {
+            daQueue.sync {}  // drain an in-flight callback
         }
     }
 
@@ -131,61 +146,47 @@ final class MountObserver: @unchecked Sendable {
 
     /// Called when a disk appears (mounted).
     private func handleDiskAppeared(_ disk: DADisk) {
-        guard let description = DADiskCopyDescription(disk) as? [String: Any],
-              let volumePath = description[kDADiskDescriptionVolumePathKey as String] as? URL else {
-            return
-        }
-
-        let mountPoint = volumePath.path
-
-        // Check if the reappeared volume contains our library
-        if isLibraryVolume(mountPoint: mountPoint) {
-            let wasUnmounted = !isLibraryMounted
-            isLibraryMounted = true
-
-            if wasUnmounted {
-                print("[MountObserver] Library volume remounted at: \(mountPoint)")
-
-                DispatchQueue.main.async {
-                    NotificationCenter.default.post(
-                        name: .libraryDriveDidMount,
-                        object: nil,
-                        userInfo: [
-                            "mountPoint": mountPoint,
-                            "libraryRoot": self.libraryRoot,
-                        ]
-                    )
-                }
-            }
-        }
+        guard let mountPoint = Self.mountPoint(of: disk), isLibraryVolume(mountPoint: mountPoint) else { return }
+        lock.lock()
+        let wasUnmounted = !mounted
+        mounted = true
+        let active = isActive
+        lock.unlock()
+        guard wasUnmounted, active else { return }
+        post(.libraryDriveDidMount, mountPoint: mountPoint)
     }
 
     /// Called when a disk disappears (unmounted/ejected).
     private func handleDiskDisappeared(_ disk: DADisk) {
+        guard let mountPoint = Self.mountPoint(of: disk), isLibraryVolume(mountPoint: mountPoint) else { return }
+        lock.lock()
+        mounted = false
+        let active = isActive
+        lock.unlock()
+        guard active else { return }
+        post(.libraryDriveDidUnmount, mountPoint: mountPoint)
+    }
+
+    /// Posts on main — only while this observer is still the container's current one, so an
+    /// event for a library folder that is no longer current is ignored.
+    private func post(_ name: Notification.Name, mountPoint: String) {
+        let root = libraryRoot
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isMonitoring, DependencyContainer.shared.mountObserver === self else { return }
+            NotificationCenter.default.post(
+                name: name,
+                object: nil,
+                userInfo: ["mountPoint": mountPoint, "libraryRoot": root]
+            )
+        }
+    }
+
+    private static func mountPoint(of disk: DADisk) -> String? {
         guard let description = DADiskCopyDescription(disk) as? [String: Any],
               let volumePath = description[kDADiskDescriptionVolumePathKey as String] as? URL else {
-            return
+            return nil
         }
-
-        let mountPoint = volumePath.path
-
-        // Check if the disappeared volume was our library volume
-        if isLibraryVolume(mountPoint: mountPoint) {
-            isLibraryMounted = false
-
-            print("[MountObserver] Library volume unmounted: \(mountPoint)")
-
-            DispatchQueue.main.async {
-                NotificationCenter.default.post(
-                    name: .libraryDriveDidUnmount,
-                    object: nil,
-                    userInfo: [
-                        "mountPoint": mountPoint,
-                        "libraryRoot": self.libraryRoot,
-                    ]
-                )
-            }
-        }
+        return volumePath.path
     }
 
     // MARK: - Volume Detection
@@ -219,7 +220,9 @@ final class MountObserver: @unchecked Sendable {
     /// Manually check if the library volume is currently connected (`Try Again` on the banner).
     func checkMountStatus() -> Bool {
         let connected = Self.isConnected(libraryRoot: libraryRoot)
-        isLibraryMounted = connected
+        lock.lock()
+        mounted = connected
+        lock.unlock()
         return connected
     }
 }

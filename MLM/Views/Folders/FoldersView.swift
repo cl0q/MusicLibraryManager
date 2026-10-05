@@ -516,6 +516,7 @@ struct FoldersView: View {
         guard let importService = container.importService else { return }
         _ = try? await importService.importDirectory(URL(fileURLWithPath: path))
         NotificationCenter.default.post(name: .libraryDidImport, object: nil)
+        NotificationCenter.default.post(name: .libraryFilesDidChange, object: nil)
         await viewModel.refresh()
     }
 

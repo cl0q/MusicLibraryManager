@@ -2,8 +2,8 @@ import Foundation
 
 // MARK: - File probe
 
-/// The two disk questions a reconciliation asks, injectable so tests can make a library
-/// folder disappear in the middle of a run.
+/// The disk questions a reconciliation asks, injectable so tests can make a library folder
+/// disappear (or turn into a wrong one) in the middle of a run.
 struct TrackFileProbe: Sendable {
     /// Is there a file at this absolute path?
     var fileExists: @Sendable (String) -> Bool
@@ -13,7 +13,7 @@ struct TrackFileProbe: Sendable {
     /// Does the library folder contain anything? A reachable but empty folder that is
     /// expected to hold files is treated as suspicious, never as "everything is missing".
     var libraryRootHasEntries: @Sendable (String) -> Bool
-    /// Is the volume at `/Volumes/<name>` mounted? (absolute paths outside the library folder)
+    /// Is the volume at `/Volumes/<name>` mounted?
     var isVolumeMounted: @Sendable (String) -> Bool
 
     static let live = TrackFileProbe(
@@ -49,13 +49,22 @@ enum LibraryRootReachability {
 /// `file_missing_since` fact (v42) — the only place besides a use-time miss that decides
 /// `File missing` (UC-TABLE-20, DEC-014).
 ///
-/// Safety rules (the classic failure is "drive unplugged mid-run → 12,000 files missing"):
+/// Safety rules (the classic failure is "drive unplugged mid-run → 12,000 files missing", and
+/// its cousin "a wrong folder / another disk under the same name → everything missing"):
+/// - **Nothing is written until the whole run is checked.** Results are collected; the one
+///   write at the end happens only if every safety check still holds, so a stopped run
+///   changes nothing.
 /// - The library folder is probed **before** the run and **after every batch**; if it is not
-///   reachable the run stops and that batch's results are thrown away. Earlier batches were
-///   checked while the folder was verifiably reachable, so they stay.
-/// - A batch in which every file is absent while the library folder is empty aborts the run
-///   (`abortedSuspicious`) — an empty folder is a mount problem, not 500 deleted files.
-/// - Absolute paths outside the library folder on an unmounted volume are skipped (unknown).
+///   reachable the run stops (`abortedRootLost`).
+/// - **Share guard:** when more than `suspiciousMissingCount` files *and* more than
+///   `suspiciousMissingShare` of the files checked are newly absent — in one batch or in the
+///   run so far — the run stops (`abortedSuspicious`): that is a wrong folder or another disk,
+///   not deleted files. Same for a fully absent batch in an empty folder.
+/// - Before the write the newly missing files are stat-ed once more (a file that reappeared is
+///   not flagged) and the folder and its volume are checked again.
+/// - The file that decides — the stored one outside the library folder, or the original one
+///   when the stored one is absent — on a volume that isn't mounted makes the row unknown,
+///   never missing.
 /// - Writes are guarded by the path that was checked, so concurrent downloads/path repairs win.
 ///
 /// Off the main actor (an `actor`), batched, cancellable through task cancellation.
@@ -64,23 +73,26 @@ actor TrackAvailabilityReconciler {
         case completed
         /// The library folder was not reachable at the start: nothing was read or written.
         case skippedRootUnreachable
-        /// The library folder went away during the run; the running batch was discarded.
+        /// The library folder or its disk went away during the run: nothing was written.
         case abortedRootLost
-        /// A whole batch was missing while the library folder was empty.
+        /// Too many files were absent to be true (wrong folder, another disk, empty mount
+        /// point): nothing was written.
         case abortedSuspicious
         case cancelled
     }
 
     struct Report: Equatable, Sendable {
         var outcome: Outcome
-        /// Files compared with the disk in batches that were kept.
+        /// Files compared with the disk.
         var checked = 0
-        /// Rows newly flagged `File missing`.
+        /// Rows newly flagged `File missing` (written).
         var flaggedMissing = 0
-        /// Rows whose file came back.
+        /// Rows whose file came back (written).
         var cleared = 0
-        /// Absolute paths on an unmounted volume outside the library folder.
+        /// Rows whose deciding file is on an unmounted volume (unknown).
         var skipped = 0
+        /// Newly absent files seen before a suspicious run stopped.
+        var absentSeen = 0
 
         var changedRows: Int { flaggedMissing + cleared }
     }
@@ -88,6 +100,10 @@ actor TrackAvailabilityReconciler {
     static let defaultBatchSize = 400
     /// A fully absent batch of at least this many files with an empty library folder aborts.
     static let suspiciousBatchMinimum = 20
+    /// More than this many newly absent files …
+    static let suspiciousMissingCount = 50
+    /// … that are also more than this share of the files checked stop the run.
+    static let suspiciousMissingShare = 0.2
 
     private let repository: TrackRepository
     private let probe: TrackFileProbe
@@ -106,8 +122,14 @@ actor TrackAvailabilityReconciler {
         self.now = now
     }
 
+    /// Whether `absent` newly missing files out of `checked` are too many to be believed.
+    static func isSuspicious(absent: Int, checked: Int) -> Bool {
+        guard checked > 0 else { return false }
+        return absent > suspiciousMissingCount && Double(absent) / Double(checked) > suspiciousMissingShare
+    }
+
     /// Run one reconciliation for `libraryRoot`.
-    /// - Parameter progress: `(checked, total)` after each kept batch.
+    /// - Parameter progress: `(checked, total)` after each batch.
     func reconcile(
         libraryRoot: String,
         scope: TrackFileCheckScope = .all,
@@ -125,21 +147,18 @@ actor TrackAvailabilityReconciler {
             return Report(outcome: .cancelled)
         }
         var report = Report(outcome: .completed)
+        var missing: [TrackFileCheckCandidate] = []
+        var present: [TrackFileCheckCandidate] = []
         var start = candidates.startIndex
         while start < candidates.endIndex {
-            if Task.isCancelled {
-                report.outcome = .cancelled
-                return report
-            }
+            if Task.isCancelled { return Self.stopped(report, .cancelled) }
             let end = min(start + batchSize, candidates.endIndex)
             let batch = candidates[start..<end]
             start = end
 
-            var missing: [TrackFileCheckCandidate] = []
-            var present: [TrackFileCheckCandidate] = []
             var checkedInBatch = 0
             var absentInBatch = 0
-            var skippedInBatch = 0
+            var newlyAbsentInBatch = 0
             for candidate in batch {
                 switch check(candidate, root: root) {
                 case .present:
@@ -148,41 +167,60 @@ actor TrackAvailabilityReconciler {
                 case .missing:
                     checkedInBatch += 1
                     absentInBatch += 1
-                    if !candidate.isFlaggedMissing { missing.append(candidate) }
+                    if !candidate.isFlaggedMissing {
+                        newlyAbsentInBatch += 1
+                        missing.append(candidate)
+                    }
                 case .unknown:
-                    skippedInBatch += 1
+                    report.skipped += 1
                 }
             }
+            report.checked += checkedInBatch
 
             // The batch counts only if the library folder is still there now.
             guard probe.isLibraryRootReachable(root) else {
-                AppLogger.shared.info("File check stopped: the library folder went away during the check.", source: "Availability")
-                report.outcome = .abortedRootLost
-                return report
+                AppLogger.shared.info("File check stopped: the library folder went away during the check. Nothing was changed.", source: "Availability")
+                return Self.stopped(report, .abortedRootLost)
             }
             let allAbsent = checkedInBatch > 0 && absentInBatch == checkedInBatch
-            if allAbsent, checkedInBatch >= Self.suspiciousBatchMinimum, !probe.libraryRootHasEntries(root) {
-                AppLogger.shared.info("File check stopped: every file of a batch was absent and the library folder is empty.", source: "Availability")
-                report.outcome = .abortedSuspicious
-                return report
+            let emptyFolder = allAbsent && checkedInBatch >= Self.suspiciousBatchMinimum && !probe.libraryRootHasEntries(root)
+            if emptyFolder
+                || Self.isSuspicious(absent: newlyAbsentInBatch, checked: checkedInBatch)
+                || Self.isSuspicious(absent: missing.count, checked: report.checked) {
+                report.absentSeen = missing.count
+                AppLogger.shared.info(
+                    "File check stopped: \(missing.count) of \(report.checked) checked files weren’t found in \(root) — a wrong folder or another disk? Nothing was changed.",
+                    source: "Availability"
+                )
+                return Self.stopped(report, .abortedSuspicious)
             }
-            if Task.isCancelled {
-                report.outcome = .cancelled
-                return report
-            }
-            do {
-                let changes = try await repository.applyFileChecks(missing: missing, present: present, checkedAt: now())
-                report.flaggedMissing += changes.flagged
-                report.cleared += changes.cleared
-            } catch {
-                AppLogger.shared.error("File check: couldn’t save the results: \(error.localizedDescription)", source: "Availability")
-                report.outcome = .cancelled
-                return report
-            }
-            report.checked += checkedInBatch
-            report.skipped += skippedInBatch
             progress?(report.checked + report.skipped, candidates.count)
         }
+
+        // Before writing: look once more at the files about to be flagged, and at the folder
+        // and its disk.
+        if Task.isCancelled { return Self.stopped(report, .cancelled) }
+        let confirmedMissing = missing.filter { check($0, root: root) == .missing }
+        let volumeMounted = MountObserver.extractVolumePath(from: root).map { probe.isVolumeMounted($0) } ?? true
+        guard volumeMounted, probe.isLibraryRootReachable(root) else {
+            return Self.stopped(report, .abortedRootLost)
+        }
+        do {
+            let changes = try await repository.applyFileChecks(missing: confirmedMissing, present: present, checkedAt: now())
+            report.flaggedMissing = changes.flagged
+            report.cleared = changes.cleared
+        } catch {
+            AppLogger.shared.error("File check: couldn’t save the results: \(error.localizedDescription)", source: "Availability")
+            return Self.stopped(report, .cancelled)
+        }
+        return report
+    }
+
+    private static func stopped(_ report: Report, _ outcome: Outcome) -> Report {
+        var report = report
+        report.outcome = outcome
+        report.flaggedMissing = 0
+        report.cleared = 0
         return report
     }
 
@@ -197,20 +235,25 @@ actor TrackAvailabilityReconciler {
     enum FileState: Equatable, Sendable { case present, missing, unknown }
 
     /// Present if the stored file exists — or, for old rows with a stale organized path, the
-    /// original import file still exists (playback falls back to it). Unknown for absolute
-    /// paths on another volume that isn't mounted.
+    /// original import file still exists (playback falls back to it). Unknown when the file
+    /// that decides lies on another volume that isn't mounted (S4): the stored file outside
+    /// the library folder, or the original file once the stored one is absent.
     nonisolated func check(_ candidate: TrackFileCheckCandidate, root: String) -> FileState {
         let path = Self.resolve(candidate.organizedPath, root: root)
-        if !Self.isInside(path, root: root),
-           let volume = MountObserver.extractVolumePath(from: path),
-           !probe.isVolumeMounted(volume) {
+        if !Self.isInside(path, root: root), isOnUnmountedVolume(path) {
             return .unknown
         }
         if probe.fileExists(path) { return .present }
-        if let original = Self.filesystemPath(candidate.originalPath), probe.fileExists(original) {
-            return .present
+        if let original = Self.filesystemPath(candidate.originalPath) {
+            if !Self.isInside(original, root: root), isOnUnmountedVolume(original) { return .unknown }
+            if probe.fileExists(original) { return .present }
         }
         return .missing
+    }
+
+    private nonisolated func isOnUnmountedVolume(_ path: String) -> Bool {
+        guard let volume = MountObserver.extractVolumePath(from: path) else { return false }
+        return !probe.isVolumeMounted(volume)
     }
 
     static func resolve(_ organizedPath: String, root: String) -> String {

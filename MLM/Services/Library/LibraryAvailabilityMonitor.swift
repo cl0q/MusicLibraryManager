@@ -6,6 +6,12 @@ extension Notification.Name {
     /// availability of at least one track. Track lists refresh in place.
     /// `userInfo["changed"]`: `Int` rows changed.
     static let trackAvailabilityDidChange = Notification.Name("MLMTrackAvailabilityDidChange")
+
+    /// Post (main thread) when **files** in the library folder were added, moved or re-pointed:
+    /// a scan or import of files, the organized-path migration and its rollback. It asks for a
+    /// full file check. Metadata edits, tag writes, genre merges, review decisions and analysis
+    /// post `.libraryDidImport` only and never cause a file check (S6, W2-A review).
+    static let libraryFilesDidChange = Notification.Name("MLMLibraryFilesDidChange")
 }
 
 /// Keeps the persisted availability fresh: decides **when** `TrackAvailabilityReconciler`
@@ -14,8 +20,8 @@ extension Notification.Name {
 ///
 /// Triggers (each coalesced, at most one run at a time, a request during a run queues one more):
 /// - library open, if the library folder is reachable (`start()`)
-/// - `.libraryDidImport` — scan/import, Scan Library Folder ⌘R, organized-path migration and
-///   repairs in Settings ▸ Maintenance (they post it) → full check
+/// - `.libraryFilesDidChange` — scan/import of files, Scan Library Folder ⌘R, organized-path
+///   migration and rollback → full check (`.libraryDidImport` alone — edits, analysis — doesn't)
 /// - `.libraryDriveDidMount` (and `Try Again` on the banner) → full check
 /// - `.libraryRootDidChange` → full check of the new folder
 /// - `.downloadDidComplete` → re-check only the tracks flagged missing (a download writes its
@@ -30,9 +36,24 @@ final class LibraryAvailabilityMonitor {
     private(set) var isChecking = false
     /// The last finished run.
     private(set) var lastReport: TrackAvailabilityReconciler.Report?
+    /// Counts runs stopped as suspicious; the status bar shows a sentence when it grows.
+    private(set) var suspiciousStops = 0
+    /// The library folder of the last suspicious stop.
+    private(set) var suspiciousFolder: String?
+
+    /// What starts a full check: files changed, the disk came back, another library folder.
+    /// Not `.libraryDidImport` — it is also posted for edits and analysis (S6).
+    static let fullCheckTriggers: [Notification.Name] = [.libraryFilesDidChange, .libraryDriveDidMount, .libraryRootDidChange]
 
     /// Phase text of the status bar while a check runs.
     static let loadingPhase = "Checking files…"
+
+    /// `File check stopped — most files weren’t found in “Music”. Check the library folder in
+    /// Settings.` (two sentences, so with periods, UC-COPY-04)
+    static func suspiciousStopMessage(folder: String) -> String {
+        let name = folder.isEmpty ? "the library folder" : "“\(URL(fileURLWithPath: folder).lastPathComponent)”"
+        return "File check stopped — most files weren’t found in \(name). Check the library folder in Settings."
+    }
 
     @ObservationIgnored private let reconciler: TrackAvailabilityReconciler
     @ObservationIgnored private let repository: TrackRepository
@@ -59,8 +80,7 @@ final class LibraryAvailabilityMonitor {
     func start(initialDelay: Duration = .seconds(3)) {
         guard observers.isEmpty else { return }
         let center = NotificationCenter.default
-        let full: [Notification.Name] = [.libraryDidImport, .libraryDriveDidMount, .libraryRootDidChange]
-        for name in full {
+        for name in Self.fullCheckTriggers {
             observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.request(.all) }
             })
@@ -89,7 +109,7 @@ final class LibraryAvailabilityMonitor {
         runningTask?.cancel()
     }
 
-    /// Ask for a check (the manual re-check hook; ⌘R Scan reaches it through `.libraryDidImport`).
+    /// Ask for a check (the manual re-check hook; ⌘R Scan reaches it through `.libraryFilesDidChange`).
     /// Requests within `coalesceDelay` merge; `.all` wins over narrower scopes.
     func request(_ scope: TrackFileCheckScope, after delay: Duration? = nil) {
         pendingScope = Self.merge(pendingScope, scope)
@@ -103,17 +123,28 @@ final class LibraryAvailabilityMonitor {
         }
     }
 
-    /// Run the pending check now and wait for it (tests, and the hook for an explicit command).
-    func checkNow(_ scope: TrackFileCheckScope = .all) async {
+    /// Run the pending check now, wait for it and return its report (`skippedRootUnreachable`
+    /// when the folder can't be read). Callers that act on the result (Download Again) go on
+    /// only for `.completed`.
+    @discardableResult
+    func checkNow(_ scope: TrackFileCheckScope = .all) async -> TrackAvailabilityReconciler.Report {
         pendingScope = Self.merge(pendingScope, scope)
         scheduledTask?.cancel()
         if let runningTask { await runningTask.value }
         runPending()
         await runningTask?.value
+        return lastReport ?? TrackAvailabilityReconciler.Report(outcome: .skippedRootUnreachable)
+    }
+
+    /// Whether the library folder can be read now (checked off the main actor).
+    func isLibraryFolderReachable() async -> Bool {
+        guard let root = await libraryRoot() else { return false }
+        return await reconciler.isLibraryRootReachable(root)
     }
 
     /// Playback or a file action met a missing file: record it — only if the library folder is
     /// reachable now (else it is the drive, DEC-014). Returns whether the row changed.
+    /// No caller yet: W2-C calls it when playback can't open a track's file.
     @discardableResult
     func recordMissingAtUse(trackID: Int64) async -> Bool {
         guard let root = await libraryRoot(), await reconciler.isLibraryRootReachable(root) else { return false }
@@ -146,20 +177,25 @@ final class LibraryAvailabilityMonitor {
         let reconciler = self.reconciler
         let libraryRoot = self.libraryRoot
         runningTask = Task { [weak self] in
-            var report: TrackAvailabilityReconciler.Report?
-            if let root = await libraryRoot(), !root.isEmpty {
+            var report = TrackAvailabilityReconciler.Report(outcome: .skippedRootUnreachable)
+            let root = await libraryRoot() ?? ""
+            if !root.isEmpty {
                 // The reconciler is an actor: the disk work runs off the main actor.
                 report = await reconciler.reconcile(libraryRoot: root, scope: scope)
             }
-            self?.finish(report)
+            self?.finish(report, root: root)
         }
     }
 
-    private func finish(_ report: TrackAvailabilityReconciler.Report?) {
+    private func finish(_ report: TrackAvailabilityReconciler.Report, root: String) {
         runningTask = nil
         isChecking = false
-        if let report {
+        do {
             lastReport = report
+            if report.outcome == .abortedSuspicious {
+                suspiciousFolder = root
+                suspiciousStops += 1
+            }
             if report.outcome != .skippedRootUnreachable {
                 AppLogger.shared.info(
                     "File check \(report.outcome): \(report.checked) checked, \(report.flaggedMissing) missing, \(report.cleared) back, \(report.skipped) skipped",

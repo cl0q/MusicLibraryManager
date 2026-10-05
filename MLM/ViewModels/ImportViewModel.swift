@@ -193,6 +193,8 @@ final class ImportViewModel {
                                 "skipped": result.skipped
                             ]
                         )
+                        // Files were added or re-read: check the library's files (W2-A).
+                        NotificationCenter.default.post(name: .libraryFilesDidChange, object: nil)
                     }
                     self.isImporting = false
                     self.currentOperationID = nil

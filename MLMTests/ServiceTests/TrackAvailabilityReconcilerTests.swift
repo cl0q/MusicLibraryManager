@@ -168,8 +168,90 @@ struct TrackAvailabilityReconcilerTests {
         let report = await TrackAvailabilityReconciler(repository: f.repo, probe: probe, batchSize: 2)
             .reconcile(libraryRoot: f.root.path)
         #expect(report.outcome == .abortedRootLost)
-        #expect(report.cleared == 1, "the batch checked while reachable is kept")
-        #expect(try await f.flaggedIDs().isEmpty, "nothing is marked missing because the drive went away")
+        #expect(report.cleared == 0, "a stopped run writes nothing — not even the batches checked before")
+        #expect(try await f.flaggedIDs() == [back], "the earlier flag is untouched; nothing new is marked missing")
+    }
+
+    // MARK: - W2-A review S3/S4: wrong folder, yanked disk, other volumes, races
+
+    @Test func aWrongNonEmptyFolderFlagsNothing() async throws {
+        let f = try Fixture()
+        defer { f.cleanUp() }
+        try f.write("Something else/unrelated.txt")  // reachable, not empty, but the wrong folder
+        for index in 0..<120 { try await f.addTrack("Artist/\(index).m4a", onDisk: false) }
+        let report = await TrackAvailabilityReconciler(repository: f.repo).reconcile(libraryRoot: f.root.path)
+        #expect(report.outcome == .abortedSuspicious)
+        #expect(report.absentSeen > TrackAvailabilityReconciler.suspiciousMissingCount)
+        #expect(report.flaggedMissing == 0)
+        #expect(try await f.flaggedIDs().isEmpty)
+    }
+
+    @Test func aDiskYankedMidBatchFlagsNothingEvenIfTheRootCheckPasses() async throws {
+        let f = try Fixture()
+        defer { f.cleanUp() }
+        for index in 0..<600 { try await f.addTrack("Y/\(index).m4a", onDisk: false) }
+        let reads = Counter()
+        var probe = TrackFileProbe.live
+        probe.isLibraryRootReachable = { _ in true }      // the root check keeps passing …
+        probe.libraryRootHasEntries = { _ in true }
+        probe.fileExists = { _ in reads.next() <= 500 }   // … but every read after 500 fails
+        let report = await TrackAvailabilityReconciler(repository: f.repo, probe: probe)
+            .reconcile(libraryRoot: f.root.path)
+        #expect(report.outcome == .abortedSuspicious)
+        #expect(try await f.flaggedIDs().isEmpty)
+    }
+
+    @Test func aFewGenuinelyMissingFilesAreStillFlagged() async throws {
+        // Below the share guard: 10 of 100 missing is a real finding.
+        let f = try Fixture()
+        defer { f.cleanUp() }
+        var gone: Set<Int64> = []
+        for index in 0..<100 {
+            let id = try await f.addTrack("Z/\(index).m4a", onDisk: index >= 10)
+            if index < 10 { gone.insert(id) }
+        }
+        let report = await TrackAvailabilityReconciler(repository: f.repo).reconcile(libraryRoot: f.root.path)
+        #expect(report.outcome == .completed)
+        #expect(try await f.flaggedIDs() == gone)
+        #expect(!TrackAvailabilityReconciler.isSuspicious(absent: 50, checked: 60))
+        #expect(TrackAvailabilityReconciler.isSuspicious(absent: 51, checked: 200))
+        #expect(!TrackAvailabilityReconciler.isSuspicious(absent: 51, checked: 300))
+    }
+
+    @Test func anOriginalFileOnAnUnmountedVolumeIsUnknownNotMissing() async throws {
+        let f = try Fixture()
+        defer { f.cleanUp() }
+        // Stored path absent; the only other copy is on a disk that isn't connected.
+        let id = try await f.addTrack("O/stale.m4a", onDisk: false,
+                                      originalPath: "/Volumes/NoSuchDisk-\(UUID().uuidString)/Music/x.m4a")
+        let report = await TrackAvailabilityReconciler(repository: f.repo).reconcile(libraryRoot: f.root.path)
+        #expect(report.skipped == 1)
+        #expect(!(try await f.flaggedIDs().contains(id)))
+    }
+
+    @Test func aPathChangedBetweenCheckAndWriteIsLeftAlone() async throws {
+        let f = try Fixture()
+        defer { f.cleanUp() }
+        try f.write("keep.txt")
+        let id = try await f.addTrack("R/old.m4a", onDisk: false)
+        let db = f.db
+        let moved = Counter()
+        var probe = TrackFileProbe.live
+        probe.fileExists = { path in
+            // While the file is being checked, a download re-points the row.
+            if path.hasSuffix("/R/old.m4a"), moved.next() == 1 {
+                try? db.write { db in
+                    try db.execute(sql: "UPDATE tracks SET organized_path = 'R/new.m4a' WHERE id = ?", arguments: [id])
+                }
+            }
+            return false
+        }
+        let report = await TrackAvailabilityReconciler(repository: f.repo, probe: probe).reconcile(libraryRoot: f.root.path)
+        #expect(report.outcome == .completed)
+        #expect(report.flaggedMissing == 0, "the write is guarded by the checked path")
+        let row = try await f.repo.fetchTrack(id: id)
+        #expect(row?.organizedPath == "R/new.m4a")
+        #expect(row?.fileMissingSince == nil)
     }
 
     @Test func aFullyAbsentBatchInAnEmptyFolderIsSuspicious() async throws {
@@ -232,6 +314,49 @@ struct TrackAvailabilityReconcilerTests {
         )
         #expect(await reachable.recordMissingAtUse(trackID: id))
         #expect(try await f.flaggedIDs() == [id])
+    }
+
+    /// S6: metadata edits (`.libraryDidImport`) never start a file check; file changes do.
+    @MainActor
+    @Test func onlyFileChangesStartACheck() async throws {
+        let f = try Fixture()
+        defer { f.cleanUp() }
+        try f.write("keep.txt")
+        _ = try await f.addTrack("S/gone.m4a", onDisk: false)
+        let root = f.root.path
+        let monitor = LibraryAvailabilityMonitor(
+            reconciler: TrackAvailabilityReconciler(repository: f.repo),
+            repository: f.repo,
+            libraryRoot: { root },
+            coalesceDelay: .milliseconds(10)
+        )
+        // A tag edit, analysis run or review decision posts `.libraryDidImport`: no file check.
+        #expect(!LibraryAvailabilityMonitor.fullCheckTriggers.contains(.libraryDidImport))
+        #expect(LibraryAvailabilityMonitor.fullCheckTriggers == [.libraryFilesDidChange, .libraryDriveDidMount, .libraryRootDidChange])
+        monitor.start(initialDelay: .seconds(3_600))
+        defer { monitor.stop() }
+        NotificationCenter.default.post(name: .libraryFilesDidChange, object: nil)
+        for _ in 0..<200 where monitor.lastReport == nil {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(monitor.lastReport?.outcome == .completed)
+    }
+
+    @MainActor
+    @Test func checkNowReturnsTheReportAndSkipsWhenUnreachable() async throws {
+        let f = try Fixture(createRoot: false)
+        defer { f.cleanUp() }
+        _ = try await f.addTrack("U/x.m4a", onDisk: false)
+        let root = f.root.path
+        let monitor = LibraryAvailabilityMonitor(
+            reconciler: TrackAvailabilityReconciler(repository: f.repo),
+            repository: f.repo,
+            libraryRoot: { root }
+        )
+        let report = await monitor.checkNow(.all)
+        #expect(report.outcome == .skippedRootUnreachable)
+        #expect(await monitor.isLibraryFolderReachable() == false)
+        #expect(try await f.flaggedIDs().isEmpty)
     }
 
     @MainActor
