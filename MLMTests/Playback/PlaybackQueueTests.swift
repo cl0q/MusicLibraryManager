@@ -200,10 +200,22 @@ struct PlaybackQueueTests {
     @Test
     func equatable_sameState_areEqual() {
         var q1 = PlaybackQueue()
+        let a = makeTrack(id: 1, title: "A")
+        q1.insertPlayNext([a])
+        let q2 = q1
+        #expect(q1 == q2)
+    }
+
+    /// W2-D: entries have their own identity — the same track queued separately is two
+    /// different entries, so two such queues differ.
+    @Test
+    func equatable_sameTrackDifferentEntries_differ() {
+        var q1 = PlaybackQueue()
         var q2 = PlaybackQueue()
         let a = makeTrack(id: 1, title: "A")
         q1.insertPlayNext([a])
         q2.insertPlayNext([a])
-        #expect(q1 == q2)
+        #expect(q1.upcoming == q2.upcoming)
+        #expect(q1 != q2)
     }
 }
