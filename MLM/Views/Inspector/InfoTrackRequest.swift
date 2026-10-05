@@ -17,6 +17,12 @@ final class InfoTrackRequest {
         baseline = selection
     }
 
+    /// Another library opened.
+    func clear() {
+        trackIDs = nil
+        baseline = []
+    }
+
     /// The selection changed: the request is over.
     func selectionDidChange(_ selection: [Int64]) {
         guard trackIDs != nil, selection != baseline else { return }

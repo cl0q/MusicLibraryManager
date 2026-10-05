@@ -305,9 +305,11 @@ struct InspectorWaveform: View {
         defer { isLoading = false }
         let cacheDirectory = container.activeLibrary?.namespacedCacheDirectory(in: ActiveLibrary.defaultWaveformCacheRoot)
             ?? ActiveLibrary.defaultWaveformCacheRoot
-        let loaded = await Task.detached(priority: .utility) {
+        // The decode stops when the selection moves on (`.task(id:)` cancels this task).
+        let decode = Task.detached(priority: .utility) {
             InspectorWaveformPeaks.load(fileURL: fileURL, trackID: id, cacheDirectory: cacheDirectory)
-        }.value
+        }
+        let loaded = await withTaskCancellationHandler { await decode.value } onCancel: { decode.cancel() }
         guard !Task.isCancelled else { return }
         peaks = loaded
     }
@@ -363,6 +365,8 @@ enum InspectorWaveformPeaks {
         var peaks = [Float](repeating: 0, count: binCount)
         var frameIndex = 0
         while frameIndex < totalFrames {
+            // Cancelled (another track selected): stop, and cache nothing half-read.
+            if Task.isCancelled { return [] }
             guard (try? file.read(into: buffer, frameCount: chunkFrames)) != nil else { break }
             let count = Int(buffer.frameLength)
             guard count > 0, let samples = buffer.floatChannelData?[0] else { break }

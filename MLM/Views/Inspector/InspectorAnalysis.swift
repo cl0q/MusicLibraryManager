@@ -77,7 +77,12 @@ final class InspectorAnalysis {
         let dance = DanceabilityAnalyzer()
         guard dance.isAvailable else { throw Problem.toolMissing }
         if let result = try await dance.analyzeTrack(path: path) {
-            try await tracks.updateDanceability(trackId: id, danceability: result.danceability, bpm: track.bpm == nil ? result.bpm : nil)
+            try await tracks.updateDanceability(trackId: id, danceability: result.danceability, bpm: nil)
+            // A BPM typed while this ran (or before) wins: filled only if still empty at write
+            // time (S5). Analysis results never queue a file write.
+            if let bpm = result.bpm, let pool = container.databaseManager?.pool {
+                try await TrackTagRepository(database: pool).fillBPMIfEmpty(trackID: id, bpm: bpm)
+            }
         }
 
         guard let duration = track.duration, duration > 0, let embedding = container.audioEmbeddingService,

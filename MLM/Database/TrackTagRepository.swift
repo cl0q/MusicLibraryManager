@@ -191,6 +191,8 @@ final class TrackTagRepository: Sendable {
         }
     }
 
+    /// `album_id` is left as it is on an album edit — exactly what the old save path
+    /// (`TrackRepository.update` with the row's album id) did; albums become entities in W4.
     private static func write(_ field: TrackTagField, _ value: TrackTagValue, of track: Track, db: Database) throws {
         guard let id = track.id else { return }
         try db.execute(
@@ -423,6 +425,18 @@ final class TrackTagRepository: Sendable {
                 SET attempts = attempts + 1, last_attempt_at = ?, last_error = ?, blocked = ?
                 WHERE track_id = ? AND revision = ?
                 """, arguments: [stamp, reason, blocked ? 1 : 0, trackID, revision])
+        }
+    }
+
+    /// An analysed BPM goes in only where none is stored at write time (`COALESCE`), so a BPM
+    /// typed while the analysis ran is kept (S5). It never queues a file write.
+    @discardableResult
+    func fillBPMIfEmpty(trackID: Int64, bpm: Int) async throws -> Bool {
+        guard bpm > 0 else { return false }
+        return try await database.write { db in
+            // BPM isn't part of `search_text`.
+            try db.execute(sql: "UPDATE tracks SET bpm = COALESCE(bpm, ?) WHERE id = ? AND bpm IS NULL", arguments: [bpm, trackID])
+            return db.changesCount > 0
         }
     }
 

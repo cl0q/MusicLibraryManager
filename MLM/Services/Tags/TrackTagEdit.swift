@@ -162,12 +162,8 @@ final class TrackTagEdit {
         return "\(changes) waiting for \(volume.map { "“\($0)”" } ?? "the library folder")"
     }
 
-    /// The notification the track lists refresh on (they reload in place, keeping selection).
+    /// `.trackMetadataDidChange` with the changed ids: track lists refresh those rows in place.
     static func postTracksChanged(_ ids: [Int64]) {
-        NotificationCenter.default.post(
-            name: .trackAvailabilityDidChange,
-            object: nil,
-            userInfo: ["changed": ids.count, "reason": "tags"]
-        )
+        NotificationCenter.default.post(name: .trackMetadataDidChange, object: nil, userInfo: ["trackIds": ids])
     }
 }

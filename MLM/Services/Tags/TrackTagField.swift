@@ -128,6 +128,11 @@ enum TrackTagValue: Sendable, Hashable, Codable {
 /// Why a typed value isn't saved: said under the field, which stays open with the text.
 struct TrackTagValidationError: Error, Equatable, Sendable {
     let message: String
+    /// For `‹Field› wasn’t changed — ‹reason›` when the field is no longer on screen.
+    var shortReason: String {
+        if message.hasPrefix("A track needs") { return message.components(separatedBy: ".").first?.lowercased() ?? message }
+        return message.hasSuffix(".") ? String(message.dropLast()).lowercased() : message.lowercased()
+    }
 }
 
 extension TrackTagField {

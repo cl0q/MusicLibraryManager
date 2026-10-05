@@ -78,7 +78,9 @@ struct InspectorFileStatus: Equatable, Sendable {
             if date != .distantPast {
                 detail += " · last tried \(date.formatted(date: .abbreviated, time: .shortened))"
             }
-            return InspectorFileStatus(text: "\(TrackStatusDisplay.downloadFailed.text) — \(reason)",
+            // Stored reasons are worded at display time, the same as the table (IMP-029).
+            let plain = DownloadFailureReasonText.plain(reason, sourceHint: DownloadFailureReasonText.sourceHint(for: track))
+            return InspectorFileStatus(text: "\(TrackStatusDisplay.downloadFailed.text) — \(plain)",
                                        systemImage: TrackStatusDisplay.downloadFailed.systemImage, tint: .attention,
                                        showsProgress: false, detail: detail, action: .retryDownload, isFileReachable: false)
         case .fileMissing:

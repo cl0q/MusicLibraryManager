@@ -20,10 +20,16 @@ struct InspectorModelTests {
         let model: InspectorModel
         let commits: Commits
         let failures: Failures
+        let loads: Loads
     }
 
     final class Failures {
         var messages: [String] = []
+    }
+
+    /// Makes the next loads fail (S4).
+    final class Loads {
+        var fail = false
     }
 
     struct Busy: Error {}
@@ -33,8 +39,12 @@ struct InspectorModelTests {
         let repository = TrackTagRepository(database: db)
         let commits = Commits()
         let failures = Failures()
+        let loads = Loads()
         let model = InspectorModel(dependencies: .init(
-            loadTracks: { ids in try await repository.fetchTracks(ids: ids) },
+            loadTracks: { ids in
+                if loads.fail { throw DatabaseError(resultCode: .SQLITE_BUSY) }
+                return try await repository.fetchTracks(ids: ids)
+            },
             commit: { value, field, ids, _ in
                 if let error = commits.failNext {
                     commits.failNext = nil
@@ -45,7 +55,7 @@ struct InspectorModelTests {
             },
             reportFailure: { failures.messages.append($0) }
         ))
-        return Env(db: db, repository: repository, model: model, commits: commits, failures: failures)
+        return Env(db: db, repository: repository, model: model, commits: commits, failures: failures, loads: loads)
     }
 
     private func select(_ env: Env, _ ids: [Int64]) async {
@@ -141,6 +151,48 @@ struct InspectorModelTests {
         await env.model.waitUntilIdle()
         #expect(env.commits.calls.isEmpty)
         #expect(env.model.issues.isEmpty)
+        #expect(env.failures.messages == ["Year wasn’t changed — year is a number, like 2019"], "said once in the status bar")
+    }
+
+    // MARK: Review S4
+
+    @Test func aFailedLoadNeverLeavesTheOldSelectionToTypeInto() async throws {
+        let env = try makeEnv()
+        let ids = try TrackTagRepositoryTests.seed(env.db, count: 2)
+        await select(env, [ids[0]])
+        env.loads.fail = true
+        await select(env, [ids[1]])
+        #expect(env.model.tracks.isEmpty, "the previous selection's tracks are gone")
+        #expect(env.model.loadError == "Couldn’t read the selected tracks — the library database is busy.")
+        #expect(!env.model.canEdit && !env.model.isEmpty)
+        type(env, "Into B?", .genre)
+        #expect(env.model.drafts.isEmpty)
+        #expect(await env.model.commitNow(.genre) == .nothingToCommit)
+        env.loads.fail = false
+        env.model.reload()
+        await env.model.waitUntilIdle()
+        #expect(env.model.canEdit && env.model.tracks.map(\.id) == [ids[1]])
+    }
+
+    @Test func aDraftCapturesOnlySelectedIdsThatWereLoaded() async throws {
+        let env = try makeEnv()
+        let ids = try TrackTagRepositoryTests.seed(env.db, count: 2)
+        await select(env, [ids[0], 999_999, ids[1]]) // one id no longer exists
+        type(env, "Dub", .genre)
+        #expect(env.model.drafts[.genre]?.trackIDs == [ids[0], ids[1]])
+    }
+
+    @Test func anotherLibraryResetsInfo() async throws {
+        let env = try makeEnv()
+        let ids = try TrackTagRepositoryTests.seed(env.db, count: 1)
+        await select(env, ids)
+        type(env, "Dub", .genre)
+        env.model.reset()
+        #expect(env.model.isEmpty && env.model.drafts.isEmpty && env.model.tracks.isEmpty)
+        let request = InfoTrackRequest()
+        request.show([1], over: [])
+        request.clear()
+        #expect(request.trackIDs == nil)
     }
 
     // MARK: Commit, revert, errors

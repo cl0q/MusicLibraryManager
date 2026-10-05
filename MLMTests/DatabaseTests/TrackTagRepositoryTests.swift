@@ -133,6 +133,19 @@ struct TrackTagRepositoryTests {
         #expect(restored.map(\.searchText) == before.map { DatabaseManager.foldedSearchText($0.rawSearchText) })
     }
 
+    @Test func analysedBPMNeverReplacesATypedOne() async throws {
+        let db = try DatabaseManager.inMemory()
+        let ids = try Self.seed(db, count: 2)
+        let repository = TrackTagRepository(database: db)
+        _ = try await repository.apply(.number(nil), to: .bpm, trackIDs: ids, queueFileWrites: false)
+        _ = try await repository.apply(.number(174), to: .bpm, trackIDs: [ids[0]], queueFileWrites: true) // typed meanwhile
+        let pendingBefore = try await repository.pendingCount()
+        #expect(try await repository.fillBPMIfEmpty(trackID: ids[0], bpm: 87) == false)
+        #expect(try await repository.fillBPMIfEmpty(trackID: ids[1], bpm: 128))
+        #expect(try await repository.fetchTracks(ids: ids).map(\.bpm) == [174, 128])
+        #expect(try await repository.pendingCount() == pendingBefore, "analysis never queues a file write")
+    }
+
     @Test func numericAndRequiredTextFields() async throws {
         let db = try DatabaseManager.inMemory()
         let ids = try Self.seed(db, count: 3)

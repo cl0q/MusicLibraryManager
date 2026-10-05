@@ -21,7 +21,7 @@ struct InspectorDetailsTab: View {
                     )
                 }
             }
-            .disabled(model.isLoadingSelection)
+            .disabled(!model.canEdit)
             // A new selection gets new fields; the old fields' late writes carry the old
             // generation and are ignored by the model (PP-INSPECTOR-04).
             .id(model.generation)
@@ -96,12 +96,15 @@ struct InspectorPlaylistsSection: View {
     @Environment(UndoCenter.self) private var undo: UndoCenter?
     @Environment(ShellActions.self) private var shell: ShellActions?
     @State private var memberships: [InspectorQueries.Membership] = []
+    @State private var membershipFailed = false
 
     private var menuSources: TrackMenuSources { TrackMenuSources.shared }
 
     var body: some View {
         Section("In playlists") {
-            if memberships.isEmpty {
+            if membershipFailed {
+                InspectorIssueLine(message: "Couldn’t read the playlists of this selection.")
+            } else if memberships.isEmpty {
                 Text(trackIDs.count == 1 ? "Not in any playlist." : "None of these tracks is in a playlist.")
                     .foregroundStyle(.secondary)
             }
@@ -141,6 +144,8 @@ struct InspectorPlaylistsSection: View {
         }
         .task(id: trackIDs) {
             menuSources.loadIfNeeded(container: container)
+            memberships = [] // never the previous selection's playlists
+            membershipFailed = false
             await load()
         }
         .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { note in
@@ -150,7 +155,18 @@ struct InspectorPlaylistsSection: View {
     }
 
     private func load() async {
-        guard let pool = container.databaseManager?.pool else { return }
-        memberships = (try? await InspectorQueries(database: pool).memberships(trackIDs: trackIDs)) ?? memberships
+        guard let pool = container.databaseManager?.pool else {
+            memberships = []
+            return
+        }
+        do {
+            memberships = try await InspectorQueries(database: pool).memberships(trackIDs: trackIDs)
+            membershipFailed = false
+        } catch {
+            // Never another selection's playlists: an empty list, said as a failure.
+            memberships = []
+            membershipFailed = true
+            AppLogger.shared.error("Info couldn’t read playlist membership: \(error)", source: "Inspector")
+        }
     }
 }
