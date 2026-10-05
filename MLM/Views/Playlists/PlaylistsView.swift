@@ -249,7 +249,7 @@ struct PlaylistsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
-            .keyboardShortcut("n", modifiers: .command)
+            // No ⌘N here: File ▸ New Playlist owns ⌘N (one meaning per key, UC-KEY-39).
             .accessibilityIdentifier("new_playlist_button")
             .accessibilityLabel("new_playlist_button")
             .popover(isPresented: $showNewPlaylistPopover, arrowEdge: .bottom) {

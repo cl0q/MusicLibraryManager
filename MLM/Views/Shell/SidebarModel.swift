@@ -77,11 +77,61 @@ final class SidebarModel {
 
     // MARK: Loading
 
-    func reloadPlaylists(_ repository: PlaylistRepository?) async {
-        guard let repository else { return }
-        if let loaded = try? await repository.fetchAll() {
-            playlists = loaded
-        }
+    @ObservationIgnored private var playlistReloadGeneration = 0
+
+    /// Reload the playlist rows. Overlapping reloads are ordered: only the most recently
+    /// started one is applied, so a slow, older fetch can't bring back a stale list.
+    ///
+    /// - Returns: ids of playlists that were listed before and are gone now (the caller
+    ///   leaves their destinations); empty when this reload was superseded or failed.
+    @discardableResult
+    func reloadPlaylists(fetch: () async throws -> [Playlist]) async -> [Int64] {
+        playlistReloadGeneration += 1
+        let generation = playlistReloadGeneration
+        guard let loaded = try? await fetch(), generation == playlistReloadGeneration else { return [] }
+        let before = Set(playlists.compactMap(\.id))
+        playlists = loaded
+        let after = Set(loaded.compactMap(\.id))
+        return before.subtracting(after).sorted()
+    }
+
+    @discardableResult
+    func reloadPlaylists(_ repository: PlaylistRepository?) async -> [Int64] {
+        guard let repository else { return [] }
+        return await reloadPlaylists(fetch: { try await repository.fetchAll() })
+    }
+
+    // MARK: Playlist second line (UC-SIDE-06)
+
+    /// Source names (`soundcloud`, `spotify`, …) by source id, for linked playlists.
+    private(set) var sourceNames: [Int64: String] = [:]
+
+    func reloadSources(_ repository: SourceRepository?) async {
+        guard let repository, let sources = try? await repository.fetchAll() else { return }
+        sourceNames = Dictionary(sources.compactMap { source in source.id.map { ($0, source.name) } },
+                                 uniquingKeysWith: { first, _ in first })
+    }
+
+    /// The sign-in a source name stands for (`soundcloud` → SoundCloud).
+    static func signInService(forSourceName name: String) -> TokenStorage.Service? {
+        let lowered = name.lowercased()
+        if lowered.contains("soundcloud") { return .soundcloud }
+        if lowered.contains("spotify") { return .spotify }
+        if lowered.contains("apple") { return .appleMusic }
+        return nil
+    }
+
+    /// Second line of a playlist row: only when it isn't healthy. Today the only state the
+    /// sidebar can know cheaply is a linked source whose sign-in can't be used
+    /// (`‹Source› sign-in expired`, §15.3/§15.5); import / incomplete / not-downloaded words
+    /// arrive with W3-PL.
+    static func playlistSecondLine(
+        sourceName: String?,
+        unusableSignIns: Set<TokenStorage.Service>
+    ) -> String? {
+        guard let sourceName, let service = signInService(forSourceName: sourceName),
+              unusableSignIns.contains(service) else { return nil }
+        return "\(service.displayName) sign-in expired"
     }
 
     func reloadBadges(trackRepository: TrackRepository?, analysisRepository: AnalysisRepository?) async {
@@ -153,22 +203,36 @@ enum SyncProfileRowState: Equatable {
         case .toAdd(let n):
             "\(n.formatted(.number)) to add"
         case .synced(let date):
-            "Synced \(Self.relativeFormatter.localizedString(for: date, relativeTo: now))"
+            "Synced \(Date.AnchoredRelativeFormatStyle(anchor: date, presentation: .named, unitsStyle: .wide).format(now))"
         case .connected:
             "Connected"
         }
     }
 
-    private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.dateTimeStyle = .named
-        formatter.unitsStyle = .full
-        return formatter
-    }()
-
     /// Fraction for the thin progress bar under a syncing row.
     var progress: Double? {
         guard case .syncing(let processed, let total) = self, total > 0 else { return nil }
         return min(1, Double(processed) / Double(total))
+    }
+}
+
+// MARK: - Sync profile page ↔ SyncViewModel selection
+
+/// `SyncViewModel` acts on its `selectedProfile` (preview, Sync Now, settings edits), so the
+/// visible sync-profile page and that selection must always name the same profile.
+///
+/// - Opening a page makes its profile the selection (`selectPage`).
+/// - When something else selects another existing profile (create, duplicate, New Sync
+///   Profile from Selection) while a profile page is visible, the page follows it
+///   (`followSelection`), so what is shown is what Sync Now acts on.
+enum SyncProfilePageAgreement: Equatable {
+    case agree
+    case followSelection(Int64)
+    case selectPage
+
+    static func reconcile(pageProfileID: Int64, selectedProfileID: Int64?, profileIDs: [Int64]) -> SyncProfilePageAgreement {
+        if selectedProfileID == pageProfileID { return .agree }
+        if let selected = selectedProfileID, profileIDs.contains(selected) { return .followSelection(selected) }
+        return .selectPage
     }
 }

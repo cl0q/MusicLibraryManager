@@ -21,6 +21,7 @@ struct SidebarView: View {
     @State private var renaming: RenameTarget?
     @State private var renameText = ""
     @State private var renameError: String?
+    @State private var isCommittingRename = false
     @FocusState private var renameFocused: Bool
 
     @State private var pendingPlaylistDeletion: Playlist?
@@ -77,8 +78,21 @@ struct SidebarView: View {
                 ForEach(syncProfiles) { profile in
                     syncProfileRow(profile)
                 }
+                if syncProfiles.isEmpty {
+                    // UC-EMPTY-01: the section says what fills it.
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("No sync profiles yet.")
+                            .foregroundStyle(.secondary)
+                        Button("New Sync Profile…") {
+                            actions.newSyncProfile()
+                        }
+                        .buttonStyle(.link)
+                    }
+                    .font(.subheadline)
+                    .selectionDisabled()
+                }
             } header: {
-                SidebarSectionHeader(title: SidebarSectionID.sync.title) {
+                SidebarSectionHeader(title: SidebarSectionID.sync.title, alwaysShowsAccessory: syncProfiles.isEmpty) {
                     Button {
                         actions.newSyncProfile()
                     } label: {
@@ -96,7 +110,8 @@ struct SidebarView: View {
         }
         .task {
             model.useLibrary(id: container.activeLibrary?.libraryId)
-            await model.reloadPlaylists(container.playlistRepository)
+            await model.reloadSources(container.sourceRepository)
+            await reloadPlaylists()
             await reloadBadges()
             model.refreshReachability(syncProfiles)
         }
@@ -156,7 +171,7 @@ struct SidebarView: View {
             Button("Cancel", role: .cancel) {
                 pendingProfileDeletion = nil
             }
-            Button("Delete", role: .destructive) {
+            Button("Delete Sync Profile", role: .destructive) {
                 deletePendingProfile()
             }
         } message: {
@@ -195,8 +210,15 @@ struct SidebarView: View {
         Label(destination.fixedTitle, systemImage: destination.systemImage)
             .tag(destination)
             .springLoadableHover {
-                navigation.select(destination)
+                springLoad(destination)
             }
+    }
+
+    /// Spring-loading opens a row while a drag hovers over it; on the row that is already
+    /// selected it does nothing (re-selecting would pop that place's pushed details mid-drag).
+    private func springLoad(_ destination: SidebarDestination) {
+        guard destination != navigation.selection else { return }
+        navigation.select(destination)
     }
 
     @ViewBuilder
@@ -205,10 +227,9 @@ struct SidebarView: View {
             let icon = playlist.isLiked == 1 ? "heart" : "music.note.list"
             if renaming == .playlist(id) {
                 renameField(systemImage: icon)
+                    .tag(SidebarDestination.playlist(id))
             } else {
-                Label(playlist.name, systemImage: icon)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                playlistLabel(playlist, systemImage: icon)
                     .help(playlist.name)
                     .tag(SidebarDestination.playlist(id))
                     .contextMenu {
@@ -223,9 +244,33 @@ struct SidebarView: View {
                         }
                     }
                     .springLoadableHover {
-                        navigation.select(.playlist(id))
+                        springLoad(.playlist(id))
                     }
             }
+        }
+    }
+
+    /// One line when healthy; a second line only to state a condition (UC-SIDE-04/06).
+    @ViewBuilder
+    private func playlistLabel(_ playlist: Playlist, systemImage: String) -> some View {
+        let condition = SidebarModel.playlistSecondLine(
+            sourceName: playlist.sourceId.flatMap { model.sourceNames[$0] },
+            unusableSignIns: container.tokenAccessStatus?.inaccessibleServices ?? []
+        )
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(playlist.name)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if let condition {
+                    Text(condition)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+        } icon: {
+            Image(systemName: systemImage)
         }
     }
 
@@ -234,6 +279,7 @@ struct SidebarView: View {
         if let id = profile.id {
             if renaming == .syncProfile(id) {
                 renameField(systemImage: "externaldrive")
+                    .tag(SidebarDestination.syncProfile(id))
             } else {
                 let state = rowState(for: profile, id: id)
                 Label {
@@ -270,7 +316,7 @@ struct SidebarView: View {
             startRename(.syncProfile(id), currentName: profile.name)
         }
         Button("Duplicate") {
-            Task { await container.syncViewModel?.duplicateProfile(profile) }
+            duplicate(profile)
         }
         Button("Read Playlist Changes from Device…") {
             deviceIngestProfile = profile
@@ -279,6 +325,19 @@ struct SidebarView: View {
         Divider()
         Button("Delete Sync Profile…", role: .destructive) {
             pendingProfileDeletion = profile
+        }
+    }
+
+    /// Duplicate makes the copy the selected profile in `SyncViewModel`; show it, so the
+    /// page and the profile Sync Now acts on agree (B1).
+    private func duplicate(_ profile: SyncProfile) {
+        guard let vm = container.syncViewModel else { return }
+        let before = Set(vm.profiles.compactMap(\.id))
+        Task {
+            await vm.duplicateProfile(profile)
+            if let copy = vm.profiles.compactMap(\.id).first(where: { !before.contains($0) }) {
+                navigation.select(.syncProfile(copy))
+            }
         }
     }
 
@@ -316,6 +375,10 @@ struct SidebarView: View {
                     .onSubmit { commitRename() }
                     .onExitCommand { cancelRename() }
                     .onAppear { renameFocused = true }
+                    .onChange(of: renameFocused) { _, focused in
+                        // Clicking elsewhere commits, like Finder (UC-SIDE-09).
+                        if !focused, renaming != nil, !isCommittingRename { commitRename() }
+                    }
             }
             if let renameError {
                 Text(renameError)
@@ -333,6 +396,7 @@ struct SidebarView: View {
     }
 
     private func cancelRename() {
+        isCommittingRename = false
         renaming = nil
         renameText = ""
         renameError = nil
@@ -340,13 +404,15 @@ struct SidebarView: View {
     }
 
     private func commitRename() {
-        guard let target = renaming else { return }
+        guard let target = renaming, !isCommittingRename else { return }
         let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else {
             cancelRename()
             return
         }
+        isCommittingRename = true
         Task {
+            defer { isCommittingRename = false }
             switch target {
             case .playlist(let id):
                 guard name != model.playlistName(id) else { return cancelRename() }
@@ -356,7 +422,9 @@ struct SidebarView: View {
                     await reloadPlaylists()
                     cancelRename()
                 } catch {
-                    renameError = "Couldn’t rename the playlist. \(error.localizedDescription)"
+                    AppLogger.shared.error("Renaming a playlist failed: \(error.localizedDescription)", source: "Sidebar")
+                    renameError = "Couldn’t rename the playlist. The library file didn’t accept the change."
+                    renameFocused = true
                 }
             case .syncProfile(let id):
                 guard let vm = container.syncViewModel,
@@ -366,6 +434,7 @@ struct SidebarView: View {
                 await vm.renameProfile(profile, name: name)
                 if let error = vm.errorMessage {
                     renameError = error
+                    renameFocused = true
                 } else {
                     cancelRename()
                 }
@@ -401,10 +470,7 @@ struct SidebarView: View {
     // MARK: - Loading
 
     private func reloadPlaylists() async {
-        let before = Set(model.playlists.compactMap(\.id))
-        await model.reloadPlaylists(container.playlistRepository)
-        let after = Set(model.playlists.compactMap(\.id))
-        for removed in before.subtracting(after) {
+        for removed in await model.reloadPlaylists(container.playlistRepository) {
             navigation.removePlaylist(removed)
         }
     }
@@ -421,6 +487,7 @@ struct SidebarView: View {
 /// the system style (UC-TYPE-02); the button stays reachable for VoiceOver and keyboard.
 private struct SidebarSectionHeader<Accessory: View>: View {
     let title: String
+    var alwaysShowsAccessory = false
     @ViewBuilder let accessory: () -> Accessory
 
     @State private var isHovering = false
@@ -430,7 +497,7 @@ private struct SidebarSectionHeader<Accessory: View>: View {
             Text(title)
             Spacer()
             accessory()
-                .opacity(isHovering ? 1 : 0)
+                .opacity(isHovering || alwaysShowsAccessory ? 1 : 0)
         }
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }

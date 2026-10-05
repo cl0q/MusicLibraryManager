@@ -31,13 +31,20 @@ final class ToolbarSearchModel {
     @ObservationIgnored var hasLocalTable: @MainActor () -> Bool = { false }
 
     @ObservationIgnored private let coordinator: SearchCoordinator
-    @ObservationIgnored private var debounceTask: Task<Void, Never>?
+    @ObservationIgnored private let sleep: @Sendable (Duration) async throws -> Void
+    /// The pending debounced commit (exposed for tests).
+    @ObservationIgnored private(set) var debounceTask: Task<Void, Never>?
     @ObservationIgnored private var isMirroring = false
 
     static let debounce: Duration = .milliseconds(100)
 
-    init(coordinator: SearchCoordinator) {
+    /// - Parameter sleep: suspends for a duration; injectable so tests control the debounce.
+    init(
+        coordinator: SearchCoordinator,
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    ) {
         self.coordinator = coordinator
+        self.sleep = sleep
     }
 
     /// Return in the field.
@@ -73,8 +80,13 @@ final class ToolbarSearchModel {
             coordinator.query = ""
             return
         }
+        let sleep = self.sleep
         debounceTask = Task { [weak self] in
-            try? await Task.sleep(for: Self.debounce)
+            do {
+                try await sleep(Self.debounce)
+            } catch {
+                return
+            }
             guard !Task.isCancelled, let self else { return }
             if self.text != self.coordinator.query {
                 self.commit()

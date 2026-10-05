@@ -108,12 +108,6 @@ extension Notification.Name {
     /// Posted when the user presses ⌘F while in Folder view.
     static let focusFolderSearchField = Notification.Name("MLMFocusFolderSearchField")
 
-    /// Posted when the user triggers "Import from Folder…" via the Library menu.
-    static let showImportDialog = Notification.Name("MLMShowImportDialog")
-
-    /// Posted when the user triggers "More Info" via the Library menu (⌘I).
-    static let showTrackDetail = Notification.Name("MLMShowTrackDetail")
-
     /// Open the right-hand track detail inspector for one track.
     ///
     /// - `userInfo["trackId"]`: `Int64` — the track to show

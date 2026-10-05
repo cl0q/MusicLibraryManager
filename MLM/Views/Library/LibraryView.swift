@@ -122,20 +122,9 @@ struct LibraryView: View {
             .disabled(viewModel.displayedTracks.isEmpty)
             .accessibilityIdentifier("library_shuffle_button")
 
-            Button {
+            ScanLibraryFolderButton(isRescanning: isRescanning) {
                 Task { await rescan() }
-            } label: {
-                if isRescanning {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Label("Scan Library Folder", systemImage: "arrow.clockwise")
-                }
             }
-            .help("Scan the library folder for changes ⌘R")
-            .keyboardShortcut("r", modifiers: .command)
-            .disabled(isRescanning)
-            .accessibilityIdentifier("rescan_button")
-            .accessibilityLabel("rescan_button")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -196,4 +185,35 @@ struct LibraryView: View {
         )
     }
 
+}
+
+/// `Scan Library Folder` ⌘R. All Tracks stays alive while hidden, so the button is enabled
+/// only while All Tracks is the visible place (no other destination, nothing pushed over it,
+/// no search pane); only this small view reads that, so switching places doesn't re-render
+/// the table.
+private struct ScanLibraryFolderButton: View {
+    let isRescanning: Bool
+    let action: () -> Void
+
+    @Environment(\.container) private var container
+    @Environment(NavigationModel.self) private var navigation: NavigationModel?
+
+    private var isVisiblePlace: Bool {
+        (navigation?.isAllTracksVisible ?? true) && !container.searchCoordinator.isPresented
+    }
+
+    var body: some View {
+        Button(action: action) {
+            if isRescanning {
+                ProgressView().controlSize(.small)
+            } else {
+                Label("Scan Library Folder", systemImage: "arrow.clockwise")
+            }
+        }
+        .help("Scan the library folder for changes ⌘R")
+        .keyboardShortcut("r", modifiers: .command)
+        .disabled(isRescanning || !isVisiblePlace)
+        .accessibilityIdentifier("rescan_button")
+        .accessibilityLabel("rescan_button")
+    }
 }

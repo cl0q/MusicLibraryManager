@@ -159,6 +159,10 @@ final class NavigationModel {
     /// The route on top of the stack, or `nil` at the destination's root.
     var currentRoute: DetailRoute? { path.last }
 
+    /// All Tracks is the visible place: selected, with nothing pushed over it. Gates commands
+    /// of the kept-alive All Tracks view (its ⌘R) while another place shows.
+    var isAllTracksVisible: Bool { selection == .allTracks && path.isEmpty }
+
     var canGoBack: Bool { !path.isEmpty }
     var canGoForward: Bool { !(forwardStacks[selection] ?? []).isEmpty }
 

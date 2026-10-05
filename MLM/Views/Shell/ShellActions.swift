@@ -54,7 +54,7 @@ final class ShellActions {
                 }
             } catch {
                 AppLogger.shared.error("Creating a playlist failed: \(error.localizedDescription)", source: "Shell")
-                statusBar.post("Couldn’t create the playlist — \(error.localizedDescription)")
+                statusBar.post("Couldn’t create the playlist — the library file didn’t accept the change")
             }
         }
     }
@@ -73,29 +73,53 @@ final class ShellActions {
     }
 
     func importFolder(_ url: URL) {
-        guard let viewModel = makeImportViewModel() else { return }
         let name = url.lastPathComponent
+        guard let viewModel = makeImportViewModel() else {
+            statusBar.post(Self.importUnavailableMessage(folder: name))
+            return
+        }
         statusBar.post("Import started — “\(name)”")
         Task {
             await viewModel.importFromDirectory(url)
-            if let result = viewModel.lastResult {
-                statusBar.post(Self.importFinishedMessage(
-                    imported: result.succeeded,
-                    skipped: result.skipped,
-                    failed: result.failed
-                ))
-            } else if let error = viewModel.errorMessage {
-                statusBar.post("Couldn’t import “\(name)” — \(error)")
+            if let error = viewModel.errorMessage, viewModel.lastResult == nil {
+                AppLogger.shared.error("Importing “\(name)” failed: \(error)", source: "Shell")
             }
+            let message = Self.importMessage(folder: name, result: viewModel.lastResult)
+            statusBar.post(message.text, actions: message.offersShow ? [Self.showActivityAction()] : [])
         }
     }
 
-    /// `Import finished — 35 imported · 2 failed` (UC-STATUS-05 shape).
+    /// The status-bar sentence after an import (UC-STATUS-05 shape, UC-COPY-11: no raw error
+    /// text — the cause is in Activity and the logs).
+    static func importMessage(folder: String, result: ImportService.ImportResult?) -> (text: String, offersShow: Bool) {
+        guard let result else {
+            return ("Couldn’t import “\(folder)” — the details are in Activity", true)
+        }
+        if result.cancelled {
+            return ("Import of “\(folder)” cancelled — \(result.committed.formatted(.number)) imported", false)
+        }
+        return (importFinishedMessage(imported: result.succeeded, skipped: result.skipped, failed: result.failed),
+                result.failed > 0)
+    }
+
+    /// `Import finished — 35 imported, 2 failed` (UC-STATUS-05 shape; `·` stays reserved for
+    /// the separator before buttons).
     static func importFinishedMessage(imported: Int, skipped: Int, failed: Int) -> String {
         var parts = ["\(imported.formatted(.number)) imported"]
-        if skipped > 0 { parts.append("\(skipped.formatted(.number)) already in the library") }
         if failed > 0 { parts.append("\(failed.formatted(.number)) failed") }
-        return "Import finished — " + parts.joined(separator: " · ")
+        if skipped > 0 { parts.append("\(skipped.formatted(.number)) already in the library") }
+        return "Import finished — " + parts.joined(separator: ", ")
+    }
+
+    static func importUnavailableMessage(folder: String) -> String {
+        "Couldn’t import “\(folder)” — the library isn’t ready yet"
+    }
+
+    /// `Show`: opens the Activity panel (the Activity popover replaces it in W3-ACT).
+    static func showActivityAction() -> StatusAction {
+        StatusAction("Show") {
+            UserDefaults.standard.set(true, forKey: ActivityPanelHosting.expandedKey)
+        }
     }
 
     // MARK: Sources (temporary)
