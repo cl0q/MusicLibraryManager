@@ -4,6 +4,7 @@ import SwiftUI
 /// NSApplicationDelegate for lifecycle events.
 ///
 /// Handles app-level events like launch, termination, and dock menu.
+@MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
     static private(set) var shared: AppDelegate?
 
@@ -49,8 +50,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Cleanup on termination
     }
 
+    /// Closing the main window (⌘W) does not quit; the Dock icon or Window ▸ MLM brings it back
+    /// (UC-WIN-01, M-FILE.E05).
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        false
+    }
+
+    // MARK: - Dock menu (UC-DOCK-01)
+
+    private let dockMenuTarget = DockMenuTarget()
+
+    /// Now playing, Play / Pause, Next, Previous and Open Recent (`DockMenuModel`); the system
+    /// appends its own items.
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        DockMenuBuilder.menu(
+            DockMenuBuilder.model(container: .shared, launch: .shared),
+            target: dockMenuTarget
+        )
     }
 
     // Settings is the SwiftUI `Settings` scene (MLMApp, DEC-035); deep links go through
