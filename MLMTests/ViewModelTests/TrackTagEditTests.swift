@@ -14,7 +14,7 @@ final class RecordingTagWriter: TagWriting, @unchecked Sendable {
 
     var requests: [TagWriteRequest] { lock.withLock { _requests } }
 
-    func write(_ request: TagWriteRequest) async -> TagWriteOutcome {
+    func write(_ request: TagWriteRequest, captureOriginals: @escaping TagOriginalsCapture) async -> TagWriteOutcome {
         onWrite(request)
         lock.withLock { _requests.append(request) }
         return answers[request.fileURL.lastPathComponent] ?? .written
@@ -179,7 +179,7 @@ struct TrackTagEditTests {
         #expect(try await env.repository.pendingCount() == 0)
         #expect(env.status.message?.text == "Changed genre of 4 tracks")
         // Something queued earlier isn't written while it's off.
-        try await env.repository.markStale(trackIDs: ids, fields: [.genre])
+        try await env.repository.queueTypedValue(.text("Dub"), field: .genre, trackIDs: ids)
         #expect(await env.queue.flushNow().outcome == .disabled)
         #expect(env.writer.requests.isEmpty)
     }
@@ -224,8 +224,8 @@ struct TrackTagEditTests {
         let requests = env.writer.requests
         #expect(requests.count == 2, "one write per track, however many edits")
         let first = try #require(requests.first { $0.fileURL.lastPathComponent == "0.mp3" })
-        #expect(first.values[.genre] == .some("Latest"))
-        #expect(first.values[.title] == .some("New Title"))
+        #expect(first.targets[.genre] == .typed("Latest"))
+        #expect(first.targets[.title] == .typed("New Title"))
         #expect(first.fileURL.path.hasPrefix(env.root.path))
         #expect(try await env.repository.pendingCount() == 0)
     }

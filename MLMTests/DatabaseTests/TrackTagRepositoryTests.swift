@@ -84,6 +84,26 @@ struct TrackTagRepositoryTests {
         try migrator.migrate(queue) // nothing pending: a no-op
     }
 
+    @Test func v53FreshUpgradeAndIdempotent() throws {
+        let fresh = try DatabaseManager.inMemory()
+        let columns = try fresh.read { try $0.columns(in: "tag_write_fields") }.map(\.name)
+        #expect(columns == ["track_id", "field", "intent", "typed_value", "original_state", "original_value", "original_captured_at"])
+        #expect(try fresh.read { try $0.primaryKey("tag_write_fields") }.columns == ["track_id", "field"])
+        let migrations = DatabaseManager.buildMigrator().migrations
+        #expect(migrations.filter { $0 == "v53_tag_write_originals" }.count == 1)
+        #expect(try #require(migrations.firstIndex(of: Self.v44)) < #require(migrations.firstIndex(of: "v53_tag_write_originals")))
+        // Upgrade from v44 with a waiting write: kept; the new table starts empty.
+        let queue = try DatabaseQueue(configuration: Self.configuration)
+        let migrator = DatabaseManager.buildMigrator()
+        try migrator.migrate(queue, upTo: Self.v44)
+        let ids = try Self.seed(queue, count: 2)
+        try queue.write { try $0.execute(sql: "INSERT INTO pending_tag_writes (track_id, fields, stale_since) VALUES (?, 'genre', 'x')", arguments: [ids[0]]) }
+        try queue.write { try $0.execute(sql: "CREATE TABLE tag_write_fields (track_id INTEGER NOT NULL, field TEXT NOT NULL, intent TEXT NOT NULL, typed_value TEXT, original_state TEXT NOT NULL DEFAULT 'unknown', original_value TEXT, original_captured_at TEXT, PRIMARY KEY (track_id, field))") }
+        try migrator.migrate(queue) // the table already exists: IF NOT EXISTS
+        #expect(try queue.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM pending_tag_writes") } == 1)
+        #expect(try queue.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM tag_write_fields") } == 0)
+    }
+
     @Test func foreignKeysStayDisabled() throws {
         let db = try DatabaseManager.inMemory()
         #expect(try db.read { try Bool.fetchOne($0, sql: "PRAGMA foreign_keys") } == false)
@@ -174,7 +194,7 @@ struct TrackTagRepositoryTests {
         _ = try await repository.apply(.text("B"), to: .genre, trackIDs: [ids[1]], queueFileWrites: true)
         let retried = try #require(try await repository.pendingWrite(trackID: ids[1]))
         #expect(!retried.blocked && retried.attempts == 0 && retried.lastError == nil)
-        #expect(try await repository.pendingWrites(limit: 10, excluding: [ids[0]]).map(\.trackID) == [ids[1]])
+        #expect(try await repository.pendingWrites(limit: 10, afterTrackID: ids[0]).map(\.trackID) == [ids[1]])
     }
 
     @Test func orphanedRowsAreNeverReadAndAreRemoved() async throws {
@@ -186,7 +206,8 @@ struct TrackTagRepositoryTests {
         try await TrackRepository(database: db).delete(ids: [ids[1]])
         #expect(try await repository.pendingWrites(limit: 10).map(\.trackID).sorted() == [ids[0], ids[2]])
         #expect(try await repository.pendingCount() == 2)
-        #expect(try await repository.removeOrphanedPendingWrites() == 1)
+        #expect(try await repository.removeOrphanedPendingWrites() == 2, "its pending row and its field row")
+        #expect(try await db.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM tag_write_fields WHERE track_id = ?", arguments: [ids[1]]) } == 0)
         #expect(try await db.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM pending_tag_writes") } == 2)
     }
 

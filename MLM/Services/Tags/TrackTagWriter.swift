@@ -2,13 +2,32 @@ import Foundation
 
 // MARK: - Request and outcome
 
-/// One file's tag write: the fields to set (`nil` = remove the tag).
+/// What one field of a file gets (W2-E review B1): a value the user typed, or the exact value
+/// the file had before MLM's first write. `nil` = no tag.
+enum TagFileTarget: Sendable, Equatable {
+    case typed(String?)
+    case restore(String?)
+
+    var value: String? {
+        switch self {
+        case .typed(let value), .restore(let value): value
+        }
+    }
+}
+
+/// One file's tag write.
 struct TagWriteRequest: Sendable {
     let fileURL: URL
     /// The library folder; the writer refuses any file outside it.
     let libraryRoot: URL
-    let values: [TrackTagField: String?]
+    let targets: [TrackTagField: TagFileTarget]
+    /// Fields whose pre-MLM value isn't captured yet: read from the file and handed to
+    /// `captureOriginals` **before** anything is written.
+    var needOriginals: Set<TrackTagField> = []
 }
+
+/// Receives the file's own values of `needOriginals` before the first write (nil = absent).
+typealias TagOriginalsCapture = @Sendable ([TrackTagField: String?]) async throws -> Void
 
 /// Why a write didn't happen. The original file is untouched in every case.
 enum TagWriteFailure: Error, Sendable, Equatable {
@@ -120,8 +139,8 @@ struct LiveTagToolRunner: TagToolRunner {
 /// 6. Atomic replace: `rename(2)` of the copy over the original (same folder, same volume),
 ///    with the original's permissions.
 ///
-/// Never writes provenance: only the fields of `TrackTagField` exist, and `values(for:fields:)`
-/// turns MLM's album placeholders (`unknown album`, source names) into "no album tag".
+/// Never writes provenance or an import-normalised database value: the targets are typed values
+/// or the file's own captured originals (B1).
 struct TrackTagWriter: Sendable {
     let tools: any TagToolRunner
     /// Replace step (injected to simulate a failing rename in tests).
@@ -140,40 +159,9 @@ struct TrackTagWriter: Sendable {
     /// Prefix of the temporary copy: `.‹name›.mlm-tags-‹uuid›.‹ext›`.
     static let temporaryMarker = ".mlm-tags-"
 
-    // MARK: Values from the database
-
-    /// The values to write for `fields` of `track`, from its current database values.
-    /// Placeholders are not written: an album that isn't a real album removes the album tag;
-    /// an empty or placeholder title/artist is left as it is in the file.
-    static func values(for track: Track, fields: Set<TrackTagField>) -> [TrackTagField: String?] {
-        var values: [TrackTagField: String?] = [:]
-        for field in fields {
-            switch field {
-            case .title:
-                let title = track.title.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !title.isEmpty { values[.title] = .some(title) }
-            case .artist:
-                if let artist = TrackMetadataPresentation.artistDisplay(track.artist) { values[.artist] = .some(artist) }
-            case .album:
-                values[.album] = .some(TrackMetadataPresentation.albumDisplay(track.album))
-            case .albumArtist:
-                let albumArtist = track.albumArtist.trimmingCharacters(in: .whitespacesAndNewlines)
-                values[.albumArtist] = .some(albumArtist.isEmpty || TrackMetadataPresentation.isPlaceholder(albumArtist) ? nil : albumArtist)
-            case .genre:
-                let genre = track.genre?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                values[.genre] = .some(genre.isEmpty ? nil : genre)
-            case .year:
-                values[.year] = .some(track.year.flatMap { $0 > 0 ? String($0) : nil })
-            case .bpm:
-                values[.bpm] = .some(track.bpm.flatMap { $0 > 0 ? String($0) : nil })
-            }
-        }
-        return values
-    }
-
     // MARK: Write
 
-    func write(_ request: TagWriteRequest) async -> TagWriteOutcome {
+    func write(_ request: TagWriteRequest, captureOriginals: @escaping TagOriginalsCapture = { _ in }) async -> TagWriteOutcome {
         let fm = FileManager.default
         var isDirectory: ObjCBool = false
         guard fm.fileExists(atPath: request.libraryRoot.path, isDirectory: &isDirectory), isDirectory.boolValue else {
@@ -191,12 +179,9 @@ struct TrackTagWriter: Sendable {
         guard let format = TagFileFormat(fileURL: original) else {
             return .failed(.unsupportedFormat(TagFileFormat.displayName(pathExtension: original.pathExtension)))
         }
-        var changes: [(key: String, value: String?)] = []
-        for field in TrackTagField.allCases {
-            guard let value = request.values[field], let key = format.metadataKey(field) else { continue }
-            changes.append((key, value))
+        guard TrackTagField.allCases.contains(where: { request.targets[$0] != nil && format.metadataKey($0) != nil }) else {
+            return .nothingToWrite
         }
-        guard !changes.isEmpty else { return .nothingToWrite }
         guard let ffmpeg = tools.path(of: .ffmpeg), let ffprobe = tools.path(of: .ffprobe) else {
             return .failed(.toolMissing)
         }
@@ -218,6 +203,19 @@ struct TrackTagWriter: Sendable {
         guard before.streams.contains(where: { $0.type == "audio" }) else {
             return .failed(.verificationFailed("no audio stream in the original"))
         }
+
+        // The file's own values, kept before MLM writes anything (B1).
+        let current = Self.currentValues(before.tags, format: format)
+        let originals = request.needOriginals.reduce(into: [TrackTagField: String?]()) { result, field in
+            if format.metadataKey(field) != nil { result[field] = .some(current[field] ?? nil) }
+        }
+        do {
+            try await captureOriginals(originals)
+        } catch {
+            return .failed(.rewriteFailed("couldn’t keep the file’s original values: \(error)"))
+        }
+        let changes = Self.changes(request.targets, current: current, format: format)
+        guard !changes.isEmpty else { return .nothingToWrite }
 
         // 3. The rewritten copy, next to the original.
         let temporary = original.deletingLastPathComponent()
@@ -282,6 +280,37 @@ struct TrackTagWriter: Sendable {
             return .failed(.replaceFailed("\(error)"))
         }
         return .written
+    }
+
+    // MARK: Values
+
+    /// The file's current value per field (nil = absent).
+    static func currentValues(_ tags: [String: String], format: TagFileFormat) -> [TrackTagField: String?] {
+        var values: [TrackTagField: String?] = [:]
+        for field in TrackTagField.allCases {
+            guard let key = format.metadataKey(field) else { continue }
+            values[field] = .some(tags[key.lowercased()])
+        }
+        return values
+    }
+
+    /// The `-metadata` changes for `targets`. A field whose file value already equals the
+    /// target is left alone; a typed year that is the year of the file's full date
+    /// (`2019` vs `2019-05-03`) keeps the date.
+    static func changes(
+        _ targets: [TrackTagField: TagFileTarget],
+        current: [TrackTagField: String?],
+        format: TagFileFormat
+    ) -> [(key: String, value: String?)] {
+        var changes: [(key: String, value: String?)] = []
+        for field in TrackTagField.allCases {
+            guard let target = targets[field], let key = format.metadataKey(field) else { continue }
+            let existing = current[field] ?? nil
+            if existing == target.value { continue }
+            if field == .year, case .typed(let year?) = target, let existing, existing.hasPrefix(year + "-") { continue }
+            changes.append((key, target.value))
+        }
+        return changes
     }
 
     // MARK: Steps

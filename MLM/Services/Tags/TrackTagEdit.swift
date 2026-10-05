@@ -12,8 +12,11 @@ import Foundation
 /// try await edit.perform(.text("Techno"), field: .genre, trackIDs: ids)
 /// // Edit ▸ Undo Edit Genre · status bar `Changed genre of 14 tracks · Undo`
 /// ```
-/// Undo puts back each track's exact previous value and marks its file stale again, so the
-/// file follows the database both ways.
+/// Undo puts back each track's exact previous value in the database; its file gets back what
+/// it was meant to carry before the step — a value the user typed, or the file's own value from
+/// before MLM's first write (B1). A file never receives the database's import-normalised value.
+/// Code that changed tags in its own transaction queues the file write with
+/// `TrackTagRepository.queueTypedValue(_:field:trackIDs:)` (an explicit typed value).
 @MainActor
 final class TrackTagEdit {
     struct Dependencies {

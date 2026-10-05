@@ -9,7 +9,9 @@ extension Notification.Name {
 
 /// Something that writes one file's tags (`TrackTagWriter`; fakes in tests).
 protocol TagWriting: Sendable {
-    func write(_ request: TagWriteRequest) async -> TagWriteOutcome
+    /// Write `request`; `captureOriginals` receives the file's own values of
+    /// `request.needOriginals` before anything is written.
+    func write(_ request: TagWriteRequest, captureOriginals: @escaping TagOriginalsCapture) async -> TagWriteOutcome
 }
 
 extension TrackTagWriter: TagWriting {}
@@ -60,8 +62,9 @@ struct TagFlushReport: Equatable, Sendable {
 /// Safety, like every file action: nothing runs while `Write tags to files` is off or the
 /// library folder is unreachable; the folder is checked again before every file and the run
 /// stops when it is gone (the rest waits); a missing file stays queued, is reported and never
-/// blocks the others; rows of deleted tracks are removed first (manual cascade). The write
-/// always takes the track's **current** database values for the stale fields.
+/// blocks the others; rows of deleted tracks are removed first (manual cascade). A file only
+/// ever receives a typed value or its own pre-MLM value (`TagFieldState`, B1) — never a value
+/// read from the database's (import-normalised) tag columns.
 @MainActor
 @Observable
 final class TagWriteQueue {
@@ -213,17 +216,37 @@ final class TagWriteQueue {
         let token = deps.statusBar()?.beginLoading(loadingPhase)
         defer { if let token { deps.statusBar()?.endLoading(token) } }
 
-        var tried: Set<Int64> = []
+        do {
+            try await writeAll(&report, deps: deps, repository: repository, root: root, rootURL: rootURL)
+        } catch {
+            AppLogger.shared.error("Tag writes stopped: \(error)", source: "Tags")
+            report.outcome = .cancelled
+        }
+        if report.written > 0 {
+            AppLogger.shared.info("Wrote tags to \(report.written) files", source: "Tags")
+        }
+        return report
+    }
+
+    private static func writeAll(
+        _ report: inout TagFlushReport,
+        deps: Dependencies,
+        repository: TrackTagRepository,
+        root: String,
+        rootURL: URL
+    ) async throws {
+        var after: Int64?
         while true {
-            guard !Task.isCancelled else { report.outcome = .cancelled; return report }
-            guard let batch = try? await repository.pendingWrites(limit: batchSize, excluding: tried), !batch.isEmpty else { break }
+            guard !Task.isCancelled else { report.outcome = .cancelled; return }
+            let batch = try await repository.pendingWrites(limit: batchSize, afterTrackID: after)
+            guard !batch.isEmpty else { break }
             for pending in batch {
-                tried.insert(pending.trackID)
-                guard !Task.isCancelled else { report.outcome = .cancelled; return report }
+                after = pending.trackID
+                guard !Task.isCancelled else { report.outcome = .cancelled; return }
                 // Turned off meanwhile: stop before the next file.
-                guard await deps.isEnabled() else { report.outcome = .disabled; return report }
+                guard await deps.isEnabled() else { report.outcome = .disabled; return }
                 // Same rule as every file action: stop the moment the folder is gone.
-                guard isReachable(root) else { report.outcome = .rootLost; return report }
+                guard isReachable(root) else { report.outcome = .rootLost; return }
                 guard let track = try? await repository.fetchTracks(ids: [pending.trackID]).first else { continue }
                 guard let organized = track.organizedPath, !organized.isEmpty else {
                     // The track has no file (any more): nothing to write.
@@ -233,21 +256,29 @@ final class TagWriteQueue {
                 let fileURL = (organized as NSString).isAbsolutePath
                     ? URL(fileURLWithPath: organized)
                     : rootURL.appendingPathComponent(organized)
-                let request = TagWriteRequest(
-                    fileURL: fileURL,
-                    libraryRoot: rootURL,
-                    values: TrackTagWriter.values(for: track, fields: pending.fields)
-                )
-                switch await deps.writer.write(request) {
+                let plan = try await Self.plan(pending, repository: repository)
+                guard !plan.targets.isEmpty else {
+                    // Only undone edits MLM never wrote: the file stays as it is.
+                    try await repository.forgetRestoredFields(trackID: pending.trackID, fields: plan.restored)
+                    _ = try await repository.completeWrite(trackID: pending.trackID, revision: pending.revision)
+                    continue
+                }
+                let request = TagWriteRequest(fileURL: fileURL, libraryRoot: rootURL, targets: plan.targets, needOriginals: plan.needOriginals)
+                let trackID = pending.trackID
+                let outcome = await deps.writer.write(request) { originals in
+                    try await repository.recordOriginals(trackID: trackID, values: originals)
+                }
+                switch outcome {
                 case .written, .nothingToWrite:
-                    _ = try? await repository.completeWrite(trackID: pending.trackID, revision: pending.revision)
+                    try await repository.forgetRestoredFields(trackID: pending.trackID, fields: plan.restored)
+                    _ = try await repository.completeWrite(trackID: pending.trackID, revision: pending.revision)
                     report.written += 1
                 case .failed(.libraryFolderUnreachable):
                     report.outcome = .rootLost
-                    return report
+                    return
                 case .failed(.fileMissing):
                     // The folder is there, the file isn't: record it, keep the write waiting.
-                    guard isReachable(root) else { report.outcome = .rootLost; return report }
+                    guard isReachable(root) else { report.outcome = .rootLost; return }
                     try? await repository.recordFailure(trackID: pending.trackID, revision: pending.revision,
                                                         reason: TagWriteFailure.fileMissing.reason, blocked: false)
                     await deps.fileMissing(pending.trackID)
@@ -261,9 +292,36 @@ final class TagWriteQueue {
                 }
             }
         }
-        if report.written > 0 {
-            AppLogger.shared.info("Wrote tags to \(report.written) files", source: "Tags")
+    }
+
+    /// What a pending track's file gets: typed values (capturing the file's originals on the
+    /// first write) and captured originals for undone fields; undone fields MLM never wrote
+    /// are dropped without touching the file.
+    struct Plan: Equatable {
+        var targets: [TrackTagField: TagFileTarget] = [:]
+        var needOriginals: Set<TrackTagField> = []
+        /// Fields back at `.original`: forgotten once the file carries its own value again.
+        var restored: Set<TrackTagField> = []
+    }
+
+    static func plan(_ pending: PendingTagWrite, repository: TrackTagRepository) async throws -> Plan {
+        let states = try await repository.fieldStates(trackID: pending.trackID)
+        var plan = Plan()
+        for field in pending.fields {
+            guard let state = states[field] else { continue }
+            switch state.intent {
+            case .typed(let value):
+                plan.targets[field] = .typed(value)
+                if state.original == nil { plan.needOriginals.insert(field) }
+                // A typed year that is the year of the file's own full date keeps that date.
+                if field == .year, let value, let original = state.original?.value, original.hasPrefix(value + "-") {
+                    plan.targets[field] = .restore(original)
+                }
+            case .original:
+                plan.restored.insert(field)
+                if let original = state.original { plan.targets[field] = .restore(original.value) }
+            }
         }
-        return report
+        return plan
     }
 }

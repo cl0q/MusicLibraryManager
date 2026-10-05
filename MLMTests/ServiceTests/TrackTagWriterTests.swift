@@ -295,29 +295,26 @@ struct TrackTagWriterTests {
 
     // MARK: Values from the database
 
-    @Test func valuesNeverCarryPlaceholdersOrProvenance() {
-        var track = Track(artist: "Skee Mask", album: "unknown album", title: "Glass Circuit", format: "m4a",
-                          originalPath: "https://soundcloud.com/skee/glass-circuit")
-        track.albumArtist = ""
-        track.genre = "  "
-        track.year = 0
-        track.bpm = 128
-        let all = TrackTagWriter.values(for: track, fields: Set(TrackTagField.allCases))
-        #expect(all[.album] == .some(nil), "a placeholder album is written as no album tag")
-        #expect(all[.albumArtist] == .some(nil))
-        #expect(all[.genre] == .some(nil))
-        #expect(all[.year] == .some(nil))
-        #expect(all[.bpm] == .some("128"))
-        #expect(all[.title] == .some("Glass Circuit"))
-        for value in all.values.compactMap({ $0 }) {
-            #expect(!value.lowercased().contains("soundcloud"), "never the source")
-        }
-        track.album = "SoundCloud Likes"
-        #expect(TrackTagWriter.values(for: track, fields: [.album])[.album] == .some(nil))
-        track.album = "Compro"
-        #expect(TrackTagWriter.values(for: track, fields: [.album]) == [.album: "Compro"], "only the stale fields")
-        track.artist = "unknown artist"
-        #expect(TrackTagWriter.values(for: track, fields: [.artist]).isEmpty, "a placeholder artist isn't written")
+    @Test func typedValuesAreWrittenAsTypedAndClearedFieldsAsNoTag() {
+        #expect(TagFileIntent.typedValue(.text("Unknown")) == .typed("Unknown"), "a typed placeholder literal is the user's value")
+        #expect(TagFileIntent.typedValue(.text("SoundCloud")) == .typed("SoundCloud"))
+        #expect(TagFileIntent.typedValue(.text("")) == .typed(nil), "a cleared field is no tag")
+        #expect(TagFileIntent.typedValue(.text(nil)) == .typed(nil))
+        #expect(TagFileIntent.typedValue(.number(2019)) == .typed("2019"))
+        #expect(TagFileIntent.typedValue(.number(nil)) == .typed(nil))
+    }
+
+    @Test func changesSkipEqualValuesAndKeepAFullDateForTheSameYear() {
+        let current: [TrackTagField: String?] = [.year: "2019-05-03", .title: "Same", .album: nil]
+        let keep = TrackTagWriter.changes([.year: .typed("2019"), .title: .typed("Same")], current: current, format: .flac)
+        #expect(keep.isEmpty, "same year keeps the full date; an equal title isn't rewritten")
+        let year = TrackTagWriter.changes([.year: .typed("2020")], current: current, format: .flac)
+        #expect(year.map(\.key) == ["date"] && year.first?.value == "2020")
+        let restore = TrackTagWriter.changes([.year: .restore("2019-05-03")], current: [.year: "2020"], format: .flac)
+        #expect(restore.first?.value == "2019-05-03", "a restore writes the exact original")
+        let cleared = TrackTagWriter.changes([.album: .typed(nil)], current: [.album: "Old"], format: .mp3)
+        #expect(cleared.count == 1 && cleared.first?.value == nil)
+        #expect(TrackTagWriter.changes([.bpm: .typed("128")], current: [:], format: .m4a).isEmpty, "BPM can't go into M4A")
     }
 
     @Test func verifyRejectsAnyDifferenceButTheRequestedTags() {

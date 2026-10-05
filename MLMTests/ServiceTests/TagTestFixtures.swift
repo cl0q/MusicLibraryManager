@@ -140,3 +140,10 @@ struct ScriptedTagToolRunner: TagToolRunner {
         return URL(fileURLWithPath: String(last.dropFirst("file:".count)))
     }
 }
+
+extension TagWriteRequest {
+    /// Typed values for every field in `values` (nil = no tag) — the shape of a plain edit.
+    init(fileURL: URL, libraryRoot: URL, values: [TrackTagField: String?]) {
+        self.init(fileURL: fileURL, libraryRoot: libraryRoot, targets: values.mapValues { TagFileTarget.typed($0) })
+    }
+}
