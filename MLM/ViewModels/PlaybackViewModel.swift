@@ -1076,7 +1076,9 @@ final class PlaybackViewModel {
             guard let entry = fromNext?.entry ?? fromHistory else { return }
             let latest = (await self.environment.freshTracks(entry.track.id.map { [$0] } ?? []))[entry.track.id ?? -1] ?? entry.track
             guard generation == self.generation else { return }
-            switch await self.open(latest, startAt: nil, generation: generation, recordMissing: true, recordHistory: false) {
+            // Return during a preview of this row plays it from the previewed position.
+            let start = self.consumePendingStart(for: latest)
+            switch await self.open(latest, startAt: start, generation: generation, recordMissing: true, recordHistory: false) {
             case .playing:
                 self.restoredStart = nil
                 var history = self.historyEntries

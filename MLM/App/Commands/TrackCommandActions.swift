@@ -6,11 +6,19 @@ import SwiftUI
 /// focused selection in display order — through the existing services.
 @MainActor
 enum TrackCommandActions {
-    /// Play Next: the playable tracks go right after the current one (existing queue lane).
-    static func playNext(_ tracks: [Track], container: DependencyContainer = .shared) {
-        let playable = tracks.filter(\.isLocal)
-        guard !playable.isEmpty, let playback = container.playbackViewModel else { return }
-        playback.insertPlayNext(playable)
+    /// Play Next ⌥↩: the tracks with a file go to the top of Next — one undo step, confirmed
+    /// `Playing next: … · Undo` on every route (Track menu, context menu, selection bar, drops
+    /// on the player; W2-D). `undo`: the window's center (`UndoCenter.main` when nil).
+    static func playNext(_ tracks: [Track], undo: UndoCenter? = nil, container: DependencyContainer = .shared) {
+        guard let playback = container.playbackViewModel else { return }
+        QueueEditCommands.queue(tracks, as: .playNext, playback: playback, undo: undo ?? .main)
+    }
+
+    /// Add to Queue ⌥⇧↩: after the last Play Next item, before the rest of the list that plays
+    /// — one undo step, confirmed `Added to queue: … · Undo` (W2-D).
+    static func addToQueue(_ tracks: [Track], undo: UndoCenter? = nil, container: DependencyContainer = .shared) {
+        guard let playback = container.playbackViewModel else { return }
+        QueueEditCommands.queue(tracks, as: .addToQueue, playback: playback, undo: undo ?? .main)
     }
 
     /// Download / Retry Download: hands the tracks without a file to the download pipeline,

@@ -10,6 +10,7 @@ import SwiftUI
 /// (UC-GLASS-01/08). Space never reaches it (§10 Q1).
 struct PlayerBar: View {
     let viewModel: PlaybackViewModel
+    @Environment(UndoCenter.self) private var undoCenter: UndoCenter?
 
     var body: some View {
         // Narrow windows give way in a fixed order (UC-TB-03): the title / artist column goes
@@ -21,6 +22,11 @@ struct PlayerBar: View {
         .padding(.horizontal, Spacing.m)
         .padding(.vertical, Spacing.xs)
         .frame(minWidth: Self.minimumWidth, idealWidth: 620, maxWidth: 800)
+        // Tracks dropped on the player play next, confirmed with Undo (UC-TB-08, W2-D).
+        .dropDestination(for: QueueRowDrag.self) { items, _ in
+            QueueEditCommands.dropOnPlayer(items, playback: viewModel, undo: undoCenter ?? .main)
+            return !items.isEmpty
+        }
         // No background of its own: the toolbar's system glass is the player's surface
         // (UC-TB-06, UC-GLASS-01/08).
         // The status-bar notes, the Locate File… panel and window-wide Esc live on the window

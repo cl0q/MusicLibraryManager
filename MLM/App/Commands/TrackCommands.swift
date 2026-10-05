@@ -11,6 +11,7 @@ struct TrackCommands: Commands {
     @FocusedValue(\.trailingColumn) private var trailingColumn
     @FocusedValue(\.shellActions) private var shellActions
     @FocusedValue(\.playlistSourceRefresh) private var playlistRefresh
+    @FocusedValue(\.undoCenter) private var undoCenter
 
     var body: some Commands {
         CommandMenu(MenuBarMenu.track.rawValue) {
@@ -38,13 +39,24 @@ struct TrackCommands: Commands {
                           disabledReason: TrackPreviewCommand.disabledReason) {
                 target.preview?()
             }
+            // Both confirm `… · Undo` in the status bar (W2-D); in the Queue panel Play Next moves
+            // its own rows to the top.
             CommandButton(.playNext, enabled: state.canPlayNext) {
                 guard !KeyEquivalentGuard.keyBelongsToText(
                     .textCommand(#selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)))
                 ) else { return }
-                TrackCommandActions.playNext(tracks())
+                if let playNext = target.playNext {
+                    playNext()
+                } else {
+                    TrackCommandActions.playNext(tracks(), undo: undoCenter)
+                }
             }
-            CommandButton(.addToQueue)
+            CommandButton(.addToQueue, enabled: state.canPlayNext) {
+                guard !KeyEquivalentGuard.keyBelongsToText(
+                    .textCommand(#selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)))
+                ) else { return }
+                TrackCommandActions.addToQueue(tracks(), undo: undoCenter)
+            }
 
             Divider()
 

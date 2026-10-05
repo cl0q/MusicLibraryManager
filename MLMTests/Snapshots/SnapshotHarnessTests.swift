@@ -35,7 +35,10 @@ final class SnapshotsTests: XCTestCase {
         // W2-G added TrackList/SelectionBar.swift (deferred: glass) and
         // TrackList/{SelectionBarState,SelectionBarHosting}.swift (non-view).
         // W2-C review added Player/PlaybackWindowSupport.swift (deferred).
-        XCTAssertEqual(paths.count, 107, "Re-audit inventory changes explicitly.")
+        // W2-D replaced Queue/PlaybackQueueView.swift (rendered) by Queue/QueuePanel.swift
+        // (rendered: the unavailable state), Queue/{QueuePanelModel,QueueEditCommands}.swift
+        // (non-view) and Queue/SaveQueueAsPlaylistPopover.swift (deferred).
+        XCTAssertEqual(paths.count, 110, "Re-audit inventory changes explicitly.")
         XCTAssertEqual(Set(SnapshotFixtures.inventory.map(\.path)), paths)
         XCTAssertEqual(SnapshotFixtures.inventory.count, paths.count)
         XCTAssertFalse(SnapshotFixtures.inventory.contains { $0.disposition.isEmpty })
@@ -43,8 +46,8 @@ final class SnapshotsTests: XCTestCase {
         XCTAssertFalse(SnapshotFixtures.fixtures.isEmpty)
         XCTAssertEqual(SnapshotFixtures.fixtures.count, 28)
         XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 24)
-        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 33)
-        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 50)
+        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 35)
+        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 51)
         for fixture in SnapshotFixtures.fixtures where fixture.expectedTableRows != nil {
             if case .swiftUI = fixture.backend {
                 XCTFail("\(fixture.id): table readiness requires the AppKit backend.")

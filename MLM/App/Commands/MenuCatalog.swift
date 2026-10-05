@@ -256,9 +256,10 @@ enum MenuCommand: String, CaseIterable, Sendable {
         // Space is the focused list's key, never this item's (UC-KEY-37, §10 Q1).
         case .preview: Entry(menu: .track, title: "Preview", shortcut: nil, wiring: .app)
         case .playNext: Entry(menu: .track, title: "Play Next", shortcut: MenuShortcut(key: .returnKey, modifiers: .option), wiring: .app)
+        // W2-D: after the last Play Next item, before the rest of the list that plays.
         case .addToQueue:
             Entry(menu: .track, title: "Add to Queue", shortcut: MenuShortcut(key: .returnKey, modifiers: [.option, .shift]),
-                  wiring: .pending(owner: "W2-D", reason: "Adding to the end of the queue isn’t available yet. Play Next adds right after the current track."))
+                  wiring: .app)
         case .addToPlaylist: Entry(menu: .track, title: "Add to Playlist", shortcut: nil, wiring: .app)
         case .addToSyncProfile: Entry(menu: .track, title: "Add to Sync Profile", shortcut: nil, wiring: .app)
         // ⌘I is registered once, by View ▸ Show Info (UC-KEY-12); this is the same command.
