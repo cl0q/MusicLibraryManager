@@ -1195,6 +1195,46 @@ final class DatabaseManager: Sendable {
             """)
         }
 
+        // ──────────────────────────────────────────────────────────────
+        // Migration v43_playback_queue (W2-D, UC-TRAIL-05, DEC-006): the
+        // queue survives quitting — "MLM reopens with this queue, paused."
+        // Registered after v53 (numbers are reserved, not ordered; GRDB runs
+        // in registration order). Kept in the library's own database, so each
+        // library has its own queue.
+        // `playback_queue_entries`: one row per queued item; `lane` is
+        // 'play_next' · 'context' · 'cycle' (Repeat All pass) · 'history';
+        // `position` orders a lane; `entry_id` (UUID) is the entry's own
+        // identity — the same track can be queued twice. No foreign key
+        // (foreign keys stay disabled): `PlaybackQueueRepository` removes the
+        // entries of deleted tracks and cleans up orphans on load.
+        // `playback_queue_state`: one row (id = 1) — the playing entry, its
+        // position in seconds, the context's origin (JSON), saved_at.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v43_playback_queue") { db in
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS playback_queue_entries (
+                    lane TEXT NOT NULL,
+                    position INTEGER NOT NULL,
+                    entry_id TEXT NOT NULL,
+                    track_id INTEGER NOT NULL,
+                    PRIMARY KEY (lane, position)
+                )
+            """)
+            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS idx_playback_queue_entries_track
+                ON playback_queue_entries(track_id)
+            """)
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS playback_queue_state (
+                    id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
+                    current_entry_id TEXT,
+                    position REAL NOT NULL DEFAULT 0,
+                    origin TEXT,
+                    saved_at TEXT NOT NULL
+                )
+            """)
+        }
+
         return migrator
     }
 
