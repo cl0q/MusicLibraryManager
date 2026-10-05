@@ -44,9 +44,9 @@ protocol PreviewAudioPort: AnyObject {
 final class PreviewController {
     /// How long the selection must rest before the preview switches rows (arrow-key repeat
     /// must not thrash the audio engine).
-    static let settleDelay: Duration = .milliseconds(150)
+    nonisolated static let settleDelay: Duration = .milliseconds(150)
     /// ← / → while previewing (DEC-047).
-    static let seekStep: TimeInterval = 5
+    nonisolated static let seekStep: TimeInterval = 5
 
     private(set) var machine = PreviewMachine()
     /// Where the running preview started (its hot spot).

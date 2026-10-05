@@ -234,12 +234,14 @@ final class RemoteCommandService {
                 trackId: trackId,
                 repository: repository
             )
-            await MainActor.run {
-                // Discard stale results if the track changed while fetching.
-                guard let self, self.artworkTrackId == trackId else { return }
-                self.applyArtwork(image, forTrackId: trackId)
-            }
+            await self?.applyLoadedArtwork(image, forTrackId: trackId)
         }
+    }
+
+    /// Discard stale results if the track changed while fetching.
+    private func applyLoadedArtwork(_ image: NSImage?, forTrackId trackId: Int64) {
+        guard artworkTrackId == trackId else { return }
+        applyArtwork(image, forTrackId: trackId)
     }
 
     /// Resolve the artwork `NSImage` for a track, checking the in-memory
