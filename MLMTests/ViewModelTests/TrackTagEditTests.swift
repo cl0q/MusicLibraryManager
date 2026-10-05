@@ -48,6 +48,8 @@ struct TrackTagEditTests {
 
     private func makeEnv(rootExists: Bool = true, writer: (any TagWriting)? = nil) throws -> Env {
         let db = try DatabaseManager.inMemory()
+        // Writing is off unless turned on (fails closed); these tests are about writing.
+        try db.write { try $0.execute(sql: "INSERT INTO app_config (key, value) VALUES ('write_tags_to_files', '1')") }
         let repository = TrackTagRepository(database: db)
         let config = ConfigRepository(database: db)
         let manager = UndoManager()
@@ -180,6 +182,22 @@ struct TrackTagEditTests {
         try await env.repository.markStale(trackIDs: ids, fields: [.genre])
         #expect(await env.queue.flushNow().outcome == .disabled)
         #expect(env.writer.requests.isEmpty)
+    }
+
+    @Test func turningTheSettingOffStopsARunningFlush() async throws {
+        let env = try makeEnv()
+        defer { TagTestFixtures.remove(env.root.deletingLastPathComponent()) }
+        let ids = try TrackTagRepositoryTests.seed(env.db, count: 4)
+        env.reachable.value = false
+        try await env.edit.perform(.text("Dub"), field: .genre, trackIDs: ids)
+        let db = env.db
+        env.writer.onWrite = { _ in
+            try? db.write { try $0.execute(sql: "UPDATE app_config SET value = '0' WHERE key = 'write_tags_to_files'") }
+        }
+        let report = await env.queue.flushNow()
+        #expect(report.outcome == .disabled)
+        #expect(env.writer.requests.count == 1, "nothing after it was turned off")
+        #expect(try await env.repository.pendingCount() == 3)
     }
 
     @Test func unsupportedFilesAreSaidOnce() async throws {

@@ -220,6 +220,8 @@ final class TagWriteQueue {
             for pending in batch {
                 tried.insert(pending.trackID)
                 guard !Task.isCancelled else { report.outcome = .cancelled; return report }
+                // Turned off meanwhile: stop before the next file.
+                guard await deps.isEnabled() else { report.outcome = .disabled; return report }
                 // Same rule as every file action: stop the moment the folder is gone.
                 guard isReachable(root) else { report.outcome = .rootLost; return report }
                 guard let track = try? await repository.fetchTracks(ids: [pending.trackID]).first else { continue }

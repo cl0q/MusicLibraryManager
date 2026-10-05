@@ -332,18 +332,25 @@ final class TrackTagRepository: Sendable {
 
 // MARK: - Setting: Write tags to files
 
-/// Settings ▸ Library ▸ `Write tags to files` (THOUGHTS §10 Q7: on by default). Stored per
-/// library in its database (`app_config`), so each library file carries its own choice.
+/// Settings ▸ Library ▸ `Write tags to files`. Stored per library in its database
+/// (`app_config`). **Fails closed:** only an explicit stored `"1"` means on; absent, any other
+/// value, an unreadable config or no library open means off (W2-E review: off until the
+/// owner decides the default, B3-PLAN §5 question 6).
 enum TagWriteSetting {
-    /// `app_config` key; `"0"` = off, anything else or absent = on.
+    /// `app_config` key; `"1"` = on, anything else or absent = off.
     static let key = "write_tags_to_files"
+    static let onValue = "1"
 
     static func isEnabled(_ config: ConfigRepository?) async -> Bool {
-        guard let config, let value = try? await config.get(key: key) else { return true }
-        return value != "0"
+        guard let config else { return false }
+        do {
+            return try await config.get(key: key) == onValue
+        } catch {
+            return false
+        }
     }
 
     static func setEnabled(_ enabled: Bool, config: ConfigRepository) async throws {
-        try await config.set(key: key, value: enabled ? "1" : "0")
+        try await config.set(key: key, value: enabled ? onValue : "0")
     }
 }

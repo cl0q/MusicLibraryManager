@@ -190,15 +190,21 @@ struct TrackTagRepositoryTests {
         #expect(try await db.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM pending_tag_writes") } == 2)
     }
 
-    @Test func settingDefaultsToOnAndIsStoredPerLibrary() async throws {
+    @Test func settingFailsClosedAndIsStoredPerLibrary() async throws {
         let db = try DatabaseManager.inMemory()
         let config = ConfigRepository(database: db)
-        #expect(await TagWriteSetting.isEnabled(config))
-        try await TagWriteSetting.setEnabled(false, config: config)
-        #expect(await TagWriteSetting.isEnabled(config) == false)
-        #expect(try await config.get(key: "write_tags_to_files") == "0")
+        #expect(await TagWriteSetting.isEnabled(config) == false, "absent = off until explicitly turned on")
+        #expect(await TagWriteSetting.isEnabled(nil) == false, "no library = off")
+        try await config.set(key: "write_tags_to_files", value: "yes")
+        #expect(await TagWriteSetting.isEnabled(config) == false, "only an explicit \"1\" is on")
         try await TagWriteSetting.setEnabled(true, config: config)
         #expect(await TagWriteSetting.isEnabled(config))
+        #expect(try await config.get(key: "write_tags_to_files") == "1")
+        try await TagWriteSetting.setEnabled(false, config: config)
+        #expect(await TagWriteSetting.isEnabled(config) == false)
+        // An unreadable config fails closed too.
+        try await db.write { try $0.execute(sql: "DROP TABLE app_config") }
+        #expect(await TagWriteSetting.isEnabled(config) == false)
     }
 
     // MARK: Fields
