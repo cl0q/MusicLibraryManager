@@ -281,13 +281,12 @@ enum SnapshotFixtures {
             expectedTableRows: 3,
             makeView: { store in
                 let allTracks = try store.tracks()
-                let localTracks = allTracks.filter(\.isLocal)
+                // All Tracks in its `Local` scope (W2-B: the scope bar replaced the tabs).
                 let model = LibraryViewModel(
                     trackRepository: try require(store.container.trackRepository, named: "track repository"),
                     configRepository: try require(store.container.configRepository, named: "config repository"),
-                    preloadedTracks: SnapshotFixtureData.persisted(localTracks),
-                    localCount: allTracks.filter(\.isLocal).count,
-                    remoteCount: allTracks.filter(\.isRemote).count
+                    preloadedTracks: SnapshotFixtureData.persisted(allTracks),
+                    scope: .local
                 )
                 return AnyView(LibraryView(initialViewModel: model))
             }

@@ -1,10 +1,11 @@
 import SwiftUI
 
-// MARK: Accessibility labels for shotty UI automation (snake_case literals)
-
-/// All Tracks — header with the Local/Remote picker (until W2-B's scope bar), Shuffle and Scan
-/// Library Folder, and the shared track table (`TrackListTable`). Hosted in the shell's
-/// content scaffold, which shows the drive banner; rows refresh in place.
+/// All Tracks (V-LIB, THOUGHTS §7.2): one table of every track — a pure table, no header
+/// buttons (DEC-048). The availability scope bar above it (`AllTracksScopeBar`, in the
+/// scaffold's scope-bar slot) and the toolbar's in-place filter decide the rows; Play /
+/// Shuffle All Tracks live in the Playback menu, Scan Library Folder on ⌘R and in the Library
+/// menu. Hosted in the shell's content scaffold, which shows the drive banner; rows refresh in
+/// place.
 struct LibraryView: View {
     @Environment(\.container) private var container
     @Environment(ShellActions.self) private var shell: ShellActions?
@@ -42,6 +43,9 @@ struct LibraryView: View {
         .onReceive(NotificationCenter.default.publisher(for: .libraryDidImport)) { _ in
             Task { await viewModel?.refresh() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .libraryFilesDidChange)) { _ in
+            Task { await viewModel?.refresh() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .libraryRootDidChange)) { _ in
             Task { await viewModel?.refresh() }
         }
@@ -64,14 +68,14 @@ struct LibraryView: View {
     // MARK: - Content
 
     private func libraryContent(_ viewModel: LibraryViewModel) -> some View {
-        VStack(spacing: 0) {
-            libraryHeader(viewModel)
-            Divider()
-            TrackListTable(
-                model: viewModel.list,
-                configuration: .allTracks(activate: onTrackDoubleClick, totals: viewModel.totals)
-            ) {
-                emptyState(viewModel)
+        TrackListTable(model: viewModel.list, configuration: configuration(viewModel)) {
+            emptyState(viewModel)
+        }
+        .overlay {
+            if !viewModel.isLoaded, viewModel.errorMessage != nil {
+                LibraryLoadErrorView(details: viewModel.errorMessage ?? "") {
+                    Task { await viewModel.refresh() }
+                }
             }
         }
         .onChange(of: container.searchCoordinator.query) { _, q in
@@ -80,11 +84,21 @@ struct LibraryView: View {
         }
     }
 
+    /// The shared table in its All Tracks context: totals of the scope and filter from SQL
+    /// (status bar), the failure reason as the second line only in `Download failed`
+    /// (UC-TABLE-13).
+    private func configuration(_ viewModel: LibraryViewModel) -> TrackListConfiguration {
+        var configuration = TrackListConfiguration.allTracks(activate: onTrackDoubleClick, totals: viewModel.totals)
+        configuration.showsFailureDetail = viewModel.scope == .downloadFailed
+        return configuration
+    }
+
+    /// UC §18: empty library → what fills it; filtered → the system search variant with
+    /// `Clear Filters`; an empty scope → what that scope means. The scope bar stays above.
     @ViewBuilder
     private func emptyState(_ viewModel: LibraryViewModel) -> some View {
-        if !viewModel.searchQuery.isEmpty {
-            ContentUnavailableView.search(text: viewModel.searchQuery)
-        } else if viewModel.selectedTab == .local {
+        let query = viewModel.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        if viewModel.isLibraryEmpty {
             ContentUnavailableView {
                 Label("No tracks yet", systemImage: "music.note")
             } description: {
@@ -93,55 +107,130 @@ struct LibraryView: View {
                 Button("Import Files or Folder…") { shell?.chooseImportFolder() }
                 Button("Import Playlist from Source…") { shell?.showSources() }
             }
-        } else {
-            ContentUnavailableView("Every track is downloaded", systemImage: "checkmark.circle")
+        } else if !query.isEmpty {
+            ContentUnavailableView {
+                Label("No Results for “\(query)”", systemImage: "magnifyingglass")
+            } description: {
+                Text("Check the spelling or try a new search.")
+            } actions: {
+                Button("Clear Filters") { clearFilters() }
+            }
+        } else if let empty = AllTracksScopeEmptyState(scope: viewModel.scope) {
+            ContentUnavailableView {
+                Label(empty.title, systemImage: empty.systemImage)
+            } actions: {
+                Button("Show All") { viewModel.scope = .all }
+            }
         }
     }
 
-    /// Content header: the Local/Remote segment control, then the view's own actions —
-    /// `Shuffle` and `Scan Library Folder` ⌘R (UC-TB-02, DEC-048). Counts come from SQL.
-    private func libraryHeader(_ viewModel: LibraryViewModel) -> some View {
-        HStack(spacing: Spacing.m) {
-            Picker("Source", selection: Bindable(viewModel).selectedTab) {
-                ForEach(LibraryTab.allCases) { tab in
-                    Text("\(tab.label) (\(countFor(tab, viewModel: viewModel).formatted(.number)))")
-                        .tag(tab)
+    /// `Clear Filters`: empties the toolbar filter (and its tokens, W2-I); the scope stays.
+    private func clearFilters() {
+        container.searchCoordinator.query = ""
+        viewModel?.searchQuery = ""
+    }
+}
+
+// MARK: - Scope bar
+
+/// The All Tracks scope bar (V-LIB.E02, DEC-011): `All · Local · Not downloaded · Download
+/// failed · File missing`, each with its live count for the current filter. The scope is
+/// remembered per window (UC-SCOPE-05). Lives in the scaffold's scope-bar slot
+/// (`ContentView`'s All Tracks host); hidden while the library has no tracks (the empty state
+/// says what fills it). View ▸ Filter follows it while All Tracks is the visible place.
+struct AllTracksScopeBar: View {
+    @Environment(\.container) private var container
+    @Environment(NavigationModel.self) private var navigation: NavigationModel?
+    @SceneStorage("allTracks.scope") private var storedScope = TrackAvailabilityScope.all.rawValue
+
+    var body: some View {
+        if let viewModel = container.libraryViewModel {
+            Group {
+                if !viewModel.isLibraryEmpty {
+                    ScopeBar(
+                        items: Self.items(counts: viewModel.counts),
+                        selection: Bindable(viewModel).scope,
+                        countNoun: .tracks,
+                        publishesMenu: isVisiblePlace
+                    )
                 }
             }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 280)
-            .labelsHidden()
-            .accessibilityIdentifier("library_source_picker")
-            .accessibilityLabel("library_source_picker")
-
-            Spacer()
-
-            Button {
-                Task {
-                    if let pvm = container.playbackViewModel {
-                        await pvm.playShuffled(viewModel.displayedTracks.filter { $0.availability() == .local })
-                    }
+            .task {
+                // Restore before (or right after) the first load; the load follows the scope.
+                if let stored = TrackAvailabilityScope(rawValue: storedScope), viewModel.scope != stored {
+                    viewModel.scope = stored
                 }
-            } label: {
-                Label("Shuffle", systemImage: "shuffle")
             }
-            .help("Shuffle All Tracks")
-            .disabled(!viewModel.list.hasPlayableRows || LibraryDriveState.current(container).isOffline)
-            .accessibilityIdentifier("library_shuffle_button")
-
-            ScanLibraryFolderButton()
+            .onChange(of: viewModel.scope) { _, scope in
+                storedScope = scope.rawValue
+            }
         }
-        .padding(.horizontal, Spacing.l)
-        .padding(.vertical, Spacing.s)
     }
 
-    private func countFor(_ tab: LibraryTab, viewModel: LibraryViewModel) -> Int {
-        switch tab {
-        case .local: viewModel.localCount
-        case .remote: viewModel.remoteCount
+    /// The five scopes in the order of UC-SCOPE-02, with their counts (`nil` before the first
+    /// load). All five always show, zero included.
+    static func items(counts: TrackAvailabilityCounts?) -> [ScopeBarItem<TrackAvailabilityScope>] {
+        TrackAvailabilityScope.allCases.map { scope in
+            ScopeBarItem(id: scope, title: scope.title, count: counts?.count(for: scope))
+        }
+    }
+
+    /// The kept-alive All Tracks host stays in the window while another place shows.
+    private var isVisiblePlace: Bool {
+        (navigation?.isAllTracksVisible ?? true) && !container.searchCoordinator.isPresented
+    }
+}
+
+/// What an empty scope says (no filter active) — pure, unit-tested. `All` is never empty
+/// here: an empty library has its own view.
+struct AllTracksScopeEmptyState: Equatable {
+    let title: String
+    let systemImage: String
+
+    init?(scope: TrackAvailabilityScope) {
+        switch scope {
+        case .all: return nil
+        case .local: (title, systemImage) = ("No local tracks", "music.note")
+        case .notDownloaded: (title, systemImage) = ("Every track is downloaded", "icloud")
+        case .downloadFailed: (title, systemImage) = ("No tracks with failed downloads", "exclamationmark.arrow.circlepath")
+        case .fileMissing: (title, systemImage) = ("No missing files", "doc.questionmark")
         }
     }
 }
+
+// MARK: - Load error (V-LIB.E21, UC-EMPTY-05)
+
+/// The first load failed: what couldn't be done, the cause, what is safe, `Try Again`,
+/// `Show Logs` and the raw text behind `Details` (UC-COPY-11).
+private struct LibraryLoadErrorView: View {
+    let details: String
+    let retry: () -> Void
+
+    var body: some View {
+        ContentUnavailableView {
+            Label("Can’t load the tracks", systemImage: "exclamationmark.triangle")
+        } description: {
+            Text("The library database didn’t answer. Your music and your library file are not affected.")
+        } actions: {
+            Button("Try Again", action: retry)
+            Button("Show Logs") {
+                UserDefaults.standard.set("Logs", forKey: "activity.selectedTab")
+                UserDefaults.standard.set(true, forKey: ActivityPanelHosting.expandedKey)
+            }
+            DisclosureGroup("Details") {
+                Text(details)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: 360, alignment: .leading)
+            }
+            .frame(maxWidth: 360)
+        }
+        .background(.background)
+    }
+}
+
+// MARK: - File check phase
 
 /// The file check's status-bar phase (UC-STATUS-06): `Checking files…` with the small
 /// spinner after 300 ms while `LibraryAvailabilityMonitor` runs. Lives in All Tracks, which
@@ -174,37 +263,5 @@ private struct AvailabilityCheckStatus: View {
                     token = nil
                 }
             }
-    }
-}
-
-/// `Scan Library Folder` — the shell's scan (`ShellActions.scanLibraryFolder()`), also in the
-/// Library menu and on ⌘R (Track ▸ Refresh from Source, the only ⌘R; UC-KEY-15/39). All Tracks
-/// stays alive while hidden, so the button is enabled only while All Tracks is the visible
-/// place; only this small view reads that, so switching places doesn't re-render the table.
-private struct ScanLibraryFolderButton: View {
-    @Environment(\.container) private var container
-    @Environment(NavigationModel.self) private var navigation: NavigationModel?
-    @Environment(ShellActions.self) private var actions: ShellActions?
-
-    private var isRescanning: Bool { actions?.isScanningLibraryFolder ?? false }
-
-    private var isVisiblePlace: Bool {
-        (navigation?.isAllTracksVisible ?? true) && !container.searchCoordinator.isPresented
-    }
-
-    var body: some View {
-        Button {
-            actions?.scanLibraryFolder()
-        } label: {
-            if isRescanning {
-                ProgressView().controlSize(.small)
-            } else {
-                Label("Scan Library Folder", systemImage: "arrow.clockwise")
-            }
-        }
-        .help("Scan the library folder for changes ⌘R")
-        .disabled(actions == nil || isRescanning || !isVisiblePlace)
-        .accessibilityIdentifier("rescan_button")
-        .accessibilityLabel("rescan_button")
     }
 }

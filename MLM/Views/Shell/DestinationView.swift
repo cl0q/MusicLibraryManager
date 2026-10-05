@@ -216,7 +216,7 @@ struct WindowTitleModifier: ViewModifier {
         switch navigation.selection {
         case .allTracks:
             guard let vm = container.libraryViewModel else { return library }
-            return "\(library) · \(StatusBarText.tracks(vm.localCount + vm.remoteCount))"
+            return "\(library) · \(StatusBarText.tracks(vm.libraryTrackCount))"
         case .allPlaylists:
             return "\(library) · \(StatusBarText.playlists(sidebar.playlists.count))"
         default:

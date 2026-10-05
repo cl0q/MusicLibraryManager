@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// View menu (M-VIEW): the system sidebar and toolbar items (`SidebarCommands`,
-/// `ToolbarCommands`), the trailing column's two modes, the table menus (pending W2-A / W2-B)
-/// and Go to Current Track. Info and Queue are custom toggles of one `.inspector` with two
+/// `ToolbarCommands`), the trailing column's two modes, the table menus (Columns, Sort By —
+/// W2-A; Filter — W2-B) and Go to Current Track. Info and Queue are custom toggles of one `.inspector` with two
 /// modes, so `InspectorCommands` (a second, mode-less toggle with its own key) is not used.
 struct ViewCommands: Commands {
     @FocusedValue(\.trailingColumn) private var trailingColumn
@@ -11,6 +11,7 @@ struct ViewCommands: Commands {
     @FocusedValue(\.toolbarSearch) private var search
     @FocusedValue(\.trackTableViewOptions) private var tableOptions
     @FocusedValue(\.trackSelection) private var focusedSelection
+    @FocusedValue(\.viewScopeMenu) private var scopeMenu
 
     /// The focused table's options — not the kept-alive All Tracks table while another place
     /// shows (the same rule as the Track menu, `TrackSelection.usable`).
@@ -83,7 +84,18 @@ struct ViewCommands: Commands {
                     .disabled(!sortedByColumn)
                 }
             }
-            CommandSubmenu(.filter)
+            // View ▸ Filter lists the visible view's scopes, the current one checked
+            // (UC-SCOPE-03, M-VIEW.N06); published by its `ScopeBar`.
+            CommandSubmenu(.filter, enabled: scopeMenu?.items.isEmpty == false) {
+                if let scopeMenu {
+                    ForEach(scopeMenu.items) { item in
+                        Toggle(item.title, isOn: Binding(
+                            get: { scopeMenu.selectedID == item.id },
+                            set: { if $0 { scopeMenu.select(item.id) } }
+                        ))
+                    }
+                }
+            }
 
             Divider()
 
@@ -110,11 +122,10 @@ struct ViewCommands: Commands {
                 navigation.select(.allTracks)
             }
         }
-        let tab: LibraryTab = track.isLocal ? .local : .remote
-        if library.selectedTab != tab { library.selectedTab = tab }
+        // The scope stays when it lists the track, else All (W2-B); a filter that hides it goes.
+        library.reveal(trackID: id, availability: track.availability())
         if !library.displayedTracks.contains(where: { $0.id == id }) {
             search?.reset()
         }
-        library.selectedTrackIDs = [id]
     }
 }
