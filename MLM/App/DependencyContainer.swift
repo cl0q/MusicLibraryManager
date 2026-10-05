@@ -256,6 +256,11 @@ final class DependencyContainer {
         // main actor (MPRemoteCommandCenter registration and CoreAudio
         // listener installation both touch UI-adjacent state).
         if let playbackVM = self.playbackViewModel {
+            // The library's saved queue comes back paused, then keeps being saved (W2-D).
+            if let trackRepo = self.trackRepository {
+                await PlaybackQueuePersister.startLive(playback: playbackVM, store: PlaybackQueueRepository(database: dbPool),
+                                                       trackRepository: trackRepo)
+            }
             await MainActor.run {
                 let remote = RemoteCommandService()
                 remote.start(viewModel: playbackVM)

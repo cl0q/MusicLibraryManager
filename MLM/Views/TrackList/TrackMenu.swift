@@ -7,7 +7,8 @@ import SwiftUI
 struct TrackMenu: View {
     let model: TrackMenuModel
     let rows: [TrackRow]
-    let actions: TrackListActions
+    /// A track table's actions (`TrackListActions`) or the Queue panel's (W2-D).
+    let actions: any TrackMenuActions
     /// Playlists offered in Add to Playlist ▸ (the current one already left out, UC-CM-08).
     let playlists: [Playlist]
     let syncProfiles: [SyncProfile]
@@ -58,6 +59,20 @@ struct TrackMenu: View {
             } else {
                 item
             }
+        case .addToQueue:
+            let item = Button("Add to Queue") { actions.addToQueue(rows) }
+            if showsKeyEquivalents {
+                item
+                    .keyboardShortcut(.return, modifiers: [.option, .shift])
+            } else {
+                item
+            }
+        case .moveToEndOfQueue:
+            Button("Move to End of Queue") { actions.moveToEndOfQueue(rows) }
+        case .showInContext(let name):
+            Button("Show in \(name)") { actions.showInContext(rows) }
+        case .clearHistory:
+            Button("Clear History") { actions.clearHistory() }
         case .addToPlaylist:
             Menu("Add to Playlist") {
                 AddToPlaylistMenuItems(
@@ -167,6 +182,42 @@ struct AddToPlaylistMenuItems: View {
         }
     }
 }
+
+/// What the track menu's items do — a track table's `TrackListActions`, or the Queue panel's
+/// actions (W2-D), which act on queue entries rather than on rows of a list.
+@MainActor
+protocol TrackMenuActions {
+    func play(_ rows: [TrackRow])
+    func preview(_ rows: [TrackRow]?)
+    func playNext(_ rows: [TrackRow])
+    func addToQueue(_ rows: [TrackRow])
+    func addToPlaylist(_ playlistID: Int64, _ rows: [TrackRow])
+    func newPlaylist(_ rows: [TrackRow])
+    func addToSyncProfile(_ profile: SyncProfile, _ rows: [TrackRow])
+    func newSyncProfile(_ rows: [TrackRow])
+    func getInfo(_ rows: [TrackRow])
+    func download(_ rows: [TrackRow])
+    func downloadAgain(_ rows: [TrackRow])
+    func locateFile(_ rows: [TrackRow])
+    func showInFinder(_ rows: [TrackRow])
+    func copyTitleAndArtist(_ rows: [TrackRow])
+    func copyFilePaths(_ rows: [TrackRow])
+    func copyLinks(_ rows: [TrackRow])
+    func removeFromContainer(_ rows: [TrackRow])
+    func removeFromLibrary(_ rows: [TrackRow])
+    // The Queue panel's own items (CM-QUEUE); a track table never offers them.
+    func moveToEndOfQueue(_ rows: [TrackRow])
+    func showInContext(_ rows: [TrackRow])
+    func clearHistory()
+}
+
+extension TrackMenuActions {
+    func moveToEndOfQueue(_ rows: [TrackRow]) {}
+    func showInContext(_ rows: [TrackRow]) {}
+    func clearHistory() {}
+}
+
+extension TrackListActions: TrackMenuActions {}
 
 extension TrackMenu {
     /// Help of file actions (other than playback) disabled while the disk is away:

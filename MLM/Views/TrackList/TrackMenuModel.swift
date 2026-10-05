@@ -6,8 +6,8 @@ import Foundation
 /// rules live in `TrackMenuModel.make` and are unit-tested.
 ///
 /// Items whose feature arrives with a later package are **absent** (context menus never show
-/// dead or placeholder items, UC-CM-01): Add to Queue (W2-D), Go to Album (W4-2), Find Similar
-/// (W3-DISC), Share… (W5-2), Remove from Queue (W2-D).
+/// dead or placeholder items, UC-CM-01): Go to Album (W4-2), Find Similar (W3-DISC), Share…
+/// (W5-2). The Queue's own rows (CM-QUEUE, W2-D) use `TrackMenuContext.queueRows`.
 enum TrackMenuItem: Hashable, Sendable {
     /// Disabled first line: `3 tracks` (UC-CM-04).
     case countHeader(Int)
@@ -18,6 +18,10 @@ enum TrackMenuItem: Hashable, Sendable {
     /// Preview (Space): one local track; disabled while its disk is away (UC-CM-04/05, W2-C).
     case preview(enabled: Bool)
     case playNext
+    /// Add to Queue ⌥⇧↩ (W2-D): the end of the Play Next items.
+    case addToQueue
+    /// Queue rows in Next: Move to End of Queue (CM-QUEUE).
+    case moveToEndOfQueue
     case addToPlaylist
     case addToSyncProfile
     case getInfo
@@ -35,6 +39,19 @@ enum TrackMenuItem: Hashable, Sendable {
     case removeFromContainer(title: String)
     /// `Remove from Library…` (irreversible, destructive, last, ⌘⌫).
     case removeFromLibrary(enabled: Bool)
+    /// A Next row of the context lane: `Show in “‹context›”` (CM-QUEUE) — the list it plays from.
+    case showInContext(name: String)
+    /// History / Now playing rows: `Clear History` (CM-QUEUE.N01).
+    case clearHistory
+}
+
+/// Which rows of the Queue panel a menu is for (CM-QUEUE, CM-QUEUE.N01).
+enum QueueMenuRows: Equatable, Sendable {
+    /// Rows of Next. `contextName` is set for one row of the context lane whose list still
+    /// exists (`Show in “‹context›”`).
+    case next(contextName: String?)
+    /// History rows and / or the Now playing row; `canPlay` is false for the playing row alone.
+    case history(canPlay: Bool)
 }
 
 /// The subject of a track menu: the selected rows (or the right-clicked row) in display order.
@@ -55,6 +72,8 @@ struct TrackMenuContext: Equatable, Sendable {
     var canPreview = true
     /// Locate File… can re-point a File missing / Download failed row (W2-C).
     var canLocate = true
+    /// The rows are the Queue panel's (W2-D): its own safe menu (CM-QUEUE).
+    var queueRows: QueueMenuRows? = nil
 
     /// `Remove from Playlist` inside one playlist (UC-CM-08), `Remove from “‹profile›”`.
     var removeTitle: String {
@@ -126,9 +145,14 @@ struct TrackMenuModel: Equatable, Sendable {
             }
         }
 
-        // 2 Queue — Play Next queues files that can play now.
+        if let queueRows = context.queueRows {
+            return makeQueueMenu(queueRows, rows: rows, header: header, reachableLocal: reachableLocal,
+                                 unreachable: unreachable, downloadable: downloadable, hasLink: hasLink, context: context)
+        }
+
+        // 2 Queue — Play Next and Add to Queue queue files that can play now.
         var queue: [TrackMenuItem] = []
-        if reachableLocal > 0 { queue.append(.playNext) }
+        if reachableLocal > 0 { queue += [.playNext, .addToQueue] }
 
         // 3 Add to
         var addTo: [TrackMenuItem] = [.addToPlaylist]
@@ -184,6 +208,62 @@ struct TrackMenuModel: Equatable, Sendable {
             remove.append(.removeFromLibrary(enabled: unreachable == 0))
         }
 
+        let sections = [header, primary, queue, addTo, info, fix, locate, remove].filter { !$0.isEmpty }
+        return TrackMenuModel(sections: sections)
+    }
+
+    /// The Queue panel's menu (CM-QUEUE / CM-QUEUE.N01): the same group order, a safe Remove
+    /// group — `Remove from Queue` for Next rows, `Clear History` for History rows — and never
+    /// `Remove from Library…` (UC-CM-07). Add to Queue is left out for rows already in Next.
+    private static func makeQueueMenu(
+        _ queueRows: QueueMenuRows, rows: [TrackRow], header: [TrackMenuItem], reachableLocal: Int,
+        unreachable: Int, downloadable: Int, hasLink: Bool, context: TrackMenuContext
+    ) -> TrackMenuModel {
+        let single = rows.count == 1
+        var primary: [TrackMenuItem] = []
+        var queue: [TrackMenuItem] = []
+        var info: [TrackMenuItem] = [.getInfo]
+        var fix: [TrackMenuItem] = []
+        var remove: [TrackMenuItem] = []
+        switch queueRows {
+        case .next(let contextName):
+            // Play ↩ (jump to it) · Preview — Play Next · Move to End of Queue.
+            if single {
+                primary.append(.play(enabled: unreachable == 0))
+                if context.canPreview, unreachable > 0 || rows[0].availability == .local {
+                    primary.append(.preview(enabled: unreachable == 0))
+                }
+            }
+            queue = [.playNext, .moveToEndOfQueue]
+            if single, let artist = TrackMetadataPresentation.artistDisplay(rows[0].track.artist) {
+                info.append(.goToArtist(artist))
+            }
+            if single, let contextName { info.append(.showInContext(name: contextName)) }
+            if downloadable > 0 {
+                let title: String
+                if single {
+                    if case .failed = rows[0].availability { title = "Retry Download" } else { title = "Download" }
+                } else {
+                    title = downloadable == 1
+                        ? "Download 1 Not-Downloaded Track"
+                        : "Download \(downloadable.formatted(.number)) Not-Downloaded Tracks"
+                }
+                fix.append(.download(title: title))
+            }
+            remove = [.removeFromContainer(title: "Remove from Queue")]
+        case .history(let canPlay):
+            if single, canPlay { primary.append(.play(enabled: unreachable == 0)) }
+            if reachableLocal > 0 { queue = [.playNext, .addToQueue] }
+            remove = [.clearHistory]
+        }
+        var locate: [TrackMenuItem] = []
+        if reachableLocal > 0 {
+            locate.append(.showInFinder(enabled: true))
+        } else if unreachable > 0 {
+            locate.append(.showInFinder(enabled: false))
+        }
+        locate.append(.copy(filePath: reachableLocal > 0, link: hasLink))
+        let addTo: [TrackMenuItem] = context.canAddToSyncProfile ? [.addToPlaylist, .addToSyncProfile] : [.addToPlaylist]
         let sections = [header, primary, queue, addTo, info, fix, locate, remove].filter { !$0.isEmpty }
         return TrackMenuModel(sections: sections)
     }

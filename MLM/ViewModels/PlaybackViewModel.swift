@@ -201,10 +201,19 @@ final class PlaybackViewModel {
 
     @ObservationIgnored private var queue = PlaybackQueue()
 
-    /// The tracks the queue passed, most recent last: the ones that played and the ones it
-    /// passed over because they couldn't play (they keep their state word). Repeat One adds no
-    /// entries. Capped by `playback_history_size`.
-    private(set) var history: [Track] = []
+    /// The entries the queue passed, most recent last: the ones that played (the last one is
+    /// the playing track's, `currentEntryID`) and the ones it passed over because they couldn't
+    /// play (they keep their state word). Repeat One adds no entries. Capped by
+    /// `playback_history_size`. Each entry has its own identity (W2-D): a track played twice is
+    /// two rows.
+    private(set) var historyEntries: [QueueEntry] = []
+
+    /// The tracks of `historyEntries`, most recent last.
+    var history: [Track] { historyEntries.map(\.track) }
+
+    /// The History entry of the playing track (the Queue panel's `Now playing` row); `nil`
+    /// while nothing is loaded or the loaded file has no library track.
+    private(set) var currentEntryID: UUID?
 
     /// Upcoming tracks: Play Next items first, then the context.
     var upcoming: [Track] { queueSnapshot.upcoming }
@@ -237,8 +246,24 @@ final class PlaybackViewModel {
     @ObservationIgnored private var pendingStart: (trackID: Int64, position: TimeInterval)?
     /// The file macOS couldn't decode last (`Show in Finder` in its note).
     @ObservationIgnored private var lastUnreadableURL: URL?
-    /// Advances, Previous and queue jumps run one after another.
+    /// Advances, Previous, queue jumps and queue edits run one after another.
     @ObservationIgnored private var transportChain: Task<Void, Never>?
+    /// Work queued on (or running in) the transport chain; a queue edit runs at once only when
+    /// it is zero (W2-D).
+    @ObservationIgnored private var transportDepth = 0
+    /// A restored track that couldn't be loaded at launch starts here when it plays (W2-D).
+    @ObservationIgnored private var restoredStart: (trackID: Int64, position: TimeInterval)?
+    /// Saves the queue across relaunches (W2-D, `v43_playback_queue`); attached after restore.
+    @ObservationIgnored private(set) var queuePersister: PlaybackQueuePersister?
+    /// Called (on the main thread) whenever the queue, History, the playing track or the
+    /// playback state changed — the persister's trigger.
+    @ObservationIgnored private var onQueueStateChange: (() -> Void)?
+    /// Called on the position timer's ticks (the persister saves the position at most every
+    /// few seconds).
+    @ObservationIgnored private var onPositionTick: (() -> Void)?
+    /// A refresh of the queued tracks' rows is running / another one was asked for meanwhile.
+    @ObservationIgnored private var isRefreshingQueuedTracks = false
+    @ObservationIgnored private var queuedTracksRefreshPending = false
     /// Taken by every user transport action and preview start (S1).
     @ObservationIgnored private(set) var generation = 0
     /// The main track ended and its advance hasn't run yet (a preview may defer it).
@@ -283,6 +308,28 @@ final class PlaybackViewModel {
                 MainActor.assumeIsolated { self?.reevaluateCantPlay(diskReturned: diskReturned) }
             })
         }
+        // Queue rows refresh in place when their tracks change; removed tracks leave the queue
+        // (W2-D). Tests call `refreshQueuedTracks()` / `removeTracksFromQueue(_:)` themselves.
+        if self.environment.observesNotifications {
+            for name in [Notification.Name.trackAvailabilityDidChange, .trackMetadataDidChange] {
+                observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.refreshQueuedTracksSoon() }
+                })
+            }
+            observers.append(NotificationCenter.default.addObserver(forName: .libraryDidDeleteTracks, object: nil, queue: .main) { [weak self] note in
+                let ids = Self.deletedTrackIDs(note.userInfo)
+                MainActor.assumeIsolated {
+                    guard let self, !ids.isEmpty else { return }
+                    Task { await self.removeTracksFromQueue(ids) }
+                }
+            })
+        }
+    }
+
+    /// The ids of `.libraryDidDeleteTracks` (`removedIds`, or `deletedIDs` as documented).
+    static func deletedTrackIDs(_ userInfo: [AnyHashable: Any]?) -> Set<Int64> {
+        let raw = (userInfo?["removedIds"] as? [Int64]) ?? (userInfo?["deletedIDs"] as? [Int64]) ?? []
+        return Set(raw)
     }
 
     deinit {
@@ -317,11 +364,13 @@ final class PlaybackViewModel {
         let generation = takeGeneration()
         let start = consumePendingStart(for: track)
         let origin = consumePendingOrigin(for: track)
-        let proposed = QueueAdvance.start(track, in: rows, queue: queue, cap: contextCap())
         switch await open(track, startAt: start, generation: generation, recordMissing: true) {
         case .playing:
-            setQueue(proposed)
+            // Built from the queue as it is now: a queue edit made while the file was being
+            // found stays (W2-D); only the context is replaced.
+            setQueue(QueueAdvance.start(track, in: rows, queue: queue, cap: contextCap()))
             playingOrigin = origin
+            restoredStart = nil
         case .superseded:
             break
         case .unavailable(let reason):
@@ -433,7 +482,11 @@ final class PlaybackViewModel {
         duration = audioPlayer.duration
         currentPosition = audioPlayer.currentPosition
         playbackState = .playing
-        if recordHistory, let track { appendHistory([track]) }
+        if recordHistory, let track {
+            currentEntryID = appendHistory([track]).last
+        } else if track == nil {
+            currentEntryID = nil
+        }
         postTrackDidChange()
         postStateDidChange()
         startPositionTimer()
@@ -477,18 +530,53 @@ final class PlaybackViewModel {
         return environment.volumeName()
     }
 
-    /// Add to history (capped).
-    private func appendHistory(_ tracks: [Track]) {
-        history.append(contentsOf: tracks)
+    /// Add to history as new entries (capped). Returns the new entries' ids.
+    @discardableResult
+    private func appendHistory(_ tracks: [Track]) -> [UUID] {
+        let entries = tracks.map { QueueEntry(track: $0) }
+        appendHistoryEntries(entries)
+        return entries.map(\.id)
+    }
+
+    /// Add entries that keep their identity (capped).
+    private func appendHistoryEntries(_ entries: [QueueEntry]) {
+        guard !entries.isEmpty else { return }
+        var updated = historyEntries + entries
         let historyCap = historySize()
-        if history.count > historyCap {
-            history.removeFirst(history.count - historyCap)
+        if updated.count > historyCap {
+            updated.removeFirst(updated.count - historyCap)
         }
+        setHistoryEntries(updated)
+    }
+
+    /// The one place History changes (the Queue panel and persistence follow it).
+    private func setHistoryEntries(_ entries: [QueueEntry]) {
+        guard entries != historyEntries else { return }
+        historyEntries = entries
+        onQueueStateChange?()
+    }
+
+    /// History entries for `tracks` — a subsequence of the current entries, as `QueueAdvance`
+    /// returns History as tracks (Previous drops items from its end). Identities are kept.
+    private func historyEntries(matching tracks: [Track], in entries: [QueueEntry]) -> [QueueEntry] {
+        var result: [QueueEntry] = []
+        var remaining = tracks[...]
+        for entry in entries {
+            guard let next = remaining.first else { break }
+            let same = next.id != nil ? entry.track.id == next.id : entry.track == next
+            if same {
+                result.append(entry)
+                remaining = remaining.dropFirst()
+            }
+        }
+        // Anything not matched (never expected) becomes a new entry.
+        return result + remaining.map { QueueEntry(track: $0) }
     }
 
     /// The output failed after loading: mirror the stopped player.
     private func clearStoppedPlaybackState() {
         currentTrack = nil
+        currentEntryID = nil
         currentURL = nil
         playbackState = .stopped
         currentPosition = 0
@@ -500,7 +588,10 @@ final class PlaybackViewModel {
 
     private func setQueue(_ newQueue: PlaybackQueue) {
         queue = newQueue
-        if queueSnapshot != newQueue { queueSnapshot = newQueue }
+        if queueSnapshot != newQueue {
+            queueSnapshot = newQueue
+            onQueueStateChange?()
+        }
     }
 
     // MARK: - Transport
@@ -614,6 +705,7 @@ final class PlaybackViewModel {
         playbackState = .stopped
         currentPosition = 0
         currentTrack = nil
+        currentEntryID = nil
         currentURL = nil
         cantPlay = nil
         endedAwaitingAdvance = false
@@ -705,14 +797,17 @@ final class PlaybackViewModel {
         }
     }
 
-    /// Advances, Previous and queue jumps run one after another.
+    /// Advances, Previous, queue jumps and (while one of those runs) queue edits run one after
+    /// another.
     @MainActor
     @discardableResult
     private func enqueueTransport(_ work: @escaping @MainActor () async -> Void) -> Task<Void, Never> {
         let previous = transportChain
-        let task = Task { @MainActor in
+        transportDepth += 1
+        let task = Task { @MainActor [weak self] in
             await previous?.value
             await work()
+            self?.transportDepth -= 1
         }
         transportChain = task
         return task
@@ -739,10 +834,15 @@ final class PlaybackViewModel {
         let leaving = currentTrack
         var position = audioPlayer.currentPosition
         var working = history
+        let entriesAtStart = historyEntries
         var passed: [SkippedTrack] = []
         let verdict = await playabilityVerdict(for: working)
         guard generation == self.generation else { return }
         var failedAtOpen: [Int64: PlaybackPlayability] = [:]
+        // `QueueAdvance` returns History as tracks; the entries keep their identities.
+        let entries: ([Track]) -> [QueueEntry] = { [unowned self] tracks in
+            self.historyEntries(matching: tracks, in: entriesAtStart)
+        }
         while true {
             let decision = QueueAdvance.previous(history: working, current: leaving, position: position) { track in
                 if let id = track.id, let failed = failedAtOpen[id] { return failed }
@@ -750,20 +850,21 @@ final class PlaybackViewModel {
             }
             switch decision {
             case .restartCurrent(let skipped):
-                if !passed.isEmpty { history = working }
+                if !passed.isEmpty { setHistoryEntries(entries(working)) }
                 restartCurrent()
                 noteSkipped(passed + skipped)
                 return
             case .waitingForDrive(let track):
-                if !passed.isEmpty { history = working }
+                if !passed.isEmpty { setHistoryEntries(entries(working)) }
                 notify(PlaybackWords.cantPlayDriveMessage(volumeName(for: track)), action: nil)
                 return
             case .play(let previous, let proposedHistory, let skipped):
                 switch await open(previous, startAt: nil, generation: generation, recordMissing: true, recordHistory: false) {
                 case .playing:
-                    history = proposedHistory
-                    appendHistory([previous])
+                    setHistoryEntries(entries(proposedHistory))
+                    currentEntryID = appendHistory([previous]).last
                     var proposedQueue = queue
+                    // The track left comes next again (the first upcoming entry).
                     if let leaving { proposedQueue.pushToFront(leaving) }
                     setQueue(proposedQueue)
                     noteSkipped(passed + skipped)
@@ -771,7 +872,7 @@ final class PlaybackViewModel {
                 case .superseded:
                     return
                 case .unavailable(.driveNotConnected):
-                    history = working
+                    setHistoryEntries(entries(working))
                     notify(PlaybackWords.cantPlayDriveMessage(volumeName(for: previous)), action: nil)
                     return
                 case .unavailable(let reason):
@@ -805,32 +906,402 @@ final class PlaybackViewModel {
         }
     }
 
-    /// Play a specific track from the upcoming queue; everything before it is dropped.
+    /// Play the first queued entry of `track` (older callers; the Queue panel plays entries,
+    /// `playQueueEntry(_:)`).
     @MainActor
     func playFromQueue(track: Track) async {
+        guard let entry = queue.upcomingEntries.first(where: { $0.track.id != nil && $0.track.id == track.id }) else { return }
+        await playQueueEntry(entry.id)
+    }
+
+    /// Play Next without an undo step (older callers outside a window, e.g. the sync failure
+    /// list). Goes through the serial queue edit like every edit.
+    @MainActor
+    func insertPlayNext(_ tracks: [Track]) {
+        let edit: @MainActor () -> Void = { [unowned self] in
+            _ = applyEdit(QueueEditing.playNext(tracks, queue: queue, history: historyEntries))
+        }
+        if transportDepth == 0 { edit() } else { enqueueTransport { edit() } }
+    }
+
+    // MARK: - Queue editing (W2-D, P-QUEUE, DEC-041, DEC-050)
+    //
+    // Every edit runs on the transport chain: at once when nothing is queued there, else after
+    // the advance / Previous / jump in flight — so an advance that started from the old queue
+    // can never overwrite the edit (it commits first, the edit applies to its result). The pure
+    // rules are `QueueEditing`; the returned receipt is the undo step's value
+    // (`QueueEditCommands` registers it with the window's `UndoCenter`).
+
+    /// Run `body` on the transport chain (at once when it is idle).
+    @MainActor
+    private func performQueueEdit<T: Sendable>(_ body: @escaping @MainActor () -> T) async -> T {
+        if transportDepth == 0 { return body() }
+        return await withCheckedContinuation { continuation in
+            enqueueTransport { continuation.resume(returning: body()) }
+        }
+    }
+
+    /// Apply an edit's result (queue and History).
+    @MainActor
+    private func applyEdit(_ result: QueueEditResult?) -> QueueEditReceipt? {
+        guard let result else { return nil }
+        setQueue(result.queue)
+        setHistoryEntries(result.history)
+        return result.receipt
+    }
+
+    /// Play Next ⌥↩: new entries at the top of Next, in the given order.
+    @MainActor
+    @discardableResult
+    func playNext(_ tracks: [Track]) async -> QueueEditReceipt? {
+        await performQueueEdit { [unowned self] in
+            applyEdit(QueueEditing.playNext(tracks, queue: queue, history: historyEntries))
+        }
+    }
+
+    /// Add to Queue ⌥⇧↩: new entries after the last Play Next item, before the context.
+    @MainActor
+    @discardableResult
+    func addToQueue(_ tracks: [Track]) async -> QueueEditReceipt? {
+        await performQueueEdit { [unowned self] in
+            applyEdit(QueueEditing.addToQueue(tracks, queue: queue, history: historyEntries))
+        }
+    }
+
+    /// A drop of tracks into Next at `position` (`.top` = Play Next).
+    @MainActor
+    @discardableResult
+    func insert(_ tracks: [Track], at position: QueuePosition) async -> QueueEditReceipt? {
+        await performQueueEdit { [unowned self] in
+            applyEdit(QueueEditing.insert(tracks, at: position, queue: queue, history: historyEntries))
+        }
+    }
+
+    /// Reorder: move entries of Next to `position` (lane + index counted before the move).
+    @MainActor
+    @discardableResult
+    func moveEntries(_ ids: [UUID], to position: QueuePosition) async -> QueueEditReceipt? {
+        await performQueueEdit { [unowned self] in
+            applyEdit(QueueEditing.move(ids, to: position, queue: queue, history: historyEntries))
+        }
+    }
+
+    /// Play Next on rows already in Next: they move to the top.
+    @MainActor
+    @discardableResult
+    func moveEntriesToTop(_ ids: [UUID]) async -> QueueEditReceipt? {
+        await performQueueEdit { [unowned self] in
+            applyEdit(QueueEditing.moveToTop(ids, queue: queue, history: historyEntries))
+        }
+    }
+
+    /// Move to End of Queue.
+    @MainActor
+    @discardableResult
+    func moveEntriesToEnd(_ ids: [UUID]) async -> QueueEditReceipt? {
+        await performQueueEdit { [unowned self] in
+            applyEdit(QueueEditing.moveToEnd(ids, queue: queue, history: historyEntries))
+        }
+    }
+
+    /// Remove from Queue ⌫ (entries of Next; others are ignored).
+    @MainActor
+    @discardableResult
+    func removeEntries(_ ids: Set<UUID>) async -> QueueEditReceipt? {
+        await performQueueEdit { [unowned self] in
+            applyEdit(QueueEditing.remove(ids, queue: queue, history: historyEntries))
+        }
+    }
+
+    /// Clear (Next): both lanes and the Repeat All cycle; the playing track continues.
+    @MainActor
+    @discardableResult
+    func clearNext() async -> QueueEditReceipt? {
+        await performQueueEdit { [unowned self] in
+            applyEdit(QueueEditing.clearNext(queue: queue, history: historyEntries))
+        }
+    }
+
+    /// Clear History (all but the playing track's entry).
+    @MainActor
+    @discardableResult
+    func clearHistory() async -> QueueEditReceipt? {
+        await performQueueEdit { [unowned self] in
+            applyEdit(QueueEditing.clearHistory(queue: queue, history: historyEntries, keeping: currentEntryID))
+        }
+    }
+
+    /// Undo an edit on the queue as it is now. Returns false when nothing was left to undo.
+    @MainActor
+    func revertQueueEdit(_ receipt: QueueEditReceipt) async -> Bool {
+        await performQueueEdit { [unowned self] in
+            let cap = historySize()
+            let result = QueueEditing.revert(receipt, queue: queue, history: historyEntries, historyCap: cap)
+            setQueue(result.queue)
+            setHistoryEntries(result.history)
+            return result.changed
+        }
+    }
+
+    /// Redo an edit on the queue as it is now. Returns false when nothing was left to redo.
+    @MainActor
+    func reapplyQueueEdit(_ receipt: QueueEditReceipt) async -> Bool {
+        await performQueueEdit { [unowned self] in
+            let result = QueueEditing.reapply(receipt, queue: queue, history: historyEntries)
+            setQueue(result.queue)
+            setHistoryEntries(result.history)
+            return result.changed
+        }
+    }
+
+    /// Return / double-click on a Queue row (UC-PRIM-12):
+    /// - a Next entry plays now; the entries before it move to History (they were passed), the
+    ///   ones after it keep their lanes;
+    /// - a History entry plays again; Next stays as it is (fixes "replaying from History
+    ///   discards the context"); the old History row gives way to the new play;
+    /// - the playing entry resumes when paused.
+    /// A track that can't play leaves everything as it was and the player / status bar say why.
+    @MainActor
+    func playQueueEntry(_ entryID: UUID) async {
+        if entryID == currentEntryID {
+            if currentTrack != nil, playbackState != .playing { play() }
+            return
+        }
         let generation = takeGeneration()
         await enqueueTransport { [weak self] in
             guard let self else { return }
             var proposed = self.queue
-            guard proposed.playFromUpcoming(track) != nil else { return }
-            switch await self.open(track, startAt: nil, generation: generation, recordMissing: true) {
-            case .playing: self.setQueue(proposed)
-            case .superseded: break
+            let fromNext = proposed.jump(to: entryID)
+            let fromHistory = fromNext == nil ? self.historyEntries.first(where: { $0.id == entryID }) : nil
+            guard let entry = fromNext?.entry ?? fromHistory else { return }
+            let latest = (await self.environment.freshTracks(entry.track.id.map { [$0] } ?? []))[entry.track.id ?? -1] ?? entry.track
+            guard generation == self.generation else { return }
+            // Return during a preview of this row plays it from the previewed position.
+            let start = self.consumePendingStart(for: latest)
+            switch await self.open(latest, startAt: start, generation: generation, recordMissing: true, recordHistory: false) {
+            case .playing:
+                self.restoredStart = nil
+                var history = self.historyEntries
+                if fromHistory != nil { history.removeAll { $0.id == entryID } }
+                history += (fromNext?.passed ?? [])
+                self.setHistoryEntries(history)
+                // The entry keeps its identity as it moves from Next / History to Now playing.
+                self.appendHistoryEntries([QueueEntry(id: entryID, track: latest)])
+                self.currentEntryID = entryID
+                if fromNext != nil { self.setQueue(proposed) }
+            case .superseded:
+                break
             case .unavailable(let reason):
                 self.previewController?.end()
-                self.reportUnplayable(track, reason)
+                self.reportUnplayable(latest, reason)
             case .outputFailed:
                 self.previewController?.end()
-                self.notify(PlaybackWords.outputFailed(track.title), action: .tryAgain(track))
+                self.notify(PlaybackWords.outputFailed(latest.title), action: .tryAgain(latest))
             }
         }
     }
 
-    /// Insert tracks right after the current track (Play Next ⌥↩). Moves, never duplicates.
-    func insertPlayNext(_ tracks: [Track]) {
-        var proposed = queue
-        proposed.insertPlayNext(tracks)
-        setQueue(proposed)
+    /// The queued tracks' rows changed (availability, tags): refresh the copies in place —
+    /// entries, order and selection stay (W2-D: no stale state words). Coalesced.
+    @MainActor
+    func refreshQueuedTracks() async {
+        let ids = Set((queue.upcoming + queue.cycle + history + [currentTrack].compactMap { $0 }).compactMap(\.id))
+        guard !ids.isEmpty else { return }
+        let fresh = await environment.freshTracks(ids)
+        guard !fresh.isEmpty else { return }
+        await performQueueEdit { [unowned self] in
+            var updated = queue
+            if updated.refreshTracks(fresh) { setQueue(updated) }
+            var entries = historyEntries
+            for index in entries.indices {
+                if let id = entries[index].track.id, let track = fresh[id] { entries[index].track = track }
+            }
+            setHistoryEntries(entries)
+            if let current = currentTrack, let id = current.id, let track = fresh[id], track != current {
+                currentTrack = track
+            }
+        }
+    }
+
+    /// `refreshQueuedTracks()` for notifications: one at a time, one more if asked meanwhile.
+    @MainActor
+    private func refreshQueuedTracksSoon() {
+        guard !isRefreshingQueuedTracks else {
+            queuedTracksRefreshPending = true
+            return
+        }
+        isRefreshingQueuedTracks = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            repeat {
+                self.queuedTracksRefreshPending = false
+                await self.refreshQueuedTracks()
+            } while self.queuedTracksRefreshPending
+            self.isRefreshingQueuedTracks = false
+        }
+    }
+
+    /// Tracks were removed from the library: their entries leave Next, the cycle and History
+    /// (not undoable — the tracks are gone). The playing track keeps playing.
+    @MainActor
+    func removeTracksFromQueue(_ trackIDs: Set<Int64>) async {
+        guard !trackIDs.isEmpty else { return }
+        await performQueueEdit { [unowned self] in
+            var updated = queue
+            if updated.removeTracks(trackIDs) { setQueue(updated) }
+            setHistoryEntries(historyEntries.filter { entry in
+                entry.id == currentEntryID || !(entry.track.id.map(trackIDs.contains) ?? false)
+            })
+        }
+        await queuePersister?.removeSavedEntries(trackIDs: trackIDs)
+    }
+
+    // MARK: - Queue across relaunches (W2-D, `v43_playback_queue`)
+
+    /// Start saving (`PlaybackQueuePersister`): every change of the queue, History, the playing
+    /// track or the playback state asks for a (coalesced) save; the position while playing at
+    /// most every `positionInterval`.
+    @MainActor
+    func attachQueuePersister(_ persister: PlaybackQueuePersister?) {
+        queuePersister = persister
+        guard let persister else {
+            onQueueStateChange = nil
+            onPositionTick = nil
+            return
+        }
+        onQueueStateChange = { [weak persister] in
+            MainActor.assumeIsolated { persister?.stateDidChange() }
+        }
+        onPositionTick = { [weak persister] in
+            MainActor.assumeIsolated { persister?.positionDidTick() }
+        }
+    }
+
+    /// What is saved now: Next (both lanes, identities), the cycle, History (capped), the
+    /// playing (or waiting) entry with its position, and where the context came from.
+    @MainActor
+    func savedQueueState() -> SavedPlaybackQueue {
+        func saved(_ entries: [QueueEntry]) -> [SavedPlaybackQueue.Entry] {
+            entries.compactMap { entry in entry.track.id.map { SavedPlaybackQueue.Entry(id: entry.id, trackID: $0) } }
+        }
+        var currentID: UUID?
+        var position: TimeInterval = 0
+        if currentTrack != nil, let id = currentEntryID {
+            currentID = id
+            position = audioPlayer.currentPosition
+        } else if let waiting = restoredStart, let head = queue.upcomingEntries.first, head.track.id == waiting.trackID {
+            // Restored but not loadable yet: it waits at the head of Next with its position.
+            currentID = head.id
+            position = waiting.position
+        }
+        return SavedPlaybackQueue(
+            playNext: saved(queue.playNextEntries),
+            context: saved(queue.contextEntries),
+            cycle: queue.cycle.compactMap(\.id),
+            history: saved(historyEntries),
+            currentEntryID: currentID,
+            position: position.isFinite ? max(position, 0) : 0,
+            origin: playingOrigin
+        )
+    }
+
+    /// Put a saved queue back at launch: **paused, never playing**. Entries whose track no
+    /// longer exists are dropped. The playing entry is loaded at its position; when it can't be
+    /// loaded now (disk away, file missing, not downloaded) it waits at the head of Next — the
+    /// player says `Can’t play — …` and Play continues from it, at its position, once it can
+    /// (IMP-033: nothing leaves the queue). Only into an untouched player.
+    /// - Returns: whether the queue was restored.
+    @MainActor
+    @discardableResult
+    func restoreQueue(_ saved: SavedPlaybackQueue, tracks: [Int64: Track]) async -> Bool {
+        guard currentTrack == nil, queue.isEmpty, queue.cycle.isEmpty, historyEntries.isEmpty, cantPlay == nil else { return false }
+        let generation = self.generation
+        func entries(_ list: [SavedPlaybackQueue.Entry]) -> [QueueEntry] {
+            list.compactMap { item in tracks[item.trackID].map { QueueEntry(id: item.id, track: $0) } }
+        }
+        var playNext = entries(saved.playNext)
+        var context = entries(saved.context)
+        var history = entries(saved.history)
+        let cap = historySize()
+        if history.count > cap { history.removeFirst(history.count - cap) }
+        // The playing (or waiting) entry: History's, or the head of Next's.
+        var current: QueueEntry?
+        var currentLane: QueueLane?
+        if let id = saved.currentEntryID {
+            if let entry = history.last(where: { $0.id == id }) {
+                current = entry
+                history.removeAll { $0.id == id }
+            } else if let entry = playNext.first(where: { $0.id == id }) {
+                current = entry
+                currentLane = .playNext
+                playNext.removeAll { $0.id == id }
+            } else if let entry = context.first(where: { $0.id == id }) {
+                current = entry
+                currentLane = .context
+                context.removeAll { $0.id == id }
+            }
+        }
+        var lookup: PlaybackFileResolver.Lookup?
+        if let current {
+            let root = await environment.libraryRoot()
+            lookup = await PlaybackFileResolver.lookupOffMain(current.track, libraryRoot: root, probe: environment.probe)
+            // The user started something meanwhile: their playback wins, nothing is restored.
+            guard generation == self.generation, currentTrack == nil, queue.isEmpty else { return false }
+        }
+        var restored = PlaybackQueue(playNext: playNext, context: context, cycle: saved.cycle.compactMap { tracks[$0] })
+        setHistoryEntries(history)
+        playingOrigin = saved.origin
+        if let current, let lookup {
+            var reason: PlaybackPlayability?
+            switch lookup {
+            case .file(let url):
+                if !loadPaused(url: url, entry: current, position: saved.position) { reason = .unreadable }
+            case .missing: reason = .fileMissing
+            case .driveNotConnected: reason = .driveNotConnected
+            case .noFile: reason = .notDownloaded
+            }
+            if let reason {
+                restored.pushToFront(current, lane: currentLane ?? (restored.playNextEntries.isEmpty ? .context : .playNext))
+                if let id = current.track.id { restoredStart = (id, saved.position) }
+                if let words = PlaybackWords.CantPlay(reason, volumeName: volumeName(for: current.track)) {
+                    cantPlay = CantPlayState(track: current.track, reason: words)
+                }
+            }
+        }
+        setQueue(restored)
+        return true
+    }
+
+    /// Load a restored track paused at `position` (no sound, no auto-play).
+    @MainActor
+    private func loadPaused(url: URL, entry: QueueEntry, position: TimeInterval) -> Bool {
+        do {
+            try audioPlayer.loadFile(at: url)
+        } catch {
+            AppLogger.shared.log("Playback: can’t open the restored \(url.lastPathComponent): \(error.localizedDescription)",
+                                 level: .warning, source: "Playback")
+            lastUnreadableURL = url
+            return false
+        }
+        audioPlayer.applyLUFSCompensation(lufsI: entry.track.lufsI)
+        if position > 0, position < audioPlayer.duration { try? audioPlayer.seek(to: position) }
+        currentTrack = entry.track
+        currentURL = url
+        appendHistoryEntries([entry])
+        currentEntryID = entry.id
+        duration = audioPlayer.duration
+        currentPosition = audioPlayer.currentPosition
+        playbackState = .paused
+        postTrackDidChange()
+        postStateDidChange()
+        extractWaveform(for: url, trackID: entry.track.id)
+        return true
+    }
+
+    /// Save now, synchronously (MLM quits).
+    @MainActor
+    func flushQueuePersistence() {
+        queuePersister?.flushNow()
     }
 
     /// Files missing in a row that stop an advance (a disk returning I/O errors would
@@ -882,16 +1353,20 @@ final class PlaybackViewModel {
                 return
             }
             let latest = candidate.id.flatMap { fresh[$0] } ?? candidate
-            let openResult = await open(latest, startAt: nil, generation: generation, recordMissing: false,
+            // A track restored at launch that couldn't be loaded then starts where it was (W2-D).
+            let start = restoredStart.flatMap { $0.trackID == latest.id ? $0.position : nil }
+            let openResult = await open(latest, startAt: start, generation: generation, recordMissing: false,
                                         recordHistory: !result.repeatsCurrent)
             switch openResult {
             case .superseded:
                 return
             case .playing:
-                // Passed-over tracks go to History before the one that plays.
-                if !result.repeatsCurrent, let played = history.popLast() {
+                restoredStart = nil
+                // Passed-over tracks go to History before the one that plays (it keeps its entry).
+                if !result.repeatsCurrent, let played = historyEntries.last {
+                    setHistoryEntries(Array(historyEntries.dropLast()))
                     commit(result.queue, passed: skipped)
-                    appendHistory([played])
+                    appendHistoryEntries([played])
                 } else {
                     commit(result.queue, passed: skipped)
                 }
@@ -899,9 +1374,10 @@ final class PlaybackViewModel {
                 noteSkipped(skipped)
                 return
             case .unavailable(.driveNotConnected):
-                // The persisted state didn't know yet: still a wait — the track stays at the head.
+                // The persisted state didn't know yet: still a wait — the track stays at the head
+                // (the same entry, in its lane).
                 var waitingQueue = result.queue
-                waitingQueue.pushToFront(candidate)
+                Self.putBack(candidate, taken: working, into: &waitingQueue)
                 commit(waitingQueue, passed: skipped)
                 waitForDrive(latest, trigger: trigger)
                 recordMissing(missingAtOpen)
@@ -910,7 +1386,7 @@ final class PlaybackViewModel {
                 if reason == .fileMissing {
                     if queueBeforeMissing == nil {
                         var beforeMissing = result.queue
-                        beforeMissing.pushToFront(candidate)
+                        Self.putBack(candidate, taken: working, into: &beforeMissing)
                         queueBeforeMissing = beforeMissing
                     }
                     missingAtOpen.append(latest)
@@ -933,6 +1409,22 @@ final class PlaybackViewModel {
         }
         // Unreachable in practice (every round consumes an item); never spin.
         commit(working, passed: skipped)
+    }
+
+    /// Put the entry an advance took for `candidate` back at the front of its lane, with its
+    /// identity (`taken` is the queue the advance started this round from). A candidate from a
+    /// restarted Repeat All cycle goes back as a new entry.
+    static func putBack(_ candidate: Track, taken: PlaybackQueue, into queue: inout PlaybackQueue) {
+        let remaining = Set(queue.upcomingEntries.map(\.id))
+        let lanes = taken.playNextEntries.map { ($0, QueueLane.playNext) } + taken.contextEntries.map { ($0, QueueLane.context) }
+        let match = lanes.last { entry, _ in
+            !remaining.contains(entry.id) && (candidate.id != nil ? entry.track.id == candidate.id : entry.track == candidate)
+        }
+        if let (entry, lane) = match {
+            queue.pushToFront(entry, lane: lane)
+        } else {
+            queue.pushToFront(candidate)
+        }
     }
 
     /// Commit an advance: the queue, and the passed-over tracks into History (they keep their
@@ -1105,6 +1597,7 @@ final class PlaybackViewModel {
     @MainActor
     private func tick() {
         updatePosition()
+        if playbackState == .playing { onPositionTick?() }
         if let previewPlayer, previewController?.isActive == true {
             previewPosition = previewPlayer.currentPosition
             if previewAudioRunning, previewPlayer.state == .stopped {
@@ -1235,10 +1728,12 @@ final class PlaybackViewModel {
             object: nil,
             userInfo: currentTrack.flatMap { track in track.id.map { ["trackId": $0] } }
         )
+        onQueueStateChange?()
     }
 
     private func postStateDidChange() {
         NotificationCenter.default.post(name: .playbackStateDidChange, object: nil, userInfo: ["state": playbackState])
+        onQueueStateChange?()
     }
 }
 

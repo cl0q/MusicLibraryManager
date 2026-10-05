@@ -61,7 +61,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // Cleanup on termination
+        // The queue is kept when MLM quits (W2-D): the last save, synchronously.
+        DependencyContainer.shared.playbackViewModel?.flushQueuePersistence()
     }
 
     /// Closing the main window (⌘W) does not quit; the Dock icon or Window ▸ MLM brings it back

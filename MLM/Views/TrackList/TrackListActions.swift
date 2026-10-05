@@ -144,8 +144,14 @@ struct TrackListActions {
         configuration.activate?(first.track, playable.map(\.track))
     }
 
+    /// Play Next ⌥↩ — confirmed in the status bar with Undo (W2-D).
     func playNext(_ rows: [TrackRow]) {
-        TrackCommandActions.playNext(rows.map(\.track), container: container)
+        TrackCommandActions.playNext(rows.map(\.track), undo: undo, container: container)
+    }
+
+    /// Add to Queue ⌥⇧↩ — confirmed in the status bar with Undo (W2-D).
+    func addToQueue(_ rows: [TrackRow]) {
+        TrackCommandActions.addToQueue(rows.map(\.track), undo: undo, container: container)
     }
 
     func addToPlaylist(_ playlistID: Int64, _ rows: [TrackRow]) {

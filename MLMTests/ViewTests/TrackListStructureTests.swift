@@ -61,12 +61,14 @@ struct TrackListStructureTests {
         ] {
             #expect(try source(path).contains("TrackListTable("), "\(path) hosts the shared table")
         }
-        let queue = try source("MLM/Views/Queue/PlaybackQueueView.swift")
-        #expect(queue.components(separatedBy: "TrackListTable(").count - 1 == 3)
-        #expect(queue.contains(".frame(height: 64)"), "now playing shows exactly one row")
+        // W2-D: the Queue panel is a native List of queue entries (each with its own identity,
+        // so the same track can be queued twice) in the inspector — not a track table.
+        #expect(!FileManager.default.fileExists(atPath: projectRoot.appendingPathComponent("MLM/Views/Queue/PlaybackQueueView.swift").path))
+        let queue = try source("MLM/Views/Queue/QueuePanel.swift")
+        #expect(queue.contains("List(selection: $selection)"))
         // Only the shared component builds a track `Table`.
         for path in ["MLM/Views/Library/LibraryView.swift", "MLM/Views/Playlists/PlaylistTable.swift",
-                     "MLM/Views/Search/SearchResultsView.swift", "MLM/Views/Queue/PlaybackQueueView.swift"] {
+                     "MLM/Views/Search/SearchResultsView.swift", "MLM/Views/Queue/QueuePanel.swift"] {
             let text = try source(path)
             #expect(!text.contains("Table(of:") && !text.contains("TableColumn("), "\(path) builds its own table")
         }
@@ -116,6 +118,7 @@ struct TrackListStructureTests {
         // highlighted item (W2-A review). Only modified keys that mirror menu-bar items.
         let allowed: [String: MenuShortcut?] = [
             ".keyboardShortcut(.return, modifiers: .option)": MenuCommand.playNext.shortcut,
+            ".keyboardShortcut(.return, modifiers: [.option, .shift])": MenuCommand.addToQueue.shortcut,
             ".keyboardShortcut(\"n\", modifiers: [.command, .shift])": MenuCommand.newPlaylistFromSelection.shortcut,
             ".keyboardShortcut(\"i\", modifiers: .command)": MenuCommand.toggleInfo.shortcut,
             ".keyboardShortcut(\"d\", modifiers: .command)": MenuCommand.download.shortcut,
@@ -123,6 +126,7 @@ struct TrackListStructureTests {
             ".keyboardShortcut(.delete, modifiers: .command)": MenuCommand.removeFromLibrary.shortcut,
         ]
         #expect(allowed[".keyboardShortcut(.return, modifiers: .option)"] == MenuShortcut(key: .returnKey, modifiers: .option))
+        #expect(allowed[".keyboardShortcut(.return, modifiers: [.option, .shift])"] == MenuShortcut(key: .returnKey, modifiers: [.option, .shift]))
         #expect(allowed[".keyboardShortcut(\"n\", modifiers: [.command, .shift])"] == .cmd("n", .shift))
         #expect(allowed[".keyboardShortcut(\"i\", modifiers: .command)"] == .cmd("i"))
         #expect(allowed[".keyboardShortcut(\"d\", modifiers: .command)"] == .cmd("d"))

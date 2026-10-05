@@ -7,7 +7,7 @@ import SwiftUI
 ///   track list (`InspectedTrackSelection`) — never the playing track (UC-TRAIL-03); an explicit
 ///   `Show Details` of an unselected track (`InfoTrackRequest`) shows that one until the
 ///   selection changes.
-/// - **Queue** hosts the existing `PlaybackQueueView` (rebuilt by W2-D).
+/// - **Queue** is the Queue panel (`QueuePanel`, W2-D, P-QUEUE).
 struct TrailingColumnView: View {
     @Environment(TrailingColumnState.self) private var state
     private var inspected: InspectedTrackSelection { InspectedTrackSelection.shared }
@@ -31,7 +31,7 @@ struct TrailingColumnView: View {
             case .info:
                 InspectorView(selection: request.effectiveSelection(inspected.trackIDs))
             case .queue:
-                PlaybackQueueView()
+                QueuePanel()
             }
         }
         .frame(maxHeight: .infinity, alignment: .top)

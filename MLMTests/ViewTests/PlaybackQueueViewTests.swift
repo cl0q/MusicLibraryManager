@@ -2,8 +2,8 @@ import Testing
 import Foundation
 
 /// Source-scan tests verifying the Playback Queue feature structure:
-/// - PlaybackQueueView contains three accessibility IDs and three TrackTable usages
-/// - PlaybackQueueView has section headers "History", "Currently playing", "Next up"
+/// - the Queue panel (W2-D) replaced PlaybackQueueView: one List of queue entries, sections
+///   "Now playing", "Next", "History", the safe CM-QUEUE menu
 /// - SidebarView renders .queue above settingsFooter
 /// - SettingsView contains the three setting keys
 @Suite("PlaybackQueueViewTests")
@@ -22,61 +22,31 @@ struct PlaybackQueueViewTests {
         return try String(contentsOf: url, encoding: .utf8)
     }
 
-    // MARK: - PlaybackQueueView
+    // MARK: - The Queue panel (W2-D replaced PlaybackQueueView)
 
     @Test
-    func playbackQueueView_containsHistoryAccessibilityID() throws {
-        let src = try readSource("MLM/Views/Queue/PlaybackQueueView.swift")
-        #expect(src.contains("queue_history_table"),
-                "PlaybackQueueView must contain queue_history_table accessibility ID")
+    func queuePanelReplacesTheThreeTables() throws {
+        let gone = Self.repoRoot.appendingPathComponent("MLM/Views/Queue/PlaybackQueueView.swift").path
+        #expect(!FileManager.default.fileExists(atPath: gone), "the three 13-column tables are gone")
+        let src = try readSource("MLM/Views/Queue/QueuePanel.swift")
+        #expect(src.contains("queue_panel"), "the panel has its accessibility ID")
+        #expect(!src.contains("TrackListTable("), "queue entries, not track-id rows (the same track can be queued twice)")
     }
 
     @Test
-    func playbackQueueView_containsNowPlayingAccessibilityID() throws {
-        let src = try readSource("MLM/Views/Queue/PlaybackQueueView.swift")
-        #expect(src.contains("queue_now_playing_table"),
-                "PlaybackQueueView must contain queue_now_playing_table accessibility ID")
+    func queuePanelHasTheThreeSections() throws {
+        let src = try readSource("MLM/Views/Queue/QueuePanel.swift")
+        #expect(src.contains("Section(QueuePanelWords.nowPlaying)") && src.contains("Section(QueuePanelWords.history)"))
+        #expect(src.contains("nextHeader("))
+        let words = try readSource("MLM/Views/Queue/QueuePanelModel.swift")
+        #expect(words.contains("\"Now playing\"") && words.contains("\"Next\"") && words.contains("\"History\""))
+        #expect(!words.contains("Currently playing") && !words.contains("Next up"), "the old section names are gone")
     }
 
     @Test
-    func playbackQueueView_containsUpNextAccessibilityID() throws {
-        let src = try readSource("MLM/Views/Queue/PlaybackQueueView.swift")
-        #expect(src.contains("queue_upnext_table"),
-                "PlaybackQueueView must contain queue_upnext_table accessibility ID")
-    }
-
-    @Test
-    func playbackQueueView_usesTrackTable() throws {
-        let src = try readSource("MLM/Views/Queue/PlaybackQueueView.swift")
-        // Count shared track-table usages — should be 3 (history, now playing, up next)
-        let count = src.components(separatedBy: "TrackListTable(").count - 1
-        #expect(count == 3, "PlaybackQueueView must use TrackListTable exactly 3 times, found \(count)")
-    }
-
-    @Test
-    func playbackQueueView_containsSectionHeaders() throws {
-        let src = try readSource("MLM/Views/Queue/PlaybackQueueView.swift")
-        #expect(src.contains("History"), "PlaybackQueueView must have 'History' section header")
-        #expect(src.contains("Currently playing"), "PlaybackQueueView must have 'Currently playing' section header")
-        #expect(src.contains("Next up"), "PlaybackQueueView must have 'Next up' section header")
-    }
-
-    // MARK: - Now playing fixed height
-
-    @Test
-    func playbackQueueView_nowPlayingFixedHeight() throws {
-        let src = try readSource("MLM/Views/Queue/PlaybackQueueView.swift")
-        #expect(src.contains(".frame(height:"),
-                "Now-playing TrackTable must have a fixed .frame(height:) to show exactly one row")
-    }
-
-    // MARK: - Full context menu in queue tables
-
-    @Test
-    func playbackQueueView_fullContextMenu() throws {
-        let src = try readSource("MLM/Views/Queue/PlaybackQueueView.swift")
-        #expect(!src.contains("contextMenuAllowsLibraryActions: false"),
-                "Queue tables must use the full context menu (no contextMenuAllowsLibraryActions: false)")
+    func queuePanelUsesTheSafeQueueMenu() throws {
+        let src = try readSource("MLM/Views/Queue/QueuePanel.swift")
+        #expect(src.contains("queueRows: content.menuRows(for: subject)"), "CM-QUEUE through the shared builder")
     }
 
     // MARK: - SidebarView (W1-1: the Queue is a trailing-column mode, DEC-006)
