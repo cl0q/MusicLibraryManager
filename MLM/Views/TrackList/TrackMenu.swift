@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// The track menu (CM-TRACK) — one builder for the table's context menu and, later, the More
-/// (•••) menus and the selection bar's More (UC-CM-02). Renders a `TrackMenuModel` in
-/// sections (DEC-039 group order); shortcuts are shown next to items (UC-CM-06); only Play
+/// The track menu (CM-TRACK) — one builder for the table's context menu, the selection bar's
+/// More (W2-G) and, later, the header More (•••) menus (UC-CM-02). Renders a `TrackMenuModel`
+/// in sections (DEC-039 group order); shortcuts are shown next to items (UC-CM-06); only Play
 /// and Download carry a glyph.
 struct TrackMenu: View {
     let model: TrackMenuModel
@@ -14,6 +14,10 @@ struct TrackMenu: View {
     /// The library's disk while it is away — the reason of the disabled file actions
     /// (UC-CM-05, UC-COPY-13); `nil` while connected.
     let offlineVolumeName: String?
+    /// Key equivalents next to the items (UC-CM-06). Only for a menu that exists while it is
+    /// open (the context menu): a `Menu` that stays in the window (the selection bar's More)
+    /// would keep them live and take the menu bar's keys — even from a text field (UC-KEY-36).
+    var showsKeyEquivalents = true
 
     var body: some View {
         ForEach(Array(model.sections.enumerated()), id: \.offset) { _, section in
@@ -45,20 +49,21 @@ struct TrackMenu: View {
             Button("Preview") { actions.preview(rows) }
                 .disabled(!enabled, reason: offlineVolumeName.map { "Can’t preview — “\($0)” is not connected" })
         case .playNext:
-            Button("Play Next") { actions.playNext(rows) }
-                .keyboardShortcut(.return, modifiers: .option)
+            let item = Button("Play Next") { actions.playNext(rows) }
+            if showsKeyEquivalents {
+                item
+                    .keyboardShortcut(.return, modifiers: .option)
+            } else {
+                item
+            }
         case .addToPlaylist:
             Menu("Add to Playlist") {
-                Button("New Playlist…") { actions.newPlaylist(rows) }
-                    .keyboardShortcut("n", modifiers: [.command, .shift])
-                if !playlists.isEmpty {
-                    Divider()
-                    ForEach(playlists) { playlist in
-                        Button(playlist.name) {
-                            if let id = playlist.id { actions.addToPlaylist(id, rows) }
-                        }
-                    }
-                }
+                AddToPlaylistMenuItems(
+                    playlists: playlists,
+                    showsKeyEquivalents: showsKeyEquivalents,
+                    newPlaylist: { actions.newPlaylist(rows) },
+                    add: { actions.addToPlaylist($0, rows) }
+                )
             }
         case .addToSyncProfile:
             Menu("Add to Sync Profile") {
@@ -69,23 +74,38 @@ struct TrackMenu: View {
                 Button("New Sync Profile…") { actions.newSyncProfile(rows) }
             }
         case .getInfo:
-            Button("Get Info") { actions.getInfo(rows) }
-                .keyboardShortcut("i", modifiers: .command)
+            let item = Button("Get Info") { actions.getInfo(rows) }
+            if showsKeyEquivalents {
+                item
+                    .keyboardShortcut("i", modifiers: .command)
+            } else {
+                item
+            }
         case .download(let title):
-            Button {
+            let item = Button {
                 actions.download(rows)
             } label: {
                 Label(title, systemImage: "arrow.down.circle")
             }
-            .keyboardShortcut("d", modifiers: .command)
+            if showsKeyEquivalents {
+                item
+                    .keyboardShortcut("d", modifiers: .command)
+            } else {
+                item
+            }
         case .downloadAgain:
             Button("Download Again") { actions.downloadAgain(rows) }
         case .locateFile:
             Button("Locate File…") { actions.locateFile(rows) }
         case .showInFinder(let enabled):
-            Button("Show in Finder") { actions.showInFinder(rows) }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
+            let item = Button("Show in Finder") { actions.showInFinder(rows) }
                 .disabled(!enabled, reason: offlineVolumeName.map(TrackMenu.notConnectedHelp))
+            if showsKeyEquivalents {
+                item
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+            } else {
+                item
+            }
         case .copy(let filePath, let link):
             Menu("Copy") {
                 Button("Title — Artist") { actions.copyTitleAndArtist(rows) }
@@ -101,9 +121,43 @@ struct TrackMenu: View {
             // instead of the highlighted item; ⌫ belongs to the focused list (IMP-014).
             Button(title) { actions.removeFromContainer(rows) }
         case .removeFromLibrary(let enabled):
-            Button("Remove from Library…", role: .destructive) { actions.removeFromLibrary(rows) }
-                .keyboardShortcut(.delete, modifiers: .command)
+            let item = Button("Remove from Library…", role: .destructive) { actions.removeFromLibrary(rows) }
                 .disabled(!enabled, reason: offlineVolumeName.map(TrackMenu.notConnectedHelp))
+            if showsKeyEquivalents {
+                item
+                    .keyboardShortcut(.delete, modifiers: .command)
+            } else {
+                item
+            }
+        }
+    }
+}
+
+/// Add to Playlist ▸ (CM-SUB-PLAYLIST, UC-CM-11) — one builder for the track context menu, the
+/// Track menu and the selection bar: `New Playlist…`, then the playlists (the current one is
+/// already left out by the caller, UC-CM-08).
+struct AddToPlaylistMenuItems: View {
+    let playlists: [Playlist]
+    /// `⇧⌘N` next to `New Playlist…` (see `TrackMenu.showsKeyEquivalents`).
+    var showsKeyEquivalents = true
+    let newPlaylist: () -> Void
+    let add: (Int64) -> Void
+
+    var body: some View {
+        let item = Button("New Playlist…", action: newPlaylist)
+        if showsKeyEquivalents {
+            item
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+        } else {
+            item
+        }
+        if !playlists.isEmpty {
+            Divider()
+            ForEach(playlists) { playlist in
+                Button(playlist.name) {
+                    if let id = playlist.id { add(id) }
+                }
+            }
         }
     }
 }

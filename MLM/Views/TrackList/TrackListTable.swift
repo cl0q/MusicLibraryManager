@@ -79,6 +79,8 @@ struct TrackListTable<EmptyContent: View>: View {
             actions: actions,
             viewOptions: viewOptions
         ))
+        // The selection bar of the scaffold around this table, if it hosts one (W2-G).
+        .modifier(TrackSelectionBarRegistration(model: model, configuration: configuration, live: live))
         .background {
             TrackTableLiveObserver(live: live)
         }
