@@ -264,13 +264,8 @@ final class FolderViewModel {
                 paths,
                 libraryRoot: rootURL
             )
-            let availability = TrackPresentationAvailability.map(
-                tracks: result,
-                libraryRoot: rootURL,
-                fileExists: { url in
-                    return FileManager.default.fileExists(atPath: url.path)
-                }
-            )
+            // Persisted availability (v42) — no per-row disk probe (UC-TABLE-20).
+            let availability = TrackAvailability.byTrackID(result)
             let ms = Int(Date().timeIntervalSince(start) * 1000)
             let indexedPaths = Set(result.compactMap { track -> String? in
                 guard let organizedPath = track.organizedPath, !organizedPath.isEmpty else { return nil }

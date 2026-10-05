@@ -22,6 +22,9 @@ final class PlaylistDetailViewModel {
     /// and the playlist table. It is rebuilt only after a complete track load.
     private(set) var availabilityByTrackID: [Int64: TrackAvailability] = [:]
 
+    /// When each track was added to this playlist (`playlist_tracks.added_at`, UC-TABLE-19).
+    private(set) var addedAtByTrackID: [Int64: String] = [:]
+
     /// The authoritative external source for a linked playlist.
     private(set) var source: Source?
 
@@ -176,15 +179,11 @@ final class PlaylistDetailViewModel {
                 source = nil
             }
 
-            let libraryRoot = await libraryRootSnapshot()
             let loadedTracks = try await playlistRepository.fetchTracks(playlistId: playlistId)
-            let availability = TrackPresentationAvailability.map(
-                tracks: loadedTracks,
-                libraryRoot: libraryRoot,
-                fileExists: { url in
-                    return FileManager.default.fileExists(atPath: url.path)
-                }
-            )
+            // Persisted availability (v42) — no per-row disk probe (UC-TABLE-20).
+            let availability = TrackAvailability.byTrackID(loadedTracks)
+            // `Added` in a playlist = added to this playlist (UC-TABLE-19).
+            addedAtByTrackID = (try? await trackRepository.fetchPlaylistAddedDates(playlistId: playlistId)) ?? [:]
 
             tracks = loadedTracks
             availabilityByTrackID = availability
@@ -207,18 +206,10 @@ final class PlaylistDetailViewModel {
         isLoading = false
     }
 
-    /// Revalidates the existing rows after the configured library root changes
-    /// without issuing another playlist-track query.
+    /// Persisted availability changed (a file check, a download): reload the rows in place.
     @MainActor
     func refreshAvailabilitySnapshot() async {
-        let libraryRoot = await libraryRootSnapshot()
-        availabilityByTrackID = TrackPresentationAvailability.map(
-            tracks: tracks,
-            libraryRoot: libraryRoot,
-            fileExists: { url in
-                return FileManager.default.fileExists(atPath: url.path)
-            }
-        )
+        await refresh()
     }
 
     // MARK: - Source Synchronization
@@ -675,16 +666,6 @@ final class PlaylistDetailViewModel {
 
 
     // MARK: - Filtering
-
-    private func libraryRootSnapshot() async -> URL? {
-        guard let configRepository else {
-            return nil
-        }
-
-        guard let path = try? await configRepository.getLibraryRoot(),
-              !path.isEmpty else { return nil }
-        return URL(fileURLWithPath: path)
-    }
 
     private func applyFilter() {
         if searchQuery.isEmpty {

@@ -519,7 +519,7 @@ final class TrackRepository: Sendable {
         try await database.write { db in
             try db.execute(
                 sql: """
-                    UPDATE tracks SET download_status = ?, organized_path = ?
+                    UPDATE tracks SET download_status = ?, organized_path = ?, file_missing_since = NULL
                     WHERE id = ?
                 """,
                 arguments: [status, organizedPath, trackId]
@@ -596,7 +596,7 @@ final class TrackRepository: Sendable {
     func updateOrganizedPath(trackId: Int64, organizedPath: String) async throws {
         try await database.write { db in
             try db.execute(
-                sql: "UPDATE tracks SET organized_path = ?, download_status = 'completed' WHERE id = ?",
+                sql: "UPDATE tracks SET organized_path = ?, download_status = 'completed', file_missing_since = NULL WHERE id = ?",
                 arguments: [organizedPath, trackId]
             )
         }
@@ -609,7 +609,7 @@ final class TrackRepository: Sendable {
     func setOrganizedPathOnly(trackId: Int64, organizedPath: String) async throws {
         try await database.write { db in
             try db.execute(
-                sql: "UPDATE tracks SET organized_path = ? WHERE id = ?",
+                sql: "UPDATE tracks SET organized_path = ?, file_missing_since = NULL WHERE id = ?",
                 arguments: [organizedPath, trackId]
             )
         }
@@ -620,7 +620,7 @@ final class TrackRepository: Sendable {
     func setPathsOnly(trackId: Int64, organizedPath: String, originalPath: String) async throws {
         try await database.write { db in
             try db.execute(
-                sql: "UPDATE tracks SET organized_path = ?, original_path = ? WHERE id = ?",
+                sql: "UPDATE tracks SET organized_path = ?, original_path = ?, file_missing_since = NULL WHERE id = ?",
                 arguments: [organizedPath, originalPath, trackId]
             )
         }
@@ -633,7 +633,7 @@ final class TrackRepository: Sendable {
     func demoteToRemote(trackId: Int64) async throws {
         try await database.write { db in
             try db.execute(
-                sql: "UPDATE tracks SET organized_path = NULL, download_status = NULL WHERE id = ?",
+                sql: "UPDATE tracks SET organized_path = NULL, download_status = NULL, file_missing_since = NULL WHERE id = ?",
                 arguments: [trackId]
             )
         }
@@ -672,6 +672,7 @@ final class TrackRepository: Sendable {
                         bitrate = ?,
                         download_status = ?,
                         download_failure = NULL,
+                        file_missing_since = NULL,
                         date_added_library = COALESCE(date_added_library, ?)
                     WHERE id = ?
                 """,
@@ -1548,4 +1549,275 @@ final class TrackRepository: Sendable {
             try Track.filter(Track.Columns.genre != nil && Track.Columns.genre != "").fetchAll(db)
         }
     }
+
+    // MARK: - Availability (v42, UC-TABLE-20/21, W2-A)
+
+    /// Counts per persisted availability — the scope counts and status-bar totals of a track
+    /// view come from here, never from counting loaded rows (UC-TABLE-21).
+    func availabilityCounts(search: String? = nil) async throws -> TrackAvailabilityCounts {
+        let (conditions, arguments) = Self.searchConditions(search)
+        let whereSQL = conditions.isEmpty ? "" : "WHERE " + conditions.joined(separator: " AND ")
+        let sql = """
+            SELECT
+                COUNT(*) AS all_count,
+                COALESCE(SUM(CASE WHEN \(TrackAvailabilitySQL.local) THEN 1 ELSE 0 END), 0) AS local_count,
+                COALESCE(SUM(CASE WHEN \(TrackAvailabilitySQL.notDownloadedScope) THEN 1 ELSE 0 END), 0) AS not_downloaded_count,
+                COALESCE(SUM(CASE WHEN \(TrackAvailabilitySQL.downloading) THEN 1 ELSE 0 END), 0) AS downloading_count,
+                COALESCE(SUM(CASE WHEN \(TrackAvailabilitySQL.failed) THEN 1 ELSE 0 END), 0) AS failed_count,
+                COALESCE(SUM(CASE WHEN \(TrackAvailabilitySQL.fileMissing) THEN 1 ELSE 0 END), 0) AS missing_count,
+                COALESCE(SUM(COALESCE(duration, 0)), 0) AS total_duration
+            FROM tracks
+            \(whereSQL)
+            """
+        return try await database.read { db in
+            guard let row = try Row.fetchOne(db, sql: sql, arguments: arguments) else {
+                return TrackAvailabilityCounts()
+            }
+            return TrackAvailabilityCounts(
+                all: row["all_count"],
+                local: row["local_count"],
+                notDownloaded: row["not_downloaded_count"],
+                downloading: row["downloading_count"],
+                failed: row["failed_count"],
+                fileMissing: row["missing_count"],
+                totalDuration: row["total_duration"]
+            )
+        }
+    }
+
+    /// Tracks of one availability scope (W2-B's scope bar), optionally searched. Order is the
+    /// table's job (in-memory sort, `TrackListModel`); rows come back by id.
+    func fetchTracks(scope: TrackAvailabilityScope, search: String? = nil) async throws -> [Track] {
+        var (conditions, arguments) = Self.searchConditions(search)
+        if let predicate = scope.sqlPredicate { conditions.insert(predicate, at: 0) }
+        let whereSQL = conditions.isEmpty ? "" : "WHERE " + conditions.joined(separator: " AND ")
+        let finalArguments = arguments
+        return try await database.read { db in
+            try Track.fetchAll(db, sql: "SELECT * FROM tracks \(whereSQL) ORDER BY id", arguments: finalArguments)
+        }
+    }
+
+    /// `search_text LIKE ?` for each whitespace-separated term, folded like `fetchForLibrary`.
+    private static func searchConditions(_ search: String?) -> ([String], StatementArguments) {
+        let trimmed = search?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return ([], StatementArguments()) }
+        let terms = trimmed.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        let values = terms.map { "%\(DatabaseManager.foldedSearchText($0))%" }
+        return (terms.map { _ in "search_text LIKE ?" }, StatementArguments(values))
+    }
+
+    /// The tracks a reconciliation compares with the disk: every row with a stored path
+    /// (`.all`), only those flagged missing (`.flaggedMissing`), or the given ids.
+    func fetchFileCheckCandidates(_ scope: TrackFileCheckScope) async throws -> [TrackFileCheckCandidate] {
+        var sql = """
+            SELECT id, organized_path, original_path, file_missing_since FROM tracks
+            WHERE organized_path IS NOT NULL AND organized_path != ''
+            """
+        var arguments = StatementArguments()
+        switch scope {
+        case .all:
+            break
+        case .flaggedMissing:
+            sql += " AND file_missing_since IS NOT NULL AND file_missing_since != ''"
+        case .tracks(let ids):
+            guard !ids.isEmpty else { return [] }
+            sql += " AND id IN (\(Array(repeating: "?", count: ids.count).joined(separator: ", ")))"
+            arguments = StatementArguments(Array(ids).sorted())
+        }
+        sql += " ORDER BY id"
+        let finalSQL = sql
+        let finalArguments = arguments
+        return try await database.read { db in
+            try Row.fetchAll(db, sql: finalSQL, arguments: finalArguments).map { row in
+                let missingSince: String? = row["file_missing_since"]
+                let originalPath: String? = row["original_path"]
+                return TrackFileCheckCandidate(
+                    id: row["id"],
+                    organizedPath: row["organized_path"],
+                    originalPath: originalPath ?? "",
+                    isFlaggedMissing: !(missingSince ?? "").isEmpty
+                )
+            }
+        }
+    }
+
+    /// Records the outcome of one checked batch in one transaction. Each update is guarded by
+    /// the path that was checked, so a row whose path changed meanwhile (a download, a path
+    /// repair) is left alone. Returns how many rows changed each way.
+    @discardableResult
+    func applyFileChecks(
+        missing: [TrackFileCheckCandidate],
+        present: [TrackFileCheckCandidate],
+        checkedAt: Date = Date()
+    ) async throws -> (flagged: Int, cleared: Int) {
+        guard !missing.isEmpty || !present.isEmpty else { return (0, 0) }
+        let stamp = ISO8601DateFormatter().string(from: checkedAt)
+        return try await database.write { db in
+            var flagged = 0
+            var cleared = 0
+            for candidate in missing {
+                try db.execute(
+                    sql: """
+                        UPDATE tracks SET file_missing_since = ?
+                        WHERE id = ? AND organized_path = ?
+                          AND (file_missing_since IS NULL OR file_missing_since = '')
+                        """,
+                    arguments: [stamp, candidate.id, candidate.organizedPath]
+                )
+                flagged += db.changesCount
+            }
+            for candidate in present {
+                try db.execute(
+                    sql: """
+                        UPDATE tracks SET file_missing_since = NULL
+                        WHERE id = ? AND organized_path = ? AND file_missing_since IS NOT NULL
+                        """,
+                    arguments: [candidate.id, candidate.organizedPath]
+                )
+                cleared += db.changesCount
+            }
+            return (flagged, cleared)
+        }
+    }
+
+    /// Use-time fact: playback or a file action met the file of `trackId` missing. Callers go
+    /// through `LibraryAvailabilityMonitor.recordMissingAtUse`, which first verifies that the
+    /// library folder is reachable (a missing drive is never a missing file, DEC-014).
+    @discardableResult
+    func recordFileMissing(trackId: Int64, at date: Date = Date()) async throws -> Bool {
+        let stamp = ISO8601DateFormatter().string(from: date)
+        return try await database.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE tracks SET file_missing_since = ?
+                    WHERE id = ? AND organized_path IS NOT NULL AND organized_path != ''
+                      AND (file_missing_since IS NULL OR file_missing_since = '')
+                    """,
+                arguments: [stamp, trackId]
+            )
+            return db.changesCount > 0
+        }
+    }
+
+    /// When each track was added to a playlist (`playlist_tracks.added_at`) — the `Added`
+    /// column of a playlist (UC-TABLE-19).
+    func fetchPlaylistAddedDates(playlistId: Int64) async throws -> [Int64: String] {
+        try await database.read { db in
+            var result: [Int64: String] = [:]
+            let rows = try Row.fetchAll(
+                db,
+                sql: "SELECT track_id, added_at FROM playlist_tracks WHERE playlist_id = ?",
+                arguments: [playlistId]
+            )
+            for row in rows {
+                let id: Int64 = row["track_id"]
+                let added: String? = row["added_at"]
+                if let added, result[id] == nil { result[id] = added }
+            }
+            return result
+        }
+    }
+}
+
+// MARK: - Availability types
+
+/// Per-availability counts and the total duration of a set of tracks (UC-TABLE-21).
+struct TrackAvailabilityCounts: Equatable, Sendable {
+    var all = 0
+    var local = 0
+    /// The `Not downloaded` scope: no file and not a settled failure — includes the tracks
+    /// downloading now.
+    var notDownloaded = 0
+    /// Of `notDownloaded`, the ones with a running download.
+    var downloading = 0
+    var failed = 0
+    var fileMissing = 0
+    /// Seconds.
+    var totalDuration = 0
+
+    func count(for scope: TrackAvailabilityScope) -> Int {
+        switch scope {
+        case .all: all
+        case .local: local
+        case .notDownloaded: notDownloaded
+        case .downloadFailed: failed
+        case .fileMissing: fileMissing
+        }
+    }
+}
+
+/// The All Tracks scopes (UC-SCOPE-02): `All · Local · Not downloaded · Download failed ·
+/// File missing`. Each maps to one SQL predicate over persisted columns (W2-B builds the bar).
+enum TrackAvailabilityScope: String, CaseIterable, Sendable {
+    case all, local, notDownloaded, downloadFailed, fileMissing
+
+    /// The scope's word, verbatim (UC-SCOPE-02, §15.4).
+    var title: String {
+        switch self {
+        case .all: "All"
+        case .local: "Local"
+        case .notDownloaded: "Not downloaded"
+        case .downloadFailed: "Download failed"
+        case .fileMissing: "File missing"
+        }
+    }
+
+    var sqlPredicate: String? {
+        switch self {
+        case .all: nil
+        case .local: TrackAvailabilitySQL.local
+        case .notDownloaded: TrackAvailabilitySQL.notDownloadedScope
+        case .downloadFailed: TrackAvailabilitySQL.failed
+        case .fileMissing: TrackAvailabilitySQL.fileMissing
+        }
+    }
+
+    /// Whether a derived availability belongs to the scope (mirrors `sqlPredicate`).
+    func contains(_ availability: TrackAvailability) -> Bool {
+        switch self {
+        case .all: return true
+        case .local: return availability == .local
+        case .notDownloaded: return availability == .notDownloaded || availability == .downloading
+        case .downloadFailed:
+            if case .failed = availability { return true }
+            return false
+        case .fileMissing: return availability == .fileMissing
+        }
+    }
+}
+
+/// SQL mirrors of `TrackAvailability.derive` — one predicate per state.
+enum TrackAvailabilitySQL {
+    static let hasFile = "(organized_path IS NOT NULL AND organized_path != '')"
+    static let noFile = "(organized_path IS NULL OR organized_path = '')"
+    static let flaggedMissing = "(file_missing_since IS NOT NULL AND file_missing_since != '')"
+    static let downloadingStatus =
+        "(LOWER(TRIM(COALESCE(download_status, ''))) IN ('downloading', 'queued', 'in_progress', 'in-progress'))"
+    static let failureRecorded =
+        "((download_failure IS NOT NULL AND download_failure != '') OR LOWER(TRIM(COALESCE(download_status, ''))) IN ('failed', 'error'))"
+
+    static let local = "(\(hasFile) AND NOT \(flaggedMissing))"
+    static let fileMissing = "(\(hasFile) AND \(flaggedMissing))"
+    static let downloading = "(\(noFile) AND \(downloadingStatus))"
+    static let failed = "(\(noFile) AND NOT \(downloadingStatus) AND \(failureRecorded))"
+    /// Not downloaded plus downloading (no file, not a settled failure).
+    static let notDownloadedScope = "(\(noFile) AND NOT \(failed))"
+}
+
+/// What a reconciliation checks.
+enum TrackFileCheckScope: Equatable, Sendable {
+    /// Every track with a stored path (scan, mount, library open, manual re-check).
+    case all
+    /// Only the tracks flagged missing — did their files come back? (after a download).
+    case flaggedMissing
+    /// These tracks.
+    case tracks(Set<Int64>)
+}
+
+/// One stored file to compare with the disk.
+struct TrackFileCheckCandidate: Equatable, Sendable {
+    let id: Int64
+    let organizedPath: String
+    let originalPath: String
+    let isFlaggedMissing: Bool
 }

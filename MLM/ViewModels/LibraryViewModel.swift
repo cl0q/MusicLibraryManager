@@ -159,13 +159,7 @@ final class LibraryViewModel {
                 let remote = counts?.remote ?? remoteCount
                 guard !Task.isCancelled else { return }
 
-                let availability = TrackPresentationAvailability.map(
-                    tracks: result,
-                    libraryRoot: libraryRoot,
-                    fileExists: { url in
-                        return FileManager.default.fileExists(atPath: url.path)
-                    }
-                )
+                let availability = TrackAvailability.byTrackID(result)
 
                 await MainActor.run { [weak self] in
                     guard let self else { return }
