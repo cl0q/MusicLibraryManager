@@ -25,8 +25,8 @@ struct TrackListContext: Equatable, Sendable {
 
     static let allTracks = TrackListContext(container: .library, viewName: "All Tracks", isAllTracksTable: true)
     static let unnamed = TrackListContext(container: .none, viewName: nil)
-    /// The Queue column's tables: no Remove from Library (UC-CM-07); Remove from Queue arrives
-    /// with W2-D's queue target.
+    /// The Queue panel (W2-D): no Remove from Library (UC-CM-07); Remove from Queue acts on its
+    /// Next rows.
     static let queue = TrackListContext(container: .queue, viewName: nil)
 
     static func playlist(id: Int64, name: String) -> TrackListContext {
@@ -56,6 +56,9 @@ struct TrackCommandTarget {
     var preview: (() -> Void)?
     /// Records the list as the playing context before a menu command plays from it (⌘L, W2-C).
     var recordOrigin: (() -> Void)?
+    /// Track ▸ Play Next done by the list itself (the Queue panel moves its own rows to the top,
+    /// W2-D); `nil`: the shared Play Next queues the selected tracks.
+    var playNext: (() -> Void)?
 }
 
 /// The focused track list as the menu bar sees it — cheap to publish and to compare.
@@ -358,7 +361,7 @@ struct TrackCommandState: Equatable, Sendable {
     static func removeDisabledReason(_ container: TrackListContainer) -> String {
         switch container {
         case .library: "All Tracks has nothing to remove tracks from. Remove from Library… deletes them."
-        case .queue: "Removing tracks from the queue isn’t available yet."
+        case .queue: "Select tracks under Next to remove them from the queue."
         case .playlist, .syncProfile: "These tracks can’t be removed here yet."
         case .none: "This list has nothing to remove tracks from."
         }

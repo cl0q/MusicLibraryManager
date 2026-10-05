@@ -188,7 +188,7 @@ struct TrackCommandStateTests {
             #expect(reason.hasSuffix(".") && !reason.hasSuffix("…."))
             #expect(reason.range(of: #"W\d-"#, options: .regularExpression) == nil)
         }
-        #expect(TrackCommandState.removeDisabledReason(.queue) == "Removing tracks from the queue isn’t available yet.")
+        #expect(TrackCommandState.removeDisabledReason(.queue) == "Select tracks under Next to remove them from the queue.")
     }
 
     @Test @MainActor func playbackViewTitlesNameOnlyAKnownList() {

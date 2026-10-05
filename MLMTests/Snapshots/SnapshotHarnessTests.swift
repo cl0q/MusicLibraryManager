@@ -38,7 +38,10 @@ final class SnapshotsTests: XCTestCase {
         // W2-I removed Search/{GlobalSearchPresentationView,UniversalSearchView}.swift (and the
         // universal-search fixture) and added Search/{SearchResultsView,OnlineSearchResultsView,
         // SearchSuggestionList}.swift (deferred) and Search/SearchFocusHandoff.swift (non-view).
-        XCTAssertEqual(paths.count, 109, "Re-audit inventory changes explicitly.")
+        // W2-D replaced Queue/PlaybackQueueView.swift (rendered) by Queue/QueuePanel.swift
+        // (rendered: the unavailable state), Queue/{QueuePanelModel,QueueEditCommands}.swift
+        // (non-view) and Queue/SaveQueueAsPlaylistPopover.swift (deferred).
+        XCTAssertEqual(paths.count, 112, "Re-audit inventory changes explicitly.")
         XCTAssertEqual(Set(SnapshotFixtures.inventory.map(\.path)), paths)
         XCTAssertEqual(SnapshotFixtures.inventory.count, paths.count)
         XCTAssertFalse(SnapshotFixtures.inventory.contains { $0.disposition.isEmpty })
@@ -46,8 +49,8 @@ final class SnapshotsTests: XCTestCase {
         XCTAssertFalse(SnapshotFixtures.fixtures.isEmpty)
         XCTAssertEqual(SnapshotFixtures.fixtures.count, 27)
         XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 23)
-        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 34)
-        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 52)
+        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 36)
+        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 53)
         for fixture in SnapshotFixtures.fixtures where fixture.expectedTableRows != nil {
             if case .swiftUI = fixture.backend {
                 XCTFail("\(fixture.id): table readiness requires the AppKit backend.")

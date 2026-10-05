@@ -167,7 +167,7 @@ struct TrackListComponentTests {
         let model = menu([track(1)], library)
         #expect(model.sections == [
             [.play(enabled: true), .preview(enabled: true)],
-            [.playNext],
+            [.playNext, .addToQueue],
             [.addToPlaylist, .addToSyncProfile],
             [.getInfo, .goToArtist("Artist")],
             [.showInFinder(enabled: true), .copy(filePath: true, link: true)],
@@ -241,13 +241,14 @@ struct TrackListComponentTests {
     }
 
     @Test func noDeadItemsFromLaterPackages() {
-        // Add to Queue, Go to Album, Find Similar, Share… don't exist yet (Preview and Locate
-        // File… arrived with W2-C, Go to Artist with W2-I).
+        // Go to Album, Find Similar, Share… don't exist yet (Preview and Locate File… arrived
+        // with W2-C, Go to Artist with W2-I, Add to Queue with W2-D).
         let all = menu([track(1)], playlist).items + menu([track(2, missing: true)], library).items
         let titles = all.map { "\($0)" }.joined(separator: " ")
-        for absent in ["addToQueue", "goToAlbum", "findSimilar", "share"] {
+        for absent in ["goToAlbum", "findSimilar", "share"] {
             #expect(!titles.contains(absent))
         }
+        #expect(all.contains(.addToQueue))
         #expect(all.contains(.preview(enabled: true)) && all.contains(.locateFile))
         // Preview needs exactly one track (UC-CM-04).
         #expect(!menu([track(1), track(2)], library).items.contains { if case .preview = $0 { true } else { false } })

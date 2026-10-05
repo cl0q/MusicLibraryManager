@@ -132,8 +132,8 @@ enum SnapshotFixtures {
                 trackRepository: trackRepository
             )))
         }),
-        Fixture(id: "playback-queue-unavailable", size: .init(width: 800, height: 560), makeView: { _ in
-            AnyView(PlaybackQueueView())
+        Fixture(id: "queue-panel-unavailable", size: .init(width: 320, height: 560), makeView: { _ in
+            AnyView(QueuePanel())
         }),
     ]
 
@@ -296,7 +296,7 @@ enum SnapshotFixtures {
         "Library/EnergyBars.swift", "Library/LibraryView.swift",
         "TrackList/TrackListTable.swift", "TrackList/TrackCell.swift", "TrackList/TrackRowPresentation.swift",
         "Playlists/PlaylistCard.swift",
-        "Playlists/PlaylistTable.swift", "Queue/PlaybackQueueView.swift",
+        "Playlists/PlaylistTable.swift", "Queue/QueuePanel.swift",
         "ReviewQueue/ReviewQueueView.swift",
         "Shared/SelectionCreationSheets.swift", "Shared/StatusChip.swift",
         "Shared/TrackCoverView.swift", "Shared/SpringLoadableHover.swift", "Shared/FirstRunWizard.swift",
@@ -372,7 +372,10 @@ enum SnapshotFixtures {
         "Shell/ContentScaffold.swift": "Deferred: shell scaffold reads the status-bar centre and mount state from the environment; re-recorded per wave.",
         "Shell/ShellToolbar.swift": "Deferred: toolbar content needs a window toolbar host and the live playback VM.",
         "Shell/DestinationView.swift": "Deferred: routes to container-backed destination views; needs application-level fixture composition.",
-        "Shell/TrailingColumnView.swift": "Deferred: hosts InspectorView and PlaybackQueueView, which need live playback state.",
+        "Shell/TrailingColumnView.swift": "Deferred: hosts InspectorView and QueuePanel, which need live playback state.",
+        "Queue/QueuePanelModel.swift": "Non-view: the Queue panel's sections, rows, words and drag payload (W2-D).",
+        "Queue/QueueEditCommands.swift": "Non-view: undoable queue edits, drops and Save as Playlist (W2-D).",
+        "Queue/SaveQueueAsPlaylistPopover.swift": "Deferred: a popover; bitmap hosts don't present it (W2-D).",
         "Inspector/InspectorModel.swift": "Non-view: Info's selection-keyed edit model (W2-E).",
         "Inspector/InfoTrackRequest.swift": "Non-view: one-track Show Details request (W2-E).",
         "Inspector/InspectorFileStatus.swift": "Non-view: availability sentence and fix per state (W2-E).",
@@ -430,7 +433,10 @@ Playlists/PlaylistDetailView.swift
 Playlists/PlaylistDetailViewLoader.swift
 Playlists/PlaylistsView.swift
 Playlists/PlaylistTable.swift
-Queue/PlaybackQueueView.swift
+Queue/QueueEditCommands.swift
+Queue/QueuePanel.swift
+Queue/QueuePanelModel.swift
+Queue/SaveQueueAsPlaylistPopover.swift
 ReelsInbox/ReelsInboxView.swift
 ReviewQueue/ReviewQueueView.swift
 Search/OnlineSearchResultsView.swift
