@@ -67,7 +67,7 @@ struct PlaylistDetailView: View {
                         emptyState(viewModel)
                             // Drop targets stay active on an empty state (UC-EMPTY-01): what
                             // lands here is added like on the playlist's sidebar row.
-                            .mlmDropTarget(.sidebarPlaylist(id: playlist.id ?? -1, name: viewModel.playlist.name),
+                            .dropTarget(.sidebarPlaylist(id: playlist.id ?? -1, name: viewModel.playlist.name),
                                            cornerRadius: 0)
                     } else {
                         trackList(viewModel)
@@ -422,7 +422,7 @@ struct PlaylistDetailView: View {
                 }
                 // The header cover takes an image (D-PLD-COVER-TO-HEADER): one undo step; a
                 // refused file says so in the header for 5 s (UC-SURF-04).
-                .mlmDropTarget(.playlistCover(id: playlist.id ?? -1, name: viewModel.playlist.name),
+                .dropTarget(.playlistCover(id: playlist.id ?? -1, name: viewModel.playlist.name),
                                cornerRadius: 6, sayRefusal: { coverRefusal = $0 })
 
                 VStack(alignment: .leading, spacing: 3) {

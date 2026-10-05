@@ -150,8 +150,8 @@ enum DropRules {
     /// The kind of a hovering drag from the types it offers. Internal payloads win over their
     /// own file URLs (a track drag also carries `public.file-url`).
     static func hoverKind(_ conforms: (UTType) -> Bool) -> DragKind {
-        if conforms(.mlmTrack) || conforms(.legacyTrackDrag) { return .tracks }
-        if conforms(.mlmPlaylist) { return .playlists }
+        if conforms(.draggedTracks) || conforms(.legacyTrackDrag) { return .tracks }
+        if conforms(.draggedPlaylist) { return .playlists }
         if conforms(.fileURL) { return .files }
         if conforms(.image) { return .imageData }
         if conforms(.url) || conforms(.plainText) { return .link }
@@ -159,7 +159,7 @@ enum DropRules {
     }
 
     /// The pasteboard types every MLM drop target listens for.
-    static let observedTypes: [UTType] = [.mlmTrack, .legacyTrackDrag, .mlmPlaylist, .fileURL, .image, .url, .plainText]
+    static let observedTypes: [UTType] = [.draggedTracks, .legacyTrackDrag, .draggedPlaylist, .fileURL, .image, .url, .plainText]
 
     /// Ring and copy cursor (true), or no ring and the not-allowed cursor (false).
     static func accepts(_ kind: DragKind, on target: DropTarget, context: DropContext) -> Bool {

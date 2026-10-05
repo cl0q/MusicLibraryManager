@@ -346,7 +346,7 @@ struct PlaylistsView: View {
         }
         // The grid's background: a new playlist from dropped tracks (D-PL-SELECTION-TO-NEW);
         // the cards take their own drops.
-        .mlmDropTarget(.playlistsSection, cornerRadius: 0)
+        .dropTarget(.playlistsSection, cornerRadius: 0)
     }
 
     // MARK: - Empty State

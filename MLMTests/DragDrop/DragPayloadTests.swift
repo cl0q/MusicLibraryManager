@@ -13,8 +13,8 @@ struct DragPayloadTests {
     // MARK: Types
 
     @Test func theTypesAreTheDeclaredOnes() throws {
-        #expect(UTType.mlmTrack.identifier == "com.ilczuk.mlm.track")
-        #expect(UTType.mlmPlaylist.identifier == "com.ilczuk.mlm.playlist")
+        #expect(UTType.draggedTracks.identifier == "com.ilczuk.mlm.track")
+        #expect(UTType.draggedPlaylist.identifier == "com.ilczuk.mlm.playlist")
         #expect(UTType.legacyTrackDrag.identifier == "com.musiclibrary.trackdrag")
         #expect(UTType.trackDrag == .legacyTrackDrag)
         // Declared in the Info.plist the app bundle gets (exported: ours; imported: legacy).
@@ -68,10 +68,10 @@ struct DragPayloadTests {
         let provider = NSItemProvider()
         provider.register(TrackDragItem(trackId: 1, libraryId: "lib", filePath: file.path))
         let types = provider.registeredTypeIdentifiers
-        #expect(types.first == UTType.mlmTrack.identifier, "inside MLM the ids win")
+        #expect(types.first == UTType.draggedTracks.identifier, "inside MLM the ids win")
         #expect(types.contains(UTType.fileURL.identifier))
         // Nothing else: no plain text, no source link.
-        #expect(Set(types).isSubset(of: [UTType.mlmTrack.identifier, UTType.url.identifier, UTType.fileURL.identifier]))
+        #expect(Set(types).isSubset(of: [UTType.draggedTracks.identifier, UTType.url.identifier, UTType.fileURL.identifier]))
 
         let url = try await Self.load(URL.self, from: provider)
         #expect(url.standardizedFileURL.path == file.standardizedFileURL.path)
@@ -82,7 +82,7 @@ struct DragPayloadTests {
     @Test func aTrackWithoutAFileOffersNoFileURL() {
         let provider = NSItemProvider()
         provider.register(TrackDragItem(trackId: 2, libraryId: "lib", filePath: nil))
-        #expect(provider.registeredTypeIdentifiers == [UTType.mlmTrack.identifier])
+        #expect(provider.registeredTypeIdentifiers == [UTType.draggedTracks.identifier])
     }
 
     @Test func aLegacyDragIsReadAsATrackItem() async throws {

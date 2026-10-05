@@ -23,14 +23,14 @@ import UniformTypeIdentifiers
 
 extension UTType {
     /// Tracks dragged inside MLM (ids). Declared in Info.plist (`scripts/run.sh`).
-    static let mlmTrack = UTType(exportedAs: "com.ilczuk.mlm.track", conformingTo: .data)
+    static let draggedTracks = UTType(exportedAs: "com.ilczuk.mlm.track", conformingTo: .data)
     /// A playlist dragged inside MLM (id). Declared in Info.plist (`scripts/run.sh`).
-    static let mlmPlaylist = UTType(exportedAs: "com.ilczuk.mlm.playlist", conformingTo: .data)
+    static let draggedPlaylist = UTType(exportedAs: "com.ilczuk.mlm.playlist", conformingTo: .data)
     /// The track drag of builds before W2-H (`TrackDragData` / `QueueRowDrag` JSON). Imported
     /// only — nothing exports it any more; declared as an imported type in Info.plist.
     static let legacyTrackDrag = UTType(importedAs: "com.musiclibrary.trackdrag", conformingTo: .data)
     /// A library file (`.mlibm`), declared by `scripts/run.sh` since A3.
-    static let mlmLibraryFile = UTType(exportedAs: "com.ilczuk.mlm.library", conformingTo: .package)
+    static let libraryPackage = UTType(exportedAs: "com.ilczuk.mlm.library", conformingTo: .package)
 }
 
 // MARK: - Tracks
@@ -69,7 +69,7 @@ struct TrackDragItem: Codable, Transferable, Equatable, Hashable, Sendable {
     var fileURL: URL? { filePath.map { URL(fileURLWithPath: $0) } }
 
     static var transferRepresentation: some TransferRepresentation {
-        CodableRepresentation(contentType: .mlmTrack)
+        CodableRepresentation(contentType: .draggedTracks)
         // The old shape still arrives from a queue row or list of an older build.
         ProxyRepresentation(importing: { (legacy: LegacyTrackDrag) in
             TrackDragItem(trackId: legacy.trackId, sourcePlaylistId: legacy.sourcePlaylistId,
@@ -143,7 +143,7 @@ struct PlaylistDragItem: Codable, Transferable, Equatable, Hashable, Sendable {
     var libraryId: String?
 
     static var transferRepresentation: some TransferRepresentation {
-        CodableRepresentation(contentType: .mlmPlaylist)
+        CodableRepresentation(contentType: .draggedPlaylist)
     }
 }
 

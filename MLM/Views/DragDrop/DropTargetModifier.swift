@@ -17,7 +17,7 @@ extension View {
     ///   - springLoad: opens the target while a track drag rests on it (system timing; offered,
     ///     never required — the target takes the drop itself).
     ///   - sayRefusal: where a refusal is said; nil = the status bar.
-    func mlmDropTarget(
+    func dropTarget(
         _ target: DropTarget,
         cornerRadius: CGFloat = 7,
         isShown: Bool = false,
@@ -74,7 +74,7 @@ private struct DropTargetModifier: ViewModifier {
     }
 }
 
-/// The delegate behind `mlmDropTarget`: decides from the pasteboard types while hovering,
+/// The delegate behind `dropTarget`: decides from the pasteboard types while hovering,
 /// loads only on the drop.
 private struct DropTargetDelegate: DropDelegate {
     let target: DropTarget
@@ -192,7 +192,7 @@ private struct MainWindowDrops: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .mlmDropTarget(.window, cornerRadius: 0)
+            .dropTarget(.window, cornerRadius: 0)
             .sheet(item: $drops.m3uImport) { request in
                 M3UDropImportSheet(request: request)
             }

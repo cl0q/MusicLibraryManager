@@ -33,9 +33,9 @@ struct DropRulesTests {
     @Test func theHoverKindComesFromThePasteboardTypes() {
         func kind(_ types: [UTType]) -> DragKind { DropRules.hoverKind { type in types.contains { $0.conforms(to: type) } } }
         // A track drag also carries its file URL: the ids win.
-        #expect(kind([.mlmTrack, .url, .fileURL]) == .tracks)
+        #expect(kind([.draggedTracks, .url, .fileURL]) == .tracks)
         #expect(kind([.legacyTrackDrag]) == .tracks)
-        #expect(kind([.mlmPlaylist]) == .playlists)
+        #expect(kind([.draggedPlaylist]) == .playlists)
         #expect(kind([.fileURL]) == .files)
         #expect(kind([.png]) == .imageData)
         #expect(kind([.url]) == .link)

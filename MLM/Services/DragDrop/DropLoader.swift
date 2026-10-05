@@ -14,17 +14,17 @@ enum DropLoader {
         guard !providers.isEmpty else { return nil }
         let has: (UTType) -> Bool = { type in providers.contains { $0.hasItemConformingToTypeIdentifier(type.identifier) } }
 
-        if has(.mlmTrack) || has(.legacyTrackDrag) {
+        if has(.draggedTracks) || has(.legacyTrackDrag) {
             var items: [TrackDragItem] = []
-            for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.mlmTrack.identifier)
+            for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.draggedTracks.identifier)
                 || provider.hasItemConformingToTypeIdentifier(UTType.legacyTrackDrag.identifier) {
                 if let item = await transferable(TrackDragItem.self, from: provider) { items.append(item) }
             }
             return items.isEmpty ? nil : .tracks(TrackDragPayload(items: items))
         }
-        if has(.mlmPlaylist) {
+        if has(.draggedPlaylist) {
             var items: [PlaylistDragItem] = []
-            for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.mlmPlaylist.identifier) {
+            for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.draggedPlaylist.identifier) {
                 if let item = await transferable(PlaylistDragItem.self, from: provider) { items.append(item) }
             }
             return items.isEmpty ? nil : .playlists(items)

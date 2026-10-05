@@ -59,10 +59,10 @@ struct DropStructureTests {
 
     @Test func theSidebarRowsAreDropTargetsAndPlaylistsDrag() throws {
         let sidebar = try source("MLM/Views/Sidebar/SidebarView.swift")
-        #expect(sidebar.contains(".mlmDropTarget(\n                        .sidebarPlaylist(id: id, name: playlist.name)"))
+        #expect(sidebar.contains(".dropTarget(\n                        .sidebarPlaylist(id: id, name: playlist.name)"))
         #expect(sidebar.contains("isShown: navigation.selection == .playlist(id)"))
-        #expect(sidebar.contains(".mlmDropTarget(.syncProfile(id: id, name: profile.name))"))
-        #expect(sidebar.contains(".mlmDropTarget(destination == .allPlaylists ? .playlistsSection : .fixedRow)"))
+        #expect(sidebar.contains(".dropTarget(.syncProfile(id: id, name: profile.name))"))
+        #expect(sidebar.contains(".dropTarget(destination == .allPlaylists ? .playlistsSection : .fixedRow)"))
         #expect(sidebar.contains(".draggable(PlaylistDragItem("))
     }
 

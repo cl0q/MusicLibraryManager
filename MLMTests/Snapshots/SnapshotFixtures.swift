@@ -234,7 +234,7 @@ enum SnapshotFixtures {
         // W2-H: the shared drop target (ring only while a drag hovers) replaced the pulsing
         // spring-load modifier.
         Fixture(id: "drop-target-resting", size: .init(width: 300, height: 100), makeView: { _ in
-            AnyView(Text("Snapshot drop target").padding(20).mlmDropTarget(.fixedRow))
+            AnyView(Text("Snapshot drop target").padding(20).dropTarget(.fixedRow))
         }),
         Fixture(id: "first-run-welcome", size: .init(width: 560, height: 460), makeView: { _ in
             AnyView(FirstRunWizard(onComplete: {}).padding(20))

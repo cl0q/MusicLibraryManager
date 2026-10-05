@@ -82,7 +82,7 @@ struct TrackListTotals: Equatable, Sendable {
 extension TrackListConfiguration {
     /// What a list with `onInsert` takes at the insertion line: tracks, playlists, Finder files,
     /// links (the UC-DND matrix column "Playlist detail table").
-    static let insertableTypes: [UTType] = [.mlmTrack, .legacyTrackDrag, .mlmPlaylist, .fileURL, .url, .plainText]
+    static let insertableTypes: [UTType] = [.draggedTracks, .legacyTrackDrag, .draggedPlaylist, .fileURL, .url, .plainText]
 }
 
 /// The operations a drag out of a track list allows: inside MLM copy or move (reorder); outside

@@ -329,6 +329,6 @@ extension Track {
 
 extension UTType {
     /// The pre-W2-H track drag type, now declared (imported) in Info.plist. Read only: new
-    /// drags carry `UTType.mlmTrack`; `TrackDragItem` still decodes this shape.
+    /// drags carry `UTType.draggedTracks`; `TrackDragItem` still decodes this shape.
     static var trackDrag: UTType { .legacyTrackDrag }
 }

@@ -103,7 +103,7 @@ struct PlaylistCard: View {
         }
         // Tracks, playlists, Finder files and links as on its sidebar row; an image sets the
         // cover (undoable); a refused image says so on the card (W2-H, DEC-040).
-        .mlmDropTarget(
+        .dropTarget(
             .playlistCard(id: playlist.id ?? -1, name: playlist.name),
             cornerRadius: 8,
             springLoad: onSpringLoad,
@@ -386,7 +386,7 @@ struct PlaylistCard: View {
     // MARK: - Stroke
 
     /// The card's edge: hover only. A drag over the card gets the shared drop ring
-    /// (`mlmDropTarget`, W2-H) instead of a stroke of its own.
+    /// (`dropTarget`, W2-H) instead of a stroke of its own.
     private var strokeColor: Color {
         isHovered ? .mlmEdge : .mlmEdgeSubtle
     }

@@ -74,7 +74,7 @@ struct SidebarView: View {
                     .accessibilityLabel("Add Playlist")
                 }
                 // Tracks dropped on the header make a new playlist, named inline (IMP-018).
-                .mlmDropTarget(.playlistsSection)
+                .dropTarget(.playlistsSection)
             }
 
             Section(isExpanded: expansion(.sync)) {
@@ -109,7 +109,7 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         // The empty area below the rows: a new playlist from the drop (D-PL-SELECTION-TO-NEW).
-        .mlmDropTarget(.playlistsSection)
+        .dropTarget(.playlistsSection)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             LibraryFooter()
         }
@@ -229,7 +229,7 @@ struct SidebarView: View {
             .tag(destination)
             // Views, not containers: no ring for tracks; Finder files import (UC-SIDE-11).
             // All Playlists stands for the Playlists section: a drop there makes a playlist.
-            .mlmDropTarget(destination == .allPlaylists ? .playlistsSection : .fixedRow)
+            .dropTarget(destination == .allPlaylists ? .playlistsSection : .fixedRow)
     }
 
     /// Spring-loading opens a playlist row while a track drag rests on it (offered, never
@@ -264,7 +264,7 @@ struct SidebarView: View {
                     }
                     // A playlist row takes tracks, playlists, Finder files, M3U files and links
                     // directly (UC-DND-04) and drags as the playlist (UC-DND-01).
-                    .mlmDropTarget(
+                    .dropTarget(
                         .sidebarPlaylist(id: id, name: playlist.name),
                         isShown: navigation.selection == .playlist(id),
                         springLoad: { springLoad(.playlist(id)) }
@@ -331,7 +331,7 @@ struct SidebarView: View {
                     syncProfileMenu(profile, id: id)
                 }
                 // Tracks and playlists add to the profile; the open page doesn't switch.
-                .mlmDropTarget(.syncProfile(id: id, name: profile.name))
+                .dropTarget(.syncProfile(id: id, name: profile.name))
             }
         }
     }

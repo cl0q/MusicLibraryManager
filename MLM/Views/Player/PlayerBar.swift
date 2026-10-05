@@ -24,7 +24,7 @@ struct PlayerBar: View {
         // Tracks (and playlists) dropped on the player play next, confirmed with Undo — through
         // the queue's own entry point `QueueEditCommands.dropOnPlayer` (UC-TB-08, W2-D, W2-H).
         // Anything else: no ring, the not-allowed cursor.
-        .mlmDropTarget(.player, cornerRadius: 9)
+        .dropTarget(.player, cornerRadius: 9)
         // No background of its own: the toolbar's system glass is the player's surface
         // (UC-TB-06, UC-GLASS-01/08).
         // The status-bar notes, the Locate File… panel and window-wide Esc live on the window
