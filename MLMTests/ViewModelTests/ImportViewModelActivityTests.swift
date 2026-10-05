@@ -11,6 +11,15 @@ struct ImportViewModelActivityTests {
 
     // MARK: - Helpers
 
+    private func eventually(timeout: Duration = .seconds(5), _ condition: @escaping () async -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if await condition() { return true }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return await condition()
+    }
+
     private struct Fixture {
         let importService: ImportService
         let configRepo: ConfigRepository
@@ -119,7 +128,8 @@ struct ImportViewModelActivityTests {
 
         let importTask = Task { await importVM.importFromDirectory(dir) }
         // The operation registers synchronously on the main actor before the work starts.
-        while importVM.currentOperationID == nil { await Task.yield() }
+        let registered = await eventually(timeout: .seconds(60)) { importVM.currentOperationID != nil }
+        try #require(registered, "import operation never registered")
         let opID = try #require(importVM.currentOperationID)
         #expect(center.operation(id: opID)?.controls.cancelStyle.title == "Cancel After This File")
 

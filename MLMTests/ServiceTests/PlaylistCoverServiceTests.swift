@@ -27,25 +27,27 @@ struct PlaylistCoverServiceTests {
         try? FileManager.default.removeItem(at: coversDir.deletingLastPathComponent())
     }
 
-    private func makeService() async throws -> (DatabaseQueue, PlaylistRepository, PlaylistCoverService) {
+    private func makeService() async throws -> (DatabaseQueue, PlaylistRepository, PlaylistCoverService, NotificationCenter) {
         // PlaylistCoverService.init accepts `any DatabaseWriter`, so DatabaseQueue
         // (returned by DatabaseManager.inMemory()) flows through without a cast.
         let db = try DatabaseManager.inMemory()
         let plRepo = PlaylistRepository(database: db)
         let trRepo = TrackRepository(database: db)
         let cfRepo = ConfigRepository(database: db)
+        let center = NotificationCenter()
         let svc = PlaylistCoverService(
             database: db,
             playlistRepository: plRepo,
             trackRepository: trRepo,
             configRepository: cfRepo,
-            coversDirectory: coversDir
+            coversDirectory: coversDir,
+            notificationCenter: center
         )
-        return (db, plRepo, svc)
+        return (db, plRepo, svc, center)
     }
 
     @Test func fallback_with_zero_tracks_writes_PNG() async throws {
-        let (_, repo, svc) = try await makeService()
+        let (_, repo, svc, _) = try await makeService()
         defer { cleanup() }
         let pl = try await repo.create(name: "Empty Test")
         let id = pl.id!
@@ -68,7 +70,7 @@ struct PlaylistCoverServiceTests {
     }
 
     @Test func respects_cover_is_custom_flag() async throws {
-        let (_, repo, svc) = try await makeService()
+        let (_, repo, svc, _) = try await makeService()
         defer { cleanup() }
         let pl = try await repo.create(name: "Locked")
         let id = pl.id!
@@ -83,7 +85,7 @@ struct PlaylistCoverServiceTests {
     }
 
     @Test func setCustomCover_flipsLockTo1() async throws {
-        let (_, repo, svc) = try await makeService()
+        let (_, repo, svc, _) = try await makeService()
         defer { cleanup() }
         let pl = try await repo.create(name: "Custom Test")
         let id = pl.id!
@@ -111,7 +113,7 @@ struct PlaylistCoverServiceTests {
     }
 
     @Test func resetToAuto_clearsLockAndRegens() async throws {
-        let (_, repo, svc) = try await makeService()
+        let (_, repo, svc, _) = try await makeService()
         defer { cleanup() }
         let pl = try await repo.create(name: "Reset Auto Test")
         let id = pl.id!
@@ -130,7 +132,7 @@ struct PlaylistCoverServiceTests {
     }
 
     @Test func reentry_guard_skips_self_notifications() async throws {
-        let (_, repo, svc) = try await makeService()
+        let (_, repo, svc, center) = try await makeService()
         defer { cleanup() }
         // Keep `svc` alive across the await — the observer's [weak self] would
         // otherwise let the service be released before the test completes.
@@ -144,7 +146,7 @@ struct PlaylistCoverServiceTests {
         #expect(fetched1?.coverImagePath == nil)
 
         // Post a notification with the service-origin tag.
-        NotificationCenter.default.post(
+        center.post(
             name: .playlistDidChange,
             object: nil,
             userInfo: ["origin": "coverService", "playlistId": id]

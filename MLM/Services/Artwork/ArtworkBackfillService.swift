@@ -39,6 +39,7 @@ final class ArtworkBackfillService {
     private let analysisRepository: AnalysisRepository
     private let configRepository: ConfigRepository
     private let artworkService: ArtworkService
+    private let notificationCenter: NotificationCenter
 
     // MARK: - Internal state
 
@@ -65,12 +66,14 @@ final class ArtworkBackfillService {
         database: any DatabaseWriter,
         trackRepository: TrackRepository,
         analysisRepository: AnalysisRepository,
-        configRepository: ConfigRepository
+        configRepository: ConfigRepository,
+        notificationCenter: NotificationCenter = .default
     ) {
         self.database = database
         self.trackRepository = trackRepository
         self.analysisRepository = analysisRepository
         self.configRepository = configRepository
+        self.notificationCenter = notificationCenter
 
         // ArtworkService cache dir matches MaintenanceView.runArtwork path so
         // both Maintenance-Action and Auto-Trigger share the same cache (D-08).
@@ -85,18 +88,19 @@ final class ArtworkBackfillService {
     deinit {
         // `deinit` is nonisolated; read the MainActor-isolated tokens via the
         // safe escape hatch (mirrors PlaylistCoverService deinit pattern).
+        let center = notificationCenter
         if let token = MainActor.assumeIsolated({ libraryImportObserverToken }) {
-            NotificationCenter.default.removeObserver(token)
+            center.removeObserver(token)
         }
         if let token = MainActor.assumeIsolated({ downloadCompleteObserverToken }) {
-            NotificationCenter.default.removeObserver(token)
+            center.removeObserver(token)
         }
     }
 
     // MARK: - Notification observer
 
     private func startObserving() {
-        libraryImportObserverToken = NotificationCenter.default.addObserver(
+        libraryImportObserverToken = notificationCenter.addObserver(
             forName: .libraryDidImport,
             object: nil,
             queue: .main
@@ -109,7 +113,7 @@ final class ArtworkBackfillService {
             }
         }
 
-        downloadCompleteObserverToken = NotificationCenter.default.addObserver(
+        downloadCompleteObserverToken = notificationCenter.addObserver(
             forName: .downloadDidComplete,
             object: nil,
             queue: .main
@@ -411,7 +415,7 @@ final class ArtworkBackfillService {
         selfHealAttempted.remove(trackId)
 
         // D-03: Notify UI per-track so covers appear incrementally ("pop-in" effect)
-        NotificationCenter.default.post(
+        notificationCenter.post(
             name: .trackArtworkDidChange,
             object: nil,
             userInfo: [
