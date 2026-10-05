@@ -253,7 +253,10 @@ struct PlaybackStepTests {
     }
 
     @Test @MainActor func volumeIsSharedAndClamped() {
-        let playback = PlaybackViewModel(audioPlayer: MockAudioPlayerForMenus())
+        // The volume is remembered between launches (W2-C): use a throwaway defaults suite, never
+        // the test runner's standard defaults.
+        let env = PlaybackTestEnvironment()
+        let playback = PlaybackViewModel(audioPlayer: MockAudioPlayerForMenus(), environment: env.environment)
         #expect(playback.volume == 1.0)
         playback.setVolume(1.4)
         #expect(playback.volume == 1.0)
