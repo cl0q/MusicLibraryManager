@@ -36,7 +36,7 @@ Status words: `planned` · `in progress` · `in review` · `merged` · `blocked`
 | W0-2 | Baseline build + tests recorded (§0) | coordinator | merged |
 | W0-3 | B2: `UI-CONVENTIONS.md`, `CLAUDE.md`, superseded banner on `UI-GROUNDTRUTH.md` | worker (Opus) | in progress |
 | W0-4 | Deployment target macOS 27 (`Package.swift`, `scripts/run.sh` `LSMinimumSystemVersion`) | coordinator | merged (`a39fe32`) |
-| W0-5 | Snapshot baselines: delete the 60 old baselines, re-record per wave for finished surfaces | coordinator | **waiting for Oliver's OK** (see §5) |
+| W0-5 | Snapshot baselines: old baselines deleted, re-record per wave for finished surfaces | coordinator | merged |
 | W0-6 | This plan | coordinator | merged |
 
 ### Wave 1 — Shell (sequential, one worker, then independent review)
@@ -134,7 +134,7 @@ Latest existing: `v41_remote_provider_identity`. Reserved (a number is only used
 
 | # | Question | When | Status |
 |---|---|---|---|
-| 1 | Delete the 60 old snapshot baselines now (recoverable from `v0.9`)? | wave 0 | open |
+| 1 | Delete the 60 old snapshot baselines now (recoverable from `v0.9`)? | wave 0 | answered 2026-10-05: yes |
 | 2 | Album metadata source for the backfill (no MusicBrainz client exists) | before W4-3 lookup | open |
 | 3 | Does `Remove from List` in the library picker need a confirmation? | W3-LAUNCH | open |
 | 4 | History size of the Activity window | W3-ACT | open |
