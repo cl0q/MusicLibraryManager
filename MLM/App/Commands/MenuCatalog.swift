@@ -302,8 +302,7 @@ enum MenuCommand: String, CaseIterable, Sendable {
         case .findDuplicates:
             Entry(menu: .library, title: "Find Duplicates", shortcut: nil, wiring: .app)
         case .findAlbums:
-            Entry(menu: .library, title: "Find Albums", shortcut: nil,
-                  wiring: .pending(owner: "W4-3", reason: "Album suggestions aren’t available yet."))
+            Entry(menu: .library, title: "Find Albums", shortcut: nil, wiring: .app)
         case .maintenance: Entry(menu: .library, title: "Maintenance", shortcut: nil, wiring: .app)
         case .fingerprintAllTracks: Self.maintenanceJob("Fingerprint All Tracks")
         case .replayGainAnalysis: Self.maintenanceJob("ReplayGain Analysis")

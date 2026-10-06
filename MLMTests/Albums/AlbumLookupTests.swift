@@ -267,6 +267,11 @@ struct AlbumLookupTests {
         #expect(remaining == 1, "looked up again next time")
     }
 
+    @Test func libraryFindAlbumsIsWiredToTheLookup() {
+        #expect(!MenuCommand.findAlbums.isPending, "Library ▸ Find Albums starts the lookup (W4-3)")
+        #expect(MenuCommand.findAlbums.title == "Find Albums")
+    }
+
     @Test func theIndexIsBuiltFromTracksWithARealAlbum() async throws {
         let env = try await Self.env(tracks: 0)
         try await env.db.write { db in
