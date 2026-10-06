@@ -451,6 +451,19 @@ final class OrganizedPathMigrationService {
         try await latestRecoverableManifest() != nil
     }
 
+    /// The migration `Roll Back Last Migration…` would undo (A-SET-PATHROLLBACK names it).
+    struct MigrationSummary: Equatable, Sendable {
+        let changeCount: Int
+        let appliedAt: Date
+    }
+
+    /// W3-SET: what the rollback would restore, or `nil` when there is nothing to roll back.
+    func lastAppliedMigration() async throws -> MigrationSummary? {
+        guard let latest = try await latestRecoverableManifest() else { return nil }
+        return MigrationSummary(changeCount: latest.manifest.changes.count,
+                                appliedAt: latest.manifest.appliedAt ?? latest.manifest.createdAt)
+    }
+
     private func buildInventory() -> Inventory {
         var byBasename: [String: [String]] = [:]
         var byTrackID: [Int64: [String]] = [:]

@@ -351,12 +351,10 @@ enum MenuCommand: String, CaseIterable, Sendable {
         }
     }
 
-    /// A Maintenance ▸ job (DEC-044): runs from Settings ▸ Maintenance until W3-SET turns the
-    /// jobs into Activity operations that the menu can start.
+    /// A Maintenance ▸ job (DEC-044): starts (or queues) the same Activity operation as `Run`
+    /// in Settings ▸ Maintenance (W3-SET, `MaintenanceJobs`).
     private static func maintenanceJob(_ title: String) -> Entry {
-        Entry(menu: .library, title: title, shortcut: nil,
-              wiring: .pending(owner: "W3-SET", reason: "Run this job in Settings ▸ Maintenance."),
-              parent: .maintenance)
+        Entry(menu: .library, title: title, shortcut: nil, wiring: .app, parent: .maintenance)
     }
 
     var menu: MenuBarMenu { entry.menu }
