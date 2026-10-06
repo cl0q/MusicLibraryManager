@@ -164,7 +164,7 @@ struct ContentView: View {
                 openTrackDetail(notification.userInfo)
             }
             .sheet(item: $syncProfileSelectionContainer) { selection in
-                NewSyncProfileFromSelectionSheet(trackIds: selection.trackIds)
+                NewSyncProfileSheet(trackIDs: Array(selection.trackIds).sorted())
             }
             .onChange(of: searchPlace) { _, _ in
                 // The query belongs to the view: keep the outgoing place's, restore this one's.

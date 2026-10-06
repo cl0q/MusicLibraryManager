@@ -28,9 +28,6 @@ struct SidebarView: View {
     @State private var isCommittingRename = false
     @FocusState private var renameFocused: Bool
 
-    @State private var pendingProfileDeletion: SyncProfile?
-    @State private var deviceIngestProfile: SyncProfile?
-
     private var syncProfiles: [SyncProfile] { container.syncViewModel?.profiles ?? [] }
 
     var body: some View {
@@ -133,7 +130,6 @@ struct SidebarView: View {
             // A playlist created while the sidebar wasn't on screen still gets its name edited.
             beginRequestedRename()
             await reloadBadges()
-            model.refreshReachability(syncProfiles)
         }
         .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { note in
             // Cover regeneration posts are noise for the sidebar.
@@ -160,14 +156,11 @@ struct SidebarView: View {
                 await model.reloadSummaries(container.playlistRepository)
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .syncProfileDidChange)) { _ in
-            Task { await container.syncViewModel?.loadProfiles() }
-        }
-        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didMountNotification)) { _ in
-            model.refreshReachability(syncProfiles)
-        }
-        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didUnmountNotification)) { _ in
-            model.refreshReachability(syncProfiles)
+        // Sync profiles, their destinations and plans are watched by `SyncViewModel` (W3-SYNC).
+        .onChange(of: container.syncViewModel?.presenter.renameRequest) { _, request in
+            guard let id = request, let profile = syncProfiles.first(where: { $0.id == id }) else { return }
+            container.syncViewModel?.presenter.renameRequest = nil
+            startRename(.syncProfile(id), currentName: profile.name)
         }
         .onChange(of: model.renameRequest) { _, _ in
             beginRequestedRename()
@@ -182,32 +175,13 @@ struct SidebarView: View {
             beginRequestedRename()
         }
         .onChange(of: syncProfiles.compactMap(\.id)) { old, new in
-            model.refreshReachability(syncProfiles)
             for removed in Set(old).subtracting(new) {
                 navigation.removeSyncProfile(removed)
             }
         }
-        // A-SYNC-DELETEPROFILE: not undoable, so confirmed (UC-UNDO-03). Cancel is the default.
-        .alert(
-            "Delete the sync profile “\(pendingProfileDeletion?.name ?? "")”?",
-            isPresented: Binding(
-                get: { pendingProfileDeletion != nil },
-                set: { if !$0 { pendingProfileDeletion = nil } }
-            )
-        ) {
-            Button("Delete Sync Profile", role: .destructive) {
-                deletePendingProfile()
-            }
-            Button("Cancel", role: .cancel) {
-                pendingProfileDeletion = nil
-            }
-            .keyboardShortcut(.defaultAction)
-        } message: {
-            Text("The profile, its plan and its sync history are removed. Music on the device and in your library is not touched.")
-        }
-        .sheet(item: $deviceIngestProfile) { profile in
-            DeviceIngestResultsView(profile: profile)
-        }
+        // Delete Sync Profile… (A-SYNC-DELETEPROFILE), Change Destination…, Add…, Read Playlist
+        // Changes from Device… — shared with the profile pages (W3-SYNC).
+        .syncProfileSheets()
     }
 
     // MARK: - Selection and expansion
@@ -358,94 +332,48 @@ struct SidebarView: View {
         }
     }
 
+    /// UC-SIDE-07: always a second line with this profile's own state (§15.8) — whichever
+    /// profile is open (W3-SYNC); a thin bar while it syncs.
     @ViewBuilder
     private func syncProfileRow(_ profile: SyncProfile) -> some View {
         if let id = profile.id {
+            let icon = SyncDestination.volumePath(for: profile.outputFolder) == nil ? "folder" : "externaldrive"
             if renaming == .syncProfile(id) {
-                renameField(systemImage: "externaldrive")
+                renameField(systemImage: icon)
                     .tag(SidebarDestination.syncProfile(id))
             } else {
-                let state = rowState(for: profile, id: id)
+                let state = container.syncViewModel?.state(for: profile)
                 Label {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(profile.name)
                             .lineLimit(1)
                             .truncationMode(.tail)
-                        Text(state.text())
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                            .lineLimit(1)
-                        if let progress = state.progress {
-                            ProgressView(value: progress)
-                                .progressViewStyle(.linear)
-                                .controlSize(.mini)
+                        if let state {
+                            Text(state.sidebarText)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                                .lineLimit(1)
+                            if let progress = state.sidebarProgress {
+                                ProgressView(value: progress)
+                                    .progressViewStyle(.linear)
+                                    .controlSize(.mini)
+                            }
                         }
                     }
                 } icon: {
-                    Image(systemName: "externaldrive")
+                    Image(systemName: icon)
                 }
                 .help(profile.outputFolder)
                 .tag(SidebarDestination.syncProfile(id))
+                // CM-SYNC-PROFILE: the one builder, also the page's More (UC-CM-02).
                 .contextMenu {
-                    syncProfileMenu(profile, id: id)
+                    SyncProfileMenu(profile: profile, place: .contextMenu)
                 }
                 // Tracks and playlists add to the profile; the open page doesn't switch.
                 .dropTarget(.syncProfile(id: id, name: profile.name))
             }
         }
-    }
-
-    @ViewBuilder
-    private func syncProfileMenu(_ profile: SyncProfile, id: Int64) -> some View {
-        Button("Rename") {
-            startRename(.syncProfile(id), currentName: profile.name)
-        }
-        Button("Duplicate") {
-            duplicate(profile)
-        }
-        Button("Read Playlist Changes from Device…") {
-            deviceIngestProfile = profile
-            Task { await container.syncViewModel?.scanDeviceForPlaylistChanges(profile: profile) }
-        }
-        Divider()
-        Button("Delete Sync Profile…", role: .destructive) {
-            pendingProfileDeletion = profile
-        }
-    }
-
-    /// Duplicate makes the copy the selected profile in `SyncViewModel`; show it, so the
-    /// page and the profile Sync Now acts on agree (B1).
-    private func duplicate(_ profile: SyncProfile) {
-        guard let vm = container.syncViewModel else { return }
-        let before = Set(vm.profiles.compactMap(\.id))
-        Task {
-            await vm.duplicateProfile(profile)
-            if let copy = vm.profiles.compactMap(\.id).first(where: { !before.contains($0) }) {
-                navigation.select(.syncProfile(copy))
-            }
-        }
-    }
-
-    private func rowState(for profile: SyncProfile, id: Int64) -> SyncProfileRowState {
-        guard let vm = container.syncViewModel else {
-            return .make(isSyncing: false, processed: 0, total: 0,
-                         isReachable: model.reachableProfileIDs.contains(id),
-                         pendingAdds: nil, lastSynced: nil)
-        }
-        let isSelected = vm.selectedProfile?.id == id
-        let pendingAdds: Int? = {
-            guard isSelected, let preview = vm.preview, preview.isDeviceConnected else { return nil }
-            return preview.filesToAdd.count
-        }()
-        return .make(
-            isSyncing: isSelected && vm.isSyncing,
-            processed: vm.syncProcessed,
-            total: vm.syncTotal,
-            isReachable: model.reachableProfileIDs.contains(id),
-            pendingAdds: pendingAdds,
-            lastSynced: vm.profileLastSynced[id]
-        )
     }
 
     // MARK: - Reorder by drag (D-PL-CARD-REORDER, between rows)
@@ -553,17 +481,6 @@ struct SidebarView: View {
             startRename(.playlist(id), currentName: playlist.name)
         } else if let folder = model.takeFolderRenameRequest(), let id = folder.id {
             startRename(.folder(id), currentName: folder.name)
-        }
-    }
-
-    // MARK: - Deleting
-
-    private func deletePendingProfile() {
-        guard let profile = pendingProfileDeletion, let vm = container.syncViewModel else { return }
-        pendingProfileDeletion = nil
-        Task {
-            await vm.deleteProfile(profile)
-            if let id = profile.id { navigation.removeSyncProfile(id) }
         }
     }
 

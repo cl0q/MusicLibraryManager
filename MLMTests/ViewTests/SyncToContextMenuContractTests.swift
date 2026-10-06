@@ -36,7 +36,14 @@ struct SyncToContextMenuContractTests {
             configRepository: configRepo,
             transcodeCache: cache
         )
-        let vm = SyncViewModel(syncRepository: syncRepo, syncService: svc)
+        let vm = SyncViewModel(syncRepository: syncRepo, syncService: svc, notificationCenter: NotificationCenter())
+        // W3-SYNC: Add to Sync Profile ▸ goes through ShellEdits (one undo step) on this database.
+        let playlists = PlaylistRepository(database: db)
+        let undo = UndoCenter(undoManager: UndoManager(), statusBar: StatusBarCenter(), log: { _ in })
+        vm.edits = {
+            ShellEdits(dependencies: .init(playlists: { playlists }, syncProfiles: { syncRepo }, syncProfileDidChange: { _ in }),
+                       undo: undo, window: ShellWindowModels())
+        }
         return (db, vm)
     }
 
@@ -51,7 +58,9 @@ struct SyncToContextMenuContractTests {
 
     @Test func libraryTableWiresSyncToAction() throws {
         let actions = try source("MLM/Views/TrackList/TrackListActions.swift")
-        #expect(actions.contains("await sync?.addTracks(ids)"))
+        // W3-SYNC: routed through the undoable ShellEdits path; nothing selects the profile.
+        #expect(actions.contains("TrackCommandActions.addToSyncProfile(profile, tracks: rows.map(\\.track), shell: shell)"))
+        #expect(!actions.contains("selectedProfile"))
         // The Track menu reaches the same action through the published selection.
         #expect(try source("MLM/Views/TrackList/TrackListTable.swift").contains("addToSyncProfile: { profile, ids in"))
     }
@@ -69,10 +78,8 @@ struct SyncToContextMenuContractTests {
         let trackId: Int64 = try await db.read { db in
             (try Row.fetchOne(db, sql: "SELECT id FROM tracks"))?["id"] ?? -1
         }
-        vm.selectedProfile = profile
-
-        // Simulates the context-menu "Sync to -> P" action.
-        await vm.addTracks([trackId])
+        // Simulates Add to Sync Profile ▸ P.
+        await vm.addTracks([trackId], to: profile)
 
         let count: Int = try await db.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM sync_profile_tracks WHERE profile_id = ?",
@@ -94,10 +101,8 @@ struct SyncToContextMenuContractTests {
         let trackId: Int64 = try await db.read { db in
             (try Row.fetchOne(db, sql: "SELECT id FROM tracks"))?["id"] ?? -1
         }
-        vm.selectedProfile = profile
-
-        await vm.addTracks([trackId])
-        await vm.addTracks([trackId])
+        await vm.addTracks([trackId], to: profile)
+        await vm.addTracks([trackId], to: profile)
 
         let count: Int = try await db.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM sync_profile_tracks WHERE profile_id = ?",
@@ -119,9 +124,8 @@ struct SyncToContextMenuContractTests {
         let trackId: Int64 = try await db.read { db in
             (try Row.fetchOne(db, sql: "SELECT id FROM tracks"))?["id"] ?? -1
         }
-        vm.selectedProfile = profile
-
-        await vm.addTracks([trackId])
-        #expect(vm.profileTracks.contains { $0.id == trackId })
+        await vm.addTracks([trackId], to: profile)
+        await vm.loadContent(profile.id!)
+        #expect(vm.contents[profile.id!]?.tracks.contains { $0.id == trackId } == true)
     }
 }

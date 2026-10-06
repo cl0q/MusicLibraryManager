@@ -778,8 +778,7 @@ struct GrooveStudioView: View {
                                         availableSyncProfiles: availableSyncProfiles,
                                         addToSyncProfile: { profile in
                                             Task {
-                                                container.syncViewModel?.selectedProfile = profile
-                                                await container.syncViewModel?.addTracks([track.id!])
+                                                await container.syncViewModel?.addTracks([track.id!], to: profile)
                                             }
                                         }
                                     )
@@ -983,8 +982,7 @@ struct GrooveStudioView: View {
                                             availableSyncProfiles: availableSyncProfiles,
                                             addToSyncProfile: { profile in
                                                 Task {
-                                                    container.syncViewModel?.selectedProfile = profile
-                                                    await container.syncViewModel?.addTracks([track.id!])
+                                                    await container.syncViewModel?.addTracks([track.id!], to: profile)
                                                 }
                                             }
                                         )
@@ -1293,8 +1291,7 @@ struct GrooveStudioView: View {
                                     availableSyncProfiles: availableSyncProfiles,
                                     addToSyncProfile: { profile in
                                         Task {
-                                            container.syncViewModel?.selectedProfile = profile
-                                            await container.syncViewModel?.addTracks(Array(selectedIDs))
+                                            await container.syncViewModel?.addTracks(Array(selectedIDs), to: profile)
                                         }
                                     }
                                 )

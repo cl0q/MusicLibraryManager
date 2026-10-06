@@ -180,9 +180,12 @@ struct TrackCommands: Commands {
         case .recomputePlan(let id):
             let sync = DependencyContainer.shared.syncViewModel
             let profile = sync?.profiles.first { $0.id == id }
+            // ⌘R on a profile page: compare the profile with the device again (K-SYNC-REFRESH).
+            let connected = sync?.destinations[id] == .connected
             CommandButton(.refreshFromSource, title: reread.title(),
-                          enabled: profile != nil && sync?.selectedProfile?.id == id && sync?.isPreviewUpdating == false) {
-                if let sync, let profile { Task { await sync.refreshPreviewNow(for: profile) } }
+                          enabled: profile != nil && connected,
+                          disabledReason: "Connect the device to compare it with the profile.") {
+                sync?.recomputePlan(id)
             }
         case .scanThisFolder, .runScan, .none:
             CommandButton(.refreshFromSource, title: reread.title(), enabled: false,

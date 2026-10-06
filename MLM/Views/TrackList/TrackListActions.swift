@@ -160,12 +160,7 @@ struct TrackListActions {
     }
 
     func addToSyncProfile(_ profile: SyncProfile, _ rows: [TrackRow]) {
-        let ids = rows.map(\.id)
-        let sync = container.syncViewModel
-        Task {
-            sync?.selectedProfile = profile
-            await sync?.addTracks(ids)
-        }
+        TrackCommandActions.addToSyncProfile(profile, tracks: rows.map(\.track), shell: shell)
     }
 
     func newSyncProfile(_ rows: [TrackRow]) {

@@ -637,8 +637,7 @@ struct FolderTracksTable: View {
                 availableSyncProfiles: availableSyncProfiles,
                 addToSyncProfile: { profile in
                     Task {
-                        container.syncViewModel?.selectedProfile = profile
-                        await container.syncViewModel?.addTracks(Array(selectedIDs))
+                        await container.syncViewModel?.addTracks(Array(selectedIDs), to: profile)
                     }
                 }
             )

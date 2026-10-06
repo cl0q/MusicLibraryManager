@@ -60,14 +60,8 @@ struct DeviceDetectorTests {
     @Test func smartDefaultsCreateProfileWithDeviceSettings() async throws {
         let (db, vm) = try makeViewModel()
 
-        await vm.createProfile(
-            name: "TestPod",
-            outputFolder: "/tmp",
-            generateM3U8: true,
-            transcodeMode: "aac_248",
-            fat32SafePaths: true,
-            cleanupRemovedFiles: true
-        )
+        // W3-SYNC: the device preset sets the options (S-SYNC-NEWPROFILE.N01).
+        _ = await vm.createProfile(name: "TestPod", outputFolder: "/tmp", preset: .rockbox)
 
         let profiles = try await db.read { db in try SyncProfile.fetchAll(db) }
         let created = profiles.first { $0.name == "TestPod" }
@@ -85,7 +79,7 @@ struct DeviceDetectorTests {
         await vm.loadProfiles()
         #expect(vm.profiles.isEmpty)
 
-        await vm.createProfile(name: "iPod", outputFolder: "/tmp")
+        _ = await vm.createProfile(name: "iPod", outputFolder: "/tmp", preset: .plainFolder)
         #expect(vm.profiles.count == 1)
         #expect(vm.profiles.first?.name == "iPod")
     }

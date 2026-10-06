@@ -1,16 +1,15 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// `New Sync Profile…` sheet, opened from the Sync section header ＋ and from the
-/// `New Sync Profile…` items of the track and playlist menus.
-///
-/// Taken from `SyncView`'s private create sheet (W1-1) so the shell can present it now that
-/// sync profiles are sidebar rows: same fields and behaviour, system styles, a file panel via
-/// `.fileImporter`, and the "Rockbox device detected" toast as a status-bar message.
-/// `SyncView` itself is no longer routed (its profile list duplicated the sidebar); W3-SYNC
-/// redesigns this sheet and removes `SyncView`.
+/// S-SYNC-NEWPROFILE: one sheet for the Sync section ＋, File ▸ New Sync Profile… and
+/// Add to Sync Profile ▸ New Sync Profile… (with the selection: `Create and Add ‹n› Tracks`).
+/// Detected devices are listed at once; choosing one fills the destination, the name and the
+/// preset, and the preset says what it sets before anything applies (replaces the toast,
+/// S-SYNC-TOAST). A destination is required; errors stay in the sheet (UC-SHEET-05).
 struct NewSyncProfileSheet: View {
-    /// Called with the created profile after a successful create.
+    /// Tracks to add as the first content (from a selection; nothing navigates then).
+    var trackIDs: [Int64] = []
+    /// Called with the created profile (the ＋ opens its page).
     var onCreated: (SyncProfile) -> Void = { _ in }
 
     @Environment(\.container) private var container
@@ -18,136 +17,156 @@ struct NewSyncProfileSheet: View {
     @Environment(StatusBarCenter.self) private var statusBar: StatusBarCenter?
 
     @State private var name = ""
-    @State private var outputFolder = ""
-    @State private var detectedDevices: [DeviceDetector.RockboxDevice] = []
-    @State private var hasRunDetection = false
-    @State private var applyDeviceDefaults = false
+    @State private var destination = ""
+    @State private var preset: SyncDevicePreset = .plainFolder
+    @State private var devices: [DeviceDetector.RockboxDevice] = []
     @State private var isCreating = false
     @State private var isChoosingFolder = false
+    @State private var isDropTargeted = false
+
+    private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var canCreate: Bool { !trimmedName.isEmpty && !destination.isEmpty && !isCreating }
+    private var libraryVolume: String? { container.mountObserver?.libraryVolumePath }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.l) {
-            Text("New Sync Profile")
-                .font(.title3.weight(.semibold))
-
-            TextField("Name", text: $name)
-                .textFieldStyle(.roundedBorder)
-
-            HStack {
-                TextField("Destination folder", text: $outputFolder)
-                    .textFieldStyle(.roundedBorder)
-                Button("Choose…") {
-                    isChoosingFolder = true
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    TextField("Name", text: $name, prompt: Text("iPod Classic"))
                 }
-            }
-
-            VStack(alignment: .leading, spacing: Spacing.s) {
-                Button("Detect Device") {
-                    detectedDevices = DeviceDetector.detectRockboxDevices()
-                    hasRunDetection = true
-                }
-
-                if hasRunDetection {
-                    if detectedDevices.isEmpty {
-                        Text("No device found. Connect it and try again.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(detectedDevices, id: \.mountPoint) { device in
-                            Button {
-                                choose(device)
-                            } label: {
-                                HStack {
-                                    Image(systemName: "externaldrive")
-                                    VStack(alignment: .leading) {
-                                        Text(device.deviceName)
-                                        Text(device.mountPoint)
-                                            .font(.subheadline)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    if applyDeviceDefaults && outputFolder == device.mountPoint {
-                                        Image(systemName: "checkmark")
-                                            .foregroundStyle(.tint)
-                                    }
-                                }
-                                .contentShape(Rectangle())
+                Section("Destination") {
+                    ForEach(devices, id: \.mountPoint) { device in
+                        deviceRow(device)
+                    }
+                    LabeledContent {
+                        Button("Choose…") { isChoosingFolder = true }
+                    } label: {
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(destination.isEmpty ? "No destination chosen" : destination)
+                                    .truncationMode(.middle)
+                                    .lineLimit(1)
+                                    .monospaced(!destination.isEmpty)
+                                Text("Any folder on this Mac or on a connected disk. You can also drop a folder or a disk here.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
                             }
-                            .buttonStyle(.plain)
+                        } icon: {
+                            Image(systemName: "folder")
                         }
                     }
                 }
-            }
-
-            if let error = container.syncViewModel?.errorMessage {
-                Label {
-                    Text(error)
-                } icon: {
-                    Image(systemName: "exclamationmark.triangle")
-                        .foregroundStyle(.red)
+                Section("Device preset") {
+                    Picker("Preset", selection: $preset) {
+                        ForEach(SyncDevicePreset.allCases) { Text($0.title).tag($0) }
+                    }
+                    Text(preset.summary)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Text("Every option can be changed later on the profile.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
-                .font(.callout)
+                if let error = container.syncViewModel?.errorMessage {
+                    Section {
+                        Text(error)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
+            .formStyle(.grouped)
+            .scrollDisabled(true)
 
             HStack {
+                Text("The profile appears in the sidebar under Sync.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                 Spacer()
-                Button("Cancel") {
-                    dismiss()
-                }
-                .keyboardShortcut(.cancelAction)
-                .disabled(isCreating)
-
-                Button("Create") {
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button(trackIDs.isEmpty ? "Create" : "Create and Add \(StatusBarText.tracks(trackIDs.count).capitalizedTracks)") {
                     create()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isCreating)
+                .disabled(!canCreate)
             }
+            .padding(Spacing.l)
         }
-        .padding(Spacing.xl)
-        .frame(width: 420)
+        .frame(width: 480)
+        .navigationTitle("New Sync Profile")
         .onAppear {
             container.syncViewModel?.clearError()
+            // Removable volumes connected now; Rockbox players are recognised. The library's own
+            // disk is never offered as a destination.
+            devices = DeviceDetector.detectRockboxDevices().filter { $0.mountPoint != libraryVolume }
         }
         .fileImporter(isPresented: $isChoosingFolder, allowedContentTypes: [.folder]) { result in
-            if case .success(let url) = result {
-                outputFolder = url.path
-            }
+            if case .success(let url) = result { useFolder(url) }
         }
-        .fileDialogMessage("Choose the folder or device this profile copies music to.")
+        .fileDialogMessage("Choose the folder or disk to sync to.")
+        // D-SYNC-FOLDER-TO-OUTPUT: a folder or disk dropped anywhere on the sheet.
+        .dropDestination(for: URL.self) { urls, _ in
+            guard let url = urls.first, url.hasDirectoryPath || (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { return false }
+            useFolder(url)
+            return true
+        } isTargeted: { isDropTargeted = $0 }
     }
 
-    private func choose(_ device: DeviceDetector.RockboxDevice) {
-        outputFolder = device.mountPoint
-        if name.isEmpty {
-            name = "\(device.deviceName) iPod"
+    private func deviceRow(_ device: DeviceDetector.RockboxDevice) -> some View {
+        Button {
+            destination = device.mountPoint
+            if name.isEmpty { name = device.deviceName }
+            preset = .rockbox
+        } label: {
+            HStack {
+                Image(systemName: destination == device.mountPoint ? "largecircle.fill.circle" : "circle")
+                    .foregroundStyle(destination == device.mountPoint ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                Image(systemName: "externaldrive")
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(device.deviceName)
+                    Text("Rockbox player · \(device.mountPoint) · \(device.availableSpace.formatted(.byteCount(style: .file))) free")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .contentShape(Rectangle())
         }
-        applyDeviceDefaults = true
-        statusBar?.post("Rockbox device detected — device defaults applied")
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(device.deviceName), Rockbox player")
+    }
+
+    private func useFolder(_ url: URL) {
+        destination = url.path
+        if name.isEmpty { name = SyncDestination.deviceName(for: url.path) }
     }
 
     private func create() {
-        guard let vm = container.syncViewModel else { return }
-        let defaults = applyDeviceDefaults
+        guard let vm = container.syncViewModel, canCreate else { return }
         isCreating = true
+        let chosenPreset = preset
+        let detected = devices.contains { $0.mountPoint == destination }
         Task {
-            await vm.createProfile(
-                name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                outputFolder: outputFolder,
-                generateM3U8: defaults,
-                transcodeMode: defaults ? "aac_248" : "keep_originals",
-                fat32SafePaths: true,
-                cleanupRemovedFiles: true,
-                artworkMode: defaults ? "resize_250" : "keep_original"
-            )
+            let created = await vm.createProfile(name: trimmedName, outputFolder: destination, preset: chosenPreset,
+                                                 trackIDs: trackIDs)
             isCreating = false
-            if vm.errorMessage == nil {
-                NotificationCenter.default.post(name: .syncProfileDidChange, object: nil)
-                if let created = vm.selectedProfile {
-                    onCreated(created)
-                }
-                dismiss()
+            guard let created else { return }
+            if chosenPreset == .rockbox && detected {
+                statusBar?.post("Rockbox device detected — device defaults applied")  // IMP-008
+            } else if !trackIDs.isEmpty {
+                statusBar?.post("Created “\(created.name)” with \(StatusBarText.tracks(trackIDs.count))")
+            } else {
+                statusBar?.post("Created the sync profile “\(created.name)” — add playlists or tracks")
             }
+            if trackIDs.isEmpty { onCreated(created) }
+            dismiss()
         }
+    }
+}
+
+private extension String {
+    /// `3 tracks` → `3 Tracks` (button Title Case, UC-COPY-02).
+    var capitalizedTracks: String {
+        replacingOccurrences(of: " tracks", with: " Tracks").replacingOccurrences(of: " track", with: " Track")
     }
 }
