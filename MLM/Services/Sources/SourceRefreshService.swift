@@ -27,35 +27,60 @@ protocol SourceLibraryRefreshing: AnyObject {
 /// playlist is (re)linked. It never calls the clients' `syncPlaylists()` (which created a
 /// playlist per account set, adopted same-named playlists and replaced track lists).
 ///
-/// Likes are **not** part of it yet: the likes sync (`SoundCloudClient.syncLikes`) still
-/// replaces the Liked playlist and writes an album; it joins here once the W3-PL fix round
-/// makes it append-only (`// LIKES:` below). The Liked playlist keeps its own `Refresh from
+/// Likes are part of it since W5-F2 (the W3-PL fix round made the likes refresh append-only):
+/// for a connected source that **has** a Liked playlist, the liked tracks it doesn't hold yet
+/// are appended (`likedPlayableTrackIDs` + `appendTracksReturningEntries` — rows already there
+/// keep their position, date and id). A Liked playlist is never created and nothing is removed
+/// (IMP-042, B3-PLAN §5 Q5: add-only). The Liked playlist still has its own `Refresh from
 /// ‹Source›` on the playlist page.
 @MainActor
 final class LinkedPlaylistsRefresher: SourceLibraryRefreshing {
     typealias ListTracks = @MainActor (Playlist, Source) async throws -> [RemotePlaylistTrack]
+    /// The liked tracks of a source that have a file, in the source's order, after syncing the
+    /// likes into the library (`PlaylistRefreshService.Remote.likedTracks`).
+    typealias ListLikes = @MainActor (Source) async throws -> [Int64]
 
     private let queries: ImportLibraryQueries
     private let importer: PlaylistImporter
+    private let playlists: PlaylistRepository
     private let listTracks: ListTracks
+    private let listLikes: ListLikes?
 
-    init(database: any DatabaseWriter, listTracks: @escaping ListTracks, notificationCenter: NotificationCenter = .default) {
+    init(database: any DatabaseWriter, listTracks: @escaping ListTracks, listLikes: ListLikes? = nil,
+         notificationCenter: NotificationCenter = .default) {
         queries = ImportLibraryQueries(database: database)
         importer = PlaylistImporter(database: database, downloads: NoPlaylistDownloads(), notificationCenter: notificationCenter)
+        playlists = PlaylistRepository(database: database)
         self.listTracks = listTracks
+        self.listLikes = listLikes
     }
 
     /// The real source lists: `PlaylistRefreshService.Remote.live(_:).listTracks` (W3-PL), as is.
     static func live(_ container: DependencyContainer) -> LinkedPlaylistsRefresher? {
         guard let database = container.databaseManager else { return nil }
-        return LinkedPlaylistsRefresher(database: database.pool,
-                                        listTracks: PlaylistRefreshService.Remote.live(container).listTracks)
+        let remote = PlaylistRefreshService.Remote.live(container)
+        return LinkedPlaylistsRefresher(database: database.pool, listTracks: remote.listTracks, listLikes: remote.likedTracks)
     }
 
     func refresh(_ service: TokenStorage.Service) async throws -> SourceRefreshSummary {
         var summary = SourceRefreshSummary()
         guard let link = Self.linkSource(service) else { return summary }
-        // LIKES: add the append-only likes refresh here (W3-PL fix round).
+        // LIKES: append-only, only into a Liked playlist that exists, only for SoundCloud (the one
+        // source whose likes the live reader supports); never creates one, never removes a row.
+        if link == .soundcloud, let listLikes, let liked = try await queries.likedPlaylist(sourceName: link.storedName),
+           let likedID = liked.playlist.id {
+            do {
+                let ids = try await listLikes(liked.source)
+                let appended = try await playlists.appendTracksReturningEntries(playlistId: likedID, trackIds: ids)
+                summary.newTracks += appended.entries.count
+                if !appended.entries.isEmpty { summary.playlistsUpdated += 1 }
+            } catch where SourceSignInProblem.isRejectedSignIn(error) {
+                throw error
+            } catch {
+                AppLogger.shared.error("Refreshing the likes of “\(liked.playlist.name)” failed: \(error)", source: "Sources")
+                summary.failedPlaylists.append(liked.playlist.name)
+            }
+        }
         for (playlist, source) in try await queries.linkedPlaylists(sourceName: link.storedName) {
             guard let playlistID = playlist.id, let sourceID = source.id, let externalID = playlist.externalId else { continue }
             do {
