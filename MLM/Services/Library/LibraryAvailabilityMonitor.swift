@@ -207,9 +207,9 @@ final class LibraryAvailabilityMonitor {
         case .skippedRootUnreachable: job.discard()
         case .cancelled: job.cancelled(result)
         case .abortedRootLost:
-            job.cancelled(ActivityResult(summary: "The library folder went away — nothing was flagged"))
+            job.cancelled(ActivityResult(summary: "The library folder went away — no file was marked missing"))
         case .abortedSuspicious:
-            job.fail(cause: "Too many files looked missing at once — nothing was flagged. Check the library folder in Settings ▸ Library.",
+            job.fail(cause: "Too many files looked missing at once — no file was marked missing. Check the library folder in Settings ▸ Library.",
                      fix: .openSettings(SettingsTab.library.rawValue))
         }
     }

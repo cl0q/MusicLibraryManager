@@ -199,7 +199,7 @@ final class ImportService: Sendable {
         onProgress: (@Sendable (ImportProgress) -> Void)? = nil
     ) async throws -> ImportResult {
         // Phase 1: Scan for audio files
-        onProgress?(ImportProgress(total: 0, processed: 0, phase: "Scanning...", currentFile: nil))
+        onProgress?(ImportProgress(total: 0, processed: 0, phase: "Scanning…", currentFile: nil))
         let audioFiles = try Self.scanDirectory(directory)
         try Task.checkCancellation()
         return try await importFiles(audioFiles, remap: remap, onProgress: onProgress)
@@ -226,7 +226,7 @@ final class ImportService: Sendable {
         onProgress?(ImportProgress(
             total: audioFiles.count,
             processed: 0,
-            phase: "Extracting metadata...",
+            phase: "Extracting metadata…",
             currentFile: nil
         ))
 
@@ -269,7 +269,7 @@ final class ImportService: Sendable {
             onProgress?(ImportProgress(
                 total: audioFiles.count,
                 processed: processed,
-                phase: "Extracting metadata...",
+                phase: "Extracting metadata…",
                 currentFile: chunk.last?.lastPathComponent
             ))
         }
@@ -290,7 +290,7 @@ final class ImportService: Sendable {
         onProgress?(ImportProgress(
             total: audioFiles.count,
             processed: audioFiles.count,
-            phase: "Saving to database...",
+            phase: "Saving to the library…",
             currentFile: nil
         ))
 

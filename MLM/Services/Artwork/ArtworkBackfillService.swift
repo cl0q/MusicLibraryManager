@@ -404,7 +404,7 @@ final class ArtworkBackfillService {
         do {
             try await analysisRepository.saveArtwork(artwork)
             savedToDatabase = true
-            AppLogger.shared.debug("ArtworkBackfill [\(tracker?.currentState.current ?? 0)/\(tracker?.currentState.total ?? 0)] \(track.artist) - \(track.title) → saved ✓", source: "ArtworkBackfill")
+            AppLogger.shared.debug("ArtworkBackfill [\(tracker?.currentState.current ?? 0)/\(tracker?.currentState.total ?? 0)] \(track.artist) - \(track.title) → saved", source: "ArtworkBackfill")
         } catch {
             AppLogger.shared.warn("ArtworkBackfill: saveArtwork DB failed for track \(trackId): \(error)",
                                   source: "ArtworkBackfill")

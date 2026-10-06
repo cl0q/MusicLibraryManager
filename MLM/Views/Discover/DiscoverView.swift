@@ -102,7 +102,7 @@ struct DiscoverView: View {
                         .font(.subheadline)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
-                    Button("Find Recommendations…") { find() }
+                    Button("Find Recommendations") { find() }
                 }
                 .padding(.horizontal, Spacing.l)
                 .padding(.vertical, Spacing.xs)
