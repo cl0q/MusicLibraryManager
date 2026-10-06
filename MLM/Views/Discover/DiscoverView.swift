@@ -2,7 +2,7 @@ import SwiftUI
 
 /// **Discover** (V-DISC, DEC-029): `Recommendations · Reels` in a scope bar (the old 260 pt
 /// segmented control is gone), one title (the window's), the held recommendations in the shared
-/// track table, and — in the Reels scope — the existing inbox until W3-DISC-B replaces it.
+/// track table, and — in the Reels scope — `ReelsView` (W3-DISC-B).
 /// UC-LAYOUT-01…05, UC-SCOPE-01…05.
 struct DiscoverView: View {
     let onTrackActivated: TrackActivation
@@ -39,6 +39,7 @@ struct DiscoverView: View {
         .onReceive(NotificationCenter.default.publisher(for: .downloadDidComplete)) { _ in Task { await model?.reload() } }
         .onReceive(NotificationCenter.default.publisher(for: .libraryDidDeleteTracks)) { _ in Task { await model?.reload() } }
         .onReceive(NotificationCenter.default.publisher(for: .discoverFindRecommendations)) { _ in find() }
+        .onReceive(NotificationCenter.default.publisher(for: .reelsDidChange)) { _ in Task { await model?.reload() } }
     }
 
     private func setUp() async {
@@ -123,7 +124,7 @@ struct DiscoverView: View {
                 Color.clear
             }
         case .reels:
-            ReelsInboxView()
+            ReelsView()
         }
     }
 

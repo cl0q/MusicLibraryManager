@@ -312,7 +312,11 @@ enum SnapshotFixtures {
         "Playlists/PlaylistLinkSheet.swift": "Deferred: the Link sheet checks a live source link; its wording is unit-tested.",
         "Playlists/PlaylistM3UImportSheet.swift": "Deferred: the M3U preview reads a file and the library; its plan is unit-tested (PlaylistFolderEditsTests).",
         "Playlists/PlaylistsView.swift": "Deferred: live playlist/cover loading and root view state need a preloaded composition.",
-        "ReelsInbox/ReelsInboxView.swift": "Deferred: AVKit/Shazam/Vision work and detached tasks require service/clock seams.",
+        "Reels/ReelsView.swift": "Deferred: the page reads the library database and hosts the AVKit player; ReelsModel (list, selection, Use, Done, Delete, import, drops) is unit-tested on temporary databases with fakes (W3-DISC-B).",
+        "Reels/ReelWorkbench.swift": "Deferred: an AVKit VideoPlayer and the keyframe popover over a live reel; the workbench state is ReelsModel, unit-tested (W3-DISC-B).",
+        "Reels/ReelWorkbenchSections.swift": "Deferred: guesses, fields and results of the selected reel; their states are ReelBench / ReelsModel, unit-tested (W3-DISC-B).",
+        "Reels/ReelLinkSheet.swift": "Deferred: the sheet hands its text to ReelsModel.addLink(text:); link recognition is ReelLinkParser, unit-tested (W3-DISC-B).",
+        "Reels/ReelThumbnail.swift": "Deferred: a list thumbnail generated from the video file with AVFoundation (W3-DISC-B).",
         "Search/SearchResultsView.swift": "Deferred: Library-scope results read the open library and the shell environment (W2-I); its model is unit-tested.",
         "Search/OnlineSearchResultsView.swift": "Deferred: Online-scope results ask live sources (W2-I); OnlineSearchModel is unit-tested with fake sources.",
         "Search/SearchSuggestionList.swift": "Deferred: search suggestions render only inside the window's toolbar search field (W2-I).",
@@ -459,7 +463,11 @@ Queue/QueueEditCommands.swift
 Queue/QueuePanel.swift
 Queue/QueuePanelModel.swift
 Queue/SaveQueueAsPlaylistPopover.swift
-ReelsInbox/ReelsInboxView.swift
+Reels/ReelLinkSheet.swift
+Reels/ReelThumbnail.swift
+Reels/ReelWorkbench.swift
+Reels/ReelWorkbenchSections.swift
+Reels/ReelsView.swift
 Review/ReviewComparison.swift
 Review/ReviewGroupList.swift
 Review/ReviewResolvedView.swift

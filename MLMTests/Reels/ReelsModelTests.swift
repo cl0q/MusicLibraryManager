@@ -356,6 +356,19 @@ struct ReelsModelTests {
         #expect(env.analyzer.calls == 1 && env.audio.calls == 1)
     }
 
+    @Test func aResultThatArrivesAfterTheReelWasDeletedIsDropped() async throws {
+        let env = try await ReelsEnv.make()
+        await env.model.load()
+        env.audio.result = .match(ReelShazamMatch(artist: "A", title: "B", offset: nil))
+        env.model.requestDelete(["id1"])
+        let identify = Task { await env.model.identify("id1") }
+        await env.model.confirmDelete(moveFilesToTrash: false)
+        await identify.value
+        #expect(env.model.item(for: "id1") == nil && env.model.benches["id1"] == nil)
+        #expect(try await env.repo.fetchAll().map(\.id) == ["id0", "id2"], "nothing was written for the deleted reel")
+        #expect(env.model.items.count == 2)
+    }
+
     @Test func offlineAndNoMatchAreDifferentResults() async throws {
         let env = try await ReelsEnv.make()
         await env.model.load()

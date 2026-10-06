@@ -81,6 +81,8 @@ struct ReelPlayRequest: Equatable {
     let token = UUID()
     let reelID: String
     let offset: TimeInterval?
+    /// Space: play when paused, pause when playing (UC-KEY-01, the Reels row).
+    var toggles = false
 }
 
 @MainActor
@@ -629,8 +631,8 @@ final class ReelsModel {
     /// The alert's `Delete`: the video goes to the Trash first when asked; a reel whose file
     /// can't be moved (or whose row can't be deleted) stays listed and is named in the status
     /// bar with the cause (A-REELS-DELETEERROR). Not undoable (UC-UNDO-03).
-    func confirmDelete(moveFilesToTrash: Bool) async {
-        guard let ids = pendingDeletion else { return }
+    func confirmDelete(_ explicit: [String]? = nil, moveFilesToTrash: Bool) async {
+        guard let ids = explicit ?? pendingDeletion else { return }
         pendingDeletion = nil
         var deleted = 0
         var failures: [(String, String)] = []
@@ -775,6 +777,12 @@ final class ReelsModel {
     func playVideo(_ id: String, from offset: TimeInterval? = nil) {
         if focusedID != id || selection != [id] { setSelection([id], focus: id) }
         playRequest = ReelPlayRequest(reelID: id, offset: offset)
+    }
+
+    /// Space on the list or the workbench: the video of the shown reel starts or pauses.
+    func toggleVideo() {
+        guard let id = focusedID else { return }
+        playRequest = ReelPlayRequest(reelID: id, offset: nil, toggles: true)
     }
 }
 

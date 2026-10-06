@@ -76,7 +76,9 @@ final class SnapshotsTests: XCTestCase {
         // and made Discover/DiscoverView.swift (rendered: `discover-screen`) deferred; added
         // Discover/{RecommendationsView, RecommendationCells} (deferred) and Discover/DiscoverLive (non-view),
         // and replaced the unhosted TrackDetail/GrooveView.swift (deferred) by Similar/SimilarView.swift (deferred).
-        XCTAssertEqual(paths.count, 134, "Re-audit inventory changes explicitly.")
+        // W3-DISC-B replaced ReelsInbox/ReelsInboxView.swift (deferred) by the 5 files of Reels/ (all
+        // deferred): 134 → 138 files, 77 → 81 deferred.
+        XCTAssertEqual(paths.count, 138, "Re-audit inventory changes explicitly.")
         XCTAssertEqual(Set(SnapshotFixtures.inventory.map(\.path)), paths)
         XCTAssertEqual(SnapshotFixtures.inventory.count, paths.count)
         XCTAssertFalse(SnapshotFixtures.inventory.contains { $0.disposition.isEmpty })
@@ -85,7 +87,7 @@ final class SnapshotsTests: XCTestCase {
         XCTAssertEqual(SnapshotFixtures.fixtures.count, 21)
         XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 17)
         XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 40)
-        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 77)
+        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 81)
         for fixture in SnapshotFixtures.fixtures where fixture.expectedTableRows != nil {
             if case .swiftUI = fixture.backend {
                 XCTFail("\(fixture.id): table readiness requires the AppKit backend.")
