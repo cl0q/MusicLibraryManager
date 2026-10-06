@@ -52,6 +52,8 @@ final class SyncRepository: Sendable {
             try db.execute(sql: "DELETE FROM sync_profile_playlists WHERE profile_id = ?", arguments: [id])
             try db.execute(sql: "DELETE FROM sync_profile_rules WHERE profile_id = ?", arguments: [id])
             try db.execute(sql: "DELETE FROM playlist_sync_snapshots WHERE profile_id = ?", arguments: [id])
+            // v47 (W3-SYNC): the profile's last sync result goes with it.
+            try db.execute(sql: "DELETE FROM sync_profile_results WHERE profile_id = ?", arguments: [id])
             try SyncProfile.deleteOne(db, id: id)
         }
     }
@@ -86,7 +88,9 @@ final class SyncRepository: Sendable {
                 fat32SafePaths: original.fat32SafePaths,
                 cleanupRemovedFiles: original.cleanupRemovedFiles,
                 playlistFormat: original.playlistFormat,
-                normalizeLoudness: original.normalizeLoudness
+                normalizeLoudness: original.normalizeLoudness,
+                // Duplicate copies every option, Artwork included (CM-SYNC-PROFILE).
+                artworkMode: original.artworkMode
             )
             try copy.insert(db)
             guard let copyID = copy.id else { return copy }

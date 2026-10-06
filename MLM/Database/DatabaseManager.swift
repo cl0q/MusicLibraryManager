@@ -1364,6 +1364,46 @@ final class DatabaseManager: Sendable {
             }
         }
 
+        // ──────────────────────────────────────────────────────────────
+        // Migration v47_sync_profile_results (W3-SYNC, DEC-027, PP-SYNC-02):
+        // the last sync of each profile, kept across relaunch and never
+        // shared between profiles. One row per profile (`profile_id` is the
+        // key; a new run replaces the row, Retry Failed updates it).
+        // `outcome`: running · interrupted (the device was removed; the run
+        // waits and resumes copying only what is missing) · completed ·
+        // cancelled · failed. `planned_count` = files the run had to copy,
+        // `copied_count` = copied so far (written while running, so a
+        // removal or a quit leaves an honest `‹n› of ‹m› copied`).
+        // `failures` / `skipped`: JSON arrays with per-track reason (and the
+        // device path for failures); `plan_summary`: JSON of the plan the run
+        // started from. `last_connected_at`: when the destination was last
+        // seen connected (header `Not connected · last connected ‹date›`).
+        // No backfill (the old results lived only in memory). No foreign
+        // keys (they stay disabled): `SyncRepository.delete` removes the row.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v47_sync_profile_results") { db in
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS sync_profile_results (
+                    profile_id INTEGER PRIMARY KEY NOT NULL,
+                    started_at TEXT,
+                    ended_at TEXT,
+                    outcome TEXT NOT NULL DEFAULT 'none',
+                    planned_count INTEGER NOT NULL DEFAULT 0,
+                    copied_count INTEGER NOT NULL DEFAULT 0,
+                    removed_count INTEGER NOT NULL DEFAULT 0,
+                    failed_count INTEGER NOT NULL DEFAULT 0,
+                    skipped_count INTEGER NOT NULL DEFAULT 0,
+                    failures TEXT,
+                    skipped TEXT,
+                    plan_summary TEXT,
+                    failure_cause TEXT,
+                    operation_id TEXT,
+                    last_interrupted_at TEXT,
+                    last_connected_at TEXT
+                )
+            """)
+        }
+
         return migrator
     }
 

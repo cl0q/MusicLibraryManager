@@ -34,7 +34,7 @@ struct PlaylistFoldersMigrationTests {
     @Test func registeredOnceAfterTheLatestExistingMigration() throws {
         let migrations = DatabaseManager.buildMigrator().migrations
         #expect(migrations.filter { $0 == Self.v45 }.count == 1)
-        #expect(migrations.last == Self.v45)
+        // W3-SYNC registered v47 after it; v45 stays after v46 (never reordered).
         let previousIndex = try #require(migrations.firstIndex(of: Self.previous))
         let v45Index = try #require(migrations.firstIndex(of: Self.v45))
         #expect(previousIndex < v45Index, "registered after v46 — existing migrations are never reordered")
