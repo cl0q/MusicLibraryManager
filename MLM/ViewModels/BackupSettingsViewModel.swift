@@ -240,9 +240,7 @@ final class BackupSettingsViewModel {
 
     /// `Can’t restore while 2 downloads and 1 sync are running.` + one line per operation.
     static func restoreRefusal(_ summary: RunningWorkSummary) -> String {
-        let parts = summary.headline.replacingOccurrences(of: " will stop:", with: "")
-        let verb = summary.operationCount == 1 ? "is" : "are"
-        var text = "MLM can’t restore while \(parts) \(verb) running. Let them finish or cancel them in Activity, then restore."
+        var text = "MLM can’t restore while \(summary.runningPhrase) running. Let them finish or cancel them in Activity, then restore."
         for line in summary.lines { text += "\n• " + line }
         if summary.moreCount > 0 { text += "\n• and \(summary.moreCount.formatted(.number)) more" }
         return text

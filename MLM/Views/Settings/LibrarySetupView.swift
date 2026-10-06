@@ -363,6 +363,13 @@ private struct LibraryFolderSheet: View {
                     .toggleStyle(.checkbox)
                 }
             }
+            if let refusal = runningWorkRefusal {
+                Label(refusal, systemImage: "exclamationmark.triangle")
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.red, .primary)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let currentRoot, !DataLocationsViewModel.isVolumeMounted(URL(fileURLWithPath: currentRoot)),
                let volume = LibraryDriveState.volumeName(fromVolumePath: MountObserver.extractVolumePath(from: currentRoot)) {
                 Text("“\(volume)” is not connected, so the current folder can’t be compared.")
@@ -378,7 +385,7 @@ private struct LibraryFolderSheet: View {
                 dismiss()
             }
             .keyboardShortcut(.defaultAction)
-            .disabled(chosen == nil || comparison == nil || comparing)
+            .disabled(chosen == nil || comparison == nil || comparing || runningWorkRefusal != nil)
         }
         .frame(width: 520)
         .folderPanel(isPresented: $choosing, message: "Choose the folder that contains your music.",
@@ -388,6 +395,11 @@ private struct LibraryFolderSheet: View {
         .task {
             if let initialFolder { await check(initialFolder) }
         }
+    }
+
+    /// Refused while downloads, scans, path migrations or syncs run (review S5).
+    private var runningWorkRefusal: String? {
+        ImportViewModel.folderChangeRefusal(operations: ActivityCenter.shared.activeOperations)
     }
 
     private func check(_ folder: URL) async {
@@ -412,7 +424,7 @@ private struct RenameLibrarySheet: View {
     @Environment(\.container) private var container
     @State private var name = LibraryLaunchCoordinator.shared.activeLibraryName ?? ""
     @State private var problem: LibraryRename.Problem?
-    @State private var relaunchRequired = false
+    @State private var isRenaming = false
 
     private var currentName: String { LibraryLaunchCoordinator.shared.activeLibraryName ?? "" }
     private var package: URL? { container.activeLibrary?.packageURL }
@@ -447,15 +459,9 @@ private struct RenameLibrarySheet: View {
                 .keyboardShortcut(.cancelAction)
             Button("Rename and Relaunch") { Task { await rename() } }
                 .keyboardShortcut(.defaultAction)
-                .disabled(inlineProblem != nil)
+                .disabled(inlineProblem != nil || isRenaming)
         }
         .frame(width: 460)
-        .alert("Rename didn’t finish", isPresented: $relaunchRequired) {
-            Button("Relaunch") { BackupService.relaunchApp() }
-                .keyboardShortcut(.defaultAction)
-        } message: {
-            Text("MLM couldn’t rename the library file and needs to relaunch. Nothing was changed.")
-        }
     }
 
     /// Only problems worth a sentence while typing (an empty or unchanged name just disables).
@@ -465,7 +471,9 @@ private struct RenameLibrarySheet: View {
     }
 
     private func rename() async {
-        guard let package, let libraryId = container.activeLibrary?.libraryId else { return }
+        guard !isRenaming, let package, let libraryId = container.activeLibrary?.libraryId else { return }
+        isRenaming = true
+        defer { isRenaming = false }
         await ActivityCenter.shared.flushPersistence()
         let pool = container.databaseManager?.pool
         let outcome = LibraryRename.renameOpenLibrary(
@@ -476,9 +484,22 @@ private struct RenameLibrarySheet: View {
             pendingOpen: .userDefaults,
             relaunch: { BackupService.relaunchApp() })
         switch outcome {
-        case .relaunching: break
-        case .refused(let refusal): problem = refusal
-        case .relaunchRequired: relaunchRequired = true
+        case .relaunching(let renamed):
+            // Review S4: if MLM is still running a little later, the relaunch was cancelled — the
+            // library is closed, so say so app-wide (not in the Settings window).
+            let name = renamed.deletingPathExtension().lastPathComponent
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+                RelaunchRequiredAlert.show(
+                    title: "MLM needs to relaunch",
+                    message: "The library was renamed to “\(name)”, but MLM didn’t quit. Relaunch to open it.")
+            }
+        case .refused(let refusal):
+            problem = refusal
+        case .relaunchRequired:
+            dismiss()
+            RelaunchRequiredAlert.show(
+                title: "Rename didn’t finish",
+                message: "MLM couldn’t rename the library file and needs to relaunch. The library keeps its name.")
         }
     }
 }
@@ -506,5 +527,23 @@ private struct SettingsSheet<Content: View, Buttons: View>: View {
             }
             .padding([.bottom, .horizontal], Spacing.xl)
         }
+    }
+}
+
+// MARK: - Relaunch required (app-wide)
+
+/// `Rename didn’t finish` · `Relaunch`: MLM can't continue without relaunching (the library is
+/// closed), so the alert is app-modal — independent of the Settings window (review S4).
+enum RelaunchRequiredAlert {
+    @MainActor
+    static func show(title: String, message: String) {
+        MainWindowPresenter.shared.show()
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Relaunch")
+        alert.runModal()
+        BackupService.relaunchApp()
     }
 }

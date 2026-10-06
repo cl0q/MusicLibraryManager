@@ -67,4 +67,19 @@ struct SettingsTabsLogicTests {
             #expect(row.statusText.hasPrefix("Not found · "))
         }
     }
+
+    // MARK: Review S5
+
+    @Test func folderChangeIsRefusedWhileFileWorkRuns() {
+        func op(_ kind: ActivityKind, _ title: String) -> ActivityOperation {
+            ActivityOperation(id: UUID(), kind: kind, title: title, subject: .none, state: .running, wait: nil,
+                              progress: .indeterminate, result: nil, startedAt: Date(), endedAt: nil, isAutomatic: false,
+                              libraryID: nil, needsAttention: false, dismissedAt: nil, itemNoun: .track,
+                              messageName: "", controls: .none, isFromHistory: false)
+        }
+        #expect(ImportViewModel.folderChangeRefusal(operations: [op(.backup, "Back Up Now")]) == nil)
+        let text = ImportViewModel.folderChangeRefusal(operations: [op(.download, "Import “Warm-up”"), op(.sync, "Sync “iPod”")])
+        #expect(text?.hasPrefix("MLM can’t change the library folder while 1 download and 1 sync are running.") == true)
+        #expect(text?.contains("• Sync “iPod”") == true)
+    }
 }

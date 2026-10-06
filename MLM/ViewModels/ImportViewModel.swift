@@ -127,6 +127,21 @@ final class ImportViewModel {
         return FolderComparison(found: found, total: organizedPaths.filter { !$0.isEmpty }.count)
     }
 
+    /// Work that reads or moves the library's files blocks a folder change (review S5).
+    static let folderChangeBlockingKinds: Set<ActivityKind> = [
+        .download, .recommendationDownload, .reelsDownload, .folderScan, .pathMigration, .sync, .tagWrite,
+    ]
+
+    /// `MLM can’t change the library folder while 1 download is running. …`, or `nil`.
+    static func folderChangeRefusal(operations: [ActivityOperation]) -> String? {
+        let summary = RunningWorkSummary(operations: operations.filter { folderChangeBlockingKinds.contains($0.kind) })
+        guard !summary.isEmpty else { return nil }
+        var text = "MLM can’t change the library folder while \(summary.runningPhrase) running. Let the work finish or cancel it in Activity first."
+        for line in summary.lines { text += "\n• " + line }
+        if summary.moreCount > 0 { text += "\n• and \(summary.moreCount.formatted(.number)) more" }
+        return text
+    }
+
     /// `Change Folder`: the new folder becomes the base of every track's location (existing tracks
     /// keep their relative paths); the file check runs after (`.libraryRootDidChange` →
     /// `LibraryAvailabilityMonitor`), then — when asked — a scan of the new folder.

@@ -11,6 +11,8 @@ struct RunningWorkSummary: Equatable, Sendable {
     /// Operations beyond the listed lines.
     let moreCount: Int
     let operationCount: Int
+    /// `1 download is` · `2 downloads and 1 sync are` — built from the counts (W3-SET).
+    let runningPhrase: String
     /// The operations that pick up again when the library is opened next, as counted groups
     /// (`2 downloads and 1 sync`); `nil` when none can.
     let continuingPhrase: String?
@@ -49,6 +51,7 @@ struct RunningWorkSummary: Equatable, Sendable {
             .map { Blocker(kind: $0.kind, title: $0.title) }
 
         headline = stopping.isEmpty ? "" : "\(Self.counted(stopping)) will stop:"
+        runningPhrase = stopping.isEmpty ? "" : "\(Self.counted(stopping)) \(stopping.count == 1 ? "is" : "are")"
         let continuing = stopping.filter { !Self.nonContinuingKinds.contains($0.kind) }
         continuingCount = continuing.count
         continuingPhrase = continuing.isEmpty ? nil : Self.counted(continuing)
