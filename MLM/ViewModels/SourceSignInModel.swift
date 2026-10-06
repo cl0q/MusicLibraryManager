@@ -39,7 +39,7 @@ final class SourceSignInModel {
     @ObservationIgnored private var generation = 0
 
     /// App-wide: which model's attempt is waiting in the browser.
-    static let sharedGate = SignInGate()
+    nonisolated static let sharedGate = SignInGate()
     @ObservationIgnored private let gate: SignInGate
 
     init(service: TokenStorage.Service, accounts: any SourceAccountStateReading,
