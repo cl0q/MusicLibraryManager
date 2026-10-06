@@ -264,6 +264,19 @@ enum TrackLibraryRemoval {
         }
     }
 
+    /// Move one library file to the Trash while holding its `LibraryFileLock` (W5-F1), so a tag
+    /// write or cover embed on the same file finishes first. Returns the Trash location.
+    static func trashLocked(_ url: URL, lock: LibraryFileLock = .shared,
+                            trash: @Sendable (URL) throws -> URL? = TrackLibraryRemoval.systemTrash) async throws -> URL? {
+        try await LibraryFileLock.holding(url, in: lock) { try trash(url) }
+    }
+
+    nonisolated static let systemTrash: @Sendable (URL) throws -> URL? = { url in
+        var trashed: NSURL?
+        try FileManager.default.trashItem(at: url, resultingItemURL: &trashed)
+        return trashed as URL?
+    }
+
     static func remove(_ snapshot: [Track], ids: [Int64], container: DependencyContainer,
                        afterRemoval: (@MainActor ([Int64]) async -> Void)? = nil) {
         guard let trackRepo = container.trackRepository else { return }
@@ -281,10 +294,9 @@ enum TrackLibraryRemoval {
                     continue
                 }
                 do {
-                    var trashed: NSURL?
-                    try FileManager.default.trashItem(at: url, resultingItemURL: &trashed)
+                    let trashed = try await trashLocked(url)
                     removableIDs.insert(id)
-                    trashedItems.append((url, trashed as URL?))
+                    trashedItems.append((url, trashed))
                 } catch {
                     failures.append("\(track.artist) — \(track.title): \(error.localizedDescription)")
                 }

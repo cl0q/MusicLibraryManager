@@ -50,7 +50,29 @@ final class TranscodeService: Sendable {
         sourceFormat: String? = nil,
         sourceBitrate: Int? = nil,
         normalizationGainDB: Double? = nil,
-        artworkMaxPx: Int? = nil
+        artworkMaxPx: Int? = nil,
+        lock: LibraryFileLock = .shared
+    ) async throws -> TranscodeResult {
+        // The output path may be a library file (W5-F1): one writer per path, released on every exit.
+        let finalOutputName = outputName ?? (input.deletingPathExtension().lastPathComponent + ".m4a")
+        return try await LibraryFileLock.holding(outputDir.appendingPathComponent(finalOutputName), in: lock) {
+            try await performTranscode(
+                input: input, outputDir: outputDir, outputName: outputName, bitrateKbps: bitrateKbps,
+                sourceFormat: sourceFormat, sourceBitrate: sourceBitrate,
+                normalizationGainDB: normalizationGainDB, artworkMaxPx: artworkMaxPx
+            )
+        }
+    }
+
+    private func performTranscode(
+        input: URL,
+        outputDir: URL,
+        outputName: String?,
+        bitrateKbps: Int,
+        sourceFormat: String?,
+        sourceBitrate: Int?,
+        normalizationGainDB: Double?,
+        artworkMaxPx: Int?
     ) async throws -> TranscodeResult {
         guard let ffmpeg = ffmpegPath else {
             AppLogger.shared.error(

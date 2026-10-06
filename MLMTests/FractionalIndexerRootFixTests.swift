@@ -122,4 +122,86 @@ import Testing
         #expect(PlaylistPlacement.strictlyBetween("a0|V", "a1") == between("a0|V", "a1"))
         #expect(FractionalIndexer.isStrictlyBetween(PlaylistPlacement.strictlyBetween(nil, "0001"), nil, "0001"))
     }
+
+    // MARK: W5-F1: strictly between, always
+
+    @Test func pairsWithNoBaseKeyGetAGrownKeyNotTheLeftBound() {
+        let pairs: [(String?, String?)] = [
+            ("a", "a0"), ("a", "a00"), (nil, "0"), (nil, "000"), ("a0|a0", "a0|a00"), ("Zz", "Zz0"),
+        ]
+        for (left, right) in pairs {
+            #expect(FractionalIndexer.key(between: left, and: right) == nil, "no base-62 key between \(left ?? "nil") and \(right ?? "nil")")
+            let key = between(left, right)
+            #expect(FractionalIndexer.isStrictlyBetween(key, left, right), "\(left ?? "nil") < \(key) < \(right ?? "nil")")
+        }
+    }
+
+    @Test func repeatedInsertsAtTheSameSpotBeforeAZeroKeyStayOrdered() {
+        var right = "a0"
+        let left = "a"
+        for _ in 0..<500 {
+            let key = between(left, right)
+            #expect(FractionalIndexer.isStrictlyBetween(key, left, right), "\(left) < \(key) < \(right)")
+            right = key
+        }
+    }
+
+    private struct SeededGenerator: RandomNumberGenerator {
+        var state: UInt64
+        mutating func next() -> UInt64 {
+            state &+= 0x9E37_79B9_7F4A_7C15
+            var z = state
+            z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+            z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+            return z ^ (z >> 31)
+        }
+    }
+
+    /// 10,000 random insert sequences from the start states real lists have. After every insert
+    /// the new key sits strictly between its neighbours; a list with a key over 256 bytes is
+    /// renumbered (the repository's trigger), so no list keeps one.
+    @Test func tenThousandRandomInsertSequencesStayStrictlyOrdered() {
+        for seed in 0..<10_000 {
+            var generator = SeededGenerator(state: UInt64(seed) &* 7919 &+ 1)
+            var keys: [String]
+            switch Int.random(in: 0..<4, using: &generator) {
+            case 0: keys = ["a0"]
+            case 1:
+                var last = "a0"
+                keys = [last]
+                for _ in 0..<Int.random(in: 1..<90, using: &generator) { last += "|a0"; keys.append(last) }
+            case 2: keys = (0..<Int.random(in: 1..<20, using: &generator)).map { String(format: "%012d", $0) }
+            default: keys = FractionalIndexer.evenlySpaced(count: Int.random(in: 1..<30, using: &generator))
+            }
+            var lastIndex = keys.count / 2
+            for _ in 0..<16 {
+                let index: Int
+                switch Int.random(in: 0..<4, using: &generator) {
+                case 0: index = 0
+                case 1: index = keys.count
+                case 2: index = min(lastIndex, keys.count)
+                default: index = Int.random(in: 0...keys.count, using: &generator)
+                }
+                lastIndex = index
+                let left = index > 0 ? keys[index - 1] : nil
+                let right = index < keys.count ? keys[index] : nil
+                let key = between(left, right)
+                if !FractionalIndexer.isStrictlyBetween(key, left, right) {
+                    Issue.record("seed \(seed): \(left ?? "nil") < \(key) < \(right ?? "nil") is not strictly between")
+                    break
+                }
+                keys.insert(key, at: index)
+                if keys.contains(where: { $0.utf8.count > FractionalIndexer.renumberLength }) {
+                    keys = FractionalIndexer.evenlySpaced(count: keys.count)
+                }
+                if keys.contains(where: { $0.utf8.count > FractionalIndexer.renumberLength }) {
+                    Issue.record("seed \(seed): a key over \(FractionalIndexer.renumberLength) bytes survived the renumbering")
+                    break
+                }
+            }
+            if !zip(keys, keys.dropFirst()).allSatisfy({ isOrdered($0, $1) }) {
+                Issue.record("seed \(seed): the keys are not strictly ascending")
+            }
+        }
+    }
 }

@@ -26,6 +26,9 @@ final class ArtworkBackfillService {
     /// True while the backfill TaskGroup is running.
     var isBackfilling = false
 
+    /// How many backfill runs have started (tests count them to prove coalescing).
+    private(set) var backfillRuns = 0
+
     /// Progress counter for optional toolbar UI (D-16 discretion).
     var progress: (current: Int, total: Int) = (0, 0)
 
@@ -59,6 +62,7 @@ final class ArtworkBackfillService {
     /// NotificationCenter observer tokens (removed in deinit).
     private var libraryImportObserverToken: NSObjectProtocol?
     private var downloadCompleteObserverToken: NSObjectProtocol?
+    private var metadataObserverToken: NSObjectProtocol?
 
     // MARK: - Init
 
@@ -95,6 +99,9 @@ final class ArtworkBackfillService {
         if let token = MainActor.assumeIsolated({ downloadCompleteObserverToken }) {
             center.removeObserver(token)
         }
+        if let token = MainActor.assumeIsolated({ metadataObserverToken }) {
+            center.removeObserver(token)
+        }
     }
 
     // MARK: - Notification observer
@@ -113,6 +120,17 @@ final class ArtworkBackfillService {
             }
         }
 
+        metadataObserverToken = notificationCenter.addObserver(
+            forName: .trackMetadataDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            let ids = note.userInfo?["trackIds"] as? [Int64] ?? []
+            Task { @MainActor [weak self] in
+                await self?.requeueArtwork(forTrackIDs: ids)
+            }
+        }
+
         downloadCompleteObserverToken = notificationCenter.addObserver(
             forName: .downloadDidComplete,
             object: nil,
@@ -123,6 +141,24 @@ final class ArtworkBackfillService {
                 await self.backfillMissing()
             }
         }
+    }
+
+    /// The tracks a tag edit named (`.trackMetadataDidChange` with `trackIds`) look for embedded
+    /// artwork again: a "no embedded art" mark was made for the file as it was, and a tag
+    /// write, a re-read or an album edit may have changed it (W5-F1). Real artwork rows stay.
+    /// Posts without ids carry no track to look at and are ignored.
+    func requeueArtwork(forTrackIDs ids: [Int64]) async {
+        guard !ids.isEmpty else { return }
+        do {
+            try await analysisRepository.clearNoArtworkSentinels(trackIds: ids)
+        } catch {
+            AppLogger.shared.warn("ArtworkBackfill: requeue failed — \(error)", source: "ArtworkBackfill")
+            return
+        }
+        for id in ids { selfHealAttempted.remove(id) }
+        // A run in progress has read its list already: queue behind it instead of dropping the request.
+        while isBackfilling { try? await Task.sleep(for: .milliseconds(50)) }
+        await backfillMissing()
     }
 
     // MARK: - Public API
@@ -228,6 +264,7 @@ final class ArtworkBackfillService {
 
     private func backfillMissing(turboMode: Bool = false, progressHandler: ((MaintenanceProgressTracker.ProgressState) -> Void)? = nil) async {
         isBackfilling = true
+        backfillRuns += 1
         progress = (0, 0)
         defer {
             isBackfilling = false

@@ -130,6 +130,11 @@ struct SidebarView: View {
             // A playlist created while the sidebar wasn't on screen still gets its name edited.
             beginRequestedRename()
             await reloadBadges()
+            // Tag edits change the rows' second lines and the Review count (W5-F1).
+            model.observeMetadataChanges {
+                await model.reloadSummaries(container.playlistRepository)
+                await reloadBadges()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { note in
             // Cover regeneration posts are noise for the sidebar.

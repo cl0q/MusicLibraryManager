@@ -594,7 +594,7 @@ final class ReviewModel {
             }
             undone += 1
             try await restoreTags(record.consequences.tags)
-            gone += dependencies.consequences.putBack(record.consequences.trashed).gone
+            gone += await dependencies.consequences.putBack(record.consequences.trashed).gone
         }
         guard undone > 0 else { throw UndoNothingLeft(note: "Nothing to undo — the decision was already restored") }
         let playlists = outcomes.contains { !$0.consequences.playlistRows.isEmpty || !$0.consequences.syncRows.isEmpty }
@@ -640,7 +640,7 @@ final class ReviewModel {
         do {
             let record = try await dependencies.decisions.undo(decisionID: decisionID, refusingWhenNewerDecisionCovers: true)
             try await restoreTags(record.consequences.tags)
-            let report = dependencies.consequences.putBack(record.consequences.trashed)
+            let report = await dependencies.consequences.putBack(record.consequences.trashed)
             let playlists = !record.consequences.playlistRows.isEmpty || !record.consequences.syncRows.isEmpty
             dependencies.postChange(playlists, !record.consequences.trashed.isEmpty)
             statusBar?.post(report.gone > 0

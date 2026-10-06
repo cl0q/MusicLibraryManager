@@ -56,6 +56,8 @@ struct SystemReviewFileManager: ReviewFileManaging {
 /// the library folder and not a symbolic link.
 struct ReviewConsequences: Sendable {
     var files: any ReviewFileManaging = SystemReviewFileManager()
+    /// The library file lock: a file is locked while it moves to the Trash and while it comes back.
+    var lock: LibraryFileLock = .shared
 
     /// One unkept version.
     struct TrashCandidate: Equatable, Sendable {
@@ -173,7 +175,7 @@ struct ReviewConsequences: Sendable {
                 continue
             }
             do {
-                let resulting = try files.trash(url)
+                let resulting = try await LibraryFileLock.holding(url, in: lock) { try files.trash(url) }
                 let item = ReviewDecisionConsequences.Trashed(trackId: candidate.id, from: path, trashURL: resulting?.path ?? "")
                 report.trashed.append(item)
                 await record(item)
@@ -198,7 +200,7 @@ struct ReviewConsequences: Sendable {
     }
 
     /// Move each trashed file back from its resulting Trash URL while it is still there.
-    func putBack(_ trashed: [ReviewDecisionConsequences.Trashed]) -> PutBackReport {
+    func putBack(_ trashed: [ReviewDecisionConsequences.Trashed]) async -> PutBackReport {
         var report = PutBackReport()
         for item in trashed {
             guard !item.trashURL.isEmpty, files.fileExists(atPath: item.trashURL),
@@ -207,7 +209,10 @@ struct ReviewConsequences: Sendable {
                 continue
             }
             do {
-                try files.moveBack(from: URL(fileURLWithPath: item.trashURL), to: URL(fileURLWithPath: item.from))
+                let original = URL(fileURLWithPath: item.from)
+                try await LibraryFileLock.holding(original, in: lock) {
+                    try files.moveBack(from: URL(fileURLWithPath: item.trashURL), to: original)
+                }
                 report.restored += 1
             } catch {
                 report.gone += 1

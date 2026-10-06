@@ -145,16 +145,25 @@ struct PlaylistCoverServiceTests {
         let fetched1 = try await repo.fetch(id: id)
         #expect(fetched1?.coverImagePath == nil)
 
-        // Post a notification with the service-origin tag.
+        // Post a notification with the service-origin tag, then an ordinary one for another
+        // playlist. The observer handles posts in order on the main actor, so once the second
+        // playlist has its cover, the first post has been seen — and the guard must have dropped it.
+        let other = try await repo.create(name: "Reentry Control")
+        let otherID = other.id!
         center.post(
             name: .playlistDidChange,
             object: nil,
             userInfo: ["origin": "coverService", "playlistId": id]
         )
-        // Yield to let any erroneous re-entry have a chance to run.
-        try await Task.sleep(for: .milliseconds(200))
+        center.post(name: .playlistDidChange, object: nil, userInfo: ["playlistId": otherID])
+        var controlHasCover = false
+        for _ in 0..<5000 {
+            if try await repo.fetch(id: otherID)?.coverImagePath != nil { controlHasCover = true; break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(controlHasCover, "the control notification regenerates its playlist's cover")
 
-        // Service must NOT have written a cover (no regenerate triggered).
+        // Service must NOT have written a cover for the self-tagged post (no regenerate triggered).
         let fetched2 = try await repo.fetch(id: id)
         #expect(fetched2?.coverImagePath == nil,
                 "Service should ignore its own .playlistDidChange emissions (re-entry guard)")

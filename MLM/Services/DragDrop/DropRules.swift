@@ -584,14 +584,10 @@ enum PlaylistPlacement {
         return placements
     }
 
-    /// `FractionalIndexer.positionBetween`, made strict: for some pairs (`a0|V`, `a1`) it
-    /// returns the left bound itself, so a multi-track drop would share one position and fall
-    /// back to the added-date order. Then the left bound is extended instead (still below the
-    /// right one: a strict, non-prefix lower bound stays lower when extended).
-    ///
-    /// W3-PL review: the fixed indexer is strict wherever a key exists; writers use
-    /// `FractionalIndexer.key(between:and:)` and renumber when it returns nil — this pure
-    /// helper is kept for the drop plan tests.
+    /// `FractionalIndexer.positionBetween`, which is strictly between ordered bounds in every
+    /// case (W5-F1 root fix — this used to compensate for answers equal to the left bound, so a
+    /// multi-track drop could share one position). Writers use `FractionalIndexer.key(between:and:)`
+    /// and renumber when it returns nil; this pure helper serves the drop plan.
     static func strictlyBetween(_ left: String?, _ right: String?) -> String {
         FractionalIndexer.positionBetween(left: left, right: right)
     }

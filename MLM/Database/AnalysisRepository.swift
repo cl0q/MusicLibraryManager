@@ -126,6 +126,23 @@ final class AnalysisRepository: Sendable {
         }
     }
 
+    /// Delete the "no embedded art" sentinel rows (`source = 'none'`, no path) of these tracks, so
+    /// `fetchTracksWithoutArtwork()` lists them again. Real artwork rows are never touched.
+    func clearNoArtworkSentinels(trackIds: [Int64]) async throws {
+        guard !trackIds.isEmpty else { return }
+        let chunkSize = 500
+        try await database.write { db in
+            for chunkStart in stride(from: 0, to: trackIds.count, by: chunkSize) {
+                let chunk = Array(trackIds[chunkStart..<min(chunkStart + chunkSize, trackIds.count)])
+                let placeholders = chunk.map { _ in "?" }.joined(separator: ", ")
+                try db.execute(
+                    sql: "DELETE FROM artwork WHERE source = 'none' AND artwork_path IS NULL AND track_id IN (\(placeholders))",
+                    arguments: StatementArguments(chunk)
+                )
+            }
+        }
+    }
+
     // MARK: - ReplayGain
 
     /// Fetch ReplayGain data for a track.
