@@ -88,12 +88,12 @@ struct BackForwardButtons: View {
 struct AddMenu: View {
     @Environment(ShellActions.self) private var actions
 
-    /// Help texts of the items that are not available yet (W3-PL, W3-ADD).
+    /// Help texts of the items that are not available yet (W3-PL) or now (W3-ADD).
     enum Unavailable {
         static let playlistFolder = "Playlist folders aren’t available yet."
-        static let addFromLink = "Adding a track from a link isn’t available yet. To import a playlist from a link, choose Import Playlist from Source… in this menu."
         static let importM3U = "To import an M3U file now, open a playlist and choose Import M3U… there."
-        static let refreshFromSources = "Refreshing all sources at once isn’t available yet. Open a linked playlist to refresh it."
+        /// UC-TB-05.
+        static let refreshFromSources = ImportSheetsPresenter.noSourceConnected
     }
 
     var body: some View {
@@ -107,11 +107,11 @@ struct AddMenu: View {
 
             Divider()
 
-            Button("Add from Link…") {}
-                .disabled(true)
-                .help(Unavailable.addFromLink)
+            Button("Add from Link…") {
+                actions.addFromLink()
+            }
             Button("Import Playlist from Source…") {
-                actions.showSources()
+                actions.importPlaylistFromSource()
             }
             Button("Import Files or Folder…") {
                 actions.chooseImportFolder()
@@ -122,9 +122,11 @@ struct AddMenu: View {
 
             Divider()
 
-            Button("Refresh from Sources") {}
-                .disabled(true)
-                .help(Unavailable.refreshFromSources)
+            Button("Refresh from Sources") {
+                actions.refreshFromSources()
+            }
+            .disabled(!actions.canRefreshFromSources)
+            .help(actions.canRefreshFromSources ? "" : Unavailable.refreshFromSources)
         } label: {
             Label("Add", systemImage: "plus")
         }

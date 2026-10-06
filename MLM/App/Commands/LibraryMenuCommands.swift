@@ -12,7 +12,12 @@ struct LibraryMenuCommands: Commands {
     var body: some Commands {
         CommandMenu(MenuBarMenu.library.rawValue) {
             let hasLibrary = shellActions != nil
-            CommandButton(.refreshFromSources)
+            // W3-ADD: every connected source, one Activity operation each (UC-TB-05).
+            CommandButton(.refreshFromSources,
+                          enabled: shellActions?.canRefreshFromSources == true,
+                          disabledReason: hasLibrary ? ImportSheetsPresenter.noSourceConnected : nil) {
+                shellActions?.refreshFromSources()
+            }
             CommandButton(.scanLibraryFolder,
                           enabled: shellActions?.isScanningLibraryFolder == false,
                           disabledReason: hasLibrary ? "The library folder is being scanned." : nil) {

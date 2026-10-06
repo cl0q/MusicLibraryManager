@@ -393,8 +393,10 @@ enum SnapshotFixtures {
         "Inspector/InspectorAudioTab.swift": "Deferred: waveform extraction, analysis and similarity read files and the database.",
         "Inspector/InspectorFileTab.swift": "Deferred: file location, size and diagnostics read the disk and the database.",
         "Sync/NewSyncProfileSheet.swift": "Deferred: concrete SyncViewModel and device detection; needs passive sync model.",
-        "Sources/RemotePlaylistsView.swift": "Deferred: concrete remote providers fetch on presentation; inject provider clients.",
-        "Sources/SourcesView.swift": "Deferred: source model requires OAuth/token clients; needs inert account-status composition.",
+        "Import/QuickAddSheet.swift": "Deferred: Add from Link is a sheet looking links up through yt-dlp; QuickAddModel is unit-tested (W3-ADD).",
+        "Import/ImportPlaylistSheet.swift": "Deferred: the import sheet reads source accounts and providers; ImportPlaylistModel is unit-tested (W3-ADD).",
+        "Import/SourceSignInView.swift": "Deferred: the browser sign-in hand-off waits for a real OAuth callback; SourceSignInModel is unit-tested (W3-ADD).",
+        "Import/ImportSheetsHost.swift": "Deferred: presents the Add menu sheets on the main window; nothing drawn of its own (W3-ADD).",
         "Sync/Pickers/PlaylistPickerSheet.swift": "Deferred: concrete SyncViewModel requires filesystem TranscodeCache and standard-default-reading SyncService.",
         "Sync/SyncContentSections.swift": "Deferred: same concrete SyncViewModel boundary; needs passive expanded-content model.",
         "Sync/SyncFailedDisclosure.swift": "Deferred: concrete sync VM plus async row lookup; inject passive failed-row state.",
@@ -419,6 +421,10 @@ DiscoveryInbox/DiscoveryInboxView.swift
 DragDrop/DropTargetModifier.swift
 Folders/FoldersView.swift
 Folders/FolderTreeView.swift
+Import/ImportPlaylistSheet.swift
+Import/ImportSheetsHost.swift
+Import/QuickAddSheet.swift
+Import/SourceSignInView.swift
 Inspector/InfoTrackRequest.swift
 Inspector/InspectorAnalysis.swift
 Inspector/InspectorAudioTab.swift
@@ -490,8 +496,6 @@ Shell/TrailingColumnView.swift
 Shell/UndoCenter.swift
 Sidebar/LibraryFooter.swift
 Sidebar/SidebarView.swift
-Sources/RemotePlaylistsView.swift
-Sources/SourcesView.swift
 Sync/DeviceIngestResultsView.swift
 Sync/IngestPreviewView.swift
 Sync/NewSyncProfileSheet.swift

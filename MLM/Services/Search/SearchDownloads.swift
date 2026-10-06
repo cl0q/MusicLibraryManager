@@ -30,11 +30,17 @@ protocol TrackDownloadStarting {
 struct LiveTrackDownloadStarter: TrackDownloadStarting {
     var container: DependencyContainer = .shared
 
-    var isBusy: Bool { container.downloadViewModel?.isDownloading ?? true }
+    /// Never busy since W3-ACT: a download requested while another runs queues behind it in
+    /// the download lane (PP-ACTIVITY-05, IMP-039); `nil` = no library is open.
+    var isBusy: Bool { container.downloadViewModel == nil }
 
+    /// One Activity operation `Download “‹title›”` with the track as subject (W3-ADD).
     func start(_ track: Track, preferredSource: DownloadOrchestrator.PreferredSource, artworkURL: String?) {
         guard let downloads = container.downloadViewModel else { return }
-        Task { await downloads.downloadTracks([track], preferredSource: preferredSource, artworkURL: artworkURL) }
+        let context = DownloadActivityContext(title: "Download “\(track.title)”",
+                                              subject: track.id.map { .tracks([$0]) })
+        Task { await downloads.downloadTracks([track], preferredSource: preferredSource, artworkURL: artworkURL,
+                                              context: context) }
     }
 }
 

@@ -15,7 +15,7 @@ struct ShellNavigationHistoryTests {
 
         nav.select(.folders)
         #expect(!nav.canGoForward, "Folders has no forward history of its own")
-        nav.push(.sources)
+        nav.push(.genre("Techno"))
         nav.goBack()
         #expect(nav.canGoForward)
 
@@ -26,7 +26,7 @@ struct ShellNavigationHistoryTests {
 
         nav.select(.folders)
         nav.goForward()
-        #expect(nav.path == [.sources])
+        #expect(nav.path == [.genre("Techno")])
     }
 
     @Test func removingAPlaylistClearsItFromPathsAndForwardStacks() {
@@ -36,7 +36,7 @@ struct ShellNavigationHistoryTests {
         #expect(nav.canGoForward)
 
         nav.select(.playlist(5))
-        nav.push(.sources)
+        nav.push(.genre("Techno"))
         nav.goBack()
         nav.select(.folders)
 
@@ -50,8 +50,8 @@ struct ShellNavigationHistoryTests {
 
     @Test func removingASyncProfileClearsItsHistory() {
         let nav = NavigationModel(selection: .syncProfile(3))
-        nav.push(.sources)
-        nav.push(.sources)
+        nav.push(.genre("Techno"))
+        nav.push(.genre("Techno"))
         nav.goBack()
         nav.select(.folders)
         nav.removeSyncProfile(3)
@@ -63,7 +63,7 @@ struct ShellNavigationHistoryTests {
     @Test func allTracksIsVisibleOnlyAtItsRoot() {
         let nav = NavigationModel()
         #expect(nav.isAllTracksVisible)
-        nav.push(.sources)
+        nav.push(.genre("Techno"))
         #expect(!nav.isAllTracksVisible, "A route pushed over All Tracks hides it")
         nav.goBack()
         nav.select(.folders)

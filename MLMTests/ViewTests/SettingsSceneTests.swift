@@ -109,7 +109,8 @@ struct SettingsSceneTests {
         let expectations: [(String, String, Int)] = [
             ("MLM/Views/Sidebar/LibraryFooter.swift", "openSettings(tab: .library)", 1),
             ("MLM/Views/Playlists/PlaylistDetailView.swift", "openSettings(tab: .sources)", 1),
-            ("MLM/Views/Sources/RemotePlaylistsView.swift", "openSettings(tab: .sources)", 2),
+            // W3-ADD: the import sheets' Settings links go through one host (the remote window is gone).
+            ("MLM/Views/Import/ImportSheetsHost.swift", "openSettings(tab: .sources)", 1),
             ("MLM/Views/Settings/SourcesSetupView.swift", "openSettings(tab: .sources)", 1),
         ]
         for (path, call, count) in expectations {

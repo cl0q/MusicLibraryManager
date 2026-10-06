@@ -50,7 +50,9 @@ final class SnapshotsTests: XCTestCase {
         // LibraryLaunchStateView, NewLibrarySheet (deferred)} by the 9 files of Launch/:
         // LibraryLoadingView rendered (the first-run fixture became `launch-loading-update`),
         // LibraryFileIcon non-view, 7 deferred.
-        XCTAssertEqual(paths.count, 117, "Re-audit inventory changes explicitly.")
+        // W3-ADD replaced Sources/{RemotePlaylistsView,SourcesView} (deferred) by the 4 files of Import/
+        // (deferred): 117 → 119 files, 57 → 59 deferred.
+        XCTAssertEqual(paths.count, 119, "Re-audit inventory changes explicitly.")
         XCTAssertEqual(Set(SnapshotFixtures.inventory.map(\.path)), paths)
         XCTAssertEqual(SnapshotFixtures.inventory.count, paths.count)
         XCTAssertFalse(SnapshotFixtures.inventory.contains { $0.disposition.isEmpty })
@@ -59,7 +61,7 @@ final class SnapshotsTests: XCTestCase {
         XCTAssertEqual(SnapshotFixtures.fixtures.count, 27)
         XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 23)
         XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 37)
-        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 57)
+        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 59)
         for fixture in SnapshotFixtures.fixtures where fixture.expectedTableRows != nil {
             if case .swiftUI = fixture.backend {
                 XCTFail("\(fixture.id): table readiness requires the AppKit backend.")

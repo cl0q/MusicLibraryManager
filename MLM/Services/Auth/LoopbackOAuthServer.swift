@@ -28,13 +28,34 @@ final class LoopbackOAuthServer: @unchecked Sendable {
     ///
     /// Suspends until the browser redirects to the loopback URI.
     /// Shuts down automatically after the first callback.
+    ///
+    /// Cancelling the calling task (the sign-in sheet's `Cancel`, its 5-minute timeout, `Open
+    /// Browser Again`) stops the listener — the port is free for the next attempt — and throws
+    /// `CancellationError` (S-SRC-OAUTH; it used to wait forever).
     func waitForCallback() async throws -> (code: String, state: String) {
-        try await withCheckedThrowingContinuation { [self] cont in
-            lock.lock()
-            self.continuation = cont
-            lock.unlock()
-            self.startListener()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { [self] cont in
+                lock.lock()
+                self.continuation = cont
+                lock.unlock()
+                if Task.isCancelled {
+                    self.resumeOnce(throwing: CancellationError())
+                    return
+                }
+                self.startListener()
+            }
+        } onCancel: { [self] in
+            self.stop()
         }
+    }
+
+    /// Stops listening and ends a pending wait with `CancellationError`.
+    func stop() {
+        queue.async { [weak self] in
+            self?.listener?.cancel()
+            self?.listener = nil
+        }
+        resumeOnce(throwing: CancellationError())
     }
 
     // MARK: - Listener
