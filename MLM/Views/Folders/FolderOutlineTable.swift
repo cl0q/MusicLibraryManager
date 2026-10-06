@@ -39,7 +39,9 @@ struct FolderOutlineTable: View {
         .environment(live)
         .environment(\.trackTableCellOptions, TrackTableCellOptions())
         .modifier(TrackTablePublisher(model: model.trackList, configuration: configuration, live: live,
-                                      actions: actions, viewOptions: viewOptions))
+                                      actions: actions, viewOptions: viewOptions,
+                                      selectionOverride: folderSelection))
+        .onChange(of: model.trackList.selection) { _, _ in model.selectionDidChange() }
         .modifier(TrackSelectionBarRegistration(model: model.trackList, configuration: configuration, live: live))
         .focusedValue(\.folderOutlineKeys, outlineKeys)
         .background { TrackTableLiveObserver(live: live) }
@@ -84,6 +86,35 @@ struct FolderOutlineTable: View {
     }
 
     private var dragContext: TrackDragContext { TrackDragContext.current(container) }
+
+    /// With folders selected the Track menu acts on their tracks (UC-MENU-05): the same commands,
+    /// the folders' tracks in display order as the selection.
+    private var folderSelection: TrackSelection? {
+        guard let resolved = model.folderSelectionTracks, resolved.selection == model.trackList.selection else { return nil }
+        let tracks = resolved.tracks
+        let rows = TrackRowBuilder.build(tracks)
+        let actions = self.actions
+        let configuration = self.configuration
+        let model = self.model
+        let sources = TrackMenuSources.shared
+        return TrackSelection(
+            selectedIDs: Set(tracks.compactMap(\.id)),
+            summary: TrackSelectionSummary(rows: rows, container: configuration.listContext.container, live: live.state),
+            context: configuration.listContext,
+            hasPlayableRows: model.trackList.hasPlayableRows(live: live.state),
+            rowsToken: rows.reduce(into: Hasher()) { $0.combine($1.id) }.finalize(),
+            target: TrackCommandTarget(
+                activate: configuration.activate,
+                deselectAll: { model.trackList.selection = [] },
+                playlists: sources.playlists,
+                syncProfiles: sources.syncProfiles,
+                addToSyncProfile: { profile, ids in actions.addToSyncProfile(profile, rows.filter { ids.contains($0.id) }) },
+                preview: { actions.preview(rows) },
+                recordOrigin: { actions.recordPlaybackOrigin(trackID: nil) }
+            ),
+            rows: { tracks }
+        )
+    }
 
     // MARK: Sort (within each folder, UC-TABLE-04)
 

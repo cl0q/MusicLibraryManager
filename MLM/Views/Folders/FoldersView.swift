@@ -10,7 +10,7 @@ import SwiftUI
 struct FoldersView: View {
     let onTrackActivated: TrackActivation
 
-    @State private var model = FolderViewModel(environment: .live())
+    @State private var model = FolderModelStore.shared.model()
     @State private var live = TrackTableLive()
 
     @Environment(\.container) private var container
@@ -48,6 +48,7 @@ struct FoldersView: View {
         .onChange(of: FolderOpenRequest.shared.path) { _, _ in openRequestedFolder() }
         .onChange(of: LibraryDriveState.current(container)) { _, _ in model.driveStateChanged() }
         .background { FolderRevealTaker(model: model) }
+        .onDisappear { model.placeDidDisappear() }
         .onReceive(NotificationCenter.default.publisher(for: .libraryFilesDidChange)) { _ in model.libraryFilesDidChange() }
         .onReceive(NotificationCenter.default.publisher(for: .libraryDidImport)) { _ in model.libraryFilesDidChange() }
         .onReceive(NotificationCenter.default.publisher(for: .libraryRootDidChange)) { _ in Task { await model.load() } }

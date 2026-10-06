@@ -317,6 +317,9 @@ struct TrackTablePublisher: ViewModifier {
     let live: TrackTableLive
     let actions: TrackListActions
     let viewOptions: TrackTableViewOptions
+    /// Published instead of the rows' own selection when set — Folders, where a selected folder
+    /// stands for its tracks in the Track menu (UC-MENU-05, W3-FOLD).
+    var selectionOverride: TrackSelection? = nil
 
     @Environment(NavigationModel.self) private var navigation: NavigationModel?
     @Environment(\.container) private var container
@@ -337,7 +340,7 @@ struct TrackTablePublisher: ViewModifier {
         let summary = TrackSelectionSummary(rows: selected, container: configuration.listContext.container, live: live.state)
         content
             .disabled(!visible)
-            .focusedValue(\.trackSelection, visible ? selection(summary: summary) : nil)
+            .focusedValue(\.trackSelection, visible ? (selectionOverride ?? selection(summary: summary)) : nil)
             .focusedValue(\.trackTableViewOptions, visible ? viewOptions : nil)
             .statusBarText(configuration.publishesStatusText ? statusText(selected) : nil)
             .onChange(of: model.selection) { _, _ in

@@ -266,4 +266,36 @@ struct FolderViewModelTests {
         #expect(model.trackList.selection.isEmpty)
         await waitUntil("the catalog") { model.rootTrackCount == 2 }
     }
+
+    @Test func aSelectedFolderStandsForItsTracksInTheTrackMenu() async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.cleanUp() }
+        let model = fixture.model
+        await model.load()
+        model.trackList.selection = [model.ids.folder("Sets")]
+        model.selectionDidChange()
+        await waitUntil("the folder's tracks") { model.folderSelectionTracks != nil }
+        #expect(model.folderSelectionTracks?.tracks.map(\.title) == ["Beta"])
+        model.trackList.selection = []
+        model.selectionDidChange()
+        #expect(model.folderSelectionTracks == nil)
+    }
+
+    @Test func newFilesUpdateTheOutlineInPlace() async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.cleanUp() }
+        let model = fixture.model
+        await model.load()
+        await waitUntil("the walk") { model.isWalkComplete }
+        #expect(model.catalog.trackCount(under: "_Inbox") == 0)
+        var track = Track(artist: "New", album: "Album", title: "Inbox Track", format: "mp3",
+                          originalPath: fixture.root.appendingPathComponent("_Inbox/x.mp3").path)
+        track.organizedPath = "New/Album/Inbox Track.mp3"
+        try await TrackRepository(database: fixture.database).insert(track)
+        model.libraryFilesDidChange()
+        model.libraryFilesDidChange()
+        await waitUntil("the refreshed catalog") { model.catalog.trackCount(under: "_Inbox") == 1 }
+        await waitUntil("the new walk") { model.isWalkComplete && model.notInLibraryFiles(under: "_Inbox")?.isEmpty == true }
+        #expect(fixture.box.walks >= 2, "read again after the change")
+    }
 }

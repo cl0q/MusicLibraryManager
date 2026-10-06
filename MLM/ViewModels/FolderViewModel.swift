@@ -71,6 +71,7 @@ final class FolderViewModel {
     @ObservationIgnored private var listingFolders: Set<String> = []
     @ObservationIgnored private var walkTask: Task<Void, Never>?
     @ObservationIgnored private var filterTask: Task<Void, Never>?
+    @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var rowsVersion = 0
     /// Folders the current filter opened that the user closed.
@@ -272,13 +273,17 @@ final class FolderViewModel {
     }
 
     /// Files were added, moved or re-pointed, an import finished, tracks were deleted: the
-    /// catalog and (when connected) the disk are read again; the outline updates in place.
+    /// catalog and (when connected) the disk are read again; the outline updates in place (the
+    /// old rows stay until the new ones are there). Notifications that arrive together (an
+    /// import posts two) are read once.
     func libraryFilesDidChange() {
-        Task {
+        refreshTask?.cancel()
+        refreshTask = Task {
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, phase == .ready else { return }
             await refreshCatalog()
             if !isOffline {
-                for folder in Array(listings.keys) where isShownOrOpen(folder) { listings[folder] = nil }
-                rebuild()
+                for folder in Array(listings.keys) where isShownOrOpen(folder) { list(folder) }
                 restartWalk()
             }
         }
@@ -408,8 +413,9 @@ final class FolderViewModel {
 
     // MARK: The background walk (files not in the library, folder names)
 
-    private func startWalk() {
-        guard !isOffline, walkTask == nil, let root = libraryRoot else { return }
+    /// Reads the whole library folder once (again only after files changed: `restartWalk`).
+    private func startWalk(force: Bool = false) {
+        guard !isOffline, walkTask == nil, force || !isWalkComplete, let root = libraryRoot else { return }
         let walk = environment.walkDirectory
         let rootURL = URL(fileURLWithPath: root, isDirectory: true)
         let token = generation
@@ -428,7 +434,7 @@ final class FolderViewModel {
     private func restartWalk() {
         walkTask?.cancel()
         walkTask = nil
-        startWalk()
+        startWalk(force: true)
     }
 
     // MARK: - Expanding (Return / double-click / → ←, persisted)
@@ -685,6 +691,36 @@ final class FolderViewModel {
         return result
     }
 
+    // MARK: - The Track menu on folders (UC-MENU-05)
+
+    /// The tracks of a selection that contains folders (subfolders included, display order),
+    /// for the Track menu: "with a folder selected the items act on its tracks". Nil while the
+    /// selection holds no folder or its tracks are still being read.
+    private(set) var folderSelectionTracks: (selection: Set<Int64>, tracks: [Track])?
+    @ObservationIgnored private var folderSelectionTask: Task<Void, Never>?
+
+    func selectionDidChange() {
+        folderSelectionTask?.cancel()
+        let selection = trackList.selection
+        guard selection.contains(where: { outline.foldersByID[$0] != nil }) else {
+            folderSelectionTracks = nil
+            return
+        }
+        if folderSelectionTracks?.selection != selection { folderSelectionTracks = nil }
+        folderSelectionTask = Task {
+            let tracks = await tracks(forRows: selection)
+            guard !Task.isCancelled, trackList.selection == selection else { return }
+            folderSelectionTracks = (selection, tracks)
+        }
+    }
+
+    // MARK: - Leaving the place
+
+    /// Navigating away clears the selection (UC-TABLE-08); what is open stays.
+    func placeDidDisappear() {
+        trackList.selection = []
+    }
+
     // MARK: - Snapshot fixtures
 
     /// Puts `tracks` at the top of an otherwise empty outline (snapshot fixture; no database).
@@ -701,5 +737,27 @@ final class FolderViewModel {
         phase = .ready
         rebuild()
         trackList.setTracksNow(outline.trackRows.map(\.track))
+    }
+}
+
+// MARK: - One model per library
+
+/// Keeps the Folders model while the library is open, so coming back to Folders doesn't read the
+/// whole library folder again (the outline, what was read from disk and the counts stay; the
+/// catalog is refreshed on each visit).
+@MainActor
+final class FolderModelStore {
+    static let shared = FolderModelStore()
+
+    private var libraryID: String?
+    private var cached: FolderViewModel?
+
+    func model(_ container: DependencyContainer = .shared) -> FolderViewModel {
+        let id = container.activeLibrary?.libraryId
+        if let cached, id == libraryID { return cached }
+        let model = FolderViewModel(environment: .live(container))
+        libraryID = id
+        cached = model
+        return model
     }
 }
