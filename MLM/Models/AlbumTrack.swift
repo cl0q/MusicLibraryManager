@@ -27,17 +27,11 @@ enum AlbumKey {
         return trimmed.isEmpty ? artist : albumArtist
     }
 
-    /// The text the importer writes when a file has no album tag. Not an album (DEC-021).
-    static let unknownAlbumText = "unknown album"
-
-    /// `album` holds no real album: empty, or the importer's placeholder.
+    /// `album` names no album (DEC-021): empty, the importer's `unknown album`, a source name or a
+    /// URL stored as album — the one decision every view uses (`TrackMetadataPresentation`).
     static func isNoAlbum(_ album: String) -> Bool {
-        let trimmed = album.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty || trimmed.caseInsensitiveCompare(unknownAlbumText) == .orderedSame
+        !TrackMetadataPresentation.isRealAlbum(album)
     }
-
-    /// SQL over `tracks`: the row has no album (empty text or the importer's placeholder).
-    static let noAlbumSQL = "(tracks.album = '' OR LOWER(tracks.album) = '\(unknownAlbumText)')"
 
     /// Finds the base album (no variant kind) with this key or creates it. Returns its id.
     static func findOrCreate(_ db: Database, artist: String, albumArtist: String, title: String, year: Int?) throws -> Int64 {

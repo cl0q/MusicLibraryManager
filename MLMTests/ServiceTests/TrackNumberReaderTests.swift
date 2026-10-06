@@ -164,9 +164,15 @@ struct TrackNumberReaderTests {
         let files = try Directory()
         let (db, _, _) = try make(titles: ["A"], files: files)
         let fake = FakeExtractor(["A.flac": .init(track: 1, disc: 1)])
-        let reader = reader(db, fake, connected: { false }, pause: { try? await Task.sleep(for: .milliseconds(5)) })
+        let checks = Counter()
+        let reader = reader(db, fake, connected: { _ = await checks.next(); return false }, pause: { try? await Task.sleep(for: .milliseconds(5)) })
         let task = Task { await reader.run() }
-        try await Task.sleep(for: .milliseconds(30))
+        // Cancel only once the run is really waiting for the drive (no fixed sleep).
+        let deadline = ContinuousClock.now + .seconds(20)
+        while await checks.checked < 2 {
+            guard ContinuousClock.now < deadline else { Issue.record("the run never waited for the drive"); break }
+            try await Task.sleep(for: .milliseconds(2))
+        }
         task.cancel()
         let outcome = await task.value
         #expect(outcome.cancelled && outcome.read == 0 && outcome.unreadable == 0)
@@ -174,7 +180,7 @@ struct TrackNumberReaderTests {
     }
 
     actor Counter {
-        private var checked = 0
+        private(set) var checked = 0
         private(set) var pauses = 0
         func next() -> Int { checked += 1; return checked }
         func paused() { pauses += 1 }

@@ -11,8 +11,8 @@ enum AlbumMigrations {
     ///
     /// (a) Every track with album text and no `album_id` is linked to an `albums` row found or
     /// created by (album artist — else artist — NFC-case-folded, normalised title). Database
-    /// only; no file is read. Tracks whose album text is empty or the importer's placeholder
-    /// `unknown album` are not an album (DEC-021) and stay unlinked.
+    /// only; no file is read. Tracks whose album text is no album (empty, `unknown album`, a source name or
+    /// a URL — `TrackMetadataPresentation.isRealAlbum`) are not an album (DEC-021) and stay unlinked.
     /// (b) Every track with an `album_id` that has no row yet gets one: disc 1, positions evenly
     /// spaced in title order, `track_number` NULL (the numbers come later from the files).
     static func v50AlbumTracks(_ db: Database) throws {
@@ -56,12 +56,11 @@ enum AlbumMigrations {
 
         // (b) seed the join.
         let members = try Row.fetchAll(db, sql: """
-            SELECT t.album_id AS album_id, t.id AS track_id
+            SELECT t.album_id AS album_id, t.id AS track_id, a.title AS album_title
             FROM tracks t JOIN albums a ON a.id = t.album_id
-            WHERE LOWER(a.title) <> '\(AlbumKey.unknownAlbumText)'
-              AND NOT EXISTS (SELECT 1 FROM album_tracks x WHERE x.album_id = t.album_id AND x.track_id = t.id)
+            WHERE NOT EXISTS (SELECT 1 FROM album_tracks x WHERE x.album_id = t.album_id AND x.track_id = t.id)
             ORDER BY t.album_id, t.title COLLATE NOCASE, t.id
-            """)
+            """).filter { !AlbumKey.isNoAlbum($0["album_title"]) }
         var start = 0
         while start < members.count {
             let albumID: Int64 = members[start]["album_id"]
