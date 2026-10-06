@@ -135,6 +135,7 @@ struct RunningWorkSummary: Equatable, Sendable {
         case .storageSize: ActivityNoun(singular: "size calculation", plural: "size calculations")
         case .sourceRefresh, .playlistRefresh: ActivityNoun(singular: "refresh", plural: "refreshes")
         case .duplicateScan: ActivityNoun(singular: "duplicate search", plural: "duplicate searches")
+        case .albumLookup: ActivityNoun(singular: "album lookup", plural: "album lookups")
         case .fileCheck: ActivityNoun(singular: "file check", plural: "file checks")
         case .tagWrite: ActivityNoun(singular: "tag write", plural: "tag writes")
         case .other: ActivityNoun(singular: "operation", plural: "operations")

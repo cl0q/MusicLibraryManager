@@ -166,7 +166,7 @@ final class ReviewModel {
 
     /// The running scan's words and numbers — Activity's (`Comparing 48,210 of 131,400`).
     var scanEcho: ActivityEcho? {
-        guard let echo = center.echo(for: .review), echo.state.isActive else { return nil }
+        guard let echo = center.echo(for: .review), echo.state.isActive, echo.kind == .duplicateScan else { return nil }
         return echo
     }
 
