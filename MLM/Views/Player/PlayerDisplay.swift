@@ -26,11 +26,15 @@ struct PlayerDisplay: Equatable {
     /// - Parameter currentCantPlay: why the loaded (paused) main track can't play now — its
     ///   disk went away; the sentence replaces its artist line.
     static func make(current: Track?, preview: Track?, previewSource: String? = nil, cantPlay: CantPlayState?,
-                     currentCantPlay: PlaybackWords.CantPlay? = nil) -> PlayerDisplay {
+                     currentCantPlay: PlaybackWords.CantPlay? = nil, previewIsResolving: Bool = false) -> PlayerDisplay {
         if let preview {
+            // A stream preview says `Resolving…` while its link is looked up (IMP-109), then Esc.
+            let second = preview.isPreviewStream
+                ? (previewIsResolving ? PlaybackWords.resolvingWord : PlaybackWords.streamPreviewHint)
+                : PlaybackWords.previewHint
             return PlayerDisplay(mode: .preview(tag: PlaybackWords.previewTag(fromSource: previewSource)),
-                                 title: preview.title, secondLine: PlaybackWords.previewHint, fixTitle: nil,
-                                 showsTimes: true, coverTrackID: preview.id)
+                                 title: preview.title, secondLine: second, fixTitle: nil,
+                                 showsTimes: !(preview.isPreviewStream && previewIsResolving), coverTrackID: preview.id)
         }
         if let current {
             return PlayerDisplay(mode: .track, title: current.title,

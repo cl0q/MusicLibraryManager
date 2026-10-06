@@ -285,6 +285,7 @@ struct SimilarView: View {
         .padding(.vertical, Spacing.xs)
         .accessibilityElement(children: .combine)
         .contextMenu {
+            StreamPreviewMenuItem(link: row.recommendation.scDownloadUrl, title: row.recommendation.title, rowID: row.id)
             Button("Download") { model.download(row) }
                 .disabled(row.isBusy || row.isPlaced)
             Button("Keep") { model.keep(row) }
@@ -312,6 +313,8 @@ struct SimilarView: View {
         } else {
             HStack(spacing: Spacing.xs) {
                 if row.pipeline == .failed { Text("Download failed").foregroundStyle(.secondary) }
+                // Hear it before downloading it (V-SIMILAR.N10): a stream in the toolbar player.
+                StreamPreviewButton(link: row.recommendation.scDownloadUrl, title: row.recommendation.title, rowID: row.id)
                 Button("Download") { model.download(row) }
                     .help("Downloads it and holds it in Discover ▸ Recommendations until you keep it")
                 Button("Keep") { model.keep(row) }

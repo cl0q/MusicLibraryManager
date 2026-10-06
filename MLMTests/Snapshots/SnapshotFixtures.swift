@@ -396,6 +396,7 @@ enum SnapshotFixtures {
         "TrackList/TrackPrimaryAction.swift": "Non-view: primary action per row kind and play-when-ready (W2-A).",
         "TrackList/TrackMenu.swift": "Deferred: menus require interactive presentation; current bitmap hosts do not open them.",
         "Sync/Pickers/PlaylistPickerModel.swift": "Non-view: selection model.",
+        "Shared/StreamPreviewControls.swift": "Deferred: Preview / Stop buttons read the live preview controller and the container; the rules are PreviewMachine and StreamPreview tests (W5-F2).",
         "Shared/SelectionCreationSheets.swift": "Non-view: identifiable selection wrapper (the sheet merged into Sync/NewSyncProfileSheet, W3-SYNC).",
         "TrackDetail/WaveformHelpers.swift": "Non-view: waveform math; production WaveformView is captured.",
         "Activity/ActivityLogsView.swift": "Deferred: global logger and AppKit text representable need fixed attributed-log input.",
@@ -610,6 +611,7 @@ Settings/SourcesSetupView.swift
 Shared/DownloadRetryBudget.swift
 Shared/SelectionCreationSheets.swift
 Shared/StatusChip.swift
+Shared/StreamPreviewControls.swift
 Shared/TrackCoverView.swift
 Shared/TrackMetadataPresentation.swift
 Shell/ContentScaffold.swift

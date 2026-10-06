@@ -250,8 +250,8 @@ struct ReelResultsSection: View {
 
 /// One result: words instead of unlabelled icons. `Download` shows its state in the row
 /// (`Queued` → `Downloading…` → `In library`, or `Download failed — ‹reason›` and `Retry`);
-/// `Add to Playlist ▸` is the standard submenu (CM-REELS-ADDPL). A result preview needs a stream
-/// preview that doesn't exist yet, so there is no Preview button (no dead controls).
+/// `Add to Playlist ▸` is the standard submenu (CM-REELS-ADDPL). `Preview` streams a SoundCloud or
+/// YouTube result in the toolbar player without downloading it (IMP-109); other sources have none.
 private struct ReelResultRow: View {
     let model: ReelsModel
     let bench: ReelBench
@@ -272,12 +272,16 @@ private struct ReelResultRow: View {
                     Button("Retry") { Task { await model.retry(result) } }
                 }
             } else {
+                StreamPreviewButton(link: result.sourceURL, title: result.title, rowID: result.id)
                 Button("Download") { Task { await model.download(result) } }
                 addToPlaylist
             }
         }
         .padding(Spacing.s)
         .accessibilityElement(children: .combine)
+        .contextMenu {
+            StreamPreviewMenuItem(link: result.sourceURL, title: result.title, rowID: result.id)
+        }
     }
 
     private var addToPlaylist: some View {

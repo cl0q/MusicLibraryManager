@@ -12,6 +12,10 @@ enum PlaybackWords {
     static let notPlaying = "Not playing"
     static let previewTag = "Preview"
     static let previewHint = "Space to stop · Return to play"
+    /// While a stream preview's link is being resolved (IMP-109).
+    static let resolvingWord = "Resolving…"
+    /// A stream preview has no row to press Space on: Esc (or the row's Stop) ends it.
+    static let streamPreviewHint = "Esc to stop"
     /// Online results later: `Preview · from YouTube`.
     static func previewTag(fromSource source: String?) -> String {
         guard let source, !source.isEmpty else { return previewTag }
@@ -70,6 +74,8 @@ enum PlaybackWords {
         case fileMissing
         case driveNotConnected(volumeName: String?)
         case unreadable
+        /// A stream preview that couldn't start (IMP-109).
+        case streamFailed(title: String, cause: String)
 
         init?(_ playability: PlaybackPlayability, volumeName: String?) {
             switch playability {
@@ -88,6 +94,7 @@ enum PlaybackWords {
             case .fileMissing: "Can’t preview — file missing."
             case .driveNotConnected(let name): "Can’t preview — \(PlaybackWords.diskName(name)) is not connected."
             case .unreadable: "Can’t preview — the file can’t be read."
+            case .streamFailed(let title, let cause): "Couldn’t preview “\(title)” — \(cause)"
             }
         }
     }

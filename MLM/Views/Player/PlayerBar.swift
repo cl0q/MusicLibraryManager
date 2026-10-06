@@ -47,7 +47,8 @@ struct PlayerBar: View {
         return PlayerDisplay.make(current: viewModel.currentTrack,
                                   preview: preview.isActive ? preview.track : nil,
                                   cantPlay: viewModel.cantPlay,
-                                  currentCantPlay: viewModel.currentTrackCantPlay)
+                                  currentCantPlay: viewModel.currentTrackCantPlay,
+                                  previewIsResolving: preview.isLoading)
     }
 
     private func playerRow(showsTrackInfo: Bool) -> some View {

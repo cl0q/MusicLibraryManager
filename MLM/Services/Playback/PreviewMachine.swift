@@ -6,10 +6,24 @@ import Foundation
 enum PreviewCandidate: Equatable, Sendable {
     /// One track whose file can be used now.
     case previewable(Track)
+    /// A suggestion or result that isn't in the library: `page` is its SoundCloud or YouTube
+    /// link, resolved to a stream when the preview starts (IMP-109). Nothing is downloaded into
+    /// the library and nothing is saved.
+    case stream(URL, title: String)
     /// The selection can't be previewed; the status bar says why (UC-STATUS-07).
     case refused(PlaybackWords.PreviewRefusal)
     /// Nothing is selected: Space does nothing, silently.
     case nothing
+
+    /// The track a preview session shows and plays: the library track, or the stand-in of a
+    /// stream (no id, `format == "stream"`, the link as its path).
+    var previewTrack: Track? {
+        switch self {
+        case .previewable(let track): return track
+        case .stream(let page, let title): return Track.previewStream(page: page, title: title)
+        case .refused, .nothing: return nil
+        }
+    }
 
     /// From the focused table's selected rows in display order and the window's drive state
     /// (persisted availability only — no disk access, UC-TABLE-20).
@@ -164,7 +178,8 @@ struct PreviewMachine: Equatable {
             return []
         case .refused(let refusal):
             return [.report(refusal)]
-        case .previewable(let track):
+        case .previewable, .stream:
+            guard let track = candidate.previewTrack else { return [] }
             let token = newToken()
             session = Session(owner: owner, main: main, phase: .loading(track, token: token))
             return [.suspendMain, .resolve(track, token: token), .changed]
@@ -182,7 +197,7 @@ struct PreviewMachine: Equatable {
     /// Other lists' selections don't touch it.
     mutating func selectionChanged(owner: PreviewOwner, candidate: PreviewCandidate) -> [Effect] {
         guard var current = session, current.owner == owner else { return [] }
-        if case .previewable(let track) = candidate, track.id != nil, track.id == current.phase.track.id {
+        if let track = candidate.previewTrack, Self.isSame(track, current.phase.track) {
             current.pending = nil
             session = current
             return []
@@ -198,7 +213,8 @@ struct PreviewMachine: Equatable {
     mutating func settle(token: Int) -> [Effect] {
         guard var current = session, let pending = current.pending, pending.token == token else { return [] }
         switch pending.candidate {
-        case .previewable(let track):
+        case .previewable, .stream:
+            guard let track = pending.candidate.previewTrack else { return [] }
             current.pending = nil
             current.phase = .loading(track, token: token)
             session = current
@@ -208,6 +224,12 @@ struct PreviewMachine: Equatable {
         case .nothing:
             return end()
         }
+    }
+
+    /// The same library track, or the same stream link.
+    private static func isSame(_ a: Track, _ b: Track) -> Bool {
+        if a.isPreviewStream || b.isPreviewStream { return a.isPreviewStream && b.isPreviewStream && a.originalPath == b.originalPath }
+        return a.id != nil && a.id == b.id
     }
 
     /// The file and hot spot of the loading track are known (or it turned out unusable).
@@ -299,9 +321,12 @@ enum PreviewResolveFailure: Error, Equatable, Sendable {
     case fileMissing
     case driveNotConnected(volumeName: String?)
     case unreadable
+    /// A stream couldn't be resolved or fetched (`Couldn’t preview “‹title›” — ‹cause›`).
+    case stream(title: String, cause: String)
 
     var refusal: PlaybackWords.PreviewRefusal {
         switch self {
+        case .stream(let title, let cause): .streamFailed(title: title, cause: cause)
         case .notDownloaded: .notDownloaded
         case .fileMissing: .fileMissing
         case .driveNotConnected(let name): .driveNotConnected(volumeName: name)
