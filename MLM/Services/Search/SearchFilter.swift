@@ -148,7 +148,7 @@ struct SearchFilter: Equatable, Hashable, Sendable {
         case .notDownloaded: return TrackAvailabilityScope.notDownloaded.contains(track.availability())
         case .downloadFailed: return TrackAvailabilityScope.downloadFailed.contains(track.availability())
         case .fileMissing: return TrackAvailabilityScope.fileMissing.contains(track.availability())
-        case .noAlbum: return !TrackMetadataPresentation.isRealAlbum(track.album)
+        case .noAlbum: return !TrackMetadataPresentation.isRealAlbum(track.album) && !track.noAlbum
         case .noGenre: return GenreName.key(track.genre) == nil
         case .notAnalysed: return track.energyBucket == nil
         case .inNoPlaylist: return isInAnyPlaylist?(track).map { !$0 } ?? false

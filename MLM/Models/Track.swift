@@ -46,6 +46,9 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
     /// `hidden_by_review` (v54): set only by a Review decision (`ReviewDecisionRepository`);
     /// not written by `encode(to:)`, so saving a track never changes it.
     var hiddenByReview: Bool = false
+    /// `no_album` (v52): the user confirmed the track has no album on purpose (a mix, a live
+    /// set). Not written by `encode(to:)`, so saving a track never changes it.
+    var noAlbum: Bool = false
 
     static let databaseTableName = "tracks"
 
@@ -82,6 +85,7 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
         static let mlmUuid = Column(CodingKeys.mlmUuid)
         static let fileMissingSince = Column(CodingKeys.fileMissingSince)
         static let hiddenByReview = Column(CodingKeys.hiddenByReview)
+        static let noAlbum = Column(CodingKeys.noAlbum)
     }
 
     // MARK: - Snake case mapping
@@ -117,6 +121,7 @@ struct Track: Codable, FetchableRecord, MutablePersistableRecord, Identifiable, 
         case mlmUuid = "mlm_uuid"
         case fileMissingSince = "file_missing_since"
         case hiddenByReview = "hidden_by_review"
+        case noAlbum = "no_album"
     }
 
     // MARK: - Computed Properties

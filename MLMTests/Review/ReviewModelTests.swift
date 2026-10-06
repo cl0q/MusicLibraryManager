@@ -20,7 +20,7 @@ struct ReviewModelTests {
 
     // MARK: Tabs and counts
 
-    @Test func tabsCountGroupsAndAlbumsNeverShows() async throws {
+    @Test func tabsCountGroupsAndAlbumsStayHiddenUntilALookupRan() async throws {
         let env = try ReviewEnv.make()
         try await env.addGroup(title: "So U Kno", versions: flacMp3)
         try await env.addGroup(title: "Arpo", versions: flacMp3)
@@ -31,9 +31,11 @@ struct ReviewModelTests {
         #expect(env.model.count(for: .conflicts) == 1)
         #expect(env.model.count(for: .resolved) == 1)
         #expect(env.model.waitingCount == 3, "the sidebar badge adds groups and conflicts")
-        #expect(env.model.count(for: .albums) == nil)
+        #expect(env.model.count(for: .albums) == 0, "W4-3: the pending album suggestions (none yet)")
+        #expect(!env.model.albumsLookedUp)
         let items = ReviewTab.allCases.map {
-            ScopeBarItem(id: $0, title: $0.title, count: env.model.count(for: $0), hidesWhenEmpty: $0 == .albums)
+            ScopeBarItem(id: $0, title: $0.title, count: env.model.count(for: $0),
+                         hidesWhenEmpty: $0 == .albums && !env.model.albumsLookedUp)
         }
         #expect(ScopeBarRules.visibleItems(items, selection: .duplicates).map(\.id) == [.duplicates, .conflicts, .resolved])
     }

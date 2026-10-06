@@ -45,8 +45,8 @@ struct TrackScopeQueries: Sendable {
 
     /// Listed tracks that have no album — `is: no album`'s predicate (`TrackSearchSQL.noAlbum`:
     /// empty, `unknown album`, a source name or a URL as album): the Albums footer line
-    /// `‹n› tracks have no album` (W4-1, DEC-021). W4-3 adds the tracks confirmed `No album`
-    /// (`tracks.no_album`) to the exclusion.
+    /// `‹n› tracks have no album` (W4-1, DEC-021). Tracks confirmed `No album`
+    /// (`tracks.no_album`, W4-3) are not counted — and not matched by `is: no album` either.
     func noAlbumCount() async throws -> Int {
         try await database.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM tracks WHERE \(TrackVisibility.listed(TrackSearchSQL.noAlbum))") ?? 0

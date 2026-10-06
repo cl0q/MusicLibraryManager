@@ -1,9 +1,8 @@
 import Foundation
 import Observation
 
-/// The tabs of Review. `Albums` belongs to Wave 4: it exists in the scope bar as a hidden item
-/// (count `nil`, `hidesWhenEmpty`), so it never shows now and needs no change of the bar later
-/// (IMP-050).
+/// The tabs of Review. `Albums` (W4-3) is hidden until a lookup has run (IMP-050, IMP-086); its
+/// count is the pending suggestions.
 enum ReviewTab: String, CaseIterable, Identifiable, Sendable {
     case duplicates, conflicts, albums, resolved
 
@@ -66,6 +65,8 @@ final class ReviewModel {
         var tagEdit: @MainActor () -> TrackTagEdit
         var consequences: ReviewConsequences
         var postChange: @MainActor (_ playlistsChanged: Bool, _ filesChanged: Bool) -> Void
+        /// Review ▸ Albums (W4-3): the pending suggestions behind the tab's count and visibility.
+        var albumSuggestions: AlbumSuggestionRepository? = nil
 
         @MainActor
         static func live(_ container: DependencyContainer = .shared) -> Dependencies? {
@@ -84,7 +85,8 @@ final class ReviewModel {
                     if playlists { center.post(name: .playlistDidChange, object: nil) }
                     // A file check finds what moved to / came back from the Trash.
                     if files { center.post(name: .libraryFilesDidChange, object: nil) }
-                }
+                },
+                albumSuggestions: AlbumSuggestionRepository(database: manager.pool)
             )
         }
     }
@@ -94,6 +96,10 @@ final class ReviewModel {
     private(set) var duplicates: [ReviewGroupItem] = []
     private(set) var conflicts: [ReviewGroupItem] = []
     private(set) var resolved: [ReviewResolvedRow] = []
+    /// Pending album suggestions, and whether a lookup has ever written a row (IMP-086: the
+    /// Albums tab stays hidden until the first lookup ran).
+    private(set) var albumPending = 0
+    private(set) var albumsLookedUp = false
     private(set) var isLoaded = false
     private(set) var loadError: String?
     /// The in-place filter of this view (`SearchCoordinator.filter(for: .review)`).
@@ -126,8 +132,8 @@ final class ReviewModel {
     var duplicateCount: Int { duplicates.count }
     var conflictCount: Int { conflicts.count }
     var resolvedCount: Int { resolved.count }
-    /// What the sidebar badge adds up (UC-SIDE-05): groups waiting + conflicts.
-    var waitingCount: Int { duplicates.count + conflicts.count }
+    /// What the sidebar badge adds up (UC-SIDE-05): groups waiting + conflicts + album suggestions.
+    var waitingCount: Int { duplicates.count + conflicts.count + albumPending }
     var isNothingToReview: Bool { isLoaded && duplicates.isEmpty && conflicts.isEmpty }
 
     func count(for tab: ReviewTab) -> Int? {
@@ -136,7 +142,7 @@ final class ReviewModel {
         case .duplicates: return duplicateCount
         case .conflicts: return conflictCount
         case .resolved: return resolvedCount
-        case .albums: return nil
+        case .albums: return albumPending
         }
     }
 
@@ -166,7 +172,7 @@ final class ReviewModel {
 
     /// The running scan's words and numbers — Activity's (`Comparing 48,210 of 131,400`).
     var scanEcho: ActivityEcho? {
-        guard let echo = center.echo(for: .review), echo.state.isActive else { return nil }
+        guard let echo = center.echo(for: .review), echo.state.isActive, echo.kind == .duplicateScan else { return nil }
         return echo
     }
 
@@ -259,6 +265,10 @@ final class ReviewModel {
             duplicates = newDuplicates
             conflicts = newConflicts
             resolved = resolvedGroups.map { Self.resolvedRow($0, decision: decisions[$0.key]) }
+            if let albums = dependencies.albumSuggestions, let counts = try? await albums.counts() {
+                albumPending = counts.pending
+                albumsLookedUp = counts.rows > 0
+            }
             let liveKeys = Set((duplicates + conflicts).map(\.key))
             picks = picks.filter { liveKeys.contains($0.key) }
             choices = choices.filter { liveKeys.contains($0.key) }

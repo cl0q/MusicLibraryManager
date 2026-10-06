@@ -16,6 +16,7 @@ struct ReviewView: View {
     @Environment(ToolbarSearchModel.self) private var search: ToolbarSearchModel?
 
     @State private var model: ReviewModel?
+    @State private var albums: ReviewAlbumsModel?
     @SceneStorage("review.tab") private var storedTab = ReviewTab.duplicates.rawValue
     @State private var expanded: Set<String> = []
     @State private var selection: String?
@@ -24,8 +25,7 @@ struct ReviewView: View {
     @State private var writesTags = false
 
     private var tab: ReviewTab {
-        let tab = ReviewTab(rawValue: storedTab) ?? .duplicates
-        return tab == .albums ? .duplicates : tab
+        ReviewTab(rawValue: storedTab) ?? .duplicates
     }
 
     var body: some View {
@@ -44,10 +44,17 @@ struct ReviewView: View {
         .task(id: LibraryDriveState.current(container)) {
             model?.drive = LibraryDriveState.current(container)
         }
+        .task(id: LibraryDriveState.current(container)) {
+            albums?.drive = LibraryDriveState.current(container)
+        }
+        .task(id: container.searchCoordinator.filter(for: .review)) {
+            albums?.search = container.searchCoordinator.filter(for: .review)
+        }
         .onChange(of: model?.scan.finishedCount) { _, _ in Task { await model?.reload() } }
-        .onReceive(NotificationCenter.default.publisher(for: .reviewQueueDidChange)) { _ in Task { await model?.reload() } }
-        .onReceive(NotificationCenter.default.publisher(for: .trackMetadataDidChange)) { _ in Task { await model?.reload() } }
-        .onReceive(NotificationCenter.default.publisher(for: .libraryDidDeleteTracks)) { _ in Task { await model?.reload() } }
+        .onChange(of: albums?.lookup.finishedCount) { _, _ in Task { await refreshAlbums() } }
+        .onReceive(NotificationCenter.default.publisher(for: .reviewQueueDidChange)) { _ in Task { await model?.reload(); await refreshAlbums() } }
+        .onReceive(NotificationCenter.default.publisher(for: .trackMetadataDidChange)) { _ in Task { await model?.reload(); await refreshAlbums() } }
+        .onReceive(NotificationCenter.default.publisher(for: .libraryDidDeleteTracks)) { _ in Task { await model?.reload(); await refreshAlbums() } }
         .onReceive(NotificationCenter.default.publisher(for: .pendingTagWritesDidChange)) { _ in
             Task { writesTags = await TagWriteSetting.isEnabled(container.configRepository) }
         }
@@ -67,12 +74,25 @@ struct ReviewView: View {
             created.drive = LibraryDriveState.current(container)
             model = created
         }
+        if albums == nil, let dependencies = ReviewAlbumsModel.Dependencies.live(container) {
+            let created = ReviewAlbumsModel(dependencies: dependencies)
+            created.search = container.searchCoordinator.filter(for: .review)
+            created.drive = LibraryDriveState.current(container)
+            albums = created
+        }
         guard let model else { return }
         model.scan.statusBar = statusBar
+        albums?.lookup.statusBar = statusBar
         writesTags = await TagWriteSetting.isEnabled(container.configRepository)
         await model.scan.loadLastScan()
+        await albums?.lookup.loadLastLookup()
         await model.reload()
+        await refreshAlbums()
         openFocused()
+    }
+
+    private func refreshAlbums() async {
+        await albums?.reload()
     }
 
     /// `Show in Review`: the group of the track opens (P3: nothing else moves).
@@ -87,7 +107,8 @@ struct ReviewView: View {
 
     private var scopeBar: some View {
         let items = ReviewTab.allCases.map { tab in
-            ScopeBarItem(id: tab, title: tab.title, count: model?.count(for: tab), hidesWhenEmpty: tab == .albums)
+            ScopeBarItem(id: tab, title: tab.title, count: model?.count(for: tab),
+                         hidesWhenEmpty: tab == .albums && model?.albumsLookedUp != true)
         }
         return ScopeBar(
             items: items,
@@ -132,14 +153,23 @@ struct ReviewView: View {
     private var content: some View {
         if let model {
             VStack(spacing: 0) {
-                scanRow(model)
-                Divider()
+                if tab != .albums {
+                    // The duplicate scan's row; Albums has its own header and lookup.
+                    scanRow(model)
+                    Divider()
+                }
                 switch tab {
-                case .duplicates, .albums:
+                case .duplicates:
                     if model.isNothingToReview {
                         nothingToReview(model)
                     } else {
                         duplicatesTab(model)
+                    }
+                case .albums:
+                    if let albums {
+                        ReviewAlbumsView(model: albums, onTrackActivated: onTrackActivated)
+                    } else {
+                        ContentUnavailableView("No library is open", systemImage: "square.stack.3d.up")
                     }
                 case .conflicts:
                     if model.isNothingToReview {
@@ -151,7 +181,7 @@ struct ReviewView: View {
                     ReviewResolvedView(model: model, statusBar: statusBar, search: search)
                 }
             }
-            .statusBarText(statusText(model))
+            .statusBarText(tab == .albums ? nil : statusText(model))
         } else {
             ContentUnavailableView("No library is open", systemImage: "square.stack.3d.up")
         }

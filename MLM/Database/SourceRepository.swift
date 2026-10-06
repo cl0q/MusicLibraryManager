@@ -112,6 +112,7 @@ final class SourceRepository: Sendable {
             newTrack.searchText = DatabaseManager.foldedSearchText(newTrack.rawSearchText)
             try newTrack.insert(db)
             guard let trackId = newTrack.id else { return nil }
+            AlbumTrackRepository.linkNewTrack(db, newTrack)   // W4-3: no-op while the album is empty
             try db.execute(sql: """
                 INSERT INTO track_sources (track_id, source_id, external_id, added_at)
                 VALUES (?, ?, ?, ?)

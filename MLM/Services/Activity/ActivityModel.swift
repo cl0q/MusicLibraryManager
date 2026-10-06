@@ -37,6 +37,8 @@ enum ActivityKind: String, Codable, CaseIterable, Sendable {
     /// Refresh one linked playlist from its source.
     case playlistRefresh
     case duplicateScan
+    /// Review ▸ Albums: `Look Up Albums` over the tracks without an album (W4-3, IMP-083).
+    case albumLookup
     /// The file check of persisted availability (W2-A).
     case fileCheck
     /// Writing tag changes into the files (W2-E).
@@ -64,7 +66,7 @@ enum ActivityKind: String, Codable, CaseIterable, Sendable {
         case .deviceScan: "Device"
         case .backup, .restore: "Backup"
         case .sourceRefresh, .playlistRefresh: "Refresh"
-        case .duplicateScan: "Review"
+        case .duplicateScan, .albumLookup: "Review"
         case .tagWrite: "Tags"
         case .other: "Other"
         }
@@ -84,6 +86,7 @@ enum ActivityKind: String, Codable, CaseIterable, Sendable {
         case .backup, .restore: "clock.arrow.circlepath"
         case .sourceRefresh, .playlistRefresh: "arrow.clockwise"
         case .duplicateScan: "checklist"
+        case .albumLookup: "square.stack"
         case .tagWrite: "pencil"
         case .other: "gearshape"
         }
@@ -107,6 +110,7 @@ enum ActivityKind: String, Codable, CaseIterable, Sendable {
         case .storageSize: "Calculating"
         case .sourceRefresh, .playlistRefresh: "Refreshing"
         case .duplicateScan: "Comparing"
+        case .albumLookup: "Looking up albums"
         case .fileCheck: "Checking files"
         case .tagWrite: "Writing tags"
         case .other: "Working"
@@ -131,6 +135,7 @@ enum ActivityKind: String, Codable, CaseIterable, Sendable {
         case .storageSize: "Size calculation"
         case .sourceRefresh, .playlistRefresh: "Refresh"
         case .duplicateScan: "Duplicate scan"
+        case .albumLookup: "Album lookup"
         case .fileCheck: "File check"
         case .tagWrite: "Tag writing"
         case .other: "Operation"

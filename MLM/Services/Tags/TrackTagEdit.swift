@@ -115,6 +115,36 @@ final class TrackTagEdit {
         )
     }
 
+    /// Set `field` to `value` on `trackIDs` as one **part** of the caller's `UndoCenter.performGroup`
+    /// (W4-3: accepting an album suggestion sets album, album artist and year together with the
+    /// album join in one step). Same write, same file queueing and same exact undo as `perform`;
+    /// it registers no step and posts no message of its own — the group does.
+    ///
+    /// - Returns: the part's step (nil when no track changed); its `waiting` / `unsupported`
+    ///   facts are for the group's confirmation.
+    @discardableResult
+    func perform(_ value: TrackTagValue, field: TrackTagField, trackIDs: [Int64], in group: UndoGroup) async throws -> Step? {
+        let ids = TrackTagRepository.uniqued(trackIDs)
+        guard !ids.isEmpty, let repository = dependencies.repository() else { return nil }
+        let deps = dependencies
+        return try await group.perform(
+            do: { () async throws -> Step? in
+                let queue = await deps.writesEnabled()
+                let result = try await repository.apply(value, to: field, trackIDs: ids, queueFileWrites: queue)
+                guard result.changedCount > 0 else { return nil }
+                let waiting = await Self.afterChange(result, deps: deps)
+                return Step(field: field, snapshots: result.previous, waiting: waiting, unsupported: result.unsupported)
+            },
+            undo: { (step: Step?) async throws -> Step? in
+                guard let step else { return nil }
+                return try await Self.restore(step, repository: repository, deps: deps)
+            },
+            redo: { (step: Step?) async throws -> Step? in
+                guard let step else { return nil }
+                return try await Self.restore(step, repository: repository, deps: deps)
+            })
+    }
+
     /// The words of a tag edit that is a named command (genre rename, merge, drop, staged save):
     /// Edit ▸ Undo ‹actionName› and the status-bar headline for the number of changed tracks.
     struct Wording {

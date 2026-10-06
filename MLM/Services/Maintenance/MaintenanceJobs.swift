@@ -18,6 +18,8 @@ struct MaintenanceCoverage: Equatable, Sendable {
     var withoutArtwork = 0
     /// Album tracks with a file and no track number yet (`Read Track Numbers`, W4-1).
     var unnumberedAlbumTracks = 0
+    /// Tracks whose Album field holds a source name (`Clear Source Names from Album`, W4-3).
+    var sourceNamedAlbums = 0
 
     static func load(_ db: Database) throws -> MaintenanceCoverage {
         func count(_ sql: String) throws -> Int { try Int.fetchOne(db, sql: sql) ?? 0 }
@@ -48,7 +50,8 @@ struct MaintenanceCoverage: Equatable, Sendable {
                 SELECT COUNT(*) FROM tracks t WHERE \(withFile)
                 AND NOT EXISTS (SELECT 1 FROM artwork a WHERE a.track_id = t.id AND a.artwork_path IS NOT NULL)
                 """),
-            unnumberedAlbumTracks: try TrackNumberReader.unreadCount(db)
+            unnumberedAlbumTracks: try TrackNumberReader.unreadCount(db),
+            sourceNamedAlbums: try SourceAlbumCleanup.count(db)
         )
     }
 
@@ -67,6 +70,8 @@ struct MaintenanceCoverage: Equatable, Sendable {
         case MaintenanceJob.artworkEmbedded: "\(withArtwork.formatted()) of \(tracksWithFile.formatted()) tracks have artwork"
         case MaintenanceJob.artworkMusicBrainz:
             withoutArtwork == 1 ? "1 track without artwork" : "\(withoutArtwork.formatted()) tracks without artwork"
+        case MaintenanceJob.clearSourceNames:
+            sourceNamedAlbums == 1 ? "1 track has a source name as album" : "\(sourceNamedAlbums.formatted()) tracks have a source name as album"
         default: nil
         }
     }
@@ -81,6 +86,7 @@ extension MaintenanceJob {
     static let artworkMusicBrainz = "artwork-musicbrainz"
     static let rereadTags = "rescan"
     static let readTrackNumbers = "read-track-numbers"
+    static let clearSourceNames = "clear-source-names"
     static let recreateLikedPlaylist = "create-liked-playlist"
     static let pathAudit = "path-audit"
     static let pathApply = "path-apply"
@@ -116,6 +122,9 @@ final class MaintenanceJobs {
     /// `Reread tags from files` asks first (review S2); set by the row and by Library ▸
     /// Maintenance ▸, answered by Settings ▸ Maintenance.
     var rereadConfirmationRequested = false
+    /// `Clear Source Names from Album…` asks first (UC-UNDO-05 style: it is undoable and says so);
+    /// set by Library ▸ Maintenance ▸ and by the row, answered by Settings ▸ Maintenance.
+    var clearSourceNamesConfirmationRequested = false
 
     /// A-SET-REREAD (W3-SET review S2): the question with the count.
     static func rereadTitle(tracks: Int) -> String {
@@ -146,6 +155,7 @@ final class MaintenanceJobs {
         case MaintenanceJob.artworkMusicBrainz: runner.run(action) { await self.runArtworkMusicBrainz() }
         case MaintenanceJob.rereadTags: runner.run(action) { await self.runRereadTags() }
         case MaintenanceJob.readTrackNumbers: runner.run(action) { await self.runReadTrackNumbers() }
+        case MaintenanceJob.clearSourceNames: runner.run(action) { await self.runClearSourceNames() }
         case MaintenanceJob.recreateLikedPlaylist: runner.run(action) { await self.runRecreateLikedPlaylist() }
         case MaintenanceJob.pathAudit: runner.run(action) { await self.runPathAudit() }
         case MaintenanceJob.pathApply: runner.run(action) { await self.applyPathMigration() }
@@ -162,6 +172,7 @@ final class MaintenanceJobs {
             return "“\(name)” is not connected."
         }
         if action == MaintenanceJob.readTrackNumbers, coverage?.unnumberedAlbumTracks == 0 { return TrackNumberReader.nothingToRead }
+        if action == MaintenanceJob.clearSourceNames, coverage?.sourceNamedAlbums == 0 { return SourceAlbumCleanup.nothingToClear }
         if toolMissing, action == MaintenanceJob.fingerprint { return "fpcalc not found." }
         if action == MaintenanceJob.artworkEmbedded, automaticArtworkOperation != nil {
             return "Artwork is being read for new tracks."
@@ -331,6 +342,27 @@ final class MaintenanceJobs {
         let outcome = await reader.run { [runner] state in Task { @MainActor in runner.progress = state } }
         runner.resultMessage = "Track numbers: \(outcome.read) updated, \(outcome.unreadable) failed"
         if outcome.read > 0 { NotificationCenter.default.post(name: .trackMetadataDidChange, object: nil) }
+        await didChangeLibrary()
+    }
+
+    /// `Clear Source Names from Album` (W4-3, IMP-085): one undo step (`Clear Source Names`).
+    private func runClearSourceNames() async {
+        let c = container()
+        guard let pool = c.databaseManager?.pool else { return }
+        let cleanup = SourceAlbumCleanup(database: pool)
+        do {
+            let tracks = try await cleanup.affected()
+            let outcome = try await cleanup.run(
+                tracks: tracks, tagEdit: .live(undo: nil), undo: UndoCenter.main,
+                volumeName: { LibraryDriveState.current(c).volumeName })
+            if let outcome {
+                runner.resultMessage = "Source names: \(outcome.count) updated"
+                NotificationCenter.default.post(name: .trackMetadataDidChange, object: nil)
+                NotificationCenter.default.post(name: .reviewQueueDidChange, object: nil)
+            }
+        } catch {
+            runner.resultMessage = "Clearing source names failed: \(error.localizedDescription)"
+        }
         await didChangeLibrary()
     }
 
