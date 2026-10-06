@@ -110,7 +110,7 @@ struct LibraryView: View {
                 Text("Import music from a folder, or import a playlist from SoundCloud, YouTube or Spotify.")
             } actions: {
                 Button("Import Files or Folder…") { shell?.chooseImportFolder() }
-                Button("Import Playlist from Source…") { shell?.showSources() }
+                Button("Import Playlist from Source…") { shell?.importPlaylistFromSource() }
             }
         } else if !query.isEmpty {
             ContentUnavailableView {

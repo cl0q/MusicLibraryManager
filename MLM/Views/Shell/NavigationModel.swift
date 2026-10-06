@@ -97,9 +97,8 @@ enum DetailRoute: Hashable, Codable, Sendable {
     case genre(String)
     /// Reserved for W3-DISC (`Similar to ‹track›`).
     case similar(trackID: Int64)
-    /// Temporary home of the former Sources section (accounts and playlist import) until
-    /// W3-SET (Settings ▸ Sources) and W3-ADD (import sheet) replace it.
-    case sources
+    // The interim `sources` route (IMP-009) is gone (W3-ADD): accounts live in Settings ▸
+    // Sources, imports in the Add menu's sheets (K-NAV-SOURCES removed, DEC-004).
 
     var fallbackTitle: String {
         switch self {
@@ -107,14 +106,12 @@ enum DetailRoute: Hashable, Codable, Sendable {
         case .album: "Album"
         case .genre(let name): name
         case .similar: "Similar"
-        case .sources: "Sources"
         }
     }
 
     var listsTracks: Bool {
         switch self {
         case .playlist, .album, .genre, .similar: true
-        case .sources: false
         }
     }
 }

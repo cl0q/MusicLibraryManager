@@ -37,10 +37,12 @@ struct FileCommands: Commands {
 
             Divider()
 
-            CommandButton(.addFromLink)
-            // Opens the Sources page until W3-ADD's import sheet (IMP-009).
+            // The Add menu's sheets (W3-ADD): S-QUICKADD and S-IMPORT.
+            CommandButton(.addFromLink, enabled: shellActions != nil) {
+                shellActions?.addFromLink()
+            }
             CommandButton(.importPlaylistFromSource, enabled: shellActions != nil) {
-                shellActions?.showSources()
+                shellActions?.importPlaylistFromSource()
             }
             CommandButton(.importFilesOrFolder, enabled: shellActions != nil) {
                 shellActions?.chooseImportFolder()

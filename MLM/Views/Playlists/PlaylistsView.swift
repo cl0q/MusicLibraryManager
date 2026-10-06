@@ -130,7 +130,7 @@ struct PlaylistsView: View {
             } actions: {
                 Button("New Playlist") { shell?.newPlaylist() }
                     .buttonStyle(.borderedProminent)
-                Button("Import Playlist from Source…") { shell?.showSources() }
+                Button("Import Playlist from Source…") { shell?.importPlaylistFromSource() }
             }
             // Drop targets stay active on an empty state (UC-EMPTY-01).
             .dropTarget(.playlistsSection, cornerRadius: 0)

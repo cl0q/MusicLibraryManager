@@ -137,6 +137,49 @@ final class ImportViewModel {
         return await runImport(directory: Self.commonFolder(of: files), files: files, title: title)
     }
 
+    /// `Import Files or Folder…` with files (W3-ADD): files from outside the library folder are
+    /// first **copied** into it (`LibraryFileCopier`: the importer's organised layout, originals
+    /// untouched), then imported — one `Scan` operation for both phases, in the import lane.
+    /// Files already in the library folder are imported where they are.
+    ///
+    /// - Returns: the import result and what the copy phase did; nil when it didn't run.
+    @MainActor
+    @discardableResult
+    func importFilesCopyingIntoLibrary(_ files: [URL], title: String,
+                                       copier: LibraryFileCopier) async -> (result: ImportService.ImportResult, placement: LibraryFileCopier.Placement)? {
+        guard !files.isEmpty else { return nil }
+        let box = PlacementBox()
+        let prepare: PrepareFiles = { job, isCancelled in
+            let placement = await copier.place(files, progress: { done, name in
+                job?.update(ActivityProgress(completed: done, total: files.count,
+                                             currentItem: name.isEmpty ? nil : name, detail: "Copying into the library folder"))
+            }, isCancelled: isCancelled)
+            box.placement = placement
+            var extra: [ActivityCount] = []
+            if placement.copied > 0 { extra.append(ActivityCount(.done, placement.copied, "copied into the library folder")) }
+            if !placement.notCopied.isEmpty { extra.append(ActivityCount(.failed, placement.notCopied.count, "not copied")) }
+            return PreparedFiles(files: placement.toImport, extraCounts: extra,
+                                 failureCauses: placement.notCopied.map(\.reason))
+        }
+        guard let result = await runImport(directory: Self.commonFolder(of: files), files: files, title: title,
+                                           prepare: prepare) else { return nil }
+        return (result, box.placement ?? LibraryFileCopier.Placement())
+    }
+
+    /// What a preparation phase hands to the import: the files, and counts / causes for the
+    /// operation's result.
+    struct PreparedFiles: Sendable {
+        var files: [URL]
+        var extraCounts: [ActivityCount] = []
+        var failureCauses: [String] = []
+    }
+
+    typealias PrepareFiles = @Sendable (ActivityOperationHandle?, @escaping @Sendable () -> Bool) async -> PreparedFiles
+
+    private final class PlacementBox: @unchecked Sendable {
+        var placement: LibraryFileCopier.Placement?
+    }
+
     /// Imports run one at a time; a second one is `Queued` behind the running one instead of
     /// overwriting its state (UC-JOB-03, PP-ACTIVITY-05).
     static let lane = ActivityLane("imports")
@@ -167,7 +210,8 @@ final class ImportViewModel {
 
     @MainActor
     @discardableResult
-    private func runImport(directory: URL, files: [URL]? = nil, title: String) async -> ImportService.ImportResult? {
+    private func runImport(directory: URL, files: [URL]? = nil, title: String,
+                           prepare: PrepareFiles? = nil) async -> ImportService.ImportResult? {
         // Activity (W3-ACT): `Scan “‹folder›”`; Cancel stops after the current file and keeps
         // what was imported (`ImportService` checks cancellation per file). One box per run, so
         // cancelling a queued import never stops the running one (W2-H).
@@ -198,8 +242,15 @@ final class ImportViewModel {
                                                  currentItem: progress.currentFile ?? progress.phase))
                     Task { @MainActor in self?.progress = progress }
                 }
-                let result = if let files {
-                    try await self.importService.importFiles(files, onProgress: onProgress)
+                // W3-ADD: an optional first phase in the same operation (copy into the library folder).
+                var prepared: PreparedFiles?
+                if let prepare {
+                    prepared = await prepare(job, { Task.isCancelled })
+                    try Task.checkCancellation()
+                }
+                let importFiles = prepared?.files ?? files
+                let result = if let importFiles {
+                    try await self.importService.importFiles(importFiles, onProgress: onProgress)
                 } else {
                     try await self.importService.importDirectory(directory, onProgress: onProgress)
                 }
@@ -208,11 +259,19 @@ final class ImportViewModel {
                     self.lastResult = result
                     outcome.result = result
                     self.progress = nil
+                    var activityResult = Self.activityResult(for: result)
+                    if let prepared {
+                        activityResult.counts.insert(contentsOf: prepared.extraCounts, at: 0)
+                        if !prepared.failureCauses.isEmpty {
+                            activityResult.failureGroups.append(ActivityFailureGroup(
+                                cause: prepared.failureCauses[0], count: prepared.failureCauses.count, fix: nil, isRetryable: false))
+                        }
+                    }
 
                     if result.cancelled {
-                        job?.cancelled(Self.activityResult(for: result))
+                        job?.cancelled(activityResult)
                     } else {
-                        job?.finish(Self.activityResult(for: result))
+                        job?.finish(activityResult)
                         if result.failed > 0 {
                             self.errorMessage = "\(result.failed) file(s) failed to import"
                         }
@@ -250,7 +309,9 @@ final class ImportViewModel {
             // Strong: a throwaway importer (Folders) must still run again (W3-ACT S5).
             runAgain: {
                 Task { @MainActor in
-                    if let files {
+                    if let files, let prepare {
+                        await self.runImport(directory: directory, files: files, title: title, prepare: prepare)
+                    } else if let files {
                         await self.importFiles(files, title: title)
                     } else {
                         await self.importFromDirectory(directory)

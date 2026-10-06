@@ -36,18 +36,3 @@ struct RemotePlaylistTrack: Identifiable, Hashable {
         return track
     }
 }
-
-/// The durable playlist and track records created by an explicit import action.
-struct RemotePlaylistPersistence {
-    let playlistID: Int64
-    let tracks: [Track]
-}
-
-/// The state presented after an explicit save or completed download.
-struct RemotePlaylistImportResult: Equatable {
-    let playlistID: Int64
-    let selectedTrackCount: Int
-    let downloadedCount: Int
-    let failedCount: Int
-    let didDownload: Bool
-}

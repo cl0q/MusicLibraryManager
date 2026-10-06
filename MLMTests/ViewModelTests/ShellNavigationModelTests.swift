@@ -69,13 +69,13 @@ struct ShellNavigationModelTests {
     @Test func reselectingTheCurrentDestinationPopsToRootAndKeepsForward() {
         let nav = NavigationModel(selection: .allPlaylists)
         nav.push(.playlist(4))
-        nav.push(.sources)
+        nav.push(.genre("Techno"))
         nav.select(.allPlaylists)
         #expect(nav.path.isEmpty)
         nav.goForward()
         #expect(nav.path == [.playlist(4)])
         nav.goForward()
-        #expect(nav.path == [.playlist(4), .sources])
+        #expect(nav.path == [.playlist(4), .genre("Techno")])
     }
 
     @Test func systemPopThroughTheStackBindingFeedsForward() {
@@ -87,7 +87,7 @@ struct ShellNavigationModelTests {
         nav.goForward()
         #expect(nav.path == [.playlist(1), .playlist(2)])
 
-        nav.setPath([.sources])
+        nav.setPath([.genre("Techno")])
         #expect(!nav.canGoForward, "A replaced path is a new push")
     }
 
@@ -139,14 +139,15 @@ struct ShellNavigationModelTests {
         #expect(!nav.currentPlaceListsTracks)
         nav.push(.playlist(1))
         #expect(nav.currentPlaceListsTracks)
-        nav.push(.sources)
-        #expect(!nav.currentPlaceListsTracks)
+        nav.push(.genre("Techno"))
+        // W3-ADD removed the only pushed route without tracks (the interim Sources page).
+        #expect(nav.currentPlaceListsTracks)
         #expect(!SidebarDestination.albums.listsTracks)
         #expect(SidebarDestination.syncProfile(1).listsTracks)
     }
 
     @Test func routesAreCodable() throws {
-        let routes: [DetailRoute] = [.playlist(1), .playlist(2, showFailedTracks: true), .album(3), .genre("Techno"), .similar(trackID: 4), .sources]
+        let routes: [DetailRoute] = [.playlist(1), .playlist(2, showFailedTracks: true), .album(3), .genre("Techno"), .similar(trackID: 4)]
         let data = try JSONEncoder().encode(routes)
         #expect(try JSONDecoder().decode([DetailRoute].self, from: data) == routes)
     }

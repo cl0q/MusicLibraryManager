@@ -249,6 +249,18 @@ struct SoundCloudProviderImportTests {
         ]
     }
 
+    /// The commit the import sheet makes (W3-ADD `PlaylistImporter`; the provider no longer persists).
+    private static func commit(_ preview: RemotePlaylistPreview, _ tracks: [RemotePlaylistTrack],
+                               provider: SoundCloudPlaylistProvider, database: DatabaseQueue) async throws -> PlaylistImportOutcome {
+        let importer = PlaylistImporter(
+            trackRepository: TrackRepository(database: database), sourceRepository: SourceRepository(database: database),
+            playlistRepository: PlaylistRepository(database: database), queries: ImportLibraryQueries(database: database),
+            downloads: RecordingPlaylistDownloads(), notificationCenter: NotificationCenter())
+        return try await importer.run(
+            PlaylistImportRequest(preview: preview, tracks: tracks, source: .soundcloud, downloadNow: false),
+            sourceRowID: { try await provider.sourceRowForLinking().id! })
+    }
+
     // MARK: - Tests
 
     @Test func soundCloudBrowseModeIsAccountPlaylistsAndURL() async throws {
@@ -312,17 +324,11 @@ struct SoundCloudProviderImportTests {
         // First: import via account list
         let summaries = try await provider.fetchPlaylists()
         let accountPreview = try await provider.fetchPreview(for: summaries[0])
-        let first = try await provider.persist(
-            preview: accountPreview,
-            selectedTracks: accountPreview.tracks
-        )
+        let first = try await Self.commit(accountPreview, accountPreview.tracks, provider: provider, database: database)
 
         // Second: import via URL of the same playlist
         let urlPreview = try await provider.fetchPreview(fromURL: "https://soundcloud.com/user/sets/my-set")
-        let second = try await provider.persist(
-            preview: urlPreview,
-            selectedTracks: urlPreview.tracks
-        )
+        let second = try await Self.commit(urlPreview, urlPreview.tracks, provider: provider, database: database)
 
         #expect(first.playlistID == second.playlistID)
 
@@ -333,16 +339,13 @@ struct SoundCloudProviderImportTests {
 
     @Test func persistCreatesSuffixedCopyWhenNameAlreadyTaken() async throws {
         let http = RoutingHTTPClient(Self.standardRoutes(playlistId: 42, playlistTitle: "My Set"))
-        let (provider, _, playlistRepo, _) = try makeProvider(http: http)
+        let (provider, database, playlistRepo, _) = try makeProvider(http: http)
 
         // Pre-create a local playlist with the same name
         let original = try await playlistRepo.create(name: "My Set")
 
         let preview = try await provider.fetchPreview(fromURL: "https://soundcloud.com/user/sets/my-set")
-        let result = try await provider.persist(
-            preview: preview,
-            selectedTracks: preview.tracks
-        )
+        let result = try await Self.commit(preview, preview.tracks, provider: provider, database: database)
 
         let imported = try await playlistRepo.fetch(id: result.playlistID)
         #expect(imported?.name == "My Set 2")
@@ -355,18 +358,12 @@ struct SoundCloudProviderImportTests {
 
     @Test func persistIsIdempotentForSameExternalId() async throws {
         let http = RoutingHTTPClient(Self.standardRoutes(playlistId: 42, playlistTitle: "My Set"))
-        let (provider, _, playlistRepo, _) = try makeProvider(http: http)
+        let (provider, database, playlistRepo, _) = try makeProvider(http: http)
 
         let preview = try await provider.fetchPreview(fromURL: "https://soundcloud.com/user/sets/my-set")
 
-        let first = try await provider.persist(
-            preview: preview,
-            selectedTracks: preview.tracks
-        )
-        let second = try await provider.persist(
-            preview: preview,
-            selectedTracks: preview.tracks
-        )
+        let first = try await Self.commit(preview, preview.tracks, provider: provider, database: database)
+        let second = try await Self.commit(preview, preview.tracks, provider: provider, database: database)
 
         #expect(first.playlistID == second.playlistID)
 
@@ -379,14 +376,11 @@ struct SoundCloudProviderImportTests {
     @Test func persistLinksEverySelectedTrackInOrder() async throws {
         let tracks = [(1, "Track A"), (2, "Track B"), (3, "Track C")]
         let http = RoutingHTTPClient(Self.standardRoutes(playlistId: 42, tracks: tracks))
-        let (provider, _, playlistRepo, _) = try makeProvider(http: http)
+        let (provider, database, playlistRepo, _) = try makeProvider(http: http)
 
         let preview = try await provider.fetchPreview(fromURL: "https://soundcloud.com/user/sets/my-set")
         let selected = Array(preview.tracks.prefix(2))
-        let result = try await provider.persist(
-            preview: preview,
-            selectedTracks: selected
-        )
+        let result = try await Self.commit(preview, selected, provider: provider, database: database)
 
         let persistedTracks = try await playlistRepo.fetchTracks(playlistId: result.playlistID)
         #expect(persistedTracks.count == 2)
@@ -417,19 +411,13 @@ struct SoundCloudProviderImportTests {
             _ = try await provider.fetchPreview(fromURL: "https://soundcloud.com/user/some-track")
         }
 
-        // Through the ViewModel, the error message is user-facing
-        let preview = RemotePlaylistPreview(
-            sourceName: "SoundCloud",
-            externalID: "placeholder",
-            title: "placeholder",
-            tracks: []
-        )
-        let vm = RemotePlaylistsViewModel(
-            provider: provider,
-            downloadViewModel: DownloadViewModel()
-        )
-        await vm.importFromURL("https://soundcloud.com/user/some-track")
+        // Through the import sheet (W3-ADD): the error belongs under the link field, step 1.
+        let model = ImportPlaylistModel(environment: ImportPlaylistEnvironment(
+            provider: { _ in provider }, accounts: ImportTestAccounts(), queries: nil, makeImporter: { nil }))
+        model.linkText = "https://soundcloud.com/user/sets/some-track"
+        await model.loadLink()
 
-        #expect(vm.errorMessage == "That link is not a SoundCloud playlist")
+        #expect(model.step == .source)
+        #expect(model.linkError == ImportPlaylistModel.notAPlaylistLink)
     }
 }

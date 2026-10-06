@@ -199,8 +199,7 @@ enum MenuCommand: String, CaseIterable, Sendable {
                   wiring: .app)
         case .newSyncProfile: Entry(menu: .file, title: "New Sync Profile…", shortcut: nil, wiring: .app)
         case .addFromLink:
-            Entry(menu: .file, title: "Add from Link…", shortcut: .cmd("u"),
-                  wiring: .pending(owner: "W3-ADD", reason: "Adding a track from a link isn’t available yet. To import a playlist from a link, use Import Playlist from Source… in this menu."))
+            Entry(menu: .file, title: "Add from Link…", shortcut: .cmd("u"), wiring: .app)
         case .importPlaylistFromSource:
             Entry(menu: .file, title: "Import Playlist from Source…", shortcut: .cmd("i", .shift), wiring: .app)
         case .importFilesOrFolder: Entry(menu: .file, title: "Import Files or Folder…", shortcut: nil, wiring: .app)
@@ -300,8 +299,7 @@ enum MenuCommand: String, CaseIterable, Sendable {
 
         // MARK: Library (M-LIBRARY)
         case .refreshFromSources:
-            Entry(menu: .library, title: "Refresh from Sources", shortcut: nil,
-                  wiring: .pending(owner: "W3-ADD", reason: "Refreshing all sources at once isn’t available yet. Open a linked playlist to refresh it."))
+            Entry(menu: .library, title: "Refresh from Sources", shortcut: nil, wiring: .app)
         case .scanLibraryFolder: Entry(menu: .library, title: "Scan Library Folder", shortcut: nil, wiring: .app)
         case .findDuplicates:
             Entry(menu: .library, title: "Find Duplicates", shortcut: nil,

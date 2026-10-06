@@ -219,8 +219,6 @@ struct SearchPlace: Equatable, Sendable {
                 self.init(key: SearchPlaceKey("genre.\(name)"), capability: .none, name: title)
             case .similar(let id):
                 self.init(key: SearchPlaceKey("similar.\(id)"), capability: .none, name: title)
-            case .sources:
-                self.init(key: SearchPlaceKey("sources"), capability: .none, name: title)
             }
             return
         }

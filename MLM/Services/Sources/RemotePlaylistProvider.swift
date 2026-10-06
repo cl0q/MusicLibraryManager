@@ -2,7 +2,7 @@ import Foundation
 
 /// How a remote-playlist browser presents its source.
 enum RemotePlaylistBrowseMode: Sendable {
-    case accountPlaylists          // list the user's playlists only (Spotify)
+    case accountPlaylists          // list the user's playlists (Spotify)
     case urlOnly                   // paste a URL only (YouTube)
     case accountPlaylistsAndURL    // both at once (SoundCloud)
 }
@@ -15,8 +15,8 @@ struct RemotePlaylistSummary: Identifiable, Hashable {
     var isPrivate: Bool = false
 }
 
-/// Abstraction over a streaming source that can list, preview, and explicitly
-/// commit playlists. Fetching a preview must never mutate the local library.
+/// Abstraction over a streaming source that can list and preview playlists. Fetching never
+/// writes to the library; the commit is `PlaylistImporter` (W3-ADD).
 @MainActor
 protocol RemotePlaylistProvider: AnyObject {
     /// Human-readable source name.
@@ -34,20 +34,9 @@ protocol RemotePlaylistProvider: AnyObject {
     func fetchPreview(for summary: RemotePlaylistSummary) async throws -> RemotePlaylistPreview
     /// Fetch a pasted playlist URL's metadata without writing local records.
     func fetchPreview(fromURL url: String) async throws -> RemotePlaylistPreview
-    /// Persist exactly the reviewed remote references selected by the user.
-    func persist(
-        preview: RemotePlaylistPreview,
-        selectedTracks: [RemotePlaylistTrack]
-    ) async throws -> RemotePlaylistPersistence
 
-    /// Return (or create) the `sources` row this provider writes tracks under.
-    ///
-    /// Used by the "Link Source" flow in PlaylistDetailViewModel: when the
-    /// user commits a pasted URL we need to write `source_id` onto the
-    /// playlists row, and the correct source row depends on the provider
-    /// (YouTube uses userId "local", SoundCloud uses the logged-in user's
-    /// numeric ID). Spotify never reaches this code path — the default
-    /// implementation throws `previewUnavailable`.
+    /// Return (or create) the `sources` row this provider's tracks and linked playlists belong
+    /// to (YouTube: user `local`; SoundCloud / Spotify: the signed-in account).
     func sourceRowForLinking() async throws -> Source
 }
 
@@ -66,20 +55,23 @@ extension RemotePlaylistProvider {
     }
 }
 
-enum RemotePlaylistProviderError: LocalizedError {
+enum RemotePlaylistProviderError: LocalizedError, Equatable {
     case previewUnavailable
     case playlistUnavailable
     case ytDlpUnavailable
     case notAPlaylistURL(String)
+    case emptyPlaylist
 
     var errorDescription: String? {
         switch self {
         case .previewUnavailable, .playlistUnavailable:
-            return "Video unavailable"
+            return "This playlist is private or no longer available"
         case .ytDlpUnavailable:
-            return "yt-dlp not installed — open Settings"
+            return "yt-dlp not found"
         case .notAPlaylistURL:
-            return "That link is not a SoundCloud playlist"
+            return "That link isn’t a playlist"
+        case .emptyPlaylist:
+            return "This playlist has no tracks"
         }
     }
 }
@@ -93,26 +85,20 @@ final class SoundCloudPlaylistProvider: RemotePlaylistProvider {
     let browseMode: RemotePlaylistBrowseMode = .accountPlaylistsAndURL
 
     private let client: SoundCloudClient
-    private let trackRepository: TrackRepository
     private let sourceRepository: SourceRepository
-    private let playlistRepository: PlaylistRepository
     private var cache: [String: SoundCloudPlaylist] = [:]
 
-    init(
-        client: SoundCloudClient,
-        trackRepository: TrackRepository,
-        sourceRepository: SourceRepository,
-        playlistRepository: PlaylistRepository
-    ) {
+    /// `trackRepository` / `playlistRepository` are accepted for existing callers; the commit
+    /// is `PlaylistImporter`'s.
+    init(client: SoundCloudClient, trackRepository: TrackRepository? = nil, sourceRepository: SourceRepository,
+         playlistRepository: PlaylistRepository? = nil) {
         self.client = client
-        self.trackRepository = trackRepository
         self.sourceRepository = sourceRepository
-        self.playlistRepository = playlistRepository
     }
 
     func fetchPlaylists() async throws -> [RemotePlaylistSummary] {
         let playlists = try await client.fetchPlaylists()
-        cache = Dictionary(uniqueKeysWithValues: playlists.map { (String($0.id), $0) })
+        cache = Dictionary(playlists.map { (String($0.id), $0) }, uniquingKeysWith: { first, _ in first })
         return playlists.map {
             RemotePlaylistSummary(
                 id: String($0.id),
@@ -141,45 +127,10 @@ final class SoundCloudPlaylistProvider: RemotePlaylistProvider {
         return try await makePreview(from: playlist)
     }
 
-    /// SoundCloud's source row is keyed by the logged-in user's numeric ID,
-    /// matching the userId used in `persist()`.
+    /// SoundCloud's source row is keyed by the signed-in user's numeric ID.
     func sourceRowForLinking() async throws -> Source {
         let user = try await client.fetchProfile()
         return try await sourceRepository.upsert(name: "soundcloud", userId: String(user.id))
-    }
-
-    func persist(
-        preview: RemotePlaylistPreview,
-        selectedTracks: [RemotePlaylistTrack]
-    ) async throws -> RemotePlaylistPersistence {
-        let user = try await client.fetchProfile()
-        let source = try await sourceRepository.upsert(
-            name: "soundcloud",
-            userId: String(user.id)
-        )
-        guard let sourceID = source.id else {
-            throw SoundCloudClient.SoundCloudError.noSourceId
-        }
-
-        let persistedTracks = try await persistTracks(selectedTracks, sourceID: sourceID)
-        let playlist = try await playlistRepository.createSourcePlaylistPreservingExisting(
-            name: preview.title,
-            sourceId: sourceID,
-            externalId: preview.externalID
-        )
-        guard let playlistID = playlist.id else {
-            throw RemotePlaylistProviderError.previewUnavailable
-        }
-        try await playlistRepository.replaceTrackList(
-            playlistId: playlistID,
-            trackIds: persistedTracks.compactMap(\.id)
-        )
-        NotificationCenter.default.post(
-            name: .playlistDidChange,
-            object: nil,
-            userInfo: ["playlistId": playlistID]
-        )
-        return RemotePlaylistPersistence(playlistID: playlistID, tracks: persistedTracks)
     }
 
     private func makePreview(from playlist: SoundCloudPlaylist) async throws -> RemotePlaylistPreview {
@@ -190,7 +141,7 @@ final class SoundCloudPlaylistProvider: RemotePlaylistProvider {
             sourceTracks = try await client.fetchPlaylistTracks(playlistId: playlist.id)
         }
         guard !sourceTracks.isEmpty else {
-            throw RemotePlaylistProviderError.playlistUnavailable
+            throw RemotePlaylistProviderError.emptyPlaylist
         }
         return RemotePlaylistPreview(
             sourceName: displayName,
@@ -200,41 +151,15 @@ final class SoundCloudPlaylistProvider: RemotePlaylistProvider {
                 RemotePlaylistTrack(
                     externalID: String(track.id),
                     title: track.title,
-                    artist: track.user?.username ?? "Unknown",
-                    album: "SoundCloud",
+                    artist: track.user?.username ?? "",
+                    // SoundCloud has no albums; the source is the track's link, never a tag (DEC-013).
+                    album: "",
                     durationSeconds: track.duration.map { $0 / 1000 },
                     format: "soundcloud",
                     originalPath: track.permalinkUrl ?? "soundcloud://\(track.id)"
                 )
             }
         )
-    }
-
-    private func persistTracks(
-        _ selectedTracks: [RemotePlaylistTrack],
-        sourceID: Int64
-    ) async throws -> [Track] {
-        var persistedTracks: [Track] = []
-        persistedTracks.reserveCapacity(selectedTracks.count)
-        for remoteTrack in selectedTracks {
-            if let existing = try await trackRepository.fetchTrackByExternalId(
-                remoteTrack.externalID,
-                sourceName: "soundcloud"
-            ) {
-                persistedTracks.append(existing)
-                continue
-            }
-            let inserted = try await trackRepository.insert(remoteTrack.unresolvedTrack())
-            if let trackID = inserted.id {
-                try await sourceRepository.linkTrackToSource(
-                    trackId: trackID,
-                    sourceId: sourceID,
-                    externalId: remoteTrack.externalID
-                )
-            }
-            persistedTracks.append(inserted)
-        }
-        return persistedTracks
     }
 }
 
@@ -246,110 +171,78 @@ final class SpotifyPlaylistProvider: RemotePlaylistProvider {
     // Spotify provides no downloadable audio — resolve via the search chain.
     let preferredSource: DownloadOrchestrator.PreferredSource = .auto
     var downloadNote: String? {
-        "Spotify does not provide audio files — tracks are found through SoundCloud or YouTube."
+        "Spotify doesn’t provide audio files. MLM finds each track on SoundCloud or YouTube."
     }
 
     private let client: SpotifyClient
-    private let trackRepository: TrackRepository
     private let sourceRepository: SourceRepository
-    private let playlistRepository: PlaylistRepository
     private var cache: [String: SpotifyPlaylistSimple] = [:]
 
-    init(
-        client: SpotifyClient,
-        trackRepository: TrackRepository,
-        sourceRepository: SourceRepository,
-        playlistRepository: PlaylistRepository
-    ) {
+    init(client: SpotifyClient, trackRepository: TrackRepository? = nil, sourceRepository: SourceRepository,
+         playlistRepository: PlaylistRepository? = nil) {
         self.client = client
-        self.trackRepository = trackRepository
         self.sourceRepository = sourceRepository
-        self.playlistRepository = playlistRepository
     }
 
     func fetchPlaylists() async throws -> [RemotePlaylistSummary] {
         let playlists = try await client.fetchPlaylists()
-        cache = Dictionary(uniqueKeysWithValues: playlists.map { ($0.id, $0) })
+        cache = Dictionary(playlists.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return playlists.map {
             RemotePlaylistSummary(id: $0.id, title: $0.name, trackCount: $0.tracksInfo?.total ?? 0)
         }
     }
 
     func fetchPreview(for summary: RemotePlaylistSummary) async throws -> RemotePlaylistPreview {
-        guard let playlist = cache[summary.id] else {
-            throw RemotePlaylistProviderError.previewUnavailable
+        try await makePreview(id: summary.id, title: cache[summary.id]?.name ?? summary.title)
+    }
+
+    /// A pasted `open.spotify.com/playlist/‹id›` link (W3-ADD: Spotify playlist links open the
+    /// import at the preview step). The title comes from the account's playlists when it is
+    /// one of them.
+    func fetchPreview(fromURL url: String) async throws -> RemotePlaylistPreview {
+        guard let id = Self.playlistID(fromURL: url) else { throw RemotePlaylistProviderError.notAPlaylistURL(url) }
+        if cache[id] == nil, let playlists = try? await client.fetchPlaylists() {
+            for playlist in playlists where cache[playlist.id] == nil { cache[playlist.id] = playlist }
         }
-        let sourceTracks = try await client.fetchPlaylistTracks(playlistId: playlist.id)
+        return try await makePreview(id: id, title: cache[id]?.name ?? "Spotify Playlist")
+    }
+
+    nonisolated static func playlistID(fromURL url: String) -> String? {
+        guard let parsed = URL(string: url.trimmingCharacters(in: .whitespacesAndNewlines)),
+              parsed.host?.lowercased() == "open.spotify.com" else { return nil }
+        let parts = parsed.path.split(separator: "/").map(String.init)
+        guard let index = parts.firstIndex(of: "playlist"), index + 1 < parts.count, !parts[index + 1].isEmpty else { return nil }
+        return parts[index + 1]
+    }
+
+    /// Spotify's source row is keyed by the signed-in account's id.
+    func sourceRowForLinking() async throws -> Source {
+        let profile = try await client.fetchProfile()
+        return try await sourceRepository.upsert(name: "spotify", userId: profile.id)
+    }
+
+    private func makePreview(id: String, title: String) async throws -> RemotePlaylistPreview {
+        let sourceTracks = try await client.fetchPlaylistTracks(playlistId: id)
         guard !sourceTracks.isEmpty else {
-            throw RemotePlaylistProviderError.playlistUnavailable
+            throw RemotePlaylistProviderError.emptyPlaylist
         }
         return RemotePlaylistPreview(
             sourceName: displayName,
-            externalID: playlist.id,
-            title: playlist.name,
+            externalID: id,
+            title: title,
             tracks: sourceTracks.map { track in
                 RemotePlaylistTrack(
                     externalID: track.id,
                     title: track.name,
-                    artist: track.artists.first?.name ?? "Unknown",
-                    album: track.album?.name ?? "Unknown",
+                    artist: track.artists.first?.name ?? "",
+                    // Spotify knows the real album; nothing when it doesn't (DEC-013).
+                    album: track.album?.name ?? "",
                     durationSeconds: track.durationMs / 1000,
                     format: "spotify",
                     originalPath: "spotify://track/\(track.id)"
                 )
             }
         )
-    }
-
-    func persist(
-        preview: RemotePlaylistPreview,
-        selectedTracks: [RemotePlaylistTrack]
-    ) async throws -> RemotePlaylistPersistence {
-        let profile = try await client.fetchProfile()
-        let source = try await sourceRepository.upsert(name: "spotify", userId: profile.id)
-        guard let sourceID = source.id else {
-            throw RemotePlaylistProviderError.previewUnavailable
-        }
-
-        var persistedTracks: [Track] = []
-        persistedTracks.reserveCapacity(selectedTracks.count)
-        for remoteTrack in selectedTracks {
-            if let existing = try await trackRepository.fetchTrackByExternalId(
-                remoteTrack.externalID,
-                sourceName: "spotify"
-            ) {
-                persistedTracks.append(existing)
-                continue
-            }
-            let inserted = try await trackRepository.insert(remoteTrack.unresolvedTrack())
-            if let trackID = inserted.id {
-                try await sourceRepository.linkTrackToSource(
-                    trackId: trackID,
-                    sourceId: sourceID,
-                    externalId: remoteTrack.externalID
-                )
-            }
-            persistedTracks.append(inserted)
-        }
-
-        let playlist = try await playlistRepository.findOrCreateSourcePlaylist(
-            name: preview.title,
-            sourceId: sourceID,
-            externalId: preview.externalID
-        )
-        guard let playlistID = playlist.id else {
-            throw RemotePlaylistProviderError.previewUnavailable
-        }
-        try await playlistRepository.replaceTrackList(
-            playlistId: playlistID,
-            trackIds: persistedTracks.compactMap(\.id)
-        )
-        NotificationCenter.default.post(
-            name: .playlistDidChange,
-            object: nil,
-            userInfo: ["playlistId": playlistID]
-        )
-        return RemotePlaylistPersistence(playlistID: playlistID, tracks: persistedTracks)
     }
 }
 
@@ -362,20 +255,12 @@ final class YouTubePlaylistProvider: RemotePlaylistProvider {
     let browseMode: RemotePlaylistBrowseMode = .urlOnly
 
     private let downloader: YouTubeDownloader
-    private let trackRepository: TrackRepository
     private let sourceRepository: SourceRepository
-    private let playlistRepository: PlaylistRepository
 
-    init(
-        downloader: YouTubeDownloader,
-        trackRepository: TrackRepository,
-        sourceRepository: SourceRepository,
-        playlistRepository: PlaylistRepository
-    ) {
+    init(downloader: YouTubeDownloader, trackRepository: TrackRepository? = nil, sourceRepository: SourceRepository,
+         playlistRepository: PlaylistRepository? = nil) {
         self.downloader = downloader
-        self.trackRepository = trackRepository
         self.sourceRepository = sourceRepository
-        self.playlistRepository = playlistRepository
     }
 
     func fetchPreview(fromURL url: String) async throws -> RemotePlaylistPreview {
@@ -385,12 +270,11 @@ final class YouTubePlaylistProvider: RemotePlaylistProvider {
         let listing = try await downloader.listPlaylist(url: url)
         let entries = listing.entries
         guard !entries.isEmpty else {
-            throw RemotePlaylistProviderError.playlistUnavailable
+            throw RemotePlaylistProviderError.emptyPlaylist
         }
 
-        // Prefer the real playlist title; fall back to a URL-derived name so
-        // the browser never shows a generic "YouTube Playlist" for two
-        // different playlists (which would also collide on name+category).
+        // Prefer the real playlist title; fall back to a URL-derived name so two different
+        // playlists never share a generic name.
         let playlistName = listing.title?.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedName = (playlistName?.isEmpty == false)
             ? playlistName!
@@ -404,8 +288,9 @@ final class YouTubePlaylistProvider: RemotePlaylistProvider {
                 RemotePlaylistTrack(
                     externalID: entry.id,
                     title: entry.title,
-                    artist: entry.uploader ?? "Unknown",
-                    album: "YouTube",
+                    artist: entry.uploader ?? "",
+                    // Mixes and videos import without an album (DEC-013).
+                    album: "",
                     durationSeconds: entry.durationSeconds,
                     format: "youtube",
                     originalPath: entry.url
@@ -414,63 +299,12 @@ final class YouTubePlaylistProvider: RemotePlaylistProvider {
         )
     }
 
-    /// YouTube's source row is userId "local" — there's no per-user OAuth
-    /// identity; playlist URLs are public.
+    /// YouTube's source row is userId "local" — playlist URLs are public.
     func sourceRowForLinking() async throws -> Source {
         let source = try await sourceRepository.upsert(name: "youtube", userId: "local")
         guard source.id != nil else {
             throw RemotePlaylistProviderError.previewUnavailable
         }
         return source
-    }
-
-    func persist(
-        preview: RemotePlaylistPreview,
-        selectedTracks: [RemotePlaylistTrack]
-    ) async throws -> RemotePlaylistPersistence {
-        let source = try await sourceRepository.upsert(name: "youtube", userId: "local")
-        guard let sourceID = source.id else {
-            throw RemotePlaylistProviderError.previewUnavailable
-        }
-
-        var persistedTracks: [Track] = []
-        persistedTracks.reserveCapacity(selectedTracks.count)
-        for remoteTrack in selectedTracks {
-            if let existing = try await trackRepository.fetchTrackByExternalId(
-                remoteTrack.externalID,
-                sourceName: "youtube"
-            ) {
-                persistedTracks.append(existing)
-                continue
-            }
-            let inserted = try await trackRepository.insert(remoteTrack.unresolvedTrack())
-            if let trackID = inserted.id {
-                try await sourceRepository.linkTrackToSource(
-                    trackId: trackID,
-                    sourceId: sourceID,
-                    externalId: remoteTrack.externalID
-                )
-            }
-            persistedTracks.append(inserted)
-        }
-
-        let playlist = try await playlistRepository.findOrCreateSourcePlaylist(
-            name: preview.title,
-            sourceId: sourceID,
-            externalId: preview.externalID
-        )
-        guard let playlistID = playlist.id else {
-            throw RemotePlaylistProviderError.previewUnavailable
-        }
-        try await playlistRepository.replaceTrackList(
-            playlistId: playlistID,
-            trackIds: persistedTracks.compactMap(\.id)
-        )
-        NotificationCenter.default.post(
-            name: .playlistDidChange,
-            object: nil,
-            userInfo: ["playlistId": playlistID]
-        )
-        return RemotePlaylistPersistence(playlistID: playlistID, tracks: persistedTracks)
     }
 }

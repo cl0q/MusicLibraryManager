@@ -131,8 +131,6 @@ struct RouteView: View {
                 systemImage: "point.3.connected.trianglepath.dotted",
                 description: "Similar tracks aren’t available yet."
             )
-        case .sources:
-            SourcesView()
         }
     }
 }
