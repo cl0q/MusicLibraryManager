@@ -18,6 +18,8 @@ struct ReviewAlbumsView: View {
 
     @State private var selection: Set<Int64> = []
     @State private var showsBulk = false
+    /// The row an album is being chosen for (`Choose Another Album…`, the shared album picker).
+    @State private var pickerItem: AlbumSuggestionItem?
 
     private static let previewOwner = "review.albums"
 
@@ -34,6 +36,12 @@ struct ReviewAlbumsView: View {
                 .keyboardShortcut(.defaultAction)
         } message: {
             Text(model.bulkMessage)
+        }
+        .sheet(item: $pickerItem) { item in
+            AlbumPickerSheet(
+                trackTitle: item.track.title,
+                reference: AlbumPickReference(title: item.row.suggestion.albumTitle, albumArtist: item.track.artist),
+                choose: { album in chooseAlbum(album, for: item.id) })
         }
         .onDisappear { endPreview() }
     }
@@ -272,6 +280,9 @@ struct ReviewAlbumsView: View {
             case .noAlbum:
                 Button("Suggest Again") { suggestAgain([item.id]) }
             default:
+                if item.row.status == .noMatch {
+                    Button("Choose Album…") { pickerItem = item }
+                }
                 Button("No Album") { markNoAlbum([item.id]) }
             }
         }
@@ -304,12 +315,19 @@ struct ReviewAlbumsView: View {
             Section {
                 Button("Accept") { accept([item.id]) }
                     .disabled(!pending)
-                Menu("Choose Another Album…") {
-                    ForEach(Array(item.row.alternatives.enumerated()), id: \.offset) { index, other in
-                        Button(ReviewAlbumsModel.alternativeLine(other)) { choose(index, for: item.id) }
+                if item.row.status == .pending, !item.row.alternatives.isEmpty {
+                    Menu("Choose Another Album…") {
+                        ForEach(Array(item.row.alternatives.enumerated()), id: \.offset) { index, other in
+                            Button(ReviewAlbumsModel.alternativeLine(other)) { choose(index, for: item.id) }
+                        }
+                        Divider()
+                        Button("Other Album…") { pickerItem = item }
                     }
+                } else {
+                    // No Match, or the other suggestions are used up: pick from the library's albums.
+                    Button("Choose Another Album…") { pickerItem = item }
+                        .disabled(!(item.row.status == .pending || item.row.status == .noMatch))
                 }
-                .disabled(!(item.row.status == .pending && !item.row.alternatives.isEmpty))
                 Button("No Album") { markNoAlbum([item.id]) }
                     .disabled(item.row.status == .noAlbum)
                 Button("Reject") { reject([item.id]) }
@@ -366,6 +384,11 @@ struct ReviewAlbumsView: View {
 
     private func choose(_ index: Int, for id: Int64) {
         Task { await model.choose(alternativeAt: index, for: id) }
+    }
+
+    /// The picked album replaces the row's suggestion; nothing is written until Accept.
+    private func chooseAlbum(_ album: Album, for id: Int64) {
+        Task { await model.choose(album: album, for: id); pruneSelection() }
     }
 
     /// A decided row leaves the list; the selection keeps only rows that are still shown.

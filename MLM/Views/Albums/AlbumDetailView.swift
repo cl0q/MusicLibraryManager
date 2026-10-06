@@ -80,6 +80,10 @@ private struct AlbumDetailPage: View {
 
     @State private var isChoosingCover = false
     @State private var coverRefusal: String?
+    @State private var isEditingInfo = false
+    @State private var isMerging = false
+    /// The gap a library track is being chosen for.
+    @State private var absentSlot: AbsentSlot?
 
     private var actions: AlbumActions {
         AlbumActions(container: container, shell: shell, navigation: navigation, statusBar: statusBar, undo: undo)
@@ -139,6 +143,14 @@ private struct AlbumDetailPage: View {
             guard case .success(let url) = result else { return }
             setCover(.file(url))
         }
+        .sheet(isPresented: $isEditingInfo) { AlbumInfoSheet(albumID: shownID) }
+        .sheet(isPresented: $isMerging) {
+            AlbumMergeSheet(albumID: shownID, albumTitle: model.album?.title ?? "", albumArtist: model.album?.albumArtist ?? "")
+        }
+        .sheet(item: $absentSlot) { slot in
+            AlbumTrackPickerSheet(albumID: shownID, albumTitle: model.album?.title ?? "", disc: slot.disc, number: slot.number,
+                                  hasDiscs: (model.layout?.discCount ?? 1) > 1)
+        }
         // Gaps and headings are not tracks: they are never selected into commands.
         .onChange(of: model.list.selection) { _, selection in
             let real = selection.filter { $0 > 0 }
@@ -177,7 +189,9 @@ private struct AlbumDetailPage: View {
             let subject = AlbumMenuSubject(id: shownID, title: album.title, albumArtist: album.albumArtist, isCompilation: model.isCompilation)
             AlbumMenu(albums: [subject], place: .more, missing: model.downloadableTracks.count,
                       chooseCover: { isChoosingCover = true },
-                      editOrder: model.isEditingOrder ? nil : { Task { await model.beginEditingOrder() } })
+                      editOrder: model.isEditingOrder ? nil : { Task { await model.beginEditingOrder() } },
+                      showInfo: { isEditingInfo = true },
+                      merge: model.isEditingOrder ? nil : { isMerging = true })
         }
     }
 
@@ -213,7 +227,10 @@ private struct AlbumDetailPage: View {
         let tracks = model.list.rows.filter(\.isTrack)
         configuration.totals = TrackListTotals(count: tracks.count, duration: tracks.reduce(0) { $0 + max($1.track.duration ?? 0, 0) })
         configuration.showsDragHandles = editing
-        configuration.syntheticRowsMenu = { _ in AnyView(AbsentRowMenu()) }
+        configuration.syntheticRowsMenu = { rows in
+            let slot = rows.count == 1 ? rows.first.flatMap(AlbumPlacement.position(of:)) : nil
+            return AnyView(AbsentRowMenu(slot: slot.map { AbsentSlot(disc: $0.disc, number: $0.number) }, use: { absentSlot = $0 }))
+        }
         return configuration
     }
 
@@ -288,14 +305,26 @@ private struct AlbumDetailPage: View {
     }
 }
 
-/// The menu of a `Not in library` row (CM-ALBD-ABSENT, IMP-076): only `Use a Track from the
-/// Library…`, which arrives with the next package (W4-2b). `Find Online` and `Copy Title —
-/// Artist` need the album's tracklist source (§5 Q2): there is no title to look for.
+/// A `Not in library` position: the disc and number a library track can take.
+struct AbsentSlot: Identifiable, Equatable {
+    let disc: Int
+    let number: Int
+    var id: String { "\(disc)/\(number)" }
+}
+
+/// The menu of a `Not in library` row (CM-ALBD-ABSENT, IMP-076, IMP-095): `Use a Track from the
+/// Library…` for one position. `Find Online` and `Copy Title — Artist` need the album's tracklist
+/// source (§5 Q2): there is no title to look for.
 private struct AbsentRowMenu: View {
+    let slot: AbsentSlot?
+    let use: (AbsentSlot) -> Void
+
     var body: some View {
-        Button("Use a Track from the Library…") {}
-            .disabled(true)
-            .help(AlbumMenuModel.nextPackageHelp)
+        Button("Use a Track from the Library…") {
+            if let slot { use(slot) }
+        }
+        .disabled(slot == nil)
+        .help(slot == nil ? "Select one position to choose a track for it" : "")
     }
 }
 

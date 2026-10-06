@@ -9,9 +9,9 @@ struct AlbumMenuSubject: Equatable, Sendable {
 }
 
 /// The album menu (CM-ALB-CARD on a card, CM-ALBD-MORE on the page's `More`, UC-CM-02): one
-/// builder, sections in the DEC-039 order, rendered from `AlbumMenuModel`. `Get Info`, `Edit
-/// Album Info…` and `Merge with Another Album…` are in their place, disabled, until the next
-/// package builds their sheets (W4-2b); nothing else is a placeholder.
+/// builder, sections in the DEC-039 order, rendered from `AlbumMenuModel`. `Get Info` (the card),
+/// `Edit Album Info…` and `Merge with Another Album…` (the page) open their sheets through the
+/// closures of the place that presents them (W4-2b).
 struct AlbumMenu: View {
     let albums: [AlbumMenuSubject]
     let place: AlbumMenuPlace
@@ -20,6 +20,10 @@ struct AlbumMenu: View {
     /// `Choose Cover…` and `Edit Order` are the page's (`More` only).
     var chooseCover: (() -> Void)?
     var editOrder: (() -> Void)?
+    /// `Get Info` (card) / `Edit Album Info…` (page): the same sheet.
+    var showInfo: (() -> Void)?
+    /// `Merge with Another Album…` (page).
+    var merge: (() -> Void)?
 
     @Environment(\.container) private var container
     @Environment(ShellActions.self) private var shell: ShellActions?
@@ -89,11 +93,12 @@ struct AlbumMenu: View {
                 if !profiles.isEmpty { Divider() }
                 Button("New Sync Profile…") { actions.newSyncProfile(albumIDs: ids) }
             }
-        case .getInfo, .editAlbumInfo, .mergeWithAnother:
-            // The sheets arrive with the next package (W4-2b): in place, disabled.
-            Button(title) {}
-                .disabled(true)
-                .help(AlbumMenuModel.nextPackageHelp)
+        case .getInfo, .editAlbumInfo:
+            Button(title) { showInfo?() }
+                .disabled(showInfo == nil)
+        case .mergeWithAnother:
+            Button(title) { merge?() }
+                .disabled(merge == nil)
         case .goToArtist(let artist):
             Button(title) { actions.goToArtist(artist, search: search) }
                 .disabled(search == nil)
