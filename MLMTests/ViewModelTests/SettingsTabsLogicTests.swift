@@ -82,4 +82,12 @@ struct SettingsTabsLogicTests {
         #expect(text?.hasPrefix("MLM can’t change the library folder while 1 download and 1 sync are running.") == true)
         #expect(text?.contains("• Sync “iPod”") == true)
     }
+
+    @Test func absolutePathsUnderTheOldFolderMoveWithIt() {
+        let result = ImportViewModel.compare(
+            folder: URL(fileURLWithPath: "/Volumes/B/Music"),
+            organizedPaths: ["/Volumes/A/Music/x.m4a", "/Volumes/A/Music/y.m4a"], oldRoot: "/Volumes/A/Music",
+            fileExists: { $0 == "/Volumes/B/Music/x.m4a" || $0 == "/Volumes/A/Music/y.m4a" })
+        #expect(result.found == 1, "a file still in the old folder isn't found in the new one")
+    }
 }

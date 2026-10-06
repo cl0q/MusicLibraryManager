@@ -207,7 +207,7 @@ struct LibrarySetupView: View {
                         if let last = lastScan {
                             HStack(spacing: 4) {
                                 if last.failedCount > 0 {
-                                    SettingsState(text: last.text, systemImage: "exclamationmark.triangle", tone: .problem)
+                                    SettingsState(text: last.text, systemImage: "exclamationmark.triangle", tone: .error)
                                 } else {
                                     Text(last.text)
                                 }
@@ -410,7 +410,8 @@ private struct LibraryFolderSheet: View {
         let paths = (try? await pool?.read { db in
             try String.fetchAll(db, sql: "SELECT organized_path FROM tracks WHERE organized_path IS NOT NULL")
         }) ?? []
-        comparison = await Task.detached { ImportViewModel.compare(folder: folder, organizedPaths: paths) }.value
+        let oldRoot = currentRoot
+        comparison = await Task.detached { ImportViewModel.compare(folder: folder, organizedPaths: paths, oldRoot: oldRoot) }.value
         comparing = false
     }
 }
@@ -449,7 +450,7 @@ private struct RenameLibrarySheet: View {
                 if let shown = problem ?? visibleProblem {
                     Label(shown.message, systemImage: "exclamationmark.triangle")
                         .symbolRenderingMode(.palette)
-                        .foregroundStyle(.orange, .primary)
+                        .foregroundStyle(.red, .primary)
                         .font(.callout)
                         .fixedSize(horizontal: false, vertical: true)
                 }

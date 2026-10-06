@@ -112,11 +112,18 @@ final class ImportViewModel {
 
     /// Compares `folder` with the stored track locations (`organized_path`, relative to the
     /// library folder; an absolute path outside it is checked as it is). Reads no file contents.
-    nonisolated static func compare(folder: URL, organizedPaths: [String],
+    nonisolated static func compare(folder: URL, organizedPaths: [String], oldRoot: String? = nil,
                                     fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> FolderComparison {
         let root = folder.standardizedFileURL.path
+        let old = oldRoot.map { ($0 as NSString).standardizingPath }
         var found = 0
         for path in organizedPaths where !path.isEmpty {
+            // An absolute path under the old folder moves with the folder (review nit): it counts
+            // only when the same place exists below the new one.
+            if let old, path.hasPrefix(old + "/") {
+                if fileExists(root + "/" + path.dropFirst(old.count + 1)) { found += 1 }
+                continue
+            }
             if path.hasPrefix("/"), fileExists(path) {
                 found += 1
                 continue

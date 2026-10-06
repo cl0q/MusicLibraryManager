@@ -71,6 +71,18 @@ struct MaintenanceJobsTests {
         #expect(center.finishedOperations.contains { $0.title == "Reread tags from files" && $0.state == .cancelled })
     }
 
+    @Test func aQueuedJobShowsCancelInActivityEvenWhenItCantStopLater() async {
+        let center = ActivityCenter(scheduler: ManualActivityScheduler(), progressInterval: 0)
+        let runner = MaintenanceJobRunner(center: center)
+        let gate = AsyncGate()
+        runner.run(MaintenanceJob.replayGain) { await gate.wait() }
+        runner.run(MaintenanceJob.pathApply) {}
+        let queued = try! #require(runner.operationIDs[MaintenanceJob.pathApply])
+        #expect(center.operation(id: queued)?.controls.canCancel == true, "queued: Cancel is real")
+        await gate.open()
+        await runner.waitUntilIdle()
+    }
+
     @Test func runningEchoUsesActivityNumbers() async {
         let center = ActivityCenter(scheduler: ManualActivityScheduler(), progressInterval: 0)
         let runner = MaintenanceJobRunner(center: center)

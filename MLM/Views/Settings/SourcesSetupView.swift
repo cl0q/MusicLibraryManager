@@ -293,10 +293,13 @@ private struct QobuzCookieSection: View {
                         .labelsHidden()
                         .frame(width: 160)
                         .onSubmit(save)
+                        // Review S8: the credentials file's value takes precedence; the field is
+                        // read-only while it is set there.
+                        .disabled(setInCredentialsFile)
                     Button("Save", action: save)
-                        .disabled(trimmed.isEmpty || trimmed == stored)
+                        .disabled(setInCredentialsFile || trimmed.isEmpty || trimmed == stored)
                     Button("Clear…", role: .destructive) { confirmsClear = true }
-                        .disabled(stored == nil)
+                        .disabled(setInCredentialsFile || stored == nil)
                 }
             } label: {
                 SettingsRowLabel("Access cookie") { status }
@@ -359,7 +362,7 @@ private struct QobuzCookieSection: View {
 
     /// Return or `Save`; an empty value is never saved (ST-SRC.E06) — `Clear…` removes it.
     private func save() {
-        guard !trimmed.isEmpty else { return }
+        guard !setInCredentialsFile, !trimmed.isEmpty else { return }
         UserDefaults.standard.set(trimmed, forKey: SquidWtfClient.userDefaultsKey)
         SquidWtfClient.isCookieExpired = false
         let now = Date()

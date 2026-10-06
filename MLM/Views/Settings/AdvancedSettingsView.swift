@@ -65,7 +65,7 @@ struct AdvancedSettingsView: View {
                             }
                         } else {
                             HStack(spacing: 4) {
-                                SettingsState(text: "Not found", systemImage: "exclamationmark.triangle", tone: .problem)
+                                SettingsState(text: "Not found", systemImage: "questionmark.folder", tone: .error)
                                 Text("· put the file at this location, then press Check Again")
                             }
                         }
@@ -122,6 +122,8 @@ struct AdvancedSettingsView: View {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
             copiedSummary = true
+            try? await Task.sleep(for: .seconds(2))
+            copiedSummary = false
         }
     }
 

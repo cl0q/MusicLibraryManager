@@ -239,7 +239,7 @@ struct MaintenanceView: View {
                             Text("\(DataLocationsViewModel.countText(cacheSummary.files, singular: "file", plural: "files")) · \(DataLocationsViewModel.formatBytes(cacheSummary.bytes))")
                         }
                         if let refusal = cacheProblem ?? cacheRefusal {
-                            SettingsState(text: refusal, systemImage: "exclamationmark.triangle", tone: .problem)
+                            SettingsState(text: refusal, systemImage: "exclamationmark.triangle", tone: .error)
                         }
                         if let echo = ActivityCenter.shared.activeOperations.first(where: { $0.kind == .transcodeCacheMove })
                             .flatMap(MaintenanceJobRunner.echo) {
@@ -354,7 +354,7 @@ private struct OrganizedPathsSection: View {
         if let active {
             JobEchoView(echo: active)
         } else if let problem = jobs.pathProblem {
-            SettingsState(text: "Couldn’t preview — \(problem)", systemImage: "exclamationmark.triangle", tone: .problem)
+            SettingsState(text: "Couldn’t preview — \(problem)", systemImage: "exclamationmark.triangle", tone: .error)
         } else if let report = jobs.pathReport {
             Text("\(report.inspectedCount.formatted()) reviewed · \(report.alreadyValidCount.formatted()) already valid · \(report.eligibleCount.formatted()) can be fixed · \(report.unresolvedCount.formatted()) unclear · \(report.diskFileCount.formatted()) audio files found")
         } else if let result = jobs.pathResult {
