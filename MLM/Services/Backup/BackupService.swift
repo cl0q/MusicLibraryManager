@@ -271,13 +271,10 @@ final class BackupService: Sendable {
         BackupRetention(configValue: (try? await configRepository.get(key: BackupRetention.configKey)) ?? nil)
     }
 
-    /// Stores the setting and applies it at once (a smaller number removes the oldest backups
-    /// now, like after the next backup would).
-    @discardableResult
-    func setRetention(_ retention: BackupRetention) async throws -> [URL] {
+    /// Stores the setting only. Older backups are removed after the next backup succeeds
+    /// (ST-BACKUP.N02 — review S3), never when the number is changed.
+    func setRetention(_ retention: BackupRetention) async throws {
         try await configRepository.set(key: BackupRetention.configKey, value: retention.rawValue)
-        guard let keep = retention.keep else { return [] }
-        return try await pruneBackups(keep: keep)
     }
 
     // MARK: - List
