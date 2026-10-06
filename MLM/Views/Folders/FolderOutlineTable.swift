@@ -80,6 +80,7 @@ struct FolderOutlineTable: View {
             handle(press)
         }
         .alternatingRowBackgrounds()
+        .scrollEdgeEffectStyle(.soft, for: .top)
         // The outline's own root: Finder files dropped anywhere on it are imported there.
         .dropTarget(.folderRow(path: model.root, name: model.rootName), cornerRadius: 0)
         .accessibilityIdentifier("folders_outline_table")

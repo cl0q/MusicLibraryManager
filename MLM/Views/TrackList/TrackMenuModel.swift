@@ -200,8 +200,13 @@ struct TrackMenuModel: Equatable, Sendable {
 
         // 4 Info
         var info: [TrackMenuItem] = [.getInfo]
-        if single, let album = Self.albumToGo(to: rows[0].track, in: context.container) { info.append(.goToAlbum(album)) }
-        if single, let artist = TrackMetadataPresentation.artistDisplay(rows[0].track.artist) {
+        // A Review version row is `Get Info · Show in All Tracks` (CM-REV-VERSION): no Go to.
+        var isReviewVersion = false
+        if case .reviewGroup = context.container { isReviewVersion = true }
+        if single, !isReviewVersion, let album = Self.albumToGo(to: rows[0].track, in: context.container) {
+            info.append(.goToAlbum(album))
+        }
+        if single, !isReviewVersion, let artist = TrackMetadataPresentation.artistDisplay(rows[0].track.artist) {
             info.append(.goToArtist(artist))
         }
         // `Find Similar` (W3-DISC-A): one track, in every list that is a place of the library.
@@ -320,6 +325,7 @@ struct TrackMenuModel: Equatable, Sendable {
             if single, let artist = TrackMetadataPresentation.artistDisplay(rows[0].track.artist) {
                 info.append(.goToArtist(artist))
             }
+            if single, context.canFindSimilar { info.append(.findSimilar) }
             if single, let contextName { info.append(.showInContext(name: contextName)) }
             if downloadable > 0 {
                 let title: String
@@ -335,6 +341,7 @@ struct TrackMenuModel: Equatable, Sendable {
             remove = [.removeFromContainer(title: "Remove from Queue")]
         case .history(let canPlay):
             if single, let album = Self.albumToGo(to: rows[0].track, in: context.container) { info.append(.goToAlbum(album)) }
+            if single, context.canFindSimilar { info.append(.findSimilar) }
             if single, canPlay { primary.append(.play(enabled: unreachable == 0)) }
             if reachableLocal > 0 { queue = [.playNext, .addToQueue] }
             remove = [.clearHistory]

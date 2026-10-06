@@ -185,6 +185,7 @@ struct GenresView: View {
                     }
             }
         }
+        .scrollEdgeEffectStyle(.soft, for: .top)
         .contextMenu(forSelectionType: String.self) { keys in
             let subjects = selected(keys)
             if !subjects.isEmpty {
