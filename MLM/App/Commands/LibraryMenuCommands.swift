@@ -68,6 +68,10 @@ struct LibraryMenuCommands: Commands {
                     MaintenanceJobs.shared.rereadConfirmationRequested = true
                     openSettings(tab: .maintenance)
                 }
+                CommandButton(.readTrackNumbers, enabled: jobBlockedReason(MaintenanceJob.readTrackNumbers) == nil,
+                              disabledReason: jobBlockedReason(MaintenanceJob.readTrackNumbers)) {
+                    MaintenanceJobs.shared.start(MaintenanceJob.readTrackNumbers)
+                }
                 Divider()
                 CommandButton(.maintenanceSettings, enabled: hasLibrary) {
                     openSettings(tab: .maintenance)

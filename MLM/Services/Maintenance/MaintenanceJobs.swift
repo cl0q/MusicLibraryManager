@@ -16,6 +16,8 @@ struct MaintenanceCoverage: Equatable, Sendable {
     var withArtwork = 0
     /// Tracks a MusicBrainz fetch would look for (`fetchTracksEligibleForProviderArtwork`).
     var withoutArtwork = 0
+    /// Album tracks with a file and no track number yet (`Read Track Numbers`, W4-1).
+    var unnumberedAlbumTracks = 0
 
     static func load(_ db: Database) throws -> MaintenanceCoverage {
         func count(_ sql: String) throws -> Int { try Int.fetchOne(db, sql: sql) ?? 0 }
@@ -45,7 +47,8 @@ struct MaintenanceCoverage: Equatable, Sendable {
             withoutArtwork: try count("""
                 SELECT COUNT(*) FROM tracks t WHERE \(withFile)
                 AND NOT EXISTS (SELECT 1 FROM artwork a WHERE a.track_id = t.id AND a.artwork_path IS NOT NULL)
-                """)
+                """),
+            unnumberedAlbumTracks: try TrackNumberReader.unreadCount(db)
         )
     }
 
@@ -77,6 +80,7 @@ extension MaintenanceJob {
     static let artworkEmbedded = "artwork-embedded"
     static let artworkMusicBrainz = "artwork-musicbrainz"
     static let rereadTags = "rescan"
+    static let readTrackNumbers = "read-track-numbers"
     static let recreateLikedPlaylist = "create-liked-playlist"
     static let pathAudit = "path-audit"
     static let pathApply = "path-apply"
@@ -85,7 +89,7 @@ extension MaintenanceJob {
     /// Jobs that read the audio files: they wait for the library drive (ST-MAINT.N01).
     var readsAudioFiles: Bool {
         [Self.fingerprint, Self.replayGain, Self.danceability, Self.similarity, Self.artworkEmbedded,
-         Self.rereadTags, Self.pathAudit, Self.pathApply].contains(action)
+         Self.rereadTags, Self.readTrackNumbers, Self.pathAudit, Self.pathApply].contains(action)
     }
 }
 
@@ -141,6 +145,7 @@ final class MaintenanceJobs {
         case MaintenanceJob.artworkEmbedded: runner.run(action) { await self.runArtworkEmbedded() }
         case MaintenanceJob.artworkMusicBrainz: runner.run(action) { await self.runArtworkMusicBrainz() }
         case MaintenanceJob.rereadTags: runner.run(action) { await self.runRereadTags() }
+        case MaintenanceJob.readTrackNumbers: runner.run(action) { await self.runReadTrackNumbers() }
         case MaintenanceJob.recreateLikedPlaylist: runner.run(action) { await self.runRecreateLikedPlaylist() }
         case MaintenanceJob.pathAudit: runner.run(action) { await self.runPathAudit() }
         case MaintenanceJob.pathApply: runner.run(action) { await self.applyPathMigration() }
@@ -156,6 +161,7 @@ final class MaintenanceJobs {
         if MaintenanceJob(action: action).readsAudioFiles, drive.isOffline, let name = drive.volumeName {
             return "“\(name)” is not connected."
         }
+        if action == MaintenanceJob.readTrackNumbers, coverage?.unnumberedAlbumTracks == 0 { return TrackNumberReader.nothingToRead }
         if toolMissing, action == MaintenanceJob.fingerprint { return "fpcalc not found." }
         if action == MaintenanceJob.artworkEmbedded, automaticArtworkOperation != nil {
             return "Artwork is being read for new tracks."
@@ -313,6 +319,19 @@ final class MaintenanceJobs {
         } catch {
             runner.resultMessage = "Rereading tags failed: \(error.localizedDescription)"
         }
+    }
+
+    /// `Read Track Numbers` (W4-1): the `track` / `disc` tags of album tracks into `album_tracks`.
+    private func runReadTrackNumbers() async {
+        let c = container()
+        guard let pool = c.databaseManager?.pool else { return }
+        let root = (try? await c.configRepository?.getLibraryRoot()).flatMap { $0 }
+        var reader = TrackNumberReader(database: pool, libraryRoot: root)
+        reader.isDriveConnected = { await MainActor.run { !LibraryDriveState.current(c).isOffline } }
+        let outcome = await reader.run { [runner] state in Task { @MainActor in runner.progress = state } }
+        runner.resultMessage = "Track numbers: \(outcome.read) updated, \(outcome.unreadable) failed"
+        if outcome.read > 0 { NotificationCenter.default.post(name: .trackMetadataDidChange, object: nil) }
+        await didChangeLibrary()
     }
 
     /// The liked playlist's name (SoundCloud is the only source with one today).

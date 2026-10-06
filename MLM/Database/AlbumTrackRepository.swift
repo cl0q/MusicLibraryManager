@@ -141,32 +141,57 @@ final class AlbumTrackRepository: Sendable {
     /// order — so the album plays in its own order.
     @discardableResult
     func setNumbers(albumID: Int64, _ numbers: [Int64: (disc: Int, number: Int)]) async throws -> AlbumNumbering {
-        try await database.write { db in
-            var changed = 0
-            for (trackID, value) in numbers {
-                try db.execute(sql: """
-                    UPDATE album_tracks SET disc = ?, track_number = ?
-                    WHERE album_id = ? AND track_id = ? AND (disc <> ? OR track_number IS NOT ?)
-                    """, arguments: [value.disc, value.number, albumID, trackID, value.disc, value.number])
-                changed += db.changesCount
-            }
-            let rows = try Self.orderedRows(db, albumID: albumID)
-            guard !rows.isEmpty, rows.allSatisfy({ $0.trackNumber != nil }) else {
-                return AlbumNumbering(changed: changed, resorted: false)
-            }
-            let sorted = rows.enumerated().sorted { a, b in
-                let l = a.element, r = b.element
-                if l.disc != r.disc { return l.disc < r.disc }
-                if l.trackNumber != r.trackNumber { return l.trackNumber! < r.trackNumber! }
-                return a.offset < b.offset
-            }.map(\.element)
-            let keys = FractionalIndexer.evenlySpaced(count: sorted.count)
-            for (row, key) in zip(sorted, keys) where row.position != key {
-                try db.execute(sql: "UPDATE album_tracks SET position = ? WHERE album_id = ? AND track_id = ?",
-                               arguments: [key, albumID, row.trackId])
-            }
-            return AlbumNumbering(changed: changed, resorted: true)
+        try await database.write { db in try Self.writeNumbers(db, albumID: albumID, numbers) }
+    }
+
+    /// `setNumbers` inside a transaction.
+    static func writeNumbers(_ db: Database, albumID: Int64, _ numbers: [Int64: (disc: Int, number: Int)]) throws -> AlbumNumbering {
+        var changed = 0
+        for (trackID, value) in numbers {
+            try db.execute(sql: """
+                UPDATE album_tracks SET disc = ?, track_number = ?
+                WHERE album_id = ? AND track_id = ? AND (disc <> ? OR track_number IS NOT ?)
+                """, arguments: [value.disc, value.number, albumID, trackID, value.disc, value.number])
+            changed += db.changesCount
         }
+        return AlbumNumbering(changed: changed, resorted: try resortIfNumbered(db, albumID: albumID))
+    }
+
+    /// When every member of the album has a track number, re-sorts the positions by (disc,
+    /// number) — ties keep their order — and returns true.
+    static func resortIfNumbered(_ db: Database, albumID: Int64) throws -> Bool {
+        let rows = try orderedRows(db, albumID: albumID)
+        guard !rows.isEmpty, rows.allSatisfy({ $0.trackNumber != nil }) else { return false }
+        let sorted = rows.enumerated().sorted { a, b in
+            let l = a.element, r = b.element
+            if l.disc != r.disc { return l.disc < r.disc }
+            if l.trackNumber != r.trackNumber { return l.trackNumber! < r.trackNumber! }
+            return a.offset < b.offset
+        }.map(\.element)
+        let keys = FractionalIndexer.evenlySpaced(count: sorted.count)
+        for (row, key) in zip(sorted, keys) where row.position != key {
+            try db.execute(sql: "UPDATE album_tracks SET position = ? WHERE album_id = ? AND track_id = ?",
+                           arguments: [key, albumID, row.trackId])
+        }
+        return true
+    }
+
+    /// A track imported with album text (the import path, inside its write): finds or creates the
+    /// album, links `tracks.album_id` and appends the track with the file's disc and track number.
+    /// Nothing for a track without an album (DEC-021). Returns the album id.
+    @discardableResult
+    static func linkImportedTrack(_ db: Database, trackID: Int64, artist: String, albumArtist: String, album: String,
+                                  year: Int?, disc: Int?, number: Int?) throws -> Int64? {
+        guard !AlbumKey.isNoAlbum(album) else { return nil }
+        let albumID = try AlbumKey.findOrCreate(db, artist: artist, albumArtist: albumArtist, title: album, year: year)
+        let alreadyMember = try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM album_tracks WHERE album_id = ? AND track_id = ?)",
+                                              arguments: [albumID, trackID]) ?? false
+        try db.execute(sql: "UPDATE tracks SET album_id = ? WHERE id = ? AND album_id IS NULL", arguments: [albumID, trackID])
+        guard !alreadyMember else { return albumID }
+        let (keys, usedDisc) = try positionKeys(db, albumID: albumID, count: 1, at: nil, disc: disc, excluding: [])
+        try AlbumTrack(albumId: albumID, trackId: trackID, disc: usedDisc, position: keys[0], trackNumber: number).insert(db)
+        if number != nil { _ = try resortIfNumbered(db, albumID: albumID) }
+        return albumID
     }
 
     // MARK: - Undo (exact rows)
