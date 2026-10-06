@@ -88,11 +88,9 @@ struct BackForwardButtons: View {
 struct AddMenu: View {
     @Environment(ShellActions.self) private var actions
 
-    /// Help texts of the items that are not available yet (W3-PL, W3-ADD).
+    /// Help texts of the items that are not available yet (W3-ADD).
     enum Unavailable {
-        static let playlistFolder = "Playlist folders aren’t available yet."
         static let addFromLink = "Adding a track from a link isn’t available yet. To import a playlist from a link, choose Import Playlist from Source… in this menu."
-        static let importM3U = "To import an M3U file now, open a playlist and choose Import M3U… there."
         static let refreshFromSources = "Refreshing all sources at once isn’t available yet. Open a linked playlist to refresh it."
     }
 
@@ -101,9 +99,9 @@ struct AddMenu: View {
             Button("New Playlist") {
                 actions.newPlaylist()
             }
-            Button("New Playlist Folder") {}
-                .disabled(true)
-                .help(Unavailable.playlistFolder)
+            Button("New Playlist Folder") {
+                Task { await actions.edits.newPlaylistFolder() }
+            }
 
             Divider()
 
@@ -116,9 +114,9 @@ struct AddMenu: View {
             Button("Import Files or Folder…") {
                 actions.chooseImportFolder()
             }
-            Button("Import M3U…") {}
-                .disabled(true)
-                .help(Unavailable.importM3U)
+            Button("Import M3U…") {
+                DropCenter.shared.chooseM3U(into: nil)
+            }
 
             Divider()
 

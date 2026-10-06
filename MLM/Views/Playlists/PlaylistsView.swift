@@ -103,6 +103,8 @@ struct PlaylistsView: View {
             }
         }
         .modifier(WindowTitleModifier())
+        // Export ▸ Playlist as M3U… with one card selected.
+        .focusedSceneValue(\.selectedPlaylists, selection.compactMap { items[$0]?.playlist })
         .onChange(of: PlaylistRequests.shared.revealInGrid) { _, id in reveal(id) }
         .onAppear { reveal(PlaylistRequests.shared.revealInGrid) }
     }

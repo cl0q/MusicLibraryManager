@@ -11,6 +11,8 @@ struct TrackCommands: Commands {
     @FocusedValue(\.trailingColumn) private var trailingColumn
     @FocusedValue(\.shellActions) private var shellActions
     @FocusedValue(\.playlistSourceRefresh) private var playlistRefresh
+    @FocusedValue(\.playlistPage) private var playlistPage
+    @FocusedValue(\.sidebarModel) private var sidebar
     @FocusedValue(\.undoCenter) private var undoCenter
     @FocusedValue(\.toolbarSearch) private var search
 
@@ -68,6 +70,8 @@ struct TrackCommands: Commands {
                 AddToPlaylistMenuItems(
                     playlists: target.playlists,
                     showsKeyEquivalents: false,
+                    tree: sidebar?.tree,
+                    recent: sidebar?.recentPlaylists(),
                     newPlaylist: { TrackCommandActions.newPlaylistFromSelection(tracks(), shell: shellActions) },
                     add: { TrackCommandActions.addToPlaylist($0, tracks: tracks(), shell: shellActions) }
                 )
@@ -101,9 +105,18 @@ struct TrackCommands: Commands {
 
             Divider()
 
-            CommandButton(.download, title: state.downloadTitle, enabled: state.canDownload,
-                          disabledReason: state.downloadDisabledReason) {
-                TrackCommandActions.download(tracks())
+            // ⌘D with nothing selected on a playlist page: all of its not-downloaded tracks
+            // (UC-KEY-14, `Download ‹n› Tracks`, W3-PL).
+            let wholePlaylist = (selection?.selectedIDs.isEmpty ?? true) ? playlistPage.flatMap { $0.notDownloaded > 0 ? $0 : nil } : nil
+            if let page = wholePlaylist {
+                CommandButton(.download, title: PlaylistMenuModel.title(.download(page.notDownloaded)), enabled: true) {
+                    page.downloadAll()
+                }
+            } else {
+                CommandButton(.download, title: state.downloadTitle, enabled: state.canDownload,
+                              disabledReason: state.downloadDisabledReason) {
+                    TrackCommandActions.download(tracks())
+                }
             }
             CommandButton(.locateFile,
                           enabled: TrackPreviewCommand.canLocate(selection?.summary),
