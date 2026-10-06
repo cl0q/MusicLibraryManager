@@ -226,7 +226,7 @@ final class SyncService {
     static let lane = ActivityLane("sync")
 
     /// Space buffer: require 50MB free beyond needed space.
-    private static let spaceBuffer: Int64 = 50_000_000
+    static let spaceBuffer: Int64 = 50_000_000
 
     init(
         trackRepository: TrackRepository,
@@ -793,6 +793,15 @@ final class SyncService {
 
     // MARK: - Execute
 
+    /// The space a run needs. A full run uses the plan's own verdict (removals free space first,
+    /// with Clean up on); Retry Failed copies only the retried tracks and removes nothing, so it
+    /// needs room for those tracks alone.
+    static func spaceCheck(preview: PreviewResult, filesToAdd: [FilePreview], isRetry: Bool) -> (needed: Int64, isSufficient: Bool) {
+        guard isRetry else { return (preview.totalNewSize, preview.hasSufficientSpace) }
+        let needed = filesToAdd.reduce(Int64(0)) { $0 + $1.size }
+        return (needed, preview.deviceAvailableSpace >= needed + spaceBuffer)
+    }
+
     /// Execute sync for a profile.
     ///
     /// W3-SYNC — named fixes only; what is copied, transcoded, deleted and written to `sync_state`
@@ -850,19 +859,18 @@ final class SyncService {
             operationId?.discard()
             return SyncResult()
         }
-        guard preview.hasSufficientSpace else {
-            operationId?.fail(cause: "Not enough space on “\(deviceName)”", fix: .runAgain)
-            throw SyncError.insufficientSpace(
-                needed: preview.totalNewSize,
-                available: preview.deviceAvailableSpace
-            )
-        }
         // Never write into a path whose disk is gone (a folder under /Volumes would be created on
-        // the Mac's own disk).
+        // the Mac's own disk). Checked before the space: a missing device is "not connected",
+        // never "not enough space".
         if !filesToAdd.isEmpty || !filesToRemove.isEmpty,
            !destinations.isDestinationReachable(profile.outputFolder) {
             operationId?.fail(cause: "“\(deviceName)” is not connected", fix: .runAgain)
             throw SyncRunError.destinationNotConnected(deviceName)
+        }
+        let space = Self.spaceCheck(preview: preview, filesToAdd: filesToAdd, isRetry: isRetry)
+        guard space.isSufficient else {
+            operationId?.fail(cause: "Not enough space on “\(deviceName)”", fix: .runAgain)
+            throw SyncError.insufficientSpace(needed: space.needed, available: preview.deviceAvailableSpace)
         }
 
         // Reset cancellation flag + progress tracking at start (D-14)
@@ -874,12 +882,16 @@ final class SyncService {
 
         isRunning = true
         runningProfileId = profileId
-        defer {
+        activityJob = operationId
+        // The order at the end of a run: its result is written, then this state is reset, then the
+        // Activity operation ends — so a queued run that starts on the operation's end finds the
+        // service idle. Idempotent; the `defer` is the net for any exit not routed through it.
+        func resetRunState() {
             isRunning = false
             runningProfileId = nil
+            activityJob = nil
         }
-        activityJob = operationId
-        defer { activityJob = nil }
+        defer { resetRunState() }
         operationId?.update(completed: 0, total: total)
 
         var result = SyncResult()
@@ -899,7 +911,9 @@ final class SyncService {
                                       plan: preview.summary, operationID: operationId?.id)
         }
 
-        let libraryRoot = try await finalisingOperationOnThrow(operationId) { try await configRepository.getLibraryRoot() ?? "" }
+        let libraryRoot = try await finalisingOperationOnThrow(operationId, beforeFail: resetRunState) { try await configRepository.getLibraryRoot() ?? "" }
+        // Which volume this run writes to; a wait for the device ends only when it is back.
+        let volumeIdentity = destinations.volumeIdentity(profile.outputFolder)
         let workerCount = syncTurboLevel.workerCount()
         let limiter = ConcurrencyLimiter(maxConcurrency: workerCount)
         var copiedSoFar = 0
@@ -986,6 +1000,12 @@ final class SyncService {
                                     await self.uncountProcessed()
                                     return .interrupted(file.trackId)
                                 }
+                                // The library drive left while the file was being read: not the
+                                // track's failure — it is skipped with that reason (P6).
+                                if case .failed(_, let reason) = outcome, reason != "Cancelled",
+                                   self.isLibraryDriveAway(libraryRoot) {
+                                    return .skipped(file.trackId, .libraryDriveAway)
+                                }
                                 return outcome
                             }
                         } catch is CancellationError {
@@ -993,6 +1013,13 @@ final class SyncService {
                         } catch {
                             if !self.destinations.isDestinationReachable(profile.outputFolder) {
                                 return .interrupted(file.trackId)
+                            }
+                            if self.isLibraryDriveAway(libraryRoot) {
+                                await self.incrementProcessed(
+                                    currentFile: "Skipped: \(file.artist) – \(file.title)",
+                                    operationId: operationId
+                                )
+                                return .skipped(file.trackId, .libraryDriveAway)
                             }
                             AppLogger.shared.error(
                                 "Sync failed for \(file.artist) - \(file.title): \(error.localizedDescription)",
@@ -1045,7 +1072,9 @@ final class SyncService {
                 break
             }
             var interrupted = Set<Int64>()
+            var copiesRan = false
             if pendingRemovals.isEmpty {
+                copiesRan = true
                 for outcome in await runCopies(pendingCopies) {
                     if case .interrupted(let id) = outcome {
                         interrupted.insert(id)
@@ -1058,7 +1087,10 @@ final class SyncService {
             if pendingRemovals.isEmpty && interrupted.isEmpty { break }
             // The device was removed: wait for it as the same operation (UC-JOB-10); nothing
             // is marked failed. Only the files not copied yet are tried again.
-            pendingCopies = pendingCopies.filter { interrupted.contains($0.trackId) }
+            // (When the device went away during the clean-up, no copy was tried yet: all stay.)
+            if copiesRan {
+                pendingCopies = pendingCopies.filter { interrupted.contains($0.trackId) }
+            }
             result.interruptions += 1
             AppLogger.shared.info(
                 "Sync interrupted: “\(deviceName)” disconnected — \(copiedSoFar) copied, \(pendingCopies.count + pendingRemovals.count) waiting",
@@ -1068,7 +1100,7 @@ final class SyncService {
                 try? await results?.recordInterruption(profileID: profileId, copiedCount: copiedSoFar, at: Date())
             }
             operationId?.setWaiting(.drive(volumeName: deviceName))
-            guard await waitForDestination(profile.outputFolder) else { break }
+            guard await waitForDestination(profile.outputFolder, identity: volumeIdentity) else { break }
             operationId?.setWaiting(nil)
             if !isRetry {
                 try? await results?.recordResumed(profileID: profileId)
@@ -1111,15 +1143,9 @@ final class SyncService {
             }
         }
 
-        // 3. Generate M3U8 playlists (M3U8 gate — SYNC-v2-20) and 4. the iOS manifest.
-        do {
-            if profile.generateM3U8 && !result.wasCancelled {
-                try await finalisingOperationOnThrow(operationId) { try await generatePlaylists(profileId: profileId, profile: profile, libraryRoot: libraryRoot) }
-            }
-            if profile.playlistFormatEnum == .ios && !result.wasCancelled {
-                try await finalisingOperationOnThrow(operationId) { try await generateManifest(profileId: profileId, profile: profile, libraryRoot: libraryRoot) }
-            }
-        } catch {
+        // 3. Generate M3U8 playlists (M3U8 gate — SYNC-v2-20) and 4. the iOS manifest. When one
+        //    throws: the failed result is written, the state reset, then the operation fails.
+        let recordPlaylistFailure: () async -> Void = {
             if !isRetry {
                 try? await results?.finish(
                     profileID: profileId, outcome: .failed, endedAt: Date(), copiedCount: result.syncedCount,
@@ -1127,31 +1153,44 @@ final class SyncService {
                     skipped: result.skippedTracks,
                     failureCause: "Couldn’t write the playlist files on “\(deviceName)”")
             }
-            throw error
+            resetRunState()
+        }
+        if profile.generateM3U8 && !result.wasCancelled {
+            try await finalisingOperationOnThrow(operationId, beforeFail: recordPlaylistFailure) { try await generatePlaylists(profileId: profileId, profile: profile, libraryRoot: libraryRoot) }
+        }
+        if profile.playlistFormatEnum == .ios && !result.wasCancelled {
+            try await finalisingOperationOnThrow(operationId, beforeFail: recordPlaylistFailure) { try await generateManifest(profileId: profileId, profile: profile, libraryRoot: libraryRoot) }
         }
 
         currentFile = ""
         progress = 1.0
 
-        // End the Activity operation — always, also when cancelled (PP-ACTIVITY-01).
-        if let operationId {
-            let activityResult = Self.activityResult(result)
-            if result.wasCancelled || cancellationRequested {
-                operationId.cancelled(activityResult)
-            } else {
-                operationId.finish(activityResult)
-            }
-        }
-
         // This profile's result (v47) — never another profile's (PP-SYNC-02).
         if isRetry {
+            // A retried track that now has nothing to copy (skipped, or no longer in the profile)
+            // is no longer a failure of the last run.
+            let attempted = Set(filesToAdd.map(\.trackId))
+            let settled = (onlyTrackIDs ?? []).subtracting(attempted)
+                .union(result.skippedTracks.map(\.trackID))
             try? await results?.applyRetry(profileID: profileId, copiedTrackIDs: Set(result.syncedTrackIDs),
-                                           stillFailing: Self.resultFailures(result))
+                                           stillFailing: Self.resultFailures(result), retried: settled)
         } else {
             try? await results?.finish(
                 profileID: profileId, outcome: result.wasCancelled ? .cancelled : .completed, endedAt: Date(),
                 copiedCount: result.syncedCount, removedCount: result.removedCount,
                 failures: Self.resultFailures(result), skipped: result.skippedTracks)
+        }
+
+        // Reset, then end the Activity operation — always, also when cancelled (PP-ACTIVITY-01).
+        let wasCancelled = result.wasCancelled || cancellationRequested
+        resetRunState()
+        if let operationId {
+            let activityResult = Self.activityResult(result)
+            if wasCancelled {
+                operationId.cancelled(activityResult)
+            } else {
+                operationId.finish(activityResult)
+            }
         }
 
         return result
@@ -1165,9 +1204,14 @@ final class SyncService {
         }
     }
 
-    /// Waits until the destination is reachable again; `false` when the sync was cancelled.
-    private func waitForDestination(_ path: String) async -> Bool {
-        while !destinations.isDestinationReachable(path) {
+    /// Waits until the destination is reachable again — on the same volume when the run knew
+    /// its identity (another disk under the same name does not resume it); `false` when the
+    /// sync was cancelled.
+    private func waitForDestination(_ path: String, identity: String?) async -> Bool {
+        func isBack() -> Bool {
+            destinations.isDestinationReachable(path) && (identity == nil || destinations.volumeIdentity(path) == identity)
+        }
+        while !isBack() {
             if cancellationRequested { return false }
             do {
                 try await destinations.waitBeforeRecheck()
@@ -1179,6 +1223,11 @@ final class SyncService {
     }
 
     private let attemptLock = NSLock()
+
+    /// The library's drive is not connected now (with no library folder there is no drive).
+    private func isLibraryDriveAway(_ libraryRoot: String) -> Bool {
+        !libraryRoot.isEmpty && !destinations.isLibraryReachable(libraryRoot)
+    }
 
     private func noteAttempt(_ trackId: Int64) {
         attemptLock.withLock { attemptedTrackIds.append(trackId) }
@@ -1196,10 +1245,12 @@ final class SyncService {
     /// terminalise it because `operationId` is local to `executeSync`.
     private func finalisingOperationOnThrow<T>(
         _ operationId: ActivityOperationHandle?,
+        beforeFail: () async -> Void = {},
         _ work: () async throws -> T
     ) async rethrows -> T {
         do { return try await work() }
         catch {
+            await beforeFail()
             operationId?.fail(cause: error.localizedDescription, fix: .runAgain)
             throw error
         }
@@ -1231,10 +1282,61 @@ final class SyncService {
 
     // MARK: - M3U8 Generation
 
+    /// The path of a track's file as MLM writes it into a playlist file of `profile` (relative
+    /// to the device or the profile folder, by dialect). One source of truth for the playlist
+    /// writer and for matching a device's playlist entries back to tracks.
+    static func devicePath(for track: Track, profile: SyncProfile, libraryRoot: String) -> String {
+        let profileDir = URL(fileURLWithPath: profile.outputFolder)
+        let destPath = TranscodeCache.buildProfilePath(
+            track: track,
+            libraryRoot: libraryRoot,
+            profileOutputFolder: musicRootFolder(for: profile),
+            transcodeMode: profile.transcodeModeEnum
+        )
+        var fullPath: String
+        if profile.playlistFormatEnum == .rockbox {
+            if profile.outputFolder.hasPrefix("/Volumes/") {
+                // Extract mount point prefix (e.g. /Volumes/IPOD)
+                let components = profile.outputFolder.split(separator: "/")
+                if components.count >= 2 {
+                    let volumePrefix = "/\(components[0])/\(components[1])"
+                    if destPath.path.hasPrefix(volumePrefix) {
+                        fullPath = String(destPath.path.dropFirst(volumePrefix.count))
+                    } else {
+                        let relativePath = destPath.path.replacingOccurrences(of: profileDir.path + "/", with: "")
+                        let prefix = profile.playlistPathPrefix
+                        fullPath = prefix.isEmpty ? relativePath : "\(prefix)/\(relativePath)"
+                    }
+                } else {
+                    let relativePath = destPath.path.replacingOccurrences(of: profileDir.path + "/", with: "")
+                    let prefix = profile.playlistPathPrefix
+                    fullPath = prefix.isEmpty ? relativePath : "\(prefix)/\(relativePath)"
+                }
+            } else {
+                let relativePath = destPath.path.replacingOccurrences(of: profileDir.path + "/", with: "")
+                let prefix = profile.playlistPathPrefix
+                fullPath = prefix.isEmpty ? relativePath : "\(prefix)/\(relativePath)"
+            }
+        } else if profile.playlistFormatEnum == .ios {
+            // iOS dialect: relative path from profile output root (includes Music/ prefix),
+            // no leading slash, independent of playlist_path_prefix (spec §2).
+            let relativePath = destPath.path.replacingOccurrences(of: profileDir.path + "/", with: "")
+            fullPath = relativePath
+        } else {
+            // Doppi: relative to output folder with a leading slash
+            let relativePath = destPath.path.replacingOccurrences(of: profileDir.path + "/", with: "")
+            let prefix = profile.playlistPathPrefix
+            fullPath = prefix.isEmpty ? relativePath : "\(prefix)/\(relativePath)"
+            if !fullPath.hasPrefix("/") {
+                fullPath = "/" + fullPath
+            }
+        }
+        return fullPath
+    }
+
     /// Generate playlist files for each playlist in the profile (Rockbox/Doppi/iOS).
     private func generatePlaylists(profileId: Int64, profile: SyncProfile, libraryRoot: String) async throws {
         let playlists = try await syncRepository.fetchProfilePlaylists(profileId: profileId)
-        let profileDir = URL(fileURLWithPath: profile.outputFolder)
         let isIOS = profile.playlistFormatEnum == .ios
 
         // For the iOS dialect, ensure stable UUIDs on every playlist and track before writing.
@@ -1253,7 +1355,7 @@ final class SyncService {
                 m3u += "#EXTMLM-PLAYLIST:\(plUuid)\n"
             }
             // Collect snapshot entries for iOS dialect (WP3)
-            var snapshotEntries: [(uuid: String?, path: String)] = []
+            var snapshotEntries: [(uuid: String?, path: String, trackId: Int64?)] = []
             for track in tracks {
                 let duration = track.duration ?? 0
                 let destPath = TranscodeCache.buildProfilePath(
@@ -1265,46 +1367,7 @@ final class SyncService {
 
                 let fileURL = URL(fileURLWithPath: destPath.path)
                 let isDoppi = profile.playlistFormatEnum == .doppi
-
-                // Make path relative to profile root or absolute depending on format
-                var fullPath: String
-                if profile.playlistFormatEnum == .rockbox {
-                    if profile.outputFolder.hasPrefix("/Volumes/") {
-                        // Extract mount point prefix (e.g. /Volumes/IPOD)
-                        let components = profile.outputFolder.split(separator: "/")
-                        if components.count >= 2 {
-                            let volumePrefix = "/\(components[0])/\(components[1])"
-                            if destPath.path.hasPrefix(volumePrefix) {
-                                fullPath = String(destPath.path.dropFirst(volumePrefix.count))
-                            } else {
-                                let relativePath = destPath.path.replacingOccurrences(of: profileDir.path + "/", with: "")
-                                let prefix = profile.playlistPathPrefix
-                                fullPath = prefix.isEmpty ? relativePath : "\(prefix)/\(relativePath)"
-                            }
-                        } else {
-                            let relativePath = destPath.path.replacingOccurrences(of: profileDir.path + "/", with: "")
-                            let prefix = profile.playlistPathPrefix
-                            fullPath = prefix.isEmpty ? relativePath : "\(prefix)/\(relativePath)"
-                        }
-                    } else {
-                        let relativePath = destPath.path.replacingOccurrences(of: profileDir.path + "/", with: "")
-                        let prefix = profile.playlistPathPrefix
-                        fullPath = prefix.isEmpty ? relativePath : "\(prefix)/\(relativePath)"
-                    }
-                } else if isIOS {
-                    // iOS dialect: relative path from profile output root (includes Music/ prefix),
-                    // no leading slash, independent of playlist_path_prefix (spec §2).
-                    let relativePath = destPath.path.replacingOccurrences(of: profileDir.path + "/", with: "")
-                    fullPath = relativePath
-                } else {
-                    // Doppi: relative to output folder with a leading slash
-                    let relativePath = destPath.path.replacingOccurrences(of: profileDir.path + "/", with: "")
-                    let prefix = profile.playlistPathPrefix
-                    fullPath = prefix.isEmpty ? relativePath : "\(prefix)/\(relativePath)"
-                    if !fullPath.hasPrefix("/") {
-                        fullPath = "/" + fullPath
-                    }
-                }
+                let fullPath = Self.devicePath(for: track, profile: profile, libraryRoot: libraryRoot)
 
                 let loadMetadata: () async throws -> PlaylistTrackMemoEntry = {
                     // Only include track if it physically exists on the device destination (skipped or missing tracks are omitted)
@@ -1382,10 +1445,8 @@ final class SyncService {
                     m3u += "#EXTMLM:\(trackUuid)\n"
                 }
                 m3u += "\(fullPath)\n"
-                // Record for snapshot (iOS dialect only)
-                if isIOS {
-                    snapshotEntries.append((uuid: track.mlmUuid, path: fullPath))
-                }
+                // Record for the snapshot (every dialect): what the device file lists now.
+                snapshotEntries.append((uuid: track.mlmUuid, path: fullPath, trackId: track.id))
             }
 
             // Apply precomposed NFC Unicode normalization to the entire playlist contents
@@ -1403,10 +1464,14 @@ final class SyncService {
 
             try normalizedM3U.write(to: playlistPath, atomically: true, encoding: .utf8)
 
-            // Persist snapshot for iOS dialect (WP3) — enables ingest diff
-            if isIOS, let playlistId = playlist.id {
-                let snapshotJson: [[String: String?]] = snapshotEntries.map {
-                    ["uuid": $0.uuid, "path": $0.path]
+            // Persist the snapshot for every dialect — it is what "MLM wrote this" means when
+            // the device's playlist files are read back.
+            if let playlistId = playlist.id {
+                let snapshotJson: [[String: Any]] = snapshotEntries.map {
+                    var entry: [String: Any] = ["path": $0.path]
+                    if let uuid = $0.uuid { entry["uuid"] = uuid }
+                    if let trackId = $0.trackId { entry["track_id"] = trackId }
+                    return entry
                 }
                 let data = try JSONSerialization.data(withJSONObject: snapshotJson)
                 let json = String(data: data, encoding: .utf8) ?? "[]"

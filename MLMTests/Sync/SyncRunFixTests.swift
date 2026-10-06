@@ -160,6 +160,137 @@ struct SyncRunFixTests {
         #expect(center.operations.filter { $0.kind == .sync }.count == 1)
     }
 
+    @Test func aRunInterruptedDuringCleanUpStillCopiesAfterTheDeviceReturns() async throws {
+        let destinations = ScriptedDestinations()
+        let env = try await SyncTestEnv(destinations: destinations)
+        let device = try env.device("IPOD")
+        let profile = try await env.profile("iPod", device: device)
+        try await env.sync.updateSettings(profileId: profile.id!, cleanupRemovedFiles: true)
+        for (id, title) in [(1, "Old One"), (2, "Old Two"), (3, "New Three"), (4, "New Four")] {
+            try env.localTrack(Int64(id), title: title)
+        }
+        try await env.add([1, 2], to: profile)
+        _ = try await env.service.executeSync(profileId: profile.id!)
+        #expect(env.files(in: device).count == 2)
+        // Both old tracks leave the profile, two new ones join.
+        try await env.sync.removeTrack(profileId: profile.id!, trackId: 1)
+        try await env.sync.removeTrack(profileId: profile.id!, trackId: 2)
+        try await env.add([3, 4], to: profile)
+        // The start guard and the first removal see the device; it is gone before the second.
+        destinations.script(disconnectAfter: 2)
+        destinations.onWait = { _ in true }
+
+        let result = try await env.service.executeSync(profileId: profile.id!)
+
+        #expect(result.interruptions == 1)
+        #expect(result.removedCount == 2)
+        #expect(result.syncedCount == 2, "every planned copy is made after the device returns")
+        #expect(result.failedCount == 0)
+        #expect(try await env.syncedTrackIDs(profile) == [3, 4])
+        #expect(env.files(in: device).count == 2)
+        #expect(try await env.results.fetch(profileID: profile.id!)?.outcome == .completed)
+    }
+
+    @Test func aWaitingRunResumesOnlyWhenTheSameVolumeReturns() async throws {
+        let destinations = ScriptedDestinations(disconnectAfter: 2)
+        destinations.identity = "volume-A"
+        let env = try await SyncTestEnv(destinations: destinations)
+        let device = try env.device("IPOD")
+        let profile = try await env.profile("iPod", device: device)
+        for (id, title) in [(1, "One"), (2, "Two"), (3, "Three")] { try env.localTrack(Int64(id), title: title) }
+        try await env.add([1, 2, 3], to: profile)
+        let filesWhileOtherDisk = LockedBox<Int>(-1)
+        destinations.onWait = { count in
+            if count == 1 {
+                destinations.identity = "volume-B"  // another disk under the same name
+                filesWhileOtherDisk.value = (FileManager.default.enumerator(atPath: device.path)?.allObjects as? [String] ?? []).filter { $0.hasSuffix(".mp3") }.count
+                return true
+            }
+            destinations.identity = "volume-A"  // the same disk is back
+            return true
+        }
+
+        let result = try await env.service.executeSync(profileId: profile.id!)
+
+        #expect(destinations.waits == 2, "the other disk didn’t end the wait")
+        #expect(filesWhileOtherDisk.value == 1, "nothing was written to the other disk")
+        #expect(result.syncedCount == 3)
+        #expect(env.files(in: device).count == 3)
+    }
+
+    // MARK: Start guards, retry scope, drive loss
+
+    @Test func aMissingDeviceIsNotConnectedNeverNotEnoughSpace() async throws {
+        let destinations = ScriptedDestinations(disconnectAfter: 0)
+        let env = try await SyncTestEnv(destinations: destinations)
+        let device = try env.device("IPOD")
+        let profile = try await env.profile("iPod", device: device)
+        try env.localTrack(1, title: "One")
+        try await env.add([1], to: profile)
+        // The folder is gone: its free space can't be read either.
+        try FileManager.default.removeItem(at: device)
+        do {
+            _ = try await env.service.executeSync(profileId: profile.id!)
+            Issue.record("the sync should not start")
+        } catch let error as SyncRunError {
+            #expect(error.plainCause == "“IPOD” is not connected")
+        } catch {
+            Issue.record("wrong error: \(error)")
+        }
+    }
+
+    @Test func retryNeedsSpaceForTheRetriedTracksOnly() {
+        var preview = SyncService.PreviewResult()
+        preview.totalNewSize = 10_000_000_000  // the whole plan
+        preview.deviceAvailableSpace = 1_000_000_000
+        preview.hasSufficientSpace = false
+        let retried = [SyncService.FilePreview(id: 1, trackId: 1, title: "A", artist: "B", album: "C", size: 5_000_000,
+                                               destinationPath: "/x")]
+        let full = SyncService.spaceCheck(preview: preview, filesToAdd: retried, isRetry: false)
+        #expect(!full.isSufficient)
+        let retry = SyncService.spaceCheck(preview: preview, filesToAdd: retried, isRetry: true)
+        #expect(retry.isSufficient)
+        #expect(retry.needed == 5_000_000)
+    }
+
+    @Test func aRetriedTrackThatIsNowSkippedLeavesTheFailures() async throws {
+        let env = try await SyncTestEnv()
+        let device = try env.device("IPOD")
+        let profile = try await env.profile("iPod", device: device)
+        let id = profile.id!
+        try env.localTrack(1, title: "Fixed")
+        try env.remoteTrack(2, title: "Now Remote")
+        try await env.add([1, 2], to: profile)  // 3 was removed from the profile meanwhile
+        func failure(_ track: Int64) -> SyncResultFailure {
+            SyncResultFailure(trackID: track, title: "T\(track)", artist: "A", reason: "The device is full", devicePath: "")
+        }
+        try await env.results.begin(profileID: id, startedAt: Date(), plannedCount: 3, plan: nil, operationID: nil)
+        try await env.results.finish(profileID: id, outcome: .completed, endedAt: Date(), copiedCount: 0, removedCount: 0,
+                                     failures: [failure(1), failure(2), failure(3)], skipped: [])
+
+        _ = try await env.service.executeSync(profileId: id, onlyTrackIDs: [1, 2, 3])
+
+        let stored = try #require(try await env.results.fetch(profileID: id))
+        #expect(stored.failures.isEmpty, "1 copied, 2 is skipped now, 3 is no longer in the profile")
+    }
+
+    @Test func theLibraryDriveLeavingMidRunSkipsInsteadOfFailing() async throws {
+        let destinations = ScriptedDestinations()
+        let env = try await SyncTestEnv(destinations: destinations)
+        let device = try env.device("IPOD")
+        let profile = try await env.profile("iPod", device: device)
+        try await env.sync.updateSettings(profileId: profile.id!, transcodeMode: TranscodeMode.aac248.rawValue)
+        // "audio-1" is not audio: the conversion fails; by then the library drive has left.
+        try env.localTrack(1, title: "One")
+        try await env.add([1], to: profile)
+        destinations.script(libraryLeavesAfter: 2)  // the plan and the file's own check still see it
+
+        let result = try await env.service.executeSync(profileId: profile.id!)
+
+        #expect(result.failedCount == 0)
+        #expect(result.skippedTracks.map(\.reason) == [.libraryDriveAway])
+    }
+
     @Test func aResumedRunCopiesOnlyWhatIsNotOnTheDevice() async throws {
         let env = try await SyncTestEnv()
         let device = try env.device("IPOD")

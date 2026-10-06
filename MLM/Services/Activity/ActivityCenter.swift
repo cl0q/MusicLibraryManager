@@ -40,6 +40,8 @@ struct ActivityEcho: Equatable, Sendable {
     let failedCount: Int
     /// The result sentence of the last finished operation (`35 downloaded · 9 failed`).
     let resultText: String?
+    /// What a queued / paused operation waits for, as a value (`waitText` is its sentence).
+    var wait: ActivityWait? = nil
 
     /// `Downloading 12 of 44` (toolbar, sync profile row/header).
     var toolbarText: String {
@@ -865,7 +867,8 @@ final class ActivityCenter {
                 fraction: active.progress.fraction,
                 waitText: active.wait?.sentence,
                 failedCount: 0,
-                resultText: nil
+                resultText: nil,
+                wait: active.wait
             )
         }
         guard let last = finishedOperations.first(where: matches) else { return nil }

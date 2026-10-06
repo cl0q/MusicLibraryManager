@@ -149,6 +149,38 @@ struct SyncProfileResultRepositoryTests {
         #expect(all[b]?.failures == [failure], "B keeps its own failures")
     }
 
+    @Test func aRunLeftRunningAtLaunchBecomesInterrupted() async throws {
+        let (_, sync, results) = try make()
+        let a = try await sync.create(name: "A", outputFolder: "/tmp/a").id!
+        let b = try await sync.create(name: "B", outputFolder: "/tmp/b").id!
+        try await results.begin(profileID: a, startedAt: Date(), plannedCount: 9, plan: nil, operationID: nil)
+        try await results.recordProgress(profileID: a, copiedCount: 4)
+        try await results.begin(profileID: b, startedAt: Date(), plannedCount: 1, plan: nil, operationID: nil)
+        try await results.finish(profileID: b, outcome: .completed, endedAt: Date(), copiedCount: 1,
+                                 removedCount: 0, failures: [], skipped: [])
+        try await results.markStaleRunsInterrupted()
+        let all = try await results.fetchAll()
+        #expect(all[a]?.outcome == .interrupted)
+        #expect(all[a]?.copiedCount == 4, "what arrived stays counted")
+        #expect(all[a]?.lastInterruptedAt != nil)
+        #expect(all[b]?.outcome == .completed, "finished runs are untouched")
+    }
+
+    @Test func anUnreadableElementIsDroppedAndTheRestStays() async throws {
+        let (db, sync, results) = try make()
+        let a = try await sync.create(name: "A", outputFolder: "/tmp/a").id!
+        try await results.begin(profileID: a, startedAt: Date(), plannedCount: 2, plan: nil, operationID: nil)
+        try await results.finish(profileID: a, outcome: .completed, endedAt: Date(), copiedCount: 0,
+                                 removedCount: 0, failures: [failure], skipped: [])
+        // A newer version wrote a failure this one can't read, between two it can.
+        let good = try String(decoding: JSONEncoder().encode(failure), as: UTF8.self)
+        try await db.write { db in
+            try db.execute(sql: "UPDATE sync_profile_results SET failures = ? WHERE profile_id = ?",
+                           arguments: ["[\(good),{\"unknown\":true},\(good)]", a])
+        }
+        #expect(try await results.fetch(profileID: a)?.failures == [failure, failure])
+    }
+
     @Test func connectionDateSurvivesANewRun() async throws {
         let (_, sync, results) = try make()
         let a = try await sync.create(name: "A", outputFolder: "/tmp/a").id!

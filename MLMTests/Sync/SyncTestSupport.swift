@@ -11,6 +11,8 @@ final class ScriptedDestinations: SyncDestinationChecking, @unchecked Sendable {
     private var connected = true
     private(set) var waits = 0
     var libraryReachable = true
+    /// The scripted volume identity of the device (`nil` = unknown).
+    var identity: String?
     /// Called (off the main actor) while the sync waits for the device; returns whether the
     /// device is connected again afterwards.
     var onWait: (@Sendable (Int) async -> Bool)?
@@ -34,12 +36,33 @@ final class ScriptedDestinations: SyncDestinationChecking, @unchecked Sendable {
         }
     }
 
-    func isLibraryReachable(_ libraryRoot: String) -> Bool { lock.withLock { libraryReachable } }
+    /// `true` answers left before the library drive "leaves" (`nil` = it stays as `libraryReachable` says).
+    private var libraryAllowance: Int?
+
+    func script(libraryLeavesAfter allowance: Int?) {
+        lock.withLock { libraryAllowance = allowance }
+    }
+
+    func isLibraryReachable(_ libraryRoot: String) -> Bool {
+        lock.withLock {
+            if let left = libraryAllowance {
+                if left <= 0 { libraryReachable = false; libraryAllowance = nil } else { libraryAllowance = left - 1 }
+            }
+            return libraryReachable
+        }
+    }
+
+    func volumeIdentity(_ path: String) -> String? { lock.withLock { identity } }
 
     func waitBeforeRecheck() async throws {
         let count = lock.withLock { waits += 1; return waits }
         let back = await onWait?(count) ?? true
         lock.withLock { if back { connected = true } }
+    }
+
+    /// Scripts the next disconnect: `allowance` more `true` answers, then the device is gone.
+    func script(disconnectAfter allowance: Int?) {
+        lock.withLock { self.allowance = allowance; connected = true }
     }
 
     func disconnect() { lock.withLock { connected = false } }

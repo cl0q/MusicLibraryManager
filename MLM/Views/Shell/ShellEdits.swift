@@ -35,7 +35,7 @@ final class ShellEdits {
                 syncContentDidChange: { id in
                     // The profile's page shows the new content and a fresh plan (W3-SYNC: every
                     // profile has its own state; nothing switches, D-SYNC-TRACKS-TO-PROFILE).
-                    await container.syncViewModel?.profileDidChange(id)
+                    // One notification: `SyncViewModel` observes it and reloads and re-plans.
                     NotificationCenter.default.post(name: .syncProfileDidChange, object: nil, userInfo: ["profileId": id])
                 },
                 covers: { container.playlistCoverService }
@@ -797,7 +797,13 @@ extension ShellEdits {
                 return copy
             },
             undo: { copy in
-                if let id = copy.id { try await repository.delete(id: id) }
+                if let id = copy.id {
+                    // Undo would drop the copy's sync history and leave its files unaccounted for.
+                    if try await !repository.fetchSyncState(profileId: id).isEmpty {
+                        throw UndoNothingLeft(note: "Can’t undo — “\(copy.name)” has synced since")
+                    }
+                    try await repository.delete(id: id)
+                }
                 await didChange(profileID)
                 return ()
             },

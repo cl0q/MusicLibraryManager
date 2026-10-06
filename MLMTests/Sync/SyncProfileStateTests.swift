@@ -66,8 +66,8 @@ struct SyncProfileStateTests {
 
     @Test func folderNotFoundOnAConnectedDevice() {
         let s = state { $0.destination = .folderNotFound }
-        #expect(s.sidebarText == "Folder not found on “IPOD CLASSIC”")
-        #expect(s.syncNowDisabledReason == "Folder not found on “IPOD CLASSIC”")
+        #expect(s.sidebarText == "Folder not found on IPOD CLASSIC")
+        #expect(s.syncNowDisabledReason == "Folder not found on IPOD CLASSIC")
     }
 
     @Test func syncingShowsTheActivityNumbersAndAThinBar() {
@@ -135,7 +135,7 @@ struct SyncProfileStateTests {
         #expect(s.sidebarText == "Interrupted — 86 of 214 copied")
         #expect(s.page == .interrupted)
         #expect(s.banner?.kind == .interrupted)
-        #expect(s.banner?.title == "“IPOD CLASSIC” was disconnected — 86 of 214 copied · Resume when connected")
+        #expect(s.banner?.title == "“IPOD CLASSIC” was disconnected — 86 of 214 copied")
     }
 
     @Test func interruptedAfterARelaunchHasNoOperationButStillSaysSo() {
@@ -181,7 +181,7 @@ struct SyncProfileStateTests {
                                       freeBytes: 2_000_000_000, cleanUp: true)
             $0.planHasSufficientSpace = false
         }
-        let sentence = "Not enough space — \(bytes(3_100_000_000)) needed, \(bytes(2_400_000_000)) free after removals"
+        let sentence = "Not enough space — \(bytes(3_100_000_000 + 50_000_000)) needed, \(bytes(2_400_000_000)) free after removals"
         #expect(s.syncNowDisabledReason == sentence)
         #expect(s.planSentence == "Add 214 · Remove 12 · Skip 9 · \(sentence)")
     }
@@ -222,8 +222,13 @@ struct SyncProfileStateTests {
                                    progressText: "86 of 214", fraction: 0.4, waitText: nil, failedCount: 0, resultText: nil)
         #expect(SyncRunSnapshot.from(running, progress: ActivityProgress(completed: 86, total: 214))?.phase == .running)
         let waiting = ActivityEcho(operationID: id, kind: .sync, state: .queued, verb: "Syncing", progressText: nil,
-                                   fraction: nil, waitText: "Waiting for “IPOD”", failedCount: 0, resultText: nil)
+                                   fraction: nil, waitText: "Waiting for “IPOD”", failedCount: 0, resultText: nil,
+                                   wait: .drive(volumeName: "IPOD"))
         #expect(SyncRunSnapshot.from(waiting)?.phase == .waitingForDevice)
+        let queued = ActivityEcho(operationID: id, kind: .sync, state: .queued, verb: "Syncing", progressText: nil,
+                                  fraction: nil, waitText: "Waiting for another sync", failedCount: 0, resultText: nil,
+                                  wait: .turn(after: "“Car”"))
+        #expect(SyncRunSnapshot.from(queued)?.phase == .queued, "only a drive wait is a device wait")
         let scan = ActivityEcho(operationID: id, kind: .deviceScan, state: .running, verb: "Reading", progressText: nil,
                                 fraction: nil, waitText: nil, failedCount: 0, resultText: nil)
         #expect(SyncRunSnapshot.from(scan) == nil, "a device scan is not a sync")

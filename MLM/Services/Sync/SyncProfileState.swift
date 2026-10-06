@@ -29,7 +29,8 @@ struct SyncRunSnapshot: Equatable, Sendable {
         switch echo.state {
         case .running: phase = .running
         case .paused: phase = .paused
-        case .queued: phase = echo.waitText?.hasPrefix("Waiting for") == true ? .waitingForDevice : .queued
+        case .queued:
+            if case .drive? = echo.wait { phase = .waitingForDevice } else { phase = .queued }
         default: return nil
         }
         return SyncRunSnapshot(operationID: echo.operationID, phase: phase,
@@ -88,7 +89,7 @@ struct SyncProfileState: Equatable, Sendable {
     /// The thin bar under a syncing row.
     let sidebarProgress: Double?
     let isConnected: Bool
-    /// `Connected` / `Not connected` / `Folder not found on “IPOD”`.
+    /// `Connected` / `Not connected` / `Folder not found on IPOD` (§15.8: no quotes).
     let connectionText: String
     /// Facts after the connection word (`214 to add`, `last synced 2 hours ago`).
     let headerFacts: [String]
@@ -175,7 +176,7 @@ struct SyncProfileState: Equatable, Sendable {
             if let interruptedText { return "Interrupted — \(interruptedText)" }
             switch input.destination {
             case .none, .notConnected: return "Not connected"
-            case .folderNotFound: return "Folder not found on \(device)"
+            case .folderNotFound: return "Folder not found on \(input.deviceName)"
             case .connected: break
             }
             if failedCount > 0, let lastSyncedAt {
@@ -191,7 +192,7 @@ struct SyncProfileState: Equatable, Sendable {
             switch input.destination {
             case .connected: return "Connected"
             case .none, .notConnected: return "Not connected"
-            case .folderNotFound: return "Folder not found on \(device)"
+            case .folderNotFound: return "Folder not found on \(input.deviceName)"
             }
         }()
         var facts: [String] = []
@@ -213,7 +214,8 @@ struct SyncProfileState: Equatable, Sendable {
         let spaceSentence: String? = {
             guard let plan = input.plan, !input.planHasSufficientSpace, let space = neededAfterRemovals else { return nil }
             _ = plan
-            return "Not enough space — \(bytes(space.needed)) needed, \(bytes(space.free)) free after removals"
+            // The figure includes the buffer the run keeps free, so it matches what the check used.
+            return "Not enough space — \(bytes(space.needed + SyncService.spaceBuffer)) needed, \(bytes(space.free)) free after removals"
         }()
         let planSentence: String? = {
             if driveAway { return "Can’t sync — \(driveName) is not connected" }
@@ -241,7 +243,7 @@ struct SyncProfileState: Equatable, Sendable {
             switch input.destination {
             case .none: return "Choose a destination with Change Destination…"
             case .notConnected: return "Connect \(device) to sync."
-            case .folderNotFound: return "Folder not found on \(device)"
+            case .folderNotFound: return "Folder not found on \(input.deviceName)"
             case .connected: break
             }
             if driveAway { return "Can’t sync — \(driveName) is not connected" }
@@ -258,7 +260,7 @@ struct SyncProfileState: Equatable, Sendable {
             if let interruptedText {
                 let live = input.run?.phase == .waitingForDevice
                 return Banner(kind: .interrupted,
-                              title: "\(device) was disconnected — \(interruptedText)" + (live ? " · Resume when connected" : ""),
+                              title: "\(device) was disconnected — \(interruptedText)",
                               detail: live
                                 ? "The copied tracks are complete; the playlist files on the device were not updated yet."
                                 : "Sync Now continues with the tracks that are not on the device yet.")
