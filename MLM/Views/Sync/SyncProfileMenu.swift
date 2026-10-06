@@ -75,12 +75,9 @@ struct SyncProfileMenu: View {
                 Button("Change Destination…") { vm.presenter.changingDestination = profile }
                 if connected {
                     Button("Read Playlist Changes from Device…") { readChanges(vm) }
-                    let recompute = Button("Recompute Plan") { vm.recomputePlan(id) }
-                    if place == .contextMenu {
-                        recompute.keyboardShortcut("r", modifiers: .command)
-                    } else {
-                        recompute
-                    }
+                    // ⌘R is Track ▸ Recompute Plan on the profile page (menu keys live in
+                    // `.commands`, not in view menus).
+                    Button("Recompute Plan") { vm.recomputePlan(id) }
                 }
             }
 

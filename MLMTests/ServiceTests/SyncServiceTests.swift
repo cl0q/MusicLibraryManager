@@ -10,6 +10,14 @@ struct SyncServiceTests {
     /// Correct init chain — all required params:
     /// TranscodeCache.init(cacheDir: URL)
     /// SyncService.init(trackRepository:syncRepository:configRepository:transcodeCache:)
+    /// A readable library file: since W3-SYNC a track without one is planned under Skip, not Add
+    /// (PP-SYNC-01), so tracks meant to be added need a file.
+    private func sourceFile(_ name: String = "source-\(UUID().uuidString).flac") throws -> String {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        try Data(repeating: 1, count: 16).write(to: url)
+        return url.path
+    }
+
     private func makeService() throws -> (DatabaseQueue, SyncService) {
         let db = try DatabaseManager.inMemory()
         let syncRepo = SyncRepository(database: db)
@@ -355,6 +363,7 @@ struct SyncServiceTests {
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: output) }
 
+        let source750 = try sourceFile()
         try await db.write { db in
             try db.execute(sql: """
                 INSERT INTO sync_profiles
@@ -362,9 +371,9 @@ struct SyncServiceTests {
                 VALUES (75, 'Input hash', ?, '', 0, 'aac_248', 1, 0)
                 """, arguments: [output.path])
             try db.execute(sql: """
-                INSERT INTO tracks (id, artist, album_artist, album, title, format, duration, original_path, is_duplicate)
-                VALUES (750, 'Artist', 'Artist', 'Album', 'Title', 'flac', 100, '/missing.flac', 0)
-                """)
+                INSERT INTO tracks (id, artist, album_artist, album, title, format, duration, original_path, organized_path, is_duplicate)
+                VALUES (750, 'Artist', 'Artist', 'Album', 'Title', 'flac', 100, ?, ?, 0)
+                """, arguments: [source750, source750])
             try db.execute(
                 sql: "INSERT INTO sync_profile_tracks (profile_id, track_id) VALUES (75, 750)"
             )
@@ -414,9 +423,9 @@ struct SyncServiceTests {
                 VALUES (72, 'Originals', ?, '', 0, 'keep_originals', 1, 0)
                 """, arguments: [output.path])
             try db.execute(sql: """
-                INSERT INTO tracks (id, artist, album_artist, album, title, format, duration, original_path, is_duplicate)
-                VALUES (720, 'Artist', 'Artist', 'Album', 'Title', 'mp3', 180, ?, 0)
-                """, arguments: [source.path])
+                INSERT INTO tracks (id, artist, album_artist, album, title, format, duration, original_path, organized_path, is_duplicate)
+                VALUES (720, 'Artist', 'Artist', 'Album', 'Title', 'mp3', 180, ?, ?, 0)
+                """, arguments: [source.path, source.path])
             try db.execute(
                 sql: "INSERT INTO sync_profile_tracks (profile_id, track_id) VALUES (72, 720)"
             )
@@ -434,6 +443,7 @@ struct SyncServiceTests {
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: output) }
 
+        let source730 = try sourceFile()
         try await db.write { db in
             try db.execute(sql: """
                 INSERT INTO sync_profiles
@@ -441,9 +451,9 @@ struct SyncServiceTests {
                 VALUES (73, 'AAC', ?, '', 0, 'aac_320', 1, 0)
                 """, arguments: [output.path])
             try db.execute(sql: """
-                INSERT INTO tracks (id, artist, album_artist, album, title, format, duration, original_path, is_duplicate)
-                VALUES (730, 'Artist', 'Artist', 'Album', 'Title', 'flac', 100, '/missing.flac', 0)
-                """)
+                INSERT INTO tracks (id, artist, album_artist, album, title, format, duration, original_path, organized_path, is_duplicate)
+                VALUES (730, 'Artist', 'Artist', 'Album', 'Title', 'flac', 100, ?, ?, 0)
+                """, arguments: [source730, source730])
             try db.execute(
                 sql: "INSERT INTO sync_profile_tracks (profile_id, track_id) VALUES (73, 730)"
             )
@@ -460,6 +470,7 @@ struct SyncServiceTests {
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: output) }
 
+        let source760 = try sourceFile()
         try await db.write { db in
             try db.execute(sql: """
                 INSERT INTO sync_profiles
@@ -467,9 +478,9 @@ struct SyncServiceTests {
                 VALUES (76, 'AAC 248', ?, '', 0, 'aac_248', 1, 0)
                 """, arguments: [output.path])
             try db.execute(sql: """
-                INSERT INTO tracks (id, artist, album_artist, album, title, format, duration, original_path, is_duplicate)
-                VALUES (760, 'Artist', 'Artist', 'Album', 'Title', 'flac', 100, '/missing.flac', 0)
-                """)
+                INSERT INTO tracks (id, artist, album_artist, album, title, format, duration, original_path, organized_path, is_duplicate)
+                VALUES (760, 'Artist', 'Artist', 'Album', 'Title', 'flac', 100, ?, ?, 0)
+                """, arguments: [source760, source760])
             try db.execute(
                 sql: "INSERT INTO sync_profile_tracks (profile_id, track_id) VALUES (76, 760)"
             )
@@ -517,17 +528,18 @@ struct SyncServiceTests {
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: output) }
 
+        let sources = try (741...743).map { _ in try sourceFile() }
         try await db.write { db in
             try db.execute(sql: """
                 INSERT INTO sync_profiles
                     (id, name, output_folder, playlist_path_prefix, generate_m3u8, transcode_mode, fat32_safe_paths, cleanup_removed_files)
                 VALUES (74, 'Batch', ?, '', 0, 'aac_248', 1, 0)
                 """, arguments: [output.path])
-            for id in 741...743 {
+            for (index, id) in (741...743).enumerated() {
                 try db.execute(sql: """
-                    INSERT INTO tracks (id, artist, album_artist, album, title, format, duration, original_path, is_duplicate)
-                    VALUES (?, 'Artist', 'Artist', 'Album', 'Title', 'flac', 10, '/missing-\(id).flac', 0)
-                    """, arguments: [id])
+                    INSERT INTO tracks (id, artist, album_artist, album, title, format, duration, original_path, organized_path, is_duplicate)
+                    VALUES (?, 'Artist', 'Artist', 'Album', 'Title', 'flac', 10, ?, ?, 0)
+                    """, arguments: [id, sources[index], sources[index]])
                 try db.execute(
                     sql: "INSERT INTO sync_profile_tracks (profile_id, track_id) VALUES (74, ?)",
                     arguments: [id]
