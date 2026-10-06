@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import Observation
 
 /// Steps 2 and 3 of the in-window setup (V-SETUP, DEC-034) for a library that was just
@@ -33,6 +34,8 @@ final class LibrarySetupModel {
     struct Services {
         var makeImporter: @MainActor () -> ImportViewModel?
         var activity: ActivityCenter?
+        /// Writes (`true`) or clears (`false`) the library's `setup_dismissed` flag.
+        var rememberSetUpLater: @MainActor (Bool) async -> Void = { _ in }
 
         static var live: Services {
             Services(
@@ -41,9 +44,39 @@ final class LibrarySetupModel {
                     guard let service = container.importService, let config = container.configRepository else { return nil }
                     return ImportViewModel(importService: service, configRepository: config, activity: .shared)
                 },
-                activity: .shared
+                activity: .shared,
+                rememberSetUpLater: { dismissed in
+                    guard let config = DependencyContainer.shared.configRepository else { return }
+                    if dismissed {
+                        try? await config.set(key: LibrarySetupModel.dismissedKey, value: "1")
+                    } else {
+                        try? await config.delete(key: LibrarySetupModel.dismissedKey)
+                    }
+                }
             )
         }
+    }
+
+    /// `app_config` key set by `Set Up Later`, cleared when the setup saves a library folder.
+    nonisolated static let dismissedKey = "setup_dismissed"
+
+    /// After a library opens: the window continues with the setup when the library is empty,
+    /// has no library folder and its setup wasn't left with `Set Up Later` (S8). A library
+    /// created this session always meets this (new, empty, no flag).
+    nonisolated static func needsSetup(_ database: any DatabaseReader) async -> Bool {
+        let facts = try? await database.read { db -> (tracks: Int, root: String?, dismissed: String?) in
+            let tracks = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM tracks") ?? 0
+            let root = try String.fetchOne(db, sql: "SELECT value FROM app_config WHERE key = 'library_root'")
+            let dismissed = try String.fetchOne(db, sql: "SELECT value FROM app_config WHERE key = ?", arguments: [dismissedKey])
+            return (tracks, root, dismissed)
+        }
+        guard let facts else { return false }
+        return facts.tracks == 0 && (facts.root ?? "").isEmpty && facts.dismissed != "1"
+    }
+
+    /// `Set Up Later`: remembered for this library.
+    func setUpLater() async {
+        await services.rememberSetUpLater(true)
     }
 
     let libraryName: String
@@ -127,6 +160,8 @@ final class LibrarySetupModel {
             problem = "The folder couldn’t be saved. Try again."
             return
         }
+        // A folder is set: a `Set Up Later` from before no longer applies (S8).
+        await services.rememberSetUpLater(false)
         stage = .importing
         importTask = Task { [weak self] in
             await importer.importLibrary()
@@ -160,6 +195,7 @@ final class LibrarySetupModel {
         }
         self.importer = importer
         await importer.setLibraryRoot(folder.path)
+        await services.rememberSetUpLater(false)
         let job = services.activity?.begin(
             .folderScan, title: "Scan “\(folder.lastPathComponent)”", subject: .folder(folder), itemNoun: .file)
         job?.setWaiting(.drive(volumeName: volume))

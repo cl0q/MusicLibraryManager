@@ -27,11 +27,7 @@ struct NewLibrarySheet: View {
                 rationale: "The default location is on this Mac, so the library opens even when no external drive is connected."
             )
             if let message = visibleError?.message {
-                Label(message, systemImage: "exclamationmark.triangle")
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(.orange, .primary)
-                    .font(.callout)
-                    .fixedSize(horizontal: false, vertical: true)
+                InlineProblem(message)
             }
             HStack {
                 Spacer()
@@ -47,15 +43,14 @@ struct NewLibrarySheet: View {
         .onAppear { name = defaultName }
         .onChange(of: name) { _, _ in error = nil }
         .onChange(of: directory) { _, _ in error = nil }
+        .newLibraryCheck(name: name, directory: directory, defaultDirectory: launch.store.librariesDirectory,
+                         problem: $liveProblem)
     }
 
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     /// Name taken / location not writable, checked while typing (empty is just disabled).
-    private var liveProblem: NewLibraryError? {
-        guard !trimmedName.isEmpty else { return nil }
-        return launch.newLibraryProblem(named: trimmedName, in: directory)
-    }
+    @State private var liveProblem: NewLibraryError?
 
     private var visibleError: NewLibraryError? { error ?? liveProblem }
 
@@ -64,6 +59,30 @@ struct NewLibrarySheet: View {
         Task {
             error = await launch.createLibrary(named: trimmedName, in: directory)
             isCreating = false
+        }
+    }
+}
+
+extension View {
+    /// Checks a new library's name and location while typing — debounced, off the main
+    /// actor (file-system calls never run per keystroke on the main thread, review N5).
+    func newLibraryCheck(
+        name: String, directory: URL?, defaultDirectory: URL, problem: Binding<NewLibraryError?>
+    ) -> some View {
+        task(id: "\(name)\u{0}\(directory?.path ?? "")") {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                problem.wrappedValue = nil
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            let folder = directory ?? defaultDirectory
+            let result = await Task.detached(priority: .userInitiated) {
+                LibraryLaunchCoordinator.newLibraryProblem(named: trimmed, in: folder)
+            }.value
+            guard !Task.isCancelled else { return }
+            problem.wrappedValue = result
         }
     }
 }

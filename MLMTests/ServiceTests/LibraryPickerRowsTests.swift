@@ -60,6 +60,24 @@ struct LibraryPickerRowsTests {
         #expect(LibraryPickerRows.initialSelection(in: rows, focus: nil) == "a")
     }
 
+    /// S3: an interrupted setup replaces the old install's row, with its own words.
+    @Test func anInterruptedSetupReplacesTheOldInstallsRow() {
+        let journal = URL(fileURLWithPath: "/tmp/adoption-journal.json")
+        let rows = LibraryPickerRows.build(
+            registry: LibraryRegistry(), legacyDatabase: URL(fileURLWithPath: "/tmp/music_library.db"),
+            interruptedSetup: InterruptedSetup(name: "Main Library", journal: journal, details: "journalUnreadable"),
+            availability: availability)
+        #expect(rows.map(\.id) == ["setup-interrupted"])
+        #expect(rows[0].listedName == "Main Library (setup interrupted)")
+        #expect(rows[0].openRefusal == "Can’t open — setup interrupted")
+        #expect(rows[0].state == .setupInterrupted(details: "journalUnreadable"))
+    }
+
+    /// N6: a library on a volume that isn't mounted is never read.
+    @Test func factsAreNotReadFromAnUnmountedVolume() {
+        #expect(LibraryPickerFacts.read(databaseAt: URL(fileURLWithPath: "/Volumes/MLMTestNoSuchVolume-\(UUID().uuidString)/X.mlibm/music_library.db")) == nil)
+    }
+
     @Test func factsCaption() {
         #expect(LibraryPickerFacts(trackCount: 12_935, libraryRoot: "/Volumes/Lexxar/Music").caption(isLegacy: false)
                 == "\(12_935.formatted(.number)) tracks · library folder on “Lexxar”")

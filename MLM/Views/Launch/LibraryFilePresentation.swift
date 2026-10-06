@@ -28,15 +28,29 @@ struct LibraryFilePresentation: ViewModifier {
             .modifier(SwitchAlert(launch: launch))
             .modifier(ProblemAlert(launch: launch))
             .alert(
-                "Quit MLM?",
-                isPresented: Binding(get: { quit.pending != nil }, set: { if !$0 { quit.cancel() } })
+                quitTitle,
+                isPresented: Binding(get: { quit.question != nil }, set: { if !$0 { quit.cancel() } })
             ) {
-                Button("Quit", role: .destructive) { quit.confirm() }
-                Button("Cancel", role: .cancel) { quit.cancel() }
-                    .keyboardShortcut(.defaultAction)
+                switch quit.question {
+                case .confirm?:
+                    Button("Quit", role: .destructive) { quit.confirm() }
+                    Button("Cancel", role: .cancel) { quit.cancel() }
+                        .keyboardShortcut(.defaultAction)
+                default:
+                    // The one legitimate `OK`: nothing to choose (UC-SHEET-14, review S4).
+                    Button("OK", role: .cancel) { quit.cancel() }
+                        .keyboardShortcut(.defaultAction)
+                }
             } message: {
-                Text(quit.pending?.message(continuingIn: LibraryFooter.libraryName(launch)) ?? "")
+                if case .confirm(let summary, let libraryName)? = quit.question {
+                    Text(summary.message(continuingIn: libraryName) ?? "")
+                }
             }
+    }
+
+    private var quitTitle: String {
+        if case .refuse(let sentence)? = quit.question { return sentence }
+        return "Quit MLM?"
     }
 }
 
@@ -49,11 +63,16 @@ private struct SwitchAlert: ViewModifier {
     func body(content: Content) -> some View {
         let work = RunningWorkSummary(operations: ActivityCenter.shared.activeOperations)
         let name = launch.pendingSwitch?.name ?? ""
+        let refusal = work.refusal(libraryName: launch.workSubjectName, switching: true)
         content.alert(
             "Switch to “\(name)”?",
             isPresented: Binding(get: { launch.pendingSwitch != nil }, set: { if !$0 { launch.cancelSwitch() } })
         ) {
-            if work.isEmpty {
+            if refusal != nil {
+                // Work that must not be cut off runs: only `Cancel` (review S4).
+                Button("Cancel", role: .cancel) { launch.cancelSwitch() }
+                    .keyboardShortcut(.defaultAction)
+            } else if work.isEmpty {
                 Button("Switch and Relaunch") { launch.confirmSwitch() }
                     .keyboardShortcut(.defaultAction)
                 Button("Cancel", role: .cancel) { launch.cancelSwitch() }
@@ -63,11 +82,11 @@ private struct SwitchAlert: ViewModifier {
                     .keyboardShortcut(.defaultAction)
             }
         } message: {
-            Text(Self.message(name: name, work: work, current: LibraryFooter.libraryName(launch)))
+            Text(refusal ?? Self.message(name: name, work: work, current: launch.openLibraryName))
         }
     }
 
-    static func message(name: String, work: RunningWorkSummary, current: String) -> String {
+    static func message(name: String, work: RunningWorkSummary, current: String?) -> String {
         let lead = "MLM quits and reopens with “\(name)”."
         guard let list = work.message(continuingIn: current) else { return lead }
         return lead + "\n\n" + list
@@ -91,7 +110,7 @@ private struct ProblemAlert: ViewModifier {
         }
     }
 
-    private var current: String { LibraryFooter.libraryName(launch) }
+    private var current: String { launch.openLibraryName ?? LibraryFooter.libraryName(launch) }
     private var staysOpen: String {
         launch.screen == .opened ? " “\(current)” stays open." : ""
     }
@@ -106,6 +125,8 @@ private struct ProblemAlert: ViewModifier {
             return "“\(name)” is a copy of “\(originalName)”"
         case .creationFailed(let name, _)?:
             return "The library “\(name)” couldn’t be created"
+        case .refused(let sentence)?:
+            return sentence
         case nil:
             return ""
         }
@@ -128,7 +149,7 @@ private struct ProblemAlert: ViewModifier {
             return message
         case .listNotSaved?:
             return "MLM couldn’t update its list of libraries, so nothing changed. Try again."
-        case nil:
+        case .refused?, nil:
             return ""
         }
     }
@@ -160,7 +181,7 @@ private struct ProblemAlert: ViewModifier {
             Button("Choose Another Location…") { launch.requestNewLibrary(named: name) }
                 .keyboardShortcut(.defaultAction)
             Button("Cancel", role: .cancel) { launch.dismissProblem() }
-        case .listNotSaved?, nil:
+        case .listNotSaved?, .refused?, nil:
             Button("OK", role: .cancel) { launch.dismissProblem() }
         }
     }

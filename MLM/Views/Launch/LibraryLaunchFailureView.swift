@@ -14,19 +14,29 @@ struct LibraryLaunchFailureView: View {
 
     var body: some View {
         ContentUnavailableView {
-            Label(failure.title, systemImage: "exclamationmark.triangle")
-                .symbolRenderingMode(.palette)
-                .foregroundStyle(.orange, .primary)
+            StateLabel(text: failure.title, systemImage: "exclamationmark.triangle", tint: .orange)
         } description: {
             Text(failure.message)
         } actions: {
             VStack(spacing: Spacing.m) {
                 HStack(spacing: Spacing.s) {
-                    Button("Try Again") { Task { await launch.retryFailedOpen() } }
-                        .buttonStyle(.borderedProminent)
-                        .keyboardShortcut(.defaultAction)
+                    // After a failed update `Try Again` would start the update again: it is not
+                    // the default there; `Choose Another Library` is (review S2).
+                    if failure.tryAgainIsDefault {
+                        Button("Try Again") { Task { await launch.retryFailedOpen() } }
+                            .buttonStyle(.borderedProminent)
+                            .keyboardShortcut(.defaultAction)
+                    } else {
+                        Button("Try Again") { Task { await launch.retryFailedOpen() } }
+                    }
                     if failure.offersChooseAnother {
-                        Button("Choose Another Library") { launch.chooseAnotherLibrary() }
+                        if failure.tryAgainIsDefault {
+                            Button("Choose Another Library") { launch.chooseAnotherLibrary() }
+                        } else {
+                            Button("Choose Another Library") { launch.chooseAnotherLibrary() }
+                                .buttonStyle(.borderedProminent)
+                                .keyboardShortcut(.defaultAction)
+                        }
                     }
                     if launch.restore != nil {
                         Button("Restore from Backup…") { isRestoring = true }
@@ -34,6 +44,7 @@ struct LibraryLaunchFailureView: View {
                     Button("Show Logs") { LaunchLogs.show() }
                 }
                 .controlSize(.large)
+                .disabled(launch.isBusy)
                 DetailsDisclosure(text: failure.details)
             }
         }
@@ -41,7 +52,7 @@ struct LibraryLaunchFailureView: View {
         .task(id: failure) { await launch.loadRestoreOptions() }
         .sheet(isPresented: $isRestoring) {
             if let restore = launch.restore {
-                LaunchRestoreSheet(model: restore)
+                LaunchRestoreSheet(model: restore, launch: launch)
             }
         }
     }
@@ -55,9 +66,7 @@ struct InvalidLibraryFileView: View {
 
     var body: some View {
         ContentUnavailableView {
-            Label(file.title, systemImage: "exclamationmark.triangle")
-                .symbolRenderingMode(.palette)
-                .foregroundStyle(.orange, .primary)
+            StateLabel(text: file.title, systemImage: "exclamationmark.triangle", tint: .orange)
         } description: {
             Text(file.message)
         } actions: {
@@ -93,6 +102,24 @@ struct DetailsDisclosure: View {
     }
 }
 
+/// A state or failure label: only the symbol carries the tint; the text keeps its own
+/// (primary or secondary) colour — the text carries the meaning (UC-COLOR-05, review N4).
+struct StateLabel: View {
+    let text: String
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        Label {
+            Text(text)
+        } icon: {
+            Image(systemName: systemImage)
+                .foregroundStyle(tint)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
 /// `Show Logs`: the Activity window on Logs (available in every launch state, UC-JOB-06).
 enum LaunchLogs {
     @MainActor
@@ -107,6 +134,7 @@ enum LaunchLogs {
 /// `Before restore` backup first, then the relaunch into the restored library.
 struct LaunchRestoreSheet: View {
     let model: LaunchRestoreModel
+    let launch: LibraryLaunchCoordinator
 
     @Environment(\.dismiss) private var dismiss
     @State private var selection: URL?
@@ -138,9 +166,7 @@ struct LaunchRestoreSheet: View {
             .formStyle(.grouped)
             .frame(minHeight: 160)
             if let error = model.backups.errorMessage {
-                Label(error, systemImage: "exclamationmark.triangle")
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(.orange, .primary)
+                StateLabel(text: error, systemImage: "exclamationmark.triangle", tint: .orange)
                     .font(.callout)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -169,7 +195,7 @@ struct LaunchRestoreSheet: View {
             presenting: confirming
         ) { info in
             Button("Restore and Relaunch", role: .destructive) {
-                Task { await model.restore(info) }
+                Task { await launch.restoreFromBackup(info) }
             }
             Button("Cancel", role: .cancel) {}
                 .keyboardShortcut(.defaultAction)

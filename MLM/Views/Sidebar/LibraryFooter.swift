@@ -25,16 +25,21 @@ struct LibraryFooter: View {
                     } label: {
                         LibraryMenuLabel(title: Self.recentTitle(recent))
                     }
-                    .disabled(recent.availability != .available)
+                    .disabled(recent.availability != .available || launch.isBusy)
                 }
             }
             Divider()
-            Button("Open Library…") {
-                launch.chooseLibraryFile()
+            // Disabled with the reason while a restore or a library file setup runs (W3-LAUNCH S1).
+            Group {
+                Button("Open Library…") {
+                    launch.chooseLibraryFile()
+                }
+                Button("New Library…") {
+                    launch.requestNewLibrary()
+                }
             }
-            Button("New Library…") {
-                launch.requestNewLibrary()
-            }
+            .disabled(launch.isBusy)
+            .help(launch.busyReason ?? "")
             Divider()
             Button("Show Library File in Finder") {
                 if let url = launch.activePackageURL {
