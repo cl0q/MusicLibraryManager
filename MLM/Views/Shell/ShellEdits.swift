@@ -72,13 +72,22 @@ final class ShellEdits {
         let after: AlbumTrackSnapshot
     }
 
-    /// `Reordered “‹album›”` — one step; `orderedTrackIDs` is the whole new order (members left
-    /// out keep their relative place after the listed ones).
+    /// `Reordered “‹album›”` — one step; `orderedTrackIDs` is the whole new order. Every row keeps
+    /// its disc, numbers run 1, 2, 3… within each disc in the given order, and members left out
+    /// follow the listed ones of their disc. A thin wrapper over `setAlbumLayout` (one code path).
     @discardableResult
     func setAlbumOrder(albumID: Int64, orderedTrackIDs: [Int64]) async throws -> AlbumEditResult? {
-        try await editAlbum(albumID, actionName: { "Reorder “\($0)”" }, message: { name, _ in "Reordered “\(name)”" }) { repository in
-            _ = try await repository.move(trackIDs: orderedTrackIDs, to: 0, in: albumID)
+        guard let repository = dependencies.albumTracks() else { throw UndoTargetMissing(quotedName: "The album") }
+        let discs = Dictionary(uniqueKeysWithValues: try await repository.rows(of: albumID).map { ($0.trackId, $0.disc) })
+        var seen = Set<Int64>()
+        var next: [Int: Int] = [:]
+        var layout: [(trackID: Int64, disc: Int, number: Int)] = []
+        for id in orderedTrackIDs where seen.insert(id).inserted {
+            guard let disc = discs[id] else { continue }
+            next[disc, default: 0] += 1
+            layout.append((id, disc, next[disc]!))
         }
+        return try await setAlbumLayout(albumID: albumID, layout)
     }
 
     /// `Added ‹n› tracks to “‹album›”` (n counts the tracks that were not members yet).

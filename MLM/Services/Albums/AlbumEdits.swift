@@ -11,8 +11,7 @@ extension ShellEdits {
     /// numbers 1, 2, 3… within each disc (`AlbumOrderEditor.numbered`). One step,
     /// `Reorder “‹album›”`; undo restores the earlier rows exactly. Nil when nothing changed.
     ///
-    /// `setAlbumOrder` (W4-1) can't carry discs or numbers: it places the whole list as one disc
-    /// and leaves the numbers as they were, which would flatten a two-disc album.
+    /// `setAlbumOrder` (W4-1) is a thin wrapper over this: it keeps every row's disc.
     @discardableResult
     func setAlbumLayout(albumID: Int64, _ ordered: [(trackID: Int64, disc: Int, number: Int)]) async throws -> AlbumEditResult? {
         guard let repository = dependencies.albumTracks(), let albums = dependencies.albums(),

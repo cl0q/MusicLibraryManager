@@ -61,8 +61,25 @@ struct AlbumEditsUndoTests {
         #expect(try await order(env) == [env.ids[2], env.ids[0], env.ids[1]])
     }
 
+    @Test func reorderingATwoDiscAlbumKeepsEveryDiscAndNumbersPerDisc() async throws {
+        let env = try await makeEnv()
+        let (a, b, c) = (env.ids[0], env.ids[1], env.ids[2])
+        try await env.repo.setNumbers(albumID: env.album, [a: (1, 1), b: (1, 2), c: (2, 1)])
+        let before = try await env.repo.snapshot(albumID: env.album)
+        try await env.edits.setAlbumOrder(albumID: env.album, orderedTrackIDs: [c, b, a])
+        let rows = try await env.repo.rows(of: env.album)
+        #expect(rows.map(\.trackId) == [b, a, c], "disc 1 reordered, disc 2 untouched")
+        #expect(rows.map(\.disc) == [1, 1, 2], "no disc is flattened")
+        #expect(rows.map(\.trackNumber) == [1, 2, 1], "numbers 1…k within each disc")
+        env.manager.undo()
+        await env.undo.waitUntilIdle()
+        #expect(try await env.repo.snapshot(albumID: env.album) == before)
+    }
+
     @Test func aReorderThatChangesNothingLeavesNoStep() async throws {
         let env = try await makeEnv()
+        // Numbered 1, 2, 3 in this order already: the same order again changes nothing.
+        try await env.repo.setNumbers(albumID: env.album, [env.ids[0]: (1, 1), env.ids[1]: (1, 2), env.ids[2]: (1, 3)])
         try await env.edits.setAlbumOrder(albumID: env.album, orderedTrackIDs: Array(env.ids.prefix(3)))
         #expect(env.manager.undoMenuItemTitle == "Undo", "no step")
         #expect(env.status.message == nil)
