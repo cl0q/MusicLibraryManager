@@ -132,9 +132,14 @@ final class ImportViewModel {
     /// `LibraryAvailabilityMonitor`), then — when asked — a scan of the new folder.
     @MainActor
     func changeLibraryFolder(to folder: URL, scanAfterwards: Bool) async {
-        await setLibraryRoot(folder.standardizedFileURL.path)
+        let oldRoot = libraryRoot
+        let newRoot = folder.standardizedFileURL.path
+        await setLibraryRoot(newRoot)
         guard errorMessage == nil, scanAfterwards else { return }
-        await importLibrary()
+        // B2: files that are known tracks at the same place below the new folder are re-pointed,
+        // never added a second time.
+        let remap = oldRoot.flatMap { $0.isEmpty ? nil : LibraryRootRemap(oldRoot: $0, newRoot: newRoot) }
+        await runImport(directory: folder, title: "Scan “\(folder.lastPathComponent)”", remap: remap)
     }
 
     // MARK: - Import
@@ -248,7 +253,7 @@ final class ImportViewModel {
     @MainActor
     @discardableResult
     private func runImport(directory: URL, files: [URL]? = nil, title: String,
-                           prepare: PrepareFiles? = nil) async -> ImportService.ImportResult? {
+                           prepare: PrepareFiles? = nil, remap: LibraryRootRemap? = nil) async -> ImportService.ImportResult? {
         // Activity (W3-ACT): `Scan “‹folder›”`; Cancel stops after the current file and keeps
         // what was imported (`ImportService` checks cancellation per file). One box per run, so
         // cancelling a queued import never stops the running one (W2-H).
@@ -289,7 +294,7 @@ final class ImportViewModel {
                 let result = if let importFiles {
                     try await self.importService.importFiles(importFiles, onProgress: onProgress)
                 } else {
-                    try await self.importService.importDirectory(directory, onProgress: onProgress)
+                    try await self.importService.importDirectory(directory, remap: remap, onProgress: onProgress)
                 }
 
                 await MainActor.run {

@@ -319,7 +319,8 @@ private struct LibraryFolderSheet: View {
     @State private var choosing = false
     @State private var comparison: ImportViewModel.FolderComparison?
     @State private var comparing = false
-    @State private var scanAfterwards = true
+    /// Off by default (review B2): the user opts in to adding files.
+    @State private var scanAfterwards = false
 
     var body: some View {
         SettingsSheet(title: "Change the library folder?") {
@@ -355,8 +356,11 @@ private struct LibraryFolderSheet: View {
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    Toggle("Scan the new folder for more files afterwards", isOn: $scanAfterwards)
-                        .toggleStyle(.checkbox)
+                    Toggle(isOn: $scanAfterwards) {
+                        Text("Scan the new folder for more files afterwards")
+                        Text("Adds the folder’s files that aren’t in the library yet. A file at the same place as a library track is that track: it is only re-pointed, never added twice.")
+                    }
+                    .toggleStyle(.checkbox)
                 }
             }
             if let currentRoot, !DataLocationsViewModel.isVolumeMounted(URL(fileURLWithPath: currentRoot)),
