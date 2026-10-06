@@ -72,16 +72,20 @@ final class SnapshotsTests: XCTestCase {
         // W3-REV replaced ReviewQueue/ReviewQueueView.swift (rendered: `review-queue-empty`) by the 5
         // files of Review/ (all deferred): 128 → 132 files, fixtures 24 → 23, rendered 20 → 19,
         // deferred 69 → 74.
-        XCTAssertEqual(paths.count, 132, "Re-audit inventory changes explicitly.")
+        // W3-DISC-A replaced DiscoveryInbox/DiscoveryInboxView.swift (rendered: `discovery-inbox-empty`)
+        // and made Discover/DiscoverView.swift (rendered: `discover-screen`) deferred; added
+        // Discover/{RecommendationsView, RecommendationCells} (deferred) and Discover/DiscoverLive (non-view),
+        // and replaced the unhosted TrackDetail/GrooveView.swift (deferred) by Similar/SimilarView.swift (deferred).
+        XCTAssertEqual(paths.count, 134, "Re-audit inventory changes explicitly.")
         XCTAssertEqual(Set(SnapshotFixtures.inventory.map(\.path)), paths)
         XCTAssertEqual(SnapshotFixtures.inventory.count, paths.count)
         XCTAssertFalse(SnapshotFixtures.inventory.contains { $0.disposition.isEmpty })
         XCTAssertEqual(Set(SnapshotFixtures.fixtures.map(\.id)).count, SnapshotFixtures.fixtures.count)
         XCTAssertFalse(SnapshotFixtures.fixtures.isEmpty)
-        XCTAssertEqual(SnapshotFixtures.fixtures.count, 23)
-        XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 19)
-        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 39)
-        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 74)
+        XCTAssertEqual(SnapshotFixtures.fixtures.count, 21)
+        XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 17)
+        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 40)
+        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 77)
         for fixture in SnapshotFixtures.fixtures where fixture.expectedTableRows != nil {
             if case .swiftUI = fixture.backend {
                 XCTFail("\(fixture.id): table readiness requires the AppKit backend.")

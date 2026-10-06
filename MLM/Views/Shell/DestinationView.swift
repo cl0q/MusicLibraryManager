@@ -44,6 +44,10 @@ struct DestinationView: View {
         // Review builds its own scaffold: its scope bar, banners and the scan line (W3-REV).
         case .review:
             ReviewView(focusTrackID: reviewFocusTrackID, onTrackActivated: onTrackActivated)
+        // Discover builds its own scaffold: its scope bar, the held-recommendations header and the
+        // selection bar over its tables (W3-DISC-A).
+        case .discover:
+            DiscoverView(onTrackActivated: onTrackActivated)
         default:
             ContentScaffold(showsDriveBanner: destination.listsTracks) {
                 content
@@ -75,7 +79,8 @@ struct DestinationView: View {
             // Hosted by `body` (own scaffold).
             Color.clear
         case .discover:
-            DiscoverView()
+            // Hosted by `body` (own scaffold).
+            Color.clear
         case .review:
             // Hosted by `body` (own scaffold).
             Color.clear
@@ -108,6 +113,10 @@ struct RouteView: View {
                 PlaylistDetailViewLoader(playlistId: id, initiallyShowFailedTracks: showFailedTracks,
                                          onBack: { navigation.goBack() }, onTrackDoubleClick: onTrackActivated)
                     .id(id)
+            } else if case .similar(let trackID) = route {
+                // Own scaffold: the seed header, the library matches and the online suggestions (W3-DISC-A).
+                SimilarView(trackID: trackID, onTrackActivated: onTrackActivated)
+                    .id(trackID)
             } else if case .genre(let name) = route {
                 // Own scaffold: the genre's detail header (W3-GEN, UC-LAYOUT-06).
                 GenreDetailView(name: name, onTrackActivated: onTrackActivated)
@@ -141,11 +150,8 @@ struct RouteView: View {
             // Hosted by `body` (own scaffold).
             Color.clear
         case .similar:
-            PendingDestinationView(
-                title: "Similar",
-                systemImage: "point.3.connected.trianglepath.dotted",
-                description: "Similar tracks aren’t available yet."
-            )
+            // Hosted by `body` (own scaffold).
+            Color.clear
         }
     }
 }

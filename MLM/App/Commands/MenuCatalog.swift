@@ -267,8 +267,7 @@ enum MenuCommand: String, CaseIterable, Sendable {
         case .goToArtist:
             Entry(menu: .track, title: "Go to Artist", shortcut: nil, wiring: .app)
         case .findSimilar:
-            Entry(menu: .track, title: "Find Similar", shortcut: nil,
-                  wiring: .pending(owner: "W3-DISC", reason: "Similar tracks aren’t available yet."))
+            Entry(menu: .track, title: "Find Similar", shortcut: nil, wiring: .app)
         case .download: Entry(menu: .track, title: "Download", shortcut: .cmd("d"), wiring: .app)
         case .locateFile: Entry(menu: .track, title: "Locate File…", shortcut: nil, wiring: .app)
         case .refreshFromSource: Entry(menu: .track, title: "Refresh from Source", shortcut: .cmd("r"), wiring: .app)

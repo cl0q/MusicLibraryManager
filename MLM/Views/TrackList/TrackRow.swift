@@ -82,6 +82,8 @@ extension TrackRow {
     var versionSortKey: Int { position }
     var locationSortKey: Int { position }
     var usedInSortKey: Int { position }
+    /// Discover's source column keeps the loaded order (W3-DISC-A).
+    var sourceSortKey: Int { position }
 }
 
 // MARK: - Building rows

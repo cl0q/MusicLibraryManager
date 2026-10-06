@@ -255,7 +255,7 @@ struct SavedPlaybackOrigin: Codable, Equatable {
         case .folder(let path, let name): container = .folder(path: path, name: name)
         case .genre(let key, let name): container = .genre(key: key, name: name)
         // A Review comparison is not a place to come back to.
-        case .reviewGroup, .none: container = .none
+        case .reviewGroup, .recommendations, .similar, .none: container = .none
         }
     }
 

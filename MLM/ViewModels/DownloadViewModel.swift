@@ -102,6 +102,9 @@ final class DownloadViewModel {
         let soundcloudURL: String?
         let source: String
         let seedTrack: Track
+        /// Held in Discover ▸ Recommendations until kept (v49, IMP-053) — `false`: a library
+        /// track from the start (`Keep` in Similar ▸ Online).
+        var hold = true
     }
 
     private(set) var discoveryStatuses: [String: DiscoveryStatus] = [:]
@@ -957,7 +960,8 @@ final class DownloadViewModel {
         title: String,
         soundcloudURL: String?,
         source: String,
-        seedTrack: Track
+        seedTrack: Track,
+        hold: Bool = true
     ) {
         let key = soundcloudURL ?? "\(artist) - \(title)"
 
@@ -980,7 +984,8 @@ final class DownloadViewModel {
             title: title,
             soundcloudURL: soundcloudURL,
             source: source,
-            seedTrack: seedTrack
+            seedTrack: seedTrack,
+            hold: hold
         )
 
         discoveryStatuses[key] = .queued
@@ -1097,9 +1102,12 @@ final class DownloadViewModel {
                     downloadStatus: ISO8601DateFormatter().string(from: Date())
                 )
                 
-                // Save track to DB
-                let insertedTrack = try await trackRepository.insert(newTrack)
-                guard let newTrackId = insertedTrack.id else {
+                // Save the track, its held flag and its log row in one transaction (IMP-053): a held
+                // recommendation is never listed in All Tracks, not even for an instant. (Fixes the
+                // window between the insert and the log row of the old two-step write.)
+                let insertedTrack = try await RecommendationRepository(database: trackRepository.writer)
+                    .insert(newTrack, hold: request.hold, seedTrackID: request.seedTrack.id, source: request.source)
+                guard insertedTrack.id != nil else {
                     await MainActor.run {
                         self.discoveryStatuses[key] = .failed
                     }
@@ -1108,14 +1116,6 @@ final class DownloadViewModel {
                 
                 // Enqueue discovery track for auto-analysis
                 await PerformanceQueueService.shared.enqueueAnalysis(track: insertedTrack)
-                
-                // Register in track_discovery_log
-                try await trackRepository.saveDiscoveryLog(
-                    discoveredTrackId: newTrackId,
-                    seedTrackId: request.seedTrack.id,
-                    source: request.source,
-                    status: "new"
-                )
                 
                 outcome = ("Downloaded", nil)
                 await MainActor.run {

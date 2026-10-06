@@ -323,7 +323,8 @@ struct TrackVisibilityTests {
             try Int64.fetchAll(db, sql: "SELECT track_id FROM playlist_tracks WHERE playlist_id = ?", arguments: [playlist])
         }
         #expect(inPlaylist == [3], "playlists, genres, folders, queue and sync keep it (IMP-049)")
-        #expect(TrackVisibility.listedSQL == "tracks.is_duplicate = 0")
+        // v49 (W3-DISC-A, IMP-053) added the held-recommendation flag to the same predicate.
+        #expect(TrackVisibility.listedSQL == "tracks.is_duplicate = 0 AND tracks.is_pending_recommendation = 0")
     }
 }
 

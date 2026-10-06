@@ -103,7 +103,12 @@ struct TrackCommands: Commands {
                           disabledReason: GoToArtist.disabledReason) {
                 if let artist { search?.goToArtist(artist) }
             }
-            CommandButton(.findSimilar)
+            // Pushes `Similar to “‹title›”` for the one selected track (W3-DISC-A, UC-CM-04).
+            let similarTrack = selection.flatMap { $0.summary.count == 1 ? $0.selectedTracks.first : nil }
+            CommandButton(.findSimilar, enabled: similarTrack?.id != nil && navigation != nil,
+                          disabledReason: "Select one track.") {
+                if let id = similarTrack?.id { navigation?.push(.similar(trackID: id)) }
+            }
 
             Divider()
 

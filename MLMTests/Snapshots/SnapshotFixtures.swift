@@ -94,12 +94,6 @@ enum SnapshotFixtures {
             )
             .frame(width: 180))
         }),
-        Fixture(id: "discovery-inbox-empty", size: .init(width: 800, height: 560), makeView: { _ in
-            AnyView(DiscoveryInboxView())
-        }),
-        Fixture(id: "discover-screen", size: .init(width: 800, height: 620), makeView: { _ in
-            AnyView(DiscoverView())
-        }),
         Fixture(id: "queue-panel-unavailable", size: .init(width: 320, height: 560), makeView: { _ in
             AnyView(QueuePanel())
         }),
@@ -266,7 +260,6 @@ enum SnapshotFixtures {
     }
 
     static let renderedPaths: Set<String> = [
-        "Discover/DiscoverView.swift", "DiscoveryInbox/DiscoveryInboxView.swift",
         "Folders/FolderOutlineTable.swift", "Library/DanceabilitySteps.swift",
         "Library/EnergyBars.swift", "Library/LibraryView.swift",
         "TrackList/TrackListTable.swift", "TrackList/TrackCell.swift", "TrackList/TrackRowPresentation.swift",
@@ -391,7 +384,11 @@ enum SnapshotFixtures {
         "Genres/CreateMLExportSheet.swift": "Deferred: the export sheet reads the library and the disk; CreateMLExportPlan / CreateMLExporter are unit-tested.",
         "Genres/GenreMenu.swift": "Deferred: the genre menu builder reads the shell environment; its sections are unit-tested (GenreMenuModelTests).",
         "Genres/GenreRequests.swift": "Non-view: window-level genre requests (the export sheet from File ▸ Export) — hosts the sheet only.",
-        "TrackDetail/GrooveView.swift": "Deferred: preview audio, recommendations and random placeholders require controlled provider/player state.",
+        "Discover/DiscoverView.swift": "Deferred: the page reads the library database, the drive and the selection; DiscoverModel (groups, counts, Keep, Dismiss, Find Recommendations) is unit-tested on temporary databases (W3-DISC-A).",
+        "Discover/RecommendationsView.swift": "Deferred: the groups are the shared track table over live tracks; their verdicts are DiscoverModel, unit-tested (W3-DISC-A).",
+        "Discover/RecommendationCells.swift": "Deferred: the source cell of the shared track table (word and 6 pt dot); the words are DiscoverModel.sourceWord, unit-tested (W3-DISC-A).",
+        "Discover/DiscoverLive.swift": "Non-view: the app\u{2019}s wiring of DiscoverModel (repositories, downloads, analysis, playlist placement) (W3-DISC-A).",
+        "Similar/SimilarView.swift": "Deferred: the page reads the library database, the sources and the download pipeline; SimilarModel (matches, online rows, Download and Keep, failures) is unit-tested on temporary databases (W3-DISC-A).",
     ]
 
     private static let inventoryPaths = """
@@ -403,8 +400,10 @@ Activity/ActivityWindow.swift
 Activity/LogFeed.swift
 Activity/LogTextRenderer.swift
 ContentView/ContentView.swift
+Discover/DiscoverLive.swift
 Discover/DiscoverView.swift
-DiscoveryInbox/DiscoveryInboxView.swift
+Discover/RecommendationCells.swift
+Discover/RecommendationsView.swift
 DragDrop/DropTargetModifier.swift
 Folders/FolderMenus.swift
 Folders/FolderOutlineTable.swift
@@ -502,13 +501,13 @@ Shell/TrailingColumnView.swift
 Shell/UndoCenter.swift
 Sidebar/LibraryFooter.swift
 Sidebar/SidebarView.swift
+Similar/SimilarView.swift
 Sync/NewSyncProfileSheet.swift
 Sync/Pickers/PlaylistPickerModel.swift
 Sync/SyncProfileMenu.swift
 Sync/SyncProfilePage.swift
 Sync/SyncProfileSections.swift
 Sync/SyncProfileSheets.swift
-TrackDetail/GrooveView.swift
 TrackDetail/WaveformHelpers.swift
 TrackDetail/WaveformView.swift
 TrackList/DownloadFailureReasonText.swift

@@ -33,6 +33,11 @@ enum TrackMenuItem: Hashable, Sendable {
     case downloadAgain
     /// File missing / Download failed: point the track at its file (W2-C).
     case locateFile
+    /// `Find Similar` (one track): pushes `Similar to “‹title›”` (W3-DISC-A).
+    case findSimilar
+    /// `Keep and Add to Playlist ▸` on a held recommendation: the list's `perform` receives
+    /// `keepAndAdd:‹playlist id›` (W3-DISC-A).
+    case keepAndAddToPlaylist
     case showInFinder(enabled: Bool)
     case copy(filePath: Bool, link: Bool)
     /// `Remove from Playlist` / `Remove from “Warm-up”` (reversible, normal colour, ⌫).
@@ -99,6 +104,8 @@ struct TrackMenuContext: Equatable, Sendable {
     var queueRows: QueueMenuRows? = nil
     /// The place's own items for these rows (W3-GEN).
     var extras: TrackMenuExtras = .none
+    /// `Find Similar` is offered for one track (W3-DISC-A).
+    var canFindSimilar = true
 
     /// `Remove from Playlist` inside one playlist (UC-CM-08), `Remove from “‹profile›”`.
     var removeTitle: String {
@@ -106,7 +113,7 @@ struct TrackMenuContext: Equatable, Sendable {
         case .playlist: "Remove from Playlist"
         case .syncProfile(_, let name), .genre(_, let name): "Remove from “\(name)”"
         case .queue: "Remove from Queue"
-        case .library, .folder, .reviewGroup, .none: "Remove"
+        case .library, .folder, .reviewGroup, .recommendations, .similar, .none: "Remove"
         }
     }
 }
@@ -170,6 +177,12 @@ struct TrackMenuModel: Equatable, Sendable {
             }
         }
 
+        if context.container == .recommendations {
+            let preview = primary.filter { item in if case .preview = item { return true } else { return false } }
+            return makeRecommendationMenu(rows: rows, header: header, preview: preview, unreachable: unreachable,
+                                          reachableLocal: reachableLocal, hasLink: hasLink, context: context)
+        }
+
         if let queueRows = context.queueRows {
             return makeQueueMenu(queueRows, rows: rows, header: header, reachableLocal: reachableLocal,
                                  unreachable: unreachable, downloadable: downloadable, hasLink: hasLink, context: context)
@@ -188,6 +201,11 @@ struct TrackMenuModel: Equatable, Sendable {
         if single, let artist = TrackMetadataPresentation.artistDisplay(rows[0].track.artist) {
             info.append(.goToArtist(artist))
         }
+        // `Find Similar` (W3-DISC-A): one track, in every list that is a place of the library.
+        if single, context.canFindSimilar {
+            if case .reviewGroup = context.container {} else { info.append(.findSimilar) }
+        }
+        // A place's own items stay last in the Info group.
         info += context.extras.info.map(TrackMenuItem.extra)
 
         // 5 Fix
@@ -223,7 +241,7 @@ struct TrackMenuModel: Equatable, Sendable {
         switch context.container {
         case .playlist, .syncProfile, .genre:
             if context.canRemoveFromContainer { remove.append(.removeFromContainer(title: context.removeTitle)) }
-        case .queue, .library, .folder, .reviewGroup, .none:
+        case .queue, .library, .folder, .reviewGroup, .recommendations, .similar, .none:
             break
         }
         // A place's own items in the Remove group (`Not Now` on a suggestion, W3-GEN).
@@ -231,12 +249,37 @@ struct TrackMenuModel: Equatable, Sendable {
         switch context.container {
         case .queue, .syncProfile:
             break  // Remove from Library does not exist there (UC-CM-07)
+        case .recommendations, .similar:
+            break  // not in the library yet / Similar never deletes (V-SIMILAR.N07)
         case .library, .playlist, .folder, .genre, .reviewGroup, .none:
             // Trashing files needs their disk (UC-CM-05).
             remove.append(.removeFromLibrary(enabled: unreachable == 0))
         }
 
         let sections = [header, primary, queue, addTo, info, fix, locate, remove].filter { !$0.isEmpty }
+        return TrackMenuModel(sections: sections)
+    }
+
+    /// The menu of a held recommendation (V-INBOX.N07, CM-REC): Preview — Keep · Keep and Add to
+    /// Playlist ▸ — Go to Seed Track · Find Similar — Show in Finder · Copy ▸ — Dismiss. Nothing
+    /// that plays or queues, nothing that treats it as a library track yet.
+    private static func makeRecommendationMenu(
+        rows: [TrackRow], header: [TrackMenuItem], preview: [TrackMenuItem], unreachable: Int,
+        reachableLocal: Int, hasLink: Bool, context: TrackMenuContext
+    ) -> TrackMenuModel {
+        let single = rows.count == 1
+        let keep: [TrackMenuItem] = context.extras.addTo.map(TrackMenuItem.extra) + [.keepAndAddToPlaylist]
+        var info: [TrackMenuItem] = context.extras.info.map(TrackMenuItem.extra)
+        if single { info.append(.findSimilar) }
+        var locate: [TrackMenuItem] = []
+        if reachableLocal > 0 {
+            locate.append(.showInFinder(enabled: true))
+        } else if unreachable > 0 {
+            locate.append(.showInFinder(enabled: false))
+        }
+        locate.append(.copy(filePath: reachableLocal > 0, link: hasLink))
+        let remove = context.extras.remove.map(TrackMenuItem.extra)
+        let sections = [header, preview, keep, info, locate, remove].filter { !$0.isEmpty }
         return TrackMenuModel(sections: sections)
     }
 

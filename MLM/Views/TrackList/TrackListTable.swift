@@ -61,7 +61,8 @@ struct TrackListTable<EmptyContent: View>: View {
         .environment(\.trackTableCellOptions, TrackTableCellOptions(
             showsFailureDetail: configuration.showsFailureDetail,
             dimsPosition: configuration.hasContainerOrder && !(model.sortOrder?.isContainerOrder ?? true),
-            openAlbum: configuration.openAlbum
+            openAlbum: configuration.openAlbum,
+            showsAnalysingEnergy: configuration.showsAnalysingEnergy
         ))
         .overlay {
             if model.isLoaded, model.rows.isEmpty {
@@ -218,6 +219,8 @@ private struct TrackTableCore: View {
         // Space previews, Esc ends it, ←/→ seek while previewing — only while this table has
         // keyboard focus (UC-KEY-01/04/05, W2-C). Never Play/Pause.
         .modifier(TrackListPreviewKeys(actions: actions))
+        // The list's own plain-letter keys (`K` = Keep on Recommendations, UC-KEY-29).
+        .modifier(TrackListCharacterKeys(model: model, keys: configuration.characterKeys))
         .alternatingRowBackgrounds()
         .redacted(reason: model.isLoaded ? [] : .placeholder)
         .allowsHitTesting(model.isLoaded)
@@ -294,6 +297,7 @@ enum TrackTableColumns {
         case .version: TableColumn(id.title, value: \TrackRow.versionSortKey) { TrackCell(column: id, row: $0) }
         case .location: TableColumn(id.title, value: \TrackRow.locationSortKey) { TrackCell(column: id, row: $0) }
         case .usedIn: TableColumn(id.title, value: \TrackRow.usedInSortKey) { TrackCell(column: id, row: $0) }
+        case .source: TableColumn(id.title, value: \TrackRow.sourceSortKey) { TrackCell(column: id, row: $0) }
         }
     }
 }
@@ -509,5 +513,28 @@ private struct TrackListRevealTaker: View {
     private struct RevealKey: Equatable {
         let requestID: UUID?
         let rowsLoaded: Int
+    }
+}
+
+/// A list's own plain-letter keys (`TrackListConfiguration.characterKeys`): only while the table
+/// has keyboard focus, never with ⌘ ⌃ ⌥, and only with rows selected — otherwise the key stays
+/// the table's type-select.
+struct TrackListCharacterKeys: ViewModifier {
+    let model: TrackListModel
+    let keys: [Character: ([TrackRow]) -> Void]
+
+    func body(content: Content) -> some View {
+        if keys.isEmpty {
+            content
+        } else {
+            content.onKeyPress(characters: CharacterSet(charactersIn: String(keys.keys)), phases: .down) { press in
+                guard press.modifiers.isDisjoint(with: [.command, .control, .option, .shift]),
+                      let character = press.characters.lowercased().first, let action = keys[character] else { return .ignored }
+                let rows = model.selectedRows()
+                guard !rows.isEmpty else { return .ignored }
+                action(rows)
+                return .handled
+            }
+        }
     }
 }

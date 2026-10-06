@@ -1447,6 +1447,32 @@ final class DatabaseManager: Sendable {
             """)
         }
 
+        // ──────────────────────────────────────────────────────────────
+        // Migration v49_pending_recommendations (W3-DISC-A, IMP-053, DEC-029):
+        // a downloaded recommendation is *held* in Discover until it is kept.
+        // `tracks.is_pending_recommendation` (1 = held) is part of
+        // `TrackVisibility.listedSQL`, so All Tracks, search and later albums
+        // do not list a held track. Backfill: every track whose discovery log
+        // row is still `new`. `track_discovery_log.trash_url` records where a
+        // dismissed recommendation's file went, so Undo can move it back.
+        // Guarded by `columns(in:)` so a database that already has either
+        // column migrates cleanly.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v49_pending_recommendations") { db in
+            let trackColumns = try db.columns(in: "tracks").map(\.name)
+            if !trackColumns.contains("is_pending_recommendation") {
+                try db.execute(sql: "ALTER TABLE tracks ADD COLUMN is_pending_recommendation INTEGER NOT NULL DEFAULT 0")
+            }
+            let logColumns = try db.columns(in: "track_discovery_log").map(\.name)
+            if !logColumns.contains("trash_url") {
+                try db.execute(sql: "ALTER TABLE track_discovery_log ADD COLUMN trash_url TEXT")
+            }
+            try db.execute(sql: """
+                UPDATE tracks SET is_pending_recommendation = 1
+                WHERE id IN (SELECT discovered_track_id FROM track_discovery_log WHERE status = 'new')
+            """)
+        }
+
         return migrator
     }
 

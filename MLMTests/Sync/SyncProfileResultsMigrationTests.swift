@@ -32,8 +32,8 @@ struct SyncProfileResultsMigrationTests {
     @Test func registeredOnceAfterTheLatestExistingMigration() throws {
         let migrations = DatabaseManager.buildMigrator().migrations
         #expect(migrations.filter { $0 == Self.v47 }.count == 1)
-        // v48 (W3-REV) is registered after it; v47 stays where it was.
-        #expect(migrations.last == "v48_review_decisions")
+        // v48 (W3-REV) and v49 (W3-DISC-A) are registered after it; v47 stays where it was.
+        #expect(migrations.contains("v48_review_decisions"))
         let previousIndex = try #require(migrations.firstIndex(of: Self.previous))
         let index = try #require(migrations.firstIndex(of: Self.v47))
         #expect(previousIndex < index)

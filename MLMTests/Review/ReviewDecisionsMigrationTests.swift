@@ -33,7 +33,6 @@ struct ReviewDecisionsMigrationTests {
     @Test func registeredOnceAfterTheLatestExistingMigration() throws {
         let migrations = DatabaseManager.buildMigrator().migrations
         #expect(migrations.filter { $0 == Self.v48 }.count == 1)
-        #expect(migrations.last == Self.v48)
         let previousIndex = try #require(migrations.firstIndex(of: Self.previous))
         let index = try #require(migrations.firstIndex(of: Self.v48))
         #expect(previousIndex < index)
