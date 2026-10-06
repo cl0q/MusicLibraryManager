@@ -30,8 +30,8 @@ enum AlbumMigrations {
 
         // (a) link by name.
         var known: [String: Int64] = [:]
-        for row in try Row.fetchAll(db, sql: "SELECT id, album_artist, title FROM albums WHERE variant_kind IS NULL ORDER BY id") {
-            let key = AlbumKey.artistKey(row["album_artist"]) + "\u{1F}" + AlbumKey.normalize(row["title"])
+        for row in try Row.fetchAll(db, sql: "SELECT id, artist, album_artist, title FROM albums WHERE IFNULL(variant_kind, '') = '' ORDER BY id") {
+            let key = AlbumKey.rowKey(albumArtist: row["album_artist"], artist: row["artist"], title: row["title"])
             if known[key] == nil { known[key] = row["id"] }
         }
         let unlinked = try Row.fetchAll(db, sql: """
@@ -43,7 +43,7 @@ enum AlbumMigrations {
             if AlbumKey.isNoAlbum(album) { continue }
             let artist: String = row["artist"]
             let filedUnder = AlbumKey.effectiveArtist(albumArtist: row["album_artist"], artist: artist)
-            let key = AlbumKey.artistKey(filedUnder) + "\u{1F}" + AlbumKey.normalize(album)
+            let key = AlbumKey.key(artist: filedUnder, title: album)
             let albumID: Int64
             if let id = known[key] {
                 albumID = id
@@ -92,7 +92,8 @@ enum AlbumMigrations {
     /// when it has none. The log of merges is kept in `app_config` (`albums.dedup.v51`).
     static func v51AlbumDedup(_ db: Database) throws {
         let albums = try Row.fetchAll(db, sql: """
-            SELECT id, album_artist, title FROM albums WHERE variant_kind IS NULL AND variant_of IS NULL ORDER BY id
+            SELECT id, artist, album_artist, title FROM albums
+            WHERE IFNULL(variant_kind, '') = '' AND variant_of IS NULL ORDER BY id
             """)
         var counts: [Int64: Int] = [:]
         for row in try Row.fetchAll(db, sql: "SELECT album_id, COUNT(*) AS n FROM album_tracks GROUP BY album_id") {
@@ -101,7 +102,7 @@ enum AlbumMigrations {
         var groups: [String: [Int64]] = [:]
         var order: [String] = []
         for row in albums {
-            let key = AlbumKey.artistKey(row["album_artist"]) + "\u{1F}" + AlbumKey.normalize(row["title"])
+            let key = AlbumKey.rowKey(albumArtist: row["album_artist"], artist: row["artist"], title: row["title"])
             if groups[key] == nil { order.append(key) }
             groups[key, default: []].append(row["id"])
         }
@@ -115,6 +116,16 @@ enum AlbumMigrations {
                 try merge(db, loser: loser, into: winner)
                 log[String(loser)] = winner
             }
+        }
+        // Every base row now carries the Swift `title_normalized` (the Tauri app wrote `good_lies`,
+        // v16 `goodlies`), so the unique index, `AlbumKey` and every lookup agree from here on.
+        // Done after the merges: distinct Swift keys never collide on the index.
+        for row in albums {
+            let id: Int64 = row["id"]
+            guard log[String(id)] == nil else { continue }
+            let normalized = AlbumKey.normalize(row["title"])
+            try db.execute(sql: "UPDATE OR IGNORE albums SET title_normalized = ? WHERE id = ? AND title_normalized <> ?",
+                           arguments: [normalized, id, normalized])
         }
         guard !log.isEmpty else { return }
         // A log from an earlier run is kept; this run's merges are added.
