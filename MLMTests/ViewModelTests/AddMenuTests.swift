@@ -263,8 +263,9 @@ struct AddMenuWiringTests {
         #expect(MenuCommand.refreshFromSources.entry.wiring == .app)
         #expect(MenuCommand.addFromLink.shortcut?.description == "⌘U")
         // W3-PL wires these two.
-        #expect(MenuCommand.newPlaylistFolder.isPending)
-        #expect(MenuCommand.importM3U.isPending)
+        // W3-PL wired New Playlist Folder and Import M3U…; every Add-menu item is live now.
+        #expect(!MenuCommand.newPlaylistFolder.isPending)
+        #expect(!MenuCommand.importM3U.isPending)
         #expect(AddMenu.Unavailable.refreshFromSources == "No source is connected")
     }
 
