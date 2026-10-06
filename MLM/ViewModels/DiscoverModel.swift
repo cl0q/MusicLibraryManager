@@ -47,7 +47,7 @@ extension SwarmRecommendationService: SwarmRecommending {}
 final class DiscoverModel {
     struct Dependencies {
         var recommendations: RecommendationRepository
-        /// Reels waiting (`ImportedReelRecord` has no state yet, so this is the saved reels).
+        /// Reels waiting: every reel that is not `Done` (`ReelRepository.notDoneCount`, IMP-059).
         var reelCount: @MainActor () async -> Int = { 0 }
         var libraryRoot: @MainActor () async -> String? = { nil }
         var consequences = ReviewConsequences()

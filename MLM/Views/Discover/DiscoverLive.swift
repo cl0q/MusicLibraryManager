@@ -10,7 +10,8 @@ enum DiscoverLive {
         let pool = manager.pool
         return DiscoverModel.Dependencies(
             recommendations: RecommendationRepository(database: pool),
-            reelCount: { (try? await container.reelRepository?.fetchAll().count) ?? 0 },
+            // Reels that still wait for a verdict: everything but Done (W3-DISC-B, IMP-059).
+            reelCount: { (try? await container.reelRepository?.notDoneCount()) ?? 0 },
             libraryRoot: { (try? await container.configRepository?.getLibraryRoot()) ?? nil },
             matchPercent: { seedID, trackID in await matchPercent(seedID, trackID, tracks: tracks) },
             postChange: {

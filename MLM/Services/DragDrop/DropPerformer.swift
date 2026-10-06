@@ -16,6 +16,7 @@ import Observation
 /// | cover | Choose Cover… (`ShellEdits.setCover`, undoable) |
 /// | genre row | Info's Genre field (`GenreEdits.setGenre`, one undoable tag edit) |
 /// | genre table | `Add to “‹Genre›”` on a suggestion (`GenreWorkbench.stage`) |
+/// | Reels view | `Import…` / `Add from Link…` of Discover ▸ Reels (`ReelsModel.addDropped`, `addDroppedLink`) |
 ///
 /// Placements at a position (`placeTracks`, `placePlaylists`, `importFilesAndPlace`) need the
 /// table's rows and are run by `PlaylistTable`; here they fall back to appending.
@@ -76,6 +77,10 @@ struct DropPerformer {
         case .openLink(let url, _):
             // The playlist it was dropped on can't be preselected until W3-ADD's sheets exist.
             QuickAddRouter.shared.open(url: url.absoluteString)
+        case .addReels(let urls):
+            ReelsDropRouter.shared.addFiles(urls)
+        case .fetchReelLink(let url):
+            ReelsDropRouter.shared.fetchLink(url)
         case .openLibraryFile(let url, let ignored):
             MainWindowPresenter.shared.openLibrary(url, launch: .shared)
             if ignored > 0 { statusBar?.post(DropWords.ignoredWithLibrary(ignored)) }
