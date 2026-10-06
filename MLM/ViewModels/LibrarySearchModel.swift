@@ -32,8 +32,11 @@ struct LibrarySearchResults: Equatable, Sendable {
     var playlistTotal = 0
     var folders: [LibraryFolderHit] = []
     var folderTotal = 0
+    /// Albums whose title, album artist or year match (`SearchFilterCapability.albums`, IMP-091).
+    var albums: [AlbumListing] = []
+    var albumTotal = 0
 
-    var isEmpty: Bool { trackTotal == 0 && playlistTotal == 0 && folderTotal == 0 }
+    var isEmpty: Bool { trackTotal == 0 && albumTotal == 0 && playlistTotal == 0 && folderTotal == 0 }
 }
 
 /// Searches the whole library for the field's filter: tracks in SQL (text and tokens),
@@ -56,6 +59,8 @@ final class LibrarySearchModel {
     @ObservationIgnored var trackSearch: @Sendable (SearchFilter, Int) async throws -> (tracks: [Track], total: Int) = { _, _ in ([], 0) }
     @ObservationIgnored var playlists: @MainActor () -> [Playlist] = { [] }
     @ObservationIgnored var folderSearch: @Sendable (String) async -> [LibraryFolderHit] = { _ in [] }
+    /// The albums the album-applicable part of the filter matches (empty filter: none).
+    @ObservationIgnored var albumSearch: @Sendable (SearchFilter) async throws -> [AlbumListing] = { _ in [] }
     @ObservationIgnored private(set) var task: Task<Void, Never>?
 
     init() {}
@@ -72,16 +77,21 @@ final class LibrarySearchModel {
         let limit = Self.sectionLimit
         let trackSearch = self.trackSearch
         let folderSearch = self.folderSearch
+        let albumSearch = self.albumSearch
+        let albumFilter = filter.applicable(to: .albums)
         let names = SearchFilter(text: filter.parsed.freeText)
         let playlistHits = names.freeTerms.isEmpty ? [] : playlists().filter { names.matchesName($0.name) }
         task = Task { [weak self] in
             do {
                 let found = try await trackSearch(filter, limit)
+                let albums = albumFilter.isEmpty ? [] : try await albumSearch(albumFilter)
                 let folders = names.freeTerms.isEmpty ? [] : await folderSearch(names.parsed.freeText)
                 guard !Task.isCancelled, let self else { return }
                 var results = LibrarySearchResults()
                 results.tracks = found.tracks
                 results.trackTotal = found.total
+                results.albums = Array(albums.prefix(limit))
+                results.albumTotal = albums.count
                 results.playlists = Array(playlistHits.prefix(limit))
                 results.playlistTotal = playlistHits.count
                 results.folders = Array(folders.prefix(limit))
@@ -102,6 +112,16 @@ final class LibrarySearchModel {
     /// Search again for the same filter (the library changed).
     func refresh() {
         if let searchedFilter { search(searchedFilter) }
+    }
+}
+
+/// Albums for the Library scope: the listed albums (Albums grid rules) that pass the filter.
+enum LibraryAlbumSearch {
+    static func albums(matching filter: SearchFilter, in repository: AlbumRepository) async throws -> [AlbumListing] {
+        let applicable = filter.applicable(to: .albums)
+        guard !applicable.isEmpty else { return [] }
+        return try await repository.fetchListed(scope: .all, sort: .artist, filter: SearchFilter(text: applicable.parsed.freeText))
+            .filter { AlbumFilterRules.matches($0, applicable) }
     }
 }
 

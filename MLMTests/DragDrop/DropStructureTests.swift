@@ -43,7 +43,7 @@ struct DropStructureTests {
                          "func addPlaylists(", "func setCover("] {
             let body = try #require(drops.components(separatedBy: function).dropFirst().first, "\(function)")
             let next = body.components(separatedBy: "\n    func ").first ?? body
-            #expect(next.contains("undo.perform("), "\(function) registers an undo step")
+            #expect(next.contains("undo.perform(") || next.contains("performKeeping("), "\(function) registers an undo step")
         }
     }
 

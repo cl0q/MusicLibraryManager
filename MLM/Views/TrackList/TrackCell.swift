@@ -33,6 +33,7 @@ struct TrackCell: View {
 
     @Environment(TrackTableLive.self) private var live: TrackTableLive?
     @Environment(\.trackTableCellOptions) private var options
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let presentation = TrackRowPresentation(row: row, live: live?.state ?? .idle)
@@ -130,7 +131,7 @@ struct TrackCell: View {
                     Image(systemName: "speaker.wave.2.fill")
                         .imageScale(.small)
                         .foregroundStyle(.tint)
-                        .symbolEffect(.variableColor.iterative, isActive: live?.state.isPlaying ?? false)
+                        .symbolEffect(.variableColor.iterative, isActive: (live?.state.isPlaying ?? false) && !reduceMotion)
                         .accessibilityLabel("Now playing")
                 } else {
                     Text(row.displayNumber ?? row.position, format: .number)
@@ -212,6 +213,7 @@ private struct TrackTitleCell: View {
     let showsFailureDetail: Bool
     var showsCover = true
     var showsPlayingGlyph = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static let coverSize: CGFloat = 20
 
@@ -237,7 +239,7 @@ private struct TrackTitleCell: View {
                 Image(systemName: "speaker.wave.2.fill")
                     .imageScale(.small)
                     .foregroundStyle(.tint)
-                    .symbolEffect(.variableColor.iterative, isActive: live.isPlaying)
+                    .symbolEffect(.variableColor.iterative, isActive: live.isPlaying && !reduceMotion)
                     .accessibilityHidden(true)
             }
             VStack(alignment: .leading, spacing: 0) {

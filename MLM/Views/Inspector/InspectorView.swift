@@ -122,9 +122,18 @@ struct InspectorHeader: View {
     static let coverSize: CGFloat = 54
     private static let stackedCoverSize: CGFloat = 44
 
+    @Environment(\.container) private var container
+    /// The refusal of an artwork drop, said on the cover for 5 s (UC-SURF-04, UC-SHEET-23).
+    @State private var coverRefusal: String?
+
     var body: some View {
         HStack(spacing: Spacing.m) {
             cover
+                // D-TD-ARTWORK-IN: an image from Finder or a browser sets the artwork of every
+                // selected track (undoable `Set Artwork`).
+                .dropTarget(.trackArtwork(ids: tracks.compactMap(\.id), title: count == 1 ? tracks.first?.title : nil),
+                            cornerRadius: 7, sayRefusal: { coverRefusal = $0 })
+                .inPlaceRefusal($coverRefusal)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 if count > 1 {
                     Text("\(count.formatted(.number)) tracks selected")
@@ -165,8 +174,15 @@ struct InspectorHeader: View {
             }
             .frame(width: Self.coverSize, height: Self.coverSize, alignment: .topLeading)
         } else if let track = tracks.first {
+            // D-TD-TRACK-OUT: the cover of one track drags as that track.
             coverImage(track, size: Self.coverSize)
+                .draggable(dragItem(track))
         }
+    }
+
+    private func dragItem(_ track: Track) -> TrackDragItem {
+        TrackDragContext.current(container).item(for: track)
+            ?? TrackDragItem(trackId: track.id ?? -1, libraryId: nil)
     }
 
     @ViewBuilder

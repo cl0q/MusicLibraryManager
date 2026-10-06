@@ -49,6 +49,7 @@ struct GenresView: View {
         let shown = self.shown
         ContentScaffold(showsDriveBanner: false) {
             content(shown: shown)
+                .windowCount(overview == nil ? nil : (filter.isEmpty ? GenreText.genres(genres.count) : "\(shown.count.formatted(.number)) of \(GenreText.genres(genres.count))"))
                 .statusBarText(statusText(shown: shown))
         } header: {
             if !genres.isEmpty { commandBar }
@@ -184,6 +185,7 @@ struct GenresView: View {
                     }
             }
         }
+        .scrollEdgeEffectStyle(.soft, for: .top)
         .contextMenu(forSelectionType: String.self) { keys in
             let subjects = selected(keys)
             if !subjects.isEmpty {

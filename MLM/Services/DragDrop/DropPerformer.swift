@@ -97,6 +97,12 @@ struct DropPerformer {
                     say(refusal)
                 }
             }
+        case .setTrackArtwork(let source, let trackIDs, let title):
+            let edit = TrackArtworkEdit(analysis: container.analysisRepository,
+                                        cacheDirectory: TrackArtworkEdit.standardCacheDirectory, undo: undo)
+            Task {
+                if let refusal = await edit.set(source, trackIDs: trackIDs, title: title) { say(refusal) }
+            }
         case .addTracksToAlbum(let ids, let albumID, _):
             Task { _ = try? await edits?.addTracks(toAlbum: albumID, trackIDs: ids) }
         case .movePlaylistItems(let items, let folderID, let before):

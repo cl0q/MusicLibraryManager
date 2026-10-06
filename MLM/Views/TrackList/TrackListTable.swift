@@ -221,6 +221,7 @@ private struct TrackTableCore: View {
         }
         // Out of MLM a drag copies — Finder, Mail and DJ software never move a library file.
         .dragConfiguration(TrackDragConfiguration.rows)
+        .scrollEdgeEffectStyle(.soft, for: .top)
         .contextMenu(forSelectionType: Int64.self) { ids in
             menu(for: ids)
         } primaryAction: { ids in

@@ -34,7 +34,8 @@ struct FoldersView: View {
         }
         .hostsTrackSelectionBar()
         .navigationTitle(title)
-        .navigationSubtitle(LibraryFooter.libraryName(LibraryLaunchCoordinator.shared))
+        .navigationSubtitle(WindowSubtitle.text(library: LibraryFooter.libraryName(LibraryLaunchCoordinator.shared),
+                                                placeCount: model.phase == .ready ? StatusBarText.tracks(model.rootTrackCount) : nil, fallback: nil))
         .focusedSceneValue(\.folderScan, scanCommand)
         .task {
             await model.load()

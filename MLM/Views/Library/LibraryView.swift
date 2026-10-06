@@ -107,7 +107,7 @@ struct LibraryView: View {
             ContentUnavailableView {
                 Label("No tracks yet", systemImage: "music.note")
             } description: {
-                Text("Import music from a folder, or import a playlist from SoundCloud, YouTube or Spotify.")
+                Text("Import music from a folder, or import a playlist from SoundCloud, YouTube or Spotify. You can also drop files here.")
             } actions: {
                 Button("Import Files or Folder…") { shell?.chooseImportFolder() }
                 Button("Import Playlist from Source…") { shell?.importPlaylistFromSource() }

@@ -143,6 +143,7 @@ private struct AlbumDetailPage: View {
             guard case .success(let url) = result else { return }
             setCover(.file(url))
         }
+        .fileDialogMessage("Choose an image for the cover of “\(model.album?.title ?? "")”.")
         .sheet(isPresented: $isEditingInfo) { AlbumInfoSheet(albumID: shownID) }
         .sheet(isPresented: $isMerging) {
             AlbumMergeSheet(albumID: shownID, albumTitle: model.album?.title ?? "", albumArtist: model.album?.albumArtist ?? "")

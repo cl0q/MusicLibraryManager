@@ -226,7 +226,7 @@ final class ImportService: Sendable {
         onProgress?(ImportProgress(
             total: audioFiles.count,
             processed: 0,
-            phase: "Extracting metadata…",
+            phase: "Reading tags…",
             currentFile: nil
         ))
 
@@ -269,7 +269,7 @@ final class ImportService: Sendable {
             onProgress?(ImportProgress(
                 total: audioFiles.count,
                 processed: processed,
-                phase: "Extracting metadata…",
+                phase: "Reading tags…",
                 currentFile: chunk.last?.lastPathComponent
             ))
         }
@@ -290,7 +290,7 @@ final class ImportService: Sendable {
         onProgress?(ImportProgress(
             total: audioFiles.count,
             processed: audioFiles.count,
-            phase: "Saving to the library…",
+            phase: "Adding to the library…",
             currentFile: nil
         ))
 
@@ -304,7 +304,7 @@ final class ImportService: Sendable {
         onProgress?(ImportProgress(
             total: audioFiles.count,
             processed: audioFiles.count,
-            phase: "Complete",
+            phase: "Finished",
             currentFile: nil
         ))
 

@@ -75,6 +75,12 @@ final class RecommendationRepository: Sendable {
 
     // MARK: Keep
 
+    /// The held (waiting) ones among `ids`, in the order given, each once. A drop of such tracks on
+    /// a playlist or a sync profile keeps them as part of the same step (D-INBOX-TO-PLAYLIST).
+    func waiting(among ids: [Int64]) async throws -> [Int64] {
+        try await database.read { db in try Self.ids(in: ids, withStatus: Status.waiting, db) }
+    }
+
     /// Keep the waiting ones among `ids`: they join the library. Returns the ids that changed
     /// (a second Keep on the same ids changes nothing).
     @discardableResult

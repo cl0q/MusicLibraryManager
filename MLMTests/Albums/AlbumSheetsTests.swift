@@ -318,7 +318,7 @@ struct AlbumInfoEditTests {
         #expect(try await env.lib.albums.fetch(id: id)?.title == "Low Season")
         #expect(try await env.trackRow(tracks[0]).album == "Low Season")
         #expect(env.undo.stepCount == 0)
-        #expect(AlbumInfoForm.keyTaken == "An album with this title by this artist already exists — use Merge with Another Album….")
+        #expect(AlbumInfoForm.keyTaken == "A base album with this title already exists. Use Merge with Another Album…")
         // The same title under another album artist is a different album.
         new.albumArtist = "Bicep"
         try await env.edits.editAlbumInfo(albumID: id, original: original, new: new, trackIDs: tracks, tagEdit: env.tagEdit)

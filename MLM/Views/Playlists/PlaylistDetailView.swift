@@ -47,6 +47,7 @@ struct PlaylistDetailView: View {
         ContentScaffold(showsDriveBanner: true) {
             if let model {
                 content(model)
+                    .windowCount(StatusBarText.tracks(model.summary.totalTracks))
             } else {
                 Color.clear
             }
