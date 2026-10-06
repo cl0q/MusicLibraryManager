@@ -52,7 +52,7 @@ struct DevicePlaylistChangesTests {
 
     // MARK: Scan + apply on a temporary database and device folder
 
-    private func seed(_ env: SyncTestEnv) async throws -> (profile: SyncProfile, playlistID: Int64, device: URL) {
+    private func seed(_ env: SyncTestEnv, withUnmatched: Bool = false) async throws -> (profile: SyncProfile, playlistID: Int64, device: URL) {
         let device = try env.device("IPOD")
         for id in Int64(1)...5 { try env.localTrack(id, title: "Song \(id)") }
         let playlist = try await env.playlists.createNumbered(baseName: "Road", trackIds: [1, 2, 3, 4])
@@ -69,7 +69,8 @@ struct DevicePlaylistChangesTests {
             }
         }
         // On the device the user removed Song 2, added Song 5 and reordered.
-        let m3u = "#EXTM3U\nArtist/Song 3.mp3\nArtist/Song 1.mp3\nArtist/Song 5.mp3\nUnknown/track 07.m4a\n"
+        let m3u = "#EXTM3U\nArtist/Song 3.mp3\nArtist/Song 1.mp3\nArtist/Song 5.mp3\n"
+            + (withUnmatched ? "Unknown/track 07.m4a\n" : "")
         try m3u.write(to: device.appendingPathComponent("Road.m3u8"), atomically: true, encoding: .utf8)
         // A hidden folder (Rockbox's own) is never read.
         let hidden = device.appendingPathComponent(".rockbox")
@@ -101,7 +102,7 @@ struct DevicePlaylistChangesTests {
         #expect(card.diff.added == [5])
         #expect(card.diff.removed == [2])
         #expect(card.diff.keptOnlyInMLM == [4])
-        #expect(card.unmatched.map(\.path) == ["Unknown/track 07.m4a"])
+        #expect(card.unmatched.isEmpty)
 
         let model = DevicePlaylistChangesModel(profile: profile, service: service, isReachable: { _ in true })
         model.load(cards: scan.cards)
@@ -109,6 +110,46 @@ struct DevicePlaylistChangesTests {
         let closed = await model.apply(edits: env.edits)
         #expect(closed)
         #expect(try await members(env, playlistID) == [1, 3, 4, 5], "Song 4 (never on the device) stays")
+    }
+
+    @Test func aCardWithAnUnmatchedEntryHasItsRemovalsUnchecked() async throws {
+        let env = try await SyncTestEnv()
+        let (profile, _, _) = try await seed(env, withUnmatched: true)
+        let card = try #require(try await service(env).scan(profile: profile).cards.first)
+        #expect(card.unmatched.map(\.path) == ["Unknown/track 07.m4a"])
+        #expect(card.diff.removed == [2], "the removal is still listed")
+        let selection = DevicePlaylistSelection(card: card)
+        #expect(selection.removed.isEmpty, "…but not pre-checked while an entry is not understood")
+        #expect(selection.added == [5])
+    }
+
+    @Test func aTranscodedFileIsMatchedByTheNameTheSyncWrote() async throws {
+        let env = try await SyncTestEnv()
+        let device = try env.device("IPOD")
+        // Source `Artist - Title.flac` lands on the device as `.m4a`: the library's file name is
+        // never the device's.
+        try await env.db.write { db in
+            try db.execute(sql: """
+                INSERT INTO tracks (id, artist, album_artist, album, title, format, original_path, organized_path, date_added, duration)
+                VALUES (1, 'Artist', 'Artist', '', 'Title', 'flac', 'x', 'Artist/Artist - Title.flac', '2026-01-01T00:00:00Z', 180)
+            """)
+        }
+        let playlist = try await env.playlists.createNumbered(baseName: "Road", trackIds: [1])
+        var profile = try await env.profile("iPod", device: device, generateM3U8: true)
+        try await env.sync.updateSettings(profileId: profile.id!, generateM3U8: true, transcodeMode: TranscodeMode.aac248.rawValue)
+        profile = try #require(try await env.sync.fetch(id: profile.id!))
+        try await env.sync.addPlaylist(profileId: profile.id!, playlistId: playlist.id!)
+        try await env.db.write { db in
+            try db.execute(sql: "UPDATE playlist_tracks SET added_at = '2026-01-01 00:00:00'")
+            try db.execute(sql: """
+                INSERT INTO sync_state (profile_id, track_id, synced_checksum, synced_size, synced_timestamp)
+                VALUES (?, 1, 'x', 1, '2026-02-01 00:00:00')
+            """, arguments: [profile.id!])
+        }
+        try "#EXTM3U\nArtist/Artist - Title.m4a\n".write(to: device.appendingPathComponent("Road.m3u8"), atomically: true, encoding: .utf8)
+        let scan = try await service(env).scan(profile: profile)
+        #expect(scan.cards.isEmpty, "no removal, no unmatched entry")
+        #expect(scan.unchanged == 1)
     }
 
     @Test func applyIsOneUndoStepThatRestoresTheExactRows() async throws {

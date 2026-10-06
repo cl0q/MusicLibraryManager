@@ -145,7 +145,9 @@ struct DevicePlaylistSelection: Equatable, Sendable {
 
     init(card: DevicePlaylistCard) {
         added = Set(card.isNew ? card.device : card.diff.added)
-        removed = Set(card.diff.removed)
+        // Removals are pre-checked only when every entry of the file was understood; with
+        // unmatched entries MLM can't be sure what the device really dropped.
+        removed = card.unmatched.isEmpty ? Set(card.diff.removed) : []
     }
 
     var changeCount: Int { added.count + removed.count + (useDeviceOrder ? 1 : 0) }
@@ -227,6 +229,13 @@ final class DevicePlaylistChangeService: Sendable {
         let synced = Set(try await database.read { db in
             try Int64.fetchAll(db, sql: "SELECT track_id FROM sync_state WHERE profile_id = ?", arguments: [profileID])
         })
+        // The path MLM wrote for every track this profile has synced (the device's own names are
+        // never guessed from the library's file names).
+        let libraryRoot = try await ConfigRepository(database: database).getLibraryRoot() ?? ""
+        var writtenPaths: [String: Track] = [:]
+        for track in try await tracks.fetchTracks(ids: synced) {
+            writtenPaths[Self.pathKey(SyncService.devicePath(for: track, profile: profile, libraryRoot: libraryRoot))] = track
+        }
         var cards: [DevicePlaylistCard] = []
         var unchanged = 0
         var unreadable: [String] = []
@@ -235,7 +244,8 @@ final class DevicePlaylistChangeService: Sendable {
             progress(index, files.count)
             do {
                 if let card = try await card(for: file.url, name: file.name, profile: profile, profileID: profileID,
-                                             lastSync: lastSync, synced: synced) {
+                                             lastSync: lastSync, synced: synced,
+                                             libraryRoot: libraryRoot, writtenPaths: writtenPaths) {
                     cards.append(card)
                 } else {
                     unchanged += 1
@@ -252,16 +262,41 @@ final class DevicePlaylistChangeService: Sendable {
     }
 
     private func card(for url: URL, name: String, profile: SyncProfile, profileID: Int64,
-                      lastSync: String?, synced: Set<Int64>) async throws -> DevicePlaylistCard? {
+                      lastSync: String?, synced: Set<Int64>,
+                      libraryRoot: String, writtenPaths: [String: Track]) async throws -> DevicePlaylistCard? {
         let (header, entries) = try ingest.parse(url: url)
-        let (resolved, unresolved) = try await ingest.resolveEntries(entries)
-        let device = resolved.compactMap { $0.track.id }
-        let unmatched = unresolved.map {
-            DevicePlaylistCard.Unmatched(path: $0.entry.path, reason: "no track in the library has this file")
-        }
         let target = try await resolveTarget(header: header, url: url)
 
-        var labelTracks = resolved.map(\.track)
+        var pathMap = writtenPaths
+        var memberRows: [PlaylistTrack] = []
+        if case .existing(let playlistID, _) = target {
+            memberRows = try await database.read { db in
+                try PlaylistTrack.fetchAll(db, sql: """
+                    SELECT * FROM playlist_tracks WHERE playlist_id = ? ORDER BY position, added_at, id
+                """, arguments: [playlistID])
+            }
+            for track in try await tracks.fetchTracks(ids: Set(memberRows.map(\.trackId))) {
+                pathMap[Self.pathKey(SyncService.devicePath(for: track, profile: profile, libraryRoot: libraryRoot))] = track
+            }
+        }
+        // 1. The path MLM wrote; 2. only then the UUID / file-name guesses.
+        var resolvedTracks: [Track] = []
+        var unmatched: [DevicePlaylistCard.Unmatched] = []
+        for entry in entries {
+            if let track = pathMap[Self.pathKey(entry.path)] {
+                resolvedTracks.append(track)
+                continue
+            }
+            let (resolved, unresolved) = try await ingest.resolveEntries([entry])
+            if let track = resolved.first?.track {
+                resolvedTracks.append(track)
+            } else if let miss = unresolved.first {
+                unmatched.append(.init(path: miss.entry.path, reason: "no track in the library has this file"))
+            }
+        }
+        let device = resolvedTracks.compactMap(\.id)
+
+        var labelTracks = resolvedTracks
         let mlm: [Int64]
         let expected: Set<Int64>
         switch target {
@@ -270,11 +305,7 @@ final class DevicePlaylistChangeService: Sendable {
             mlm = []
             expected = []
         case .existing(let playlistID, _):
-            let rows = try await database.read { db in
-                try PlaylistTrack.fetchAll(db, sql: """
-                    SELECT * FROM playlist_tracks WHERE playlist_id = ? ORDER BY position, added_at, id
-                """, arguments: [playlistID])
-            }
+            let rows = memberRows
             mlm = rows.map(\.trackId)
             expected = try await expectedOnDevice(rows: rows, profile: profile, profileID: profileID,
                                                   playlistID: playlistID, lastSync: lastSync, synced: synced)
@@ -289,6 +320,11 @@ final class DevicePlaylistChangeService: Sendable {
         }
         return DevicePlaylistCard(id: name, fileURL: url, target: target, device: device, mlm: mlm,
                                   diff: diff, unmatched: unmatched, labels: labels)
+    }
+
+    /// Normalised key of a device path: precomposed Unicode, case-insensitive (FAT / HFS+).
+    static func pathKey(_ path: String) -> String {
+        path.precomposedStringWithCanonicalMapping.lowercased()
     }
 
     /// The tracks MLM itself wrote into the device file — the only ones the device can have

@@ -1231,10 +1231,61 @@ final class SyncService {
 
     // MARK: - M3U8 Generation
 
+    /// The path of a track's file as MLM writes it into a playlist file of `profile` (relative
+    /// to the device or the profile folder, by dialect). One source of truth for the playlist
+    /// writer and for matching a device's playlist entries back to tracks.
+    static func devicePath(for track: Track, profile: SyncProfile, libraryRoot: String) -> String {
+        let profileDir = URL(fileURLWithPath: profile.outputFolder)
+        let destPath = TranscodeCache.buildProfilePath(
+            track: track,
+            libraryRoot: libraryRoot,
+            profileOutputFolder: musicRootFolder(for: profile),
+            transcodeMode: profile.transcodeModeEnum
+        )
+        var fullPath: String
+        if profile.playlistFormatEnum == .rockbox {
+            if profile.outputFolder.hasPrefix("/Volumes/") {
+                // Extract mount point prefix (e.g. /Volumes/IPOD)
+                let components = profile.outputFolder.split(separator: "/")
+                if components.count >= 2 {
+                    let volumePrefix = "/\(components[0])/\(components[1])"
+                    if destPath.path.hasPrefix(volumePrefix) {
+                        fullPath = String(destPath.path.dropFirst(volumePrefix.count))
+                    } else {
+                        let relativePath = destPath.path.replacingOccurrences(of: profileDir.path + "/", with: "")
+                        let prefix = profile.playlistPathPrefix
+                        fullPath = prefix.isEmpty ? relativePath : "\(prefix)/\(relativePath)"
+                    }
+                } else {
+                    let relativePath = destPath.path.replacingOccurrences(of: profileDir.path + "/", with: "")
+                    let prefix = profile.playlistPathPrefix
+                    fullPath = prefix.isEmpty ? relativePath : "\(prefix)/\(relativePath)"
+                }
+            } else {
+                let relativePath = destPath.path.replacingOccurrences(of: profileDir.path + "/", with: "")
+                let prefix = profile.playlistPathPrefix
+                fullPath = prefix.isEmpty ? relativePath : "\(prefix)/\(relativePath)"
+            }
+        } else if profile.playlistFormatEnum == .ios {
+            // iOS dialect: relative path from profile output root (includes Music/ prefix),
+            // no leading slash, independent of playlist_path_prefix (spec §2).
+            let relativePath = destPath.path.replacingOccurrences(of: profileDir.path + "/", with: "")
+            fullPath = relativePath
+        } else {
+            // Doppi: relative to output folder with a leading slash
+            let relativePath = destPath.path.replacingOccurrences(of: profileDir.path + "/", with: "")
+            let prefix = profile.playlistPathPrefix
+            fullPath = prefix.isEmpty ? relativePath : "\(prefix)/\(relativePath)"
+            if !fullPath.hasPrefix("/") {
+                fullPath = "/" + fullPath
+            }
+        }
+        return fullPath
+    }
+
     /// Generate playlist files for each playlist in the profile (Rockbox/Doppi/iOS).
     private func generatePlaylists(profileId: Int64, profile: SyncProfile, libraryRoot: String) async throws {
         let playlists = try await syncRepository.fetchProfilePlaylists(profileId: profileId)
-        let profileDir = URL(fileURLWithPath: profile.outputFolder)
         let isIOS = profile.playlistFormatEnum == .ios
 
         // For the iOS dialect, ensure stable UUIDs on every playlist and track before writing.
@@ -1265,46 +1316,7 @@ final class SyncService {
 
                 let fileURL = URL(fileURLWithPath: destPath.path)
                 let isDoppi = profile.playlistFormatEnum == .doppi
-
-                // Make path relative to profile root or absolute depending on format
-                var fullPath: String
-                if profile.playlistFormatEnum == .rockbox {
-                    if profile.outputFolder.hasPrefix("/Volumes/") {
-                        // Extract mount point prefix (e.g. /Volumes/IPOD)
-                        let components = profile.outputFolder.split(separator: "/")
-                        if components.count >= 2 {
-                            let volumePrefix = "/\(components[0])/\(components[1])"
-                            if destPath.path.hasPrefix(volumePrefix) {
-                                fullPath = String(destPath.path.dropFirst(volumePrefix.count))
-                            } else {
-                                let relativePath = destPath.path.replacingOccurrences(of: profileDir.path + "/", with: "")
-                                let prefix = profile.playlistPathPrefix
-                                fullPath = prefix.isEmpty ? relativePath : "\(prefix)/\(relativePath)"
-                            }
-                        } else {
-                            let relativePath = destPath.path.replacingOccurrences(of: profileDir.path + "/", with: "")
-                            let prefix = profile.playlistPathPrefix
-                            fullPath = prefix.isEmpty ? relativePath : "\(prefix)/\(relativePath)"
-                        }
-                    } else {
-                        let relativePath = destPath.path.replacingOccurrences(of: profileDir.path + "/", with: "")
-                        let prefix = profile.playlistPathPrefix
-                        fullPath = prefix.isEmpty ? relativePath : "\(prefix)/\(relativePath)"
-                    }
-                } else if isIOS {
-                    // iOS dialect: relative path from profile output root (includes Music/ prefix),
-                    // no leading slash, independent of playlist_path_prefix (spec §2).
-                    let relativePath = destPath.path.replacingOccurrences(of: profileDir.path + "/", with: "")
-                    fullPath = relativePath
-                } else {
-                    // Doppi: relative to output folder with a leading slash
-                    let relativePath = destPath.path.replacingOccurrences(of: profileDir.path + "/", with: "")
-                    let prefix = profile.playlistPathPrefix
-                    fullPath = prefix.isEmpty ? relativePath : "\(prefix)/\(relativePath)"
-                    if !fullPath.hasPrefix("/") {
-                        fullPath = "/" + fullPath
-                    }
-                }
+                let fullPath = Self.devicePath(for: track, profile: profile, libraryRoot: libraryRoot)
 
                 let loadMetadata: () async throws -> PlaylistTrackMemoEntry = {
                     // Only include track if it physically exists on the device destination (skipped or missing tracks are omitted)
