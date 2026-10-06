@@ -171,6 +171,7 @@ final class LibraryViewModel {
 
     /// Refresh after external changes (import, download, delete, file check) — in place.
     func refresh() async {
+        debouncer.cancel() // a pending debounced refresh must not cancel this explicit one
         scheduleRefresh()
         await refreshTask?.value
     }

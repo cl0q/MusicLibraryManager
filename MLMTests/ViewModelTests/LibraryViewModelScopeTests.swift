@@ -123,6 +123,17 @@ struct LibraryViewModelScopeTests {
         #expect(!model.isLibraryEmpty)
     }
 
+    @Test func anExplicitRefreshIsNotCancelledByAPendingDebounce() async throws {
+        let fixture = try await makeFixture()
+        let model = fixture.model
+        model.searchQuery = "two"
+        await model.refresh()
+        #expect(titles(model) == ["Local Two"])
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(titles(model) == ["Local Two"])
+        #expect(model.counts?.all == 1)
+    }
+
     @Test func removalUpdatesRowsAndCountsInPlace() async throws {
         let fixture = try await makeFixture()
         let model = fixture.model
