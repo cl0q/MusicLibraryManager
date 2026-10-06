@@ -74,6 +74,9 @@ final class TrackTagEdit {
     ///     (`Changed genre of “Glass Circuit”`); nil uses the count.
     ///   - failure: `Couldn’t …` for the status bar when the database refuses; nil when the
     ///     caller shows the failure where the edit was typed (Info, UC-SHEET-17).
+    ///   - wording: the action name and the confirmation's first part when the edit is a named
+    ///     command (`Merge Genres` · `Merged 3 genres into “Techno” — 46 tracks changed`); nil =
+    ///     `Edit ‹Field›` · `Changed ‹field› of …`. The waiting / unsupported suffixes are kept.
     /// - Returns: the step, or nil when no track changed (no step, no message).
     /// - Throws: the database error (the edit didn't happen).
     @discardableResult
@@ -82,7 +85,8 @@ final class TrackTagEdit {
         field: TrackTagField,
         trackIDs: [Int64],
         singleTitle: String? = nil,
-        failure: String? = nil
+        failure: String? = nil,
+        wording: Wording? = nil
     ) async throws -> Step? {
         let ids = TrackTagRepository.uniqued(trackIDs)
         guard !ids.isEmpty, let repository = dependencies.repository() else { return nil }
@@ -99,13 +103,23 @@ final class TrackTagEdit {
             return try await apply()
         }
         return try await undo.perform(
-            field.actionName,
+            wording?.actionName ?? field.actionName,
             failure: failure,
             do: apply,
             undo: { step in try await Self.restore(step, repository: repository, deps: deps) },
             redo: { step in try await Self.restore(step, repository: repository, deps: deps) },
-            message: { step in Self.message(step, count: step.snapshots.count, singleTitle: ids.count == 1 ? singleTitle : nil, volume: deps.volumeName()) }
+            message: { step in
+                Self.message(step, count: step.snapshots.count, singleTitle: ids.count == 1 ? singleTitle : nil,
+                             volume: deps.volumeName(), headline: wording?.headline(step.snapshots.count))
+            }
         )
+    }
+
+    /// The words of a tag edit that is a named command (genre rename, merge, drop, staged save):
+    /// Edit ▸ Undo ‹actionName› and the status-bar headline for the number of changed tracks.
+    struct Wording {
+        let actionName: String
+        let headline: @MainActor (Int) -> String
     }
 
     /// Undo and redo: put the snapshot's values back; the result holds what they replaced.
@@ -137,12 +151,17 @@ final class TrackTagEdit {
     /// `Changed genre of 14 tracks` · `Changed genre of “Glass Circuit”`, plus
     /// `· 3 tag changes waiting for “Lexxar”` when the folder is away and
     /// `· Tags of 2 files couldn’t be written — WAV isn’t supported`.
-    static func message(_ step: Step, count: Int, singleTitle: String?, volume: String?) -> String {
-        var text = "Changed \(step.field.sentenceName) of "
-        if let singleTitle, count == 1 {
-            text += "“\(singleTitle)”"
+    static func message(_ step: Step, count: Int, singleTitle: String?, volume: String?, headline: String? = nil) -> String {
+        var text: String
+        if let headline {
+            text = headline
         } else {
-            text += StatusBarText.tracks(count)
+            text = "Changed \(step.field.sentenceName) of "
+            if let singleTitle, count == 1 {
+                text += "“\(singleTitle)”"
+            } else {
+                text += StatusBarText.tracks(count)
+            }
         }
         if let waiting = step.waiting, waiting > 0 {
             text += " · " + waitingText(waiting, volume: volume)
