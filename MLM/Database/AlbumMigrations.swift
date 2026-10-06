@@ -158,7 +158,6 @@ enum AlbumMigrations {
                 """, arguments: [winner, row.trackId, row.disc, key, row.trackNumber])
         }
         try db.execute(sql: "DELETE FROM album_tracks WHERE album_id = ?", arguments: [loser])
-        if !rows.isEmpty { _ = try AlbumTrackRepository.resortIfNumbered(db, albumID: winner) }
 
         // Variant preferences: the base moves (a winner that already has a preference keeps its
         // own and the loser's row goes); the selected variant moves.

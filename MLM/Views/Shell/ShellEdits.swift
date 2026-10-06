@@ -117,8 +117,8 @@ final class ShellEdits {
                            message: @escaping @MainActor (String, Int) -> String,
                            _ edit: @escaping @Sendable (Database) throws -> Void) async throws -> AlbumEditResult? {
         guard let repository = dependencies.albumTracks() else { throw UndoTargetMissing(quotedName: "The album") }
-        let name = (try await dependencies.albums()?.fetch(id: albumID))?.title ?? "Album"
-        guard try await dependencies.albums()?.fetch(id: albumID) != nil else { throw UndoTargetMissing(quotedName: "“\(name)”") }
+        guard let album = try await dependencies.albums()?.fetch(id: albumID) else { throw UndoTargetMissing(quotedName: "The album") }
+        let name = album.title
         let result = try await undo.perform(
             actionName(name),
             failure: "Couldn’t change “\(name)”",
