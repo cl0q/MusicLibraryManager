@@ -78,6 +78,7 @@ enum TrackSearchSQL {
         case .downloadFailed: return (TrackAvailabilitySQL.failed, [])
         case .fileMissing: return (TrackAvailabilitySQL.fileMissing, [])
         case .noAlbum: return (noAlbum, [])
+        case .noGenre: return ("(TRIM(COALESCE(genre, '')) = '')", [])
         case .notAnalysed: return ("(energy_bucket IS NULL)", [])
         case .inNoPlaylist:
             return ("(NOT EXISTS (SELECT 1 FROM playlist_tracks pt WHERE pt.track_id = tracks.id))", [])

@@ -193,6 +193,8 @@ private struct MainWindowDrops: ViewModifier {
             .dropTarget(.window, cornerRadius: 0)
             // The M3U preview, file panel and export (W3-PL, `PlaylistM3UImportSheet.swift`).
             .playlistWindowRequests()
+            // Export Create ML Training Set… from File ▸ Export or Genres ▸ More (W3-GEN).
+            .genreWindowRequests()
     }
 }
 

@@ -1204,7 +1204,7 @@ struct ReelsInboxView: View {
                     Button(action: {
                         identifyReelMusic(reel)
                     }) {
-                        Label("Per Audio erkennen (Shazam)", systemImage: "shazam.logo.fill")
+                        Label("Identify by Audio (Shazam)", systemImage: "shazam.logo.fill")
                             .font(MLMFont.bodyBold)
                     }
                     .buttonStyle(.bordered)

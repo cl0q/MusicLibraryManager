@@ -62,7 +62,10 @@ final class SnapshotsTests: XCTestCase {
         // `device-changes-sheet`); Shared/SelectionCreationSheets became non-view (its sheet merged
         // into NewSyncProfileSheet): 122 → 117 files, fixtures 27 → 24, rendered 23 → 20,
         // non-view 37 → 38, deferred 62 → 59.
-        XCTAssertEqual(paths.count, 120, "Re-audit inventory changes explicitly.")
+        // W3-GEN removed TrackDetail/GrooveStudioView.swift (deferred) and added the 7 files of
+        // Genres/ (6 deferred, GenreRequests non-view): 125 → 131 files, 65 → 70 deferred,
+        // 37 → 38 non-view.
+        XCTAssertEqual(paths.count, 126, "Re-audit inventory changes explicitly.")
         XCTAssertEqual(Set(SnapshotFixtures.inventory.map(\.path)), paths)
         XCTAssertEqual(SnapshotFixtures.inventory.count, paths.count)
         XCTAssertFalse(SnapshotFixtures.inventory.contains { $0.disposition.isEmpty })
@@ -70,8 +73,8 @@ final class SnapshotsTests: XCTestCase {
         XCTAssertFalse(SnapshotFixtures.fixtures.isEmpty)
         XCTAssertEqual(SnapshotFixtures.fixtures.count, 24)
         XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 20)
-        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 38)
-        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 62)
+        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 39)
+        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 67)
         for fixture in SnapshotFixtures.fixtures where fixture.expectedTableRows != nil {
             if case .swiftUI = fixture.backend {
                 XCTFail("\(fixture.id): table readiness requires the AppKit backend.")

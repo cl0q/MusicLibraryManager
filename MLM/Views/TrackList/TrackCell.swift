@@ -75,6 +75,11 @@ struct TrackCell: View {
                 TrackStatusLabel(status: status)
                     .help(row.failureDetail ?? "")
             }
+        case .match:
+            // A plain number, no badge (V-GENRED.N10).
+            value(row.matchPercent.map { "\($0) %" }, dimmed: dimmed, numeric: true)
+        case .suggestion:
+            TrackSuggestionCell(rowID: row.id)
         }
     }
 
@@ -87,6 +92,47 @@ struct TrackCell: View {
                 .foregroundStyle(dimmed ? AnyShapeStyle(.tertiary) : (secondary ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary)))
         } else {
             Text("—").foregroundStyle(.tertiary)
+        }
+    }
+}
+
+// MARK: - Suggestion verdicts (W3-GEN, ST-STUDIO-GENRE.E04)
+
+/// The state and verdicts of a suggestion list's rows: staged ids and what `Add to Genre`,
+/// `Remove` (unstage) and `Not Now` do. The host puts it into the environment of the table.
+@MainActor
+@Observable
+final class TrackSuggestionVerdicts {
+    var stagedIDs: Set<Int64> = []
+    @ObservationIgnored var stage: (Int64) -> Void = { _ in }
+    @ObservationIgnored var unstage: (Int64) -> Void = { _ in }
+    @ObservationIgnored var hide: (Int64) -> Void = { _ in }
+}
+
+extension EnvironmentValues {
+    @Entry var trackSuggestionVerdicts: TrackSuggestionVerdicts? = nil
+}
+
+/// `Add to Genre` · `Not Now` — or, once staged, `Staged` · `Remove`.
+private struct TrackSuggestionCell: View {
+    let rowID: Int64
+    @Environment(\.trackSuggestionVerdicts) private var verdicts
+
+    var body: some View {
+        if let verdicts {
+            HStack(spacing: Spacing.s) {
+                if verdicts.stagedIDs.contains(rowID) {
+                    Text("Staged").foregroundStyle(.secondary)
+                    Button("Remove") { verdicts.unstage(rowID) }
+                        .buttonStyle(.link)
+                } else {
+                    Button("Add to Genre") { verdicts.stage(rowID) }
+                        .controlSize(.small)
+                    Button("Not Now") { verdicts.hide(rowID) }
+                        .buttonStyle(.link)
+                }
+            }
+            .lineLimit(1)
         }
     }
 }

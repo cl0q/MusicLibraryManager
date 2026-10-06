@@ -211,9 +211,7 @@ enum MenuCommand: String, CaseIterable, Sendable {
             Entry(menu: .file, title: "Playlist as M3U…", shortcut: nil,
                   wiring: .app, parent: .export)
         case .createMLTrainingSet:
-            Entry(menu: .file, title: "Create ML Training Set…", shortcut: nil,
-                  wiring: .pending(owner: "W3-GEN", reason: "To export a Create ML training set now, use the genre tools in Settings ▸ Advanced."),
-                  parent: .export)
+            Entry(menu: .file, title: "Create ML Training Set…", shortcut: nil, wiring: .app, parent: .export)
         case .newLibrary: Entry(menu: .file, title: "New Library…", shortcut: nil, wiring: .app)
         case .openLibrary: Entry(menu: .file, title: "Open Library…", shortcut: .cmd("o"), wiring: .app)
         case .openRecent: Entry(menu: .file, title: "Open Recent", shortcut: nil, wiring: .app)

@@ -60,7 +60,11 @@ struct FileCommands: Commands {
                     PlaylistActions(container: .shared, shell: shellActions, navigation: navigation,
                                     statusBar: nil, undo: nil).exportM3U(exportable)
                 }
-                CommandButton(.createMLTrainingSet)
+                // The export sheet in the main window, wherever the user is (W3-GEN).
+                CommandButton(.createMLTrainingSet, enabled: shellActions != nil,
+                              disabledReason: "Open a library to export a Create ML training set.") {
+                    GenreRequests.shared.showsExportSheet = true
+                }
             }
 
             Divider()

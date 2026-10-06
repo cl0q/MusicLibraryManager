@@ -34,6 +34,9 @@ struct DestinationView: View {
         // (W3-SYNC, UC-LAYOUT-01/02).
         case .syncProfile(let id):
             SyncProfilePage(profileID: id)
+        case .genres:
+            // Own scaffold: the list's command bar and footer line (W3-GEN).
+            GenresView()
         default:
             ContentScaffold(showsDriveBanner: destination.listsTracks) {
                 content
@@ -59,11 +62,8 @@ struct DestinationView: View {
                 description: "Albums aren’t available yet."
             )
         case .genres:
-            PendingDestinationView(
-                title: "Genres",
-                systemImage: SidebarDestination.genres.systemImage,
-                description: "Genres aren’t available yet."
-            )
+            // Hosted by `body` (own scaffold).
+            Color.clear
         case .folders:
             FoldersView(onTrackDoubleClick: onTrackActivated)
         case .discover:
@@ -99,6 +99,10 @@ struct RouteView: View {
                 PlaylistDetailViewLoader(playlistId: id, initiallyShowFailedTracks: showFailedTracks,
                                          onBack: { navigation.goBack() }, onTrackDoubleClick: onTrackActivated)
                     .id(id)
+            } else if case .genre(let name) = route {
+                // Own scaffold: the genre's detail header (W3-GEN, UC-LAYOUT-06).
+                GenreDetailView(name: name, onTrackActivated: onTrackActivated)
+                    .id(GenreName.key(name) ?? name)
             } else {
                 ContentScaffold(showsDriveBanner: route.listsTracks) {
                     content
@@ -124,12 +128,9 @@ struct RouteView: View {
                 systemImage: "square.stack",
                 description: "Album pages aren’t available yet."
             )
-        case .genre(let name):
-            PendingDestinationView(
-                title: name,
-                systemImage: "guitars",
-                description: "Genre pages aren’t available yet."
-            )
+        case .genre:
+            // Hosted by `body` (own scaffold).
+            Color.clear
         case .similar:
             PendingDestinationView(
                 title: "Similar",
@@ -142,7 +143,7 @@ struct RouteView: View {
 
 // MARK: - Helpers
 
-/// A destination whose redesigned view is not built yet (Albums, Genres, reserved routes).
+/// A destination whose redesigned view is not built yet (Albums, reserved routes).
 struct PendingDestinationView: View {
     let title: String
     let systemImage: String
