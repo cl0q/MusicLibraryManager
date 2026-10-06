@@ -235,59 +235,6 @@ final class PlaylistViewModel {
         renameText = ""
     }
 
-    // MARK: - Pin/Unpin
-
-    /// Toggle the pin status of a playlist.
-    ///
-    /// D-10: Soft limit of 8 pinned playlists. The 9th attempt is hard-blocked
-    /// and surfaces `pinLimitHintMessage` for 3 seconds. Unpins are never
-    /// blocked.
-    ///
-    /// On a successful pin/unpin, posts `.playlistDidChange` so the Sidebar
-    /// pinned-disclosure (Plan 04) refreshes. The repo's `togglePin` itself
-    /// does not emit the notification — only the higher-level mutators do.
-    @MainActor
-    func togglePin(id: Int64) async {
-        guard let target = playlists.first(where: { $0.id == id }) else { return }
-        let willPin = target.isPinned == 0
-
-        if willPin {
-            let pinnedCount = playlists.filter { $0.isPinned == 1 }.count
-            if pinnedCount >= 8 {
-                pinLimitHintMessage = "Pin limit reached (8). Unpin one first."
-                // Schedule auto-clear after 3 seconds (UI-SPEC line 241).
-                Task { @MainActor [weak self] in
-                    try? await Task.sleep(for: .seconds(3))
-                    self?.pinLimitHintMessage = nil
-                }
-                return  // hard block — no repo call, no notification
-            }
-        }
-
-        do {
-            try await playlistRepository.togglePin(id: id)
-
-            if let idx = playlists.firstIndex(where: { $0.id == id }) {
-                playlists[idx].isPinned = playlists[idx].isPinned == 1 ? 0 : 1
-            }
-
-            // Re-sort: pinned first
-            playlists.sort { a, b in
-                if a.isPinned != b.isPinned {
-                    return a.isPinned > b.isPinned
-                }
-                return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
-            }
-
-            applyFilter()
-
-            // Sidebar pinned-disclosure observer needs this signal (Plan 04).
-            NotificationCenter.default.post(name: .playlistDidChange, object: nil)
-        } catch {
-            errorMessage = "Failed to toggle pin: \(error.localizedDescription)"
-        }
-    }
-
     // MARK: - Cover-Drop Rejection (UI-SPEC line 174)
 
     /// Surface the drop-rejected banner for 4 seconds.

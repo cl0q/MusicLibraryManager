@@ -531,7 +531,7 @@ private struct PlaylistsGridCard: View {
                 viewModel.cancelRename()
             },
             onTogglePin: {
-                Task { await viewModel.togglePin(id: playlist.id!) }
+                // Pinning is retired (DEC-003); the grid is rebuilt in this package.
             },
             onDelete: {
                 pendingDeletion = playlist

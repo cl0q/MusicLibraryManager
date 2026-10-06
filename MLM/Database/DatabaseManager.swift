@@ -1274,7 +1274,90 @@ final class DatabaseManager: Sendable {
             """)
         }
 
+        // ──────────────────────────────────────────────────────────────
+        // Migration v45_playlist_folders (W3-PL, DEC-003, UC-SIDE-08):
+        // playlist folders and the user's own playlist order. Registered
+        // after v46 (numbers are reserved, not ordered).
+        // `playlist_folders`: one row per folder; `parent_id` is reserved
+        // (folders hold playlists only — one level, enforced by
+        // `PlaylistFolderRepository`), `position` orders folders together
+        // with the top-level playlists. Expanded/collapsed is UI state
+        // (UserDefaults per library), not stored here.
+        // `playlists.folder_id` (NULL = top level) and `playlists.position`
+        // (fractional index, like `playlist_tracks.position`).
+        // Backfill: every playlist gets a position in the order the sidebar
+        // showed until now (`is_pinned DESC, name`, then id), so nothing
+        // visibly reorders; `is_pinned` itself is left untouched (DEC-003
+        // retires pinning; columns are never dropped). No foreign keys
+        // (they stay disabled): a folder's deletion moves its playlists to
+        // the top level in code, and readers treat a dangling `folder_id`
+        // as the top level.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v45_playlist_folders") { db in
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS playlist_folders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    parent_id INTEGER,
+                    position TEXT,
+                    date_created TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            let columns = try db.columns(in: "playlists").map(\.name)
+            if !columns.contains("folder_id") {
+                try db.alter(table: "playlists") { table in table.add(column: "folder_id", .integer) }
+            }
+            if !columns.contains("position") {
+                try db.alter(table: "playlists") { table in table.add(column: "position", .text) }
+            }
+            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS idx_playlists_folder_position
+                ON playlists(folder_id, position)
+            """)
+            // Only rows without a position (idempotent: a re-run or a hand-made column keeps
+            // what is already placed), after any that already have one.
+            let unplaced = try Int64.fetchAll(db, sql: """
+                SELECT id FROM playlists WHERE position IS NULL
+                ORDER BY COALESCE(is_pinned, 0) DESC, name, id
+            """)
+            let placedTail = try String.fetchOne(db, sql: """
+                SELECT MAX(position) FROM playlists WHERE position IS NOT NULL AND folder_id IS NULL
+            """)
+            let keys = Self.v45BackfillKeys(count: unplaced.count, after: placedTail)
+            for (id, key) in zip(unplaced, keys) {
+                try db.execute(sql: "UPDATE playlists SET position = ? WHERE id = ?", arguments: [key, id])
+            }
+        }
+
         return migrator
+    }
+
+    // MARK: - v45 backfill keys (frozen with the migration)
+
+    /// `count` ascending position keys for the v45 backfill: `a` + base-62 digits, evenly spread
+    /// (the same keys `FractionalIndexer.evenlySpaced` makes today — copied so a later change of
+    /// the indexer never changes what this migration writes). After `tail` when some rows were
+    /// already placed.
+    static func v45BackfillKeys(count: Int, after tail: String?) -> [String] {
+        guard count > 0 else { return [] }
+        let digits = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
+        var width = 2
+        var capacity = digits.count * digits.count
+        while capacity <= count {
+            width += 1
+            capacity *= digits.count
+        }
+        let step = capacity / (count + 1)
+        return (1...count).map { index in
+            var value = index * step
+            var key = [Character](repeating: digits[0], count: width)
+            for slot in stride(from: width - 1, through: 0, by: -1) {
+                key[slot] = digits[value % digits.count]
+                value /= digits.count
+            }
+            let spaced = "a" + String(key)
+            return tail.map { "\($0)|\(spaced)" } ?? spaced
+        }
     }
 
     // MARK: - Search Text Folding

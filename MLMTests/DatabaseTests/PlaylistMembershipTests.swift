@@ -80,7 +80,8 @@ struct PlaylistMembershipTests {
         #expect(afterReAdd.map(\.name) == ["Alpha"])
     }
 
-    @Test func fetchPlaylists_ordersPinnedFirstThenName() async throws {
+    /// W3-PL (DEC-003): the sidebar's manual order, not pinned-then-name; `is_pinned` is ignored.
+    @Test func fetchPlaylists_ordersLikeTheSidebar() async throws {
         let (db, repo) = try makeRepo()
         let a = try await repo.create(name: "Alpha")
         let z = try await repo.create(name: "Zulu")
@@ -89,13 +90,14 @@ struct PlaylistMembershipTests {
         try await repo.addTrack(playlistId: a.id!, trackId: 1, position: "0.5")
         try await repo.addTrack(playlistId: z.id!, trackId: 1, position: "0.5")
 
-        // Pin Zulu so it should appear first despite alphabetical order.
+        // Zulu first in the user's order; Alpha pinned, which no longer means anything.
         try await db.write { db in
-            try db.execute(sql: "UPDATE playlists SET is_pinned = 1 WHERE id = ?",
-                           arguments: [z.id!])
+            try db.execute(sql: "UPDATE playlists SET position = 'a1' WHERE id = ?", arguments: [z.id!])
+            try db.execute(sql: "UPDATE playlists SET position = 'a2', is_pinned = 1 WHERE id = ?", arguments: [a.id!])
         }
 
         let result = try await repo.fetchPlaylists(forTrackId: 1)
         #expect(result.map(\.name) == ["Zulu", "Alpha"])
+        #expect(try await repo.fetchAll().map(\.name) == ["Zulu", "Alpha"])
     }
 }
