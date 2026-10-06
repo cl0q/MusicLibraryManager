@@ -14,6 +14,8 @@ struct SimilarView: View {
     @Environment(\.openSettings) private var openSettings
     @Environment(NavigationModel.self) private var navigation: NavigationModel?
     @Environment(StatusBarCenter.self) private var statusBar: StatusBarCenter?
+    @Environment(UndoCenter.self) private var undo: UndoCenter?
+    @Environment(ShellActions.self) private var shell: ShellActions?
 
     @State private var model: SimilarModel?
     @State private var list = TrackListModel(sortOrder: nil)
@@ -43,11 +45,12 @@ struct SimilarView: View {
     }
 
     private func setUp() async {
-        if model == nil, let dependencies = DiscoverLive.similarDependencies(container) {
+        if model == nil, let dependencies = DiscoverLive.similarDependencies(container, shell: shell) {
             let created = SimilarModel(trackID: trackID, dependencies: dependencies)
             created.drive = LibraryDriveState.current(container)
             model = created
         }
+        model?.undo = undo
         await model?.load()
         await list.setTracks(model?.inLibrary ?? [], context: TrackRowBuildContext(matchPercents: model?.matches ?? [:]))
     }
@@ -284,12 +287,21 @@ struct SimilarView: View {
         }
         .padding(.vertical, Spacing.xs)
         .accessibilityElement(children: .combine)
+        .onAppear { TrackMenuSources.shared.loadIfNeeded() }
         .contextMenu {
             StreamPreviewMenuItem(link: row.recommendation.scDownloadUrl, title: row.recommendation.title, rowID: row.id)
             Button("Download") { model.download(row) }
                 .disabled(row.isBusy || row.isPlaced)
             Button("Keep") { model.keep(row) }
                 .disabled(row.isBusy || row.isPlaced)
+            Menu("Keep and Add to Playlist") {
+                AddToPlaylistMenuItems(
+                    playlists: TrackMenuSources.shared.playlists,
+                    showsKeyEquivalents: false,
+                    newPlaylist: { model.keep(row, addingTo: .new) },
+                    add: { id in model.keep(row, addingTo: .existing(id)) })
+            }
+            .disabled(row.isBusy || row.isPlaced)
             if let link = row.recommendation.scDownloadUrl, let url = URL(string: link) {
                 Divider()
                 Button("Open on \(DiscoverModel.sourceWord(row.recommendation.source))") { NSWorkspace.shared.open(url) }

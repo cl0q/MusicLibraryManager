@@ -9,6 +9,7 @@ struct RecommendationsView: View {
     let onTrackActivated: TrackActivation
 
     @Environment(ToolbarSearchModel.self) private var search: ToolbarSearchModel?
+    @Environment(NavigationModel.self) private var navigation: NavigationModel?
     @State private var showsLoadDetails = false
     @State private var placeholder = TrackListModel()
 
@@ -17,7 +18,7 @@ struct RecommendationsView: View {
             ContentUnavailableView {
                 Label("Can’t load the recommendations", systemImage: "exclamationmark.triangle")
             } description: {
-                Text("The library database didn’t answer. The recommendations you downloaded are still on the drive; nothing was kept or dismissed.")
+                Text("The library database didn’t answer. The recommendations you downloaded are still in the library folder; nothing was kept or dismissed.")
             } actions: {
                 Button("Try Again") { Task { await model.reload() } }
                 Button("Show Logs") { ActivityRouter.shared.showLogs(for: nil) }
@@ -41,6 +42,11 @@ struct RecommendationsView: View {
             } actions: {
                 Button("Find Recommendations") { NotificationCenter.default.post(name: .discoverFindRecommendations, object: nil) }
                     .buttonStyle(.borderedProminent)
+                Button("Similar to the Playing Track") {
+                    if let id = model.dependencies.playingTrack()?.id { navigation?.push(.similar(trackID: id)) }
+                }
+                .disabled(model.dependencies.playingTrack() == nil)
+                .help(model.dependencies.playingTrack() == nil ? "Nothing is playing." : "Opens Similar for the track that is playing")
             }
         } else if model.hasNoMatches {
             ContentUnavailableView {

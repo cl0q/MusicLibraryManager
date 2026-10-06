@@ -83,9 +83,9 @@ enum DiscoverLive {
 
 extension DiscoverLive {
     /// `nil` before a library is open.
-    static func similarDependencies(_ container: DependencyContainer) -> SimilarModel.Dependencies? {
+    static func similarDependencies(_ container: DependencyContainer, shell: ShellActions? = nil) -> SimilarModel.Dependencies? {
         guard let manager = container.databaseManager, let tracks = container.trackRepository,
-              let discover = dependencies(container, shell: nil) else { return nil }
+              let discover = dependencies(container, shell: shell) else { return nil }
         let recommendations = RecommendationRepository(database: manager.pool)
         return SimilarModel.Dependencies(
             fetchTrack: discover.fetchTrack,
@@ -107,7 +107,12 @@ extension DiscoverLive {
             },
             placement: { recommendation, seedID in
                 await placement(of: recommendation, seedID: seedID, tracks: tracks, recommendations: recommendations)
-            }
+            },
+            trackID: { recommendation, seedID in
+                await matchingTrackID(of: recommendation, seedID: seedID, tracks: tracks)
+            },
+            placeInPlaylist: discover.placeInPlaylist,
+            newPlaylist: { ids in shell?.newPlaylistFromSelection(trackIDs: ids) }
         )
     }
 
@@ -118,6 +123,17 @@ extension DiscoverLive {
         of recommendation: SwarmRecommendation, seedID: Int64, tracks: TrackRepository,
         recommendations: RecommendationRepository
     ) async -> SimilarModel.OnlineRow.Placement? {
+        guard let id = await matchingTrackID(of: recommendation, seedID: seedID, tracks: tracks) else { return nil }
+        switch (try? await recommendations.statuses(for: [id]))?[id] {
+        case RecommendationRepository.Status.waiting: return .held
+        case RecommendationRepository.Status.dismissed: return nil
+        default: return .library
+        }
+    }
+
+    /// The track a suggestion became: downloaded for this seed (matched by title), else the same
+    /// artist and title anywhere in the library.
+    static func matchingTrackID(of recommendation: SwarmRecommendation, seedID: Int64, tracks: TrackRepository) async -> Int64? {
         func normal(_ text: String) -> String { text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) }
         let wanted = normal(recommendation.title)
         let discovered = (try? await tracks.fetchDiscoveryTracksForSeed(seedTrackId: seedID)) ?? []
@@ -128,11 +144,6 @@ extension DiscoverLive {
         if match == nil {
             match = (try? await tracks.fetchTrackByArtistAndTitle(artist: recommendation.artist, title: recommendation.title)) ?? nil
         }
-        guard let id = match?.id else { return nil }
-        switch (try? await recommendations.statuses(for: [id]))?[id] {
-        case RecommendationRepository.Status.waiting: return .held
-        case RecommendationRepository.Status.dismissed: return nil
-        default: return .library
-        }
+        return match?.id
     }
 }
