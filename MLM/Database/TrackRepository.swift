@@ -35,6 +35,10 @@ enum SortColumn: String, CaseIterable {
 final class TrackRepository: Sendable {
     private let database: any DatabaseWriter
 
+    /// The database this repository writes to (for sibling repositories that must join a
+    /// transaction with it, e.g. `RecommendationRepository`).
+    var writer: any DatabaseWriter { database }
+
     init(database: any DatabaseWriter) {
         self.database = database
     }

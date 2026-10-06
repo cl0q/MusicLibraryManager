@@ -464,6 +464,19 @@ final class DependencyContainer {
             }
         }
 
+        // Dismissed recommendations (v49, IMP-055): their files went to the Trash when they were
+        // dismissed; the rows are purged once per launch — database only, no file is touched.
+        if let pool = self.databaseManager?.pool {
+            Task.detached {
+                do {
+                    let purged = try await RecommendationRepository(database: pool).purgeDismissed()
+                    if purged > 0 { AppLogger.shared.info("Purged \(purged) dismissed recommendations", source: "Discover") }
+                } catch {
+                    AppLogger.shared.error("Purging dismissed recommendations failed: \(error.localizedDescription)", source: "Discover")
+                }
+            }
+        }
+
         // Tag writes waiting for the library folder (W2-E): flush on open, mount, folder change.
         await MainActor.run {
             TagWriteQueue.shared.start(.live())
