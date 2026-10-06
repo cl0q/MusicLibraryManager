@@ -57,7 +57,8 @@ struct ReelStateMigrationTests {
 
     @Test func v55IsRegisteredAfterTheLatestMigration() {
         let names = DatabaseManager.buildMigrator().migrations
-        #expect(names.last == "v55_reel_state")
-        #expect(names.firstIndex(of: "v54_review_hidden") == names.count - 2)
+        // Registered right after v54; the album migrations (v50, v51, W4-1) follow it.
+        #expect(names.firstIndex(of: "v55_reel_state") == names.firstIndex(of: "v54_review_hidden").map { $0 + 1 })
+        #expect(names.firstIndex(of: "v50_album_tracks") == names.firstIndex(of: "v55_reel_state").map { $0 + 1 })
     }
 }

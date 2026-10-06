@@ -1542,6 +1542,17 @@ final class DatabaseManager: Sendable {
             try AlbumMigrations.v50AlbumTracks(db)
         }
 
+        // ──────────────────────────────────────────────────────────────
+        // Migration v51_album_dedup (W4-1, IMP-068): albums with the same album artist
+        // (NFC, case-folded) and normalised title are merged into the row with the most
+        // `album_tracks` rows (ties: lowest id); tracks, joins, variant preferences and variant_of
+        // are re-pointed; variants are untouched; the log {old: new} is kept in `app_config`
+        // key `albums.dedup.v51`. The launch coordinator makes the pre-migration backup.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v51_album_dedup") { db in
+            try AlbumMigrations.v51AlbumDedup(db)
+        }
+
         return migrator
     }
 
