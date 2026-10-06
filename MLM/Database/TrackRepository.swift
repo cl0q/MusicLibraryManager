@@ -551,6 +551,7 @@ final class TrackRepository: Sendable {
                     : "UPDATE tracks SET is_duplicate = 0, variant_of = NULL WHERE variant_of = ?", arguments: [id])
                 try db.execute(sql: "DELETE FROM track_sources WHERE track_id = ?", arguments: [id])
                 try db.execute(sql: "DELETE FROM playlist_tracks WHERE track_id = ?", arguments: [id])
+                try db.execute(sql: "DELETE FROM album_tracks WHERE track_id = ?", arguments: [id])
                 try db.execute(sql: "DELETE FROM sync_profile_tracks WHERE track_id = ?", arguments: [id])
                 try db.execute(sql: "DELETE FROM sync_state WHERE track_id = ?", arguments: [id])
                 try db.execute(sql: "DELETE FROM fingerprints WHERE track_id = ?", arguments: [id])

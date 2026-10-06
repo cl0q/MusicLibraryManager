@@ -1532,6 +1532,16 @@ final class DatabaseManager: Sendable {
             try db.execute(sql: "UPDATE imported_reels SET state = 'identified' WHERE state = 'new' AND artist <> '' AND title <> ''")
         }
 
+        // ──────────────────────────────────────────────────────────────
+        // Migration v50_album_tracks (W4-1, IMP-067, DEC-019): the order of an album's tracks
+        // (`disc`, fractional `position`, `track_number` from the file) and the link of every
+        // track with album text to an `albums` row (DB only). Registered after v55 (the numbers
+        // were reserved before the later migrations existed). Body: `AlbumMigrations`.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v50_album_tracks") { db in
+            try AlbumMigrations.v50AlbumTracks(db)
+        }
+
         return migrator
     }
 
