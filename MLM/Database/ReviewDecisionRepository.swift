@@ -214,6 +214,27 @@ final class ReviewDecisionRepository: Sendable {
             consequences: consequences, decidedAt: row["decided_at"])
     }
 
+    /// The tracks with these ids (a group's members), in id order.
+    func tracks(ids: [Int64]) async throws -> [Track] {
+        guard !ids.isEmpty else { return [] }
+        return try await database.read { db in
+            try Track.filter(ids.contains(Track.Columns.id)).order(Track.Columns.id).fetchAll(db)
+        }
+    }
+
+    /// In how many playlists each track is (`‹n› playlists`, V-REV.N12).
+    func playlistUsage(trackIDs: [Int64]) async throws -> [Int64: Int] {
+        guard !trackIDs.isEmpty else { return [:] }
+        return try await database.read { db in
+            let marks = trackIDs.map { _ in "?" }.joined(separator: ", ")
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT track_id, COUNT(DISTINCT playlist_id) AS n FROM playlist_tracks
+                WHERE track_id IN (\(marks)) GROUP BY track_id
+                """, arguments: StatementArguments(trackIDs))
+            return Dictionary(uniqueKeysWithValues: rows.map { ($0["track_id"] as Int64, $0["n"] as Int) })
+        }
+    }
+
     // MARK: Deciding
 
     /// Decide one group in one transaction. Throws `nothingPending` when the group isn't

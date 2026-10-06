@@ -17,6 +17,9 @@ enum TrackListContainer: Equatable, Sendable {
     /// A genre's tracks (V-GENRED, W3-GEN): `Remove from “‹Genre›”` clears their genre
     /// (UC-KEY-17). `key` is the genre's identity (`GenreName.key`), `name` its display name.
     case genre(key: String, name: String)
+    /// The versions of one Review group (W3-REV): no `Remove from ‹Container›`, the track menu
+    /// keeps `Remove from Library…`.
+    case reviewGroup(key: String)
     /// Search results, sheet tables and other lists without a container.
     case none
 }
@@ -338,7 +341,7 @@ struct TrackCommandState: Equatable, Sendable {
         let inContainer: Bool
         switch summary.container {
         case .playlist, .queue, .syncProfile, .genre: inContainer = true
-        case .library, .folder, .none: inContainer = false
+        case .library, .folder, .reviewGroup, .none: inContainer = false
         }
 
         canPlay = capabilities.canActivate && summary.firstIsLocal
@@ -384,6 +387,7 @@ struct TrackCommandState: Equatable, Sendable {
         case .folder: "A folder has nothing to remove tracks from. Remove from Library… deletes them."
         case .queue: "Select tracks under Next to remove them from the queue."
         case .playlist, .syncProfile, .genre: "These tracks can’t be removed here yet."
+        case .reviewGroup: "A version is decided on, not removed from its group. Remove from Library… deletes it."
         case .none: "This list has nothing to remove tracks from."
         }
     }
@@ -394,7 +398,7 @@ struct TrackCommandState: Equatable, Sendable {
         switch container {
         case .playlist(_, let name), .syncProfile(_, let name), .genre(_, let name): "Remove from “\(name)”"
         case .queue: "Remove from Queue"
-        case .library, .folder, .none: MenuCommand.removeFromContainer.title
+        case .library, .folder, .reviewGroup, .none: MenuCommand.removeFromContainer.title
         }
     }
 }

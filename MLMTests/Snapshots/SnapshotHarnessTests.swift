@@ -69,16 +69,19 @@ final class SnapshotsTests: XCTestCase {
         // Genres/ (6 deferred, GenreRequests non-view): 125 → 131 files, 65 → 70 deferred,
         // 37 → 38 non-view.
         // Merge of W3-FOLD and W3-GEN/W3-SYNC: 128 files, 24 fixtures, 20 rendered, 39 non-view, 69 deferred.
-        XCTAssertEqual(paths.count, 128, "Re-audit inventory changes explicitly.")
+        // W3-REV replaced ReviewQueue/ReviewQueueView.swift (rendered: `review-queue-empty`) by the 5
+        // files of Review/ (all deferred): 128 → 132 files, fixtures 24 → 23, rendered 20 → 19,
+        // deferred 69 → 74.
+        XCTAssertEqual(paths.count, 132, "Re-audit inventory changes explicitly.")
         XCTAssertEqual(Set(SnapshotFixtures.inventory.map(\.path)), paths)
         XCTAssertEqual(SnapshotFixtures.inventory.count, paths.count)
         XCTAssertFalse(SnapshotFixtures.inventory.contains { $0.disposition.isEmpty })
         XCTAssertEqual(Set(SnapshotFixtures.fixtures.map(\.id)).count, SnapshotFixtures.fixtures.count)
         XCTAssertFalse(SnapshotFixtures.fixtures.isEmpty)
-        XCTAssertEqual(SnapshotFixtures.fixtures.count, 24)
-        XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 20)
+        XCTAssertEqual(SnapshotFixtures.fixtures.count, 23)
+        XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 19)
         XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 39)
-        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 69)
+        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 74)
         for fixture in SnapshotFixtures.fixtures where fixture.expectedTableRows != nil {
             if case .swiftUI = fixture.backend {
                 XCTFail("\(fixture.id): table readiness requires the AppKit backend.")

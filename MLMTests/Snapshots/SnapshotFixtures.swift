@@ -100,20 +100,6 @@ enum SnapshotFixtures {
         Fixture(id: "discover-screen", size: .init(width: 800, height: 620), makeView: { _ in
             AnyView(DiscoverView())
         }),
-        Fixture(id: "review-queue-empty", size: .init(width: 800, height: 620), makeView: { store in
-            let analysisRepository = try SnapshotFixtures.require(
-                store.container.analysisRepository,
-                named: "analysis repository"
-            )
-            let trackRepository = try SnapshotFixtures.require(
-                store.container.trackRepository,
-                named: "track repository"
-            )
-            return AnyView(ReviewQueueView(initialViewModel: ReviewQueueViewModel(
-                analysisRepository: analysisRepository,
-                trackRepository: trackRepository
-            )))
-        }),
         Fixture(id: "queue-panel-unavailable", size: .init(width: 320, height: 560), makeView: { _ in
             AnyView(QueuePanel())
         }),
@@ -286,7 +272,6 @@ enum SnapshotFixtures {
         "TrackList/TrackListTable.swift", "TrackList/TrackCell.swift", "TrackList/TrackRowPresentation.swift",
         "Playlists/PlaylistCard.swift",
         "Playlists/PlaylistTable.swift", "Queue/QueuePanel.swift",
-        "ReviewQueue/ReviewQueueView.swift",
         "Shared/StatusChip.swift",
         "Shared/TrackCoverView.swift", "DragDrop/DropTargetModifier.swift", "Launch/LibraryLoadingView.swift",
         "Shared/TrackMetadataPresentation.swift", "Sync/SyncProfileSheets.swift",
@@ -394,6 +379,11 @@ enum SnapshotFixtures {
         "Import/ImportPlaylistSheet.swift": "Deferred: the import sheet reads source accounts and providers; ImportPlaylistModel is unit-tested (W3-ADD).",
         "Import/SourceSignInView.swift": "Deferred: the browser sign-in hand-off waits for a real OAuth callback; SourceSignInModel is unit-tested (W3-ADD).",
         "Import/ImportSheetsHost.swift": "Deferred: presents the Add menu sheets on the main window; nothing drawn of its own (W3-ADD).",
+        "Review/ReviewView.swift": "Deferred: the page reads the library database, the scan\u{2019}s Activity echo and the drive; ReviewModel / ReviewPresentation are unit-tested on temporary databases (W3-REV).",
+        "Review/ReviewGroupList.swift": "Deferred: the group list hosts live comparisons; its decisions are ReviewModel plans, unit-tested (W3-REV).",
+        "Review/ReviewComparison.swift": "Deferred: the comparison is the shared track table over live tracks plus the conflict grid; ReviewModel plans are unit-tested (W3-REV).",
+        "Review/ReviewResolvedView.swift": "Deferred: Resolved reads the decision history; its rows and outcomes are unit-tested (ReviewPresentationTests, W3-REV).",
+        "Review/ReviewVersionCells.swift": "Deferred: cells of the shared track table (version radio, location, used in); the words they show are ReviewPresentation, unit-tested (W3-REV).",
         "Genres/GenresView.swift": "Deferred: the genre list loads its counts from the library database; GenreOverview / GenreLookalikes are unit-tested (W3-GEN).",
         "Genres/GenreDetailView.swift": "Deferred: the genre page loads tracks and runs tag edits; GenreEdits is unit-tested on temporary databases (W3-GEN).",
         "Genres/GenreSuggestionsSection.swift": "Deferred: suggestions are computed from the similarity analysis; GenreWorkbench / GenreSuggestionRules are unit-tested (W3-GEN).",
@@ -471,7 +461,11 @@ Queue/QueuePanel.swift
 Queue/QueuePanelModel.swift
 Queue/SaveQueueAsPlaylistPopover.swift
 ReelsInbox/ReelsInboxView.swift
-ReviewQueue/ReviewQueueView.swift
+Review/ReviewComparison.swift
+Review/ReviewGroupList.swift
+Review/ReviewResolvedView.swift
+Review/ReviewVersionCells.swift
+Review/ReviewView.swift
 Search/OnlineSearchResultsView.swift
 Search/SearchFocusHandoff.swift
 Search/SearchResultsView.swift

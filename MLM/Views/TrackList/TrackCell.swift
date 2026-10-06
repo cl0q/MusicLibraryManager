@@ -80,6 +80,12 @@ struct TrackCell: View {
             value(row.matchPercent.map { "\($0) %" }, dimmed: dimmed, numeric: true)
         case .suggestion:
             TrackSuggestionCell(rowID: row.id)
+        case .version:
+            ReviewVersionCell(row: row)
+        case .location:
+            ReviewLocationCell(row: row, dimmed: dimmed)
+        case .usedIn:
+            ReviewUsedInCell(rowID: row.id)
         }
     }
 

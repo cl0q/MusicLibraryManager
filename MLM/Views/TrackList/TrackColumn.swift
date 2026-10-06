@@ -10,6 +10,10 @@ enum TrackColumnID: String, CaseIterable, Codable, Sendable, Identifiable {
     /// `Match` = how close a suggestion sounds (`93 %`, V-GENRED.N10); `suggestion` = the
     /// row's state and verdicts (`Add to Genre` · `Not Now` / `Staged` · `Remove`, W3-GEN).
     case match, suggestion
+    /// Review's comparison (W3-REV, V-REV.E07): `version` = the radio pick and the version's words
+    /// (`Recommended — highest quality`), `location` = the file's folder, `usedIn` = playlists
+    /// using it (`‹n› playlists`). Never in `standardColumns`.
+    case version, location, usedIn
 
     var id: String { rawValue }
 
@@ -37,6 +41,9 @@ enum TrackColumnID: String, CaseIterable, Codable, Sendable, Identifiable {
         case .status: "Status"
         case .match: "Match"
         case .suggestion: ""
+        case .version: "Version"
+        case .location: "Location"
+        case .usedIn: "Used in"
         }
     }
 
@@ -80,6 +87,9 @@ enum TrackColumnID: String, CaseIterable, Codable, Sendable, Identifiable {
         case .status: (90, 146, 220)
         case .match: (52, 64, 80)
         case .suggestion: (170, 210, 260)
+        case .version: (190, 250, 340)
+        case .location: (140, 260, nil)
+        case .usedIn: (70, 90, 140)
         }
     }
 }
@@ -134,6 +144,9 @@ struct TrackSortOrder: Equatable, Hashable, Codable, Sendable, RawRepresentable 
         case .status: return KeyPathComparator(\TrackRow.statusSortKey, order: order)
         case .match: return KeyPathComparator(\TrackRow.matchSortKey, order: order)
         case .suggestion: return KeyPathComparator(\TrackRow.suggestionSortKey, order: order)
+        case .version: return KeyPathComparator(\TrackRow.versionSortKey, order: order)
+        case .location: return KeyPathComparator(\TrackRow.locationSortKey, order: order)
+        case .usedIn: return KeyPathComparator(\TrackRow.usedInSortKey, order: order)
         }
     }
 
@@ -166,6 +179,9 @@ extension TrackColumnID {
         case .status: \TrackRow.statusSortKey
         case .match: \TrackRow.matchSortKey
         case .suggestion: \TrackRow.suggestionSortKey
+        case .version: \TrackRow.versionSortKey
+        case .location: \TrackRow.locationSortKey
+        case .usedIn: \TrackRow.usedInSortKey
         }
     }
 }

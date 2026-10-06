@@ -254,7 +254,8 @@ struct SavedPlaybackOrigin: Codable, Equatable {
         case .syncProfile(let id, let name): container = .syncProfile(id: id, name: name)
         case .folder(let path, let name): container = .folder(path: path, name: name)
         case .genre(let key, let name): container = .genre(key: key, name: name)
-        case .none: container = .none
+        // A Review comparison is not a place to come back to.
+        case .reviewGroup, .none: container = .none
         }
     }
 
