@@ -48,7 +48,6 @@ struct ContentView: View {
 
     @State private var shell = ShellState(container: .shared)
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
-    @State private var showFirstRunWizard = false
 
     @State private var reviewFocusTrackID: Int64?
 
@@ -72,77 +71,36 @@ struct ContentView: View {
                 .environment(shell.sidebar)
                 .environment(shell.actions)
                 .environment(shell.search)
-                .focusedSceneValue(\.navigationModel, container.isInitialized ? shell.navigation : nil)
-                .focusedSceneValue(\.trailingColumn, container.isInitialized ? shell.trailing : nil)
-                .focusedSceneValue(\.statusBarCenter, container.isInitialized ? shell.statusBar : nil)
-                .focusedSceneValue(\.shellActions, container.isInitialized ? shell.actions : nil)
+                .focusedSceneValue(\.navigationModel, isShellVisible ? shell.navigation : nil)
+                .focusedSceneValue(\.trailingColumn, isShellVisible ? shell.trailing : nil)
+                .focusedSceneValue(\.statusBarCenter, isShellVisible ? shell.statusBar : nil)
+                .focusedSceneValue(\.shellActions, isShellVisible ? shell.actions : nil)
                 .focusedSceneValue(\.playbackViewModel, container.playbackViewModel)
                 // Edit ▸ Find (⌘F, main window only) and Go ▸ Playlists (W1-2).
-                .focusedSceneValue(\.toolbarSearch, container.isInitialized ? shell.search : nil)
-                .focusedSceneValue(\.sidebarModel, container.isInitialized ? shell.sidebar : nil)
-                .modifier(UndoCenterInstallation(shell: shell, isLibraryOpen: container.isInitialized,
+                .focusedSceneValue(\.toolbarSearch, isShellVisible ? shell.search : nil)
+                .focusedSceneValue(\.sidebarModel, isShellVisible ? shell.sidebar : nil)
+                .modifier(UndoCenterInstallation(shell: shell, isLibraryOpen: isShellVisible,
                                                  libraryID: container.activeLibrary?.libraryId))
         )
     }
 
-    /// Launch states until a library is open, then the shell (UC-WIN-07: launch states
-    /// have no sidebar, player or search).
+    /// The shell once a library is open and its setup is done; until then the launch states
+    /// (W3-LAUNCH: picker, setup, opening, failed, invalid — UC-WIN-07: no sidebar, player or
+    /// search).
+    private var isShellVisible: Bool { container.isInitialized && launch.setup == nil }
+
     @ViewBuilder
     private var rootContent: some View {
         Group {
-            if container.isInitialized {
-                ZStack {
-                    initializedView
-
-                    // First-run wizard overlay when no library root configured
-                    if showFirstRunWizard {
-                        Color.black.opacity(0.6)
-                            .ignoresSafeArea()
-                            .transition(.opacity)
-
-                        FirstRunWizard {
-                            withAnimation(.easeInOut(duration: 0.3)) {
-                                showFirstRunWizard = false
-                                container.hasLibraryRoot = true
-                            }
-                        }
-                        .transition(.scale(scale: 0.9).combined(with: .opacity))
-                    }
-                }
-                .onAppear {
-                    showFirstRunWizard = !container.hasLibraryRoot
-                }
-            } else if let error = container.initializationError {
-                errorView(error)
-            } else if launch.screen == .offerAdoption {
-                // Pre-A3 install found: offer the library file before anything opens.
-                Color.mlmBase
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .sheet(isPresented: .constant(true)) {
-                        LibraryAdoptionSheet(
-                            state: launch.adoptionState,
-                            onCreate: { name in Task { await launch.adoptLegacyLibrary(named: name) } },
-                            onNotNow: { Task { await launch.declineAdoption() } },
-                            onDone: { Task { await launch.finishAdoption() } }
-                        )
-                    }
-            } else if launch.screen != .resolving, launch.screen != .opened {
-                // No library open yet (A3): first run, picker placeholder, or a problem.
-                LibraryLaunchStateView(
-                    screen: launch.screen,
-                    onNewLibrary: { launch.requestNewLibrary() },
-                    onOpenLibrary: { url in Task { await launch.open(packageAt: url) } },
-                    onOpenAsSeparateLibrary: { url in Task { await launch.openAsSeparateLibrary(url) } },
-                    onRetry: { Task { await launch.retry() } },
-                    onDismissProblem: { launch.dismissProblem() }
-                )
+            if isShellVisible {
+                initializedView
             } else {
-                loadingView
+                LaunchRootView(launch: launch)
             }
         }
         // Launch states show only the title and the Activity item (UC-WIN-07, UC-JOB-04).
         .toolbar {
-            if !container.isInitialized {
+            if !isShellVisible {
                 ToolbarItem(placement: .primaryAction) {
                     ActivityToolbarItem()
                 }
@@ -485,40 +443,6 @@ struct ContentView: View {
             shell.statusBar.post(result.message)
         }
     }
-
-    // MARK: - Error state
-
-    private func errorView(_ error: Error) -> some View {
-        VStack(spacing: 16) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 48))
-                .foregroundColor(.mlmError)
-            Text("Failed to Initialize")
-                .font(MLMFont.pageTitle)
-                .foregroundColor(.mlmInk)
-            Text(error.localizedDescription)
-                .font(MLMFont.body)
-                .foregroundColor(.mlmInkSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.mlmBase)
-    }
-
-    // MARK: - Loading state
-
-    private var loadingView: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-                .controlSize(.large)
-            Text("Loading Library...")
-                .font(MLMFont.body)
-                .foregroundColor(.mlmInkSecondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.mlmBase)
-    }
 }
 
 // MARK: - Undo
@@ -614,90 +538,4 @@ private struct LibraryHost: View, Equatable {
     }
 
     static func == (_: LibraryHost, _: LibraryHost) -> Bool { true }
-}
-
-// MARK: - Library files (A3)
-
-/// `New Library` sheet, `Switch to "‹name›"?` and problems with a library chosen while
-/// another one is open. Copy: UI-GROUNDTRUTH §3.17.
-private struct LibraryFilePresentation: ViewModifier {
-    let launch: LibraryLaunchCoordinator
-
-    func body(content: Content) -> some View {
-        content
-            .sheet(item: Binding(get: { launch.newLibraryRequest }, set: { if $0 == nil { launch.cancelNewLibrary() } })) { request in
-                NewLibrarySheet(
-                    defaultName: request.defaultName,
-                    onCreate: { name in Task { await launch.createLibrary(named: name) } },
-                    onCancel: { launch.cancelNewLibrary() }
-                )
-            }
-            .alert(
-                "Switch to \"\(launch.pendingSwitch?.name ?? "")\"?",
-                isPresented: Binding(get: { launch.pendingSwitch != nil }, set: { if !$0 { launch.cancelSwitch() } })
-            ) {
-                Button("Relaunch") { launch.confirmSwitch() }
-                Button("Cancel", role: .cancel) { launch.cancelSwitch() }
-            } message: {
-                Text("MLM relaunches to open this library. Finish active downloads and syncs first.")
-            }
-            .alert(
-                problemTitle,
-                isPresented: Binding(get: { launch.switchProblem != nil }, set: { if !$0 { launch.dismissProblem() } })
-            ) {
-                problemButtons
-            } message: {
-                problemMessage
-            }
-    }
-
-    private var problemTitle: String {
-        switch launch.switchProblem {
-        case .unavailable(let entry, _): return "\"\(entry.displayName)\" can't be opened"
-        case .mismatch(let name, _): return "\"\(name)\" can't be opened"
-        case .invalid(let name): return "\"\(name)\" isn't a valid library file."
-        case .duplicateCopy(let name, let originalName, _): return "\"\(name)\" is a copy of \"\(originalName)\""
-        default: return ""
-        }
-    }
-
-    @ViewBuilder
-    private var problemMessage: some View {
-        switch launch.switchProblem {
-        case .unavailable(_, .notConnected):
-            Text("The library file is on a disk that isn't connected. Connect the disk, then try again.")
-        case .unavailable:
-            Text("The library file isn't where MLM last found it. Open it from its new location, or create a new library.")
-        case .mismatch:
-            Text("The library file and its database don't belong together. This can happen when files inside a library file were replaced. MLM didn't change anything.")
-        case .duplicateCopy(_, let originalName, _):
-            Text("To open it, MLM makes the copy a separate library. \"\(originalName)\" is not changed.")
-        default:
-            EmptyView()
-        }
-    }
-
-    @ViewBuilder
-    private var problemButtons: some View {
-        switch launch.switchProblem {
-        case .mismatch(_, let packageURL):
-            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([packageURL]) }
-            Button("OK", role: .cancel) { launch.dismissProblem() }
-        case .duplicateCopy(_, _, let packageURL):
-            Button("Open as separate library") { Task { await launch.openAsSeparateLibrary(packageURL) } }
-            Button("Cancel", role: .cancel) { launch.dismissProblem() }
-        case .unavailable:
-            Button("Open Library…") {
-                launch.dismissProblem()
-                if let url = LibraryFilePanel.chooseLibraryFile() { Task { await launch.handleOpen(url) } }
-            }
-            Button("New Library…") {
-                launch.dismissProblem()
-                launch.requestNewLibrary()
-            }
-            Button("Cancel", role: .cancel) { launch.dismissProblem() }
-        default:
-            Button("OK", role: .cancel) { launch.dismissProblem() }
-        }
-    }
 }

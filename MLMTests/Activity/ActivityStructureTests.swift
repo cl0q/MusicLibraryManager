@@ -62,9 +62,9 @@ struct ActivityStructureTests {
         #expect(app.contains("Window(ActivityWindow.title, id: ActivityWindow.id)"))
         #expect(ActivityWindow.id == "activity")
         #expect(MenuCommand.activity.shortcut?.keyboardShortcut == .init("0", modifiers: [.option, .command]))
-        // Launch states show the Activity item too (UC-WIN-07).
+        // Launch states (W3-LAUNCH: also the setup of a new library) show the Activity item too (UC-WIN-07).
         let content = try source("MLM/Views/ContentView/ContentView.swift")
-        #expect(content.contains("if !container.isInitialized {\n                ToolbarItem(placement: .primaryAction) {\n                    ActivityToolbarItem()"))
+        #expect(content.contains("if !isShellVisible {\n                ToolbarItem(placement: .primaryAction) {\n                    ActivityToolbarItem()"))
     }
 
     @Test func toolbarItemHonoursReduceMotionAndCollapses() throws {

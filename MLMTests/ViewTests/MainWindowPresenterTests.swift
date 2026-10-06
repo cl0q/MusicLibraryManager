@@ -41,7 +41,8 @@ struct MainWindowPresenterTests {
         let dock = try source("MLM/App/Commands/DockMenu.swift")
         #expect(dock.contains("MainWindowPresenter.shared.openLibrary(url, launch: .shared)"))
         let settings = try source("MLM/Views/Settings/SettingsView.swift")
-        #expect(settings.contains("MainWindowPresenter.shared.openLibrary(url, launch: .shared)"))
+        // `Choose Library…` brings the window with the library picker (W3-LAUNCH).
+        #expect(settings.contains("MainWindowPresenter.shared.show()"))
         #expect(settings.contains(".installsMainWindowPresenter()"))
         let content = try source("MLM/Views/ContentView/ContentView.swift")
         #expect(content.contains(".installsMainWindowPresenter()"))

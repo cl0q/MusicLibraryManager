@@ -116,7 +116,8 @@ struct LibraryFinderIntegrationTests {
                        "\"Show Library File in Finder\""] {
             #expect(catalog.contains(string), "missing catalog entry: \(string)")
         }
-        // Clear Menu exists (UC-MENU-05) but stays disabled until W3-LAUNCH can remove libraries.
+        // Clear Menu exists (UC-MENU-05) but stays pending: Open Recent lists every library MLM
+        // knows; there is no separate recent list to clear (W3-LAUNCH).
         #expect(src.contains("CommandButton(.clearRecentLibraries)"))
         #expect(catalog.contains("title: \"Clear Menu\""))
         let file = try source("MLM/App/Commands/FileCommands.swift")
@@ -124,10 +125,10 @@ struct LibraryFinderIntegrationTests {
     }
 
     @Test func switchAlertUsesApprovedCopy() throws {
-        let src = try source("MLM/Views/ContentView/ContentView.swift")
+        let src = try source("MLM/Views/Launch/LibraryFilePresentation.swift")
         for string in [
-            "Switch to \\\"", "MLM relaunches to open this library. Finish active downloads and syncs first.",
-            "Relaunch", "Cancel",
+            "Switch to “", "MLM quits and reopens with “", "Switch and Relaunch", "Cancel",
+            "RunningWorkSummary(operations: ActivityCenter.shared.activeOperations)",
         ] {
             #expect(src.contains(string), "missing switch copy: \(string)")
         }
@@ -149,10 +150,10 @@ struct LibraryFinderIntegrationTests {
     }
 
     @Test func duplicatePromptUsesApprovedCopy() throws {
-        let src = try source("MLM/Views/Shared/LibraryLaunchStateView.swift")
+        let src = try source("MLM/Views/Launch/LibraryFilePresentation.swift")
         for string in [
             "is a copy of", "To open it, MLM makes the copy a separate library.", "is not changed.",
-            "Open as separate library", "Cancel",
+            "Open as Separate Library", "Cancel",
         ] {
             #expect(src.contains(string), "missing duplicate copy: \(string)")
         }

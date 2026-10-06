@@ -368,6 +368,8 @@ final class BackupService: Sendable {
         // cancel termination. If MLM is still running a few seconds later, termination was
         // cancelled — stop the waiter, or it would relaunch MLM whenever the user quits.
         DispatchQueue.main.async {
+            // The relaunch was confirmed already (switch, restore): no second `Quit MLM?`.
+            QuitGuard.shared.allowNextTermination()
             NSApplication.shared.terminate(nil)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) {

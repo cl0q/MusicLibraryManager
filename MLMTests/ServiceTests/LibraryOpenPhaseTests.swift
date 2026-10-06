@@ -112,4 +112,11 @@ struct LibraryOpenPhaseTests {
         #expect(LibraryOpenPhase.finishingSetup.caption?.hasPrefix("The setup was interrupted last time.") == true)
         #expect(LibraryOpenPhase.backingUp(bytes: nil).isWriting && !LibraryOpenPhase.reading.isWriting)
     }
+
+    @Test func failureCauseFollowsThePhase() {
+        #expect(LaunchFailure.cause(after: nil) == .unreadable)
+        #expect(LaunchFailure.cause(after: .reading) == .unreadable)
+        #expect(LaunchFailure.cause(after: .backingUp(bytes: 1)) == .backupBeforeUpdate)
+        #expect(LaunchFailure.cause(after: .updating(step: 1, total: 2)) == .update)
+    }
 }

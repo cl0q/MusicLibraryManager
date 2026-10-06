@@ -60,6 +60,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    /// Quit with work running asks first and lists what stops (PP-SHELL-16, `QuitGuard`);
+    /// nothing running quits at once.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        QuitGuard.shared.shouldTerminate()
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         // The queue is kept when MLM quits (W2-D): the last save, synchronously.
         DependencyContainer.shared.playbackViewModel?.flushQueuePersistence()
