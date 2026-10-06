@@ -51,4 +51,18 @@ struct AlbumTauriKeyTests {
         #expect(albums == 1)
         #expect(link == tauri)
     }
+
+    @Test func aFailedLinkLeavesNoHalfWrittenAlbumRowOrLink() throws {
+        let queue = try DatabaseManager.inMemory()
+        try queue.write { db in
+            try db.execute(sql: "CREATE TRIGGER no_join BEFORE INSERT ON album_tracks BEGIN SELECT RAISE(ABORT, 'refused'); END")
+            let id = try AlbumTracksMigrationTests.insertTrack(db, title: "A", artist: "Overmono", album: "Fresh Album")
+            #expect(throws: (any Error).self) {
+                try AlbumTrackRepository.linkImportedTrack(db, trackID: id, artist: "Overmono", albumArtist: "", album: "Fresh Album",
+                                                           year: nil, disc: nil, number: nil)
+            }
+            #expect(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM albums") == 0, "the new album row was rolled back")
+            #expect(try Int64?.fetchOne(db, sql: "SELECT album_id FROM tracks WHERE id = ?", arguments: [id]) == .some(nil), "no album link")
+        }
+    }
 }

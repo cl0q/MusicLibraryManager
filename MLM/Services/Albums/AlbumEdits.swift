@@ -21,9 +21,10 @@ extension ShellEdits {
             "Reorder “\(name)”",
             failure: "Couldn’t reorder “\(name)”",
             do: { () async throws -> AlbumEditResult? in
-                let before = try await repository.snapshot(albumID: albumID)
-                guard try await repository.applyLayout(albumID: albumID, ordered) else { return nil }
-                let after = try await repository.snapshot(albumID: albumID)
+                let (before, after) = try await repository.edit(albumID: albumID) { db in
+                    try AlbumTrackRepository.writeLayout(db, albumID: albumID, ordered)
+                }
+                guard before != after else { return nil }
                 NotificationCenter.default.post(name: .trackMetadataDidChange, object: nil)
                 return AlbumEditResult(albumID: albumID, name: name, before: before, after: after)
             },

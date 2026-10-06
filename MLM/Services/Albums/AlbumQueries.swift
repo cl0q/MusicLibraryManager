@@ -152,7 +152,13 @@ extension AlbumTrackRepository {
     /// disc. One transaction; undo restores `snapshot` exactly. Returns whether anything changed.
     @discardableResult
     func applyLayout(albumID: Int64, _ ordered: [(trackID: Int64, disc: Int, number: Int)]) async throws -> Bool {
-        try await database.write { db in
+        try await database.write { db in try Self.writeLayout(db, albumID: albumID, ordered) }
+    }
+
+    /// `applyLayout` inside a transaction.
+    @discardableResult
+    static func writeLayout(_ db: Database, albumID: Int64, _ ordered: [(trackID: Int64, disc: Int, number: Int)]) throws -> Bool {
+        do {
             let before = try Self.orderedRows(db, albumID: albumID)
             let layout = Dictionary(ordered.map { ($0.trackID, $0) }, uniquingKeysWith: { first, _ in first })
             // The new full order: listed members as given, hidden ones after their disc's.

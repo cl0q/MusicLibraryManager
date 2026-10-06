@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import GRDB
 
 /// The undoable edits the shell offers today (W2-F adoptions of `UndoCenter`): New Playlist,
 /// New Playlist from Selection, Add to Playlist ▸, playlist rename, Delete Playlist, sync
@@ -94,8 +95,8 @@ final class ShellEdits {
     @discardableResult
     func addTracks(toAlbum albumID: Int64, trackIDs: [Int64]) async throws -> AlbumEditResult? {
         try await editAlbum(albumID, actionName: { "Add to “\($0)”" },
-                            message: { "Added \(Self.tracks($1)) to “\($0)”" }) { repository in
-            _ = try await repository.add(trackIDs: trackIDs, to: albumID)
+                            message: { "Added \(Self.tracks($1)) to “\($0)”" }) { db in
+            try AlbumTrackRepository.addRows(db, trackIDs: trackIDs, to: albumID)
         }
     }
 
@@ -103,18 +104,18 @@ final class ShellEdits {
     @discardableResult
     func removeTracks(fromAlbum albumID: Int64, trackIDs: [Int64]) async throws -> AlbumEditResult? {
         try await editAlbum(albumID, actionName: { "Remove from “\($0)”" },
-                            message: { "Removed \(Self.tracks($1)) from “\($0)”" }) { repository in
-            _ = try await repository.remove(trackIDs: trackIDs, from: albumID)
+                            message: { "Removed \(Self.tracks($1)) from “\($0)”" }) { db in
+            try AlbumTrackRepository.removeRows(db, trackIDs: trackIDs, from: albumID)
         }
     }
 
     private static func tracks(_ count: Int) -> String { count == 1 ? "1 track" : "\(count.formatted()) tracks" }
 
-    /// One album edit as one undo step: snapshot, edit, snapshot; undo / redo restore the snapshots.
+    /// One album edit as one undo step (one transaction: snapshot, edit, snapshot); undo / redo restore the snapshots.
     /// Nothing changed → no step. Posts `.trackMetadataDidChange` after each of do, undo and redo.
     private func editAlbum(_ albumID: Int64, actionName: (String) -> String,
                            message: @escaping @MainActor (String, Int) -> String,
-                           _ edit: @escaping @MainActor (AlbumTrackRepository) async throws -> Void) async throws -> AlbumEditResult? {
+                           _ edit: @escaping @Sendable (Database) throws -> Void) async throws -> AlbumEditResult? {
         guard let repository = dependencies.albumTracks() else { throw UndoTargetMissing(quotedName: "The album") }
         let name = (try await dependencies.albums()?.fetch(id: albumID))?.title ?? "Album"
         guard try await dependencies.albums()?.fetch(id: albumID) != nil else { throw UndoTargetMissing(quotedName: "“\(name)”") }
@@ -122,9 +123,8 @@ final class ShellEdits {
             actionName(name),
             failure: "Couldn’t change “\(name)”",
             do: { () async throws -> AlbumEditResult? in
-                let before = try await repository.snapshot(albumID: albumID)
-                try await edit(repository)
-                let after = try await repository.snapshot(albumID: albumID)
+                // Snapshot, edit, snapshot: one transaction.
+                let (before, after) = try await repository.edit(albumID: albumID, edit)
                 guard before != after else { return nil }
                 NotificationCenter.default.post(name: .trackMetadataDidChange, object: nil)
                 return AlbumEditResult(albumID: albumID, name: name, before: before, after: after)
