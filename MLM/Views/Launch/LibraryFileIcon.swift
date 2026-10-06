@@ -7,14 +7,37 @@ import UniformTypeIdentifiers
 /// for every library — a library's state is always text, never drawn into the icon.
 enum LibraryFileIcon {
     @MainActor
-    static let nsImage: NSImage = {
-        if let url = Bundle.module.url(forResource: "LibraryFile", withExtension: "icns"),
-           let image = NSImage(contentsOf: url) {
-            return image
+    static let nsImage: NSImage = load(from: candidateBundles())
+
+    /// Where `LibraryFile.icns` may be, without touching `Bundle.module` (its accessor
+    /// crashes when the resource bundle isn't embedded — review S6): the app bundle itself
+    /// (`scripts/run.sh` copies the icon into Contents/Resources), then the SwiftPM resource
+    /// bundle next to the app, in its resources, or next to the code (`swift run`, tests).
+    static func candidateBundles() -> [Bundle] {
+        let resourceBundleName = "MLM_MLM.bundle"
+        var urls: [URL] = [Bundle.main.bundleURL.appendingPathComponent(resourceBundleName)]
+        if let resources = Bundle.main.resourceURL {
+            urls.append(resources.appendingPathComponent(resourceBundleName))
         }
-        // Without the resource (should not happen): the system's icon for the type.
+        urls.append(Bundle(for: BundleToken.self).bundleURL.deletingLastPathComponent()
+            .appendingPathComponent(resourceBundleName))
+        return [Bundle.main] + urls.compactMap { url in
+            FileManager.default.fileExists(atPath: url.path) ? Bundle(path: url.path) : nil
+        }
+    }
+
+    /// The first `LibraryFile.icns` found; otherwise the system's icon for the type.
+    static func load(from bundles: [Bundle]) -> NSImage {
+        for bundle in bundles {
+            if let url = bundle.url(forResource: "LibraryFile", withExtension: "icns"),
+               let image = NSImage(contentsOf: url) {
+                return image
+            }
+        }
         return NSWorkspace.shared.icon(for: LibraryFileType.contentType ?? .package)
-    }()
+    }
+
+    private final class BundleToken {}
 
     /// The icon at `size` points (32 in the picker, 16 in menus).
     @MainActor
