@@ -233,16 +233,9 @@ final class AlbumSuggestionRepository: Sendable {
             var result: [Int64: Int64] = [:]
             for item in items where item.row.hasSuggestion {
                 let suggestion = item.row.suggestion
-                let filedUnder = AlbumKey.effectiveArtist(
-                    albumArtist: suggestion.albumArtist.isEmpty ? item.track.albumArtist : suggestion.albumArtist,
-                    artist: item.track.artist)
-                let wanted = AlbumKey.artistKey(filedUnder)
-                let rows = try Row.fetchAll(db, sql: """
-                    SELECT id, album_artist FROM albums
-                    WHERE variant_kind IS NULL AND LOWER(album_artist) = LOWER(?) AND title_normalized = ?
-                    ORDER BY id
-                    """, arguments: [filedUnder, AlbumKey.normalize(suggestion.albumTitle)])
-                if let hit = rows.first(where: { AlbumKey.artistKey($0["album_artist"]) == wanted }) { result[item.id] = hit["id"] }
+                if let id = try AlbumKey.find(db, artist: item.track.artist,
+                                              albumArtist: suggestion.albumArtist.isEmpty ? item.track.albumArtist : suggestion.albumArtist,
+                                              title: suggestion.albumTitle) { result[item.id] = id }
             }
             return result
         }

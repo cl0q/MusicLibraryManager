@@ -50,8 +50,25 @@ enum AlbumKey {
     /// `title` (not by the stored `title_normalized`); of several matches the one with the most
     /// `album_tracks` rows wins. A new row is written with the Swift `title_normalized`.
     static func findOrCreate(_ db: Database, artist: String, albumArtist: String, title: String, year: Int?) throws -> Int64 {
+        if let id = try find(db, artist: artist, albumArtist: albumArtist, title: title) { return id }
         let filedUnder = effectiveArtist(albumArtist: albumArtist, artist: artist)
         let normalized = normalize(title)
+        try db.execute(sql: """
+            INSERT OR IGNORE INTO albums (artist, album_artist, title, title_normalized, year)
+            VALUES (?, ?, ?, ?, ?)
+            """, arguments: [artist, filedUnder, title, normalized, year])
+        if db.changesCount > 0 { return db.lastInsertedRowID }
+        // The unique index (case-insensitive artist, stored title key, kind) refused it: that row is the album.
+        if let id = try Int64.fetchOne(db, sql: """
+            SELECT id FROM albums WHERE IFNULL(variant_kind, '') = '' AND LOWER(album_artist) = LOWER(?) AND title_normalized = ?
+            ORDER BY id LIMIT 1
+            """, arguments: [filedUnder, normalized]) { return id }
+        throw DatabaseError(message: "The album “\(title)” could not be created.")
+    }
+
+    /// The existing base album with this key, if any (nothing is created).
+    static func find(_ db: Database, artist: String, albumArtist: String, title: String) throws -> Int64? {
+        let filedUnder = effectiveArtist(albumArtist: albumArtist, artist: artist)
         let wanted = key(artist: filedUnder, title: title)
         // An ASCII artist narrows the scan to its rows in SQL; anything else compares in Swift.
         let trimmed = filedUnder.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -69,27 +86,14 @@ enum AlbumKey {
                 """)
         }
         let hits = rows.filter { rowKey(albumArtist: $0["album_artist"], artist: $0["artist"], title: $0["title"]) == wanted }
-        if hits.count == 1 { return hits[0]["id"] }
-        if hits.count > 1 {
-            var best: (id: Int64, count: Int)?
-            for hit in hits {
-                let id: Int64 = hit["id"]
-                let count = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM album_tracks WHERE album_id = ?", arguments: [id]) ?? 0
-                if best == nil || count > best!.count { best = (id, count) }
-            }
-            if let best { return best.id }
+        if hits.count <= 1 { return hits.first?["id"] }
+        var best: (id: Int64, count: Int)?
+        for hit in hits {
+            let id: Int64 = hit["id"]
+            let count = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM album_tracks WHERE album_id = ?", arguments: [id]) ?? 0
+            if best == nil || count > best!.count { best = (id, count) }
         }
-        try db.execute(sql: """
-            INSERT OR IGNORE INTO albums (artist, album_artist, title, title_normalized, year)
-            VALUES (?, ?, ?, ?, ?)
-            """, arguments: [artist, filedUnder, title, normalized, year])
-        if db.changesCount > 0 { return db.lastInsertedRowID }
-        // The unique index (case-insensitive artist, stored title key, kind) refused it: that row is the album.
-        if let id = try Int64.fetchOne(db, sql: """
-            SELECT id FROM albums WHERE IFNULL(variant_kind, '') = '' AND LOWER(album_artist) = LOWER(?) AND title_normalized = ?
-            ORDER BY id LIMIT 1
-            """, arguments: [filedUnder, normalized]) { return id }
-        throw DatabaseError(message: "The album “\(title)” could not be created.")
+        return best?.id
     }
 }
 
