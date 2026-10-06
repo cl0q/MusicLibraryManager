@@ -16,7 +16,7 @@ extension EnvironmentValues {
 /// 4. Load NSImage from disk + cache it
 ///
 /// Observes `.trackArtworkDidChange` to reload when background backfill completes.
-/// Fallback: Solar linearGradient mlmBase→mlmRaised + music.note in mlmInkMuted (D-11).
+/// Fallback: quaternary fill + music.note in the tertiary style (D-11).
 ///
 /// Sizing: TrackCoverView does NOT apply its own .frame — callers are responsible
 /// for all sizing (width/height) so the component renders at whatever size is requested.
@@ -188,20 +188,14 @@ struct TrackCoverView: View {
         return CGImageSourceCreateThumbnailAtIndex(source, 0, thumbOptions as CFDictionary)
     }
 
-    // MARK: - Fallback (D-11 Solar contract)
+    // MARK: - Fallback (D-11)
 
     private var fallbackGradient: some View {
         RoundedRectangle(cornerRadius: cornerRadius)
-            .fill(
-                LinearGradient(
-                    gradient: Gradient(colors: [Color.mlmBase, Color.mlmRaised]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
+            .fill(.quaternary)
             .overlay(
                 Image(systemName: "music.note")
-                    .foregroundStyle(Color.mlmInkMuted)
+                    .foregroundStyle(.tertiary)
                     .font(.system(size: fallbackIconSize))
             )
     }

@@ -160,21 +160,6 @@ struct RouteView: View {
 
 // MARK: - Helpers
 
-/// A destination whose redesigned view is not built yet (Albums, reserved routes).
-struct PendingDestinationView: View {
-    let title: String
-    let systemImage: String
-    let description: String
-
-    var body: some View {
-        ContentUnavailableView {
-            Label(title, systemImage: systemImage)
-        } description: {
-            Text(description)
-        }
-    }
-}
-
 /// Sets the window title (current place) and subtitle (library name + count where cheap),
 /// UC-WIN-06. Applied to every scaffolded place so whichever is visible names the window.
 struct WindowTitleModifier: ViewModifier {

@@ -22,7 +22,7 @@ final class ActivitySystemNotifier: ActivityFinishNotifying {
         var title: String {
             switch self {
             case .importsAndDownloads: "Imports and downloads"
-            case .sync: "Sync to a device"
+            case .sync: "Device syncs"
             case .backups: "Backups and restores"
             }
         }

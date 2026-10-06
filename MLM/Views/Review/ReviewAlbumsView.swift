@@ -316,7 +316,7 @@ struct ReviewAlbumsView: View {
                 Button("Accept") { accept([item.id]) }
                     .disabled(!pending)
                 if item.row.status == .pending, !item.row.alternatives.isEmpty {
-                    Menu("Choose Another Album…") {
+                    Menu("Choose Another Album") {
                         ForEach(Array(item.row.alternatives.enumerated()), id: \.offset) { index, other in
                             Button(ReviewAlbumsModel.alternativeLine(other)) { choose(index, for: item.id) }
                         }

@@ -22,11 +22,11 @@ struct DevicePlaylistDiff: Equatable, Sendable {
 
     static func make(device: [Int64], mlm: [Int64], expected: Set<Int64>) -> DevicePlaylistDiff {
         let deviceSet = Set(device)
-        let mlmSet = Set(mlm)
-        let added = unique(device.filter { !mlmSet.contains($0) })
+        let ownSet = Set(mlm)
+        let added = unique(device.filter { !ownSet.contains($0) })
         let removed = mlm.filter { expected.contains($0) && !deviceSet.contains($0) }
         let kept = mlm.filter { !deviceSet.contains($0) && !expected.contains($0) }
-        let commonOnDevice = unique(device.filter { mlmSet.contains($0) })
+        let commonOnDevice = unique(device.filter { ownSet.contains($0) })
         let commonInMLM = mlm.filter { deviceSet.contains($0) }
         return DevicePlaylistDiff(added: added, removed: removed, keptOnlyInMLM: kept,
                                   orderDiffers: commonOnDevice != commonInMLM)

@@ -195,7 +195,7 @@ actor BatchResultCollector {
                         trackArtist: track.artist,
                         savedToDb: true
                     )
-                    AppLogger.shared.debug("Artwork [\(tracker.currentState.current)/\(tracker.currentState.total)] \(track.artist) - \(track.title) → embedded ✓", source: "Artwork")
+                    AppLogger.shared.debug("Artwork [\(tracker.currentState.current)/\(tracker.currentState.total)] \(track.artist) - \(track.title) → embedded", source: "Artwork")
                     return
                 } catch {
                     // Fall through to MusicBrainz

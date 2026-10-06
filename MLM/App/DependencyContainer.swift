@@ -51,7 +51,6 @@ final class DependencyContainer {
     private(set) var audioEmbeddingService: AudioEmbeddingService?
     private(set) var grooveBatchAnalyzer: GrooveBatchAnalyzer?
     private(set) var swarmRecommendationService: SwarmRecommendationService?
-    private(set) var discoveryReviewService: DiscoveryReviewService?
     private(set) var transcodeCache: TranscodeCache?
     private(set) var unifiedSearchService: UnifiedSearchService?
     private(set) var playlistIngestService: PlaylistIngestService?
@@ -202,10 +201,6 @@ final class DependencyContainer {
         self.audioEmbeddingService = AudioEmbeddingService()
         self.grooveBatchAnalyzer = GrooveBatchAnalyzer(embeddingService: self.audioEmbeddingService!)
         self.swarmRecommendationService = SwarmRecommendationService()
-        self.discoveryReviewService = DiscoveryReviewService(
-            trackRepository: self.trackRepository!,
-            configRepository: self.configRepository!
-        )
 
         // Auth services (shared by all source integrations)
         let tokens = TokenStorage()

@@ -258,45 +258,23 @@ struct PlaylistIngestTests {
 
     // MARK: - Snapshot Persistence
 
-    @Test func snapshotWrittenAfterExport() async throws {
+    @Test func snapshotReadsBackWhatSyncWrote() async throws {
         let (db, service, _, _) = try makeService()
-        _ = service
+        #expect(try await service.readSnapshot(profileId: 42, playlistId: 99) == nil)
 
-        // Verify the snapshot table exists and is empty initially
-        let count = try await db.read { db in
-            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM playlist_sync_snapshots") ?? 0
+        // `SyncService.generatePlaylists` writes the row; the ingest engine only reads it.
+        let json = #"[{"uuid":"U1","path":"A/B/C.m4a","track_id":7}]"#
+        try await db.write { db in
+            try db.execute(sql: """
+                INSERT INTO playlist_sync_snapshots (profile_id, playlist_id, playlist_uuid, snapshot_json, written_at)
+                VALUES (42, 99, 'PL-U', ?, datetime('now'))
+                """, arguments: [json])
         }
-        #expect(count == 0)
 
-        // Write a snapshot manually
-        let entries: [PlaylistIngestService.SnapshotEntry] = [
-            .init(uuid: "U1", path: "A/B/C.m4a")
-        ]
-        try await service.writeSnapshot(profileId: 42, playlistId: 99, playlistUuid: "PL-U", entries: entries)
-
-        // Read it back
         let snapshot = try await service.readSnapshot(profileId: 42, playlistId: 99)
         #expect(snapshot?.count == 1)
         #expect(snapshot?[0].uuid == "U1")
         #expect(snapshot?[0].path == "A/B/C.m4a")
-    }
-
-    @Test func snapshotReplacedOnSubsequentWrite() async throws {
-        let (db, service, _, _) = try makeService()
-        _ = db
-
-        // Write first snapshot
-        let entries1: [PlaylistIngestService.SnapshotEntry] = [.init(uuid: "U1", path: "A.m4a")]
-        try await service.writeSnapshot(profileId: 1, playlistId: 1, playlistUuid: nil, entries: entries1)
-
-        // Write second snapshot (should replace)
-        let entries2: [PlaylistIngestService.SnapshotEntry] = [
-            .init(uuid: "U1", path: "A.m4a"),
-            .init(uuid: "U2", path: "B.m4a")
-        ]
-        try await service.writeSnapshot(profileId: 1, playlistId: 1, playlistUuid: nil, entries: entries2)
-
-        let snapshot = try await service.readSnapshot(profileId: 1, playlistId: 1)
-        #expect(snapshot?.count == 2)
+        #expect(snapshot?[0].trackId == 7)
     }
 }

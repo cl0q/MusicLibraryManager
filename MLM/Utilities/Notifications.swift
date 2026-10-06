@@ -109,9 +109,6 @@ extension Notification.Name {
     /// Posted when the user presses ⌘F — views should focus their search field.
     static let focusSearchField = Notification.Name("MLMFocusSearchField")
 
-    /// Posted when the user presses ⌘F while in Folder view.
-    static let focusFolderSearchField = Notification.Name("MLMFocusFolderSearchField")
-
     /// Open the right-hand track detail inspector for one track.
     ///
     /// - `userInfo["trackId"]`: `Int64` — the track to show

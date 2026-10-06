@@ -39,7 +39,7 @@ struct RecommendationsView: View {
             } description: {
                 Text("Pick a track you like and MLM looks for similar ones on SoundCloud or Last.fm. What it downloads waits here until you keep or dismiss it.")
             } actions: {
-                Button("Find Recommendations…") { NotificationCenter.default.post(name: .discoverFindRecommendations, object: nil) }
+                Button("Find Recommendations") { NotificationCenter.default.post(name: .discoverFindRecommendations, object: nil) }
                     .buttonStyle(.borderedProminent)
             }
         } else if model.hasNoMatches {

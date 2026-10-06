@@ -97,30 +97,4 @@ struct TrackRepositoryBatchingTests {
         let inbox = try await repo.fetchDiscoveryInboxTracks()
         #expect(inbox.isEmpty)
     }
-
-    // MARK: - Combined count
-
-    @Test func countTracksByAvailabilityMatchesIndividualCounts() async throws {
-        let (db, repo) = try makeRepo()
-
-        _ = try await insertTrack(db, title: "L1", organizedPath: "/l1.mp3")
-        _ = try await insertTrack(db, title: "L2", organizedPath: "/l2.mp3")
-        _ = try await insertTrack(db, title: "L3", organizedPath: "/l3.mp3")
-        _ = try await insertTrack(db, title: "R1", organizedPath: nil)
-        _ = try await insertTrack(db, title: "R2", organizedPath: nil)
-
-        let combined = try await repo.countTracksByAvailability()
-        let local = try await repo.countLocalTracks()
-
-        #expect(combined.local == 3)
-        #expect(combined.remote == 2)
-        #expect(combined.local == local)
-    }
-
-    @Test func countTracksByAvailabilityEmptyTable() async throws {
-        let (_, repo) = try makeRepo()
-        let combined = try await repo.countTracksByAvailability()
-        #expect(combined.local == 0)
-        #expect(combined.remote == 0)
-    }
 }

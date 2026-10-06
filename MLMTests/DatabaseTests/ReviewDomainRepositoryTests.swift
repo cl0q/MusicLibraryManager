@@ -209,22 +209,29 @@ struct ReviewDomainRepositoryTests {
         #expect(count == 0)
     }
 
-    @Test func keepResolutionAndUndoRestoreDuplicateMarkersAndHistory() async throws {
+    /// A decision made before v48 left a `resolutionSnapshot` on its rows; Restore puts every
+    /// duplicate marker and metadata field back and returns the group to the pending queue.
+    @Test func undoRestoresDuplicateMarkersAndMetadataFromAPreV48Snapshot() async throws {
         let (database, analysis, tracks) = try makeRepositories()
-        let firstID = try await insertTrack(database, title: "Master")
-        let secondID = try await insertTrack(database, title: "Copy")
+        let firstID = try await insertTrack(database, title: "Song (Radio Edit)")
+        let secondID = try await insertTrack(database, title: "Song")
         let groupKey = "duplicate:\(firstID):\(secondID)"
+        let first = try #require(await tracks.fetchTrack(id: firstID))
+        let second = try #require(await tracks.fetchTrack(id: secondID))
 
-        // An existing marker must be restored exactly after undo, rather than
-        // simply clearing the group as a side effect of the resolution.
-        try await tracks.markDuplicate(trackId: secondID, variantOf: firstID)
-        let details = ReviewDetails(
+        var details = ReviewDetails(
             groupKey: groupKey,
-            recommendation: ReviewRecommendation(action: .keepTrack, trackId: secondID),
-            tracks: [
-                ReviewTrackSnapshot(id: firstID, title: "Master", artist: "Artist"),
-                ReviewTrackSnapshot(id: secondID, title: "Copy", artist: "Artist"),
-            ]
+            tracks: [ReviewTrackSnapshot(track: first), ReviewTrackSnapshot(track: second)]
+        )
+        details.resolutionSnapshot = ReviewResolutionSnapshot(
+            action: "keep_manual",
+            keptTrackIds: [secondID],
+            unkeptTrackIds: [firstID],
+            duplicateStates: [
+                ReviewDuplicateState(trackId: firstID, isDuplicate: 0, variantOf: nil),
+                ReviewDuplicateState(trackId: secondID, isDuplicate: 1, variantOf: firstID),
+            ],
+            metadataStates: [ReviewTrackMetadataSnapshot(track: first), ReviewTrackMetadataSnapshot(track: second)]
         )
         try await analysis.saveReviewItem(
             ReviewItem(
@@ -235,111 +242,37 @@ struct ReviewDomainRepositoryTests {
                 relatedTrackId: secondID,
                 details: try details.encodedJSON(),
                 autoAction: nil,
-                status: "pending",
+                status: "resolved",
                 createdAt: nil,
                 resolvedAt: nil
             )
         )
-
-        try await analysis.applyReviewResolution(
-            groupKey: groupKey,
-            action: .keepManual,
-            keptTrackIds: [secondID]
-        )
-
-        let resolved = try await analysis.fetchResolvedReviews()
-        let resolvedFirst = try await tracks.fetchTrack(id: firstID)
-        let resolvedSecond = try await tracks.fetchTrack(id: secondID)
-
-        #expect(resolved.count == 1)
-        #expect(resolved[0].reviewDetails?.resolutionSnapshot?.action == ReviewResolutionAction.keepManual.rawValue)
-        #expect(resolvedFirst?.isDuplicate == 1)
-        #expect(resolvedFirst?.variantOf == secondID)
-        #expect(resolvedSecond?.isDuplicate == 0)
-        #expect(resolvedSecond?.variantOf == nil)
+        // The state after the old decision: the markers flipped and a title changed.
+        try await database.write { db in
+            try db.execute(sql: "UPDATE tracks SET is_duplicate = 1, variant_of = ?, title = 'Changed' WHERE id = ?",
+                           arguments: [secondID, firstID])
+            try db.execute(sql: "UPDATE tracks SET is_duplicate = 0, variant_of = NULL WHERE id = ?",
+                           arguments: [secondID])
+        }
 
         try await analysis.undoReviewResolution(groupKey: groupKey)
 
         let restored = try await analysis.fetchPendingReviews()
         let restoredFirst = try await tracks.fetchTrack(id: firstID)
         let restoredSecond = try await tracks.fetchTrack(id: secondID)
-
         #expect(restored.count == 1)
         #expect(restored[0].reviewDetails?.resolutionSnapshot == nil)
         #expect(restoredFirst?.isDuplicate == 0)
         #expect(restoredFirst?.variantOf == nil)
+        #expect(restoredFirst?.title == "Song (Radio Edit)")
         #expect(restoredSecond?.isDuplicate == 1)
         #expect(restoredSecond?.variantOf == firstID)
     }
 
-    @Test func metadataMergeUpdatesDatabaseOnlyAndUndoRestoresEveryField() async throws {
-        let (database, analysis, tracks) = try makeRepositories()
-        let firstID = try await insertTrack(database, title: "Song (Radio Edit)")
-        let secondID = try await insertTrack(database, title: "Song")
-        let groupKey = "duplicate:\(firstID):\(secondID)"
-
-        try await database.write { db in
-            try db.execute(
-                sql: "UPDATE tracks SET artist = ?, album_artist = ?, genre = ?, year = ? WHERE id = ?",
-                arguments: ["Artist", "Artist", "Electronic", 2020, firstID]
-            )
-            try db.execute(
-                sql: "UPDATE tracks SET artist = ?, album_artist = ?, genre = ?, year = ? WHERE id = ?",
-                arguments: ["Artist feat. Guest", "Artist feat. Guest", "Dance", 2024, secondID]
-            )
+    @Test func undoWithoutASnapshotThrows() async throws {
+        let (_, analysis, _) = try makeRepositories()
+        await #expect(throws: ReviewResolutionError.self) {
+            try await analysis.undoReviewResolution(groupKey: "duplicate:1:2")
         }
-        let first = try #require(await tracks.fetchTrack(id: firstID))
-        let second = try #require(await tracks.fetchTrack(id: secondID))
-        let details = ReviewDetails(
-            groupKey: groupKey,
-            conflictingFields: ["title", "artist", "genre", "year"],
-            tracks: [ReviewTrackSnapshot(track: first), ReviewTrackSnapshot(track: second)]
-        )
-        try await analysis.saveReviewItem(
-            ReviewItem(
-                id: nil,
-                actionType: "metadata_conflict",
-                groupKey: groupKey,
-                trackId: firstID,
-                relatedTrackId: secondID,
-                details: try details.encodedJSON(),
-                autoAction: nil,
-                status: "pending",
-                createdAt: nil,
-                resolvedAt: nil
-            )
-        )
-
-        let merge = ReviewMetadataMerge(
-            fields: [.title, .artist, .albumArtist, .genre, .year],
-            source: second
-        )
-        try await analysis.applyReviewResolution(
-            groupKey: groupKey,
-            action: .mergeMetadata,
-            metadataMerge: merge
-        )
-
-        let mergedFirst = try await tracks.fetchTrack(id: firstID)
-        let mergedSecond = try await tracks.fetchTrack(id: secondID)
-        #expect(mergedFirst?.title == "Song")
-        #expect(mergedFirst?.artist == "Artist feat. Guest")
-        #expect(mergedFirst?.genre == "Dance")
-        #expect(mergedFirst?.year == 2024)
-        #expect(mergedSecond?.title == "Song")
-        #expect(try await analysis.fetchResolvedReviews().count == 1)
-
-        try await analysis.undoReviewResolution(groupKey: groupKey)
-
-        let restoredFirst = try await tracks.fetchTrack(id: firstID)
-        let restoredSecond = try await tracks.fetchTrack(id: secondID)
-        #expect(restoredFirst?.title == "Song (Radio Edit)")
-        #expect(restoredFirst?.artist == "Artist")
-        #expect(restoredFirst?.genre == "Electronic")
-        #expect(restoredFirst?.year == 2020)
-        #expect(restoredSecond?.title == "Song")
-        #expect(restoredSecond?.artist == "Artist feat. Guest")
-        #expect(restoredSecond?.genre == "Dance")
-        #expect(restoredSecond?.year == 2024)
     }
 }

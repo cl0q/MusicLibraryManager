@@ -181,14 +181,6 @@ struct ReviewTrackMetadataSnapshot: Codable, Equatable, Sendable {
     }
 }
 
-enum ReviewResolutionAction: String, Codable, Sendable {
-    case keepRecommended = "keep_recommended"
-    case keepManual = "keep_manual"
-    case keepAll = "keep_all"
-    case mergeMetadata = "merge_metadata"
-    case dismiss = "dismiss"
-}
-
 enum ReviewMetadataField: String, CaseIterable, Codable, Hashable, Sendable {
     case title
     case artist
@@ -206,28 +198,6 @@ enum ReviewMetadataField: String, CaseIterable, Codable, Hashable, Sendable {
         case .genre: "Genre"
         case .year: "Year"
         }
-    }
-}
-
-/// Values selected in the metadata-conflict UI. The selected fields are
-/// explicit so choosing an empty genre can still be applied deliberately.
-struct ReviewMetadataMerge: Equatable, Sendable {
-    var fields: Set<ReviewMetadataField>
-    var title: String
-    var artist: String
-    var albumArtist: String
-    var album: String
-    var genre: String?
-    var year: Int?
-
-    init(fields: Set<ReviewMetadataField>, source: Track) {
-        self.fields = fields
-        title = source.title
-        artist = source.artist
-        albumArtist = source.albumArtist
-        album = source.album
-        genre = source.genre
-        year = source.year
     }
 }
 
