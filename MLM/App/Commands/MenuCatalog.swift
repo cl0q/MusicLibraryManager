@@ -158,7 +158,7 @@ enum MenuCommand: String, CaseIterable, Sendable {
     case maintenance
     case fingerprintAllTracks, replayGainAnalysis, danceabilityAnalysis, similarityAnalysis
     case refreshEmbeddedArtwork, fetchArtworkFromMusicBrainz, rereadTagsFromFiles
-    case readTrackNumbers
+    case readTrackNumbers, clearSourceNames
     case maintenanceSettings
     case backUpNow, librarySettings
     // Go
@@ -313,6 +313,7 @@ enum MenuCommand: String, CaseIterable, Sendable {
         case .fetchArtworkFromMusicBrainz: Self.maintenanceJob("Fetch Artwork from MusicBrainz")
         case .rereadTagsFromFiles: Self.maintenanceJob("Reread Tags from Files…")
         case .readTrackNumbers: Self.maintenanceJob("Read Track Numbers")
+        case .clearSourceNames: Self.maintenanceJob("Clear Source Names from Album…")
         case .maintenanceSettings:
             Entry(menu: .library, title: "Maintenance Settings…", shortcut: nil, wiring: .app, parent: .maintenance)
         case .backUpNow: Entry(menu: .library, title: "Back Up Now", shortcut: nil, wiring: .app)

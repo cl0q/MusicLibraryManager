@@ -72,6 +72,13 @@ struct LibraryMenuCommands: Commands {
                               disabledReason: jobBlockedReason(MaintenanceJob.readTrackNumbers)) {
                     MaintenanceJobs.shared.start(MaintenanceJob.readTrackNumbers)
                 }
+                CommandButton(.clearSourceNames, enabled: jobBlockedReason(MaintenanceJob.clearSourceNames) == nil,
+                              disabledReason: jobBlockedReason(MaintenanceJob.clearSourceNames)) {
+                    // It changes the Album field of many tracks: the question is asked in
+                    // Settings ▸ Maintenance, where the job's row is (like Reread Tags).
+                    MaintenanceJobs.shared.clearSourceNamesConfirmationRequested = true
+                    openSettings(tab: .maintenance)
+                }
                 Divider()
                 CommandButton(.maintenanceSettings, enabled: hasLibrary) {
                     openSettings(tab: .maintenance)
