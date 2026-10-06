@@ -1471,6 +1471,9 @@ final class DatabaseManager: Sendable {
                 UPDATE tracks SET is_pending_recommendation = 1
                 WHERE id IN (SELECT discovered_track_id FROM track_discovery_log WHERE status = 'new')
             """)
+        }
+
+        // ──────────────────────────────────────────────────────────────
         // Migration v54_review_hidden (W3-REV fixes): hiding gets its own
         // column. `is_duplicate = 1` exists on many rows from older scans
         // that were never user decisions, so lists must not hide by it.

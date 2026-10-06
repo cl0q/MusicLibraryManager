@@ -300,19 +300,24 @@ final class DiscoverModel {
         let dismissed = try await recommendations.dismiss(ids: ids)
         guard !dismissed.isEmpty else { return Dismissal(ids: [], trashed: []) }
         let root = await dependencies.libraryRoot()
-        let files = dismissed.map { (id: $0.trackID, url: ReviewConsequences.fileURL(organizedPath: $0.organizedPath, libraryRoot: root)) }
-        let report = dependencies.consequences.trash(files)
-        for item in report.trashed where !item.trashURL.isEmpty {
-            try await recommendations.recordTrash(trackID: item.trackId, url: item.trashURL)
+        let files = dismissed.map {
+            ReviewConsequences.TrashCandidate(id: $0.trackID, url: ReviewConsequences.fileURL(organizedPath: $0.organizedPath, libraryRoot: root))
         }
-        if report.failures > 0 {
+        // Held recommendations are not listed anywhere, so the only guard that applies is the
+        // library folder; each Trash URL is recorded as soon as its file moved.
+        let report = await dependencies.consequences.trash(files, guards: .init(keptURL: nil, libraryRoot: root.map { URL(fileURLWithPath: $0) })) { item in
+            guard !item.trashURL.isEmpty else { return }
+            try? await recommendations.recordTrash(trackID: item.trackId, url: item.trashURL)
+        }
+        let failures = report.failures + report.skipped.count
+        if failures > 0 {
             // The rows whose file couldn't move stay waiting: find them (they have a file but no Trash record).
             let moved = Set(report.trashed.map(\.trackId))
             let failed = files.filter { $0.url != nil && !moved.contains($0.id) && dependencies.consequences.files.fileExists(atPath: $0.url?.path ?? "") }
-                .map(\.id)
+                .map { $0.id }
             try await recommendations.undoDismiss(ids: failed)
             statusBar?.post(
-                report.failures == 1 ? "Couldn’t move 1 file to the Trash" : "Couldn’t move \(report.failures) files to the Trash",
+                failures == 1 ? "Couldn’t move 1 file to the Trash" : "Couldn’t move \(failures) files to the Trash",
                 actions: [StatusAction("Show Logs") { ActivityRouter.shared.showLogs(for: nil) }])
             let failedSet = Set(failed)
             return Dismissal(ids: dismissed.map(\.trackID).filter { !failedSet.contains($0) }, trashed: report.trashed)
