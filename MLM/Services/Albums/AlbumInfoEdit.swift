@@ -156,7 +156,7 @@ struct AlbumInfoForm: Equatable, Sendable {
     }
 
     /// The key collision sentence (IMP-093): shown above the buttons, Save disabled.
-    static let keyTaken = "An album with this title by this artist already exists — use Merge with Another Album…."
+    static let keyTaken = "A base album with this title already exists. Use Merge with Another Album…"
 }
 
 // MARK: - Words

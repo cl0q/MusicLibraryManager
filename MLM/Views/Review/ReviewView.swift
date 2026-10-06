@@ -237,7 +237,7 @@ struct ReviewView: View {
         } description: {
             Text(model.lastScan == nil
                  ? "Nothing has been scanned yet. Run a scan to look for duplicates and tag conflicts."
-                 : "No duplicates or tag conflicts are waiting. Run a scan after importing more music.")
+                 : "No duplicates, tag conflicts or album suggestions are waiting. Run a scan after importing more music.")
         } actions: {
             Button("Run Scan") { model.scan.startWithConfirmation(statusBar: statusBar) }
                 .buttonStyle(.borderedProminent)

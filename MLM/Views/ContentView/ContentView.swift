@@ -66,6 +66,7 @@ struct ContentView: View {
                 .modifier(LibraryRemovalAlert())
                 .installsMainWindowPresenter()
                 .environment(shell.navigation)
+                .modifier(TrackRemovalFailureAlert())
                 .environment(shell.trailing)
                 .environment(shell.statusBar)
                 .environment(shell.sidebar)
@@ -271,6 +272,10 @@ struct ContentView: View {
             return try await queries.matchingTracks(filter: filter, limit: limit)
         }
         shell.libraryResults.playlists = { sidebar.playlists }
+        shell.libraryResults.albumSearch = { filter in
+            guard let albums = await MainActor.run(body: { DependencyContainer.shared.albumRepository }) else { return [] }
+            return try await LibraryAlbumSearch.albums(matching: filter, in: albums)
+        }
         shell.libraryResults.folderSearch = { text in await LibraryFolderSearch.folders(matching: text) }
         shell.onlineResults.providers = { LiveOnlineSearchProviders.make() }
         shell.onlineResults.libraryMatches = { results in

@@ -80,6 +80,7 @@ struct PlaylistsView: View {
         let layout = PlaylistGridRules.layout(tree: sidebar.tree, items: items, sort: sort, scope: scope, filter: filter)
         ContentScaffold(showsDriveBanner: false) {
             content(layout: layout, all: all, scope: scope)
+                .windowCount(PlaylistGridRules.statusText(shown: layout.items.count, total: all.count))
                 .statusBarText(statusText(layout: layout, total: all.count, items: items))
         } scopeBar: {
             if sidebar.hasLoadedPlaylists && !sidebar.playlists.isEmpty {

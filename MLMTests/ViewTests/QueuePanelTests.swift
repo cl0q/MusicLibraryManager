@@ -106,7 +106,7 @@ struct QueuePanelTests {
             [.play(enabled: true), .preview(enabled: true)],
             [.playNext, .moveToEndOfQueue],
             [.addToPlaylist, .addToSyncProfile],
-            [.getInfo, .goToArtist("Artist 1"), .showInContext(name: "“Warm-up”")],
+            [.getInfo, .goToArtist("Artist 1"), .findSimilar, .showInContext(name: "“Warm-up”")],
             [.showInFinder(enabled: true), .copy(filePath: true, link: true)],
             [.removeFromContainer(title: "Remove from Queue")],
         ])
@@ -130,7 +130,7 @@ struct QueuePanelTests {
             [.play(enabled: true)],
             [.playNext, .addToQueue],
             [.addToPlaylist, .addToSyncProfile],
-            [.getInfo],
+            [.getInfo, .findSimilar],
             [.showInFinder(enabled: true), .copy(filePath: true, link: true)],
             [.clearHistory],
         ])

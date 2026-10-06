@@ -22,8 +22,8 @@ final class InspectorAnalysis {
 
         var text: String {
             switch self {
-            case .toolMissing: "Can’t analyze — ffmpeg not found"
-            case .failed(let cause): "Couldn’t analyze this track — \(cause)"
+            case .toolMissing: "Can’t analyse — ffmpeg not found"
+            case .failed(let cause): "Couldn’t analyse this track — \(cause)"
             }
         }
     }

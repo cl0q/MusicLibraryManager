@@ -282,7 +282,7 @@ enum TrackLibraryRemoval {
         guard let trackRepo = container.trackRepository else { return }
         Task {
             var removableIDs = Set(snapshot.filter(\.isRemote).compactMap(\.id))
-            var failures: [String] = []
+            var failures: [TrackRemovalFailure.Item] = []
             var trashedItems: [(original: URL, trash: URL?)] = []
 
             // A local row is removable only after its file reached the Trash; keep the Trash
@@ -290,7 +290,8 @@ enum TrackLibraryRemoval {
             for track in snapshot where track.isLocal {
                 guard let id = track.id else { continue }
                 guard let url = await TrackFileLocator.localURL(for: track, container: container) else {
-                    failures.append("\(track.artist) — \(track.title): file could not be located")
+                    failures.append(.init(id: id, label: "\(track.artist) — \(track.title)",
+                                          cause: TrackRemovalFailure.notFoundCause))
                     continue
                 }
                 do {
@@ -298,7 +299,7 @@ enum TrackLibraryRemoval {
                     removableIDs.insert(id)
                     trashedItems.append((url, trashed))
                 } catch {
-                    failures.append("\(track.artist) — \(track.title): \(error.localizedDescription)")
+                    failures.append(.init(id: id, label: "\(track.artist) — \(track.title)", cause: error.localizedDescription))
                 }
             }
 
@@ -313,10 +314,8 @@ enum TrackLibraryRemoval {
                     NotificationCenter.default.post(name: .libraryDidDeleteTracks, object: nil, userInfo: ["removedIds": deletableIDs])
                 }
                 if !failures.isEmpty {
-                    presentFailure(
-                        "Some tracks were kept in the Library because they could not be moved to Trash.",
-                        details: failures.joined(separator: "\n")
-                    )
+                    TrackRemovalFailureCenter.shared.present(
+                        .partial(failures: failures, total: ids.count, removed: deletableIDs.count))
                 }
             } catch {
                 let recovery = trashedItems.map { item in
@@ -327,20 +326,109 @@ enum TrackLibraryRemoval {
                     level: .error,
                     source: "Library"
                 )
-                presentFailure(
-                    "The Library database could not be updated. The moved files remain in Trash and can be restored.",
-                    details: recovery.isEmpty ? error.localizedDescription : recovery
-                )
+                TrackRemovalFailureCenter.shared.present(.libraryNotUpdated(ids: ids, details: recovery.isEmpty ? error.localizedDescription : recovery))
             }
         }
     }
+}
 
-    private static func presentFailure(_ message: String, details: String) {
-        let alert = NSAlert()
-        alert.messageText = "Could Not Remove All Tracks"
-        alert.informativeText = "\(message)\n\n\(details)"
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
+// MARK: - A removal that did not finish (A-TRACK-REMOVE-FAILED, UC-SHEET-16)
+
+/// What a Remove from Library… could not finish: files that could not be moved to the Trash (those
+/// tracks stay), or the library database not updating after the files were trashed.
+struct TrackRemovalFailure: Identifiable, Equatable {
+    struct Item: Equatable {
+        let id: Int64
+        let label: String
+        let cause: String
+    }
+
+    static let notFoundCause = "the file couldn’t be found"
+
+    let id = UUID()
+    /// The tracks that are still in the library.
+    let failedIDs: [Int64]
+    let total: Int
+    let removed: Int
+    /// The plain cause(s); nil when the database failed.
+    let cause: String?
+    /// The per-track system text (written to Activity ▸ Logs; an alert has no disclosure).
+    let details: String
+
+    static func partial(failures: [Item], total: Int, removed: Int) -> TrackRemovalFailure {
+        var causes: [String] = []
+        for item in failures where !causes.contains(item.cause) { causes.append(item.cause) }
+        return TrackRemovalFailure(failedIDs: failures.map(\.id), total: total, removed: removed,
+                                   cause: causes.joined(separator: "; "),
+                                   details: failures.map { "\($0.label): \($0.cause)" }.joined(separator: "\n"))
+    }
+
+    /// Every file is in the Trash, but the rows stayed: nothing was removed from the library.
+    static func libraryNotUpdated(ids: [Int64], details: String) -> TrackRemovalFailure {
+        TrackRemovalFailure(failedIDs: ids, total: ids.count, removed: 0, cause: nil, details: details)
+    }
+
+    /// `3 of 14 tracks couldn’t be removed`
+    var title: String { "\(failedIDs.count.formatted(.number)) of \(StatusBarText.tracks(total)) couldn’t be removed" }
+
+    var message: String {
+        guard let cause else { return "The library couldn’t be updated. The files are in the Trash and can be put back." }
+        var text = "Their files couldn’t be moved to the Trash: \(cause)."
+        if removed == 1 {
+            text += " The other track was removed."
+        } else if removed > 1 {
+            text += " The other \(removed.formatted(.number)) tracks were removed."
+        }
+        return text
+    }
+
+    /// `Show the 3 Tracks`
+    var showTitle: String {
+        failedIDs.count == 1 ? "Show the Track" : "Show the \(failedIDs.count.formatted(.number)) Tracks"
+    }
+}
+
+/// The pending partial-removal alert, shown by the main window (`TrackRemovalFailureAlert`).
+@MainActor
+@Observable
+final class TrackRemovalFailureCenter {
+    static let shared = TrackRemovalFailureCenter()
+
+    private(set) var pending: TrackRemovalFailure?
+
+    func present(_ failure: TrackRemovalFailure, showsWindow: Bool = true) {
+        AppLogger.shared.log("\(failure.title). \(failure.details)", level: .error, source: "Library")
+        pending = failure
+        if showsWindow { MainWindowPresenter.shared.show() }
+    }
+
+    func dismiss() { pending = nil }
+
+    /// `Show the ‹n› Tracks`: select them in All Tracks.
+    func showTracks(navigation: NavigationModel, container: DependencyContainer = .shared) {
+        guard let failure = pending else { return }
+        pending = nil
+        navigation.select(.allTracks)
+        guard let library = container.libraryViewModel else { return }
+        library.scope = .all
+        library.selectedTrackIDs = Set(failure.failedIDs)
+    }
+}
+
+struct TrackRemovalFailureAlert: ViewModifier {
+    @Environment(NavigationModel.self) private var navigation
+    private var center: TrackRemovalFailureCenter { .shared }
+
+    func body(content: Content) -> some View {
+        content.alert(
+            center.pending?.title ?? "",
+            isPresented: Binding(get: { center.pending != nil }, set: { if !$0 { center.dismiss() } }),
+            presenting: center.pending
+        ) { failure in
+            Button(failure.showTitle) { center.showTracks(navigation: navigation) }
+            Button("OK", role: .cancel) { center.dismiss() }
+        } message: { failure in
+            Text(failure.message)
+        }
     }
 }

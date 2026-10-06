@@ -168,6 +168,8 @@ struct SyncAddContentSheet: View {
                     }
                     .contentShape(Rectangle())
                 }
+                .accessibilityAddTraits(row.isSelected ? .isSelected : [])
+                .accessibilityLabel(row.playlist.name)
                 .buttonStyle(.plain)
                 .foregroundStyle(row.isIncluded ? .tertiary : .primary)
                 .disabled(row.isIncluded)
@@ -207,6 +209,7 @@ struct SyncAddContentSheet: View {
                     }
                     .contentShape(Rectangle())
                 }
+                .accessibilityAddTraits(selected ? .isSelected : [])
                 .buttonStyle(.plain)
                 .foregroundStyle(included ? .tertiary : .primary)
                 .disabled(included)

@@ -222,6 +222,22 @@ extension View {
     }
 }
 
+/// The count a place adds to the window subtitle (`‹Library› · ‹count›`, UC-WIN-06): selection-free,
+/// so it never repeats the status bar's `‹n› selected`. Read by `WindowTitleModifier`.
+struct WindowCountKey: PreferenceKey {
+    static let defaultValue: String? = nil
+    static func reduce(value: inout String?, nextValue: () -> String?) {
+        if let next = nextValue() { value = next }
+    }
+}
+
+extension View {
+    /// Declare the window-subtitle count of this place, e.g. `48 genres`, `6 of 28 playlists`.
+    func windowCount(_ text: String?) -> some View {
+        preference(key: WindowCountKey.self, value: text)
+    }
+}
+
 /// Count wording for status bars and subtitles (UC-COPY-09: thousands separators, plural).
 enum StatusBarText {
     static func count(_ n: Int, _ singular: String, _ plural: String) -> String {

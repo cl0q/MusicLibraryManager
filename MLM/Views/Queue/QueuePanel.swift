@@ -627,6 +627,7 @@ struct QueuePanelMenuActions: TrackMenuActions {
     func newSyncProfile(_ rows: [TrackRow]) { tracks.newSyncProfile(rows) }
     func getInfo(_ rows: [TrackRow]) { tracks.getInfo(rows) }
     func goToAlbum(_ albumID: Int64) { navigation?.push(.album(albumID)) }
+    func findSimilar(_ rows: [TrackRow]) { tracks.findSimilar(rows) }
     func download(_ rows: [TrackRow]) { tracks.download(rows) }
     func downloadAgain(_ rows: [TrackRow]) { tracks.downloadAgain(rows) }
     func locateFile(_ rows: [TrackRow]) { tracks.locateFile(rows) }

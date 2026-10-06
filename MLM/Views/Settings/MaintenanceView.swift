@@ -29,7 +29,7 @@ struct MaintenanceView: View {
         Form {
             if drive.isOffline, let name = drive.volumeName {
                 Section {
-                    Label("“\(name)” is not connected. Jobs that read audio files can’t run until it is.",
+                    Label("“\(name)” is not connected. Maintenance that reads audio files can’t run until it is.",
                           systemImage: "externaldrive.badge.xmark")
                 }
             }
@@ -130,7 +130,7 @@ struct MaintenanceView: View {
                 ForEach(SyncTurboLevel.allCases) { Text($0.displayName).tag($0) }
             } label: {
                 Text("How hard background work may push this Mac")
-                Text("Conservative keeps the Mac responsive · Fast uses all cores, fans may spin up. Applies to the next job.")
+                Text("Conservative keeps the Mac responsive · Fast uses all cores, fans may spin up. Applies to the next run.")
             }
             .pickerStyle(.segmented)
             .onChange(of: backgroundProcessing) { _, level in

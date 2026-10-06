@@ -58,6 +58,7 @@ struct AlbumsView: View {
         let counts = model.counts(filter: filter)
         ContentScaffold(showsDriveBanner: false) {
             content(model: model, shown: shown, filter: filter)
+                .windowCount(model.phase == .loaded ? AlbumText.statusText(shown: shown.count, total: model.all.count, isFiltered: !filter.isEmpty || scope != .all) : nil)
                 .statusBarText(statusText(model: model, shown: shown, filter: filter))
         } scopeBar: {
             if model.phase == .loaded, !model.all.isEmpty {
