@@ -79,6 +79,7 @@ struct RunningWorkSummary: Equatable, Sendable {
         case .duplicateScan: ActivityNoun(singular: "duplicate search", plural: "duplicate searches")
         case .fileCheck: ActivityNoun(singular: "file check", plural: "file checks")
         case .tagWrite: ActivityNoun(singular: "tag write", plural: "tag writes")
+        case .other: ActivityNoun(singular: "operation", plural: "operations")
         }
     }
 
