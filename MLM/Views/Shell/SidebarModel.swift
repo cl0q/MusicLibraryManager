@@ -235,10 +235,8 @@ final class SidebarModel {
         return nil
     }
 
-    /// Second line of a playlist row: only when it isn't healthy. Today the only state the
-    /// sidebar can know cheaply is a linked source whose sign-in can't be used
-    /// (`‹Source› sign-in expired`, §15.3/§15.5); import / incomplete / not-downloaded words
-    /// arrive with W3-PL.
+    /// The `‹Source› sign-in expired` words of a linked playlist (§15.3/§15.5). The row's whole
+    /// second line — import, incomplete, not downloaded too — is `PlaylistStatus` (W3-PL).
     static func playlistSecondLine(
         sourceName: String?,
         unusableSignIns: Set<TokenStorage.Service>

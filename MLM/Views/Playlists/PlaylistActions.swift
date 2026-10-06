@@ -146,8 +146,6 @@ final class PlaylistRequests {
     var coverPlaylist: Playlist?
     /// The grid card to select (Show in All Playlists).
     var revealInGrid: Int64?
-    /// A card / sidebar row / header title to put into rename mode.
-    var renameInPlace: Int64?
 }
 
 // MARK: - What the items do

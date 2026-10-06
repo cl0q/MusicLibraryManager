@@ -141,7 +141,7 @@ struct FractionalIndexer {
                 }
                 return result
 
-            case (let _?, nil):
+            case (_?, nil):
                 result.append(delimiter)
                 result.append(alphabetChars[0])
                 return result

@@ -46,6 +46,8 @@ final class SnapshotsTests: XCTestCase {
         // (deferred) and ActivityRouter, ActivityJobTracking (non-view): counts unchanged.
         // W2-H replaced Shared/SpringLoadableHover.swift (rendered) by DragDrop/DropTargetModifier.swift
         // (rendered: the resting drop target); its payloads and rules live in MLM/Services/DragDrop.
+        // W3-PL added Playlists/{PlaylistActions,PlaylistLinkSheet,PlaylistM3UImportSheet}.swift
+        // (deferred); the playlist-card fixture renders the rebuilt card.
         XCTAssertEqual(paths.count, 115, "Re-audit inventory changes explicitly.")
         XCTAssertEqual(Set(SnapshotFixtures.inventory.map(\.path)), paths)
         XCTAssertEqual(SnapshotFixtures.inventory.count, paths.count)
