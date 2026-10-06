@@ -119,15 +119,3 @@ struct TrackScopeQueries: Sendable {
         return (predicate, StatementArguments(values))
     }
 }
-
-// MARK: - Legacy tab filter
-
-/// The pre-redesign Local / Remote split, kept only because `TrackRepository.fetchForLibrary`
-/// and `libraryTotals(tab:)` (W2-A's file, not W2-B's) still take it. No view uses it any
-/// more; All Tracks filters by `TrackAvailabilityScope`. Remove together with those methods.
-enum LibraryTab: String, CaseIterable, Identifiable {
-    case local
-    case remote
-
-    var id: String { rawValue }
-}

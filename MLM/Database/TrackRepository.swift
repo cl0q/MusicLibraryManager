@@ -153,25 +153,6 @@ final class TrackRepository: Sendable {
         }
     }
 
-    func countTracksByAvailability() async throws -> (local: Int, remote: Int) {
-        try await database.read { db in
-            let sql = """
-                SELECT (organized_path IS NOT NULL AND organized_path != '') AS is_local, COUNT(*) AS cnt
-                FROM tracks
-                GROUP BY is_local
-            """
-            let rows = try Row.fetchAll(db, sql: sql)
-            var local = 0
-            var remote = 0
-            for row in rows {
-                let isLocal: Bool = row["is_local"]
-                let cnt: Int = row["cnt"]
-                if isLocal { local = cnt } else { remote = cnt }
-            }
-            return (local: local, remote: remote)
-        }
-    }
-
     /// Search tracks by title, artist, or album.
     func search(query: String, limit: Int? = nil) async throws -> [Track] {
         let pattern = "%\(query)%"
@@ -198,73 +179,6 @@ final class TrackRepository: Sendable {
                 .filter(Track.Columns.organizedPath.like(pattern))
                 .order(Track.Columns.title)
                 .fetchAll(db)
-        }
-    }
-
-    /// Fetch tracks for the library browser with SQL-side sort and filter.
-    ///
-    /// - Parameters:
-    ///   - tab: Local (organized_path IS NOT NULL) or Remote (IS NULL).
-    ///   - search: Optional search string matched against artist, album, title.
-    ///   - sortBy: Column to sort by (whitelist-safe, no SQL injection possible).
-    ///   - ascending: Sort direction.
-    ///   - limit: Optional row cap.
-    func fetchForLibrary(
-        tab: LibraryTab,
-        search: String?,
-        sortBy: SortColumn,
-        ascending: Bool,
-        limit: Int? = nil
-    ) async throws -> [Track] {
-        var conditions: [String] = []
-        var args: [DatabaseValueConvertible] = []
-
-        switch tab {
-        // One rule everywhere: an empty path is no file (TrackAvailabilitySQL).
-        case .local:  conditions.append(TrackAvailabilitySQL.hasFile)
-        case .remote: conditions.append(TrackAvailabilitySQL.noFile)
-        }
-
-        let trimmed = search?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !trimmed.isEmpty {
-            let terms = trimmed.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
-            for term in terms {
-                let normalized = DatabaseManager.foldedSearchText(term)
-                conditions.append("search_text LIKE ?")
-                args.append("%\(normalized)%")
-            }
-        }
-
-        let where_ = conditions.isEmpty ? "" : "WHERE " + conditions.joined(separator: " AND ")
-        let order   = ascending ? "ASC" : "DESC"
-        // sortBy.sqlColumn is from a closed enum — safe to interpolate.
-        let limitSQL = limit.map { "LIMIT \($0)" } ?? ""
-
-        // The "Added" column means different things per tab: on the Local
-        // tab it's when the file landed on disk (date_added_library), on
-        // the Remote tab it's when the track was added at its source /
-        // liked (date_added). Resolve the sort expression accordingly so
-        // downloading a track never reshuffles the Remote liked order.
-        let orderColumn: String
-        if sortBy == .dateAdded {
-            switch tab {
-            case .local:  orderColumn = "COALESCE(date_added_library, date_added)"
-            case .remote: orderColumn = "date_added"
-            }
-        } else {
-            orderColumn = sortBy.sqlColumn
-        }
-
-        let sql = """
-            SELECT * FROM tracks
-            \(where_)
-            ORDER BY \(orderColumn) \(order) NULLS LAST
-            \(limitSQL)
-            """
-
-        let stmtArgs = StatementArguments(args) ?? StatementArguments()
-        return try await database.read { db in
-            try Track.fetchAll(db, sql: sql, arguments: stmtArgs)
         }
     }
 
@@ -1651,19 +1565,6 @@ final class TrackRepository: Sendable {
         }
     }
 
-    /// Count and total duration of what All Tracks shows for a tab and search (status bar).
-    func libraryTotals(tab: LibraryTab, search: String? = nil) async throws -> TrackListTotals {
-        var (conditions, arguments) = Self.searchConditions(search)
-        conditions.insert(tab == .local ? TrackAvailabilitySQL.hasFile : TrackAvailabilitySQL.noFile, at: 0)
-        let sql = "SELECT COUNT(*) AS n, COALESCE(SUM(COALESCE(duration, 0)), 0) AS d FROM tracks WHERE "
-            + conditions.joined(separator: " AND ")
-        let finalArguments = arguments
-        return try await database.read { db in
-            let row = try Row.fetchOne(db, sql: sql, arguments: finalArguments)
-            return TrackListTotals(count: row?["n"] ?? 0, duration: row?["d"] ?? 0)
-        }
-    }
-
     /// Tracks of one availability scope (W2-B's scope bar), optionally searched. Order is the
     /// table's job (in-memory sort, `TrackListModel`); rows come back by id.
     func fetchTracks(scope: TrackAvailabilityScope, search: String? = nil) async throws -> [Track] {
@@ -1678,7 +1579,7 @@ final class TrackRepository: Sendable {
         }
     }
 
-    /// `search_text LIKE ?` for each whitespace-separated term, folded like `fetchForLibrary`.
+    /// `search_text LIKE ?` for each whitespace-separated term, folded like the library search column.
     private static func searchConditions(_ search: String?) -> ([String], StatementArguments) {
         let trimmed = search?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !trimmed.isEmpty else { return ([], StatementArguments()) }

@@ -151,33 +151,6 @@ final class PlaylistIngestService: Sendable {
         }
     }
 
-    /// Write (replace) the snapshot for (profile, playlist).
-    func writeSnapshot(
-        profileId: Int64,
-        playlistId: Int64,
-        playlistUuid: String?,
-        entries: [SnapshotEntry]
-    ) async throws {
-        let data = try JSONEncoder().encode(entries)
-        let json = String(data: data, encoding: .utf8) ?? "[]"
-
-        try await database.write { db in
-            // Delete existing snapshot for this (profile, playlist)
-            try db.execute(
-                sql: "DELETE FROM playlist_sync_snapshots WHERE profile_id = ? AND playlist_id = ?",
-                arguments: [profileId, playlistId]
-            )
-            // Insert new snapshot
-            try db.execute(
-                sql: """
-                    INSERT INTO playlist_sync_snapshots (profile_id, playlist_id, playlist_uuid, snapshot_json, written_at)
-                    VALUES (?, ?, ?, ?, datetime('now'))
-                    """,
-                arguments: [profileId, playlistId, playlistUuid, json]
-            )
-        }
-    }
-
     /// A single entry in the snapshot JSON.
     struct SnapshotEntry: Codable, Equatable {
         let uuid: String?

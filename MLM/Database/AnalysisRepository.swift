@@ -356,106 +356,9 @@ final class AnalysisRepository: Sendable {
 
     // MARK: - Review Resolution
 
-    /// Applies a review decision and its undo snapshot in the same database
-    /// transaction. Resolution changes database metadata only; it never moves,
-    /// renames, deletes, or trashes a media file.
-    func applyReviewResolution(
-        groupKey: String,
-        action: ReviewResolutionAction,
-        keptTrackIds: [Int64] = [],
-        metadataMerge: ReviewMetadataMerge? = nil
-    ) async throws {
-        try await database.write { db in
-            let items = try Self.reviewItems(db: db, groupKey: groupKey, status: "pending")
-            guard !items.isEmpty else { throw ReviewResolutionError.missingPendingGroup }
-
-            let trackIDs = Self.trackIDs(for: items)
-            let tracks = try Track.filter(trackIDs.contains(Track.Columns.id)).fetchAll(db)
-            let tracksByID = Dictionary(uniqueKeysWithValues: tracks.compactMap { track in
-                track.id.map { ($0, track) }
-            })
-            let orderedTrackIDs = trackIDs.sorted()
-            let availableTrackIDs = orderedTrackIDs.filter { tracksByID[$0] != nil }
-
-            let kept = Array(Set(keptTrackIds)).sorted()
-            if action == .keepRecommended || action == .keepManual {
-                guard kept.count == 1, availableTrackIDs.contains(kept[0]) else {
-                    throw ReviewResolutionError.invalidKeepSelection
-                }
-            }
-
-            let duplicateStates = availableTrackIDs.compactMap { id in
-                tracksByID[id].map {
-                    ReviewDuplicateState(trackId: id, isDuplicate: $0.isDuplicate, variantOf: $0.variantOf)
-                }
-            }
-            let metadataStates = availableTrackIDs.compactMap { id in
-                tracksByID[id].map(ReviewTrackMetadataSnapshot.init(track:))
-            }
-            let unkept = availableTrackIDs.filter { !kept.contains($0) }
-            let snapshot = ReviewResolutionSnapshot(
-                action: action.rawValue,
-                keptTrackIds: kept,
-                unkeptTrackIds: unkept,
-                duplicateStates: duplicateStates,
-                metadataStates: metadataStates
-            )
-
-            switch action {
-            case .keepRecommended, .keepManual:
-                let keptID = kept[0]
-                for trackID in availableTrackIDs {
-                    if trackID == keptID {
-                        try db.execute(
-                            sql: "UPDATE tracks SET is_duplicate = 0, variant_of = NULL WHERE id = ?",
-                            arguments: [trackID]
-                        )
-                    } else {
-                        try db.execute(
-                            sql: "UPDATE tracks SET is_duplicate = 1, variant_of = ? WHERE id = ?",
-                            arguments: [keptID, trackID]
-                        )
-                    }
-                }
-
-            case .keepAll, .mergeMetadata:
-                for trackID in availableTrackIDs {
-                    try db.execute(
-                        sql: "UPDATE tracks SET is_duplicate = 0, variant_of = NULL WHERE id = ?",
-                        arguments: [trackID]
-                    )
-                }
-
-            case .dismiss:
-                break
-            }
-
-            if action == .mergeMetadata, let metadataMerge {
-                for trackID in availableTrackIDs {
-                    guard var track = tracksByID[trackID] else { continue }
-                    Self.apply(metadataMerge, to: &track)
-                    track.searchText = DatabaseManager.foldedSearchText(track.rawSearchText)
-                    try track.update(db)
-                }
-            }
-
-            for index in items.indices {
-                var item = items[index]
-                var details = item.reviewDetails ?? ReviewDetails(
-                    groupKey: groupKey,
-                    tracks: availableTrackIDs.compactMap { tracksByID[$0].map(ReviewTrackSnapshot.init(track:)) }
-                )
-                details.resolutionSnapshot = snapshot
-                item.details = try details.encodedJSON()
-                item.status = "resolved"
-                try item.update(db)
-            }
-            try Self.updateReviewStatus(db: db, groupKey: groupKey, status: "resolved", resolvedAt: true)
-        }
-    }
-
-    /// Restores duplicate markers and metadata from the resolution snapshot,
-    /// then returns the group to the pending queue in one transaction.
+    /// Restores duplicate markers and metadata from the resolution snapshot of a decision made
+    /// before v48 (the review page now records decisions as pair rows), then returns the group to
+    /// the pending queue in one transaction.
     func undoReviewResolution(groupKey: String) async throws {
         try await database.write { db in
             let items = try Self.reviewItems(db: db, groupKey: groupKey, status: "resolved")
@@ -548,19 +451,6 @@ final class AnalysisRepository: Sendable {
         return ids
     }
 
-    private static func apply(_ merge: ReviewMetadataMerge, to track: inout Track) {
-        for field in merge.fields {
-            switch field {
-            case .title: track.title = merge.title
-            case .artist: track.artist = merge.artist
-            case .albumArtist: track.albumArtist = merge.albumArtist
-            case .album: track.album = merge.album
-            case .genre: track.genre = merge.genre
-            case .year: track.year = merge.year
-            }
-        }
-    }
-
     // MARK: - Batch Queries
 
     /// Fetch all tracks missing fingerprints.
@@ -589,16 +479,10 @@ final class AnalysisRepository: Sendable {
 }
 
 enum ReviewResolutionError: LocalizedError {
-    case invalidKeepSelection
-    case missingPendingGroup
     case missingSnapshot
 
     var errorDescription: String? {
         switch self {
-        case .invalidKeepSelection:
-            "Choose one version to keep before resolving this group."
-        case .missingPendingGroup:
-            "This review is no longer pending. Refresh Review and try again."
         case .missingSnapshot:
             "This review cannot be restored because its undo data is unavailable."
         }

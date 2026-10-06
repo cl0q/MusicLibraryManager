@@ -84,9 +84,17 @@ struct DevicePlaylistChangesTests {
 
     /// What `generatePlaylists` records for a written playlist file.
     private func writeSnapshot(_ env: SyncTestEnv, profile: SyncProfile, playlistID: Int64, paths: KeyValuePairs<Int64, String>) async throws {
-        let ingest = PlaylistIngestService(trackRepository: env.tracks, playlistRepository: env.playlists, database: env.db)
-        try await ingest.writeSnapshot(profileId: profile.id!, playlistId: playlistID, playlistUuid: nil,
-                                       entries: paths.map { .init(uuid: nil, path: $0.value, trackId: $0.key) })
+        let entries = paths.map { PlaylistIngestService.SnapshotEntry(uuid: nil, path: $0.value, trackId: $0.key) }
+        let json = String(data: try JSONEncoder().encode(entries), encoding: .utf8) ?? "[]"
+        let profileID = try #require(profile.id)
+        try await env.db.write { db in
+            try db.execute(sql: "DELETE FROM playlist_sync_snapshots WHERE profile_id = ? AND playlist_id = ?",
+                           arguments: [profileID, playlistID])
+            try db.execute(sql: """
+                INSERT INTO playlist_sync_snapshots (profile_id, playlist_id, playlist_uuid, snapshot_json, written_at)
+                VALUES (?, ?, NULL, ?, datetime('now'))
+                """, arguments: [profileID, playlistID, json])
+        }
     }
 
     private func service(_ env: SyncTestEnv) -> DevicePlaylistChangeService {

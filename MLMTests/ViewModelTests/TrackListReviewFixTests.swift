@@ -216,11 +216,8 @@ struct TrackListReviewFixTests {
         local.organizedPath = "A/l.m4a"
         _ = try await repo.insert(empty)
         _ = try await repo.insert(local)
-        let split = try await repo.countTracksByAvailability()
-        #expect(split.local == 1 && split.remote == 1)
-        #expect(try await repo.libraryTotals(tab: .local).count == 1)
-        #expect(try await repo.libraryTotals(tab: .remote).count == 1)
-        #expect(try await repo.fetchForLibrary(tab: .remote, search: nil, sortBy: .title, ascending: true).map(\.title) == ["Empty"])
+        #expect(try await repo.fetchTracks(scope: .local).map(\.title) == ["Local"])
+        #expect(try await repo.fetchTracks(scope: .notDownloaded).map(\.title) == ["Empty"])
         #expect(try await repo.availabilityCounts().notDownloaded == 1)
         #expect(!empty.isLocal && empty.isRemote && empty.availability() == .notDownloaded)
     }
