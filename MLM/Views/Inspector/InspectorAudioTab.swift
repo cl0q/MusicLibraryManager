@@ -27,6 +27,7 @@ private struct InspectorSingleAudio: View {
     @Environment(\.container) private var container
     @Environment(\.openSettings) private var openSettings
     @State private var fileURL: URL?
+    @State private var nearest: [(track: Track, match: Int)] = []
     @Environment(NavigationModel.self) private var navigation: NavigationModel?
     @State private var loadedTrackID: Int64?
 
@@ -73,9 +74,26 @@ private struct InspectorSingleAudio: View {
             analyzeRow(status)
         }
 
-        // The matches live in their own view (V-SIMILAR, DEC-030); Info only offers the way in.
+        // The five nearest in-library matches (one query, no network); the rest, and the
+        // suggestions from SoundCloud or Last.fm, live in V-SIMILAR (DEC-030) behind `Show All`.
         Section("Similar") {
-            Button("Find Similar") {
+            if nearest.isEmpty {
+                Text(isAnalysed ? SimilarModel.noSimilarHeadline : SimilarModel.notAnalysedHeadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(nearest, id: \.track.id) { item in
+                    LabeledContent {
+                        Text("\(item.match.formatted(.number))%").monospacedDigit().foregroundStyle(.secondary)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(item.track.title).lineLimit(1)
+                            Text(item.track.artist).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            }
+            Button("Show All") {
                 if let id = track.id { navigation?.push(.similar(trackID: id)) }
             }
             .disabled(track.id == nil || navigation == nil)
@@ -83,12 +101,23 @@ private struct InspectorSingleAudio: View {
         }
         .task(id: TaskKey(trackID: track.id, analysing: analysis.isRunning(track.id ?? -1))) {
             await load()
+            await loadNearest()
         }
     }
 
     private struct TaskKey: Hashable {
         let trackID: Int64?
         let analysing: Bool
+    }
+
+    private func loadNearest() async {
+        guard let id = track.id, let dependencies = DiscoverLive.similarDependencies(container) else {
+            nearest = []
+            return
+        }
+        let found = await SimilarModel.nearest(to: id, dependencies: dependencies)
+        guard !Task.isCancelled else { return }
+        nearest = found
     }
 
     private var isAnalysed: Bool {
@@ -128,7 +157,7 @@ private struct InspectorSingleAudio: View {
             }
             let reason = analyzeDisabledReason(status)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Button(isAnalysed ? "Analyze Again" : "Analyze") {
+                Button(isAnalysed ? "Analyse Again" : "Analyse") {
                     if let fileURL { analysis.analyze(track, fileURL: fileURL, container: container) }
                 }
                 .disabled(reason != nil)
@@ -144,12 +173,12 @@ private struct InspectorSingleAudio: View {
 
     private func analyzeDisabledReason(_ status: InspectorFileStatus) -> String? {
         if let offline = InspectorDrive.offlineVolume(container), track.availability().hasFile {
-            return "Can’t analyze — “\(offline.name)” is not connected."
+            return "Can’t analyse — “\(offline.name)” is not connected."
         }
         switch track.availability() {
-        case .fileMissing: return "Can’t analyze — the file is missing."
-        case .local: return fileURL == nil ? "Can’t analyze — the file isn’t where MLM expects it." : nil
-        default: return "Download the track to analyze it."
+        case .fileMissing: return "Can’t analyse — the file is missing."
+        case .local: return fileURL == nil ? "Can’t analyse — the file isn’t where MLM expects it." : nil
+        default: return "Download the track to analyse it."
         }
     }
 

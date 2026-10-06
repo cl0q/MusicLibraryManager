@@ -40,6 +40,21 @@ final class SimilarModel {
     private(set) var isLoadingLibrary = false
     /// `Top 12 by sound`.
     static let libraryLimit = 12
+    /// Info ▸ Audio shows the five nearest (P-INSPECTOR-SIMILAR); `Show All` opens this view.
+    nonisolated static let inspectorLimit = 5
+
+    /// `Match` percentage of a 0…1 score.
+    nonisolated static func matchPercent(_ score: Float) -> Int { Int((max(0, min(1, score)) * 100).rounded()) }
+
+    /// The nearest in-library matches for Info: the same query as `loadLibrary` (no network),
+    /// the first `limit` in rank order with their `Match` percentage; none for a track that
+    /// isn't analysed (its score would mean nothing).
+    static func nearest(to seedID: Int64, limit: Int = inspectorLimit,
+                        dependencies: Dependencies) async -> [(track: Track, match: Int)] {
+        guard await dependencies.isAnalysed(seedID) else { return [] }
+        let ranked = await dependencies.similarInLibrary(seedID, limit)
+        return ranked.prefix(limit).map { ($0.track, matchPercent($0.score)) }
+    }
 
     // MARK: Online section
 
@@ -179,7 +194,7 @@ final class SimilarModel {
         let ranked = await dependencies.similarInLibrary(id, Self.libraryLimit)
         inLibrary = ranked.map(\.track)
         matches = Dictionary(ranked.compactMap { item in
-            item.track.id.map { ($0, Int((max(0, min(1, item.score)) * 100).rounded())) }
+            item.track.id.map { ($0, Self.matchPercent(item.score)) }
         }, uniquingKeysWith: { first, _ in first })
         seedState = .ready
     }
