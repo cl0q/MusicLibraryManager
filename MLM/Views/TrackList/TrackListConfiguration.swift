@@ -36,7 +36,7 @@ struct TrackListConfiguration {
     /// (`playlist.‹id›`, default `#`).
     var sortPersistenceKey: String? = nil
     /// Columns that exist in this context, in table order.
-    var columns: [TrackColumnID] = TrackColumnID.allCases.filter { $0 != .number }
+    var columns: [TrackColumnID] = TrackColumnID.standardColumns
     /// The container has its own order: `#` column, `Playlist Order` in Sort By, the
     /// "reordering is off" hint while sorted otherwise (UC-TABLE-05).
     var hasContainerOrder = false
@@ -68,6 +68,15 @@ struct TrackListConfiguration {
     var onInsert: ((Int, [NSItemProvider], [TrackRow]) -> Void)?
     /// `Album` values link to the album (UC-TABLE-18). Seam: `nil` until W4-2's album pages.
     var openAlbum: ((TrackRow) -> Void)?
+    /// The place's own context-menu items for the clicked rows (W3-GEN: `Add to “Techno”`,
+    /// `Use as Reference for Suggestions`, `Not Now`).
+    var menuExtras: TrackMenuExtrasProvider?
+}
+
+/// A place's own track-menu items and what they do (`TrackMenuItem.extra`).
+struct TrackMenuExtrasProvider {
+    let items: ([TrackRow]) -> TrackMenuExtras
+    let perform: (String, [TrackRow]) -> Void
 }
 
 /// Totals of the whole view (not only the loaded rows).
@@ -125,7 +134,7 @@ extension TrackListConfiguration {
             listContext: .playlist(id: id, name: name),
             persistenceKey: "playlist",
             sortPersistenceKey: "playlist.\(id)",
-            columns: TrackColumnID.allCases,
+            columns: [.number] + TrackColumnID.standardColumns,
             hasContainerOrder: true,
             defaultSort: TrackSortOrder(column: .number, ascending: true),
             accessibilityID: "playlist_track_table",

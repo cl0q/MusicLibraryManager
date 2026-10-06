@@ -14,6 +14,9 @@ enum TrackListContainer: Equatable, Sendable {
     /// the library folder; `name` is the root's name). A folder holds files, not a list: there is
     /// no `Remove from ‹Container›` (⌫ does nothing), `Remove from Library…` exists.
     case folder(path: String, name: String)
+    /// A genre's tracks (V-GENRED, W3-GEN): `Remove from “‹Genre›”` clears their genre
+    /// (UC-KEY-17). `key` is the genre's identity (`GenreName.key`), `name` its display name.
+    case genre(key: String, name: String)
     /// Search results, sheet tables and other lists without a container.
     case none
 }
@@ -40,6 +43,11 @@ struct TrackListContext: Equatable, Sendable {
     /// Folders rooted at `path`: `Play Folders`, or `Play “2026”` after `Open ⌘↓`.
     static func folder(path: String, name: String) -> TrackListContext {
         TrackListContext(container: .folder(path: path, name: name), viewName: path.isEmpty ? "Folders" : "“\(name)”")
+    }
+
+    /// A genre's tracks (W3-GEN): Play / Shuffle `“Techno”`.
+    static func genre(key: String, name: String) -> TrackListContext {
+        TrackListContext(container: .genre(key: key, name: name), viewName: "“\(name)”")
     }
 }
 
@@ -329,7 +337,7 @@ struct TrackCommandState: Equatable, Sendable {
         guard let summary, summary.count > 0 else { return }
         let inContainer: Bool
         switch summary.container {
-        case .playlist, .queue, .syncProfile: inContainer = true
+        case .playlist, .queue, .syncProfile, .genre: inContainer = true
         case .library, .folder, .none: inContainer = false
         }
 
@@ -375,7 +383,7 @@ struct TrackCommandState: Equatable, Sendable {
         case .library: "All Tracks has nothing to remove tracks from. Remove from Library… deletes them."
         case .folder: "A folder has nothing to remove tracks from. Remove from Library… deletes them."
         case .queue: "Select tracks under Next to remove them from the queue."
-        case .playlist, .syncProfile: "These tracks can’t be removed here yet."
+        case .playlist, .syncProfile, .genre: "These tracks can’t be removed here yet."
         case .none: "This list has nothing to remove tracks from."
         }
     }
@@ -384,7 +392,7 @@ struct TrackCommandState: Equatable, Sendable {
     /// (UC-MENU-03, UC-CM-08); the base title where there is no container.
     static func removeTitle(_ container: TrackListContainer) -> String {
         switch container {
-        case .playlist(_, let name), .syncProfile(_, let name): "Remove from “\(name)”"
+        case .playlist(_, let name), .syncProfile(_, let name), .genre(_, let name): "Remove from “\(name)”"
         case .queue: "Remove from Queue"
         case .library, .folder, .none: MenuCommand.removeFromContainer.title
         }

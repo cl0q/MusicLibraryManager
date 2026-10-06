@@ -18,8 +18,8 @@ enum SidebarSectionID: String, CaseIterable, Sendable {
     }
 }
 
-/// Data behind the sidebar rows that isn't owned elsewhere: playlists, Inbox badge counts,
-/// which sync destinations are reachable, and the collapsed sections (per library).
+/// Data behind the sidebar rows that isn't owned elsewhere: playlists, Inbox badge counts and
+/// the collapsed sections (per library).
 ///
 /// Sync profiles themselves come from `SyncViewModel.profiles` (already loaded at launch).
 @MainActor
@@ -30,8 +30,6 @@ final class SidebarModel {
     private(set) var discoverCount = 0
     /// Duplicate groups + metadata conflicts waiting (album suggestions arrive with W4-3).
     private(set) var reviewCount = 0
-    /// Profiles whose destination folder exists right now.
-    private(set) var reachableProfileIDs: Set<Int64> = []
 
     private(set) var collapsedSections: Set<SidebarSectionID> = []
 
@@ -256,16 +254,6 @@ final class SidebarModel {
         }
     }
 
-    /// Check which sync destinations exist. Called on load and on mount / unmount events —
-    /// never while rendering rows.
-    func refreshReachability(_ profiles: [SyncProfile]) {
-        reachableProfileIDs = Set(profiles.compactMap { profile in
-            guard let id = profile.id,
-                  FileManager.default.fileExists(atPath: profile.outputFolder) else { return nil }
-            return id
-        })
-    }
-
     // MARK: New playlist name (UC §23 C5)
 
     /// `Untitled Playlist`, or `Untitled Playlist 2`, `3`, … when the name is taken. The
@@ -296,73 +284,5 @@ final class SidebarModel {
     }
 }
 
-// MARK: - Sync profile row state (UC-SIDE-07, §15.8)
-
-/// The second line of a sync profile row, from the data that exists before W3-SYNC
-/// (per-profile results such as `· 3 failed` arrive with it).
-enum SyncProfileRowState: Equatable {
-    case syncing(processed: Int, total: Int)
-    case notConnected
-    case toAdd(Int)
-    case synced(Date)
-    case connected
-
-    /// Precedence: syncing → not connected → `n to add` → `Synced …` → `Connected`.
-    static func make(
-        isSyncing: Bool,
-        processed: Int,
-        total: Int,
-        isReachable: Bool,
-        pendingAdds: Int?,
-        lastSynced: Date?
-    ) -> SyncProfileRowState {
-        if isSyncing { return .syncing(processed: processed, total: total) }
-        if !isReachable { return .notConnected }
-        if let pendingAdds, pendingAdds > 0 { return .toAdd(pendingAdds) }
-        if let lastSynced { return .synced(lastSynced) }
-        return .connected
-    }
-
-    /// Display words, verbatim from §15.8; relative time per UC-COPY-10 (`Synced 2 hours ago`).
-    func text(relativeTo now: Date = Date()) -> String {
-        switch self {
-        case .syncing(let processed, let total):
-            "Syncing \(processed.formatted(.number)) of \(total.formatted(.number))"
-        case .notConnected:
-            "Not connected"
-        case .toAdd(let n):
-            "\(n.formatted(.number)) to add"
-        case .synced(let date):
-            "Synced \(Date.AnchoredRelativeFormatStyle(anchor: date, presentation: .named, unitsStyle: .wide).format(now))"
-        case .connected:
-            "Connected"
-        }
-    }
-
-    /// Fraction for the thin progress bar under a syncing row.
-    var progress: Double? {
-        guard case .syncing(let processed, let total) = self, total > 0 else { return nil }
-        return min(1, Double(processed) / Double(total))
-    }
-}
-
-// MARK: - Sync profile page ↔ SyncViewModel selection
-
-/// `SyncViewModel` acts on its `selectedProfile` (preview, Sync Now, settings edits), so the
-/// visible sync-profile page and that selection must always name the same profile.
-///
-/// - Opening a page makes its profile the selection (`selectPage`).
-/// - When something else selects another existing profile (create, duplicate, New Sync
-///   Profile from Selection) while a profile page is visible, the page follows it
-///   (`followSelection`), so what is shown is what Sync Now acts on.
-enum SyncProfilePageAgreement: Equatable {
-    case agree
-    case followSelection(Int64)
-    case selectPage
-
-    static func reconcile(pageProfileID: Int64, selectedProfileID: Int64?, profileIDs: [Int64]) -> SyncProfilePageAgreement {
-        if selectedProfileID == pageProfileID { return .agree }
-        if let selected = selectedProfileID, profileIDs.contains(selected) { return .followSelection(selected) }
-        return .selectPage
-    }
-}
+// The sync profile rows' words are `SyncProfileState` (W3-SYNC, `MLM/Services/Sync/`); each
+// profile has its own state, so there is no page ↔ selection agreement to keep any more.

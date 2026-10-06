@@ -48,6 +48,12 @@ enum DropTarget: Equatable, Sendable {
     /// (W3-FOLD, D-FOLD-FILES-FROM-FINDER): Finder audio files and folders are imported there.
     /// `path` is relative to the library folder.
     case folderRow(path: String, name: String)
+    /// A genre row in Genres (W3-GEN, D-SET-GW-TRACK-TO-GENRE): tracks get this genre (one
+    /// undoable tag edit). `key` = `GenreName.key`, `name` = the display name.
+    case genreRow(key: String, name: String)
+    /// A genre's track table (D-STUDIO-TRACK-TO-GENRE): tracks are **staged** for the genre
+    /// (`Save n Changes` commits them).
+    case genreTable(key: String, name: String)
     /// The window anywhere no other target takes the drag.
     case window
 }
@@ -167,6 +173,10 @@ enum DropDecision: Equatable, Sendable {
     case importFilesAsNewPlaylistInFolder([URL], folderID: Int64)
     /// An `.m3u` onto a playlist folder: the preview sheet, as a new playlist inside it.
     case importM3UInFolder(URL, folderID: Int64)
+    /// Tracks onto a genre row: set their genre (`Set genre of 3 tracks to “Techno”`, undoable).
+    case setGenre([Int64], genreName: String)
+    /// Tracks onto a genre's track table: stage them for the genre (W3-GEN).
+    case stageForGenre([Int64], genreKey: String, genreName: String)
     /// Refused. `message`: where the refusal is said (status bar, or in place for covers);
     /// nil = nothing to say (the not-allowed cursor already said it).
     case refuse(String?)
@@ -227,6 +237,10 @@ enum DropRules {
              (.playlistCard, .imageData), (.playlistCard, .link):
             return true
         case (.window, .files), (.window, .link):
+            return true
+        case (.genreRow, .tracks), (.genreTable, .tracks):
+            // Only tracks get a genre (UC-DND matrix column "Genre row"; playlists and genres
+            // dragged onto a genre row: `—`).
             return true
         default:
             return false
@@ -302,6 +316,8 @@ enum DropRules {
         case .playlistTable(let id, let name, _): return .placeTracks(payload, playlistID: id, playlistName: name)
         case .player: return .playNext(payload)
         case .playlistFolder(let id, _): return .newPlaylistInFolder(ids, folderID: id)
+        case .genreRow(_, let name): return .setGenre(ids, genreName: name)
+        case .genreTable(let key, let name): return .stageForGenre(ids, genreKey: key, genreName: name)
         case .fixedRow, .playlistCover, .playlistCard, .window, .playlistOrder, .playlistCardInManualOrder, .folderRow:
             return .refuse(nil)
         }
@@ -347,7 +363,7 @@ enum DropRules {
         case .player:
             return ids.isEmpty ? .refuse(nil) : .playNextPlaylists(ids)
         case .playlistsSection, .fixedRow, .playlistCover, .playlistCard, .window,
-             .playlistFolder, .playlistOrder, .playlistCardInManualOrder, .folderRow:
+             .playlistFolder, .playlistOrder, .playlistCardInManualOrder, .folderRow, .genreRow, .genreTable:
             return .refuse(nil)
         }
     }
@@ -377,7 +393,8 @@ enum DropRules {
             case .playlistTable(let id, _, _): return .importM3U(m3u.url, playlistID: id)
             case .playlistsSection, .window, .fixedRow, .folderRow: return .importM3U(m3u.url, playlistID: nil)
             case .playlistFolder(let id, _): return .importM3UInFolder(m3u.url, folderID: id)
-            case .syncProfile, .player, .playlistCover, .playlistCard, .playlistOrder, .playlistCardInManualOrder:
+            case .syncProfile, .player, .playlistCover, .playlistCard, .playlistOrder, .playlistCardInManualOrder,
+                 .genreRow, .genreTable:
                 return .refuse(nil)
             }
         }
@@ -406,7 +423,8 @@ enum DropRules {
         case .fixedRow, .window: return .importFiles(urls)
         case .folderRow(let path, _): return .importFilesIntoLibrary(urls, folderPath: path)
         case .playlistFolder(let id, _): return .importFilesAsNewPlaylistInFolder(urls, folderID: id)
-        case .syncProfile, .player, .playlistCover, .playlistCard, .playlistOrder, .playlistCardInManualOrder:
+        case .syncProfile, .player, .playlistCover, .playlistCard, .playlistOrder, .playlistCardInManualOrder,
+             .genreRow, .genreTable:
             return .refuse(nil)
         }
     }

@@ -106,8 +106,12 @@ struct MenuBarStructureTests {
             // The same for the folder context menu (CM-FOLD-TREE, W3-FOLD): `Open ⌘↓`, `Scan This
             // Folder ⌘R`, `Show in Finder ⇧⌘R` — keys of the focused outline / the menu bar.
             guard !file.path.hasSuffix("/MLM/Views/Folders/FolderMenus.swift") else { continue }
+            // UC-KEY-31: ⌘S is the genre staging bar's `Save n Changes` button — a key with no
+            // menu item ("— (button)"), present only while changes are staged (W3-GEN).
+            let fileAllowed = file.path.hasSuffix("/MLM/Views/Genres/GenreSuggestionsSection.swift")
+                ? allowed + [".keyboardShortcut(\"s\", modifiers: .command)"] : allowed
             for line in text.components(separatedBy: "\n") where line.contains(".keyboardShortcut(") {
-                #expect(allowed.contains { line.contains($0) },
+                #expect(fileAllowed.contains { line.contains($0) },
                         "\(file.lastPathComponent): \(line.trimmingCharacters(in: .whitespaces)) — menu keys belong in .commands")
             }
         }
@@ -145,7 +149,7 @@ struct MenuBarStructureTests {
             .library: ["Refresh from Sources", "Scan Library Folder", "Find Duplicates", "Find Albums",
                        "Maintenance", "Fingerprint All Tracks", "ReplayGain Analysis", "Danceability Analysis",
                        "Similarity Analysis", "Refresh Embedded Artwork", "Fetch Artwork from MusicBrainz",
-                       "Reread Tags from Files", "Maintenance Settings…", "Back Up Now", "Library Settings…"],
+                       "Reread Tags from Files…", "Maintenance Settings…", "Back Up Now", "Library Settings…"],
             .go: ["All Tracks", "Albums", "Genres", "Folders", "Discover", "Review", "Back", "Forward",
                   "Playlists", "Sync Profiles"],
             .window: ["Minimize", "Zoom", "Activity", "Bring All to Front"],
@@ -301,9 +305,11 @@ struct MenuBarStructureTests {
         }
         // ⌘↓ is Volume Down, and on the focused Folders outline it opens the folder (W3-FOLD, DEC-053).
         #expect(shown.contains { $0.action.contains("as the root") })
-        for keys in ["⌫", "K", "⌘S"] {
+        for keys in ["⌫", "K"] {
             #expect(!shown.contains { $0.keys == keys }, "\(keys) doesn't work yet")
         }
+        // ⌘S saves a genre's staged changes since W3-GEN (UC-KEY-31).
+        #expect(shown.contains { $0.keys == "⌘S" })
         // Space preview and the preview keys work since W2-C.
         #expect(shown.contains { $0.keys == "Space" })
         let previewing = KeyboardMap.visibleGroups.first { $0.title == "While previewing" }

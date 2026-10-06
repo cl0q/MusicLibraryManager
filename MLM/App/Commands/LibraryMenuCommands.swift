@@ -59,7 +59,10 @@ struct LibraryMenuCommands: Commands {
                 }
                 CommandButton(.rereadTagsFromFiles, enabled: jobBlockedReason(MaintenanceJob.rereadTags) == nil,
                               disabledReason: jobBlockedReason(MaintenanceJob.rereadTags)) {
-                    MaintenanceJobs.shared.start(MaintenanceJob.rereadTags)
+                    // It replaces database values: the question is asked in Settings ▸ Maintenance,
+                    // where the job's row is (review S2).
+                    MaintenanceJobs.shared.rereadConfirmationRequested = true
+                    openSettings(tab: .maintenance)
                 }
                 Divider()
                 CommandButton(.maintenanceSettings, enabled: hasLibrary) {

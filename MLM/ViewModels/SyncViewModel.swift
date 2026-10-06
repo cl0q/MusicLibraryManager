@@ -1,56 +1,111 @@
+import AppKit
 import SwiftUI
 
-/// ViewModel for sync profile management and execution.
+/// Content of one profile, for its page (Content section).
+struct SyncProfileContent: Equatable {
+    struct PlaylistItem: Identifiable, Equatable {
+        let playlist: Playlist
+        let trackCount: Int
+        /// Tracks of the playlist that can't be copied because they aren't downloaded (N05).
+        let notDownloaded: Int
+        var id: Int64 { playlist.id ?? 0 }
+    }
+
+    var playlists: [PlaylistItem] = []
+    var tracks: [Track] = []
+}
+
+/// One profile's plan as the app keeps it (cached per profile; kept while the device is away).
+struct SyncPlanEntry {
+    var preview: SyncService.PreviewResult?
+    var computedAt: Date?
+    var isUpdating = false
+    /// `120 of 214` while updating.
+    var progress: (done: Int, total: Int)?
+    var error: String?
+}
+
+/// Sync profiles, per profile: content, plan, destination, last result and running sync
+/// (W3-SYNC, DEC-027). Nothing here depends on which profile is open — every profile has its
+/// own state (fixes PP-SYNC-02 and the selection-dependent rows of V-SYNC).
+///
+/// - Plans of **all** profiles are computed one at a time off the main actor (cached per profile;
+///   recomputed 1 s after a content or option change, at once on mount / unmount and after a
+///   sync; never for a destination that isn't there). A slow plan shows in Activity (quiet).
+/// - Sync Now, Pause / Resume / Cancel act on the profile's Activity operation — the toolbar,
+///   the popover and the page share one source of truth (UC-JOB-07).
 @Observable
 final class SyncViewModel {
-    // MARK: - State
+    // MARK: State
 
     private(set) var profiles: [SyncProfile] = []
-    private(set) var profileLastSynced: [Int64: Date] = [:]
-    var selectedProfile: SyncProfile?
-    private(set) var preview: SyncService.SyncPreview?
+    private(set) var results: [Int64: SyncProfileResult] = [:]
+    /// Newest `sync_state` timestamp per profile (the only "last synced" before v47).
+    private(set) var legacySyncedAt: [Int64: Date] = [:]
+    private(set) var plans: [Int64: SyncPlanEntry] = [:]
+    private(set) var destinations: [Int64: SyncDestination.Status] = [:]
+    private(set) var contentCounts: [Int64: Int] = [:]
+    /// Free / total bytes of connected destinations (read on mount events, never while drawing).
+    private(set) var capacities: [Int64: (free: Int64, total: Int64)] = [:]
+    /// The connected destination is a Rockbox player (`.rockbox` at the volume root).
+    private(set) var isRockbox: [Int64: Bool] = [:]
+    /// Sheets and the delete alert, shared by the sidebar rows and the profile pages.
+    let presenter = SyncPresenter()
+    private(set) var contents: [Int64: SyncProfileContent] = [:]
     private(set) var isLoading = false
-    private(set) var isPreviewUpdating = false
-    private(set) var isPreviewStale = true
-    private(set) var previewProcessed = 0
-    private(set) var previewTotal = 0
-    private(set) var previewComputedAt: Date?
-    private(set) var isSyncing = false
-    private(set) var syncSettingsApplyNextRun = false
-    private(set) var lastResult: SyncService.SyncResult?
+    /// A create in the New Sync Profile sheet failed (shown in the sheet, UC-SHEET-18).
     private(set) var errorMessage: String?
+    /// Profiles whose options changed during their running sync (`Applies to the next sync`).
+    private(set) var optionsChangedWhileSyncing: Set<Int64> = []
 
-    // WP4 — Device ingest scan state
-    private(set) var deviceIngestPreviews: [(fileName: String, preview: IngestPreview)] = []
-    private(set) var isScanningDevice = false
-    private(set) var deviceScanError: String?
+    /// Any sync runs now (blocks a transcode-cache move).
+    var isSyncing: Bool { syncService.isRunning }
 
-    // Loaded content for the selected profile (used by SyncContentSections)
-    private(set) var profilePlaylists: [Playlist] = []
-    private(set) var profileTracks: [Track] = []
-
-    // MARK: - Dependencies
+    // MARK: Dependencies
 
     private let syncRepository: SyncRepository
     let syncService: SyncService
+    let resultRepository: SyncProfileResultRepository
     private var ingestService: PlaylistIngestService?
-    private var previewTask: Task<Void, Never>?
-    private var previewRequest = UUID()
-    private var contentTask: Task<Void, Never>?
-    private var contentRequest = UUID()
-    private static let sqliteDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        return formatter
-    }()
-    private static let relativeTimeFormatter = RelativeDateTimeFormatter()
+    @ObservationIgnored private let notificationCenter: NotificationCenter
+    @ObservationIgnored private let workspaceCenter: NotificationCenter
+    @ObservationIgnored var libraryDrive: @MainActor () -> LibraryDriveState = { LibraryDriveState.current(.shared) }
+    @ObservationIgnored var statusBar: @MainActor () -> StatusBarCenter? = { ShellWindowModels.main.statusBar }
+    @ObservationIgnored var edits: @MainActor () -> ShellEdits = {
+        ShellEdits(dependencies: .live(.shared), undo: .main, window: .main)
+    }
+    @ObservationIgnored var playlistRepository: @MainActor () -> PlaylistRepository? = { DependencyContainer.shared.playlistRepository }
+    @ObservationIgnored var destinationStatus: (String) -> SyncDestination.Status = { SyncDestination.status(for: $0) }
+    /// Debounce of plan recomputes after an edit (1 s) and after downloads / file checks.
+    @ObservationIgnored var editDebounce: Duration = .seconds(1)
+    @ObservationIgnored var backgroundDebounce: Duration = .seconds(5)
 
-    init(syncRepository: SyncRepository, syncService: SyncService, ingestService: PlaylistIngestService? = nil) {
+    @ObservationIgnored private var observers: [NSObjectProtocol] = []
+    @ObservationIgnored private var planDebounces: [Int64: Task<Void, Never>] = [:]
+    @ObservationIgnored private var planQueue: [(id: Int64, force: Bool)] = []
+    @ObservationIgnored private var planWorker: Task<Void, Never>?
+    @ObservationIgnored private var currentPlanTask: (id: Int64, task: Task<SyncService.PreviewResult, Error>)?
+    @ObservationIgnored private var runs: [Int64: Task<Void, Never>] = [:]
+
+    init(syncRepository: SyncRepository, syncService: SyncService, ingestService: PlaylistIngestService? = nil,
+         resultRepository: SyncProfileResultRepository? = nil,
+         notificationCenter: NotificationCenter = .default,
+         workspaceCenter: NotificationCenter = NSWorkspace.shared.notificationCenter) {
         self.syncRepository = syncRepository
         self.syncService = syncService
         self.ingestService = ingestService
+        let results = resultRepository ?? SyncProfileResultRepository(database: syncRepository.databaseWriter)
+        self.resultRepository = results
+        self.notificationCenter = notificationCenter
+        self.workspaceCenter = workspaceCenter
+        syncService.results = results
+    }
+
+    deinit {
+        for observer in observers {
+            notificationCenter.removeObserver(observer)
+            workspaceCenter.removeObserver(observer)
+        }
     }
 
     /// Set the ingest service after initialization (WP4 wiring).
@@ -58,28 +113,326 @@ final class SyncViewModel {
         self.ingestService = service
     }
 
-    // MARK: - CRUD
+    /// The service behind Read Playlist Changes from Device (`nil` until the library is open).
+    func deviceChangeService() -> DevicePlaylistChangeService? {
+        guard let ingestService else { return nil }
+        let database = syncRepository.databaseWriter
+        return DevicePlaylistChangeService(ingest: ingestService, tracks: TrackRepository(database: database),
+                                           playlists: PlaylistRepository(database: database), database: database)
+    }
 
+    // MARK: - Loading
+
+    /// Loads profiles, results and content counts; the first call also starts watching for
+    /// changes and computes every profile's plan.
     @MainActor
     func loadProfiles() async {
         isLoading = true
-        let start = Date()
+        defer { isLoading = false }
         do {
             profiles = try await syncRepository.fetchAll()
             let timestamps = try await syncRepository.fetchLastSyncTimestamps()
-            profileLastSynced = Dictionary(uniqueKeysWithValues: timestamps.compactMap { id, timestamp in
+            legacySyncedAt = Dictionary(uniqueKeysWithValues: timestamps.compactMap { id, timestamp in
                 Self.sqliteDateFormatter.date(from: timestamp).map { (id, $0) }
             })
-            let ms = Int(Date().timeIntervalSince(start) * 1000)
-            AppLogger.shared.info(
-                "sync profiles loaded: \(profiles.count) in \(ms)ms",
-                source: "perf"
-            )
+            results = (try? await resultRepository.fetchAll()) ?? results
+            contentCounts = (try? await syncRepository.fetchContentCounts()) ?? contentCounts
         } catch {
-            errorMessage = error.localizedDescription
             AppLogger.shared.error("sync profiles load failed: \(error)", source: "sync")
         }
-        isLoading = false
+        let known = Set(profiles.compactMap(\.id))
+        plans = plans.filter { known.contains($0.key) }
+        contents = contents.filter { known.contains($0.key) }
+        let firstLoad = observers.isEmpty
+        refreshDestinations()
+        if firstLoad {
+            startObserving()
+            for id in profiles.compactMap(\.id) { schedulePlan(id, after: .zero) }
+        }
+    }
+
+    @MainActor
+    func reloadResults() async {
+        results = (try? await resultRepository.fetchAll()) ?? results
+    }
+
+    /// Checks every destination (on load and on mount / unmount — never while drawing rows).
+    @MainActor
+    @discardableResult
+    func refreshDestinations() -> Set<Int64> {
+        var changed = Set<Int64>()
+        for profile in profiles {
+            guard let id = profile.id else { continue }
+            let status = destinationStatus(profile.outputFolder)
+            if destinations[id] != status { changed.insert(id) }
+            destinations[id] = status
+            if status == .connected {
+                capacities[id] = SyncDestination.capacity(of: profile.outputFolder)
+                isRockbox[id] = SyncDestination.volumePath(for: profile.outputFolder).map {
+                    FileManager.default.fileExists(atPath: ($0 as NSString).appendingPathComponent(".rockbox"))
+                } ?? false
+            } else {
+                capacities[id] = nil
+            }
+        }
+        return changed
+    }
+
+    @MainActor
+    func loadContent(_ profileID: Int64) async {
+        do {
+            let playlists = try await syncRepository.fetchProfilePlaylists(profileId: profileID)
+            let tracks = try await syncRepository.fetchProfileTracks(profileId: profileID)
+            let summaries = (try? await playlistRepository()?.fetchSummaries()) ?? [:]
+            contents[profileID] = SyncProfileContent(
+                playlists: playlists.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }.map { playlist in
+                    let summary = playlist.id.flatMap { summaries[$0] }
+                    return .init(playlist: playlist, trackCount: summary?.totalTracks ?? 0,
+                                 notDownloaded: (summary?.notDownloadedTracks ?? 0) + (summary?.failedTracks ?? 0))
+                },
+                tracks: tracks.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+            )
+            contentCounts[profileID] = playlists.count + tracks.count
+                + ((try? await syncRepository.fetchProfileRules(profileId: profileID).count) ?? 0)
+        } catch {
+            AppLogger.shared.error("loadContent failed: \(error)", source: "sync")
+        }
+    }
+
+    // MARK: - State (UC-SIDE-07, §15.8)
+
+    @MainActor
+    func profile(_ id: Int64) -> SyncProfile? {
+        profiles.first { $0.id == id }
+    }
+
+    /// The running / queued / paused / waiting sync of the profile, from Activity.
+    @MainActor
+    func run(for profile: SyncProfile) -> SyncRunSnapshot? {
+        guard let id = profile.id else { return nil }
+        let echo = ActivityCenter.shared.echo(for: .syncProfile(id, name: profile.name))
+        let progress = echo.flatMap { ActivityCenter.shared.operation(id: $0.operationID)?.progress }
+        return SyncRunSnapshot.from(echo, progress: progress)
+    }
+
+    @MainActor
+    func stateInput(for profile: SyncProfile, now: Date = Date()) -> SyncProfileStateInput {
+        let id = profile.id ?? -1
+        let plan = plans[id]
+        return SyncProfileStateInput(
+            profileName: profile.name,
+            deviceName: SyncDestination.deviceName(for: profile.outputFolder),
+            destination: destinations[id] ?? .notConnected,
+            libraryDrive: libraryDrive(),
+            hasContent: (contentCounts[id] ?? 0) > 0,
+            plan: plan?.preview?.summary,
+            planHasSufficientSpace: plan?.preview?.hasSufficientSpace ?? true,
+            planComputedAt: plan?.computedAt,
+            isPlanUpdating: plan?.isUpdating ?? false,
+            result: results[id],
+            legacySyncedAt: legacySyncedAt[id],
+            run: run(for: profile),
+            now: now
+        )
+    }
+
+    @MainActor
+    func state(for profile: SyncProfile, now: Date = Date()) -> SyncProfileState {
+        SyncProfileState.make(stateInput(for: profile, now: now))
+    }
+
+    // MARK: - Plans
+
+    /// Recompute the profile's plan after `delay` (an edit: 1 s); a newer request replaces it.
+    @MainActor
+    func schedulePlan(_ profileID: Int64, after delay: Duration, force: Bool = false) {
+        planDebounces[profileID]?.cancel()
+        planDebounces[profileID] = Task { @MainActor [weak self] in
+            if delay > .zero {
+                do { try await Task.sleep(for: delay) } catch { return }
+            }
+            self?.enqueuePlan(profileID, force: force)
+        }
+    }
+
+    /// ⌘R / Recompute Plan: at once, ignoring the cached plan.
+    @MainActor
+    func recomputePlan(_ profileID: Int64) {
+        refreshDestinations()
+        schedulePlan(profileID, after: .zero, force: true)
+    }
+
+    /// Stops an update of the profile's plan; the previous numbers stay.
+    @MainActor
+    func cancelPlanUpdate(_ profileID: Int64) {
+        planDebounces[profileID]?.cancel()
+        planQueue.removeAll { $0.id == profileID }
+        if currentPlanTask?.id == profileID { currentPlanTask?.task.cancel() }
+        plans[profileID, default: SyncPlanEntry()].isUpdating = false
+        plans[profileID]?.progress = nil
+    }
+
+    @MainActor
+    private func enqueuePlan(_ profileID: Int64, force: Bool) {
+        if let index = planQueue.firstIndex(where: { $0.id == profileID }) {
+            planQueue[index].force = planQueue[index].force || force
+        } else {
+            planQueue.append((profileID, force))
+        }
+        guard planWorker == nil else { return }
+        planWorker = Task { @MainActor [weak self] in
+            while let self, !self.planQueue.isEmpty {
+                let next = self.planQueue.removeFirst()
+                await self.computePlan(next.id, force: next.force)
+            }
+            self?.planWorker = nil
+        }
+    }
+
+    /// One plan, off the main actor (`SyncService.previewSync` is nonisolated). Not for a
+    /// destination that isn't there, and not while the profile syncs.
+    @MainActor
+    private func computePlan(_ profileID: Int64, force: Bool) async {
+        guard let profile = profile(profileID) else { return }
+        let status = destinationStatus(profile.outputFolder)
+        destinations[profileID] = status
+        guard status == .connected, syncService.runningProfileId != profileID else {
+            plans[profileID, default: SyncPlanEntry()].isUpdating = false
+            return
+        }
+        if force { syncService.invalidatePreview(profileId: profileID) }
+        plans[profileID, default: SyncPlanEntry()].isUpdating = true
+        plans[profileID]?.error = nil
+        // Quiet and graceful (UC-JOB-01): visible in Activity only when slower than ~2 s.
+        let job = ActivityCenter.shared.begin(
+            .deviceScan, title: "Update the plan of “\(profile.name)”", itemNoun: .file,
+            automatic: true, graceful: true, quiet: true, persists: false)
+        let service = syncService
+        let task = Task.detached(priority: .utility) { [weak self] () -> SyncService.PreviewResult in
+            try await service.previewSync(profileId: profileID, forceRefresh: force) { done, total in
+                job.update(completed: done, total: total)
+                Task { @MainActor [weak self] in self?.plans[profileID]?.progress = (done, total) }
+            }
+        }
+        currentPlanTask = (profileID, task)
+        PerformanceQueueService.shared.setExternalSyncPreviewActive(true)
+        defer {
+            PerformanceQueueService.shared.setExternalSyncPreviewActive(false)
+            currentPlanTask = nil
+        }
+        do {
+            let preview = try await task.value
+            plans[profileID] = SyncPlanEntry(preview: preview, computedAt: syncService.cachedPreview(profileId: profileID)?.computedAt ?? Date())
+            job.finish()
+            capacities[profileID] = SyncDestination.capacity(of: profile.outputFolder)
+            let now = Date()
+            try? await resultRepository.recordConnected(profileID: profileID, at: now)
+            results[profileID, default: SyncProfileResult(profileID: profileID)].lastConnectedAt = now
+        } catch is CancellationError {
+            job.discard()
+            plans[profileID, default: SyncPlanEntry()].isUpdating = false
+            plans[profileID]?.progress = nil
+        } catch {
+            job.discard()
+            AppLogger.shared.error("sync plan failed for \(profile.name): \(error)", source: "Sync")
+            plans[profileID, default: SyncPlanEntry()].isUpdating = false
+            plans[profileID]?.progress = nil
+            plans[profileID]?.error = "Couldn’t read “\(SyncDestination.deviceName(for: profile.outputFolder))” — the device stopped answering."
+        }
+    }
+
+    // MARK: - Watching (content, options, mounts, downloads)
+
+    @MainActor
+    private func startObserving() {
+        func observe(_ name: Notification.Name, on center: NotificationCenter, _ handle: @escaping @MainActor (Notification) -> Void) {
+            observers.append(center.addObserver(forName: name, object: nil, queue: .main) { note in
+                MainActor.assumeIsolated { handle(note) }
+            })
+        }
+        observe(.syncProfileDidChange, on: notificationCenter) { [weak self] note in
+            guard let self else { return }
+            let id = (note.userInfo?["profileId"] as? Int64) ?? (note.userInfo?["profileId"] as? NSNumber)?.int64Value
+            Task { @MainActor in
+                await self.loadProfiles()
+                let ids = id.map { [$0] } ?? self.profiles.compactMap(\.id)
+                for id in ids {
+                    if self.contents[id] != nil { await self.loadContent(id) }
+                    self.schedulePlan(id, after: self.editDebounce)
+                }
+            }
+        }
+        observe(.playlistDidChange, on: notificationCenter) { [weak self] note in
+            guard let self, note.userInfo?["coverRevalidation"] == nil,
+                  (note.userInfo?["origin"] as? String) != "coverService" else { return }
+            Task { @MainActor in
+                for id in self.profiles.compactMap(\.id) {
+                    if self.contents[id] != nil { await self.loadContent(id) }
+                    self.schedulePlan(id, after: self.editDebounce)
+                }
+            }
+        }
+        for name in [Notification.Name.trackAvailabilityDidChange, .downloadDidComplete, .libraryFilesDidChange] {
+            observe(name, on: notificationCenter) { [weak self] _ in
+                guard let self else { return }
+                for id in self.profiles.compactMap(\.id) { self.schedulePlan(id, after: self.backgroundDebounce) }
+            }
+        }
+        for name in [Notification.Name.libraryDriveDidMount, .libraryDriveDidUnmount] {
+            observe(name, on: notificationCenter) { [weak self] _ in
+                guard let self else { return }
+                for id in self.profiles.compactMap(\.id) { self.schedulePlan(id, after: .zero) }
+            }
+        }
+        for name in [NSWorkspace.didMountNotification, NSWorkspace.didUnmountNotification] {
+            observe(name, on: workspaceCenter) { [weak self] _ in
+                guard let self else { return }
+                for id in self.refreshDestinations() where self.destinations[id] == .connected {
+                    self.schedulePlan(id, after: .zero)
+                }
+            }
+        }
+    }
+
+    /// The profile row or content changed elsewhere (rename, drop, undo): reload and re-plan.
+    @MainActor
+    func profileDidChange(_ profileID: Int64) async {
+        await loadProfiles()
+        if contents[profileID] != nil { await loadContent(profileID) }
+        schedulePlan(profileID, after: editDebounce)
+    }
+
+    // MARK: - Create, delete, options
+
+    /// Creates a profile with the preset's options and, from a selection, its first tracks.
+    @MainActor
+    func createProfile(name: String, outputFolder: String, preset: SyncDevicePreset,
+                       trackIDs: [Int64] = []) async -> SyncProfile? {
+        errorMessage = nil
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if profiles.contains(where: { $0.name.lowercased() == trimmed.lowercased() }) {
+            errorMessage = "A sync profile with this name already exists."
+            return nil
+        }
+        do {
+            let profile = try await syncRepository.create(name: trimmed, outputFolder: outputFolder)
+            guard let id = profile.id else { return nil }
+            let options = preset.options
+            try await syncRepository.updateSettings(
+                profileId: id, generateM3U8: options.playlistFiles, transcodeMode: options.transcodeMode,
+                fat32SafePaths: true, cleanupRemovedFiles: true, playlistFormat: options.playlistFormat,
+                artworkMode: options.artworkMode)
+            for trackID in trackIDs { try await syncRepository.addTrack(profileId: id, trackId: trackID) }
+            await loadProfiles()
+            schedulePlan(id, after: .zero)
+            notificationCenter.post(name: .syncProfileDidChange, object: nil, userInfo: ["profileId": id])
+            return self.profile(id)
+        } catch {
+            errorMessage = error.localizedDescription.contains("UNIQUE")
+                ? "A sync profile with this name already exists."
+                : "Couldn’t create the sync profile — \(error.localizedDescription)"
+            return nil
+        }
     }
 
     @MainActor
@@ -87,652 +440,325 @@ final class SyncViewModel {
         errorMessage = nil
     }
 
-    @MainActor
-    func createProfile(
-        name: String,
-        outputFolder: String,
-        generateM3U8: Bool = false,
-        transcodeMode: String = "keep_originals",
-        fat32SafePaths: Bool = true,
-        cleanupRemovedFiles: Bool = true,
-        artworkMode: String = "keep_original"
-    ) async {
-        errorMessage = nil
-        do {
-            let profile = try await syncRepository.create(name: name, outputFolder: outputFolder)
-            // Apply toggle settings immediately after creation
-            if let id = profile.id {
-                try await syncRepository.updateSettings(
-                    profileId: id,
-                    generateM3U8: generateM3U8,
-                    transcodeMode: transcodeMode,
-                    fat32SafePaths: fat32SafePaths,
-                    cleanupRemovedFiles: cleanupRemovedFiles,
-                    artworkMode: artworkMode
-                )
-            }
-            await loadProfiles()
-            selectedProfile = profiles.first { $0.id == profile.id }
-            if let selectedProfile {
-                schedulePreviewRefresh(for: selectedProfile, debounced: false)
-            }
-        } catch {
-            let errMsg = error.localizedDescription
-            if errMsg.contains("UNIQUE constraint failed") {
-                errorMessage = "A sync profile with this name already exists."
-            } else {
-                errorMessage = errMsg
-            }
-        }
-    }
-
+    /// A-SYNC-DELETEPROFILE (confirmed): cancels its running sync first. Nothing on the device
+    /// or in the library is touched.
     @MainActor
     func deleteProfile(_ profile: SyncProfile) async {
         guard let id = profile.id else { return }
+        if let run = run(for: profile) { ActivityCenter.shared.cancel(run.operationID) }
+        cancelPlanUpdate(id)
         do {
             try await syncRepository.delete(id: id)
             profiles.removeAll { $0.id == id }
-            if selectedProfile?.id == id {
-                selectedProfile = nil
-                preview = nil
-                previewTask?.cancel()
-                contentTask?.cancel()
-            }
+            plans[id] = nil
+            results[id] = nil
+            contents[id] = nil
+            destinations[id] = nil
             syncService.invalidatePreview(profileId: id)
+            statusBar()?.post("Deleted the sync profile “\(profile.name)”")
+            notificationCenter.post(name: .syncProfileDidChange, object: nil)
         } catch {
-            errorMessage = error.localizedDescription
+            statusBar()?.post(UndoFailure.sentence("Couldn’t delete “\(profile.name)”", error))
         }
     }
 
+    /// Options save at once; the plan recomputes after 1 s (V-SYNC-DETAIL.E07).
     @MainActor
-    func selectProfile(_ profile: SyncProfile) async {
-        selectedProfile = profile
-        await loadPreview(for: profile)
-    }
-
-    @MainActor
-    func renameProfile(_ profile: SyncProfile, name: String) async {
-        guard let id = profile.id else { return }
-        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else { return }
-
-        do {
-            try await syncRepository.updateSettings(profileId: id, name: trimmedName)
-            await loadProfiles()
-            if selectedProfile?.id == id {
-                selectedProfile = profiles.first { $0.id == id }
-            }
-        } catch {
-            errorMessage = "Could not rename sync profile."
-            AppLogger.shared.error("sync profile rename failed: \(error)", source: "Sync")
-        }
-    }
-
-    @MainActor
-    func duplicateProfile(_ profile: SyncProfile) async {
-        guard let id = profile.id else { return }
-        do {
-            let copy = try await syncRepository.duplicate(id: id)
-            await loadProfiles()
-            selectedProfile = profiles.first { $0.id == copy.id }
-            if let selectedProfile {
-                schedulePreviewRefresh(for: selectedProfile, debounced: false)
-            }
-        } catch {
-            errorMessage = "Could not duplicate sync profile."
-            AppLogger.shared.error("sync profile duplicate failed: \(error)", source: "Sync")
-        }
-    }
-
-    @MainActor
-    func profileStatus(for profile: SyncProfile) -> String {
-        guard let id = profile.id else { return "No sync yet" }
-        if selectedProfile?.id == id, isSyncing {
-            return "Syncing \(syncProcessed)/\(syncTotal)"
-        }
-        if !FileManager.default.fileExists(atPath: profile.outputFolder) {
-            return "Device not connected"
-        }
-        if selectedProfile?.id == id, let preview, preview.isDeviceConnected {
-            let pending = preview.filesToAdd.count + preview.filesToRemove.count
-            if pending > 0 {
-                return "\(pending) \(pending == 1 ? "track" : "tracks") pending"
-            }
-        }
-        if let lastSynced = profileLastSynced[id] {
-            return "Synced \(Self.relativeTimeFormatter.localizedString(for: lastSynced, relativeTo: Date()))"
-        }
-        return "No sync yet"
-    }
-
-    // MARK: - Preview
-
-    @MainActor
-    func loadPreview(for profile: SyncProfile) async {
-        await requestPreview(for: profile, forceRefresh: false)
-    }
-
-    @MainActor
-    func refreshPreviewNow(for profile: SyncProfile) async {
-        await requestPreview(for: profile, forceRefresh: true)
-    }
-
-    @MainActor
-    private func requestPreview(for profile: SyncProfile, forceRefresh: Bool) async {
-        previewTask?.cancel()
-        let request = UUID()
-        previewRequest = request
-        contentTask?.cancel()
-        let contentRequest = UUID()
-        self.contentRequest = contentRequest
-        profilePlaylists = []
-        profileTracks = []
-        presentCachedPreview(for: profile)
-        if let profileId = profile.id {
-            contentTask = Task { [weak self] in
-                guard let self else { return }
-                await self.loadProfileContent(profileId: profileId, request: contentRequest)
-            }
-        }
-        await refreshPreview(for: profile, request: request, forceRefresh: forceRefresh)
-    }
-
-    @MainActor
-    func schedulePreviewRefresh(for profile: SyncProfile, debounced: Bool = true) {
-        previewTask?.cancel()
-        let request = UUID()
-        previewRequest = request
-        presentCachedPreview(for: profile)
-        isPreviewStale = true
-        isPreviewUpdating = true
-
-        previewTask = Task { [weak self] in
-            guard let self else { return }
-            if debounced {
-                do {
-                    try await Task.sleep(for: .seconds(1))
-                } catch {
-                    return
-                }
-            }
-            guard !Task.isCancelled else { return }
-            await self.refreshPreview(for: profile, request: request, forceRefresh: false)
-        }
-    }
-
-    @MainActor
-    func cancelPreviewRefresh() {
-        previewTask?.cancel()
-        previewTask = nil
-        previewRequest = UUID()
-        isPreviewUpdating = false
-        isPreviewStale = true
-        PerformanceQueueService.shared.setExternalSyncPreviewActive(false)
-    }
-
-    @MainActor
-    func deviceAvailabilityDidChange(for profile: SyncProfile) {
-        guard let profileId = profile.id else { return }
-        let cachedAvailability = syncService.cachedPreview(profileId: profileId)?.deviceWasConnected
-        let currentAvailability = FileManager.default.fileExists(atPath: profile.outputFolder)
-        guard cachedAvailability != currentAvailability else { return }
-        syncService.invalidatePreview(profileId: profileId)
-        schedulePreviewRefresh(for: profile, debounced: false)
-    }
-
-    @MainActor
-    private func presentCachedPreview(for profile: SyncProfile) {
-        guard let profileId = profile.id,
-              let cached = syncService.cachedPreview(profileId: profileId),
-              cached.deviceWasConnected == FileManager.default.fileExists(atPath: profile.outputFolder)
-        else {
-            preview = nil
-            previewComputedAt = nil
-            previewProcessed = 0
-            previewTotal = 0
-            return
-        }
-
-        preview = cached.preview
-        previewComputedAt = cached.computedAt
-        previewProcessed = 0
-        previewTotal = 0
-    }
-
-    @MainActor
-    private func refreshPreview(
-        for profile: SyncProfile,
-        request: UUID,
-        forceRefresh: Bool
-    ) async {
-        guard let id = profile.id else { return }
-        guard selectedProfile?.id == id || selectedProfile == nil else { return }
-        isPreviewUpdating = true
-        isPreviewStale = preview != nil
-        previewProcessed = 0
-        previewTotal = 0
-        PerformanceQueueService.shared.setExternalSyncPreviewActive(true)
-        defer {
-            if previewRequest == request {
-                PerformanceQueueService.shared.setExternalSyncPreviewActive(false)
-            }
-        }
-
-        do {
-            let freshPreview = try await syncService.previewSync(
-                profileId: id,
-                forceRefresh: forceRefresh
-            ) { [weak self] processed, total in
-                Task { @MainActor in
-                    guard let self, self.previewRequest == request else { return }
-                    self.previewProcessed = processed
-                    self.previewTotal = total
-                }
-            }
-            guard previewRequest == request,
-                  selectedProfile?.id == id,
-                  !Task.isCancelled
-            else { return }
-            preview = freshPreview
-            previewComputedAt = syncService.cachedPreview(profileId: id)?.computedAt
-            previewProcessed = previewTotal
-            isPreviewStale = false
-        } catch is CancellationError {
-            // The next preview request owns the UI state.
-        } catch {
-            guard previewRequest == request else { return }
-            errorMessage = "Could not update the sync preview. Try Refresh."
-            AppLogger.shared.error("sync preview failed: \(error)", source: "Sync")
-        }
-
-        guard previewRequest == request else { return }
-        isPreviewUpdating = false
-    }
-
-    // MARK: - Profile Content (D-08)
-
-    @MainActor
-    func loadProfileContent(profileId: Int64) async {
-        await loadProfileContent(profileId: profileId, request: contentRequest)
-    }
-
-    @MainActor
-    private func loadProfileContent(profileId: Int64, request: UUID) async {
-        do {
-            let playlists = try await syncRepository.fetchProfilePlaylists(profileId: profileId)
-            let tracks = try await syncRepository.fetchProfileTracks(profileId: profileId)
-            guard contentRequest == request,
-                  selectedProfile?.id == profileId,
-                  !Task.isCancelled
-            else { return }
-            profilePlaylists = playlists
-            profileTracks = tracks
-        } catch {
-            guard contentRequest == request, !Task.isCancelled else { return }
-            AppLogger.shared.error("loadProfileContent failed: \(error)", source: "sync")
-        }
-    }
-
-    // MARK: - Sync
-
-    @MainActor
-    func executeSync() async {
-        guard let profile = selectedProfile, let id = profile.id else { return }
-        isSyncing = true
-        syncSettingsApplyNextRun = false
-        errorMessage = nil
-
-        do {
-            let result = try await syncService.executeSync(profileId: id)
-            lastResult = result
-            AppLogger.shared.log(
-                "Sync complete: \(result.syncedCount) synced, \(result.failedCount) failed",
-                source: "Sync"
-            )
-            syncService.invalidatePreview(profileId: id)
-            schedulePreviewRefresh(for: profile, debounced: false)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-
-        isSyncing = false
-        syncSettingsApplyNextRun = false
-    }
-
-    // MARK: - Content Mutations (D-08)
-
-    @MainActor
-    func addPlaylists(_ playlistIds: [Int64]) async {
-        guard let profileId = selectedProfile?.id else { return }
-        do {
-            for id in playlistIds {
-                try await syncRepository.addPlaylist(profileId: profileId, playlistId: id)
-            }
-            await loadProfileContent(profileId: profileId)
-            invalidateAndSchedulePreview(profileId: profileId)
-            NotificationCenter.default.post(
-                name: .syncProfileDidChange, object: nil, userInfo: ["profileId": profileId]
-            )
-        } catch {
-            errorMessage = "Failed to add playlists: \(error.localizedDescription)"
-        }
-    }
-
-    @MainActor
-    func addTracks(_ trackIds: [Int64]) async {
-        guard let profileId = selectedProfile?.id else { return }
-        do {
-            for id in trackIds {
-                try await syncRepository.addTrack(profileId: profileId, trackId: id)
-            }
-            await loadProfileContent(profileId: profileId)
-            invalidateAndSchedulePreview(profileId: profileId)
-            NotificationCenter.default.post(
-                name: .syncProfileDidChange, object: nil, userInfo: ["profileId": profileId]
-            )
-        } catch {
-            errorMessage = "Failed to add tracks: \(error.localizedDescription)"
-        }
-    }
-
-    @MainActor
-    func removePlaylists(_ playlistIds: [Int64]) async {
-        guard let profileId = selectedProfile?.id else { return }
-        do {
-            for id in playlistIds {
-                try await syncRepository.removePlaylist(profileId: profileId, playlistId: id)
-            }
-            await loadProfileContent(profileId: profileId)
-            invalidateAndSchedulePreview(profileId: profileId)
-            NotificationCenter.default.post(
-                name: .syncProfileDidChange, object: nil, userInfo: ["profileId": profileId]
-            )
-        } catch {
-            errorMessage = "Failed to remove playlists: \(error.localizedDescription)"
-        }
-    }
-
-    @MainActor
-    func removeTracks(_ trackIds: [Int64]) async {
-        guard let profileId = selectedProfile?.id else { return }
-        do {
-            for id in trackIds {
-                try await syncRepository.removeTrack(profileId: profileId, trackId: id)
-            }
-            await loadProfileContent(profileId: profileId)
-            invalidateAndSchedulePreview(profileId: profileId)
-            NotificationCenter.default.post(
-                name: .syncProfileDidChange, object: nil, userInfo: ["profileId": profileId]
-            )
-        } catch {
-            errorMessage = "Failed to remove tracks: \(error.localizedDescription)"
-        }
-    }
-
-    @MainActor
-    func updateProfileSettings(
-        name: String? = nil,
-        outputFolder: String? = nil,
-        generateM3U8: Bool? = nil,
-        transcodeMode: String? = nil,
-        fat32SafePaths: Bool? = nil,
-        cleanupRemovedFiles: Bool? = nil,
-        playlistPathPrefix: String? = nil,
-        playlistFormat: String? = nil,
-        normalizeLoudness: Bool? = nil,
-        artworkMode: String? = nil
-    ) async {
-        guard let profileId = selectedProfile?.id else { return }
+    func updateOptions(_ profileID: Int64, generateM3U8: Bool? = nil, transcodeMode: String? = nil,
+                       fat32SafePaths: Bool? = nil, cleanupRemovedFiles: Bool? = nil,
+                       playlistFormat: String? = nil, normalizeLoudness: Bool? = nil, artworkMode: String? = nil) async {
         do {
             try await syncRepository.updateSettings(
-                profileId: profileId,
-                name: name,
-                outputFolder: outputFolder,
-                playlistPathPrefix: playlistPathPrefix,
-                generateM3U8: generateM3U8,
-                transcodeMode: transcodeMode,
-                fat32SafePaths: fat32SafePaths,
-                cleanupRemovedFiles: cleanupRemovedFiles,
-                playlistFormat: playlistFormat,
-                normalizeLoudness: normalizeLoudness,
-                artworkMode: artworkMode
-            )
+                profileId: profileID, generateM3U8: generateM3U8, transcodeMode: transcodeMode,
+                fat32SafePaths: fat32SafePaths, cleanupRemovedFiles: cleanupRemovedFiles,
+                playlistFormat: playlistFormat, normalizeLoudness: normalizeLoudness, artworkMode: artworkMode)
+            if syncService.runningProfileId == profileID { optionsChangedWhileSyncing.insert(profileID) }
             await loadProfiles()
-            // Refresh selectedProfile from the reloaded list to reflect updated fields
-            if let updated = profiles.first(where: { $0.id == profileId }) {
-                selectedProfile = updated
-                if isSyncing {
-                    syncSettingsApplyNextRun = true
-                }
-                invalidateAndSchedulePreview(profileId: profileId, profile: updated)
-            }
-            NotificationCenter.default.post(
-                name: .syncProfileDidChange, object: nil, userInfo: ["profileId": profileId]
-            )
+            schedulePlan(profileID, after: editDebounce)
         } catch {
-            errorMessage = "Failed to update profile settings: \(error.localizedDescription)"
+            statusBar()?.post(UndoFailure.sentence("Couldn’t change the option", error))
         }
     }
 
-    // MARK: - Progress Forwarding (read-only access for SyncStatusRow in OperationsTab)
-
-    /// Forwarding property — reads SyncService.progress without exposing the service.
-    var syncProgress: Double { syncService.progress }
-
-    /// Forwarding property — reads SyncService.currentFile without exposing the service.
-    var syncCurrentFile: String { syncService.currentFile }
-
-    /// Forwarding property — reads SyncService.processed without exposing the service.
-    var syncProcessed: Int { syncService.processed }
-
-    /// Forwarding property — reads SyncService.total without exposing the service.
-    var syncTotal: Int { syncService.total }
-
-    var isSyncPaused: Bool { syncService.isPaused }
-
-    // MARK: - Cancellation (D-14)
-
+    /// Reset to Device Defaults (the preset the destination suggests).
     @MainActor
-    func cancelSync() {
-        syncService.cancelSync()
+    func applyPreset(_ preset: SyncDevicePreset, to profileID: Int64) async {
+        let options = preset.options
+        await updateOptions(profileID, generateM3U8: options.playlistFiles, transcodeMode: options.transcodeMode,
+                            cleanupRemovedFiles: true, playlistFormat: options.playlistFormat,
+                            artworkMode: options.artworkMode)
     }
 
+    /// S-SYNC-DESTINATION: the plan is computed again for the new destination; nothing is
+    /// deleted on the old one.
     @MainActor
-    func toggleSyncPause() {
-        if syncService.isPaused {
-            syncService.resumeSync()
-        } else {
-            syncService.pauseSync()
+    func changeDestination(_ profileID: Int64, to path: String) async {
+        guard let profile = profile(profileID), path != profile.outputFolder else { return }
+        do {
+            try await syncRepository.updateSettings(profileId: profileID, outputFolder: path)
+            syncService.invalidatePreview(profileId: profileID)
+            plans[profileID] = nil
+            await loadProfiles()
+            schedulePlan(profileID, after: .zero)
+            statusBar()?.post("Changed the destination of “\(profile.name)” to “\(SyncDestination.deviceName(for: path))”")
+        } catch {
+            statusBar()?.post(UndoFailure.sentence("Couldn’t change the destination", error))
         }
     }
 
     @MainActor
     func setBackgroundProcessing(_ level: SyncTurboLevel) {
         syncService.setSyncTurboLevel(level)
-        guard let profile = selectedProfile, let profileId = profile.id else { return }
-        invalidateAndSchedulePreview(profileId: profileId, profile: profile)
     }
 
-    // MARK: - Single-Track Retry (D-13)
+    // MARK: - Content (undoable through ShellEdits, nothing navigates)
 
     @MainActor
-    func retryFailedTrack(_ trackId: Int64) async {
-        guard let profile = selectedProfile, let profileId = profile.id else { return }
-        do {
-            let result = try await syncService.executeSyncSingleTrack(profileId: profileId, trackId: trackId)
-            if result.syncedCount > 0 {
-                if var previous = lastResult {
-                    previous.failedTracks.removeAll { $0.trackId == trackId }
-                    previous.failedCount = previous.failedTracks.count
-                    previous.syncedCount += result.syncedCount
-                    lastResult = previous
-                }
-                removeRetriedTrackFromPreview(trackId)
-                syncService.invalidatePreview(profileId: profileId)
-            } else if result.failedCount > 0, var previous = lastResult {
-                previous.failedTracks.removeAll { $0.trackId == trackId }
-                previous.failedTracks.append(contentsOf: result.failedTracks)
-                previous.failedCount = previous.failedTracks.count
-                lastResult = previous
-            }
-            NotificationCenter.default.post(
-                name: .syncProfileDidChange, object: nil, userInfo: ["profileId": profileId]
-            )
-        } catch {
-            errorMessage = "Retry failed: \(error.localizedDescription)"
-        }
+    func addTracks(_ trackIDs: [Int64], to profile: SyncProfile) async {
+        guard let id = profile.id else { return }
+        await edits().addTracks(trackIDs, toSyncProfile: id, name: profile.name)
     }
 
     @MainActor
-    private func invalidateAndSchedulePreview(profileId: Int64, profile: SyncProfile? = nil) {
-        syncService.invalidatePreview(profileId: profileId)
-        guard let selected = profile ?? selectedProfile, selected.id == profileId else { return }
-        isPreviewStale = true
-        schedulePreviewRefresh(for: selected)
+    func addPlaylists(_ playlistIDs: [Int64], to profile: SyncProfile) async {
+        guard let id = profile.id else { return }
+        await edits().addPlaylists(playlistIDs, toSyncProfile: id, name: profile.name)
     }
 
     @MainActor
-    private func removeRetriedTrackFromPreview(_ trackId: Int64) {
-        guard var currentPreview = preview,
-              let index = currentPreview.filesToAdd.firstIndex(where: { $0.trackId == trackId })
-        else { return }
-
-        let file = currentPreview.filesToAdd.remove(at: index)
-        currentPreview.totalNewSize = max(0, currentPreview.totalNewSize - file.size)
-        preview = currentPreview
-        previewComputedAt = Date()
-        isPreviewStale = false
+    func removePlaylists(_ playlistIDs: Set<Int64>, from profile: SyncProfile) async {
+        guard let id = profile.id else { return }
+        let names = Dictionary((contents[id]?.playlists ?? []).map { ($0.id, $0.playlist.name) }, uniquingKeysWith: { a, _ in a })
+        await edits().removePlaylists(Array(playlistIDs), fromSyncProfile: id, name: profile.name, playlistNames: names)
     }
 
-    // MARK: - WP4: Device Ingest Scan
-
-    /// Scan the profile's output folder for m3u8 files and build previews.
-    ///
-    /// For `.ios` profiles (spec §2), scans `<root>/Playlists/*.m3u8` first,
-    /// then falls back to root-level `*.m3u8` (legacy/loose files).
-    /// For rockbox/doppi, recursively walks the output folder.
-    ///
-    /// Populates `deviceIngestPreviews` with files that have changes.
     @MainActor
-    func scanDeviceForPlaylistChanges(profile: SyncProfile) async {
-        guard let ingestService else {
-            deviceScanError = "Ingest service not available"
-            return
-        }
-        guard let profileId = profile.id else { return }
+    func removeTracks(_ trackIDs: Set<Int64>, from profile: SyncProfile) async {
+        guard let id = profile.id else { return }
+        let names = Dictionary((contents[id]?.tracks ?? []).compactMap { track in track.id.map { ($0, track.title) } },
+                               uniquingKeysWith: { a, _ in a })
+        await edits().removeTracks(Array(trackIDs), fromSyncProfile: id, name: profile.name, trackNames: names)
+    }
 
-        isScanningDevice = true
-        deviceScanError = nil
-        deviceIngestPreviews = []
+    // MARK: - Sync Now, Retry Failed, Pause / Resume / Cancel
 
-        let outputFolder = profile.outputFolder
-        guard FileManager.default.fileExists(atPath: outputFolder) else {
-            deviceScanError = "Device not connected — output folder not found"
-            isScanningDevice = false
-            return
-        }
+    /// Sync Now: one Activity operation; the status bar marks the end with `Eject “‹device›”`.
+    @MainActor
+    func syncNow(_ profile: SyncProfile) {
+        start(profile, onlyTrackIDs: nil)
+    }
 
-        let fm = FileManager.default
-        var results: [(fileName: String, preview: IngestPreview)] = []
-        var seenPaths = Set<String>()
+    /// Retry Failed: only this profile's failed tracks, into this profile's destination (PP-SYNC-02).
+    @MainActor
+    func retryFailed(_ profile: SyncProfile, trackIDs: Set<Int64>? = nil) {
+        guard let id = profile.id else { return }
+        let failed = Set(results[id]?.failures.map(\.trackID) ?? [])
+        let ids = trackIDs.map { $0.intersection(failed) } ?? failed
+        guard !ids.isEmpty else { return }
+        statusBar()?.post("Retrying \(StatusBarText.tracks(ids.count)) on “\(profile.name)” — playlist files are rewritten afterwards")
+        start(profile, onlyTrackIDs: ids)
+    }
 
-        // Collect candidate m3u8 URLs depending on profile format
-        var m3u8URLs: [(url: URL, displayName: String)] = []
-
-        if profile.playlistFormatEnum == .ios {
-            // Primary: <root>/Playlists/*.m3u8
-            let playlistsDir = SyncService.playlistsFolder(for: profile)
-            if let entries = try? fm.contentsOfDirectory(atPath: playlistsDir) {
-                for entry in entries where entry.hasSuffix(".m3u8") {
-                    let fullPath = (playlistsDir as NSString).appendingPathComponent(entry)
-                    m3u8URLs.append((URL(fileURLWithPath: fullPath), "Playlists/\(entry)"))
-                }
-            }
-            // Fallback: root-level *.m3u8 (legacy/loose files)
-            if let entries = try? fm.contentsOfDirectory(atPath: outputFolder) {
-                for entry in entries where entry.hasSuffix(".m3u8") {
-                    let fullPath = (outputFolder as NSString).appendingPathComponent(entry)
-                    m3u8URLs.append((URL(fileURLWithPath: fullPath), entry))
-                }
-            }
-        } else {
-            // Rockbox/Doppi: recursive walk
-            if let enumerator = fm.enumerator(atPath: outputFolder) {
-                for case let relativePath as String in enumerator {
-                    guard relativePath.hasSuffix(".m3u8") else { continue }
-                    let fullPath = (outputFolder as NSString).appendingPathComponent(relativePath)
-                    m3u8URLs.append((URL(fileURLWithPath: fullPath), relativePath))
-                }
-            }
-        }
-
-        // Activity (W3-ACT): `Read playlist changes from “‹profile›”` — shown when slower than
-        // ~2 s; no Cancel (the scan has none).
-        let job = ActivityCenter.shared.begin(
-            .deviceScan, title: "Read playlist changes from “\(profile.name)”",
-            subject: .syncProfile(profileId, name: profile.name),
-            progress: ActivityProgress(total: m3u8URLs.count), itemNoun: .playlist, graceful: true)
-        defer {
-            job.finish(ActivityResult(counts: [ActivityCount(.done, results.count,
-                results.count == 1 ? "playlist changed on the device" : "playlists changed on the device")]))
-        }
-        for (index, (url, displayName)) in m3u8URLs.enumerated() {
-            job.update(completed: index, total: m3u8URLs.count, currentItem: displayName)
-            guard !seenPaths.contains(url.path) else { continue }
-            seenPaths.insert(url.path)
-
+    @MainActor
+    private func start(_ profile: SyncProfile, onlyTrackIDs: Set<Int64>?) {
+        guard let id = profile.id, runs[id] == nil else { return }
+        optionsChangedWhileSyncing.remove(id)
+        let service = syncService
+        let deviceName = SyncDestination.deviceName(for: profile.outputFolder)
+        runs[id] = Task { @MainActor [weak self] in
+            var message: String?
+            var ejectable = false
             do {
-                let ingestedPreview = try await ingestService.preview(url: url, profileId: profileId)
-                if !ingestedPreview.isEmpty || !ingestedPreview.unresolved.isEmpty {
-                    results.append((fileName: displayName, preview: ingestedPreview))
+                let result = try await service.executeSync(profileId: id, onlyTrackIDs: onlyTrackIDs)
+                ejectable = SyncDestination.isEjectable(profile.outputFolder)
+                message = Self.endMessage(result, retry: onlyTrackIDs != nil)
+            } catch let error as SyncError {
+                if case .insufficientSpace = error {
+                    message = "Couldn’t start the sync — not enough space on “\(deviceName)”"
                 }
+            } catch let error as SyncRunError {
+                message = "Couldn’t start the sync — \(error.plainCause)"
             } catch {
-                AppLogger.shared.error(
-                    "Failed to preview \(displayName): \(error.localizedDescription)",
-                    source: "PlaylistIngest"
-                )
+                message = UndoFailure.sentence("The sync of “\(profile.name)” stopped", error)
+            }
+            guard let self else { return }
+            self.runs[id] = nil
+            self.optionsChangedWhileSyncing.remove(id)
+            await self.loadProfiles()
+            self.refreshDestinations()
+            self.schedulePlan(id, after: .zero)
+            if let message {
+                var actions: [StatusAction] = []
+                if ejectable && !self.isAnotherSyncOnVolume(of: profile) {
+                    actions.append(StatusAction("Eject “\(deviceName)”") { [weak self] in
+                        Task { await self?.eject(profile) }
+                    })
+                }
+                self.statusBar()?.post(message, actions: actions)
             }
         }
-
-        deviceIngestPreviews = results
-        isScanningDevice = false
     }
 
-    /// Apply a single device ingest preview.
-    ///
-    /// - Parameters:
-    ///   - fileName: Stable file name identifying the preview in `deviceIngestPreviews`
-    ///   - profile: The sync profile
-    /// - Returns: The target playlist ID on success
+    /// Waits until the profile's sync (started here) has ended and its result is loaded.
     @MainActor
-    func applyDeviceIngest(fileName: String, profile: SyncProfile, fileURL: URL) async -> Int64? {
-        guard let ingestService, let profileId = profile.id else { return nil }
-        // Activity (W3-ACT): applying one device playlist (usually instant: graceful).
-        let job = ActivityCenter.shared.begin(
-            .deviceScan, title: "Apply “\(fileName)” from “\(profile.name)”",
-            subject: .syncProfile(profileId, name: profile.name), graceful: true)
+    func waitForRun(_ profileID: Int64) async {
+        await runs[profileID]?.value
+    }
 
+    /// Waits until no plan is being computed or queued.
+    @MainActor
+    func waitForPlans() async {
+        for task in planDebounces.values { await task.value }
+        while let worker = planWorker { await worker.value }
+    }
+
+    /// `Sync finished — 214 copied · 9 failed · 9 skipped` / `Sync cancelled — 86 copied`.
+    static func endMessage(_ result: SyncService.SyncResult, retry: Bool) -> String {
+        var parts = ["\(result.syncedCount.formatted(.number)) copied"]
+        if result.removedCount > 0 { parts.append("\(result.removedCount.formatted(.number)) removed") }
+        if result.failedCount > 0 { parts.append("\(result.failedCount.formatted(.number)) failed") }
+        if result.skippedCount > 0 { parts.append("\(result.skippedCount.formatted(.number)) skipped") }
+        let head = result.wasCancelled ? "Sync cancelled" : (retry ? "Retry finished" : "Sync finished")
+        return "\(head) — \(parts.joined(separator: " · "))"
+    }
+
+    @MainActor
+    func pause(_ profile: SyncProfile) {
+        if let run = run(for: profile) { ActivityCenter.shared.pause(run.operationID) }
+    }
+
+    @MainActor
+    func resume(_ profile: SyncProfile) {
+        if let run = run(for: profile) { ActivityCenter.shared.resume(run.operationID) }
+    }
+
+    @MainActor
+    func cancel(_ profile: SyncProfile) {
+        if let run = run(for: profile) { ActivityCenter.shared.cancel(run.operationID) }
+    }
+
+    /// `Show in Activity`: the Activity window with this profile's last operation selected.
+    @MainActor
+    func showInActivity(_ profile: SyncProfile) {
+        let id = run(for: profile)?.operationID ?? profile.id.flatMap { results[$0]?.operationID }
+        ActivityRouter.shared.selectedOperationID = id
+        ActivityRouter.shared.requestWindow(tab: .operations)
+    }
+
+    // MARK: - Eject (§10 Q13)
+
+    @MainActor
+    private func isAnotherSyncOnVolume(of profile: SyncProfile) -> Bool {
+        guard let volume = SyncDestination.volumePath(for: profile.outputFolder) else { return false }
+        return profiles.contains { other in
+            other.id != profile.id && SyncDestination.volumePath(for: other.outputFolder) == volume && run(for: other) != nil
+        }
+    }
+
+    /// Why `Eject` can't run now; `nil` = it can.
+    @MainActor
+    func ejectRefusal(_ profile: SyncProfile) -> String? {
+        guard let volume = SyncDestination.volumePath(for: profile.outputFolder) else { return "Not a removable disk." }
+        let deviceName = SyncDestination.deviceName(for: profile.outputFolder)
+        let busy = profiles.contains { other in
+            SyncDestination.volumePath(for: other.outputFolder) == volume && run(for: other) != nil
+        }
+        return busy ? "“\(deviceName)” can’t be ejected while it syncs." : nil
+    }
+
+    @MainActor
+    func canEject(_ profile: SyncProfile) -> Bool {
+        guard let id = profile.id, destinations[id] == .connected || destinations[id] == .folderNotFound else { return false }
+        return SyncDestination.isEjectable(profile.outputFolder)
+    }
+
+    @MainActor
+    func eject(_ profile: SyncProfile) async {
+        let deviceName = SyncDestination.deviceName(for: profile.outputFolder)
+        if let refusal = ejectRefusal(profile) {
+            statusBar()?.post("Couldn’t eject — \(refusal)")
+            return
+        }
+        guard let volume = SyncDestination.volumePath(for: profile.outputFolder) else { return }
         do {
-            let result = try await ingestService.ingest(url: fileURL, profileId: profileId)
-            job.finish()
-            // Remove by stable identity after the await: other applies may have
-            // mutated the list while this ingest was in flight, so a captured
-            // index would be stale (out of bounds or the wrong row).
-            if let idx = deviceIngestPreviews.firstIndex(where: { $0.fileName == fileName }) {
-                deviceIngestPreviews.remove(at: idx)
-            }
-            return result.playlistId
+            try await SyncDestination.eject(volumePath: volume)
+            refreshDestinations()
+            statusBar()?.post("“\(deviceName)” can be removed safely")
         } catch {
-            deviceScanError = "Failed to apply \(fileName): \(error.localizedDescription)"
-            job.fail(cause: error.localizedDescription)
-            return nil
+            AppLogger.shared.warn("Eject of \(volume) failed: \(error.localizedDescription)", source: "Sync")
+            statusBar()?.post("Couldn’t eject — “\(deviceName)” is in use", actions: [
+                StatusAction("Try Again") { [weak self] in Task { await self?.eject(profile) } }
+            ])
         }
     }
 
-    /// Clear the device scan results.
-    @MainActor
-    func clearDeviceScanResults() {
-        deviceIngestPreviews = []
-        deviceScanError = nil
+    // MARK: - Helpers
+
+    private static let sqliteDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter
+    }()
+}
+
+// MARK: - Device presets (S-SYNC-NEWPROFILE.N01)
+
+/// What a new profile starts with. Every option can be changed later on the profile.
+enum SyncDevicePreset: String, CaseIterable, Identifiable, Sendable {
+    case rockbox
+    case doppi
+    case ios
+    case plainFolder
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .rockbox: "Rockbox player"
+        case .doppi: "Phone app (Doppi)"
+        case .ios: "MLM for iOS"
+        case .plainFolder: "Plain folder"
+        }
+    }
+
+    struct Options: Equatable {
+        let playlistFiles: Bool
+        let transcodeMode: String
+        let playlistFormat: String
+        let artworkMode: String
+    }
+
+    var options: Options {
+        switch self {
+        case .rockbox: Options(playlistFiles: true, transcodeMode: TranscodeMode.aac248.rawValue,
+                               playlistFormat: PlaylistFormat.rockbox.rawValue, artworkMode: ArtworkMode.resize250.rawValue)
+        case .doppi: Options(playlistFiles: true, transcodeMode: TranscodeMode.aac248.rawValue,
+                             playlistFormat: PlaylistFormat.doppi.rawValue, artworkMode: ArtworkMode.keepOriginal.rawValue)
+        case .ios: Options(playlistFiles: true, transcodeMode: TranscodeMode.aac248.rawValue,
+                           playlistFormat: PlaylistFormat.ios.rawValue, artworkMode: ArtworkMode.keepOriginal.rawValue)
+        case .plainFolder: Options(playlistFiles: false, transcodeMode: TranscodeMode.keepOriginals.rawValue,
+                                   playlistFormat: PlaylistFormat.rockbox.rawValue, artworkMode: ArtworkMode.keepOriginal.rawValue)
+        }
+    }
+
+    /// `AAC 248 kbps · artwork 250 px · playlist files (.m3u8) · clean up on`.
+    var summary: String {
+        let o = options
+        var parts = [o.transcodeMode == TranscodeMode.keepOriginals.rawValue ? "files as they are" : "AAC 248 kbps"]
+        if o.artworkMode == ArtworkMode.resize250.rawValue { parts.append("artwork 250 px") }
+        if o.playlistFiles { parts.append(o.playlistFormat == PlaylistFormat.doppi.rawValue ? "playlist files (.m3u)" : "playlist files (.m3u8)") }
+        parts.append("clean up on")
+        return parts.joined(separator: " · ")
+    }
+
+    /// The preset matching a profile's options (`Reset to Device Defaults`), if any.
+    static func matching(_ profile: SyncProfile) -> SyncDevicePreset? {
+        allCases.first { preset in
+            let o = preset.options
+            return o.playlistFiles == profile.generateM3U8 && o.transcodeMode == profile.transcodeMode
+                && o.playlistFormat == profile.playlistFormat && o.artworkMode == profile.artworkMode
+        }
     }
 }

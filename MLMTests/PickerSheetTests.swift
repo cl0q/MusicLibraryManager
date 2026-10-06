@@ -6,6 +6,8 @@ import GRDB
 @Suite("PickerSheetTests")
 @MainActor
 struct PickerSheetTests {
+    @MainActor final class Changed { var ids: [Int64] = [] }
+    private let changedProfiles = Changed()
 
     private func makeVM() throws -> (DatabaseQueue, SyncViewModel) {
         let db = try DatabaseManager.inMemory()
@@ -21,7 +23,17 @@ struct PickerSheetTests {
             configRepository: configRepo,
             transcodeCache: cache
         )
-        let vm = SyncViewModel(syncRepository: syncRepo, syncService: svc)
+        let vm = SyncViewModel(syncRepository: syncRepo, syncService: svc, notificationCenter: NotificationCenter())
+        // W3-SYNC: the picker's Add goes through ShellEdits (one undo step) on this database.
+        let playlists = PlaylistRepository(database: db)
+        let undo = UndoCenter(undoManager: UndoManager(), statusBar: StatusBarCenter(), log: { _ in })
+        let changed = changedProfiles
+        vm.edits = {
+            ShellEdits(dependencies: .init(playlists: { playlists }, syncProfiles: { syncRepo },
+                                           syncProfileDidChange: { _ in },
+                                           syncContentDidChange: { changed.ids.append($0) }),
+                       undo: undo, window: ShellWindowModels())
+        }
         return (db, vm)
     }
 
@@ -35,10 +47,8 @@ struct PickerSheetTests {
         let playlistId: Int64 = try await db.read { db in
             (try Row.fetchOne(db, sql: "SELECT id FROM playlists"))?["id"] ?? -1
         }
-        vm.selectedProfile = profile
-
         // Add same playlist twice
-        await vm.addPlaylists([playlistId, playlistId])
+        await vm.addPlaylists([playlistId, playlistId], to: profile)
 
         // Count rows — should be 1, not 2 (INSERT OR IGNORE)
         let count: Int = try await db.read { db in
@@ -88,18 +98,12 @@ struct PickerSheetTests {
             """)
         }
         let profile = try await db.read { db in try SyncProfile.fetchOne(db)! }
-        vm.selectedProfile = profile
-
-        var received = false
-        let token = NotificationCenter.default.addObserver(
-            forName: .syncProfileDidChange, object: nil, queue: nil
-        ) { _ in received = true }
-        defer { NotificationCenter.default.removeObserver(token) }
-
         let trackId: Int64 = try await db.read { db in
             (try Row.fetchOne(db, sql: "SELECT id FROM tracks"))?["id"] ?? -1
         }
-        await vm.addTracks([trackId])
-        #expect(received)
+        await vm.addTracks([trackId], to: profile)
+        // The profile's content change is announced (W3-SYNC: through the injected edit effects,
+        // not NotificationCenter.default).
+        #expect(changedProfiles.ids == [profile.id!])
     }
 }

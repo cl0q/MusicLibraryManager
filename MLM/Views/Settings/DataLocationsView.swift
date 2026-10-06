@@ -189,7 +189,8 @@ private struct DataLocationsForm: View {
                 SettingsRowLabel("Library folder") {
                     if let url = folder.url { SettingsPath(url) }
                     if folder.state != .available, let text = DataLocationsViewModel.stateText(folder.state) {
-                        SettingsState(text: text, systemImage: DataLocationsViewModel.stateSymbol(folder.state), tone: .problem)
+                        SettingsState(text: text, systemImage: DataLocationsViewModel.stateSymbol(folder.state),
+                                      tone: folder.state == .notConnected ? .problem : .error)
                     }
                     HStack(spacing: 4) {
                         if let tracks = viewModel.trackCountText { Text("\(tracks) ·") }
@@ -217,7 +218,8 @@ private struct DataLocationsForm: View {
                 SettingsRowLabel("Transcode cache") {
                     if let url = cache.url { SettingsPath(url) }
                     if cache.state != .available, let text = DataLocationsViewModel.stateText(cache.state) {
-                        SettingsState(text: text, systemImage: DataLocationsViewModel.stateSymbol(cache.state), tone: .problem)
+                        SettingsState(text: text, systemImage: DataLocationsViewModel.stateSymbol(cache.state),
+                                      tone: cache.state == .notConnected ? .problem : .error)
                     }
                     Button("Change the location or clear it in Maintenance") { SettingsRouter.shared.select(.maintenance) }
                         .buttonStyle(.link)

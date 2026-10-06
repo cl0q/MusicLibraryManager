@@ -28,8 +28,8 @@ enum LibraryRename {
         case failed(detail: String)
         /// Work is running (a rename relaunches MLM): the sentence lists it.
         case workRunning(String)
-        /// The database couldn't be closed now; nothing was changed.
-        case busy
+        /// Another library in the list already uses that library file (it would be dropped).
+        case listedElsewhere(fileName: String)
 
         /// The inline sentence above the sheet's buttons (UC-SHEET-05).
         var message: String {
@@ -39,7 +39,7 @@ enum LibraryRename {
             case .nameTaken(let file): "A library file named “\(file)” already exists in that folder. Choose another name."
             case .failed: "The library couldn’t be renamed. Nothing was changed."
             case .workRunning(let text): text
-            case .busy: "The library is busy. Nothing was changed. Try again in a moment."
+            case .listedElsewhere(let file): "Another library in the list uses “\(file)”. Choose another name."
             }
         }
     }
@@ -93,6 +93,11 @@ enum LibraryRename {
             throw problem
         }
         let target = targetURL(for: package, newName: name)
+        // Never drop another library's list entry at the target (`upsert` would replace it).
+        let (listed, _) = (try? store.load()) ?? (LibraryRegistry(), .loaded)
+        if let other = listed.entry(at: target), other.libraryId != libraryId, !isSameFile(target, package) {
+            throw Problem.listedElsewhere(fileName: target.lastPathComponent)
+        }
         var undo: [() -> Void] = []
         func rollBack() { for step in undo.reversed() { step() } }
 
@@ -132,12 +137,14 @@ enum LibraryRename {
             let oldDatabase = LibraryPackage.databaseURL(in: package)
             let newDatabase = LibraryPackage.databaseURL(in: target)
             if oldDatabase.path != newDatabase.path {
-                try OrganizedPathMigrationService.repointManifests(
-                    in: pathMigrationsDirectory, fromDatabase: oldDatabase, to: newDatabase, fileManager: fileManager)
+                // Registered first (review S6): a re-point that fails half-way is undone too —
+                // pointing the records back is harmless for those that weren't changed.
                 undo.append {
                     _ = try? OrganizedPathMigrationService.repointManifests(
                         in: pathMigrationsDirectory, fromDatabase: newDatabase, to: oldDatabase, fileManager: fileManager)
                 }
+                try OrganizedPathMigrationService.repointManifests(
+                    in: pathMigrationsDirectory, fromDatabase: oldDatabase, to: newDatabase, fileManager: fileManager)
             }
             return target
         } catch let problem as Problem {
@@ -169,7 +176,9 @@ enum LibraryRename {
 
     /// Two paths that name the same file (they differ only in letter case on this volume).
     private static func isSameFile(_ a: URL, _ b: URL) -> Bool {
-        guard a.path.lowercased() == b.path.lowercased() else { return false }
+        // Letter case and Unicode normalisation (NFC / NFD) only.
+        func folded(_ url: URL) -> String { url.path.precomposedStringWithCanonicalMapping.lowercased() }
+        guard folded(a) == folded(b) else { return false }
         let idA = try? a.resourceValues(forKeys: [.fileResourceIdentifierKey]).fileResourceIdentifier
         let idB = try? b.resourceValues(forKeys: [.fileResourceIdentifierKey]).fileResourceIdentifier
         guard let idA, let idB else { return false }
@@ -215,7 +224,10 @@ enum LibraryRename {
         do {
             try closeDatabase()
         } catch {
-            return .refused(.busy)
+            // Review S4: the writer may already be closed — never "nothing changed, try again".
+            AppLogger.shared.error("Closing the library for the rename failed: \(error)", source: "Library")
+            pendingOpen.set(package.path)
+            return .relaunchRequired
         }
         do {
             let renamed = try rename(package: package, to: newName, libraryId: libraryId, store: store,
@@ -232,9 +244,7 @@ enum LibraryRename {
 
     /// `MLM can’t rename the library while 1 download is running. …` + one line per operation.
     static func refusal(_ summary: RunningWorkSummary) -> String {
-        let parts = summary.headline.replacingOccurrences(of: " will stop:", with: "")
-        let verb = summary.operationCount == 1 ? "is" : "are"
-        var text = "MLM can’t rename the library while \(parts) \(verb) running. Renaming relaunches MLM — let the work finish or cancel it in Activity first."
+        var text = "MLM can’t rename the library while \(summary.runningPhrase) running. Renaming relaunches MLM — let the work finish or cancel it in Activity first."
         for line in summary.lines { text += "\n• " + line }
         if summary.moreCount > 0 { text += "\n• and \(summary.moreCount.formatted(.number)) more" }
         return text

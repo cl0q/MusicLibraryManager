@@ -34,6 +34,13 @@ struct DestinationView: View {
         // window title names the opened folder (W3-FOLD, V-FOLD.E01/E07).
         case .folders:
             FoldersView(onTrackActivated: onTrackActivated)
+        // A sync profile page builds its own scaffold: the profile header and its banner
+        // (W3-SYNC, UC-LAYOUT-01/02).
+        case .syncProfile(let id):
+            SyncProfilePage(profileID: id)
+        case .genres:
+            // Own scaffold: the list's command bar and footer line (W3-GEN).
+            GenresView()
         default:
             ContentScaffold(showsDriveBanner: destination.listsTracks) {
                 content
@@ -59,11 +66,8 @@ struct DestinationView: View {
                 description: "Albums aren’t available yet."
             )
         case .genres:
-            PendingDestinationView(
-                title: "Genres",
-                systemImage: SidebarDestination.genres.systemImage,
-                description: "Genres aren’t available yet."
-            )
+            // Hosted by `body` (own scaffold).
+            Color.clear
         case .folders:
             // Hosted by `body` (own scaffold).
             Color.clear
@@ -74,8 +78,9 @@ struct DestinationView: View {
         case .allPlaylists, .playlist:
             // Hosted by `body` (own scaffold).
             Color.clear
-        case .syncProfile(let id):
-            SyncProfileHost(profileID: id)
+        case .syncProfile:
+            // Hosted by `body` (own scaffold).
+            Color.clear
         }
     }
 }
@@ -99,6 +104,10 @@ struct RouteView: View {
                 PlaylistDetailViewLoader(playlistId: id, initiallyShowFailedTracks: showFailedTracks,
                                          onBack: { navigation.goBack() }, onTrackDoubleClick: onTrackActivated)
                     .id(id)
+            } else if case .genre(let name) = route {
+                // Own scaffold: the genre's detail header (W3-GEN, UC-LAYOUT-06).
+                GenreDetailView(name: name, onTrackActivated: onTrackActivated)
+                    .id(GenreName.key(name) ?? name)
             } else {
                 ContentScaffold(showsDriveBanner: route.listsTracks) {
                     content
@@ -124,12 +133,9 @@ struct RouteView: View {
                 systemImage: "square.stack",
                 description: "Album pages aren’t available yet."
             )
-        case .genre(let name):
-            PendingDestinationView(
-                title: name,
-                systemImage: "guitars",
-                description: "Genre pages aren’t available yet."
-            )
+        case .genre:
+            // Hosted by `body` (own scaffold).
+            Color.clear
         case .similar:
             PendingDestinationView(
                 title: "Similar",
@@ -142,7 +148,7 @@ struct RouteView: View {
 
 // MARK: - Helpers
 
-/// A destination whose redesigned view is not built yet (Albums, Genres, reserved routes).
+/// A destination whose redesigned view is not built yet (Albums, reserved routes).
 struct PendingDestinationView: View {
     let title: String
     let systemImage: String
@@ -153,57 +159,6 @@ struct PendingDestinationView: View {
             Label(title, systemImage: systemImage)
         } description: {
             Text(description)
-        }
-    }
-}
-
-/// A sync profile as a sidebar destination: the existing profile detail. `SyncViewModel`
-/// acts on its `selectedProfile` (preview, Sync Now, settings edits), so page and selection
-/// are kept in agreement (`SyncProfilePageAgreement`), and the detail is only shown while
-/// they agree — it can never show profile A while its buttons act on profile B.
-private struct SyncProfileHost: View {
-    let profileID: Int64
-
-    @Environment(\.container) private var container
-    @Environment(NavigationModel.self) private var navigation
-
-    var body: some View {
-        if let vm = container.syncViewModel,
-           let profile = vm.profiles.first(where: { $0.id == profileID }) {
-            Group {
-                if vm.selectedProfile?.id == profileID {
-                    SyncProfileDetailView(profile: profile)
-                } else {
-                    Color.clear
-                }
-            }
-            .task(id: profileID) {
-                reconcile(vm, selected: vm.selectedProfile?.id, page: profile)
-            }
-            .onChange(of: vm.selectedProfile?.id) { _, selected in
-                reconcile(vm, selected: selected, page: profile)
-            }
-        } else {
-            ContentUnavailableView(
-                "Sync profile not found",
-                systemImage: "externaldrive",
-                description: Text("It may have been deleted.")
-            )
-        }
-    }
-
-    private func reconcile(_ vm: SyncViewModel, selected: Int64?, page: SyncProfile) {
-        switch SyncProfilePageAgreement.reconcile(
-            pageProfileID: profileID,
-            selectedProfileID: selected,
-            profileIDs: vm.profiles.compactMap(\.id)
-        ) {
-        case .agree:
-            break
-        case .followSelection(let id):
-            navigation.select(.syncProfile(id))
-        case .selectPage:
-            Task { await vm.selectProfile(page) }
         }
     }
 }

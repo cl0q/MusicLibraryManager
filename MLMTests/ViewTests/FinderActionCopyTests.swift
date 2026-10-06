@@ -72,8 +72,8 @@ struct FinderActionCopyTests {
             // W3-SET: the Settings tabs share one `Show in Finder` button (SettingsRows).
             "MLM/Views/Settings/SettingsRows.swift",
             "MLM/Views/TrackList/TrackMenu.swift",
-            "MLM/Views/Sync/SyncFailedDisclosure.swift",
-            "MLM/Views/Sync/SyncProfileDetailView.swift",
+            "MLM/Views/Sync/SyncProfileSections.swift",  // W3-SYNC: was SyncFailedDisclosure
+            "MLM/Views/Sync/SyncProfileMenu.swift",  // W3-SYNC: was SyncProfileDetailView
         ] {
             let src = try String(contentsOf: projectRoot.appendingPathComponent(path), encoding: .utf8)
             #expect(src.contains("\"Show in Finder\""), "\(path) lost its Show in Finder label")

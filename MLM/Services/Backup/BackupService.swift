@@ -271,13 +271,10 @@ final class BackupService: Sendable {
         BackupRetention(configValue: (try? await configRepository.get(key: BackupRetention.configKey)) ?? nil)
     }
 
-    /// Stores the setting and applies it at once (a smaller number removes the oldest backups
-    /// now, like after the next backup would).
-    @discardableResult
-    func setRetention(_ retention: BackupRetention) async throws -> [URL] {
+    /// Stores the setting only. Older backups are removed after the next backup succeeds
+    /// (ST-BACKUP.N02 — review S3), never when the number is changed.
+    func setRetention(_ retention: BackupRetention) async throws {
         try await configRepository.set(key: BackupRetention.configKey, value: retention.rawValue)
-        guard let keep = retention.keep else { return [] }
-        return try await pruneBackups(keep: keep)
     }
 
     // MARK: - List
@@ -325,8 +322,10 @@ final class BackupService: Sendable {
     /// The `On quit` backup, synchronous (called from `applicationWillTerminate`). Returns
     /// `nil` when the schedule is another one, or when the database can't be read any more
     /// (a restore closed it — the restore made its own backup).
-    func backUpOnQuitIfScheduled() -> BackupInfo? {
-        let scope: BundleScope
+    func backUpOnQuitIfScheduled(
+        timeout: TimeInterval = 20,
+        isReachable: (URL) -> Bool = BackupService.isOnMountedLocalVolume
+    ) -> BackupInfo? {
         let configured: (schedule: String?, keep: String?)
         do {
             configured = try database.read { db in
@@ -339,20 +338,56 @@ final class BackupService: Sendable {
             return nil
         }
         guard BackupSchedule(configValue: configured.schedule) == .onQuit else { return nil }
-        scope = Self.scope(of: database, destinationOverride: nil, backupsRoot: defaultBackupsRoot)
-        do {
-            let info = try Self.writeBundle(
-                database: database, databasePath: databasePath, coversDirectory: coversDirectory,
-                destination: scope.destination, reason: .scheduled, libraryId: scope.libraryId,
-                fileManager: fileManager, now: now)
-            if let keep = BackupRetention(configValue: configured.keep).keep {
-                _ = try? Self.pruneBundles(in: scope, keep: keep, fileManager: fileManager)
-            }
-            return info
-        } catch {
-            AppLogger.shared.error("Backup on quit failed: \(error)", source: "Backup")
+        let scope = Self.scope(of: database, destinationOverride: nil, backupsRoot: defaultBackupsRoot)
+        // Review S7: quitting never waits for a disk that isn't there or a network folder.
+        guard isReachable(scope.destination) else {
+            AppLogger.shared.info("Backup on quit skipped: \(scope.destination.path) isn't on a connected local disk", source: "Backup")
             return nil
         }
+        let keep = BackupRetention(configValue: configured.keep).keep
+        let started = Date()
+        let box = QuitBackupBox()
+        let done = DispatchSemaphore(value: 0)
+        let database = database, databasePath = databasePath, coversDirectory = coversDirectory
+        let fileManager = fileManager, now = now
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let info = try Self.writeBundle(
+                    database: database, databasePath: databasePath, coversDirectory: coversDirectory,
+                    destination: scope.destination, reason: .scheduled, libraryId: scope.libraryId,
+                    fileManager: fileManager, now: now)
+                if let keep { _ = try? Self.pruneBundles(in: scope, keep: keep, fileManager: fileManager) }
+                box.set(.success(info))
+            } catch {
+                box.set(.failure(error))
+            }
+            done.signal()
+        }
+        guard done.wait(timeout: .now() + timeout) == .success else {
+            AppLogger.shared.error("Backup on quit skipped after \(Int(timeout)) s (still writing); the unfinished copy is removed at the next backup", source: "Backup")
+            return nil
+        }
+        let seconds = Date().timeIntervalSince(started)
+        switch box.result {
+        case .success(let info)?:
+            AppLogger.shared.info("Backup on quit took \(String(format: "%.1f", seconds)) s", source: "Backup")
+            return info
+        case .failure(let error)?:
+            AppLogger.shared.error("Backup on quit failed after \(String(format: "%.1f", seconds)) s: \(error)", source: "Backup")
+            return nil
+        case nil:
+            return nil
+        }
+    }
+
+    /// A folder on the Mac's own disk, or on a mounted local (not network) volume.
+    static func isOnMountedLocalVolume(_ url: URL) -> Bool {
+        if let volume = MountObserver.extractVolumePath(from: url.path) {
+            guard FileManager.default.fileExists(atPath: volume) else { return false }
+            let local = (try? URL(fileURLWithPath: volume).resourceValues(forKeys: [.volumeIsLocalKey]).volumeIsLocal) ?? nil
+            return local ?? true
+        }
+        return true
     }
 
     private func makeBackup(reason: BackupReason, prune: Bool) async throws -> BackupInfo {
@@ -1084,4 +1119,12 @@ private struct BackupManifest: Codable {
         case trackCount = "track_count"
         case databaseSizeBytes = "database_size_bytes"
     }
+}
+
+/// The on-quit backup's result, handed from its worker thread.
+private final class QuitBackupBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Result<BackupInfo, Error>?
+    func set(_ result: Result<BackupInfo, Error>) { lock.lock(); value = result; lock.unlock() }
+    var result: Result<BackupInfo, Error>? { lock.lock(); defer { lock.unlock() }; return value }
 }

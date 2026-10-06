@@ -37,7 +37,6 @@ final class ImportTestAccounts: SourceAccountStateReading {
 /// Records what an import hands to the download lane.
 @MainActor
 final class RecordingPlaylistDownloads: PlaylistDownloadStarting {
-    var hasActiveDownloads = false
     private(set) var started: [(tracks: [Track], playlistID: Int64, name: String)] = []
 
     func startDownloads(_ tracks: [Track], preferredSource: DownloadOrchestrator.PreferredSource,

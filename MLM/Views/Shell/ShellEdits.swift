@@ -29,20 +29,14 @@ final class ShellEdits {
                 playlists: { container.playlistRepository },
                 syncProfiles: { container.syncRepository },
                 syncProfileDidChange: { id in
-                    guard let sync = container.syncViewModel else { return }
-                    await sync.loadProfiles()
-                    if sync.selectedProfile?.id == id {
-                        sync.selectedProfile = sync.profiles.first { $0.id == id }
-                    }
+                    await container.syncViewModel?.profileDidChange(id)
                 },
                 tracks: { container.trackRepository },
                 syncContentDidChange: { id in
+                    // The profile's page shows the new content and a fresh plan (W3-SYNC: every
+                    // profile has its own state; nothing switches, D-SYNC-TRACKS-TO-PROFILE).
+                    await container.syncViewModel?.profileDidChange(id)
                     NotificationCenter.default.post(name: .syncProfileDidChange, object: nil, userInfo: ["profileId": id])
-                    // The open profile page shows the new content and a fresh plan; the
-                    // selection is not changed (D-SYNC-TRACKS-TO-PROFILE: nothing switches).
-                    guard let sync = container.syncViewModel, let profile = sync.selectedProfile, profile.id == id else { return }
-                    await sync.loadProfileContent(profileId: id)
-                    sync.schedulePreviewRefresh(for: profile)
                 },
                 covers: { container.playlistCoverService }
             )
@@ -712,5 +706,225 @@ extension ShellEdits {
             // Reported in the status bar by the center.
         }
         return nil
+    }
+}
+
+// MARK: - Sync profile content and device changes (W3-SYNC, DEC-041, DEC-050)
+
+/// Removing content from a profile (no alert — A-SYNC-REMOVECONTENT is replaced by Undo),
+/// Duplicate, and applying playlist changes read from a device: one undo step each.
+extension ShellEdits {
+    /// `Removed “Warm-up” from “iPod Classic” — its files leave the device at the next sync`.
+    /// Undo puts exactly these links back.
+    func removePlaylists(_ playlistIDs: [Int64], fromSyncProfile profileID: Int64, name: String,
+                         playlistNames: [Int64: String] = [:]) async {
+        let ordered = Self.uniqued(playlistIDs)
+        guard !ordered.isEmpty, let repository = dependencies.syncProfiles() else { return }
+        let didChange = dependencies.syncContentDidChange
+        _ = try? await undo.perform(
+            SyncWords.removeActionName(name),
+            failure: "Couldn’t remove \(StatusBarText.playlists(ordered.count)) from “\(name)”",
+            do: { () async throws -> [Int64]? in
+                let present = Set(try await repository.fetchProfilePlaylists(profileId: profileID).compactMap(\.id))
+                let removed = ordered.filter(present.contains)
+                guard !removed.isEmpty else { return nil }
+                for id in removed { try await repository.removePlaylist(profileId: profileID, playlistId: id) }
+                await didChange(profileID)
+                return removed
+            },
+            undo: { removed in
+                for id in removed { try await repository.addPlaylist(profileId: profileID, playlistId: id) }
+                await didChange(profileID)
+                return removed
+            },
+            redo: { added in
+                for id in added { try await repository.removePlaylist(profileId: profileID, playlistId: id) }
+                await didChange(profileID)
+                return added
+            },
+            message: { removed in
+                SyncWords.removedFromProfile(names: removed.compactMap { playlistNames[$0] },
+                                             count: removed.count, kind: "playlist", profile: name)
+            }
+        )
+    }
+
+    /// Tracks added one by one (the Tracks list of the profile).
+    func removeTracks(_ trackIDs: [Int64], fromSyncProfile profileID: Int64, name: String,
+                      trackNames: [Int64: String] = [:]) async {
+        let ordered = Self.uniqued(trackIDs)
+        guard !ordered.isEmpty, let repository = dependencies.syncProfiles() else { return }
+        let didChange = dependencies.syncContentDidChange
+        _ = try? await undo.perform(
+            SyncWords.removeActionName(name),
+            failure: "Couldn’t remove \(StatusBarText.tracks(ordered.count)) from “\(name)”",
+            do: { () async throws -> [Int64]? in
+                let present = Set(try await repository.fetchProfileTracks(profileId: profileID).compactMap(\.id))
+                let removed = ordered.filter(present.contains)
+                guard !removed.isEmpty else { return nil }
+                for id in removed { try await repository.removeTrack(profileId: profileID, trackId: id) }
+                await didChange(profileID)
+                return removed
+            },
+            undo: { removed in
+                for id in removed { try await repository.addTrack(profileId: profileID, trackId: id) }
+                await didChange(profileID)
+                return removed
+            },
+            redo: { added in
+                for id in added { try await repository.removeTrack(profileId: profileID, trackId: id) }
+                await didChange(profileID)
+                return added
+            },
+            message: { removed in
+                SyncWords.removedFromProfile(names: removed.compactMap { trackNames[$0] },
+                                             count: removed.count, kind: "track", profile: name)
+            }
+        )
+    }
+
+    /// Duplicate: `Created “iPod Classic copy”` with Undo (which deletes the copy — it has no
+    /// sync history yet). Nothing navigates (P3).
+    func duplicateSyncProfile(_ profileID: Int64, name: String) async {
+        guard let repository = dependencies.syncProfiles() else { return }
+        let didChange = dependencies.syncProfileDidChange
+        _ = try? await undo.perform(
+            "Duplicate “\(name)”",
+            failure: "Couldn’t duplicate “\(name)”",
+            do: { () async throws -> SyncProfile? in
+                let copy = try await repository.duplicate(id: profileID)
+                await didChange(profileID)
+                return copy
+            },
+            undo: { copy in
+                if let id = copy.id { try await repository.delete(id: id) }
+                await didChange(profileID)
+                return ()
+            },
+            redo: { _ in
+                let copy = try await repository.duplicate(id: profileID)
+                await didChange(profileID)
+                return copy
+            },
+            message: { "Created “\($0.name)”" }
+        )
+    }
+
+    /// Read Playlist Changes from Device ▸ Apply: every checked change of every included card in
+    /// **one** undo step (UC-UNDO-02/08). A merge, never a replace (PP-SYNC-04). A card that
+    /// can't be applied keeps its error and the others go ahead.
+    ///
+    /// - Returns: the cards that were applied, and the error sentence per card that wasn't.
+    @discardableResult
+    func applyDeviceChanges(
+        _ items: [(card: DevicePlaylistCard, selection: DevicePlaylistSelection)],
+        service: DevicePlaylistChangeService,
+        profileName: String
+    ) async -> (applied: Set<String>, errors: [String: String]) {
+        guard let playlists = dependencies.playlists() else { return ([], [:]) }
+        let effects = self.effects
+        var applied = Set<String>()
+        var errors: [String: String] = [:]
+        let summary = try? await undo.performGroup(
+            "Apply Changes from “\(profileName)”",
+            failure: "Couldn’t apply the changes from “\(profileName)”",
+            { group -> DeviceChangesSummary in
+                var summary = DeviceChangesSummary()
+                for (card, selection) in items where selection.include {
+                    do {
+                        let done: DevicePlaylistApplied? = try await group.perform(
+                            do: { try await service.apply(card, selection: selection) },
+                            undo: { done -> DevicePlaylistUndone in
+                                guard let done else { return .nothing }
+                                switch done {
+                                case .updated(let id, _, let before, _, _):
+                                    try await service.replaceRows(playlistID: id, with: before)
+                                    await effects.changed(id, repository: playlists)
+                                    return .rows(done)
+                                case .created(let playlist, _):
+                                    // The new playlist goes; Redo brings back the same one (same id).
+                                    return .deleted(try await effects.delete(playlist.id, repository: playlists))
+                                }
+                            },
+                            redo: { undone -> DevicePlaylistApplied? in
+                                switch undone {
+                                case .nothing:
+                                    return nil
+                                case .rows(let done):
+                                    if case .updated(let id, _, _, let after, _) = done {
+                                        try await service.replaceRows(playlistID: id, with: after)
+                                        await effects.changed(id, repository: playlists)
+                                    }
+                                    return done
+                                case .deleted(let snapshot):
+                                    let restored = try await effects.restore(snapshot, repository: playlists)
+                                    return .created(restored.playlist, trackCount: snapshot.entries.count)
+                                }
+                            }
+                        )
+                        guard let done else { continue }
+                        applied.insert(card.id)
+                        switch done {
+                        case .updated(let id, _, _, _, let changes):
+                            summary.changes += changes
+                            summary.playlists += 1
+                            await effects.changed(id, repository: playlists)
+                        case .created(let playlist, _):
+                            summary.created.append(playlist.name)
+                            await effects.changed(playlist.id, repository: playlists)
+                        }
+                    } catch {
+                        errors[card.id] = UndoFailure.sentence("Couldn’t apply the changes to “\(card.target.name)”", error) + "."
+                    }
+                }
+                return summary
+            },
+            message: { $0.message(profile: profileName) }
+        )
+        _ = summary
+        return (applied, errors)
+    }
+}
+
+/// What an undo of one card left, for its redo.
+enum DevicePlaylistUndone: Sendable {
+    case nothing
+    case rows(DevicePlaylistApplied)
+    case deleted(PlaylistSnapshot)
+}
+
+/// What one Apply did, for its confirmation.
+struct DeviceChangesSummary: Sendable {
+    var changes = 0
+    var playlists = 0
+    var created: [String] = []
+
+    /// `Applied 5 changes to 2 playlists and created “Gym” from “iPod Classic”`.
+    func message(profile: String) -> String {
+        var parts: [String] = []
+        if changes > 0 {
+            parts.append("applied \(changes.formatted(.number)) \(changes == 1 ? "change" : "changes") to \(StatusBarText.playlists(playlists))")
+        }
+        if created.count == 1 {
+            parts.append("created “\(created[0])”")
+        } else if created.count > 1 {
+            parts.append("created \(StatusBarText.playlists(created.count))")
+        }
+        let text = parts.joined(separator: " and ")
+        return (text.prefix(1).uppercased() + text.dropFirst()) + " from “\(profile)”"
+    }
+}
+
+/// Status-bar and undo words of sync profiles (UC-UNDO-07, UC-COPY-12).
+enum SyncWords {
+    static func removeActionName(_ profile: String) -> String { "Remove from “\(profile)”" }
+
+    /// `Removed “Warm-up” from “iPod Classic” — its files leave the device at the next sync`.
+    static func removedFromProfile(names: [String], count: Int, kind: String, profile: String) -> String {
+        let subject = count == 1 && names.count == 1
+            ? "“\(names[0])”"
+            : "\(count.formatted(.number)) \(kind)\(count == 1 ? "" : "s")"
+        let consequence = count == 1 && kind == "track" ? "its file leaves" : "the files leave"
+        return "Removed \(subject) from “\(profile)” — \(consequence) the device at the next sync"
     }
 }

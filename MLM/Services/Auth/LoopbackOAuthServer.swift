@@ -32,8 +32,13 @@ final class LoopbackOAuthServer: @unchecked Sendable {
     /// Cancelling the calling task (the sign-in sheet's `Cancel`, its 5-minute timeout, `Open
     /// Browser Again`) stops the listener — the port is free for the next attempt — and throws
     /// `CancellationError` (S-SRC-OAUTH; it used to wait forever).
+    ///
+    /// One wait at a time, app-wide (one port): a second concurrent one throws
+    /// `LoopbackOAuthError.alreadyWaiting` (W3-ADD review H5). The listener is created, assigned
+    /// and cancelled on `queue` only.
     func waitForCallback() async throws -> (code: String, state: String) {
-        try await withTaskCancellationHandler {
+        guard Self.waiting.claim(id) else { throw LoopbackOAuthError.alreadyWaiting }
+        return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { [self] cont in
                 lock.lock()
                 self.continuation = cont
@@ -42,25 +47,42 @@ final class LoopbackOAuthServer: @unchecked Sendable {
                     self.resumeOnce(throwing: CancellationError())
                     return
                 }
-                self.startListener()
+                queue.async { self.startListener() }
             }
         } onCancel: { [self] in
             self.stop()
         }
     }
 
+    /// The one waiting server (by id).
+    private static let waiting = SignInGate()
+    /// A loopback sign-in is waiting for its redirect.
+    static var isWaiting: Bool { waiting.isHeld }
+    private let id = UUID()
+    /// Set on `queue` once the wait ended; a listener is never started after it.
+    private var finished = false
+
     /// Stops listening and ends a pending wait with `CancellationError`.
     func stop() {
-        queue.async { [weak self] in
-            self?.listener?.cancel()
-            self?.listener = nil
-        }
         resumeOnce(throwing: CancellationError())
+        endListening()
+    }
+
+    /// Frees the port (on `queue`) and the app-wide slot.
+    private func endListening() {
+        Self.waiting.release(id)
+        queue.async { [self] in
+            finished = true
+            listener?.cancel()
+            listener = nil
+        }
     }
 
     // MARK: - Listener
 
+    /// On `queue`.
     private func startListener() {
+        guard !finished else { return }
         let params = NWParameters.tcp
         params.allowLocalEndpointReuse = true
 
@@ -191,6 +213,7 @@ final class LoopbackOAuthServer: @unchecked Sendable {
         let cont = continuation
         continuation = nil
         lock.unlock()
+        endListening()
         cont?.resume(returning: value)
     }
 
@@ -201,6 +224,7 @@ final class LoopbackOAuthServer: @unchecked Sendable {
         let cont = continuation
         continuation = nil
         lock.unlock()
+        endListening()
         cont?.resume(throwing: error)
     }
 }
@@ -210,6 +234,8 @@ final class LoopbackOAuthServer: @unchecked Sendable {
 enum LoopbackOAuthError: LocalizedError {
     case serverBindFailed(Error?)
     case invalidCallback
+    /// Another sign-in is waiting for its browser redirect (one port, one code verifier).
+    case alreadyWaiting
 
     var errorDescription: String? {
         switch self {
@@ -218,6 +244,8 @@ enum LoopbackOAuthError: LocalizedError {
                 (underlying.map { ": \($0.localizedDescription)" } ?? " — is port 19823 already in use?")
         case .invalidCallback:
             "Invalid OAuth callback — missing authorization code"
+        case .alreadyWaiting:
+            "A sign-in is already waiting in your browser"
         }
     }
 }

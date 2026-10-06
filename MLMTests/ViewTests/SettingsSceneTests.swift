@@ -59,10 +59,10 @@ struct SettingsSceneTests {
                      "BackupSettingsView()", "DataLocationsView()", "MaintenanceView()", "AdvancedSettingsView()"] {
             #expect(src.contains(pane), "pane \(pane) must be hosted")
         }
-        // The genre tools stay reachable under Advanced until W3-GEN (interim label of W1-2).
+        // The genre tools left Settings for the Genres destination (W3-GEN, DEC-025, ST-ADV).
         let advanced = try source("MLM/Views/Settings/AdvancedSettingsView.swift")
-        #expect(advanced.contains("GrooveStudioView()"))
-        #expect(advanced.contains("These genre tools move to Genres in the main window’s sidebar."))
+        #expect(!advanced.contains("GrooveStudioView"))
+        #expect(!advanced.contains("genre tools move"))
         #expect(!advanced.contains("Genre Workshop"), "retired word (UC-GLOSS-02)")
         #expect(src.contains("TabView(selection: $router.selectedTab)"))
         #expect(src.contains(".tabItem {") && src.contains("Label(tab.title, systemImage: tab.systemImage)"))
@@ -125,7 +125,7 @@ struct SettingsSceneTests {
             ("MLM/Views/Search/OnlineSearchResultsView.swift", "openSettings(tab: .sources)", 2),
             ("MLM/Views/Activity/ActivityToolbarItem.swift", "openSettings(tab: .backup)", 1),
             ("MLM/Views/Launch/LibrarySetupFlowView.swift", "openSettings(tab: .library)", 1),
-            ("MLM/App/Commands/LibraryMenuCommands.swift", "openSettings(tab: .maintenance)", 1),
+            ("MLM/App/Commands/LibraryMenuCommands.swift", "openSettings(tab: .maintenance)", 2),
             ("MLM/App/Commands/LibraryMenuCommands.swift", "openSettings(tab: .library)", 1),
             ("MLM/App/Commands/LibraryMenuCommands.swift", "openSettings(tab: .backup)", 2),
         ]

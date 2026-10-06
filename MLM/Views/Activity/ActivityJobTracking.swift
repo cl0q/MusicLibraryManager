@@ -52,9 +52,13 @@ final class MaintenanceJobRunner {
     func run(_ action: String, _ work: @escaping @MainActor () async -> Void) {
         guard tasks[action] == nil else { return }
         let kind = MaintenanceJob(action: action)
+        // Starts at once when no other Maintenance job is queued or running.
+        let waits = !handles.isEmpty
         let job = center.begin(
             kind.kind, title: kind.title, subject: .settings(.maintenance), itemNoun: .track,
-            controls: kind.isCancellable
+            // A queued job can always be cancelled (Settings and Activity alike); once it starts,
+            // only a job that really stops keeps its Cancel.
+            controls: waits || kind.isCancellable
                 ? ActivityControls(cancel: { [weak self] in Task { @MainActor in self?.cancel(action) } })
                 : .none,
             lane: Self.lane,
@@ -67,6 +71,7 @@ final class MaintenanceJobRunner {
                 self?.forget(action)
                 return
             }
+            if !kind.isCancellable { job.setControls(.none) }
             self.current = action
             self.cancelRequested = false
             self.resultMessage = nil
@@ -217,7 +222,8 @@ struct MaintenanceJob: Equatable {
     }
 
     var isCancellable: Bool {
-        ["fingerprint", "replaygain", "danceability", "groove", "artwork-embedded", "artwork-musicbrainz"].contains(action)
+        // `rescan` stops after the current file (review S2).
+        ["fingerprint", "replaygain", "danceability", "groove", "artwork-embedded", "artwork-musicbrainz", "rescan"].contains(action)
     }
 
     var isShort: Bool { ["path-audit", "create-liked-playlist"].contains(action) }

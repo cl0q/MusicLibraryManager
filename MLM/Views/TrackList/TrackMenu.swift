@@ -150,6 +150,9 @@ struct TrackMenu: View {
             } else {
                 item
             }
+        case .extra(let extra):
+            Button(extra.title) { actions.performExtra(extra.id, rows) }
+                .disabled(!extra.isEnabled)
         }
     }
 }
@@ -247,12 +250,15 @@ protocol TrackMenuActions {
     func moveToEndOfQueue(_ rows: [TrackRow])
     func showInContext(_ rows: [TrackRow])
     func clearHistory()
+    /// A place's own item (`TrackMenuItem.extra`, W3-GEN).
+    func performExtra(_ id: String, _ rows: [TrackRow])
 }
 
 extension TrackMenuActions {
     func moveToEndOfQueue(_ rows: [TrackRow]) {}
     func showInContext(_ rows: [TrackRow]) {}
     func clearHistory() {}
+    func performExtra(_ id: String, _ rows: [TrackRow]) {}
 }
 
 extension TrackListActions: TrackMenuActions {}

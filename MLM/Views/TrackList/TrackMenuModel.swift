@@ -43,6 +43,27 @@ enum TrackMenuItem: Hashable, Sendable {
     case showInContext(name: String)
     /// History / Now playing rows: `Clear History` (CM-QUEUE.N01).
     case clearHistory
+    /// An item only one place has (`Add to “Techno”`, `Use as Reference for Suggestions`, `Not
+    /// Now` — W3-GEN), run through the list's `TrackListConfiguration.menuExtras`.
+    case extra(TrackMenuExtra)
+}
+
+/// A place's own track-menu item, placed into one of the DEC-039 groups.
+struct TrackMenuExtra: Hashable, Sendable {
+    /// What the place's `perform` recognises.
+    let id: String
+    let title: String
+    var isEnabled = true
+}
+
+/// A place's own items per group: `addTo` goes first in the Add-to group, `info` last in the
+/// Info group, `remove` before `Remove from Library…` (UC-CM catalogue, CM-STUDIO-*).
+struct TrackMenuExtras: Equatable, Sendable {
+    var addTo: [TrackMenuExtra] = []
+    var info: [TrackMenuExtra] = []
+    var remove: [TrackMenuExtra] = []
+
+    static let none = TrackMenuExtras()
 }
 
 /// Which rows of the Queue panel a menu is for (CM-QUEUE, CM-QUEUE.N01).
@@ -74,12 +95,14 @@ struct TrackMenuContext: Equatable, Sendable {
     var canLocate = true
     /// The rows are the Queue panel's (W2-D): its own safe menu (CM-QUEUE).
     var queueRows: QueueMenuRows? = nil
+    /// The place's own items for these rows (W3-GEN).
+    var extras: TrackMenuExtras = .none
 
     /// `Remove from Playlist` inside one playlist (UC-CM-08), `Remove from “‹profile›”`.
     var removeTitle: String {
         switch container {
         case .playlist: "Remove from Playlist"
-        case .syncProfile(_, let name): "Remove from “\(name)”"
+        case .syncProfile(_, let name), .genre(_, let name): "Remove from “\(name)”"
         case .queue: "Remove from Queue"
         case .library, .folder, .none: "Remove"
         }
@@ -155,7 +178,7 @@ struct TrackMenuModel: Equatable, Sendable {
         if reachableLocal > 0 { queue += [.playNext, .addToQueue] }
 
         // 3 Add to
-        var addTo: [TrackMenuItem] = [.addToPlaylist]
+        var addTo: [TrackMenuItem] = context.extras.addTo.map(TrackMenuItem.extra) + [.addToPlaylist]
         if context.canAddToSyncProfile { addTo.append(.addToSyncProfile) }
 
         // 4 Info
@@ -163,6 +186,7 @@ struct TrackMenuModel: Equatable, Sendable {
         if single, let artist = TrackMetadataPresentation.artistDisplay(rows[0].track.artist) {
             info.append(.goToArtist(artist))
         }
+        info += context.extras.info.map(TrackMenuItem.extra)
 
         // 5 Fix
         var fix: [TrackMenuItem] = []
@@ -195,15 +219,17 @@ struct TrackMenuModel: Equatable, Sendable {
         // 7 Remove — reversible first, the irreversible one last (UC-CM-07).
         var remove: [TrackMenuItem] = []
         switch context.container {
-        case .playlist, .syncProfile:
+        case .playlist, .syncProfile, .genre:
             if context.canRemoveFromContainer { remove.append(.removeFromContainer(title: context.removeTitle)) }
         case .queue, .library, .folder, .none:
             break
         }
+        // A place's own items in the Remove group (`Not Now` on a suggestion, W3-GEN).
+        remove += context.extras.remove.map(TrackMenuItem.extra)
         switch context.container {
         case .queue, .syncProfile:
             break  // Remove from Library does not exist there (UC-CM-07)
-        case .library, .playlist, .folder, .none:
+        case .library, .playlist, .folder, .genre, .none:
             // Trashing files needs their disk (UC-CM-05).
             remove.append(.removeFromLibrary(enabled: unreachable == 0))
         }

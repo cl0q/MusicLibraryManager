@@ -45,6 +45,8 @@ enum SearchAvailabilityWord: String, CaseIterable, Codable, Sendable {
     case fileMissing = "file missing"
     case local = "local"
     case noAlbum = "no album"
+    /// Tracks without a genre (the Genres footer's `Show`, V-GENRES.N05).
+    case noGenre = "no genre"
     case notAnalysed = "not analysed"
     case inNoPlaylist = "in no playlist"
     case linkedToSoundCloud = "linked to SoundCloud"

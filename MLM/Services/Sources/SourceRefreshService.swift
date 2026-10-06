@@ -1,55 +1,102 @@
 import Foundation
+import GRDB
 import Observation
 
 // MARK: - Refresh from Sources (P-ADDMENU.N08, DEC-023, UC-TB-05)
 
-/// Pulls one source's new likes into All Tracks (as `Not downloaded`) and refreshes its linked
-/// account playlists. Returns the number of new tracks. Faked in tests (no network).
-@MainActor
-protocol SourceLibraryRefreshing: AnyObject {
-    func refresh(_ service: TokenStorage.Service) async throws -> Int
+/// What one source's refresh did.
+struct SourceRefreshSummary: Equatable, Sendable {
+    /// Tracks new to the library (added as `Not downloaded`).
+    var newTracks = 0
+    /// Linked playlists that got tracks.
+    var playlistsUpdated = 0
+    /// Linked playlists whose source list couldn't be read.
+    var failedPlaylists: [String] = []
 }
 
-/// The app's refresher: the source clients' existing likes / playlists sync (moved here from
-/// `SourcesViewModel.syncSource`, behaviour unchanged).
+/// Refreshes one source for `Refresh from Sources`. Faked in tests (no network).
 @MainActor
-final class LiveSourceLibraryRefresher: SourceLibraryRefreshing {
-    private let soundCloud: SoundCloudClient
-    private let spotify: SpotifyClient
-    private let appleMusic: AppleMusicClient
+protocol SourceLibraryRefreshing: AnyObject {
+    func refresh(_ service: TokenStorage.Service) async throws -> SourceRefreshSummary
+}
 
-    init(tokenStorage: TokenStorage, oauthManager: OAuthManager, trackRepository: TrackRepository,
-         sourceRepository: SourceRepository, playlistRepository: PlaylistRepository?) {
-        soundCloud = SoundCloudClient(tokenStorage: tokenStorage, oauthManager: oauthManager,
-                                      trackRepository: trackRepository, sourceRepository: sourceRepository,
-                                      playlistRepository: playlistRepository)
-        spotify = SpotifyClient(tokenStorage: tokenStorage, oauthManager: oauthManager,
-                                trackRepository: trackRepository, sourceRepository: sourceRepository)
-        appleMusic = AppleMusicClient(tokenStorage: tokenStorage, trackRepository: trackRepository,
-                                      sourceRepository: sourceRepository)
+/// The app's refresher (W3-ADD review H1): for one connected source it refreshes **only the
+/// playlists the user linked to that source, add-only** — each through `PlaylistImporter` with
+/// the playlist as target and no download, so tracks missing from the playlist are appended,
+/// nothing is removed or reordered, no album is written, no playlist is created and no other
+/// playlist is (re)linked. It never calls the clients' `syncPlaylists()` (which created a
+/// playlist per account set, adopted same-named playlists and replaced track lists).
+///
+/// Likes are **not** part of it yet: the likes sync (`SoundCloudClient.syncLikes`) still
+/// replaces the Liked playlist and writes an album; it joins here once the W3-PL fix round
+/// makes it append-only (`// LIKES:` below). The Liked playlist keeps its own `Refresh from
+/// ‹Source›` on the playlist page.
+@MainActor
+final class LinkedPlaylistsRefresher: SourceLibraryRefreshing {
+    typealias ListTracks = @MainActor (Playlist, Source) async throws -> [RemotePlaylistTrack]
+
+    private let queries: ImportLibraryQueries
+    private let importer: PlaylistImporter
+    private let listTracks: ListTracks
+
+    init(database: any DatabaseWriter, listTracks: @escaping ListTracks, notificationCenter: NotificationCenter = .default) {
+        queries = ImportLibraryQueries(database: database)
+        importer = PlaylistImporter(database: database, downloads: NoPlaylistDownloads(), notificationCenter: notificationCenter)
+        self.listTracks = listTracks
     }
 
-    func refresh(_ service: TokenStorage.Service) async throws -> Int {
+    /// The real source lists: `PlaylistRefreshService.Remote.live(_:).listTracks` (W3-PL), as is.
+    static func live(_ container: DependencyContainer) -> LinkedPlaylistsRefresher? {
+        guard let database = container.databaseManager else { return nil }
+        return LinkedPlaylistsRefresher(database: database.pool,
+                                        listTracks: PlaylistRefreshService.Remote.live(container).listTracks)
+    }
+
+    func refresh(_ service: TokenStorage.Service) async throws -> SourceRefreshSummary {
+        var summary = SourceRefreshSummary()
+        guard let link = Self.linkSource(service) else { return summary }
+        // LIKES: add the append-only likes refresh here (W3-PL fix round).
+        for (playlist, source) in try await queries.linkedPlaylists(sourceName: link.storedName) {
+            guard let playlistID = playlist.id, let sourceID = source.id, let externalID = playlist.externalId else { continue }
+            do {
+                let remote = try await listTracks(playlist, source)
+                let preview = RemotePlaylistPreview(sourceName: link.rawValue, externalID: externalID,
+                                                    title: playlist.name, tracks: remote)
+                let request = PlaylistImportRequest(preview: preview, tracks: remote, source: link,
+                                                    target: .existing(id: playlistID, name: playlist.name),
+                                                    keepLinked: true, downloadNow: false)
+                let outcome = try await importer.run(request, sourceRowID: { sourceID })
+                summary.newTracks += outcome.addedToLibrary
+                if outcome.addedToPlaylist > 0 { summary.playlistsUpdated += 1 }
+            } catch where SourceSignInProblem.isRejectedSignIn(error) {
+                throw error
+            } catch {
+                AppLogger.shared.error("Refreshing “\(playlist.name)” failed: \(error)", source: "Sources")
+                summary.failedPlaylists.append(playlist.name)
+            }
+        }
+        return summary
+    }
+
+    static func linkSource(_ service: TokenStorage.Service) -> LinkSource? {
         switch service {
-        case .soundcloud:
-            let new = try await soundCloud.syncLikes()
-            _ = try await soundCloud.syncPlaylists()
-            return new
-        case .spotify:
-            let new = try await spotify.syncLikedSongs()
-            _ = try await spotify.syncPlaylists()
-            return new
-        case .appleMusic:
-            let new = try await appleMusic.syncLibrary()
-            _ = try await appleMusic.syncPlaylists()
-            return new
+        case .soundcloud: .soundcloud
+        case .spotify: .spotify
+        case .appleMusic: nil
         }
     }
 }
 
+/// A refresh never downloads (`Download new tracks automatically` is W3-SET's setting).
+@MainActor
+private final class NoPlaylistDownloads: PlaylistDownloadStarting {
+    func startDownloads(_ tracks: [Track], preferredSource: DownloadOrchestrator.PreferredSource,
+                        playlistID: Int64, playlistName: String) {}
+}
+
 /// What one source's refresh came to.
 enum SourceRefreshOutcome: Equatable, Sendable {
-    case refreshed(newTracks: Int)
+    case refreshed(SourceRefreshSummary)
     case signInExpired
     case failed(String)
     /// Already refreshing (a second request for the same source does nothing).
@@ -81,11 +128,26 @@ final class SourceRefreshService {
 
     /// The app's service for the open library; `nil` before a library is open.
     static func live(_ container: DependencyContainer = .shared) -> SourceRefreshService? {
-        guard let tokens = container.tokenStorage, let oauth = container.oauthManager,
-              let tracks = container.trackRepository, let sources = container.sourceRepository else { return nil }
-        return SourceRefreshService(refresher: LiveSourceLibraryRefresher(
-            tokenStorage: tokens, oauthManager: oauth, trackRepository: tracks,
-            sourceRepository: sources, playlistRepository: container.playlistRepository))
+        guard let refresher = LinkedPlaylistsRefresher.live(container) else { return nil }
+        return SourceRefreshService(refresher: refresher)
+    }
+
+    /// `6 new tracks · 2 playlists updated · 1 playlist couldn’t be read`.
+    static func result(_ summary: SourceRefreshSummary) -> ActivityResult {
+        var counts = [ActivityCount(.done, summary.newTracks, summary.newTracks == 1 ? "new track" : "new tracks")]
+        if summary.playlistsUpdated > 0 {
+            counts.append(ActivityCount(.done, summary.playlistsUpdated,
+                                        summary.playlistsUpdated == 1 ? "playlist updated" : "playlists updated"))
+        }
+        var groups: [ActivityFailureGroup] = []
+        if !summary.failedPlaylists.isEmpty {
+            let n = summary.failedPlaylists.count
+            counts.append(ActivityCount(.failed, n, n == 1 ? "playlist couldn’t be read" : "playlists couldn’t be read"))
+            groups.append(ActivityFailureGroup(cause: "The source didn’t answer for “\(summary.failedPlaylists[0])”"
+                                               + (n > 1 ? " and \(n - 1) more" : ""),
+                                               count: n, fix: .runAgain, isRetryable: true))
+        }
+        return ActivityResult(counts: counts, failureGroups: groups)
     }
 
     /// `Refresh from Sources`: every connected source, one after the other.
@@ -109,13 +171,13 @@ final class SourceRefreshService {
         let job = activity.begin(.sourceRefresh, title: "Refresh from \(name)",
                                  subject: .settings(.sources), messageName: "Refresh from \(name)")
         do {
-            let newTracks = try await refresher.refresh(service)
-            job.finish(ActivityResult(counts: [ActivityCount(.done, newTracks, newTracks == 1 ? "new track" : "new tracks")]))
-            if newTracks > 0 {
+            let summary = try await refresher.refresh(service)
+            job.finish(Self.result(summary))
+            if summary.newTracks > 0 {
                 notificationCenter.post(name: .libraryDidImport, object: nil,
-                                        userInfo: ["succeeded": newTracks, "skipped": 0])
+                                        userInfo: ["succeeded": summary.newTracks, "skipped": 0])
             }
-            return .refreshed(newTracks: newTracks)
+            return .refreshed(summary)
         } catch where SourceSignInProblem.isRejectedSignIn(error) {
             onSignInExpired(service)
             job.fail(cause: "Sign-in expired (\(name))", fix: .reconnect(source: name))
@@ -145,9 +207,12 @@ enum SourceSignInProblem {
         }
     }
 
-    /// `SoundCloud didn’t answer` for transport failures; the error's own words otherwise.
+    /// `SoundCloud didn’t answer` for transport failures; a plain cause otherwise — never
+    /// database text (UC-COPY).
     static func plainCause(_ error: Error, source: String) -> String {
         if error is URLError { return "\(source) didn’t answer" }
+        if let plain = error as? PlainCauseError { return plain.plainCause }
+        if error is DatabaseError { return PlaylistImportError.libraryNotWritable.plainCause }
         return error.localizedDescription
     }
 }

@@ -112,11 +112,18 @@ final class ImportViewModel {
 
     /// Compares `folder` with the stored track locations (`organized_path`, relative to the
     /// library folder; an absolute path outside it is checked as it is). Reads no file contents.
-    nonisolated static func compare(folder: URL, organizedPaths: [String],
+    nonisolated static func compare(folder: URL, organizedPaths: [String], oldRoot: String? = nil,
                                     fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> FolderComparison {
         let root = folder.standardizedFileURL.path
+        let old = oldRoot.map { ($0 as NSString).standardizingPath }
         var found = 0
         for path in organizedPaths where !path.isEmpty {
+            // An absolute path under the old folder moves with the folder (review nit): it counts
+            // only when the same place exists below the new one.
+            if let old, path.hasPrefix(old + "/") {
+                if fileExists(root + "/" + path.dropFirst(old.count + 1)) { found += 1 }
+                continue
+            }
             if path.hasPrefix("/"), fileExists(path) {
                 found += 1
                 continue
@@ -127,14 +134,34 @@ final class ImportViewModel {
         return FolderComparison(found: found, total: organizedPaths.filter { !$0.isEmpty }.count)
     }
 
+    /// Work that reads or moves the library's files blocks a folder change (review S5).
+    static let folderChangeBlockingKinds: Set<ActivityKind> = [
+        .download, .recommendationDownload, .reelsDownload, .folderScan, .pathMigration, .sync, .tagWrite,
+    ]
+
+    /// `MLM can’t change the library folder while 1 download is running. …`, or `nil`.
+    static func folderChangeRefusal(operations: [ActivityOperation]) -> String? {
+        let summary = RunningWorkSummary(operations: operations.filter { folderChangeBlockingKinds.contains($0.kind) })
+        guard !summary.isEmpty else { return nil }
+        var text = "MLM can’t change the library folder while \(summary.runningPhrase) running. Let the work finish or cancel it in Activity first."
+        for line in summary.lines { text += "\n• " + line }
+        if summary.moreCount > 0 { text += "\n• and \(summary.moreCount.formatted(.number)) more" }
+        return text
+    }
+
     /// `Change Folder`: the new folder becomes the base of every track's location (existing tracks
     /// keep their relative paths); the file check runs after (`.libraryRootDidChange` →
     /// `LibraryAvailabilityMonitor`), then — when asked — a scan of the new folder.
     @MainActor
     func changeLibraryFolder(to folder: URL, scanAfterwards: Bool) async {
-        await setLibraryRoot(folder.standardizedFileURL.path)
+        let oldRoot = libraryRoot
+        let newRoot = folder.standardizedFileURL.path
+        await setLibraryRoot(newRoot)
         guard errorMessage == nil, scanAfterwards else { return }
-        await importLibrary()
+        // B2: files that are known tracks at the same place below the new folder are re-pointed,
+        // never added a second time.
+        let remap = oldRoot.flatMap { $0.isEmpty ? nil : LibraryRootRemap(oldRoot: $0, newRoot: newRoot) }
+        await runImport(directory: folder, title: "Scan “\(folder.lastPathComponent)”", remap: remap)
     }
 
     // MARK: - Import
@@ -174,41 +201,118 @@ final class ImportViewModel {
         return await runImport(directory: Self.commonFolder(of: files), files: files, title: title)
     }
 
-    /// `Import Files or Folder…` with files (W3-ADD): files from outside the library folder are
-    /// first **copied** into it (`LibraryFileCopier`: the importer's organised layout, originals
-    /// untouched), then imported — one `Scan` operation for both phases, in the import lane.
-    /// Files already in the library folder are imported where they are.
+    /// `Import Files or Folder…` and Finder drops (W3-ADD): files from outside the library
+    /// folder are first **copied** into it (`LibraryFileCopier`: the importer's organised
+    /// layout, originals untouched), then imported — one `Scan` operation for both phases, in
+    /// the import lane. Files already in the library folder are imported where they are; files
+    /// that already are tracks are neither copied nor imported again.
+    ///
+    /// Cancel stops the copying; what was copied by then is imported all the same (it is in the
+    /// library folder) and the result says `‹n› copied and imported · ‹m› not copied` (review
+    /// H2). While the library folder can't be reached the operation waits for it (S3).
+    /// `repoint(originalPath, organizedPath)` gives a renamed copy (`Title 2.ext`) its own
+    /// `organized_path` after the import (S5).
     ///
     /// - Returns: the import result and what the copy phase did; nil when it didn't run.
     @MainActor
     @discardableResult
-    func importFilesCopyingIntoLibrary(_ files: [URL], title: String,
-                                       copier: LibraryFileCopier) async -> (result: ImportService.ImportResult, placement: LibraryFileCopier.Placement)? {
+    func importFilesCopyingIntoLibrary(
+        _ files: [URL], title: String, copier: LibraryFileCopier,
+        repoint: @escaping @Sendable (_ originalPath: String, _ organizedPath: String) async -> Void = { _, _ in },
+        recheckInterval: Duration = .seconds(3)
+    ) async -> (result: ImportService.ImportResult, placement: LibraryFileCopier.Placement)? {
         guard !files.isEmpty else { return nil }
         let box = PlacementBox()
+        let root = copier.libraryRoot
         let prepare: PrepareFiles = { job, isCancelled in
+            var copier = copier
+            copier.waitForLibraryFolder = {
+                let volume = MountObserver.extractVolumePath(from: root.path)
+                    .map { URL(fileURLWithPath: $0).lastPathComponent } ?? root.lastPathComponent
+                job?.setWaiting(.drive(volumeName: volume))
+                defer { job?.setWaiting(nil) }
+                while !FileManager.default.fileExists(atPath: root.path) {
+                    if isCancelled() { return false }
+                    try? await Task.sleep(for: recheckInterval)
+                }
+                return !isCancelled()
+            }
             let placement = await copier.place(files, progress: { done, name in
                 job?.update(ActivityProgress(completed: done, total: files.count,
                                              currentItem: name.isEmpty ? nil : name, detail: "Copying into the library folder"))
             }, isCancelled: isCancelled)
             box.placement = placement
-            var extra: [ActivityCount] = []
-            if placement.copied > 0 { extra.append(ActivityCount(.done, placement.copied, "copied into the library folder")) }
-            if !placement.notCopied.isEmpty { extra.append(ActivityCount(.failed, placement.notCopied.count, "not copied")) }
-            return PreparedFiles(files: placement.toImport, extraCounts: extra,
-                                 failureCauses: placement.notCopied.map(\.reason))
+            return PreparedFiles(
+                files: placement.toImport,
+                wasCancelled: placement.wasCancelled,
+                result: { Self.copyResult(placement, import: $0) },
+                afterImport: {
+                    for renamed in placement.renamed { await repoint(renamed.copy.path, renamed.relativePath) }
+                }
+            )
         }
-        guard let result = await runImport(directory: Self.commonFolder(of: files), files: files, title: title,
-                                           prepare: prepare) else { return nil }
+        let common = Self.commonFolder(of: files)
+        // Files from several disks have no common folder: the subject is `‹n› files`.
+        let subject: ActivitySubject? = common.path == "/"
+            ? ActivitySubject(kind: .folder, name: ActivityNoun.file.counted(files.count)) : nil
+        guard let result = await runImport(directory: common, files: files, title: title,
+                                           prepare: prepare, subject: subject) else { return nil }
         return (result, box.placement ?? LibraryFileCopier.Placement())
     }
 
-    /// What a preparation phase hands to the import: the files, and counts / causes for the
-    /// operation's result.
+    /// The operation's result for a copying import: what was copied, imported, renamed, already
+    /// there and not copied — failures grouped by kind, each file listed (review S4).
+    nonisolated static func copyResult(_ placement: LibraryFileCopier.Placement,
+                                       import result: ImportService.ImportResult) -> ActivityResult {
+        var counts: [ActivityCount]
+        if placement.wasCancelled {
+            counts = [ActivityCount(.done, result.succeeded, "copied and imported"),
+                      ActivityCount(.failed, placement.notCopiedCount, "not copied")]
+        } else {
+            counts = [ActivityCount(.done, placement.copied, "copied into the library folder"),
+                      ActivityCount(.done, result.succeeded, "imported")]
+            if !placement.renamed.isEmpty {
+                counts.append(ActivityCount(.done, placement.renamed.count, "copied under a numbered name"))
+            }
+            counts.append(ActivityCount(.skipped, result.skipped + placement.alreadyInLibrary, "already in the library"))
+            counts.append(ActivityCount(.failed, result.failed, "failed"))
+            counts.append(ActivityCount(.failed, placement.notCopiedCount, "not copied"))
+        }
+        var groups: [ActivityFailureGroup] = []
+        let unreadable = placement.notCopied.filter { $0.kind == .unreadable }
+        if !unreadable.isEmpty {
+            groups.append(ActivityFailureGroup(cause: "Couldn’t read the tags", count: unreadable.count, fix: nil, isRetryable: false))
+        }
+        for (reason, items) in Dictionary(grouping: placement.notCopied.filter { $0.kind == .copyFailed }, by: \.reason)
+            .sorted(by: { $0.key < $1.key }) {
+            groups.append(ActivityFailureGroup(cause: "Couldn’t copy — \(reason)", count: items.count, fix: nil, isRetryable: false))
+        }
+        if let stop = placement.stopCause {
+            let stopped = placement.notCopied.filter { $0.kind == .diskFull }.count + placement.notReached
+            groups.append(ActivityFailureGroup(cause: stop, count: max(stopped, 1), fix: .runAgain, isRetryable: true))
+        }
+        if let leftover = placement.leftoverTemporaryFiles.first {
+            groups.append(ActivityFailureGroup(
+                cause: "A temporary copy couldn’t be removed: \(leftover.path)",
+                count: placement.leftoverTemporaryFiles.count, fix: nil, isRetryable: false))
+        }
+        var items = placement.notCopied.map {
+            ActivityItemOutcome(word: "Not copied", title: $0.file.lastPathComponent, reason: $0.reason, isFailure: true)
+        }
+        items += placement.renamed.map {
+            ActivityItemOutcome(word: "Copied as “\($0.copy.lastPathComponent)”", title: $0.relativePath,
+                                reason: "A different file has the plain name")
+        }
+        return ActivityResult(counts: counts, failureGroups: groups, items: items)
+    }
+
+    /// What a preparation phase hands to the import: the files, whether it was cancelled, the
+    /// operation's result and a step after the import.
     struct PreparedFiles: Sendable {
         var files: [URL]
-        var extraCounts: [ActivityCount] = []
-        var failureCauses: [String] = []
+        var wasCancelled = false
+        var result: @Sendable (ImportService.ImportResult) -> ActivityResult
+        var afterImport: @Sendable () async -> Void = {}
     }
 
     typealias PrepareFiles = @Sendable (ActivityOperationHandle?, @escaping @Sendable () -> Bool) async -> PreparedFiles
@@ -248,13 +352,13 @@ final class ImportViewModel {
     @MainActor
     @discardableResult
     private func runImport(directory: URL, files: [URL]? = nil, title: String,
-                           prepare: PrepareFiles? = nil) async -> ImportService.ImportResult? {
+                           prepare: PrepareFiles? = nil, subject: ActivitySubject? = nil, remap: LibraryRootRemap? = nil) async -> ImportService.ImportResult? {
         // Activity (W3-ACT): `Scan “‹folder›”`; Cancel stops after the current file and keeps
         // what was imported (`ImportService` checks cancellation per file). One box per run, so
         // cancelling a queued import never stops the running one (W2-H).
         let box = TaskBox()
         let job = activity?.begin(
-            .folderScan, title: title, subject: .folder(directory),
+            .folderScan, title: title, subject: subject ?? .folder(directory),
             progress: files.map { ActivityProgress(completed: 0, total: $0.count, currentItem: nil) } ?? .indeterminate,
             itemNoun: .file,
             controls: ActivityControls(cancelStyle: .afterThisFile, cancel: { box.task?.cancel() }),
@@ -280,35 +384,37 @@ final class ImportViewModel {
                     Task { @MainActor in self?.progress = progress }
                 }
                 // W3-ADD: an optional first phase in the same operation (copy into the library folder).
-                var prepared: PreparedFiles?
+                let prepared: PreparedFiles?
                 if let prepare {
                     prepared = await prepare(job, { Task.isCancelled })
-                    try Task.checkCancellation()
-                }
-                let importFiles = prepared?.files ?? files
-                let result = if let importFiles {
-                    try await self.importService.importFiles(importFiles, onProgress: onProgress)
                 } else {
-                    try await self.importService.importDirectory(directory, onProgress: onProgress)
+                    prepared = nil
+                }
+                let result: ImportService.ImportResult
+                if let prepared {
+                    // The copies are in the library folder already: they are imported even after a
+                    // Cancel during copying (review H2) — never left there unannounced.
+                    let service = self.importService
+                    let copies = prepared.files
+                    result = try await Task.detached { try await service.importFiles(copies, onProgress: onProgress) }.value
+                    await prepared.afterImport()
+                } else if let files {
+                    result = try await self.importService.importFiles(files, onProgress: onProgress)
+                } else {
+                    result = try await self.importService.importDirectory(directory, remap: remap, onProgress: onProgress)
                 }
 
                 await MainActor.run {
                     self.lastResult = result
                     outcome.result = result
                     self.progress = nil
-                    var activityResult = Self.activityResult(for: result)
-                    if let prepared {
-                        activityResult.counts.insert(contentsOf: prepared.extraCounts, at: 0)
-                        if !prepared.failureCauses.isEmpty {
-                            activityResult.failureGroups.append(ActivityFailureGroup(
-                                cause: prepared.failureCauses[0], count: prepared.failureCauses.count, fix: nil, isRetryable: false))
-                        }
-                    }
+                    let activityResult = prepared.map { $0.result(result) } ?? Self.activityResult(for: result)
+                    let cancelledCopying = prepared?.wasCancelled ?? false
 
-                    if result.cancelled {
+                    if result.cancelled && prepared == nil {
                         job?.cancelled(activityResult)
                     } else {
-                        job?.finish(activityResult)
+                        if cancelledCopying { job?.cancelled(activityResult) } else { job?.finish(activityResult) }
                         if result.failed > 0 {
                             self.errorMessage = "\(result.failed) file(s) failed to import"
                         }
@@ -347,7 +453,7 @@ final class ImportViewModel {
             runAgain: {
                 Task { @MainActor in
                     if let files, let prepare {
-                        await self.runImport(directory: directory, files: files, title: title, prepare: prepare)
+                        await self.runImport(directory: directory, files: files, title: title, prepare: prepare, subject: subject)
                     } else if let files {
                         await self.importFiles(files, title: title)
                     } else {

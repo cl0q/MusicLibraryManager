@@ -300,7 +300,8 @@ struct QueueReviewFixTests {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         func source(_ path: String) throws -> String { try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8) }
         // S9: one confirmed route for Play Next; Add to Queue disabled for rows already in Next.
-        let sync = try source("MLM/Views/Sync/SyncFailedDisclosure.swift")
+        // W3-SYNC: the failed rows moved from SyncFailedDisclosure into the Last sync section.
+        let sync = try source("MLM/Views/Sync/SyncProfileSections.swift")
         #expect(sync.contains("TrackCommandActions.playNext(") && !sync.contains("insertPlayNext"))
         #expect(try source("MLM/App/Commands/TrackCommands.swift").contains("target.addToQueueDisabledReason"))
         #expect(try source("MLM/Views/Queue/QueuePanel.swift").contains("addToQueueDisabledReason: nextIDs.isEmpty ? nil : QueueWords.alreadyQueuedReason"))

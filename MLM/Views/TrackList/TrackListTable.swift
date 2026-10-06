@@ -239,7 +239,8 @@ private struct TrackTableCore: View {
                 container: configuration.listContext.container,
                 canActivate: configuration.activate != nil,
                 canRemoveFromContainer: configuration.removeFromContainer != nil,
-                canAddToSyncProfile: true
+                canAddToSyncProfile: true,
+                extras: configuration.menuExtras?.items(rows) ?? .none
             )
             let state = live.state
             let menuModel = TrackMenuModel.make(subject: TrackMenuSubject(rows: rows, live: state), context: context)
@@ -288,6 +289,8 @@ enum TrackTableColumns {
         case .kbps: TableColumn(id.title, value: \TrackRow.bitrateSortKey) { TrackCell(column: id, row: $0) }
         case .added: TableColumn(id.title, value: \TrackRow.addedSortKey) { TrackCell(column: id, row: $0) }
         case .status: TableColumn(id.title, value: \TrackRow.statusSortKey) { TrackCell(column: id, row: $0) }
+        case .match: TableColumn(id.title, value: \TrackRow.matchSortKey) { TrackCell(column: id, row: $0) }
+        case .suggestion: TableColumn(id.title, value: \TrackRow.suggestionSortKey) { TrackCell(column: id, row: $0) }
         }
     }
 }
