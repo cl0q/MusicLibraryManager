@@ -131,6 +131,7 @@ Latest existing: `v41_remote_provider_identity`. Reserved (a number is only used
 | v51 | W4-1 | Album dedup |
 | v52 | W4-3 | Album suggestions / confirmed `No album` |
 | v53 | W2-E (fix round) | Original file tag values and typed values for tag writes |
+| v56 | W5-F2 | `v56_sync_followups`: `sync_probe_cache` (IMP-104) + `sync_profiles.position` (IMP-106) |
 
 ## 4. Decisions during implementation
 
@@ -173,6 +174,13 @@ Latest existing: `v41_remote_provider_identity`. Reserved (a number is only used
 | IMP-101 | Lookup writes detached | The lookup writes its rows from a detached task (GRDB async writes throw once the calling task is cancelled); cancel keeps written rows | resumability | V-REV.N05 |
 | IMP-102 | Every insert links its album | `linkNewTrack` in the catch-all `TrackRepository.insert`; downloads, `materializeRemoteTrack`, `PlaylistImporter`, kept recommendations join their album; the discovery download no longer writes `Discovered Neighbors` as album | W4-1 gap | V-ALB |
 | IMP-103 | Review ▸ Albums tab visibility | Always shown (W4-3 hid it until the first lookup wrote a row — the grid's `Find Albums…` would have led nowhere); empty state before any lookup offers `Look Up Albums` | UC-MENU-02 spirit, V-ALB.N10 | W4-2b |
+| IMP-104 | Device codec sweep (§5 Q8) | Cached per profile in `sync_probe_cache` keyed by device path, re-probed only when size/mtime changed; cleared on destination change | Repeated `Updating plan…` / USB churn | V-SYNC-DETAIL |
+| IMP-105 | Sync Now for playlist-only changes (§5 Q9) | Enabled when a profile playlist changed since its snapshot (members or order); plan count `‹n› playlists to update`; such a run rewrites only playlist files | Review S9 of W3-SYNC | V-SYNC-DETAIL |
+| IMP-106 | Sync-profile order | `sync_profiles.position` (v56, backfilled by name); drag to reorder in the sidebar, undoable `Reorder Sync Profiles` | IMP-045 left it by name | P-SIDEBAR |
+| IMP-107 | `D-FOLD` on the Queue | A folder dropped on the Queue / the player queues its in-library tracks in folder order | UC-DND table | D-FOLD |
+| IMP-108 | Review nits | `legacy:<rowid>` keys replaced by stable group keys at the next scan; a library switch cancels a running scan and discards partial proposals; Resolved shows a `Decision` column; rendered fixture `review-duplicates` | W3-REV review nits | V-REV |
+| IMP-109 | Stream preview | `PreviewCandidate.stream` + `StreamResolving` seam (`StreamResolver.live`: SoundCloud progressive URL, YouTube via `yt-dlp -g`); `Preview` on Similar ▸ Online and Reels results; state word `Resolving…`; failure sentence `Couldn’t preview “‹title›” — ‹cause›`; nothing saved | W3-DISC-A/B removed the dead button | V-SIMILAR, V-REELS.E20 |
+| IMP-110 | Reel links in Add from Link | `QuickAddRouter` routes reel URLs (Instagram, TikTok, YouTube Shorts) to Reels and starts the fetch | W3-DISC-B gap | S-QUICKADD, V-REELS.N01 |
 | IMP-086 | Review badge with albums | `ReviewTab.count(for: .albums)` = pending suggestions; the sidebar Review badge adds it; the tab stays hidden until the first lookup ran | UC-SIDE-05 | P-SIDEBAR.E09 |
 | IMP-046 | Genre details | Genre identity = trimmed lower-cased string; display = the most frequent spelling with an upper-case letter, else capitalised words; Close / Balanced / Wide = temperature 0 / 0.1 / 0.3 with minimum match 84 / 68 / 0 %; `Not Now` is session-only (`Show Hidden (n)`); suggestions run as a graceful `.trackAnalysis` operation; one export at a time, re-export replaces same-named files; new search word `is: no genre`; no `No genre` pseudo-row (footer line instead); ⌫ = Remove from ‹Genre› (UC-KEY-17) | `genres.html` leaves these open | V-GENRES, V-GENRED |
 | IMP-047 | Folders details | Where a track lies (no disk access): absolute original path inside the library folder, else relative organized path, else absolute organized path inside the folder; counts from one catalog query per library folder; one background walk feeds not-in-library counts and the name filter; a mixed selection shows the folder menu acting on all selected tracks; no `Show` in the header line; a Finder drop on a folder row copies into the organised layout (not that folder); ⌘↑/⌘↓ run the folder action only when pressed on the focused outline | `folders.html` leaves these open | V-FOLD |
