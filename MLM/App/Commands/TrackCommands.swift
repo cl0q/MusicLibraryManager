@@ -195,11 +195,16 @@ struct TrackCommands: Commands {
                           disabledReason: folderScan?.disabledReason ?? "The folders aren’t loaded yet.") {
                 folderScan?.perform()
             }
-        case .runScan, .none:
+        case .runScan:
+            // Review (W3-REV): the duplicate scan, an Activity operation.
+            CommandButton(.refreshFromSource, title: reread.title(),
+                          enabled: ReviewScanRunner.shared.blockedReason == nil,
+                          disabledReason: ReviewScanRunner.shared.blockedReason) {
+                ReviewScanRunner.shared.startWithConfirmation(statusBar: undoCenter?.statusBar)
+            }
+        case .none:
             CommandButton(.refreshFromSource, title: reread.title(), enabled: false,
-                          disabledReason: reread == .none
-                              ? "Nothing here can be refreshed from outside."
-                              : "This place can’t be refreshed yet.") {}
+                          disabledReason: "Nothing here can be refreshed from outside.") {}
         }
     }
 }

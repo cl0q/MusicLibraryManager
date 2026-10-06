@@ -41,6 +41,9 @@ struct DestinationView: View {
         case .genres:
             // Own scaffold: the list's command bar and footer line (W3-GEN).
             GenresView()
+        // Review builds its own scaffold: its scope bar, banners and the scan line (W3-REV).
+        case .review:
+            ReviewView(focusTrackID: reviewFocusTrackID, onTrackActivated: onTrackActivated)
         default:
             ContentScaffold(showsDriveBanner: destination.listsTracks) {
                 content
@@ -74,7 +77,8 @@ struct DestinationView: View {
         case .discover:
             DiscoverView()
         case .review:
-            ReviewQueueView(focusTrackID: reviewFocusTrackID)
+            // Hosted by `body` (own scaffold).
+            Color.clear
         case .allPlaylists, .playlist:
             // Hosted by `body` (own scaffold).
             Color.clear

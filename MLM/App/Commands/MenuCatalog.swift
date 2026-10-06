@@ -300,8 +300,7 @@ enum MenuCommand: String, CaseIterable, Sendable {
             Entry(menu: .library, title: "Refresh from Sources", shortcut: nil, wiring: .app)
         case .scanLibraryFolder: Entry(menu: .library, title: "Scan Library Folder", shortcut: nil, wiring: .app)
         case .findDuplicates:
-            Entry(menu: .library, title: "Find Duplicates", shortcut: nil,
-                  wiring: .pending(owner: "W3-REV", reason: "To look for duplicates now, open Review."))
+            Entry(menu: .library, title: "Find Duplicates", shortcut: nil, wiring: .app)
         case .findAlbums:
             Entry(menu: .library, title: "Find Albums", shortcut: nil,
                   wiring: .pending(owner: "W4-3", reason: "Album suggestions aren’t available yet."))

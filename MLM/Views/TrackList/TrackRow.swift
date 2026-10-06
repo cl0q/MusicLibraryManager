@@ -77,6 +77,11 @@ extension TrackRow {
     var matchSortKey: Int { matchPercent ?? -1 }
     /// The suggestion column sorts like Match (best first).
     var suggestionSortKey: Double { Double(matchPercent ?? -1) }
+    /// Review's comparison columns keep the versions in their own order (not sortable, W3-REV);
+    /// each has its own key path so a header maps back to its column.
+    var versionSortKey: Int { position }
+    var locationSortKey: Int { position }
+    var usedInSortKey: Int { position }
 }
 
 // MARK: - Building rows

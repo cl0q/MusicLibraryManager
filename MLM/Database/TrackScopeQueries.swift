@@ -73,7 +73,7 @@ struct TrackScopeQueries: Sendable {
             SELECT \(columns.joined(separator: ", "))
             FROM (
                 SELECT duration, organized_path, file_missing_since, download_status, download_failure,
-                       (\(searchSQL)) AS m
+                       (\(TrackVisibility.listed(searchSQL))) AS m
                 FROM tracks
             )
             """

@@ -530,9 +530,14 @@ final class TrackRepository: Sendable {
             // with the shared database, so remove every dependent row ourselves.
             // The saved playback queue (v43, W2-D) — absent in databases before it.
             let hasSavedQueue = try db.tableExists("playback_queue_entries")
+            let hasDecidedPairs = try db.tableExists("review_decided_pairs")
             for id in uniqueIDs {
                 if hasSavedQueue {
                     try db.execute(sql: "DELETE FROM playback_queue_entries WHERE track_id = ?", arguments: [id])
+                }
+                // Sticky Review decisions (v48, W3-REV): a deleted track's decided pairs go.
+                if hasDecidedPairs {
+                    try db.execute(sql: "DELETE FROM review_decided_pairs WHERE track_a = ? OR track_b = ?", arguments: [id, id])
                 }
                 try db.execute(sql: "DELETE FROM track_sources WHERE track_id = ?", arguments: [id])
                 try db.execute(sql: "DELETE FROM playlist_tracks WHERE track_id = ?", arguments: [id])
@@ -1630,6 +1635,8 @@ final class TrackRepository: Sendable {
     func fetchTracks(scope: TrackAvailabilityScope, search: String? = nil) async throws -> [Track] {
         var (conditions, arguments) = Self.searchConditions(search)
         if let predicate = scope.sqlPredicate { conditions.insert(predicate, at: 0) }
+        // Versions hidden by a Review decision aren't listed (IMP-049).
+        conditions.insert(TrackVisibility.listedSQL, at: 0)
         let whereSQL = conditions.isEmpty ? "" : "WHERE " + conditions.joined(separator: " AND ")
         let finalArguments = arguments
         return try await database.read { db in

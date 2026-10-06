@@ -136,7 +136,7 @@ struct QueuePanelContent: Equatable {
         case .syncProfile(let id, let name): "“\(names.syncProfiles[id] ?? name)”"
         case .folder(let path, let name): path.isEmpty ? "Folders" : "“\(name)”"
         case .genre(_, let name): "“\(name)”"
-        case .queue, .none: nil
+        case .queue, .reviewGroup, .none: nil
         }
     }
 

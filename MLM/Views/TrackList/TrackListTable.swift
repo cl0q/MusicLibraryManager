@@ -239,7 +239,7 @@ private struct TrackTableCore: View {
                 container: configuration.listContext.container,
                 canActivate: configuration.activate != nil,
                 canRemoveFromContainer: configuration.removeFromContainer != nil,
-                canAddToSyncProfile: true,
+                canAddToSyncProfile: configuration.canAddToSyncProfile,
                 extras: configuration.menuExtras?.items(rows) ?? .none
             )
             let state = live.state
@@ -291,6 +291,9 @@ enum TrackTableColumns {
         case .status: TableColumn(id.title, value: \TrackRow.statusSortKey) { TrackCell(column: id, row: $0) }
         case .match: TableColumn(id.title, value: \TrackRow.matchSortKey) { TrackCell(column: id, row: $0) }
         case .suggestion: TableColumn(id.title, value: \TrackRow.suggestionSortKey) { TrackCell(column: id, row: $0) }
+        case .version: TableColumn(id.title, value: \TrackRow.versionSortKey) { TrackCell(column: id, row: $0) }
+        case .location: TableColumn(id.title, value: \TrackRow.locationSortKey) { TrackCell(column: id, row: $0) }
+        case .usedIn: TableColumn(id.title, value: \TrackRow.usedInSortKey) { TrackCell(column: id, row: $0) }
         }
     }
 }

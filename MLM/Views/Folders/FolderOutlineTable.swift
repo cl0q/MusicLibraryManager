@@ -385,7 +385,7 @@ enum FolderTableColumns {
         case .kbps: return TableColumn(name, value: \FolderOutlineRow.bitrateSortKey) { FolderCell(column: id, row: $0) }
         case .added: return TableColumn(name, value: \FolderOutlineRow.addedSortKey) { FolderCell(column: id, row: $0) }
         // Genre-page context columns never appear in Folders; they sort like Status if asked for.
-        case .status, .match, .suggestion: return TableColumn(name, value: \FolderOutlineRow.statusSortKey) { FolderCell(column: id, row: $0) }
+        case .status, .match, .suggestion, .version, .location, .usedIn: return TableColumn(name, value: \FolderOutlineRow.statusSortKey) { FolderCell(column: id, row: $0) }
         }
     }
 
@@ -404,7 +404,7 @@ enum FolderTableColumns {
         case .format: return KeyPathComparator(\FolderOutlineRow.formatSortKey, order: direction)
         case .kbps: return KeyPathComparator(\FolderOutlineRow.bitrateSortKey, order: direction)
         case .added: return KeyPathComparator(\FolderOutlineRow.addedSortKey, order: direction)
-        case .status, .match, .suggestion: return KeyPathComparator(\FolderOutlineRow.statusSortKey, order: direction)
+        case .status, .match, .suggestion, .version, .location, .usedIn: return KeyPathComparator(\FolderOutlineRow.statusSortKey, order: direction)
         }
     }
 
@@ -428,7 +428,7 @@ enum FolderTableColumns {
         case .format: \FolderOutlineRow.formatSortKey
         case .kbps: \FolderOutlineRow.bitrateSortKey
         case .added: \FolderOutlineRow.addedSortKey
-        case .status, .match, .suggestion: \FolderOutlineRow.statusSortKey
+        case .status, .match, .suggestion, .version, .location, .usedIn: \FolderOutlineRow.statusSortKey
         }
     }
 }

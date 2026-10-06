@@ -71,6 +71,8 @@ struct TrackListConfiguration {
     /// The place's own context-menu items for the clicked rows (W3-GEN: `Add to “Techno”`,
     /// `Use as Reference for Suggestions`, `Not Now`).
     var menuExtras: TrackMenuExtrasProvider?
+    /// `Add to Sync Profile ▸` is in the track menu (Review's version rows leave it out, W3-REV).
+    var canAddToSyncProfile = true
 }
 
 /// A place's own track-menu items and what they do (`TrackMenuItem.extra`).

@@ -61,6 +61,8 @@ struct TrackMenuExtra: Hashable, Sendable {
 struct TrackMenuExtras: Equatable, Sendable {
     var addTo: [TrackMenuExtra] = []
     var info: [TrackMenuExtra] = []
+    /// First in the Fix group — `Keep This Version` (W3-REV, CM-REV-VERSION).
+    var fix: [TrackMenuExtra] = []
     var remove: [TrackMenuExtra] = []
 
     static let none = TrackMenuExtras()
@@ -104,7 +106,7 @@ struct TrackMenuContext: Equatable, Sendable {
         case .playlist: "Remove from Playlist"
         case .syncProfile(_, let name), .genre(_, let name): "Remove from “\(name)”"
         case .queue: "Remove from Queue"
-        case .library, .folder, .none: "Remove"
+        case .library, .folder, .reviewGroup, .none: "Remove"
         }
     }
 }
@@ -189,7 +191,7 @@ struct TrackMenuModel: Equatable, Sendable {
         info += context.extras.info.map(TrackMenuItem.extra)
 
         // 5 Fix
-        var fix: [TrackMenuItem] = []
+        var fix: [TrackMenuItem] = context.extras.fix.map(TrackMenuItem.extra)
         if single {
             switch rows[0].availability {
             case .notDownloaded where unreachable == 0: fix.append(.download(title: "Download"))
@@ -221,7 +223,7 @@ struct TrackMenuModel: Equatable, Sendable {
         switch context.container {
         case .playlist, .syncProfile, .genre:
             if context.canRemoveFromContainer { remove.append(.removeFromContainer(title: context.removeTitle)) }
-        case .queue, .library, .folder, .none:
+        case .queue, .library, .folder, .reviewGroup, .none:
             break
         }
         // A place's own items in the Remove group (`Not Now` on a suggestion, W3-GEN).
@@ -229,7 +231,7 @@ struct TrackMenuModel: Equatable, Sendable {
         switch context.container {
         case .queue, .syncProfile:
             break  // Remove from Library does not exist there (UC-CM-07)
-        case .library, .playlist, .folder, .genre, .none:
+        case .library, .playlist, .folder, .genre, .reviewGroup, .none:
             // Trashing files needs their disk (UC-CM-05).
             remove.append(.removeFromLibrary(enabled: unreachable == 0))
         }

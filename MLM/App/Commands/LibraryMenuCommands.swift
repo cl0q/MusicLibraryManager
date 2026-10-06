@@ -26,7 +26,11 @@ struct LibraryMenuCommands: Commands {
 
             Divider()
 
-            CommandButton(.findDuplicates)
+            // W3-REV: the same Activity operation as Review ▸ Run Scan; it never opens Review (P3).
+            CommandButton(.findDuplicates, enabled: hasLibrary && ReviewScanRunner.shared.blockedReason == nil,
+                          disabledReason: hasLibrary ? ReviewScanRunner.shared.blockedReason : "No library is open.") {
+                ReviewScanRunner.shared.startWithConfirmation(statusBar: statusBar)
+            }
             CommandButton(.findAlbums)
 
             Divider()
