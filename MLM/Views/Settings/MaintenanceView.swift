@@ -14,6 +14,9 @@ struct MaintenanceView: View {
     @State private var confirmsRollback = false
     @State private var confirmsCacheClear = false
     @State private var choosesCacheFolder = false
+    /// Why the cache can't be cleared or moved (review B1), or the last refusal.
+    @State private var cacheRefusal: String?
+    @State private var cacheProblem: String?
     @State private var cacheSummary: (files: Int, bytes: Int64)?
     @State private var cacheReach: LocationReach = .notSet
 
@@ -58,7 +61,11 @@ struct MaintenanceView: View {
         .onChange(of: ActivityCenter.shared.finishedCount) { _, _ in
             Task {
                 await jobs.refreshCoverage()
-                await refreshCache()
+                // Only a cache operation or a sync changes the cache (not every finished job).
+                if let last = ActivityCenter.shared.finishedOperations.first,
+                   [.transcodeCacheMove, .sync].contains(last.kind) {
+                    await refreshCache()
+                }
             }
         }
         .alert("Update organized paths?", isPresented: $confirmsApply) {
@@ -80,7 +87,7 @@ struct MaintenanceView: View {
         .alert("Clear the transcode cache?", isPresented: $confirmsCacheClear) {
             Button("Clear Cache", role: .destructive) {
                 Task {
-                    await jobs.clearTranscodeCache()
+                    cacheProblem = await jobs.clearTranscodeCache()
                     await refreshCache()
                 }
             }
@@ -91,7 +98,7 @@ struct MaintenanceView: View {
         }
         .folderPanel(isPresented: $choosesCacheFolder, message: "Choose a folder for the transcode cache.",
                      directory: container.transcodeCache?.cacheDir) { url in
-            container.relocateTranscodeCache(to: url.path)
+            Task { cacheProblem = await jobs.relocateTranscodeCache(to: url) }
         }
     }
 
@@ -195,7 +202,7 @@ struct MaintenanceView: View {
 
     private var transcodeCacheSection: some View {
         Section {
-            let blocked = container.transcodeCacheMoveBlockedReason
+            let blocked = container.transcodeCacheMoveBlockedReason ?? cacheRefusal
             let needsDrive = cacheReach.isReachable ? nil : cacheReach.text
             LabeledContent {
                 HStack {
@@ -214,6 +221,9 @@ struct MaintenanceView: View {
                             SettingsState(reach: cacheReach)
                         } else if let cacheSummary {
                             Text("\(DataLocationsViewModel.countText(cacheSummary.files, singular: "file", plural: "files")) · \(DataLocationsViewModel.formatBytes(cacheSummary.bytes))")
+                        }
+                        if let refusal = cacheProblem ?? cacheRefusal {
+                            SettingsState(text: refusal, systemImage: "exclamationmark.triangle", tone: .problem)
                         }
                         if let echo = ActivityCenter.shared.activeOperations.first(where: { $0.kind == .transcodeCacheMove })
                             .flatMap(MaintenanceJobRunner.echo) {
@@ -242,6 +252,7 @@ struct MaintenanceView: View {
                              exists: { FileManager.default.fileExists(atPath: $0.path) })
         }.value
         cacheSummary = cacheReach.isReachable ? await Task.detached { MaintenanceJobs.cacheSummary(dir) }.value : nil
+        cacheRefusal = cacheReach.isReachable ? await jobs.cacheRefusal(for: dir) : nil
     }
 
     /// A-SET-CACHECLEAR: `2,140 transcoded copies (18.2 GB) will be deleted. …`
@@ -249,7 +260,7 @@ struct MaintenanceView: View {
         let count = cacheSummary?.files ?? 0
         let size = DataLocationsViewModel.formatBytes(cacheSummary?.bytes ?? 0)
         let copies = count == 1 ? "1 transcoded copy" : "\(count.formatted()) transcoded copies"
-        return "\(copies) (\(size)) will be deleted. Your music files are not touched. The next sync creates the copies it needs again, which takes time."
+        return "\(copies) (\(size)) will be deleted — only files MLM made in this cache folder. Your music files are not touched. The next sync creates the copies it needs again, which takes time."
     }
 
     // MARK: Path alerts

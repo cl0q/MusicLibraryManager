@@ -152,10 +152,84 @@ struct MaintenanceJobsTests {
         defer { try? FileManager.default.removeItem(at: root) }
         try Data("a".utf8).write(to: root.appendingPathComponent("1.m4a"))
         try Data("b".utf8).write(to: root.appendingPathComponent("sub/2.m4a"))
-        #expect(MaintenanceJobs.cacheSummary(root)?.files == 2)
-        #expect(MaintenanceJobs.removeCachedFiles(in: root) == 2)
+        #expect(MaintenanceJobs.cacheSummary(root)?.files == 1, "not recursive")
+        #expect(MaintenanceJobs.removeCachedFiles(in: root) == 1)
         #expect(FileManager.default.fileExists(atPath: root.path))
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("sub/2.m4a").path))
         #expect(MaintenanceJobs.cacheSummary(root)?.files == 0)
+    }
+
+    // MARK: Review B1 — Clear Cache can never reach the music
+
+    @Test func onlyTheCachesOwnFileNamesMatch() {
+        for name in ["12.m4a", "12_248.m4a", "12_248_norm.m4a", "12_320_art600.m4a", "12_248_norm_art300.m4a"] {
+            #expect(TranscodeCacheSafety.isCacheFileName(name), "\(name)")
+        }
+        for name in ["01 Song.m4a", "12_248.mp3", ".12_248.m4a", "12_248.m4a.part", "track.flac", "12-248.m4a", "song_248.m4a"] {
+            #expect(!TranscodeCacheSafety.isCacheFileName(name), "\(name)")
+        }
+    }
+
+    @Test func aCachePathSetToTheLibraryRootDeletesNothing() async throws {
+        let library = FileManager.default.temporaryDirectory.appendingPathComponent("B1Library-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: library.appendingPathComponent("Artist"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: library) }
+        try Data("music".utf8).write(to: library.appendingPathComponent("Artist/01 Song.m4a"))
+        try Data("music".utf8).write(to: library.appendingPathComponent("7.m4a"))   // looks like a cache file
+        let refusal = await TranscodeCacheSafety.refusal(for: library, libraryRoot: library) { _, _ in false }
+        #expect(refusal?.contains("is the library folder") == true)
+        let parent = await TranscodeCacheSafety.refusal(for: library.deletingLastPathComponent(), libraryRoot: library) { _, _ in false }
+        #expect(parent?.contains("contains the library folder") == true)
+        #expect(FileManager.default.fileExists(atPath: library.appendingPathComponent("7.m4a").path))
+    }
+
+    @Test func aDedicatedHiddenSubfolderDeletesOnlyMatchingFiles() async throws {
+        let library = FileManager.default.temporaryDirectory.appendingPathComponent("B1Library-\(UUID().uuidString)")
+        let cache = library.appendingPathComponent(".mlm_transcode_cache")
+        try FileManager.default.createDirectory(at: cache.appendingPathComponent("nested"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: library) }
+        for name in ["5_248.m4a", "6_248_norm.m4a", "9.m4a"] {
+            try Data("c".utf8).write(to: cache.appendingPathComponent(name))
+        }
+        for name in ["Keep Me.m4a", ".DS_Store", "notes.txt", "nested/7_248.m4a"] {
+            try Data("k".utf8).write(to: cache.appendingPathComponent(name))
+        }
+        let refusal = await TranscodeCacheSafety.refusal(for: cache, libraryRoot: library) { _, _ in
+            Issue.record("a `.mlm…` folder needs no track check")
+            return true
+        }
+        #expect(refusal == nil)
+        #expect(MaintenanceJobs.cacheSummary(cache)?.files == 3)
+        #expect(MaintenanceJobs.removeCachedFiles(in: cache) == 3)
+        for name in ["Keep Me.m4a", ".DS_Store", "notes.txt", "nested/7_248.m4a"] {
+            #expect(FileManager.default.fileExists(atPath: cache.appendingPathComponent(name).path), "\(name) survives")
+        }
+    }
+
+    @Test func aSubfolderHoldingTracksIsRefused() async throws {
+        let library = URL(fileURLWithPath: "/tmp/B1Lib")
+        var asked: (String, String)?
+        let refusal = await TranscodeCacheSafety.refusal(for: library.appendingPathComponent("Artist"), libraryRoot: library) { rel, abs in
+            asked = (rel, abs)
+            return true
+        }
+        #expect(refusal?.contains("holds tracks of the library") == true)
+        #expect(asked?.0 == "Artist/")
+        let empty = await TranscodeCacheSafety.refusal(for: library.appendingPathComponent("Cache"), libraryRoot: library) { _, _ in false }
+        #expect(empty == nil)
+    }
+
+    @Test func diskAndSystemFoldersAreRefused() {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        for folder in ["/", "/Volumes", "/Volumes/Lexxar", "/Users", home.path,
+                       FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].path] {
+            #expect(TranscodeCacheSafety.structuralRefusal(for: URL(fileURLWithPath: folder)) != nil, "\(folder)")
+        }
+        #expect(TranscodeCacheSafety.structuralRefusal(for: URL(fileURLWithPath: "/Volumes/Lexxar/MLM Transcode Cache")) == nil)
+    }
+
+    @Test func likePatternsAreEscaped() {
+        #expect(TranscodeCacheSafety.likePrefix("a_b%/") == "a\\_b\\%/%")
     }
 
     @Test func migrationErrorsInPlainWords() {
