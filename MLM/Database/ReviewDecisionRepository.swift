@@ -265,17 +265,17 @@ final class ReviewDecisionRepository: Sendable {
                 consequences.keptFormat = byID[kept]?.format
                 for id in members where byID[id] != nil {
                     if id == kept {
-                        try db.execute(sql: "UPDATE tracks SET is_duplicate = 0, variant_of = NULL WHERE id = ?", arguments: [id])
+                        try db.execute(sql: "UPDATE tracks SET is_duplicate = 0, hidden_by_review = 0, variant_of = NULL WHERE id = ?", arguments: [id])
                     } else {
                         unkept.append(id)
-                        try db.execute(sql: "UPDATE tracks SET is_duplicate = 1, variant_of = ? WHERE id = ?", arguments: [kept, id])
+                        try db.execute(sql: "UPDATE tracks SET is_duplicate = 1, hidden_by_review = 1, variant_of = ? WHERE id = ?", arguments: [kept, id])
                     }
                 }
                 consequences.hiddenCount = unkept.count
                 try Self.repoint(db, unkept: unkept, to: kept, into: &consequences)
             } else {
                 for id in members where byID[id] != nil {
-                    try db.execute(sql: "UPDATE tracks SET is_duplicate = 0, variant_of = NULL WHERE id = ?", arguments: [id])
+                    try db.execute(sql: "UPDATE tracks SET is_duplicate = 0, hidden_by_review = 0, variant_of = NULL WHERE id = ?", arguments: [id])
                 }
             }
 
@@ -363,7 +363,7 @@ final class ReviewDecisionRepository: Sendable {
                 .flatMap(Self.record) else { throw ReviewDecisionError.noDecision }
             let c = record.consequences
             for flag in c.flags {
-                try db.execute(sql: "UPDATE tracks SET is_duplicate = ?, variant_of = ? WHERE id = ?",
+                try db.execute(sql: "UPDATE tracks SET is_duplicate = ?, hidden_by_review = 0, variant_of = ? WHERE id = ?",
                                arguments: [flag.isDuplicate, flag.variantOf, flag.trackId])
             }
             let kept = record.keptTrackID

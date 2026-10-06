@@ -30,9 +30,11 @@ struct ReviewResolvedRow: Identifiable, Equatable {
     /// Restore needs the decision's recorded consequences; earlier decisions have none.
     let decisionID: Int64?
     let memberIDs: [Int64]
+    /// A pre-v48 decision that kept a `resolutionSnapshot` (`AnalysisRepository.undoReviewResolution`).
+    var hasLegacySnapshot = false
 
     var id: String { key }
-    var canRestore: Bool { decisionID != nil }
+    var canRestore: Bool { decisionID != nil || hasLegacySnapshot }
     var groupName: String { "“\(title)”" }
 }
 
@@ -296,7 +298,8 @@ final class ReviewModel {
             date: decision.flatMap { Self.parse($0.decidedAt) } ?? item.resolvedAt.flatMap(Self.parse),
             outcome: ReviewPresentation.outcome(decision),
             decisionID: decision?.id,
-            memberIDs: group.memberTrackIDs)
+            memberIDs: group.memberTrackIDs,
+            hasLegacySnapshot: decision == nil && group.items.contains { $0.reviewDetails?.resolutionSnapshot != nil })
     }
 
     /// `2026-10-03T17:02:00Z` or SQLite's `2026-10-03 17:02:00` (UTC).
@@ -517,6 +520,19 @@ final class ReviewModel {
     /// `Restore`: the same inverse as Undo for one group, outside the undo stack.
     @discardableResult
     func restore(_ row: ReviewResolvedRow, statusBar: StatusBarCenter?) async -> Bool {
+        if row.decisionID == nil, row.hasLegacySnapshot {
+            do {
+                try await dependencies.analysis.undoReviewResolution(groupKey: row.key)
+                dependencies.postChange(false, false)
+                statusBar?.post(ReviewPresentation.restoredMessage(title: row.title))
+                await reload()
+                return true
+            } catch {
+                statusBar?.post("Couldn’t restore “\(row.title)”")
+                await reload()
+                return false
+            }
+        }
         guard let decisionID = row.decisionID else { return false }
         do {
             let record = try await dependencies.decisions.undo(decisionID: decisionID)

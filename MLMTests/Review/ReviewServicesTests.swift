@@ -295,7 +295,7 @@ struct TrackVisibilityTests {
                 track.searchText = DatabaseManager.foldedSearchText(track.rawSearchText)
                 try track.insert(db)
             }
-            try db.execute(sql: "UPDATE tracks SET is_duplicate = 1 WHERE id = 3")
+            try db.execute(sql: "UPDATE tracks SET is_duplicate = 1, hidden_by_review = 1 WHERE id = 3")
         }
     }
 
@@ -315,6 +315,14 @@ struct TrackVisibilityTests {
         #expect(withSummary.counts.all == 2)
     }
 
+    @Test func anOldDuplicateFlagAloneHidesNothing() async throws {
+        let db = try DatabaseManager.inMemory()
+        try seed(db)
+        try await db.write { db in try db.execute(sql: "UPDATE tracks SET is_duplicate = 1 WHERE id = 1") }
+        let rows = try await TrackRepository(database: db).fetchTracks(scope: .all)
+        #expect(rows.compactMap(\.id) == [1, 2])
+    }
+
     @Test func otherListsAreUnchanged() async throws {
         let db = try DatabaseManager.inMemory()
         try seed(db)
@@ -323,7 +331,7 @@ struct TrackVisibilityTests {
             try Int64.fetchAll(db, sql: "SELECT track_id FROM playlist_tracks WHERE playlist_id = ?", arguments: [playlist])
         }
         #expect(inPlaylist == [3], "playlists, genres, folders, queue and sync keep it (IMP-049)")
-        #expect(TrackVisibility.listedSQL == "tracks.is_duplicate = 0")
+        #expect(TrackVisibility.listedSQL == "tracks.hidden_by_review = 0")
     }
 }
 
