@@ -39,6 +39,11 @@ struct DiscoverView: View {
         .onReceive(NotificationCenter.default.publisher(for: .downloadDidComplete)) { _ in Task { await model?.reload() } }
         .onReceive(NotificationCenter.default.publisher(for: .libraryDidDeleteTracks)) { _ in Task { await model?.reload() } }
         .onReceive(NotificationCenter.default.publisher(for: .discoverFindRecommendations)) { _ in find() }
+        // A reel link was routed here: the Reels scope shows it (IMP-110).
+        .onReceive(NotificationCenter.default.publisher(for: .discoverShowReels)) { _ in storedScope = DiscoverScope.reels.rawValue }
+        .onAppear {
+            if !ReelsDropRouter.shared.pendingLinks.isEmpty { storedScope = DiscoverScope.reels.rawValue }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .reelsDidChange)) { _ in Task { await model?.reload() } }
     }
 

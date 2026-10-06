@@ -41,6 +41,8 @@ struct ReelsView: View {
         model.undo = undo
         ReelsDropRouter.shared.model = model
         await model.load()
+        // Links routed here before this view existed (a reel link pasted elsewhere, IMP-110).
+        for url in ReelsDropRouter.shared.takePending() { model.addDroppedLink(url) }
     }
 }
 
@@ -226,9 +228,10 @@ private struct ReelContextMenu: View {
                 }
             }
             Section {
-                // ⌫ on the list opens the same alert (`.onDeleteCommand`); `MenuBarStructureTests`
-                // allows no `.keyboardShortcut` here, so the menu doesn't draw the key.
+                // ⌫ on the list opens the same alert (`.onDeleteCommand`); the menu only teaches
+                // the key (UC-KEY-17) — `MenuBarStructureTests` allows exactly this line here.
                 Button("Delete Reel…", role: .destructive) { model.requestDelete(ids) }
+                    .keyboardShortcut(.delete, modifiers: [])
             }
         }
     }

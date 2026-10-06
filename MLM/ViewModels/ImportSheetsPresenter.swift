@@ -83,6 +83,13 @@ final class ImportSheetsPresenter: QuickAddPresenting {
         }
     }
 
+    /// A reel link: Discover ▸ Reels opens and fetches it (IMP-110). The link waits in
+    /// `ReelsDropRouter` when the Reels view isn't on screen yet.
+    func presentReelLink(_ url: URL) {
+        ReelsDropRouter.shared.route(url)
+        navigation.select(.discover)
+    }
+
     // MARK: Menu commands
 
     /// `Add from Link…` ⌘U: the field is pre-filled when the pasteboard holds a link.

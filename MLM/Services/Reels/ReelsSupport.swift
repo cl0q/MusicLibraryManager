@@ -79,6 +79,27 @@ final class ReelsDropRouter {
     static let shared = ReelsDropRouter()
     weak var model: ReelsModel?
 
+    /// Reel links that arrived while the Reels view wasn't on screen; the view takes them when
+    /// it installs its model (IMP-110).
+    private(set) var pendingLinks: [URL] = []
+
     func addFiles(_ urls: [URL]) { model?.addDropped(urls) }
     func fetchLink(_ url: URL) { model?.addDroppedLink(url) }
+
+    /// A reel link pasted or dropped anywhere: fetched at once when Reels is open, else kept
+    /// until it is; Discover shows its Reels scope either way.
+    func route(_ url: URL) {
+        if let model { model.addDroppedLink(url) } else { pendingLinks.append(url) }
+        NotificationCenter.default.post(name: .discoverShowReels, object: nil)
+    }
+
+    func takePending() -> [URL] {
+        defer { pendingLinks = [] }
+        return pendingLinks
+    }
+}
+
+extension Notification.Name {
+    /// Discover should show its Reels scope (a reel link was routed there, IMP-110).
+    static let discoverShowReels = Notification.Name("MLM.discoverShowReels")
 }

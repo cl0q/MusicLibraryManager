@@ -108,8 +108,15 @@ struct MenuBarStructureTests {
             guard !file.path.hasSuffix("/MLM/Views/Folders/FolderMenus.swift") else { continue }
             // UC-KEY-31: ⌘S is the genre staging bar's `Save n Changes` button — a key with no
             // menu item ("— (button)"), present only while changes are staged (W3-GEN).
-            let fileAllowed = file.path.hasSuffix("/MLM/Views/Genres/GenreSuggestionsSection.swift")
-                ? allowed + [".keyboardShortcut(\"s\", modifiers: .command)"] : allowed
+            // UC-KEY-17: the reel context menu draws ⌫ on `Delete Reel…`; the key itself is the
+            // list's `.onDeleteCommand` (W5-F2) — the menu teaches the key, it does not handle it.
+            var fileAllowed = allowed
+            if file.path.hasSuffix("/MLM/Views/Genres/GenreSuggestionsSection.swift") {
+                fileAllowed += [".keyboardShortcut(\"s\", modifiers: .command)"]
+            }
+            if file.path.hasSuffix("/MLM/Views/Reels/ReelsView.swift") {
+                fileAllowed += [".keyboardShortcut(.delete, modifiers: [])"]
+            }
             for line in text.components(separatedBy: "\n") where line.contains(".keyboardShortcut(") {
                 #expect(fileAllowed.contains { line.contains($0) },
                         "\(file.lastPathComponent): \(line.trimmingCharacters(in: .whitespaces)) — menu keys belong in .commands")
