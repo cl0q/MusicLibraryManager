@@ -1404,6 +1404,49 @@ final class DatabaseManager: Sendable {
             """)
         }
 
+        // ──────────────────────────────────────────────────────────────
+        // Migration v48_review_decisions (W3-REV, DEC-028, DEC-041, PP-SOURCES-01):
+        // sticky Review decisions. `review_decisions` holds one live row per
+        // decided group (`group_key`; Restore deletes it): what was decided
+        // (`decision`), which version was kept, what happened to the others
+        // (`unkept_mode`: hidden · trash) and the exact consequences as JSON
+        // (flags, playlist and sync rows that were re-pointed or dropped, files
+        // moved to the Trash with their Trash URL, tag values before a merge)
+        // so Undo and Restore can put everything back. `review_decided_pairs`
+        // holds every unordered pair of track ids (`track_a < track_b`) a
+        // decision covers: a rescan proposes a group only while it has an
+        // undecided pair. No backfill (earlier decisions never recorded
+        // their consequences; their Restore stays disabled). No foreign keys:
+        // `TrackRepository.delete` removes a deleted track's pairs and
+        // `ReviewDecisionRepository` removes a decision's pairs.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v48_review_decisions") { db in
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS review_decisions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    group_key TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    decision TEXT NOT NULL,
+                    kept_track_id INTEGER,
+                    unkept_mode TEXT,
+                    consequences_json TEXT NOT NULL,
+                    decided_at TEXT NOT NULL
+                )
+            """)
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS review_decided_pairs (
+                    track_a INTEGER NOT NULL,
+                    track_b INTEGER NOT NULL,
+                    decision_id INTEGER NOT NULL,
+                    PRIMARY KEY (track_a, track_b)
+                )
+            """)
+            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS idx_review_decided_pairs_decision
+                ON review_decided_pairs(decision_id)
+            """)
+        }
+
         return migrator
     }
 

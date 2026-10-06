@@ -312,10 +312,16 @@ final class AnalysisRepository: Sendable {
     /// Replace only pending scan proposals in one transaction. Historical
     /// resolutions are intentionally retained, and cancellation rolls back the
     /// delete as well as every new proposal.
+    ///
+    /// Decisions are sticky (IMP-051, PP-SOURCES-01): a proposed group is dropped silently
+    /// unless it contains at least one pair of tracks no decision covers, and a group whose key
+    /// equals an already resolved one (decisions from before `v48`, which recorded no pairs) is
+    /// dropped too. Returns what was actually proposed.
+    @discardableResult
     func replacePendingScanReviewItems(
         _ items: [ReviewItem],
         shouldCancel: @escaping @Sendable () -> Bool = { Task.isCancelled }
-    ) async throws {
+    ) async throws -> (duplicates: Int, conflicts: Int) {
         try await database.write { db in
             guard !shouldCancel() else { throw CancellationError() }
             try db.execute(
@@ -325,11 +331,23 @@ final class AnalysisRepository: Sendable {
                       AND action_type IN ('fingerprint_dedup', 'metadata_conflict')
                     """
             )
+            let decided = try ReviewDecisionRepository.decidedPairs(db)
+            let resolvedKeys = Set(try String.fetchAll(db, sql: """
+                SELECT DISTINCT group_key FROM review_queue
+                WHERE status IN ('resolved', 'dismissed') AND group_key IS NOT NULL
+                """))
+            var duplicates = 0
+            var conflicts = 0
             for item in items {
                 guard !shouldCancel() else { throw CancellationError() }
+                let members = Array(Self.trackIDs(for: [item])).sorted()
+                if let key = item.groupKey, resolvedKeys.contains(key) { continue }
+                if members.count > 1, !ReviewPair.hasUndecidedPair(members, decided: decided) { continue }
                 var review = item
                 try review.insert(db)
+                if item.actionType == "metadata_conflict" { conflicts += 1 } else { duplicates += 1 }
             }
+            return (duplicates, conflicts)
         }
     }
 

@@ -405,9 +405,12 @@ final class DeepScanService {
         // proposals prevents duplicate cards after a re-scan; resolved history
         // remains untouched. The repository rolls back the replacement if
         // cancellation races the final write.
-        try await analysisRepository.replacePendingScanReviewItems(reviewItems) {
+        // Decided groups are dropped there (IMP-051): the counts are what was proposed.
+        let proposed = try await analysisRepository.replacePendingScanReviewItems(reviewItems) {
             tracker.isCancelled || Task.isCancelled
         }
+        result.duplicatesFound = proposed.duplicates
+        result.conflictsFlagged = proposed.conflicts
 
         AppLogger.shared.log(
             "Deep scan: \(result.pairsCompared) pairs, \(result.duplicatesFound) dups, \(result.conflictsFlagged) conflicts",

@@ -127,6 +127,7 @@ struct TrackSearchQueries: Sendable {
     /// Tracks of one availability scope matching the filter (W2-B's scope bar + the field).
     func fetchTracks(scope: TrackAvailabilityScope, filter: SearchFilter) async throws -> [Track] {
         var (predicate, arguments) = TrackSearchSQL.predicate(for: filter)
+        predicate = TrackVisibility.listed(predicate)
         if let scopePredicate = scope.sqlPredicate { predicate = "\(scopePredicate) AND (\(predicate))" }
         let sql = "SELECT * FROM tracks WHERE \(predicate) ORDER BY id"
         let finalArguments = arguments
@@ -146,7 +147,8 @@ struct TrackSearchQueries: Sendable {
     /// The best `limit` tracks for the filter (local first, then by title) and how many match.
     func matchingTracks(filter: SearchFilter, limit: Int) async throws -> (tracks: [Track], total: Int) {
         guard !filter.isEmpty else { return ([], 0) }
-        let (predicate, arguments) = TrackSearchSQL.predicate(for: filter)
+        let (rawPredicate, arguments) = TrackSearchSQL.predicate(for: filter)
+        let predicate = TrackVisibility.listed(rawPredicate)
         let countSQL = "SELECT COUNT(*) FROM tracks WHERE \(predicate)"
         let rowsSQL = """
             SELECT * FROM tracks WHERE \(predicate)
