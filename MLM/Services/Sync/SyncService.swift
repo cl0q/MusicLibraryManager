@@ -900,6 +900,8 @@ final class SyncService {
         }
 
         let libraryRoot = try await finalisingOperationOnThrow(operationId) { try await configRepository.getLibraryRoot() ?? "" }
+        // Which volume this run writes to; a wait for the device ends only when it is back.
+        let volumeIdentity = destinations.volumeIdentity(profile.outputFolder)
         let workerCount = syncTurboLevel.workerCount()
         let limiter = ConcurrencyLimiter(maxConcurrency: workerCount)
         var copiedSoFar = 0
@@ -1073,7 +1075,7 @@ final class SyncService {
                 try? await results?.recordInterruption(profileID: profileId, copiedCount: copiedSoFar, at: Date())
             }
             operationId?.setWaiting(.drive(volumeName: deviceName))
-            guard await waitForDestination(profile.outputFolder) else { break }
+            guard await waitForDestination(profile.outputFolder, identity: volumeIdentity) else { break }
             operationId?.setWaiting(nil)
             if !isRetry {
                 try? await results?.recordResumed(profileID: profileId)
@@ -1170,9 +1172,14 @@ final class SyncService {
         }
     }
 
-    /// Waits until the destination is reachable again; `false` when the sync was cancelled.
-    private func waitForDestination(_ path: String) async -> Bool {
-        while !destinations.isDestinationReachable(path) {
+    /// Waits until the destination is reachable again — on the same volume when the run knew
+    /// its identity (another disk under the same name does not resume it); `false` when the
+    /// sync was cancelled.
+    private func waitForDestination(_ path: String, identity: String?) async -> Bool {
+        func isBack() -> Bool {
+            destinations.isDestinationReachable(path) && (identity == nil || destinations.volumeIdentity(path) == identity)
+        }
+        while !isBack() {
             if cancellationRequested { return false }
             do {
                 try await destinations.waitBeforeRecheck()

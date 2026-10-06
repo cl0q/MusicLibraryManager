@@ -191,6 +191,33 @@ struct SyncRunFixTests {
         #expect(try await env.results.fetch(profileID: profile.id!)?.outcome == .completed)
     }
 
+    @Test func aWaitingRunResumesOnlyWhenTheSameVolumeReturns() async throws {
+        let destinations = ScriptedDestinations(disconnectAfter: 2)
+        destinations.identity = "volume-A"
+        let env = try await SyncTestEnv(destinations: destinations)
+        let device = try env.device("IPOD")
+        let profile = try await env.profile("iPod", device: device)
+        for (id, title) in [(1, "One"), (2, "Two"), (3, "Three")] { try env.localTrack(Int64(id), title: title) }
+        try await env.add([1, 2, 3], to: profile)
+        let filesWhileOtherDisk = LockedBox<Int>(-1)
+        destinations.onWait = { count in
+            if count == 1 {
+                destinations.identity = "volume-B"  // another disk under the same name
+                filesWhileOtherDisk.value = (FileManager.default.enumerator(atPath: device.path)?.allObjects as? [String] ?? []).filter { $0.hasSuffix(".mp3") }.count
+                return true
+            }
+            destinations.identity = "volume-A"  // the same disk is back
+            return true
+        }
+
+        let result = try await env.service.executeSync(profileId: profile.id!)
+
+        #expect(destinations.waits == 2, "the other disk didn’t end the wait")
+        #expect(filesWhileOtherDisk.value == 1, "nothing was written to the other disk")
+        #expect(result.syncedCount == 3)
+        #expect(env.files(in: device).count == 3)
+    }
+
     @Test func aResumedRunCopiesOnlyWhatIsNotOnTheDevice() async throws {
         let env = try await SyncTestEnv()
         let device = try env.device("IPOD")

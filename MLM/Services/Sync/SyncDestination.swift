@@ -13,6 +13,13 @@ protocol SyncDestinationChecking: Sendable {
     func isLibraryReachable(_ libraryRoot: String) -> Bool
     /// The pause between two checks while a sync waits for its device.
     func waitBeforeRecheck() async throws
+    /// Which volume the destination is on (its UUID, else its creation date), `nil` when unknown.
+    /// A waiting run resumes only when the same volume returns.
+    func volumeIdentity(_ path: String) -> String?
+}
+
+extension SyncDestinationChecking {
+    func volumeIdentity(_ path: String) -> String? { nil }
 }
 
 /// The app's checks: the same volume logic as `MountObserver` / `LibraryRootReachability`.
@@ -29,6 +36,10 @@ struct LiveSyncDestinationChecking: SyncDestinationChecking {
 
     func waitBeforeRecheck() async throws {
         try await Task.sleep(for: recheckInterval)
+    }
+
+    func volumeIdentity(_ path: String) -> String? {
+        SyncDestination.volumeIdentity(of: path)
     }
 }
 
@@ -63,6 +74,17 @@ enum SyncDestination {
     /// `/Volumes/<name>` of the destination, or `nil` for a folder on the Mac's own disk.
     static func volumePath(for path: String) -> String? {
         MountObserver.extractVolumePath(from: path)
+    }
+
+    /// `volumeUUIDString` of the destination's volume; without one the volume's creation date;
+    /// `nil` when neither can be read (a path that is not there, a file system without either).
+    static func volumeIdentity(of path: String) -> String? {
+        guard !path.isEmpty else { return nil }
+        let target = volumePath(for: path) ?? path
+        let values = try? URL(fileURLWithPath: target).resourceValues(forKeys: [.volumeUUIDStringKey, .volumeCreationDateKey])
+        if let uuid = values?.volumeUUIDString { return "uuid:" + uuid }
+        if let created = values?.volumeCreationDate { return "created:\(created.timeIntervalSince1970)" }
+        return nil
     }
 
     /// See `SyncDestinationChecking.isDestinationReachable`.

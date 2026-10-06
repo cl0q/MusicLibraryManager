@@ -11,6 +11,8 @@ final class ScriptedDestinations: SyncDestinationChecking, @unchecked Sendable {
     private var connected = true
     private(set) var waits = 0
     var libraryReachable = true
+    /// The scripted volume identity of the device (`nil` = unknown).
+    var identity: String?
     /// Called (off the main actor) while the sync waits for the device; returns whether the
     /// device is connected again afterwards.
     var onWait: (@Sendable (Int) async -> Bool)?
@@ -35,6 +37,8 @@ final class ScriptedDestinations: SyncDestinationChecking, @unchecked Sendable {
     }
 
     func isLibraryReachable(_ libraryRoot: String) -> Bool { lock.withLock { libraryReachable } }
+
+    func volumeIdentity(_ path: String) -> String? { lock.withLock { identity } }
 
     func waitBeforeRecheck() async throws {
         let count = lock.withLock { waits += 1; return waits }
