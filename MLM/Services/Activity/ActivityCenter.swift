@@ -610,7 +610,7 @@ final class ActivityCenter {
         currentLibraryID = libraryID
         self.failureSource = failureSource
         attaching.insert(libraryID)
-        try? await store.closeInterrupted(at: scheduler.now())
+        _ = try? await store.closeInterrupted(at: scheduler.now())
         libraryStore = store
         releaseHeldWrites(key: libraryID, store: store)
         await loadHistory(from: store, libraryID: libraryID)
@@ -620,7 +620,7 @@ final class ActivityCenter {
     /// Attaches the app-level store (operations without a library).
     func attachAppLevel(store: any ActivityHistoryStore) async {
         attaching.insert(Self.appKey)
-        try? await store.closeInterrupted(at: scheduler.now())
+        _ = try? await store.closeInterrupted(at: scheduler.now())
         appStore = store
         releaseHeldWrites(key: Self.appKey, store: store)
         await loadHistory(from: store, libraryID: nil)
