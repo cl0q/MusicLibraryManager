@@ -54,6 +54,9 @@ enum DropTarget: Equatable, Sendable {
     /// A genre's track table (D-STUDIO-TRACK-TO-GENRE): tracks are **staged** for the genre
     /// (`Save n Changes` commits them).
     case genreTable(key: String, name: String)
+    /// Between the rows of the sidebar's Sync section, before the profile `before` (nil = at the
+    /// end): a dragged sync profile moves there (IMP-106). Only profile rows are taken.
+    case syncProfileOrder(before: Int64?)
     /// A card in the Albums grid (W4-2): tracks join the album (undoable), an image sets its cover.
     case albumCard(id: Int64, name: String)
     /// An album page's cover well (W4-2) — images only.
@@ -182,6 +185,9 @@ enum DropDecision: Equatable, Sendable {
     case movePlaylistItems([PlaylistSidebarItemID], folderID: Int64?, before: PlaylistSidebarItemID?)
     /// Playlists / folders dropped on the Playlists section: first among the top-level rows.
     case movePlaylistItemsToTop([PlaylistSidebarItemID])
+    /// Sync profiles placed in the Sync section's order (IMP-106): before `before` (nil = at the
+    /// end). One undo step, `Reorder Sync Profiles`.
+    case moveSyncProfiles([Int64], before: Int64?)
     /// Tracks onto a playlist folder: a new playlist inside it (named inline).
     case newPlaylistInFolder([Int64], folderID: Int64)
     /// Finder audio onto a playlist folder: import, then a new playlist inside it.
@@ -235,7 +241,7 @@ enum DropRules {
              (.playlistCardInManualOrder, .files), (.playlistCardInManualOrder, .imageData),
              (.playlistCardInManualOrder, .link):
             return true
-        case (.syncProfile, .tracks), (.syncProfile, .playlists):
+        case (.syncProfile, .tracks), (.syncProfile, .playlists), (.syncProfileOrder, .playlists):
             return true
         case (.fixedRow, .files):
             return true
@@ -358,7 +364,7 @@ enum DropRules {
         case .genreTable(let key, let name): return .stageForGenre(ids, genreKey: key, genreName: name)
         case .albumCard(let id, let name): return .addTracksToAlbum(ids, albumID: id, albumName: name)
         case .fixedRow, .playlistCover, .playlistCard, .window, .playlistOrder, .playlistCardInManualOrder, .folderRow, .reels,
-             .albumCover:
+             .albumCover, .syncProfileOrder:
             return .refuse(nil)
         }
     }
@@ -368,6 +374,17 @@ enum DropRules {
            playlists.contains(where: { $0.libraryId.map { $0 != libraryID } ?? false }) {
             return .refuse(DropWords.otherLibrary)
         }
+        // A dragged sync profile only reorders the Sync section (IMP-106): dropped on another
+        // profile's row it goes before it, between the rows where the line shows.
+        let profileIDs = playlists.compactMap(\.syncProfileId)
+        if !profileIDs.isEmpty {
+            switch target {
+            case .syncProfileOrder(let before): return .moveSyncProfiles(profileIDs, before: before)
+            case .syncProfile(let id, _): return .moveSyncProfiles(profileIDs, before: id)
+            default: return .refuse(nil)
+            }
+        }
+        if case .syncProfileOrder = target { return .refuse(nil) }
         // Folder rows only reorder (W3-PL); every other target takes playlists alone.
         var seenItems = Set<PlaylistSidebarItemID>()
         let items = playlists.map(\.sidebarItem).filter { seenItems.insert($0).inserted }
@@ -404,7 +421,7 @@ enum DropRules {
             return ids.isEmpty ? .refuse(nil) : .playNextPlaylists(ids)
         case .playlistsSection, .fixedRow, .playlistCover, .playlistCard, .window,
              .playlistFolder, .playlistOrder, .playlistCardInManualOrder, .folderRow, .genreRow, .genreTable, .reels,
-             .albumCard, .albumCover:
+             .albumCard, .albumCover, .syncProfileOrder:
             return .refuse(nil)
         }
     }
@@ -447,7 +464,7 @@ enum DropRules {
             case .playlistsSection, .window, .fixedRow, .folderRow: return .importM3U(m3u.url, playlistID: nil)
             case .playlistFolder(let id, _): return .importM3UInFolder(m3u.url, folderID: id)
             case .syncProfile, .player, .playlistCover, .playlistCard, .playlistOrder, .playlistCardInManualOrder,
-                 .genreRow, .genreTable, .reels, .albumCard, .albumCover:
+                 .genreRow, .genreTable, .reels, .albumCard, .albumCover, .syncProfileOrder:
                 return .refuse(nil)
             }
         }
@@ -477,7 +494,7 @@ enum DropRules {
         case .folderRow(let path, _): return .importFilesIntoLibrary(urls, folderPath: path)
         case .playlistFolder(let id, _): return .importFilesAsNewPlaylistInFolder(urls, folderID: id)
         case .syncProfile, .player, .playlistCover, .playlistCard, .playlistOrder, .playlistCardInManualOrder,
-             .genreRow, .genreTable, .reels, .albumCard, .albumCover:
+             .genreRow, .genreTable, .reels, .albumCard, .albumCover, .syncProfileOrder:
             return .refuse(nil)
         }
     }

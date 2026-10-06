@@ -88,6 +88,11 @@ struct SidebarView: View {
                 ForEach(syncProfiles) { profile in
                     syncProfileRow(profile)
                 }
+                // A drag between the rows reorders the profiles (IMP-106), one undo step.
+                .onInsert(of: [.draggedPlaylist]) { index, providers in
+                    let profiles = syncProfiles
+                    reorderSyncProfiles(providers, before: index < profiles.count ? profiles[index].id : nil)
+                }
                 if syncProfiles.isEmpty {
                     // UC-EMPTY-01: the section says what fills it.
                     VStack(alignment: .leading, spacing: 2) {
@@ -375,6 +380,8 @@ struct SidebarView: View {
                 }
                 // Tracks and playlists add to the profile; the open page doesn't switch.
                 .dropTarget(.syncProfile(id: id, name: profile.name))
+                // A profile row drags to reorder the Sync section (IMP-106).
+                .draggable(PlaylistDragItem.syncProfile(id, libraryId: container.activeLibrary?.libraryId))
             }
         }
     }
@@ -384,6 +391,15 @@ struct SidebarView: View {
     private func reorder(_ providers: [NSItemProvider], folderID: Int64?, before: PlaylistSidebarItemID?) {
         let performer = DropPerformer(container: container, shell: actions, statusBar: statusBar, undo: undo ?? .main)
         let target = DropTarget.playlistOrder(folderID: folderID, before: before)
+        Task { @MainActor in
+            guard let content = await DropLoader.load(providers) else { return }
+            performer.perform(DropRules.decide(content, onto: target, context: DropContext.current(container)))
+        }
+    }
+
+    private func reorderSyncProfiles(_ providers: [NSItemProvider], before: Int64?) {
+        let performer = DropPerformer(container: container, shell: actions, statusBar: statusBar, undo: undo ?? .main)
+        let target = DropTarget.syncProfileOrder(before: before)
         Task { @MainActor in
             guard let content = await DropLoader.load(providers) else { return }
             performer.perform(DropRules.decide(content, onto: target, context: DropContext.current(container)))

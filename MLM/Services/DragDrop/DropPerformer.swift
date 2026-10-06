@@ -103,6 +103,8 @@ struct DropPerformer {
             Task { await edits?.movePlaylistItems(items, into: folderID, before: before) }
         case .movePlaylistItemsToTop(let items):
             Task { await edits?.movePlaylistItemsToTop(items) }
+        case .moveSyncProfiles(let ids, let before):
+            Task { await edits?.moveSyncProfiles(ids, before: before) }
         case .newPlaylistInFolder(let ids, let folderID):
             Task { await edits?.newPlaylist(inFolder: folderID, trackIDs: ids) }
         case .importFilesAsNewPlaylistInFolder(let urls, let folderID):

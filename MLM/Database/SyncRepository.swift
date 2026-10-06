@@ -14,7 +14,8 @@ final class SyncRepository: Sendable {
     /// Fetch all sync profiles.
     func fetchAll() async throws -> [SyncProfile] {
         try await database.read { db in
-            try SyncProfile.order(SyncProfile.Columns.name).fetchAll(db)
+            // The user's order (v56 `position`), then name — the sidebar's Sync section (IMP-106).
+            try SyncProfile.fetchAll(db, sql: "SELECT * FROM sync_profiles ORDER BY position, name, id")
         }
     }
 
@@ -38,7 +39,39 @@ final class SyncRepository: Sendable {
                 dateModified: nil
             )
             try profile.insert(db)
+            try Self.placeLast(db, profileId: profile.id)
             return profile
+        }
+    }
+
+    /// A new profile goes last in the user's order (v56).
+    private static func placeLast(_ db: Database, profileId: Int64?) throws {
+        guard let profileId else { return }
+        try db.execute(sql: """
+            UPDATE sync_profiles SET position = (SELECT COALESCE(MAX(position), 0) + 1 FROM sync_profiles)
+            WHERE id = ?
+            """, arguments: [profileId])
+    }
+
+    /// The profile ids in the user's order.
+    func profileOrder() async throws -> [Int64] {
+        try await database.read { db in
+            try Int64.fetchAll(db, sql: "SELECT id FROM sync_profiles ORDER BY position, name, id")
+        }
+    }
+
+    /// Puts the profiles in `ids` order (positions 1…n). Profiles missing from `ids` (created
+    /// since) follow in their current order; unknown ids are ignored (IMP-106).
+    func setProfileOrder(_ ids: [Int64]) async throws {
+        try await database.write { db in
+            let current = try Int64.fetchAll(db, sql: "SELECT id FROM sync_profiles ORDER BY position, name, id")
+            let known = Set(current)
+            var seen = Set<Int64>()
+            let wanted = ids.filter { known.contains($0) && seen.insert($0).inserted }
+            let ordered = wanted + current.filter { !seen.contains($0) }
+            for (index, id) in ordered.enumerated() {
+                try db.execute(sql: "UPDATE sync_profiles SET position = ? WHERE id = ?", arguments: [index + 1, id])
+            }
         }
     }
 
@@ -96,6 +129,7 @@ final class SyncRepository: Sendable {
             )
             try copy.insert(db)
             guard let copyID = copy.id else { return copy }
+            try Self.placeLast(db, profileId: copyID)
 
             try db.execute(
                 sql: """

@@ -342,6 +342,48 @@ final class ShellEdits {
         )
     }
 
+    /// Moves sync profiles before `before` (nil = to the end) in the sidebar's Sync section as
+    /// one undo step (`Reorder Sync Profiles`, IMP-106). Nothing happens when the order would
+    /// not change.
+    func moveSyncProfiles(_ profileIDs: [Int64], before: Int64?) async {
+        guard let repository = dependencies.syncProfiles() else { return }
+        let didChange = dependencies.syncProfileDidChange
+        do {
+            try await undo.perform(
+                "Reorder Sync Profiles",
+                failure: "Couldn’t reorder the sync profiles",
+                do: { () async throws -> (before: [Int64], after: [Int64], names: [String])? in
+                    let profiles = try await repository.fetchAll()
+                    let order = profiles.compactMap(\.id)
+                    let after = SyncProfileOrder.moved(profileIDs, before: before, in: order)
+                    guard after != order else { return nil }
+                    try await repository.setProfileOrder(after)
+                    let moved = Set(profileIDs)
+                    let names = profiles.filter { $0.id.map(moved.contains) ?? false }.map(\.name)
+                    await didChange(profileIDs.first ?? 0)
+                    return (order, after, names)
+                },
+                undo: { change in
+                    try await repository.setProfileOrder(change.before)
+                    await didChange(profileIDs.first ?? 0)
+                    return change
+                },
+                redo: { change in
+                    try await repository.setProfileOrder(change.after)
+                    await didChange(profileIDs.first ?? 0)
+                    return change
+                },
+                message: { change in
+                    change.names.count == 1
+                        ? "Moved “\(change.names[0])”"
+                        : "Moved \(StatusBarText.count(change.names.count, "sync profile", "sync profiles"))"
+                }
+            )
+        } catch {
+            // Reported in the status bar by the center.
+        }
+    }
+
     private static func renameProfile(_ id: Int64, to name: String, currentName: String, repository: SyncRepository) async throws {
         let profiles = try await repository.fetchAll()
         guard profiles.contains(where: { $0.id == id }) else {
