@@ -32,10 +32,16 @@ final class BackupSettingsViewModel {
         static let restoreIncomplete = "This backup is incomplete and can't be restored. Choose another backup."
         static let restoreSafetyBackupFailed = "MLM couldn't save a copy of your current library, so nothing was restored. Check the backup folder and try again."
         static let generic = "Something went wrong. Try again."
-        static let relaunchRequiredTitle = "Restore didn't finish"
+        static let relaunchRequiredTitle = "Restore didn’t finish"
         static let relaunchRequired = "MLM couldn't replace the library files and needs to relaunch. If your library looks wrong afterwards, restore the \"Before restore\" backup."
         static let backupCreated = "Backup created"
         static let never = "Never"
+        static let deleteLastRefused = "This is the newest backup of the library and can’t be deleted."
+        static let footer = "Each backup contains the library database and playlist covers. Audio files and account credentials are never included."
+        static let scheduleFooter = "MLM also backs up before updating the library database, before a restore and before library file setup, whatever the schedule."
+        static let keepFooter = "Older backups are removed after a new one succeeds."
+        static let listFooter = "Only backups of the open library are listed. Restoring never crosses libraries."
+        static let defaultLocation = "Default location"
     }
 
     // MARK: - State
@@ -57,6 +63,14 @@ final class BackupSettingsViewModel {
     private(set) var errorDetails: String?
     /// The restore failed after the database was closed: the only way forward is a relaunch.
     private(set) var isRelaunchRequired = false
+    /// Back up automatically (DEC-036).
+    private(set) var schedule: BackupSchedule = .default
+    /// Keep (DEC-036).
+    private(set) var retention: BackupRetention = .default
+    /// Whether the backup folder can be reached now (ST-BACKUP.E04 / N03).
+    private(set) var destinationReach: LocationReach = .notSet
+    /// Tracks in the library now (for the restore consequence).
+    private(set) var currentTrackCount: Int?
 
     var isBusy: Bool { phase != .idle }
 
@@ -65,15 +79,41 @@ final class BackupSettingsViewModel {
     private let service: BackupService
     private let configRepository: ConfigRepository
     private let relaunch: @MainActor () -> Void
+    /// Activity's queued, running and paused operations (the restore guard, PP-SETTINGS-15).
+    private let activeOperations: @MainActor () -> [ActivityOperation]
+    private let countTracks: @Sendable () async -> Int?
+    private let isVolumeMounted: @Sendable (URL) -> Bool
 
+    /// - Parameter relaunch: after a successful restore. The app passes
+    ///   `relaunchIntoLibrary(package:)`, so the restored library opens even when “Open the last
+    ///   library at launch” is off (PP-SETTINGS-16).
     init(
         service: BackupService,
         configRepository: ConfigRepository,
-        relaunch: @escaping @MainActor () -> Void = { BackupService.relaunchApp() }
+        relaunch: @escaping @MainActor () -> Void = { BackupService.relaunchApp() },
+        activeOperations: @escaping @MainActor () -> [ActivityOperation] = { ActivityCenter.shared.activeOperations },
+        countTracks: @escaping @Sendable () async -> Int? = { nil },
+        isVolumeMounted: @escaping @Sendable (URL) -> Bool = { DataLocationsViewModel.isVolumeMounted($0) }
     ) {
         self.service = service
         self.configRepository = configRepository
         self.relaunch = relaunch
+        self.activeOperations = activeOperations
+        self.countTracks = countTracks
+        self.isVolumeMounted = isVolumeMounted
+    }
+
+    /// The relaunch after a restore: the library file to open next time is remembered first
+    /// (W3-LAUNCH's pending open), then MLM relaunches.
+    static func relaunchIntoLibrary(
+        package: URL?,
+        pendingOpen: LibraryLaunchCoordinator.PendingOpenStore = .userDefaults,
+        relaunch: @escaping @MainActor () -> Void = { BackupService.relaunchApp() }
+    ) -> @MainActor () -> Void {
+        {
+            if let package { pendingOpen.set(package.path) }
+            relaunch()
+        }
     }
 
     // MARK: - Actions
@@ -90,6 +130,14 @@ final class BackupSettingsViewModel {
         let configured = (try? await configRepository.getBackupDestination()) ?? nil
         isDefaultDestination = configured?.isEmpty ?? true
         destination = await service.destinationDirectory()
+        schedule = await service.schedule()
+        retention = await service.retention()
+        currentTrackCount = await countTracks()
+        let mounted = isVolumeMounted
+        let folder = destination
+        destinationReach = await Task.detached {
+            LocationReach.of(folder, isVolumeMounted: mounted, exists: { FileManager.default.fileExists(atPath: $0.path) })
+        }.value
 
         do {
             let list = try await service.listBackups()
@@ -158,6 +206,85 @@ final class BackupSettingsViewModel {
         await refresh()
     }
 
+    // MARK: - Schedule and retention
+
+    func setSchedule(_ schedule: BackupSchedule) async {
+        clearMessages()
+        do {
+            try await service.setSchedule(schedule)
+            self.schedule = schedule
+        } catch {
+            present(error, context: .backup)
+        }
+    }
+
+    func setRetention(_ retention: BackupRetention) async {
+        guard phase == .idle else { return }
+        clearMessages()
+        do {
+            try await service.setRetention(retention)
+            self.retention = retention
+        } catch {
+            present(error, context: .backup)
+        }
+        await refresh()
+    }
+
+    // MARK: - Delete
+
+    func delete(_ info: BackupInfo) async {
+        guard phase == .idle else { return }
+        clearMessages()
+        do {
+            try await service.deleteBackup(info)
+        } catch BackupError.lastCompleteBackup {
+            errorMessage = Copy.deleteLastRefused
+        } catch {
+            present(error, context: .backup)
+        }
+        await refresh()
+    }
+
+    /// Whether `info` may be deleted: never the newest complete backup.
+    func canDelete(_ info: BackupInfo) -> Bool {
+        backups.first(where: \.isComplete).map { BackupService.pathKey($0.url) } != BackupService.pathKey(info.url)
+    }
+
+    // MARK: - Restore guard (PP-SETTINGS-15)
+
+    /// The work that blocks a restore now: everything running, queued or paused except work
+    /// that waits for the library drive. `nil` when a restore may start.
+    func restoreBlockers() -> RunningWorkSummary? {
+        let summary = RunningWorkSummary(operations: activeOperations())
+        return summary.isEmpty ? nil : summary
+    }
+
+    /// `Can’t restore while 2 downloads and 1 sync are running.` + one line per operation.
+    static func restoreRefusal(_ summary: RunningWorkSummary) -> String {
+        let parts = summary.headline.replacingOccurrences(of: " will stop:", with: "")
+        let verb = summary.operationCount == 1 ? "is" : "are"
+        var text = "MLM can’t restore while \(parts) \(verb) running. Let them finish or cancel them in Activity, then restore."
+        for line in summary.lines { text += "\n• " + line }
+        if summary.moreCount > 0 { text += "\n• and \(summary.moreCount.formatted(.number)) more" }
+        return text
+    }
+
+    /// A-SET-RESTORE's title: `Restore the backup from 4 Oct 2026, 08:57?`
+    static func restoreTitle(_ info: BackupInfo) -> String {
+        "Restore the backup from \(formatDate(info.createdAt))?"
+    }
+
+    /// A-SET-RESTORE's message: what happens, in numbers, and how to undo it.
+    func restoreMessage(for info: BackupInfo, libraryName: String) -> String {
+        var text = "MLM first saves a copy of the current library (“Before restore”), then replaces the library database and playlist covers with this backup. MLM quits and reopens in the restored “\(libraryName)”. Audio files are not changed."
+        if let now = currentTrackCount, let then = info.trackCount, now > then {
+            let added = now - then
+            text += "\n\n\(added == 1 ? "1 track" : "\(added.formatted()) tracks") added since this backup \(added == 1 ? "leaves" : "leave") the library; their files stay in the library folder."
+        }
+        text += "\n\nTo undo, restore the “Before restore” backup."
+        return text
+    }
+
     /// Restore `info` and relaunch. Failures before the database closed leave the pane
     /// usable; `.restoreSwapFailed` requires a relaunch, which `acknowledgeRelaunchRequired()`
     /// performs once the user has read the message.
@@ -166,6 +293,11 @@ final class BackupSettingsViewModel {
         clearMessages()
         guard info.isComplete else {
             errorMessage = Copy.restoreIncomplete
+            return
+        }
+        // Work that started after the alert opened still blocks it (PP-SETTINGS-15).
+        if let blockers = restoreBlockers() {
+            errorMessage = Self.restoreRefusal(blockers)
             return
         }
 
@@ -231,6 +363,8 @@ final class BackupSettingsViewModel {
             return Copy.relaunchRequired
         case .wrongLibrary:
             return Copy.generic
+        case .lastCompleteBackup:
+            return Copy.deleteLastRefused
         }
     }
 
@@ -242,7 +376,7 @@ final class BackupSettingsViewModel {
             return detail
         case .bundleIncomplete(let url):
             return url.path
-        case .destinationNotWritable, .restoreSafetyBackupFailed, .wrongLibrary:
+        case .destinationNotWritable, .restoreSafetyBackupFailed, .wrongLibrary, .lastCompleteBackup:
             return nil
         }
     }

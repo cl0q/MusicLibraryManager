@@ -12,6 +12,80 @@ enum BackupReason: String, Codable, Sendable {
     case preAdoption
 }
 
+/// When MLM backs up on its own (DEC-036, ST-BACKUP.N01). Stored per library in
+/// `app_config["backup_schedule"]`; the default is the behaviour before W3-SET (daily, at launch).
+/// Whatever the schedule, MLM also backs up before a database update, a restore and library
+/// file setup.
+enum BackupSchedule: String, CaseIterable, Sendable {
+    case off
+    case daily
+    case weekly
+    /// When MLM quits (`applicationWillTerminate`).
+    case onQuit = "on_quit"
+
+    static let configKey = "backup_schedule"
+    static let `default` = BackupSchedule.daily
+
+    /// The segment title.
+    var title: String {
+        switch self {
+        case .off: "Off"
+        case .daily: "Daily"
+        case .weekly: "Weekly"
+        case .onQuit: "On quit"
+        }
+    }
+
+    /// The age the newest complete backup must reach before the launch backup is due.
+    var minimumAgeAtLaunch: TimeInterval? {
+        switch self {
+        case .daily: 86_400
+        case .weekly: 7 * 86_400
+        case .off, .onQuit: nil
+        }
+    }
+
+    init(configValue: String?) {
+        self = configValue.flatMap(BackupSchedule.init(rawValue:)) ?? .default
+    }
+}
+
+/// How many backups of a library are kept (DEC-036, ST-BACKUP.N02). Stored per library in
+/// `app_config["backup_keep"]`; the default is the old fixed 10. Older backups are removed
+/// after a new one succeeds — never the newest complete one.
+enum BackupRetention: String, CaseIterable, Sendable {
+    case last5 = "5"
+    case last10 = "10"
+    case last30 = "30"
+    case all
+
+    static let configKey = "backup_keep"
+    static let `default` = BackupRetention.last10
+
+    var title: String {
+        switch self {
+        case .last5: "Last 5"
+        case .last10: "Last 10"
+        case .last30: "Last 30"
+        case .all: "All"
+        }
+    }
+
+    /// Bundles kept after a prune; `nil` = keep everything.
+    var keep: Int? {
+        switch self {
+        case .last5: 5
+        case .last10: 10
+        case .last30: 30
+        case .all: nil
+        }
+    }
+
+    init(configValue: String?) {
+        self = configValue.flatMap(BackupRetention.init(rawValue:)) ?? .default
+    }
+}
+
 /// Metadata for a single backup bundle.
 struct BackupInfo: Codable, Sendable, Equatable {
     let url: URL
@@ -87,6 +161,8 @@ enum BackupError: Error, Equatable {
     case restoreSwapFailed(String)
     /// The bundle belongs to another library. Restores never cross libraries.
     case wrongLibrary
+    /// The newest complete backup can't be deleted (W3-SET).
+    case lastCompleteBackup
 }
 
 /// Creates, lists, prunes, and restores timestamped backup bundles of the music library.
@@ -123,7 +199,6 @@ final class BackupService: Sendable {
     private static let manifestName = "backup.json"
     private static let snapshotName = "music_library.db"
     private static let coversName = "playlist-covers"
-    private static let defaultKeep = 10
     private static let staleTempAge: TimeInterval = 3600 // 1 h
 
     /// Decoder that mirrors `writeManifest`'s ISO 8601 date encoding.
@@ -183,6 +258,29 @@ final class BackupService: Sendable {
         )
     }
 
+    // MARK: - Schedule and retention (DEC-036)
+
+    func schedule() async -> BackupSchedule {
+        BackupSchedule(configValue: (try? await configRepository.get(key: BackupSchedule.configKey)) ?? nil)
+    }
+
+    func setSchedule(_ schedule: BackupSchedule) async throws {
+        try await configRepository.set(key: BackupSchedule.configKey, value: schedule.rawValue)
+    }
+
+    func retention() async -> BackupRetention {
+        BackupRetention(configValue: (try? await configRepository.get(key: BackupRetention.configKey)) ?? nil)
+    }
+
+    /// Stores the setting and applies it at once (a smaller number removes the oldest backups
+    /// now, like after the next backup would).
+    @discardableResult
+    func setRetention(_ retention: BackupRetention) async throws -> [URL] {
+        try await configRepository.set(key: BackupRetention.configKey, value: retention.rawValue)
+        guard let keep = retention.keep else { return [] }
+        return try await pruneBackups(keep: keep)
+    }
+
     // MARK: - List
 
     /// Enumerate backup bundles at the destination, newest first.
@@ -218,6 +316,46 @@ final class BackupService: Sendable {
         return try await createBackup(reason: .scheduled)
     }
 
+    /// The launch backup of the schedule (W3-SET): Daily / Weekly when the newest complete
+    /// backup is old enough; Off and On quit make none at launch. `nil` = nothing was due.
+    func createScheduledBackupIfDue() async throws -> BackupInfo? {
+        guard let minimumAge = await schedule().minimumAgeAtLaunch else { return nil }
+        return try await createBackupIfDue(minimumAge: minimumAge)
+    }
+
+    /// The `On quit` backup, synchronous (called from `applicationWillTerminate`). Returns
+    /// `nil` when the schedule is another one, or when the database can't be read any more
+    /// (a restore closed it — the restore made its own backup).
+    func backUpOnQuitIfScheduled() -> BackupInfo? {
+        let scope: BundleScope
+        let configured: (schedule: String?, keep: String?)
+        do {
+            configured = try database.read { db in
+                (try String.fetchOne(db, sql: "SELECT value FROM app_config WHERE key = ?",
+                                     arguments: [BackupSchedule.configKey]),
+                 try String.fetchOne(db, sql: "SELECT value FROM app_config WHERE key = ?",
+                                     arguments: [BackupRetention.configKey]))
+            }
+        } catch {
+            return nil
+        }
+        guard BackupSchedule(configValue: configured.schedule) == .onQuit else { return nil }
+        scope = Self.scope(of: database, destinationOverride: nil, backupsRoot: defaultBackupsRoot)
+        do {
+            let info = try Self.writeBundle(
+                database: database, databasePath: databasePath, coversDirectory: coversDirectory,
+                destination: scope.destination, reason: .scheduled, libraryId: scope.libraryId,
+                fileManager: fileManager, now: now)
+            if let keep = BackupRetention(configValue: configured.keep).keep {
+                _ = try? Self.pruneBundles(in: scope, keep: keep, fileManager: fileManager)
+            }
+            return info
+        } catch {
+            AppLogger.shared.error("Backup on quit failed: \(error)", source: "Backup")
+            return nil
+        }
+    }
+
     private func makeBackup(reason: BackupReason, prune: Bool) async throws -> BackupInfo {
         let scope = await scope()
         let destination = scope.destination
@@ -232,9 +370,9 @@ final class BackupService: Sendable {
             fileManager: fileManager,
             now: now
         )
-        if prune {
+        if prune, let keep = await retention().keep {
             // Best-effort: a failed prune never fails the backup itself.
-            _ = try? Self.pruneBundles(in: scope, keep: Self.defaultKeep, fileManager: fileManager)
+            _ = try? Self.pruneBundles(in: scope, keep: keep, fileManager: fileManager)
         }
         return info
     }
@@ -439,7 +577,9 @@ final class BackupService: Sendable {
             now: { Date() }
         )
         // Best-effort: a failed prune never aborts startup.
-        _ = try? pruneBundles(in: scope, keep: defaultKeep, fileManager: fileManager)
+        if let keep = configuredRetention(of: pool).keep {
+            _ = try? pruneBundles(in: scope, keep: keep, fileManager: fileManager)
+        }
         return info.url
     }
 
@@ -468,8 +608,19 @@ final class BackupService: Sendable {
             fileManager: fileManager,
             now: now
         )
-        _ = try? pruneBundles(in: scope, keep: defaultKeep, fileManager: fileManager)
+        if let keep = configuredRetention(of: database).keep {
+            _ = try? pruneBundles(in: scope, keep: keep, fileManager: fileManager)
+        }
         return info
+    }
+
+    /// `Keep` of the library in `database` (W3-SET), read the same way as its destination.
+    private static func configuredRetention(of database: any DatabaseReader) -> BackupRetention {
+        let value = (try? database.read { db in
+            try String.fetchOne(db, sql: "SELECT value FROM app_config WHERE key = ?",
+                                arguments: [BackupRetention.configKey])
+        }) ?? nil
+        return BackupRetention(configValue: value)
     }
 
     /// Gives bundles made from `sourceDatabasePath` while it had no library id to the library
@@ -531,6 +682,25 @@ final class BackupService: Sendable {
     @discardableResult
     func pruneBackups(keep: Int = 10) async throws -> [URL] {
         try Self.pruneBundles(in: await scope(), keep: keep, fileManager: fileManager)
+    }
+
+    // MARK: - Delete
+
+    /// Moves one backup to the Trash (`Delete…` on a backup row). Refused for the newest
+    /// complete backup of the library — the one a restore would fall back to.
+    func deleteBackup(_ info: BackupInfo) async throws {
+        let all = try await listBackups()
+        let target = Self.pathKey(info.url)
+        guard all.contains(where: { Self.pathKey($0.url) == target }) else { return }
+        if all.first(where: \.isComplete).map({ Self.pathKey($0.url) }) == target {
+            throw BackupError.lastCompleteBackup
+        }
+        try fileManager.trashItem(at: info.url, resultingItemURL: nil)
+    }
+
+    /// A bundle's path without a trailing slash or `/private` prefix differences.
+    static func pathKey(_ url: URL) -> String {
+        url.standardizedFileURL.resolvingSymlinksInPath().path
     }
 
     // MARK: - Internals
@@ -664,6 +834,10 @@ final class BackupService: Sendable {
         let incomplete = all.filter { !$0.isComplete }.sorted { $0.createdAt < $1.createdAt }
         let complete = all.filter { $0.isComplete }.sorted { $0.createdAt < $1.createdAt }
 
+        // The newest complete bundle is never removed: a library always keeps one backup it can
+        // be restored from (W3-SET).
+        let protected = all.first(where: \.isComplete)?.url
+
         var toRemove: [BackupInfo] = []
         var remaining = all.count
 
@@ -674,7 +848,7 @@ final class BackupService: Sendable {
             remaining -= 1
         }
         // Then complete, oldest first.
-        for info in complete {
+        for info in complete where info.url != protected {
             guard remaining > keep else { break }
             toRemove.append(info)
             remaining -= 1

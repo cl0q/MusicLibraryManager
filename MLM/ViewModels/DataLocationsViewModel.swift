@@ -11,6 +11,58 @@ struct DataLocations: Sendable, Equatable {
     var libraryFile: URL? = nil
 }
 
+/// Whether a folder can be reached now, in the words Settings uses for every location
+/// (UC §15.2, DEC-014): the library folder, the backup folder, the transcode cache.
+enum LocationReach: Equatable, Sendable {
+    /// On the Mac's own disk and present.
+    case onThisMac
+    /// On a mounted volume (`/Volumes/<name>`) and present.
+    case connected(volume: String)
+    /// Its volume is not mounted.
+    case notConnected(volume: String)
+    /// Its volume is there but the folder isn't (`Not found` — not a drive state, IMP-024).
+    case notFound
+    /// No folder configured.
+    case notSet
+
+    static func of(_ url: URL?, isVolumeMounted: (URL) -> Bool, exists: (URL) -> Bool) -> LocationReach {
+        guard let url else { return .notSet }
+        let volume = MountObserver.extractVolumePath(from: url.path).map { URL(fileURLWithPath: $0).lastPathComponent }
+        if let volume, !isVolumeMounted(url) { return .notConnected(volume: volume) }
+        guard exists(url) else { return .notFound }
+        return volume.map { .connected(volume: $0) } ?? .onThisMac
+    }
+
+    var isReachable: Bool {
+        switch self {
+        case .onThisMac, .connected: true
+        case .notConnected, .notFound, .notSet: false
+        }
+    }
+
+    /// `Connected · on “Lexxar”` · `Not connected — on “Lexxar”` · `Not found` ·
+    /// `Connected — on this Mac` · `No library folder set` (only for the library folder).
+    var text: String {
+        switch self {
+        case .onThisMac: "Connected — on this Mac"
+        case .connected(let volume): "Connected · on “\(volume)”"
+        case .notConnected(let volume): "Not connected — on “\(volume)”"
+        case .notFound: "Not found"
+        case .notSet: "No library folder set"
+        }
+    }
+
+    /// Symbol for the state (orange/red tint only for the failures, UC-COLOR-05).
+    var systemImage: String {
+        switch self {
+        case .onThisMac, .connected: "checkmark.circle"
+        case .notConnected: "externaldrive.badge.xmark"
+        case .notFound: "questionmark.folder"
+        case .notSet: "folder.badge.questionmark"
+        }
+    }
+}
+
 /// What the Backup tab knows about the backup folder.
 struct BackupStatus: Sendable, Equatable {
     var destination: URL?

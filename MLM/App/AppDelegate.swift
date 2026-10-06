@@ -69,6 +69,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         // The queue is kept when MLM quits (W2-D): the last save, synchronously.
         DependencyContainer.shared.playbackViewModel?.flushQueuePersistence()
+        // Backup › On quit (W3-SET, DEC-036): synchronous, before the history flush.
+        if let info = DependencyContainer.shared.backupService?.backUpOnQuitIfScheduled() {
+            AppLogger.shared.info("Backup on quit created: \(info.url.lastPathComponent)", source: "Backup")
+        }
         // Activity's queued history writes: end states and failure ids (W3-ACT S8).
         ActivityCenter.shared.flushBeforeQuit()
     }

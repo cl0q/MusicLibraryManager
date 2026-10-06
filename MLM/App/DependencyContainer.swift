@@ -380,7 +380,8 @@ final class DependencyContainer {
                     .backup, title: "Backup (scheduled)", subject: .settings(.backup),
                     automatic: true, graceful: true, quiet: true, recordsStart: false)
                 do {
-                    if let info = try await service.createBackupIfDue() {
+                    // W3-SET: the library's schedule (Off / Daily / Weekly / On quit).
+                    if let info = try await service.createScheduledBackupIfDue() {
                         AppLogger.shared.info("Launch backup created: \(info.url.lastPathComponent)", source: "Backup")
                         job.finish(.backup(info))
                     } else {

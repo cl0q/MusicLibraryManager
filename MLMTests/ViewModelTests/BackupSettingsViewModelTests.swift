@@ -72,7 +72,8 @@ struct BackupSettingsViewModelTests {
             BackupSettingsViewModel(
                 service: service,
                 configRepository: configRepository ?? configRepo,
-                relaunch: { spy.count += 1 }
+                relaunch: { spy.count += 1 },
+                activeOperations: { [] }
             )
         }
 
@@ -411,5 +412,82 @@ struct BackupSettingsViewModelTests {
             schemaVersion: nil, trackCount: nil, databaseSizeBytes: nil, isComplete: false
         )
         #expect(vm.detailLine(for: foreign) == "Unknown")
+    }
+
+    // MARK: - W3-SET: schedule, retention, restore guard, reopen
+
+    @Test func scheduleAndRetentionAreStoredPerLibrary() async throws {
+        let fixture = try await Fixture()
+        defer { fixture.cleanup() }
+        let vm = fixture.makeViewModel(service: fixture.makeService(), spy: RelaunchSpy())
+        await vm.refresh()
+        #expect(vm.schedule == .daily)
+        #expect(vm.retention == .last10)
+        await vm.setSchedule(.weekly)
+        await vm.setRetention(.last30)
+        let again = fixture.makeViewModel(service: fixture.makeService(), spy: RelaunchSpy())
+        await again.refresh()
+        #expect(again.schedule == .weekly)
+        #expect(again.retention == .last30)
+    }
+
+    @Test func restoreIsRefusedWhileWorkRuns() async throws {
+        let fixture = try await Fixture()
+        defer { fixture.cleanup() }
+        try await fixture.insertTrack(id: 1)
+        let service = fixture.makeService(poolCloser: { Issue.record("pool must not be closed") })
+        let backup = try await service.createBackup(reason: .manual)
+        let running = ActivityOperation(
+            id: UUID(), kind: .download, title: "Import “Warm-up”", subject: .none, state: .running, wait: nil,
+            progress: ActivityProgress(completed: 3, total: 10, currentItem: nil), result: nil, startedAt: Date(),
+            endedAt: nil, isAutomatic: false, libraryID: nil, needsAttention: false, dismissedAt: nil,
+            itemNoun: .track, messageName: "Download", controls: .none, isFromHistory: false)
+        let spy = RelaunchSpy()
+        let vm = BackupSettingsViewModel(service: service, configRepository: fixture.configRepo,
+                                         relaunch: { spy.count += 1 }, activeOperations: { [running] })
+        let blockers = try #require(vm.restoreBlockers())
+        let refusal = BackupSettingsViewModel.restoreRefusal(blockers)
+        #expect(refusal.hasPrefix("MLM can’t restore while 1 download is running."))
+        #expect(refusal.contains("• Import “Warm-up” — 4 of 10") || refusal.contains("• Import “Warm-up”"))
+        await vm.restore(backup)
+        #expect(spy.count == 0)
+        #expect(vm.phase == .idle)
+        #expect(vm.errorMessage == refusal)
+    }
+
+    @Test func restoreRelaunchReopensTheRestoredLibrary() {
+        var stored: String?
+        var relaunched = 0
+        let store = LibraryLaunchCoordinator.PendingOpenStore(take: { stored }, set: { stored = $0 })
+        let package = URL(fileURLWithPath: "/tmp/Main Library.mlibm")
+        let relaunch = BackupSettingsViewModel.relaunchIntoLibrary(package: package, pendingOpen: store,
+                                                                   relaunch: { relaunched += 1 })
+        relaunch()
+        #expect(stored == package.path, "PP-SETTINGS-16: the restored library opens after the relaunch")
+        #expect(relaunched == 1)
+    }
+
+    @Test func restoreMessageStatesTheConsequenceInNumbers() async throws {
+        let fixture = try await Fixture()
+        defer { fixture.cleanup() }
+        let vm = BackupSettingsViewModel(service: fixture.makeService(), configRepository: fixture.configRepo,
+                                         relaunch: {}, activeOperations: { [] }, countTracks: { 12_935 })
+        await vm.refresh()
+        let info = BackupInfo(url: URL(fileURLWithPath: "/tmp/mlm-backup-a"), createdAt: Date(), reason: .scheduled,
+                              schemaVersion: "v1", trackCount: 12_921, databaseSizeBytes: 1, isComplete: true)
+        let message = vm.restoreMessage(for: info, libraryName: "Main Library")
+        #expect(message.contains("MLM quits and reopens in the restored “Main Library”."))
+        #expect(message.contains("14 tracks added since this backup leave the library; their files stay in the library folder."))
+        #expect(message.hasSuffix("To undo, restore the “Before restore” backup."))
+        #expect(BackupSettingsViewModel.restoreTitle(info).hasPrefix("Restore the backup from "))
+    }
+
+    @Test func destinationReachabilityIsSaidInWords() {
+        let tresor = URL(fileURLWithPath: "/Volumes/Tresor/MLM Backups")
+        #expect(LocationReach.of(tresor, isVolumeMounted: { _ in false }, exists: { _ in false }) == .notConnected(volume: "Tresor"))
+        #expect(LocationReach.of(tresor, isVolumeMounted: { _ in true }, exists: { _ in true }).text == "Connected · on “Tresor”")
+        #expect(LocationReach.of(tresor, isVolumeMounted: { _ in true }, exists: { _ in false }) == .notFound)
+        #expect(LocationReach.of(URL(fileURLWithPath: "/Users/x/b"), isVolumeMounted: { _ in true }, exists: { _ in true }) == .onThisMac)
+        #expect(LocationReach.notConnected(volume: "Lexxar").text == "Not connected — on “Lexxar”")
     }
 }
