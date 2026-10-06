@@ -295,7 +295,11 @@ struct FolderViewModelTests {
         model.libraryFilesDidChange()
         model.libraryFilesDidChange()
         await waitUntil("the refreshed catalog") { model.catalog.trackCount(under: "_Inbox") == 1 }
-        await waitUntil("the new walk") { model.isWalkComplete && model.notInLibraryFiles(under: "_Inbox")?.isEmpty == true }
+        // The first walk's `isWalkComplete` is still true while the catalog refreshes, so wait for the second walk itself.
+        await waitUntil("the new walk") {
+            fixture.box.lock.lock(); defer { fixture.box.lock.unlock() }
+            return fixture.box.walks >= 2 && model.isWalkComplete && model.notInLibraryFiles(under: "_Inbox")?.isEmpty == true
+        }
         #expect(fixture.box.walks >= 2, "read again after the change")
     }
 }
