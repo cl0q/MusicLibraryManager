@@ -12,7 +12,7 @@ import Foundation
 /// listing (playlist, genre, folder) does not use it.
 enum TrackVisibility {
     /// SQL predicate over `tracks`: the row is listed.
-    static let listedSQL = "tracks.hidden_by_review = 0"
+    static let listedSQL = "tracks.hidden_by_review IS NOT 1"
 
     /// `predicate AND listed`.
     static func listed(_ predicate: String) -> String {

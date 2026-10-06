@@ -170,9 +170,15 @@ enum ReviewDecisionError: LocalizedError, Equatable {
     case noDecision
     /// The version to keep has no local file while another version has one.
     case keptVersionHasNoFile(title: String)
+    /// `consequences_json` can't be read: Undo and Restore refuse and keep the row.
+    case unreadableRecord
+    /// A newer live decision covers one of this decision's versions.
+    case newerDecisionCovers
 
     var errorDescription: String? {
         switch self {
+        case .unreadableRecord: "Can’t undo — the decision record is unreadable"
+        case .newerDecisionCovers: "Can’t restore — a newer decision covers these versions"
         case .keptVersionHasNoFile(let title): ReviewPresentation.cantKeepFileMissing(title: title)
         case .nothingPending: "This group has already been decided."
         case .invalidKeep: "Choose one version to keep before deciding this group."
@@ -236,12 +242,17 @@ final class ReviewDecisionRepository: Sendable {
         }
     }
 
-    private static func record(_ row: Row) -> ReviewDecisionRecord? {
+    /// `strict`: a record whose consequences can't be decoded is `nil` (Undo refuses) instead of
+    /// an empty one (listings).
+    private static func record(_ row: Row) -> ReviewDecisionRecord? { record(row, strict: false) }
+
+    private static func record(_ row: Row, strict: Bool) -> ReviewDecisionRecord? {
         guard let kind = ReviewDecisionKind(rawValue: row["kind"]),
               let action = ReviewDecisionAction(rawValue: row["decision"]) else { return nil }
         let json: String = row["consequences_json"]
-        let consequences = (try? JSONDecoder().decode(ReviewDecisionConsequences.self, from: Data(json.utf8)))
-            ?? ReviewDecisionConsequences()
+        let decoded = try? JSONDecoder().decode(ReviewDecisionConsequences.self, from: Data(json.utf8))
+        if strict, decoded == nil { return nil }
+        let consequences = decoded ?? ReviewDecisionConsequences()
         return ReviewDecisionRecord(
             id: row["id"], groupKey: row["group_key"], kind: kind, action: action,
             keptTrackID: row["kept_track_id"],
@@ -459,7 +470,7 @@ final class ReviewDecisionRepository: Sendable {
         return try await database.read { db in
             let marks = spellings.map { _ in "?" }.joined(separator: ", ")
             return try Track.fetchAll(db, sql: """
-                SELECT * FROM tracks WHERE hidden_by_review = 0 AND organized_path IN (\(marks))
+                SELECT * FROM tracks WHERE hidden_by_review IS NOT 1 AND organized_path IN (\(marks))
                 """, arguments: StatementArguments(Array(spellings)))
         }
     }
@@ -470,11 +481,21 @@ final class ReviewDecisionRepository: Sendable {
     /// the decided pairs and the decision row gone. Returns what it was, so the caller can
     /// move files back from the Trash and put tag values back.
     @discardableResult
-    func undo(decisionID: Int64) async throws -> ReviewDecisionRecord {
+    func undo(decisionID: Int64, refusingWhenNewerDecisionCovers: Bool = false) async throws -> ReviewDecisionRecord {
         try await database.write { db in
-            guard let record = try Row.fetchOne(db, sql: "SELECT * FROM review_decisions WHERE id = ?", arguments: [decisionID])
-                .flatMap(Self.record) else { throw ReviewDecisionError.noDecision }
+            guard let row = try Row.fetchOne(db, sql: "SELECT * FROM review_decisions WHERE id = ?", arguments: [decisionID])
+            else { throw ReviewDecisionError.noDecision }
+            guard let record = Self.record(row, strict: true) else { throw ReviewDecisionError.unreadableRecord }
             let c = record.consequences
+            if refusingWhenNewerDecisionCovers {
+                // Restore (out of order): refuse when a newer live decision covers one of the versions.
+                let mine = Set(c.flags.map(\.trackId))
+                let newer = try Row.fetchAll(db, sql: "SELECT * FROM review_decisions WHERE id > ?", arguments: [decisionID])
+                for other in newer {
+                    guard let later = Self.record(other) else { continue }
+                    if !mine.isDisjoint(with: later.consequences.flags.map(\.trackId)) { throw ReviewDecisionError.newerDecisionCovers }
+                }
+            }
             for flag in c.flags {
                 try db.execute(sql: "UPDATE tracks SET is_duplicate = ?, hidden_by_review = 0, variant_of = ? WHERE id = ?",
                                arguments: [flag.isDuplicate, flag.variantOf, flag.trackId])

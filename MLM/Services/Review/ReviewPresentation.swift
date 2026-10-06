@@ -212,6 +212,9 @@ enum ReviewPresentation {
         "Can’t keep “\(title)” — its file is missing"
     }
 
+    /// Status bar after a cancelled scan (the mockup's copy).
+    static let scanCancelled = "Scan cancelled. Your decisions and the groups found so far are kept."
+
     /// Bulk apply failed as a whole.
     static let bulkFailed = "Couldn’t apply the decisions — nothing was changed"
 

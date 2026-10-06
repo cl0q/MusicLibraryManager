@@ -68,6 +68,7 @@ struct ReviewView: View {
             model = created
         }
         guard let model else { return }
+        model.scan.statusBar = statusBar
         writesTags = await TagWriteSetting.isEnabled(container.configRepository)
         await model.scan.loadLastScan()
         await model.reload()
@@ -313,18 +314,23 @@ struct ReviewView: View {
 
     private func decide(_ plans: [ReviewGroupPlan], _ actionName: String) {
         guard let model else { return }
+        // Where the decided group was in the list, so the group that follows it is selected.
+        let before = (tab == .conflicts ? model.visibleConflicts : model.visibleDuplicates).map(\.key)
+        let index = selection.flatMap { before.firstIndex(of: $0) }
         Task {
             await model.apply(plans, actionName: actionName, undo: undo, statusBar: statusBar)
             // The next group stays selected so ↓ Return works through the list.
             if let selection, model.group(withKey: selection) == nil {
-                self.selection = nextSelection(model, after: selection)
+                self.selection = nextSelection(model, previousIndex: index)
             }
         }
     }
 
-    private func nextSelection(_ model: ReviewModel, after key: String) -> String? {
+    /// The group now at the place the decided one had (the next one), or the last one.
+    private func nextSelection(_ model: ReviewModel, previousIndex: Int?) -> String? {
         let list = tab == .conflicts ? model.visibleConflicts : model.visibleDuplicates
-        return list.first?.key
+        guard !list.isEmpty else { return nil }
+        return list[min(previousIndex ?? 0, list.count - 1)].key
     }
 
     // MARK: Apply Recommended to All… (A-REV-APPLYALL)

@@ -781,11 +781,22 @@ final class PlaylistRepository: Sendable {
     /// keep a playlist in lockstep with the upstream order. Positions are evenly spaced
     /// `a`-keys (`FractionalIndexer.evenlySpaced`, W3-PL review) — the old `%012d` keys left no
     /// room before the first row; the next sync of such a playlist heals it.
+    ///
+    /// A track Review hid (`hidden_by_review = 1`) is replaced by the version that was kept
+    /// (`variant_of`), so a likes refresh doesn't bring hidden versions back into the playlist.
     func replaceTrackList(playlistId: Int64, trackIds: [Int64]) async throws {
-        var seen = Set<Int64>()
-        let unique = trackIds.filter { seen.insert($0).inserted }
-        let keys = FractionalIndexer.evenlySpaced(count: unique.count)
         try await database.write { db in
+            var seen = Set<Int64>()
+            var unique: [Int64] = []
+            for id in trackIds {
+                var effective = id
+                if let row = try Row.fetchOne(db, sql: "SELECT hidden_by_review, variant_of FROM tracks WHERE id = ?", arguments: [id]),
+                   (row["hidden_by_review"] as Int?) == 1, let kept: Int64 = row["variant_of"] {
+                    effective = kept
+                }
+                if seen.insert(effective).inserted { unique.append(effective) }
+            }
+            let keys = FractionalIndexer.evenlySpaced(count: unique.count)
             try db.execute(
                 sql: "DELETE FROM playlist_tracks WHERE playlist_id = ?",
                 arguments: [playlistId]

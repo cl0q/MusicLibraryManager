@@ -623,7 +623,7 @@ final class ReviewModel {
         }
         guard let decisionID = row.decisionID else { return false }
         do {
-            let record = try await dependencies.decisions.undo(decisionID: decisionID)
+            let record = try await dependencies.decisions.undo(decisionID: decisionID, refusingWhenNewerDecisionCovers: true)
             try await restoreTags(record.consequences.tags)
             let report = dependencies.consequences.putBack(record.consequences.trashed)
             let playlists = !record.consequences.playlistRows.isEmpty || !record.consequences.syncRows.isEmpty
@@ -633,6 +633,10 @@ final class ReviewModel {
                 : ReviewPresentation.restoredMessage(title: row.title))
             await reload()
             return true
+        } catch let error as ReviewDecisionError where error == .newerDecisionCovers || error == .unreadableRecord {
+            statusBar?.post(error == .unreadableRecord ? "Can’t restore — the decision record is unreadable" : error.localizedDescription)
+            await reload()
+            return false
         } catch {
             statusBar?.post("Couldn’t restore “\(row.title)”")
             await reload()

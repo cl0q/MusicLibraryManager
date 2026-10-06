@@ -397,7 +397,7 @@ struct TrackVisibilityTests {
             try Int64.fetchAll(db, sql: "SELECT track_id FROM playlist_tracks WHERE playlist_id = ?", arguments: [playlist])
         }
         #expect(inPlaylist == [3], "playlists, genres, folders, queue and sync keep it (IMP-049)")
-        #expect(TrackVisibility.listedSQL == "tracks.hidden_by_review = 0")
+        #expect(TrackVisibility.listedSQL == "tracks.hidden_by_review IS NOT 1")
     }
 }
 
