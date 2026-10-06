@@ -66,19 +66,6 @@ struct ShellSidebarReloadTests {
         #expect(SidebarModel.playlistSecondLine(sourceName: nil, unusableSignIns: [.soundcloud]) == nil)
     }
 
-    @Test func syncPageAndSelectionAlwaysAgree() {
-        #expect(SyncProfilePageAgreement.reconcile(pageProfileID: 1, selectedProfileID: 1, profileIDs: [1, 2]) == .agree)
-        #expect(SyncProfilePageAgreement.reconcile(pageProfileID: 1, selectedProfileID: 2, profileIDs: [1, 2]) == .followSelection(2),
-                "A duplicate / created profile became the selection: the page follows")
-        #expect(SyncProfilePageAgreement.reconcile(pageProfileID: 1, selectedProfileID: nil, profileIDs: [1, 2]) == .selectPage)
-        #expect(SyncProfilePageAgreement.reconcile(pageProfileID: 1, selectedProfileID: 9, profileIDs: [1, 2]) == .selectPage,
-                "A selection that no longer exists yields to the page")
-    }
-
-    @Test func syncedTimeIsRelative() {
-        let now = Date()
-        let text = SyncProfileRowState.synced(now.addingTimeInterval(-7200)).text(relativeTo: now)
-        let expected = Date.AnchoredRelativeFormatStyle(anchor: now.addingTimeInterval(-7200), presentation: .named, unitsStyle: .wide).format(now)
-        #expect(text == "Synced \(expected)")
-    }
+    // The sync row words and the page ↔ selection agreement moved to `SyncProfileState`
+    // (W3-SYNC: every profile has its own state); see `SyncProfileStateTests`.
 }

@@ -76,9 +76,6 @@ enum SnapshotFixtures {
                 needleTimeLabel: "01:42"
             ))
         }),
-        Fixture(id: "sync-toast", size: .init(width: 520, height: 100), makeView: { _ in
-            AnyView(SyncToast(message: "Device defaults applied", isShowing: true))
-        }),
         Fixture(id: "playlist-card", size: .init(width: 280, height: 220), makeView: { store in
             let playlist = try SnapshotFixtures.require(
                 store.playlists().first,
@@ -96,20 +93,6 @@ enum SnapshotFixtures {
                 renameText: .constant("")
             )
             .frame(width: 180))
-        }),
-        Fixture(id: "ingest-preview", size: .init(width: 700, height: 580), makeView: { _ in
-            let preview = IngestPreview(
-                targetPlaylistId: 1,
-                targetPlaylistName: "Snapshot Mix",
-                willCreate: false,
-                added: [.init(id: 1, title: "Jóga", artist: "Björk", uuid: "FIXTURE-1", path: "Björk/Jóga.flac")],
-                removed: [],
-                reordered: [],
-                unresolved: [.init(path: "Missing/Track.flac", uuid: nil, reason: "No library match")]
-            )
-            return AnyView(IngestPreviewView(
-                preview: preview, sourceFileName: "fixture.m3u8", onApply: {}, onCancel: {}
-            ))
         }),
         Fixture(id: "discovery-inbox-empty", size: .init(width: 800, height: 560), makeView: { _ in
             AnyView(DiscoveryInboxView())
@@ -208,25 +191,6 @@ enum SnapshotFixtures {
                 ))
             }
         ),
-        Fixture(
-            id: "device-ingest-preview-row",
-            size: .init(width: 600, height: 440),
-            makeView: { _ in
-                AnyView(DeviceIngestFileRow(
-                    fileName: "Snapshot Mix.m3u8",
-                    preview: IngestPreview(
-                        targetPlaylistId: 1,
-                        targetPlaylistName: "Snapshot Mix",
-                        willCreate: false,
-                        added: [.init(id: 1, title: "Jóga", artist: "Björk", uuid: nil, path: "Music/Joga.flac")],
-                        removed: [.init(id: 4, title: "Stream Only", artist: "Remote Artist", uuid: nil, path: "Music/Remote.m4a")],
-                        reordered: [],
-                        unresolved: []
-                    ),
-                    onApply: {}
-                ).padding(20))
-            }
-        ),
         Fixture(id: "track-cover-placeholder", size: .init(width: 220, height: 220), makeView: { _ in
             AnyView(TrackCoverView(trackId: 1, size: .small).frame(width: 180, height: 180).padding(20))
         }),
@@ -239,8 +203,23 @@ enum SnapshotFixtures {
         Fixture(id: "launch-loading-update", size: .init(width: 640, height: 360), makeView: { _ in
             AnyView(LibraryLoadingView(name: "Main Library", phase: .updating(step: 3, total: 5)))
         }),
-        Fixture(id: "new-sync-profile-sheet", size: .init(width: 460, height: 400), makeView: { _ in
-            AnyView(NewSyncProfileFromSelectionSheet(trackIds: [1, 4]))
+        // W3-SYNC: Read Playlist Changes from Device (merged sheet) — a merge, MLM-only tracks kept.
+        Fixture(id: "device-changes-sheet", size: .init(width: 800, height: 560), makeView: { _ in
+            let profile = SyncProfile(id: 1, name: "iPod Classic", outputFolder: "/Volumes/IPOD CLASSIC")
+            let card = DevicePlaylistCard(
+                id: "Road trip.m3u8", fileURL: URL(fileURLWithPath: "/Volumes/IPOD CLASSIC/Road trip.m3u8"),
+                target: .existing(id: 1, name: "Road trip"), device: [1, 3], mlm: [1, 2, 4],
+                diff: DevicePlaylistDiff.make(device: [1, 3], mlm: [1, 2, 4], expected: [1, 2]),
+                unmatched: [.init(path: "Music/Unknown/track 07.m4a", reason: "no track in the library has this file")],
+                labels: [
+                    1: .init(title: "Jóga", artist: "Björk", availability: .local),
+                    2: .init(title: "Rumble", artist: "Skrillex", availability: .local),
+                    3: .init(title: "Kerala", artist: "Bonobo", availability: .local),
+                    4: .init(title: "Stream Only", artist: "Remote Artist", availability: .notDownloaded),
+                ])
+            let model = DevicePlaylistChangesModel(profile: profile, service: nil, isReachable: { _ in true })
+            model.load(cards: [card], unchanged: 6)
+            return AnyView(DeviceChangesSheet(model: model))
         }),
         Fixture(id: "track-table-empty", size: .init(width: 900, height: 400), makeView: { _ in
             let model = TrackListModel(sortOrder: nil)
@@ -300,10 +279,9 @@ enum SnapshotFixtures {
         "Playlists/PlaylistCard.swift",
         "Playlists/PlaylistTable.swift", "Queue/QueuePanel.swift",
         "ReviewQueue/ReviewQueueView.swift",
-        "Shared/SelectionCreationSheets.swift", "Shared/StatusChip.swift",
+        "Shared/StatusChip.swift",
         "Shared/TrackCoverView.swift", "DragDrop/DropTargetModifier.swift", "Launch/LibraryLoadingView.swift",
-        "Shared/TrackMetadataPresentation.swift", "Sync/DeviceIngestResultsView.swift",
-        "Sync/IngestPreviewView.swift", "Sync/SyncToast.swift",
+        "Shared/TrackMetadataPresentation.swift", "Sync/SyncProfileSheets.swift",
         "TrackDetail/WaveformView.swift",
     ]
 
@@ -322,6 +300,7 @@ enum SnapshotFixtures {
         "TrackList/TrackPrimaryAction.swift": "Non-view: primary action per row kind and play-when-ready (W2-A).",
         "TrackList/TrackMenu.swift": "Deferred: menus require interactive presentation; current bitmap hosts do not open them.",
         "Sync/Pickers/PlaylistPickerModel.swift": "Non-view: selection model.",
+        "Shared/SelectionCreationSheets.swift": "Non-view: identifiable selection wrapper (the sheet merged into Sync/NewSyncProfileSheet, W3-SYNC).",
         "TrackDetail/WaveformHelpers.swift": "Non-view: waveform math; production WaveformView is captured.",
         "Activity/ActivityLogsView.swift": "Deferred: global logger and AppKit text representable need fixed attributed-log input.",
         "Activity/ActivityToolbarItem.swift": "Deferred: toolbar item and popover read the shared ActivityCenter; inject a fixture center.",
@@ -394,17 +373,14 @@ enum SnapshotFixtures {
         "Inspector/InspectorDetailsTab.swift": "Deferred: tag fields and playlist membership read the database and shell actions.",
         "Inspector/InspectorAudioTab.swift": "Deferred: waveform extraction, analysis and similarity read files and the database.",
         "Inspector/InspectorFileTab.swift": "Deferred: file location, size and diagnostics read the disk and the database.",
-        "Sync/NewSyncProfileSheet.swift": "Deferred: concrete SyncViewModel and device detection; needs passive sync model.",
+        "Sync/NewSyncProfileSheet.swift": "Deferred: lists connected devices (reads /Volumes) on appear; needs an injected device list.",
+        "Sync/SyncProfileMenu.swift": "Deferred: menus require interactive presentation; reads the live SyncViewModel and Activity.",
+        "Sync/SyncProfilePage.swift": "Deferred: live SyncViewModel (plans, destinations, Activity echo); needs a passive sync fixture.",
+        "Sync/SyncProfileSections.swift": "Deferred: live SyncViewModel and Activity echo; needs a passive sync fixture.",
         "Import/QuickAddSheet.swift": "Deferred: Add from Link is a sheet looking links up through yt-dlp; QuickAddModel is unit-tested (W3-ADD).",
         "Import/ImportPlaylistSheet.swift": "Deferred: the import sheet reads source accounts and providers; ImportPlaylistModel is unit-tested (W3-ADD).",
         "Import/SourceSignInView.swift": "Deferred: the browser sign-in hand-off waits for a real OAuth callback; SourceSignInModel is unit-tested (W3-ADD).",
         "Import/ImportSheetsHost.swift": "Deferred: presents the Add menu sheets on the main window; nothing drawn of its own (W3-ADD).",
-        "Sync/Pickers/PlaylistPickerSheet.swift": "Deferred: concrete SyncViewModel requires filesystem TranscodeCache and standard-default-reading SyncService.",
-        "Sync/SyncContentSections.swift": "Deferred: same concrete SyncViewModel boundary; needs passive expanded-content model.",
-        "Sync/SyncFailedDisclosure.swift": "Deferred: concrete sync VM plus async row lookup; inject passive failed-row state.",
-        "Sync/SyncProfileDetailView.swift": "Deferred: live device file checks, cache age and preview task need filesystem/clock seams.",
-        "Sync/SyncSettingsForm.swift": "Deferred: concrete sync service supplies preference state; inject settings bindings/actions.",
-        "Sync/SyncView.swift": "Deferred: profile/device/preview lifecycle needs inert sync coordinator.",
         "TrackDetail/GrooveStudioView.swift": "Deferred: audio players, model/export services and placeholder randomness need passive deck state.",
         "TrackDetail/GrooveView.swift": "Deferred: preview audio, recommendations and random placeholders require controlled provider/player state.",
     ]
@@ -501,17 +477,12 @@ Shell/TrailingColumnView.swift
 Shell/UndoCenter.swift
 Sidebar/LibraryFooter.swift
 Sidebar/SidebarView.swift
-Sync/DeviceIngestResultsView.swift
-Sync/IngestPreviewView.swift
 Sync/NewSyncProfileSheet.swift
 Sync/Pickers/PlaylistPickerModel.swift
-Sync/Pickers/PlaylistPickerSheet.swift
-Sync/SyncContentSections.swift
-Sync/SyncFailedDisclosure.swift
-Sync/SyncProfileDetailView.swift
-Sync/SyncSettingsForm.swift
-Sync/SyncToast.swift
-Sync/SyncView.swift
+Sync/SyncProfileMenu.swift
+Sync/SyncProfilePage.swift
+Sync/SyncProfileSections.swift
+Sync/SyncProfileSheets.swift
 TrackDetail/GrooveStudioView.swift
 TrackDetail/GrooveView.swift
 TrackDetail/WaveformHelpers.swift

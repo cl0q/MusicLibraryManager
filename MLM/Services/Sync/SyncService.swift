@@ -47,11 +47,38 @@ final class SyncService {
     struct PreviewResult {
         var filesToAdd: [FilePreview] = []
         var filesToRemove: [FilePreview] = []
+        /// Tracks of the profile that can't be copied now (not downloaded, download failed,
+        /// file missing, library drive away) — listed by name, never silently "pending"
+        /// (W3-SYNC, PP-SYNC-01). Not part of `filesToAdd`.
+        var filesToSkip: [SkippedFile] = []
         var totalNewSize: Int64 = 0
+        /// Bytes of the files to remove that exist on the device (credited only with Clean up on).
         var totalRemoveSize: Int64 = 0
         var deviceAvailableSpace: Int64 = 0
         var hasSufficientSpace: Bool = true
         var isDeviceConnected: Bool = true
+        /// Every track of the profile (a track in several playlists counted once).
+        var totalTracks: Int = 0
+        /// The profile's Clean up option when the plan was made.
+        var cleanupEnabled: Bool = true
+        /// The library folder's disk was connected when the plan was made.
+        var isLibraryReachable: Bool = true
+
+        /// `Add · Remove · Skip · space` for the profile page and the stored result (v47).
+        var summary: SyncPlanSummary {
+            SyncPlanSummary(add: filesToAdd.count, remove: filesToRemove.count, skip: filesToSkip.count,
+                            addBytes: totalNewSize, removeBytes: cleanupEnabled ? totalRemoveSize : 0,
+                            freeBytes: deviceAvailableSpace, cleanUp: cleanupEnabled, totalTracks: totalTracks)
+        }
+    }
+
+    /// A track the plan can't copy, with the reason (Plan ▸ Skip).
+    struct SkippedFile: Identifiable, Equatable {
+        let trackId: Int64
+        let title: String
+        let artist: String
+        let reason: SyncSkipReason
+        var id: Int64 { trackId }
     }
 
     /// Kept as an alias while the sync presentation migrates to PreviewResult.
@@ -72,6 +99,8 @@ final class SyncService {
         let title: String
         let artist: String
         let reason: String
+        /// Where the file was to be written on the device (W3-SYNC, v47).
+        var devicePath: String = ""
 
         var id: Int64 { trackId }
     }
@@ -82,6 +111,13 @@ final class SyncService {
         var skippedCount: Int = 0
         var failedTracks: [SyncFailure] = []
         var wasCancelled: Bool = false
+        /// Skipped tracks with their reason (W3-SYNC, PP-SYNC-01).
+        var skippedTracks: [SyncResultSkip] = []
+        /// Tracks copied by this run (each once, also across a device interruption).
+        var syncedTrackIDs: [Int64] = []
+        var removedCount: Int = 0
+        /// How often the device was disconnected and the run waited for it.
+        var interruptions: Int = 0
     }
 
     /// Cached previews are kept per profile so the UI can show the most
@@ -102,6 +138,7 @@ final class SyncService {
         let syncedTrackIds: Set<Int64>
         let tracksByID: [Int64: Track]
         let isDeviceConnected: Bool
+        let isLibraryReachable: Bool
         let hash: String
 
         var total: Int { trackIds.count + syncedTrackIds.subtracting(trackIds).count }
@@ -121,7 +158,14 @@ final class SyncService {
     private(set) var processed: Int = 0
     private(set) var total: Int = 0
 
-    private var previewCache: [Int64: CachedPreview] = [:]
+    /// Guarded by `previewCacheLock`: plans for every profile are computed off the main actor
+    /// while a sync may read its own (W3-SYNC).
+    private var previewCacheStorage: [Int64: CachedPreview] = [:]
+    private let previewCacheLock = NSLock()
+    private var previewCache: [Int64: CachedPreview] {
+        get { previewCacheLock.withLock { previewCacheStorage } }
+        set { previewCacheLock.withLock { previewCacheStorage = newValue } }
+    }
 
     func cancelSync() {
         cancellationRequested = true
@@ -144,7 +188,7 @@ final class SyncService {
     }
 
     func invalidatePreview(profileId: Int64) {
-        previewCache.removeValue(forKey: profileId)
+        previewCacheLock.withLock { _ = previewCacheStorage.removeValue(forKey: profileId) }
     }
 
     /// Update the sync turbo level preference
@@ -169,6 +213,17 @@ final class SyncService {
     var activity: ActivityCenter?
     /// The running sync's operation, so Pause / Resume from the profile page show in Activity.
     private var activityJob: ActivityOperationHandle?
+    /// Per-profile results (v47, W3-SYNC). `nil` = not recorded (older tests).
+    var results: SyncProfileResultRepository?
+    /// Reachability of destinations and the library folder; injectable for tests (W3-SYNC).
+    var destinations: any SyncDestinationChecking = LiveSyncDestinationChecking()
+    /// The profile whose sync runs now (one at a time: later ones queue in the Activity lane).
+    private(set) var runningProfileId: Int64?
+    /// Every file the current run tried to copy, in order (a test seam: an interrupted run
+    /// resumed by the same operation never copies a file twice).
+    private(set) var attemptedTrackIds: [Int64] = []
+    /// Syncs run one at a time; a second one is `Queued` (UC-JOB-03).
+    static let lane = ActivityLane("sync")
 
     /// Space buffer: require 50MB free beyond needed space.
     private static let spaceBuffer: Int64 = 50_000_000
@@ -236,6 +291,9 @@ final class SyncService {
 
         var preview = PreviewResult()
         preview.isDeviceConnected = isDeviceConnected
+        preview.totalTracks = trackIds.count
+        preview.cleanupEnabled = profile.cleanupRemovedFiles
+        preview.isLibraryReachable = input.isLibraryReachable
         let removeTrackIds = syncedTrackIds.subtracting(trackIds)
         var previewProcessed = 0
 
@@ -259,7 +317,14 @@ final class SyncService {
                     || !FileManager.default.fileExists(atPath: destPath.path)
                     || invalidDestinationTrackIds.contains(trackId)
 
-                if needsSync {
+                // A track whose file can't be read now is skipped by name, with the reason, instead
+                // of being planned as Add and staying "pending" forever (PP-SYNC-01). Same source
+                // rule as `syncSingleFile`.
+                if needsSync, let reason = Self.skipReason(track: track, libraryRoot: libraryRoot,
+                                                          libraryReachable: input.isLibraryReachable) {
+                    preview.filesToSkip.append(SkippedFile(trackId: trackId, title: track.title,
+                                                           artist: track.artist, reason: reason))
+                } else if needsSync {
                     let size = estimateFileSize(
                         track: track,
                         profile: profile,
@@ -294,15 +359,19 @@ final class SyncService {
                     profileOutputFolder: Self.musicRootFolder(for: profile),
                     transcodeMode: profile.transcodeModeEnum
                 )
+                // Size of the copy on the device, so the space check can credit removals (E23).
+                let size = (try? FileManager.default.attributesOfItem(atPath: destPath.path)[.size] as? NSNumber)?
+                    .int64Value ?? 0
                 preview.filesToRemove.append(FilePreview(
                     id: trackId,
                     trackId: trackId,
                     title: track.title,
                     artist: track.artist,
                     album: track.album,
-                    size: 0,
+                    size: size,
                     destinationPath: destPath.path
                 ))
+                preview.totalRemoveSize += size
             }
         }
 
@@ -310,18 +379,22 @@ final class SyncService {
         if let attrs = try? FileManager.default.attributesOfFileSystem(forPath: outputURL.path) {
             let available = (attrs[.systemFreeSize] as? Int64) ?? 0
             preview.deviceAvailableSpace = available
-            preview.hasSufficientSpace = available >= preview.totalNewSize + Self.spaceBuffer
+            // Removals run before the copies, so the space they free counts — only with Clean up
+            // on (V-SYNC-DETAIL.E23).
+            let freed = profile.cleanupRemovedFiles ? preview.totalRemoveSize : 0
+            preview.hasSufficientSpace = available + freed >= preview.totalNewSize + Self.spaceBuffer
         } else {
             preview.hasSufficientSpace = false
         }
 
         try Task.checkCancellation()
-        previewCache[profileId] = CachedPreview(
+        let cached = CachedPreview(
             result: preview,
             inputHash: input.hash,
             computedAt: Date(),
             deviceWasConnected: isDeviceConnected
         )
+        previewCacheLock.withLock { previewCacheStorage[profileId] = cached }
 
         return preview
     }
@@ -347,6 +420,7 @@ final class SyncService {
         let tracksByID = Dictionary(uniqueKeysWithValues: tracks.compactMap { track in
             track.id.map { ($0, track) }
         })
+        let isLibraryReachable = libraryRoot.isEmpty || destinations.isLibraryReachable(libraryRoot)
 
         return PreviewInput(
             profile: profile,
@@ -355,6 +429,7 @@ final class SyncService {
             syncedTrackIds: syncedTrackIds,
             tracksByID: tracksByID,
             isDeviceConnected: isDeviceConnected,
+            isLibraryReachable: isLibraryReachable,
             hash: Self.previewInputHash(
                 profile: profile,
                 libraryRoot: libraryRoot,
@@ -362,7 +437,7 @@ final class SyncService {
                 syncedTrackIds: syncedTrackIds,
                 tracksByID: tracksByID,
                 isDeviceConnected: isDeviceConnected
-            )
+            ) + (isLibraryReachable ? "|lib" : "|nolib")
         )
     }
 
@@ -461,7 +536,11 @@ final class SyncService {
                 track.originalPath,
                 track.organizedPath ?? "",
                 String(track.bitrate ?? 0),
-                String(track.duration ?? 0)
+                String(track.duration ?? 0),
+                // Availability decides Add vs Skip (W3-SYNC).
+                track.fileMissingSince ?? "",
+                track.downloadStatus ?? "",
+                track.downloadFailure == nil ? "" : "f"
             ].joined(separator: "|"))
         }
 
@@ -473,8 +552,36 @@ final class SyncService {
 
     enum FileSyncOutcome: Sendable {
         case synced(Int64, Int) // trackId, size
-        case skipped(Int64)
+        case skipped(Int64, SyncSkipReason)
         case failed(Int64, String) // trackId, error description
+        /// The destination disappeared (device removed): not a failure — the run waits and tries
+        /// this file again when the device is back (W3-SYNC, UC-JOB-10).
+        case interrupted(Int64)
+    }
+
+    /// The library paths a track's file may be read from — the one rule for the plan and the run.
+    static func sourceCandidates(_ track: Track) -> [String] {
+        var candidates: [String] = []
+        if let organized = track.organizedPath { candidates.append(organized) }
+        if track.isLocal { candidates.append(track.originalPath) }
+        return candidates
+    }
+
+    /// `nil` when the track's file can be read now; else why it is skipped. A file that can't be
+    /// read because the library drive is away is never called missing (DEC-014).
+    static func skipReason(track: Track, libraryRoot: String, libraryReachable: Bool) -> SyncSkipReason? {
+        let candidates = sourceCandidates(track)
+        if candidates.contains(where: { TranscodeCache.resolveSourceURL(sourcePath: $0, libraryRoot: libraryRoot) != nil }) {
+            return nil
+        }
+        switch track.availability() {
+        case .notDownloaded, .downloading:
+            return candidates.isEmpty ? .notDownloaded : (libraryReachable ? .fileMissing : .libraryDriveAway)
+        case .failed:
+            return candidates.isEmpty ? .downloadFailed : (libraryReachable ? .fileMissing : .libraryDriveAway)
+        case .local, .fileMissing:
+            return libraryReachable ? .fileMissing : .libraryDriveAway
+        }
     }
 
     private func incrementProcessed(currentFile: String, operationId: ActivityOperationHandle?) async {
@@ -525,26 +632,17 @@ final class SyncService {
         let operation = profile.transcodeModeEnum == .keepOriginals ? "Copying" : "Transcoding"
         await reportCurrentFile("\(operation): \(trackName)", operationId: operationId)
 
-        // Determine if the track is actually syncable (has a local file/source)
-        var isSyncable = false
-        var candidatePaths: [String] = []
-        if let op = track.organizedPath { candidatePaths.append(op) }
-        if track.isLocal { candidatePaths.append(track.originalPath) }
-        
-        for candidate in candidatePaths {
-            if TranscodeCache.resolveSourceURL(sourcePath: candidate, libraryRoot: libraryRoot) != nil {
-                isSyncable = true
-                break
-            }
-        }
-        
-        if !isSyncable {
+        // Determine if the track is actually syncable (has a local file/source). The plan already
+        // lists such tracks under Skip; this catches a file that went away since (W3-SYNC: with
+        // its reason, PP-SYNC-01).
+        if let reason = Self.skipReason(track: track, libraryRoot: libraryRoot,
+                                        libraryReachable: libraryRoot.isEmpty || destinations.isLibraryReachable(libraryRoot)) {
             AppLogger.shared.warn(
-                "Sync skipped (no local file): track \(file.trackId) \(file.artist) - \(file.title) is stream-only or missing on-disk",
+                "Sync skipped (\(reason.rawValue)): track \(file.trackId) \(file.artist) - \(file.title)",
                 source: "Sync"
             )
             await incrementProcessed(currentFile: "Skipped: \(trackName)", operationId: operationId)
-            return .skipped(file.trackId)
+            return .skipped(file.trackId, reason)
         }
 
         // Transcode-mode branching (SYNC-v2-19)
@@ -696,152 +794,285 @@ final class SyncService {
     // MARK: - Execute
 
     /// Execute sync for a profile.
-    func executeSync(profileId: Int64) async throws -> SyncResult {
+    ///
+    /// W3-SYNC — named fixes only; what is copied, transcoded, deleted and written to `sync_state`
+    /// is unchanged:
+    /// - one run at a time: the operation queues in `SyncService.lane` (UC-JOB-03);
+    /// - tracks that can't be copied are reported as skipped with their reason (PP-SYNC-01);
+    /// - the result is stored for this profile only (v47, PP-SYNC-02);
+    /// - a removed device interrupts the run instead of failing the remaining files: the same
+    ///   operation waits (`Waiting for “‹device›”`, UC-JOB-10) and, when the device is back,
+    ///   continues with exactly the files that were not copied — a copied file is in `sync_state`
+    ///   and is never copied again; clean-up stops before forgetting a file it could not delete;
+    /// - `onlyTrackIDs`: Retry Failed of this profile — only these tracks, into this profile's
+    ///   destination, no removals; the playlist files are rewritten afterwards.
+    func executeSync(profileId: Int64, onlyTrackIDs: Set<Int64>? = nil) async throws -> SyncResult {
         guard let profile = try await syncRepository.fetch(id: profileId) else {
             throw SyncError.profileNotFound(profileId)
         }
+        let isRetry = onlyTrackIDs != nil
+        let deviceName = SyncDestination.deviceName(for: profile.outputFolder)
 
-        let preview = try await previewSync(profileId: profileId)
-        if !preview.isDeviceConnected,
-           preview.filesToAdd.isEmpty,
-           preview.filesToRemove.isEmpty {
+        // Activity (W3-ACT): one operation per sync. Cancel stops the running transcodes and
+        // the queue; Pause holds before the next file. Registered first, so a second sync queues.
+        let operationId: ActivityOperationHandle? = activity?.begin(
+            .sync, title: "Sync “\(profile.name)”", subject: .syncProfile(profileId, name: profile.name),
+            progress: .indeterminate, itemNoun: .file,
+            controls: ActivityControls(
+                cancel: { [weak self] in Task { @MainActor in self?.cancelSync() } },
+                pause: { [weak self] in Task { @MainActor in self?.pauseSync() } },
+                resume: { [weak self] in Task { @MainActor in self?.resumeSync() } }
+            ),
+            lane: Self.lane
+        )
+        if let operationId, !(await operationId.waitForTurn()) {
+            var cancelled = SyncResult()
+            cancelled.wasCancelled = true
+            return cancelled
+        }
+
+        let preview: PreviewResult
+        do {
+            preview = try await previewSync(profileId: profileId)
+        } catch {
+            operationId?.fail(cause: "Couldn’t compare “\(profile.name)” with “\(deviceName)”", fix: .runAgain)
+            throw error
+        }
+        var filesToAdd = preview.filesToAdd
+        var filesToRemove = preview.filesToRemove
+        var plannedSkips = preview.filesToSkip
+        if let only = onlyTrackIDs {
+            filesToAdd = filesToAdd.filter { only.contains($0.trackId) }
+            filesToRemove = []
+            plannedSkips = plannedSkips.filter { only.contains($0.trackId) }
+        }
+        if !preview.isDeviceConnected, filesToAdd.isEmpty, filesToRemove.isEmpty {
+            operationId?.discard()
             return SyncResult()
         }
         guard preview.hasSufficientSpace else {
+            operationId?.fail(cause: "Not enough space on “\(deviceName)”", fix: .runAgain)
             throw SyncError.insufficientSpace(
                 needed: preview.totalNewSize,
                 available: preview.deviceAvailableSpace
             )
         }
+        // Never write into a path whose disk is gone (a folder under /Volumes would be created on
+        // the Mac's own disk).
+        if !filesToAdd.isEmpty || !filesToRemove.isEmpty,
+           !destinations.isDestinationReachable(profile.outputFolder) {
+            operationId?.fail(cause: "“\(deviceName)” is not connected", fix: .runAgain)
+            throw SyncRunError.destinationNotConnected(deviceName)
+        }
 
         // Reset cancellation flag + progress tracking at start (D-14)
         cancellationRequested = false
         isPaused = false
-        total = preview.filesToAdd.count + preview.filesToRemove.count
+        total = filesToAdd.count + filesToRemove.count
         processed = 0
+        attemptLock.withLock { attemptedTrackIds = [] }
 
         isRunning = true
-        defer { isRunning = false }
+        runningProfileId = profileId
+        defer {
+            isRunning = false
+            runningProfileId = nil
+        }
+        activityJob = operationId
+        defer { activityJob = nil }
+        operationId?.update(completed: 0, total: total)
 
         var result = SyncResult()
+        result.skippedTracks = plannedSkips.map {
+            SyncResultSkip(trackID: $0.trackId, title: $0.title, artist: $0.artist, reason: $0.reason)
+        }
+        result.skippedCount = plannedSkips.count
 
         AppLogger.shared.info(
-            "Sync starting: profile=\(profile.name) (id=\(profileId)) mode=\(profile.transcodeMode) toAdd=\(preview.filesToAdd.count) toRemove=\(preview.filesToRemove.count) output=\(profile.outputFolder)",
+            "Sync starting: profile=\(profile.name) (id=\(profileId)) mode=\(profile.transcodeMode) toAdd=\(filesToAdd.count) toRemove=\(filesToRemove.count) skip=\(plannedSkips.count) retry=\(isRetry) output=\(profile.outputFolder)",
             source: "Sync"
         )
 
-        // Activity (W3-ACT): one operation per sync. Cancel stops the running transcodes and
-        // the queue; Pause holds before the next file.
-        let operationId: ActivityOperationHandle? = activity?.begin(
-            .sync, title: "Sync “\(profile.name)”", subject: .syncProfile(profileId, name: profile.name),
-            progress: ActivityProgress(total: total), itemNoun: .file,
-            controls: ActivityControls(
-                cancel: { [weak self] in Task { @MainActor in self?.cancelSync() } },
-                pause: { [weak self] in Task { @MainActor in self?.pauseSync() } },
-                resume: { [weak self] in Task { @MainActor in self?.resumeSync() } }
-            )
-        )
-        activityJob = operationId
-        defer { activityJob = nil }
+        let results = self.results
+        if !isRetry {
+            try? await results?.begin(profileID: profileId, startedAt: Date(), plannedCount: filesToAdd.count,
+                                      plan: preview.summary, operationID: operationId?.id)
+        }
 
-        // 1. Remove stale files (cleanup-deletion branch — D-04 / SYNC-v2-05)
-        for file in preview.filesToRemove {
-            do {
-                try await waitForSyncPermission()
-            } catch is CancellationError {
-                result.wasCancelled = true
-                break
-            }
-            if profile.cleanupRemovedFiles {
-                let url = URL(fileURLWithPath: file.destinationPath)
-                // Security guard: only delete within profile.outputFolder (T-38-02)
-                guard file.destinationPath.hasPrefix(profile.outputFolder) else {
-                    AppLogger.shared.log(
-                        "Cleanup skipped: path outside outputFolder: \(file.destinationPath)",
-                        level: .warning,
-                        source: "sync"
-                    )
-                    continue
+        let libraryRoot = try await finalisingOperationOnThrow(operationId) { try await configRepository.getLibraryRoot() ?? "" }
+        let workerCount = syncTurboLevel.workerCount()
+        let limiter = ConcurrencyLimiter(maxConcurrency: workerCount)
+        var copiedSoFar = 0
+
+        // 1. Remove stale files (cleanup-deletion branch — D-04 / SYNC-v2-05). Returns the files
+        //    not handled yet when the device went away or the user cancelled.
+        func runRemovals(_ files: [FilePreview]) async -> (removed: Int, pending: [FilePreview], cancelled: Bool) {
+            var removed = 0
+            for (index, file) in files.enumerated() {
+                do {
+                    try await waitForSyncPermission()
+                } catch {
+                    return (removed, Array(files[index...]), true)
                 }
-                // Resolve symlinks to prevent symlink-following attacks (T-38-03)
-                let canonicalURL = url.resolvingSymlinksInPath()
-                guard canonicalURL.path.hasPrefix(profile.outputFolder) else { continue }
+                // W3-SYNC: a removed device stops the clean-up before its `sync_state` row is
+                // forgotten; the file is removed when the device is back.
+                guard destinations.isDestinationReachable(profile.outputFolder) else {
+                    return (removed, Array(files[index...]), false)
+                }
+                if profile.cleanupRemovedFiles {
+                    let url = URL(fileURLWithPath: file.destinationPath)
+                    // Security guard: only delete within profile.outputFolder (T-38-02)
+                    guard file.destinationPath.hasPrefix(profile.outputFolder) else {
+                        AppLogger.shared.log(
+                            "Cleanup skipped: path outside outputFolder: \(file.destinationPath)",
+                            level: .warning,
+                            source: "sync"
+                        )
+                        continue
+                    }
+                    // Resolve symlinks to prevent symlink-following attacks (T-38-03)
+                    let canonicalURL = url.resolvingSymlinksInPath()
+                    guard canonicalURL.path.hasPrefix(profile.outputFolder) else { continue }
 
-                if FileManager.default.fileExists(atPath: canonicalURL.path) {
-                    var trashed: NSURL? = nil
-                    do {
-                        try FileManager.default.trashItem(at: canonicalURL, resultingItemURL: &trashed)
-                    } catch {
-                        // FAT32/exFAT destinations don't support Trash — fall back to direct remove
-                        try? FileManager.default.removeItem(at: canonicalURL)
+                    if FileManager.default.fileExists(atPath: canonicalURL.path) {
+                        var trashed: NSURL? = nil
+                        do {
+                            try FileManager.default.trashItem(at: canonicalURL, resultingItemURL: &trashed)
+                        } catch {
+                            // FAT32/exFAT destinations don't support Trash — fall back to direct remove
+                            try? FileManager.default.removeItem(at: canonicalURL)
+                        }
                     }
                 }
+                try? await syncRepository.removeSyncState(
+                    profileId: profileId,
+                    trackId: file.trackId
+                )
+                removed += 1
+                await incrementProcessed(
+                    currentFile: "Removing: \(file.artist) – \(file.title)",
+                    operationId: operationId
+                )
             }
-            try? await syncRepository.removeSyncState(
-                profileId: profileId,
-                trackId: file.trackId
-            )
-            await incrementProcessed(
-                currentFile: "Removing: \(file.artist) – \(file.title)",
-                operationId: operationId
-            )
+            return (removed, [], false)
         }
 
         // 2. Sync new files
-        let libraryRoot = try await finalisingOperationOnThrow(operationId) { try await configRepository.getLibraryRoot() ?? "" }
-        let workerCount = syncTurboLevel.workerCount()
+        func runCopies(_ files: [FilePreview]) async -> [FileSyncOutcome] {
+            await withTaskGroup(of: FileSyncOutcome.self) { group in
+                for file in files {
+                    group.addTask {
+                        // Check cancellation before acquiring a slot
+                        guard !self.cancellationRequested else {
+                            return .failed(file.trackId, "Cancelled")
+                        }
+                        do {
+                            return try await limiter.run {
+                                // W3-SYNC: the device is gone — don't start this file.
+                                guard self.destinations.isDestinationReachable(profile.outputFolder) else {
+                                    return .interrupted(file.trackId)
+                                }
+                                self.noteAttempt(file.trackId)
+                                let outcome = try await self.syncSingleFile(
+                                    file: file,
+                                    profileId: profileId,
+                                    profile: profile,
+                                    libraryRoot: libraryRoot,
+                                    operationId: operationId
+                                )
+                                // A write that failed because the device was removed is not the
+                                // track's failure: it is tried again when the device is back.
+                                if case .failed = outcome, !self.destinations.isDestinationReachable(profile.outputFolder) {
+                                    await self.uncountProcessed()
+                                    return .interrupted(file.trackId)
+                                }
+                                return outcome
+                            }
+                        } catch is CancellationError {
+                            return .failed(file.trackId, "Cancelled")
+                        } catch {
+                            if !self.destinations.isDestinationReachable(profile.outputFolder) {
+                                return .interrupted(file.trackId)
+                            }
+                            AppLogger.shared.error(
+                                "Sync failed for \(file.artist) - \(file.title): \(error.localizedDescription)",
+                                source: "Sync"
+                            )
+                            await self.incrementProcessed(
+                                currentFile: "Failed: \(file.artist) – \(file.title)",
+                                operationId: operationId
+                            )
+                            return .failed(file.trackId, Self.userFacingFailureReason(error))
+                        }
+                    }
+                }
+
+                var collected: [FileSyncOutcome] = []
+                collected.reserveCapacity(files.count)
+                for await outcome in group {
+                    collected.append(outcome)
+                    if case .synced = outcome, !isRetry {
+                        copiedSoFar += 1
+                        // Kept while running, so an interruption or a quit says how many arrived.
+                        if copiedSoFar % 10 == 0 {
+                            try? await results?.recordProgress(profileID: profileId, copiedCount: copiedSoFar)
+                        }
+                    }
+                    if self.cancellationRequested {
+                        group.cancelAll()
+                        break
+                    }
+                }
+                return collected
+            }
+        }
+
         AppLogger.shared.info(
-            "Syncing new files: \(preview.filesToAdd.count) tracks with \(workerCount) workers (background processing: \(syncTurboLevel.displayName))",
+            "Syncing new files: \(filesToAdd.count) tracks with \(workerCount) workers (background processing: \(syncTurboLevel.displayName))",
             source: "Sync"
         )
 
-        let limiter = ConcurrencyLimiter(maxConcurrency: workerCount)
+        var pendingRemovals = filesToRemove
+        var pendingCopies = filesToAdd
         var outcomes: [FileSyncOutcome] = []
-        outcomes.reserveCapacity(preview.filesToAdd.count)
-
-        outcomes = await withTaskGroup(of: FileSyncOutcome.self) { group in
-            for file in preview.filesToAdd {
-                group.addTask {
-                    // Check cancellation before acquiring a slot
-                    guard !self.cancellationRequested else {
-                        return .failed(file.trackId, "Cancelled")
-                    }
-                    do {
-                        return try await limiter.run {
-                            try await self.syncSingleFile(
-                                file: file,
-                                profileId: profileId,
-                                profile: profile,
-                                libraryRoot: libraryRoot,
-                                operationId: operationId
-                            )
-                        }
-                    } catch is CancellationError {
-                        return .failed(file.trackId, "Cancelled")
-                    } catch {
-                        AppLogger.shared.error(
-                            "Sync failed for \(file.artist) - \(file.title): \(error.localizedDescription)",
-                            source: "Sync"
-                        )
-                        await self.incrementProcessed(
-                            currentFile: "Failed: \(file.artist) – \(file.title)",
-                            operationId: operationId
-                        )
-                        return .failed(file.trackId, Self.userFacingFailureReason(error))
+        outcomes.reserveCapacity(filesToAdd.count)
+        while true {
+            let removal = await runRemovals(pendingRemovals)
+            result.removedCount += removal.removed
+            pendingRemovals = removal.pending
+            if removal.cancelled {
+                result.wasCancelled = true
+                break
+            }
+            var interrupted = Set<Int64>()
+            if pendingRemovals.isEmpty {
+                for outcome in await runCopies(pendingCopies) {
+                    if case .interrupted(let id) = outcome {
+                        interrupted.insert(id)
+                    } else {
+                        outcomes.append(outcome)
                     }
                 }
             }
-
-            var collected: [FileSyncOutcome] = []
-            collected.reserveCapacity(preview.filesToAdd.count)
-            for await outcome in group {
-                collected.append(outcome)
-                if self.cancellationRequested {
-                    group.cancelAll()
-                    break
-                }
+            if cancellationRequested { break }
+            if pendingRemovals.isEmpty && interrupted.isEmpty { break }
+            // The device was removed: wait for it as the same operation (UC-JOB-10); nothing
+            // is marked failed. Only the files not copied yet are tried again.
+            pendingCopies = pendingCopies.filter { interrupted.contains($0.trackId) }
+            result.interruptions += 1
+            AppLogger.shared.info(
+                "Sync interrupted: “\(deviceName)” disconnected — \(copiedSoFar) copied, \(pendingCopies.count + pendingRemovals.count) waiting",
+                source: "Sync"
+            )
+            if !isRetry {
+                try? await results?.recordInterruption(profileID: profileId, copiedCount: copiedSoFar, at: Date())
             }
-            return collected
+            operationId?.setWaiting(.drive(volumeName: deviceName))
+            guard await waitForDestination(profile.outputFolder) else { break }
+            operationId?.setWaiting(nil)
+            if !isRetry {
+                try? await results?.recordResumed(profileID: profileId)
+            }
         }
 
         if cancellationRequested {
@@ -849,13 +1080,19 @@ final class SyncService {
         }
 
         // Aggregate outcomes
-        let previewFilesByID = Dictionary(uniqueKeysWithValues: preview.filesToAdd.map { ($0.trackId, $0) })
+        let previewFilesByID = Dictionary(uniqueKeysWithValues: filesToAdd.map { ($0.trackId, $0) })
         for outcome in outcomes {
             switch outcome {
-            case .synced:
+            case .synced(let id, _):
                 result.syncedCount += 1
-            case .skipped:
+                result.syncedTrackIDs.append(id)
+            case .skipped(let id, let reason):
                 result.skippedCount += 1
+                let file = previewFilesByID[id]
+                result.skippedTracks.append(SyncResultSkip(
+                    trackID: id, title: file?.title ?? "", artist: file?.artist ?? "", reason: reason))
+            case .interrupted:
+                break
             case .failed(let id, let errMsg):
                 if errMsg == "Cancelled" {
                     result.skippedCount += 1
@@ -867,20 +1104,30 @@ final class SyncService {
                         trackId: id,
                         title: file?.title ?? "Unknown track",
                         artist: file?.artist ?? "Unknown artist",
-                        reason: errMsg
+                        reason: errMsg,
+                        devicePath: file?.destinationPath ?? ""
                     ))
                 }
             }
         }
 
-        // 3. Generate M3U8 playlists (M3U8 gate — SYNC-v2-20)
-        if profile.generateM3U8 && !result.wasCancelled {
-            try await finalisingOperationOnThrow(operationId) { try await generatePlaylists(profileId: profileId, profile: profile, libraryRoot: libraryRoot) }
-        }
-
-        // 4. Write mlm-library.json manifest for iOS dialect profiles
-        if profile.playlistFormatEnum == .ios && !result.wasCancelled {
-            try await finalisingOperationOnThrow(operationId) { try await generateManifest(profileId: profileId, profile: profile, libraryRoot: libraryRoot) }
+        // 3. Generate M3U8 playlists (M3U8 gate — SYNC-v2-20) and 4. the iOS manifest.
+        do {
+            if profile.generateM3U8 && !result.wasCancelled {
+                try await finalisingOperationOnThrow(operationId) { try await generatePlaylists(profileId: profileId, profile: profile, libraryRoot: libraryRoot) }
+            }
+            if profile.playlistFormatEnum == .ios && !result.wasCancelled {
+                try await finalisingOperationOnThrow(operationId) { try await generateManifest(profileId: profileId, profile: profile, libraryRoot: libraryRoot) }
+            }
+        } catch {
+            if !isRetry {
+                try? await results?.finish(
+                    profileID: profileId, outcome: .failed, endedAt: Date(), copiedCount: result.syncedCount,
+                    removedCount: result.removedCount, failures: Self.resultFailures(result),
+                    skipped: result.skippedTracks,
+                    failureCause: "Couldn’t write the playlist files on “\(deviceName)”")
+            }
+            throw error
         }
 
         currentFile = ""
@@ -896,7 +1143,52 @@ final class SyncService {
             }
         }
 
+        // This profile's result (v47) — never another profile's (PP-SYNC-02).
+        if isRetry {
+            try? await results?.applyRetry(profileID: profileId, copiedTrackIDs: Set(result.syncedTrackIDs),
+                                           stillFailing: Self.resultFailures(result))
+        } else {
+            try? await results?.finish(
+                profileID: profileId, outcome: result.wasCancelled ? .cancelled : .completed, endedAt: Date(),
+                copiedCount: result.syncedCount, removedCount: result.removedCount,
+                failures: Self.resultFailures(result), skipped: result.skippedTracks)
+        }
+
         return result
+    }
+
+    /// Failures as stored for the profile (v47).
+    static func resultFailures(_ result: SyncResult) -> [SyncResultFailure] {
+        result.failedTracks.map {
+            SyncResultFailure(trackID: $0.trackId, title: $0.title, artist: $0.artist,
+                              reason: $0.reason, devicePath: $0.devicePath)
+        }
+    }
+
+    /// Waits until the destination is reachable again; `false` when the sync was cancelled.
+    private func waitForDestination(_ path: String) async -> Bool {
+        while !destinations.isDestinationReachable(path) {
+            if cancellationRequested { return false }
+            do {
+                try await destinations.waitBeforeRecheck()
+            } catch {
+                return false
+            }
+        }
+        return !cancellationRequested
+    }
+
+    private let attemptLock = NSLock()
+
+    private func noteAttempt(_ trackId: Int64) {
+        attemptLock.withLock { attemptedTrackIds.append(trackId) }
+    }
+
+    /// A file counted as done turned out to be interrupted (the device was removed).
+    private func uncountProcessed() async {
+        await MainActor.run {
+            self.processed = max(0, self.processed - 1)
+        }
     }
 
     /// Fails the Activity operation when `work` throws, then rethrows. Without this a throw between
@@ -933,72 +1225,9 @@ final class SyncService {
             })
     }
 
-    // MARK: - Single-Track Retry (D-13 / SYNC-v2-17)
-
-    /// Execute sync for a single track (for retry of failed tracks).
-    func executeSyncSingleTrack(profileId: Int64, trackId: Int64) async throws -> SyncResult {
-        guard let profile = try await syncRepository.fetch(id: profileId) else {
-            throw SyncError.profileNotFound(profileId)
-        }
-        let libraryRoot = try await configRepository.getLibraryRoot() ?? ""
-
-        var result = SyncResult()
-        guard let track = try await trackRepository.fetchTrack(id: trackId) else {
-            return result
-        }
-
-        let destinationPath = TranscodeCache.buildProfilePath(
-            track: track,
-            libraryRoot: libraryRoot,
-            profileOutputFolder: Self.musicRootFolder(for: profile),
-            transcodeMode: profile.transcodeModeEnum
-        ).path
-        let filePreview = FilePreview(
-            id: trackId,
-            trackId: trackId,
-            title: track.title,
-            artist: track.artist,
-            album: track.album,
-            size: estimateFileSize(track: track, profile: profile, libraryRoot: libraryRoot),
-            destinationPath: destinationPath
-        )
-
-        cancellationRequested = false
-        isPaused = false
-        do {
-            switch try await syncSingleFile(
-                file: filePreview,
-                profileId: profileId,
-                profile: profile,
-                libraryRoot: libraryRoot,
-                operationId: nil
-            ) {
-            case .synced:
-                result.syncedCount = 1
-            case .skipped:
-                result.skippedCount = 1
-            case .failed(_, let reason):
-                result.failedCount = 1
-                result.failedTracks = [SyncFailure(
-                    trackId: trackId,
-                    title: track.title,
-                    artist: track.artist,
-                    reason: reason
-                )]
-            }
-        } catch is CancellationError {
-            result.wasCancelled = true
-        } catch {
-            result.failedCount = 1
-            result.failedTracks = [SyncFailure(
-                trackId: trackId,
-                title: track.title,
-                artist: track.artist,
-                reason: Self.userFacingFailureReason(error)
-            )]
-        }
-        return result
-    }
+    // Single-track retry (`executeSyncSingleTrack`) was replaced by
+    // `executeSync(profileId:onlyTrackIDs:)` (W3-SYNC: Retry Failed of one profile, with progress
+    // in Activity and the playlist files rewritten afterwards).
 
     // MARK: - M3U8 Generation
 

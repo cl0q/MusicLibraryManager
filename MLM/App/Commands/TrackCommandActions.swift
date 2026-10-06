@@ -83,6 +83,19 @@ enum TrackCommandActions {
         shell?.newPlaylistFromSelection(trackIDs: tracks.compactMap(\.id))
     }
 
+    /// Add to Sync Profile ▸ ‹profile› (CM-SUB-SYNC, UC-CM-12): one undo step, `Added ‹n› tracks
+    /// to “‹profile›” · Undo`, nothing navigates and no profile page switches (W3-SYNC).
+    static func addToSyncProfile(_ profile: SyncProfile, tracks: [Track], shell: ShellActions?) {
+        guard let id = profile.id else { return }
+        let ids = tracks.compactMap(\.id)
+        guard !ids.isEmpty else { return }
+        if let shell {
+            Task { await shell.edits.addTracks(ids, toSyncProfile: id, name: profile.name) }
+        } else {
+            Task { await DependencyContainer.shared.syncViewModel?.addTracks(ids, to: profile) }
+        }
+    }
+
     /// Add to Sync Profile ▸ New Sync Profile…: the existing sheet with the selection.
     static func newSyncProfileFromSelection(_ tracks: [Track]) {
         let ids = tracks.compactMap(\.id)

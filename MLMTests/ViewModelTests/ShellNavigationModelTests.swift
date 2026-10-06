@@ -218,26 +218,6 @@ struct ShellSidebarModelTests {
         #expect(reopened.isExpanded(.playlists), "Another library has its own state")
     }
 
-    @Test func syncRowStateFollowsTheDesignedPrecedenceAndWords() {
-        let now = Date()
-        let syncing = SyncProfileRowState.make(isSyncing: true, processed: 86, total: 214, isReachable: false, pendingAdds: 3, lastSynced: now)
-        #expect(syncing.text(relativeTo: now) == "Syncing 86 of 214")
-        #expect(syncing.progress != nil)
-
-        let offline = SyncProfileRowState.make(isSyncing: false, processed: 0, total: 0, isReachable: false, pendingAdds: 12, lastSynced: now)
-        #expect(offline.text(relativeTo: now) == "Not connected")
-
-        let toAdd = SyncProfileRowState.make(isSyncing: false, processed: 0, total: 0, isReachable: true, pendingAdds: 12, lastSynced: now)
-        #expect(toAdd.text(relativeTo: now) == "12 to add")
-
-        let synced = SyncProfileRowState.make(isSyncing: false, processed: 0, total: 0, isReachable: true, pendingAdds: 0, lastSynced: now.addingTimeInterval(-7200))
-        #expect(synced.text(relativeTo: now).hasPrefix("Synced "))
-        #expect(synced.progress == nil)
-
-        let fresh = SyncProfileRowState.make(isSyncing: false, processed: 0, total: 0, isReachable: true, pendingAdds: nil, lastSynced: nil)
-        #expect(fresh.text(relativeTo: now) == "Connected")
-    }
-
     @Test func driveWordingIsVerbatim() {
         #expect(LibraryDriveState.volumeName(fromVolumePath: "/Volumes/Lexxar") == "Lexxar")
         #expect(LibraryDriveState.volumeName(fromVolumePath: nil) == nil)

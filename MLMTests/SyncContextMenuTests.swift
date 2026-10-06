@@ -21,7 +21,14 @@ struct SyncContextMenuTests {
             configRepository: configRepo,
             transcodeCache: cache
         )
-        let vm = SyncViewModel(syncRepository: syncRepo, syncService: svc)
+        let vm = SyncViewModel(syncRepository: syncRepo, syncService: svc, notificationCenter: NotificationCenter())
+        // W3-SYNC: content edits go through ShellEdits (undoable) on this test database.
+        let playlists = PlaylistRepository(database: db)
+        let undo = UndoCenter(undoManager: UndoManager(), statusBar: StatusBarCenter(), log: { _ in })
+        vm.edits = {
+            ShellEdits(dependencies: .init(playlists: { playlists }, syncProfiles: { syncRepo }, syncProfileDidChange: { _ in }),
+                       undo: undo, window: ShellWindowModels())
+        }
         return (db, vm)
     }
 
@@ -33,7 +40,7 @@ struct SyncContextMenuTests {
 
     @Test func profilesPopulatedAfterCreate() async throws {
         let (db, vm) = try makeVM()
-        await vm.createProfile(name: "iPod Sync", outputFolder: "/tmp")
+        _ = await vm.createProfile(name: "iPod Sync", outputFolder: "/tmp", preset: .plainFolder)
         await vm.loadProfiles()
         #expect(vm.profiles.count == 1)
         #expect(vm.profiles.first?.name == "iPod Sync")
@@ -50,10 +57,8 @@ struct SyncContextMenuTests {
         let playlistId: Int64 = try await db.read { db in
             (try Row.fetchOne(db, sql: "SELECT id FROM playlists"))?["id"] ?? -1
         }
-        vm.selectedProfile = profile
-
-        // Simulate context menu "Sync to Profile" action
-        await vm.addPlaylists([playlistId])
+        // Add to Sync Profile ▸ (W3-SYNC: names its profile; nothing is "selected").
+        await vm.addPlaylists([playlistId], to: profile)
 
         let count: Int = try await db.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM sync_profile_playlists WHERE profile_id = ?",
@@ -64,7 +69,7 @@ struct SyncContextMenuTests {
 
     @Test func syncProfilesHaveNewToggleColumnDefaults() async throws {
         let (db, vm) = try makeVM()
-        await vm.createProfile(name: "Folder Sync", outputFolder: "/tmp")
+        _ = await vm.createProfile(name: "Folder Sync", outputFolder: "/tmp", preset: .plainFolder)
         let profiles = try await db.read { db in try SyncProfile.fetchAll(db) }
         let p = profiles.first!
 

@@ -138,6 +138,21 @@ final class SyncRepository: Sendable {
         }
     }
 
+    /// Playlists + tracks + rules per profile in one query (W3-SYNC: `Nothing to sync yet` for
+    /// every sidebar row without loading each profile's content).
+    func fetchContentCounts() async throws -> [Int64: Int] {
+        try await database.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT profile_id, COUNT(*) AS n FROM (
+                    SELECT profile_id FROM sync_profile_playlists
+                    UNION ALL SELECT profile_id FROM sync_profile_tracks
+                    UNION ALL SELECT profile_id FROM sync_profile_rules
+                ) GROUP BY profile_id
+                """)
+            return Dictionary(rows.map { (($0["profile_id"] as Int64), ($0["n"] as Int)) }, uniquingKeysWith: +)
+        }
+    }
+
     // MARK: - Profile Content
 
     /// Fetch tracks directly added to a profile.
