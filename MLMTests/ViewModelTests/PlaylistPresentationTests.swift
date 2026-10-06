@@ -121,7 +121,7 @@ struct PlaylistPresentationTests {
         #expect(DropRules.decide(folderDrag, onto: .playlistFolder(id: 7, name: "Radio"), context: context) == .refuse(nil),
                 "one level: a folder never goes into a folder")
         #expect(DropRules.decide(playlists, onto: .playlistsSection, context: context)
-                == .movePlaylistItems([.playlist(3)], folderID: nil, before: nil))
+                == .movePlaylistItemsToTop([.playlist(3)]))
         #expect(DropRules.decide(folderDrag, onto: .playlistOrder(folderID: nil, before: .playlist(4)), context: context)
                 == .movePlaylistItems([.folder(9)], folderID: nil, before: .playlist(4)))
         #expect(DropRules.decide(playlists, onto: .playlistOrder(folderID: nil, before: .playlist(3)), context: context) == .refuse(nil))
@@ -142,7 +142,7 @@ struct PlaylistPresentationTests {
                 == .importFilesAsNewPlaylistInFolder([URL(fileURLWithPath: "/x/a.mp3")], folderID: 9))
     }
 
-    // MARK: Refresh from ‹Source› (add-only, B3-PLAN §5 question 5)
+    // MARK: Refresh from ‹Source› (add-only, B3-PLAN §5 question 5; review S2–S4)
 
     private func refreshEnv() throws -> (DatabaseQueue, PlaylistRepository, TrackRepository, SourceRepository) {
         let db = try DatabaseManager.inMemory()
@@ -155,19 +155,40 @@ struct PlaylistPresentationTests {
         return (db, PlaylistRepository(database: db), TrackRepository(database: db), SourceRepository(database: db))
     }
 
-    @Test func aLikedRefreshNeverRemovesATrack() async throws {
-        let (_, playlists, tracks, sources) = try refreshEnv()
+    private struct RowState: Equatable {
+        let id: Int64
+        let trackID: Int64
+        let position: String
+        let addedAt: String?
+    }
+
+    private func rows(_ db: DatabaseQueue, _ playlistID: Int64) throws -> [RowState] {
+        try db.read { db in
+            try Row.fetchAll(db, sql: "SELECT id, track_id, position, added_at FROM playlist_tracks WHERE playlist_id = ? ORDER BY position, added_at, id",
+                             arguments: [playlistID])
+                .map { RowState(id: $0["id"], trackID: $0["track_id"], position: $0["position"], addedAt: $0["added_at"]) }
+        }
+    }
+
+    /// S2: existing rows keep their order, position, `added_at` and row id; only new likes are
+    /// appended; a like that went away upstream stays (add-only).
+    @Test func aLikedRefreshAppendsOnlyNewTracksAndKeepsEveryExistingRowExactly() async throws {
+        let (db, playlists, tracks, sources) = try refreshEnv()
         let source = try await sources.upsert(name: "soundcloud", userId: "u")
         let liked = try await playlists.findOrCreateLikedPlaylist(name: "Liked from SoundCloud", sourceId: source.id!, externalId: "u")
-        try await playlists.replaceTrackList(playlistId: liked.id!, trackIds: [1, 2, 3])
+        // The user's own order: 3, 1, 2 (not the source's).
+        _ = try await playlists.appendTracksReturningEntries(playlistId: liked.id!, trackIds: [3, 1, 2])
+        try await db.write { db in try db.execute(sql: "UPDATE playlist_tracks SET added_at = '2020-01-01 00:00:00'") }
+        let before = try rows(db, liked.id!)
         let service = PlaylistRefreshService(playlists: playlists, tracks: tracks, sources: sources, remote: .init(
-            syncLiked: { _ in try await playlists.replaceTrackList(playlistId: liked.id!, trackIds: [4, 2]) },
+            likedTracks: { _ in [4, 2] },   // 1 and 3 no longer liked; 4 is new
             listTracks: { _, _ in [] }
         ))
         let added = try await service.refresh(playlistID: liked.id!)
         #expect(added == 1)
-        let now = Set(try await playlists.fetchTracks(playlistId: liked.id!).compactMap(\.id))
-        #expect(now == [1, 2, 3, 4], "1 and 3 dropped by the source sync come back")
+        let after = try rows(db, liked.id!)
+        #expect(Array(after.prefix(3)) == before, "order, positions, added dates and row ids unchanged")
+        #expect(after.map(\.trackID) == [3, 1, 2, 4])
         #expect(PlaylistRefreshService.resultText(newTracks: added) == "1 new track")
         #expect(PlaylistRefreshService.resultText(newTracks: 0) == "No new tracks")
     }
@@ -183,9 +204,9 @@ struct PlaylistPresentationTests {
             RemotePlaylistTrack(externalID: "vid-1", title: "Old", artist: "A", album: "", durationSeconds: 60, format: "youtube", originalPath: "https://y/1"),
         ]
         let service = PlaylistRefreshService(playlists: playlists, tracks: tracks, sources: sources, remote: .init(
-            syncLiked: { _ in }, listTracks: { _, _ in remote }
+            likedTracks: { _ in [] }, listTracks: { _, _ in remote }
         ))
-        #expect(PlaylistRefreshService.canRefresh(try await playlists.fetch(id: playlist.id!)!))
+        #expect(PlaylistRefreshService.canRefresh(try await playlists.fetch(id: playlist.id!)!, sourceName: "youtube"))
         #expect(try await service.refresh(playlistID: playlist.id!) == 1)
         let rows = try await playlists.fetchTracks(playlistId: playlist.id!)
         #expect(rows.count == 2)
@@ -197,11 +218,63 @@ struct PlaylistPresentationTests {
     @Test func aLocalPlaylistCantBeRefreshed() async throws {
         let (_, playlists, tracks, sources) = try refreshEnv()
         let playlist = try await playlists.createNumbered(baseName: "Mine")
-        #expect(!PlaylistRefreshService.canRefresh(playlist))
+        #expect(!PlaylistRefreshService.canRefresh(playlist, sourceName: nil))
         let service = PlaylistRefreshService(playlists: playlists, tracks: tracks, sources: sources,
-                                             remote: .init(syncLiked: { _ in }, listTracks: { _, _ in [] }))
+                                             remote: .init(likedTracks: { _ in [] }, listTracks: { _, _ in [] }))
         await #expect(throws: PlaylistRefreshService.RefreshError.notLinked) {
             _ = try await service.refresh(playlistID: playlist.id!)
         }
+    }
+
+    /// S3: the item is offered only where a refresh can do something.
+    @Test func refreshIsOfferedOnlyWhereItCanDoSomething() {
+        var liked = Playlist.createNative(name: "Liked")
+        liked.isLiked = 1
+        liked.sourceId = 3
+        #expect(PlaylistRefreshService.canRefresh(liked, sourceName: "soundcloud"))
+        #expect(!PlaylistRefreshService.canRefresh(liked, sourceName: "spotify"))
+        #expect(!PlaylistRefreshService.canRefresh(liked, sourceName: "apple_music"))
+        #expect(!PlaylistRefreshService.canRefresh(liked, sourceName: nil), "the source row is gone")
+        liked.sourceId = -1
+        #expect(!PlaylistRefreshService.canRefresh(liked, sourceName: "soundcloud"), "device-ingest sentinel")
+        var linked = Playlist.createNative(name: "Set")
+        linked.sourceId = 4
+        linked.externalId = "123"
+        #expect(PlaylistRefreshService.canRefresh(linked, sourceName: "SoundCloud"))
+        #expect(PlaylistRefreshService.canRefresh(linked, sourceName: "spotify"))
+        #expect(!PlaylistRefreshService.canRefresh(linked, sourceName: "Apple Music"))
+        linked.externalId = nil
+        #expect(!PlaylistRefreshService.canRefresh(linked, sourceName: "youtube"))
+    }
+
+    /// S4: a refresh that waited while the playlist was deleted leaves no orphan rows.
+    @Test func appendingToADeletedPlaylistThrowsAndWritesNothing() async throws {
+        let (db, playlists, _, _) = try refreshEnv()
+        let playlist = try await playlists.createNumbered(baseName: "Gone")
+        _ = try await playlists.deleteReturningSnapshot(id: playlist.id!)
+        await #expect(throws: PlaylistRepositoryError.self) {
+            _ = try await playlists.appendTracksReturningEntries(playlistId: playlist.id!, trackIds: [1, 2])
+        }
+        let orphans = try await db.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM playlist_tracks") }
+        #expect(orphans == 0)
+    }
+
+    /// S1: a deleted Liked playlist restored after a refresh recreated it comes back as a plain,
+    /// unlinked playlist — never a second Liked row.
+    @Test func restoringALikedPlaylistAfterItWasRecreatedBringsItBackUnlinked() async throws {
+        let (db, playlists, _, sources) = try refreshEnv()
+        let source = try await sources.upsert(name: "soundcloud", userId: "u")
+        let liked = try await playlists.findOrCreateLikedPlaylist(name: "Liked from SoundCloud", sourceId: source.id!, externalId: "u")
+        let snapshot = try await playlists.deleteReturningSnapshot(id: liked.id!)
+        _ = try await playlists.findOrCreateLikedPlaylist(name: "Liked from SoundCloud", sourceId: source.id!, externalId: "u")
+        let result = try await playlists.restore(snapshot)
+        #expect(result.unlinked != nil)
+        #expect(result.playlist.isLiked == 0)
+        #expect(result.playlist.sourceId == nil)
+        let likedRows = try await db.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM playlists WHERE is_liked = 1") }
+        #expect(likedRows == 1)
+        let message = PlaylistDeletionConfirmation.make(name: "Liked from SoundCloud",
+                                                       impact: PlaylistDeletionImpact(trackCount: 2, syncProfileNames: []), isLiked: true).message
+        #expect(message.contains("A later Refresh from Sources creates it again."))
     }
 }

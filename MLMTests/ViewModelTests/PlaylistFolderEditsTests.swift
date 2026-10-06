@@ -216,4 +216,102 @@ struct PlaylistFolderEditsTests {
         await env.undoOnce()
         #expect(try await env.playlists.fetch(id: created.id!) == nil)
     }
+
+    // MARK: Positions that can't fit (W3-PL review B2/B3, S5)
+
+    private func seedTracks(_ env: Env, _ count: Int) throws {
+        try env.db.write { db in
+            for id in 1...count {
+                try db.execute(sql: "INSERT INTO tracks (id, artist, album_artist, album, title, format, original_path) VALUES (?, 'A', 'A', '', ?, 'mp3', ?)",
+                               arguments: [id, "T\(id)", "/t/\(id).mp3"])
+            }
+        }
+    }
+
+    private func positions(_ env: Env, _ playlistID: Int64) throws -> [Int64: String] {
+        try env.db.read { db in
+            Dictionary(uniqueKeysWithValues: try Row.fetchAll(db, sql: "SELECT track_id, position FROM playlist_tracks WHERE playlist_id = ?",
+                                                              arguments: [playlistID]).map { ($0["track_id"] as Int64, $0["position"] as String) })
+        }
+    }
+
+    /// B2: a track dragged to the top of an imported playlist (`%012d` keys) lands at the top;
+    /// the playlist is renumbered in the same step and undo puts every old key back.
+    @Test func dropToTheTopOfAnImportedPlaylistRenumbersAndUndoesExactly() async throws {
+        let env = try makeEnv()
+        try seedTracks(env, 5)
+        let playlist = try await env.playlists.createNumbered(baseName: "Imported")
+        try await env.db.write { db in
+            for id in 1...4 {
+                try db.execute(sql: "INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)",
+                               arguments: [playlist.id!, id, String(format: "%012d", id - 1)])
+            }
+        }
+        let original = try positions(env, playlist.id!)
+        let plan = try #require(PlaylistDropPlan.make(trackIDs: [5], playlistOrder: [1, 2, 3, 4], displayRows: [1, 2, 3, 4],
+                                                      insertionIndex: 0, isPlaylistOrder: true, isFiltered: false))
+        await env.edits.placeTracks(plan, inPlaylist: playlist.id!, name: "Imported")
+        #expect(try await env.playlists.fetchTracks(playlistId: playlist.id!).compactMap(\.id) == [5, 1, 2, 3, 4])
+        await env.undoOnce()
+        #expect(try positions(env, playlist.id!) == original, "every old key back")
+        await env.redoOnce()
+        #expect(try await env.playlists.fetchTracks(playlistId: playlist.id!).compactMap(\.id) == [5, 1, 2, 3, 4])
+    }
+
+    /// B3: a playlist with keys over 256 bytes is renumbered by its next edit (same order).
+    @Test func longLegacyKeysAreRenumberedByTheNextAppend() async throws {
+        let env = try makeEnv()
+        try seedTracks(env, 4)
+        let playlist = try await env.playlists.createNumbered(baseName: "Old")
+        try await env.db.write { db in
+            var key = "a0"
+            for id in 1...3 {
+                key += String(repeating: "|a0", count: 100)
+                try db.execute(sql: "INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)",
+                               arguments: [playlist.id!, id, key])
+            }
+        }
+        await env.edits.addTracks([4], toPlaylist: playlist.id!)
+        #expect(try await env.playlists.fetchTracks(playlistId: playlist.id!).compactMap(\.id) == [1, 2, 3, 4])
+        #expect(try positions(env, playlist.id!).values.allSatisfy { $0.utf8.count < 16 })
+        await env.undoOnce()
+        let restored = try positions(env, playlist.id!)
+        #expect(restored.count == 3)
+        #expect(restored.values.allSatisfy { $0.utf8.count > 256 }, "undo puts the old keys back")
+    }
+
+    /// B2 for the sidebar order: playlists with `%012d` positions; one moved to the top.
+    @Test func sidebarMoveToTheTopOfAllZeroKeysRenumbersAndRevertsExactly() async throws {
+        let env = try makeEnv()
+        try await env.db.write { db in
+            for (index, name) in ["A", "B", "C"].enumerated() {
+                try db.execute(sql: "INSERT INTO playlists (name, category, position) VALUES (?, 'regular', ?)",
+                               arguments: [name, String(format: "%012d", index)])
+            }
+        }
+        let c = try #require(try await env.playlists.findByName("C"))
+        let a = try #require(try await env.playlists.findByName("A"))
+        let before = try await env.db.read { db in try String.fetchAll(db, sql: "SELECT position FROM playlists ORDER BY id") }
+        let change = try await env.playlists.folders.move([.playlist(c.id!)], into: nil, before: .playlist(a.id!))
+        #expect(try await env.topLevel() == ["C", "A", "B"])
+        _ = try await env.playlists.folders.revert(change)
+        let after = try await env.db.read { db in try String.fetchAll(db, sql: "SELECT position FROM playlists ORDER BY id") }
+        #expect(after == before)
+    }
+
+    /// S5: moving a playlist to where it already is changes nothing and records no step.
+    @Test func aMoveToTheSamePlaceIsANoOp() async throws {
+        let env = try makeEnv()
+        let b = try await env.playlists.createNumbered(baseName: "B")
+        let a = try await env.playlists.createNumbered(baseName: "A")
+        let sets = try await env.playlists.folders.createFolder(baseName: "Sets")
+        _ = (a, b)
+        #expect(try await env.playlists.folders.move([.playlist(b.id!)], into: nil, before: nil).isEmpty, "already last")
+        #expect(try await env.playlists.folders.move([.playlist(a.id!)], into: nil, before: .playlist(b.id!)).isEmpty,
+                "dropped back into its own gap")
+        #expect(try await env.playlists.folders.move([.folder(sets.id!)], into: nil, before: .folder(sets.id!)).isEmpty)
+        _ = await env.sidebar.reloadPlaylists(env.playlists)
+        await env.edits.movePlaylistItems([.playlist(b.id!)], into: nil, before: nil)
+        #expect(!env.manager.canUndo, "no step recorded")
+    }
 }

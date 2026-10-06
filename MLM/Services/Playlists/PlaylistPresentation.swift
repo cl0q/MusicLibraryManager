@@ -353,3 +353,17 @@ enum PlaylistFacts {
         playlist.isLiked == 1 ? "Liked playlist" : "Playlist"
     }
 }
+
+// MARK: - Download progress as a change signal (W3-PL review S6)
+
+extension ActivityCenter {
+    /// Changes whenever a download operation starts, advances (coalesced ≤ 4/s) or ends — the
+    /// playlist rows, cards and page reload their counts on it (nobody posts
+    /// `.downloadStateDidChange`).
+    var downloadProgressKey: String {
+        let running = activeOperations
+            .filter { $0.kind == .download }
+            .map { "\($0.id.uuidString):\($0.state.rawValue):\(ActivityPresentation.progressText($0.progress) ?? "")" }
+        return running.joined(separator: "|") + "#\(finishedCount)"
+    }
+}

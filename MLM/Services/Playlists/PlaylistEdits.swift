@@ -244,6 +244,15 @@ extension ShellEdits {
         )
     }
 
+    /// A drop on the Playlists section (header, All Playlists row, empty area, grid background):
+    /// first among the top-level rows, one step (W3-PL review: the same place for every
+    /// section drop — where a new playlist appears too).
+    func movePlaylistItemsToTop(_ items: [PlaylistSidebarItemID]) async {
+        guard let folders = dependencies.playlists()?.folders else { return }
+        let first = try? await folders.firstItem(inFolder: nil)
+        await movePlaylistItems(items, into: nil, before: first ?? nil)
+    }
+
     // MARK: New playlist inside a folder (P-SIDEBAR.N03/menu, tracks dropped on a folder)
 
     /// `New Playlist in Folder` (no tracks: rename mode, opens it like ⌘N) or tracks dropped on a
@@ -353,16 +362,10 @@ extension ShellEdits {
                 return result
             },
             undo: { added in
-                let removed = try await repository.removeEntries(added.entries)
-                guard !removed.isEmpty else { throw UndoNothingLeft(note: "Nothing to undo — the tracks are no longer in “\(name)”") }
-                await effects.changed(playlistID, repository: repository)
-                return removed
+                try await Self.undoAppend(added, playlistID: playlistID, name: name, repository: repository, effects: effects)
             },
-            redo: { removed in
-                let restored = try await repository.restoreEntries(removed)
-                guard !restored.isEmpty else { throw UndoNothingLeft(note: "Nothing to redo — the tracks can’t go back into “\(name)”") }
-                await effects.changed(playlistID, repository: repository)
-                return PlaylistAppendResult(entries: restored, alreadyPresent: 0)
+            redo: { undone in
+                try await Self.redoAppend(undone, playlistID: playlistID, name: name, repository: repository, effects: effects)
             },
             message: { result in
                 PlaylistEditWords.m3uImported(added: result.entries.count,

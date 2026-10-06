@@ -254,23 +254,16 @@ final class PlaylistRepository: Sendable {
         }
     }
 
-    /// Add multiple tracks to a playlist in a single transaction.
+    /// Add multiple tracks after the playlist's last row in a single transaction.
+    /// `startPosition` is ignored since the W3-PL review: positions always come from the
+    /// playlist's real tail (`positionKeys`), so a stale start can't put a row out of order.
     func addTracks(playlistId: Int64, trackIds: [Int64], startPosition: String) async throws {
         try await database.write { db in
-            var currentPos = startPosition
-            for (index, trackId) in trackIds.enumerated() {
-                if index > 0 {
-                    currentPos = FractionalIndexer.positionBetween(left: currentPos, right: nil)
-                }
-                var entry = PlaylistTrack(
-                    id: nil,
-                    playlistId: playlistId,
-                    trackId: trackId,
-                    position: currentPos,
-                    addedAt: Self.addedAtFormatter.string(from: Date())
-                )
-                try entry.insert(db, onConflict: .ignore)
-            }
+            let existing = Set(try Int64.fetchAll(db, sql: "SELECT track_id FROM playlist_tracks WHERE playlist_id = ?",
+                                                  arguments: [playlistId]))
+            var seen = Set<Int64>()
+            let newIDs = trackIds.filter { !existing.contains($0) && seen.insert($0).inserted }
+            _ = try Self.insertEntries(db, playlistId: playlistId, trackIds: newIDs)
         }
     }
 
@@ -282,38 +275,36 @@ final class PlaylistRepository: Sendable {
     }
 
     /// `appendTracks`, reporting exactly which rows it inserted (so Undo removes those and
-    /// never a row that was already there) and how many tracks were already in the playlist.
+    /// never a row that was already there), how many tracks were already in the playlist, and
+    /// the rows a renumbering moved (undo puts their old keys back). Throws when the playlist
+    /// no longer exists (a refresh that waited on the network must not leave orphan rows).
     func appendTracksReturningEntries(playlistId: Int64, trackIds: [Int64]) async throws -> PlaylistAppendResult {
         let orderedIDs = trackIds.reduce(into: [Int64]()) { result, id in
             if !result.contains(id) { result.append(id) }
         }
-        guard !orderedIDs.isEmpty else { return PlaylistAppendResult(entries: [], alreadyPresent: 0) }
-
         return try await database.write { db in
-            let tail = try String.fetchOne(db, sql: """
-                SELECT position FROM playlist_tracks
-                WHERE playlist_id = ?
-                ORDER BY position DESC, added_at DESC
-                LIMIT 1
-            """, arguments: [playlistId])
-
-            let existingRows = try Int64.fetchAll(db, sql: """
+            guard try Playlist.fetchOne(db, id: playlistId) != nil else { throw PlaylistRepositoryError.playlistNotFound }
+            guard !orderedIDs.isEmpty else { return PlaylistAppendResult(entries: [], alreadyPresent: 0) }
+            let existingIDs = Set(try Int64.fetchAll(db, sql: """
                 SELECT track_id FROM playlist_tracks WHERE playlist_id = ?
-            """, arguments: [playlistId])
-            let existingIDs = Set(existingRows)
-
+            """, arguments: [playlistId]))
             let newIDs = orderedIDs.filter { !existingIDs.contains($0) }
-            let entries = try Self.insertEntries(db, playlistId: playlistId, trackIds: newIDs, after: tail)
-            return PlaylistAppendResult(entries: entries, alreadyPresent: orderedIDs.count - newIDs.count)
+            let (entries, renumbered) = try Self.insertEntriesReturningRenumbering(db, playlistId: playlistId, trackIds: newIDs)
+            return PlaylistAppendResult(entries: entries, alreadyPresent: orderedIDs.count - newIDs.count, renumbered: renumbered)
         }
     }
 
-    /// Insert `trackIds` in order after `tail` (fractional positions), returning the rows.
-    private static func insertEntries(_ db: Database, playlistId: Int64, trackIds: [Int64], after tail: String?) throws -> [PlaylistTrack] {
-        var tail = tail
+    /// Insert `trackIds` in order after the playlist's last row, returning the rows.
+    private static func insertEntries(_ db: Database, playlistId: Int64, trackIds: [Int64]) throws -> [PlaylistTrack] {
+        try insertEntriesReturningRenumbering(db, playlistId: playlistId, trackIds: trackIds).entries
+    }
+
+    private static func insertEntriesReturningRenumbering(_ db: Database, playlistId: Int64, trackIds: [Int64])
+        throws -> (entries: [PlaylistTrack], renumbered: [PlaylistPositionChange]) {
+        guard !trackIds.isEmpty else { return ([], []) }
+        let (keys, renumbered) = try positionKeys(db, playlistId: playlistId, count: trackIds.count, before: nil, excluding: [])
         var inserted: [PlaylistTrack] = []
-        for trackId in trackIds {
-            let position = FractionalIndexer.positionBetween(left: tail, right: nil)
+        for (trackId, position) in zip(trackIds, keys) {
             var entry = PlaylistTrack(
                 id: nil,
                 playlistId: playlistId,
@@ -323,9 +314,138 @@ final class PlaylistRepository: Sendable {
             )
             try entry.insert(db)
             inserted.append(entry)
-            tail = position
         }
-        return inserted
+        return (inserted, renumbered)
+    }
+
+    // MARK: - Positions (W3-PL review: never an out-of-order key)
+
+    /// One row's place in the playlist order.
+    struct OrderedRow: Equatable {
+        let rowID: Int64
+        let trackID: Int64
+        let position: String
+    }
+
+    /// The playlist's rows in playlist order (`position`, then `added_at`, then row id).
+    static func orderedRows(_ db: Database, playlistId: Int64) throws -> [OrderedRow] {
+        try Row.fetchAll(db, sql: """
+            SELECT id, track_id, position FROM playlist_tracks WHERE playlist_id = ?
+            ORDER BY position, added_at, id
+        """, arguments: [playlistId]).map { OrderedRow(rowID: $0["id"], trackID: $0["track_id"], position: $0["position"]) }
+    }
+
+    /// Keys for `count` rows placed, in order, before `before` (nil = at the end) among the
+    /// playlist's rows other than `moving`. When no key fits (a row ends in `0…` at the start,
+    /// equal keys) or a key is longer than `FractionalIndexer.renumberLength`, every row of the
+    /// playlist first gets an evenly spaced key in its current order — in this transaction —
+    /// and the old keys are returned so undo can put them back. Never returns an out-of-order
+    /// key: if even that fails it throws.
+    static func positionKeys(_ db: Database, playlistId: Int64, count: Int, before: Int64?,
+                             excluding moving: Set<Int64>) throws -> (keys: [String], renumbered: [PlaylistPositionChange]) {
+        func attempt(_ rows: [OrderedRow]) -> [String]? {
+            let remaining = rows.filter { !moving.contains($0.trackID) }
+            let insertAt = before.flatMap { id in remaining.firstIndex { $0.trackID == id } } ?? remaining.count
+            var left = insertAt > 0 ? remaining[insertAt - 1].position : nil
+            let right = insertAt < remaining.count ? remaining[insertAt].position : nil
+            var keys: [String] = []
+            for _ in 0..<count {
+                guard let key = FractionalIndexer.key(between: left, and: right) else { return nil }
+                keys.append(key)
+                left = key
+            }
+            return keys
+        }
+        var rows = try orderedRows(db, playlistId: playlistId)
+        var renumbered: [PlaylistPositionChange] = []
+        if rows.contains(where: { $0.position.utf8.count > FractionalIndexer.renumberLength }) {
+            renumbered = try renumber(db, rows: rows)
+            rows = try orderedRows(db, playlistId: playlistId)
+        }
+        if let keys = attempt(rows) { return (keys, renumbered) }
+        if renumbered.isEmpty {
+            renumbered = try renumber(db, rows: rows)
+            rows = try orderedRows(db, playlistId: playlistId)
+            if let keys = attempt(rows) { return (keys, renumbered) }
+        }
+        throw PlaylistRepositoryError.noRoomForPosition
+    }
+
+    /// Evenly spaced keys for `rows` in their order (`FractionalIndexer.evenlySpaced`).
+    private static func renumber(_ db: Database, rows: [OrderedRow]) throws -> [PlaylistPositionChange] {
+        let keys = FractionalIndexer.evenlySpaced(count: rows.count)
+        var changes: [PlaylistPositionChange] = []
+        for (row, key) in zip(rows, keys) where row.position != key {
+            try db.execute(sql: "UPDATE playlist_tracks SET position = ? WHERE id = ?", arguments: [key, row.rowID])
+            changes.append(PlaylistPositionChange(trackID: row.trackID, from: row.position, to: key))
+        }
+        return changes
+    }
+
+    /// Places `trackIds`, in this order, before `beforeTrackID` (nil = at the end) as one
+    /// transaction: members move, other tracks (that still exist) are inserted. Returns what an
+    /// exact undo needs; nil when nothing would change.
+    func placeTracksReturningChanges(playlistId: Int64, trackIds: [Int64], before beforeTrackID: Int64?) async throws -> PlaylistPlacementResult? {
+        var seen = Set<Int64>()
+        let ordered = trackIds.filter { seen.insert($0).inserted }
+        guard !ordered.isEmpty else { return nil }
+        return try await database.write { db in
+            guard try Playlist.fetchOne(db, id: playlistId) != nil else { throw PlaylistRepositoryError.playlistNotFound }
+            let before = try Self.orderedRows(db, playlistId: playlistId)
+            let members = Dictionary(before.map { ($0.trackID, $0.position) }, uniquingKeysWith: { first, _ in first })
+            var ids: [Int64] = []
+            for id in ordered {
+                // Never a row for a track that left the library meanwhile.
+                let exists = try members[id] != nil
+                    || (Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM tracks WHERE id = ?)", arguments: [id]) ?? false)
+                if exists { ids.append(id) }
+            }
+            guard !ids.isEmpty else { return nil }
+            let moving = Set(ids).intersection(members.keys)
+            let (keys, renumbered) = try Self.positionKeys(db, playlistId: playlistId, count: ids.count, before: beforeTrackID, excluding: moving)
+            let renumberedTo = Dictionary(renumbered.map { ($0.trackID, $0.to) }, uniquingKeysWith: { first, _ in first })
+            var moves: [PlaylistPositionChange] = []
+            var inserted: [PlaylistTrack] = []
+            for (id, key) in zip(ids, keys) {
+                if let old = members[id] {
+                    try db.execute(sql: "UPDATE playlist_tracks SET position = ? WHERE playlist_id = ? AND track_id = ?",
+                                   arguments: [key, playlistId, id])
+                    moves.append(PlaylistPositionChange(trackID: id, from: renumberedTo[id] ?? old, to: key))
+                } else {
+                    var entry = PlaylistTrack(id: nil, playlistId: playlistId, trackId: id, position: key,
+                                              addedAt: Self.addedAtFormatter.string(from: Date()))
+                    try entry.insert(db)
+                    inserted.append(entry)
+                }
+            }
+            let after = try Self.orderedRows(db, playlistId: playlistId)
+            if inserted.isEmpty, after.map(\.trackID) == before.map(\.trackID) {
+                // Dropped back where they were: undo what the renumbering and moves wrote.
+                for move in moves { try db.execute(sql: "UPDATE playlist_tracks SET position = ? WHERE playlist_id = ? AND track_id = ?",
+                                                   arguments: [move.from, playlistId, move.trackID]) }
+                for change in renumbered { try db.execute(sql: "UPDATE playlist_tracks SET position = ? WHERE playlist_id = ? AND track_id = ?",
+                                                          arguments: [change.from, playlistId, change.trackID]) }
+                return nil
+            }
+            let placed = Set(ids)
+            let first = after.firstIndex { placed.contains($0.trackID) } ?? 0
+            return PlaylistPlacementResult(moves: moves, inserted: inserted, renumbered: renumbered, position: first + 1)
+        }
+    }
+
+    /// Writes positions back (undo / redo of a placement or a renumbering) for the tracks that
+    /// are still in the playlist; returns the changes it applied.
+    func setPositions(playlistId: Int64, _ positions: [(trackID: Int64, position: String)]) async throws -> Int {
+        guard !positions.isEmpty else { return 0 }
+        return try await database.write { db in
+            var applied = 0
+            for item in positions {
+                try db.execute(sql: "UPDATE playlist_tracks SET position = ? WHERE playlist_id = ? AND track_id = ?",
+                               arguments: [item.position, playlistId, item.trackID])
+                applied += db.changesCount
+            }
+            return applied
+        }
     }
 
     /// Remove a track from a playlist.
@@ -658,17 +778,19 @@ final class PlaylistRepository: Sendable {
     /// Replace the entire ordered track list for a playlist atomically.
     ///
     /// Used by source-sync code (SoundCloud Likes, Spotify Liked) to
-    /// keep a playlist in lockstep with the upstream order. Positions
-    /// are dense lexicographic strings ("000000000000", "000000000001", …)
-    /// so existing position-based ordering keeps working.
+    /// keep a playlist in lockstep with the upstream order. Positions are evenly spaced
+    /// `a`-keys (`FractionalIndexer.evenlySpaced`, W3-PL review) — the old `%012d` keys left no
+    /// room before the first row; the next sync of such a playlist heals it.
     func replaceTrackList(playlistId: Int64, trackIds: [Int64]) async throws {
+        var seen = Set<Int64>()
+        let unique = trackIds.filter { seen.insert($0).inserted }
+        let keys = FractionalIndexer.evenlySpaced(count: unique.count)
         try await database.write { db in
             try db.execute(
                 sql: "DELETE FROM playlist_tracks WHERE playlist_id = ?",
                 arguments: [playlistId]
             )
-            for (index, trackId) in trackIds.enumerated() {
-                let position = String(format: "%012d", index)
+            for (trackId, position) in zip(unique, keys) {
                 var entry = PlaylistTrack(
                     id: nil,
                     playlistId: playlistId,
@@ -715,7 +837,7 @@ final class PlaylistRepository: Sendable {
             }
             try playlist.insert(db)
             if let id = playlist.id {
-                _ = try Self.insertEntries(db, playlistId: id, trackIds: orderedIDs, after: nil)
+                _ = try Self.insertEntries(db, playlistId: id, trackIds: orderedIDs)
             }
             return playlist
         }
@@ -764,16 +886,34 @@ final class PlaylistRepository: Sendable {
                 }
             }
             var unlinked: PlaylistRestoreResult.Unlink?
-            if let sourceID = playlist.sourceId, let externalID = playlist.externalId,
-               let other = try Playlist
-                   .filter(Playlist.Columns.sourceId == sourceID)
-                   .filter(sql: "external_id = ?", arguments: [externalID])
-                   .filter(Playlist.Columns.isLiked == 0)
-                   .fetchOne(db) {
-                let sourceName = try String.fetchOne(db, sql: "SELECT name FROM sources WHERE id = ?", arguments: [sourceID])
-                unlinked = .init(otherPlaylistName: other.name, sourceName: sourceName ?? "its source")
-                playlist.sourceId = nil
-                playlist.externalId = nil
+            if let sourceID = playlist.sourceId {
+                // Another playlist now holds this link: for a Liked playlist, any other Liked
+                // row of the same source (a refresh recreated it, W3-PL review S1); otherwise
+                // the same source playlist imported again. This copy comes back unlinked — a
+                // restored Liked playlist then is a plain playlist, so there is one Liked row.
+                let other: Playlist?
+                if playlist.isLiked == 1 {
+                    other = try Playlist
+                        .filter(Playlist.Columns.sourceId == sourceID)
+                        .filter(Playlist.Columns.isLiked == 1)
+                        .fetchOne(db)
+                } else if let externalID = playlist.externalId {
+                    other = try Playlist
+                        .filter(Playlist.Columns.sourceId == sourceID)
+                        .filter(sql: "external_id = ?", arguments: [externalID])
+                        .filter(Playlist.Columns.isLiked == 0)
+                        .fetchOne(db)
+                } else {
+                    other = nil
+                }
+                if let other {
+                    let sourceName = try String.fetchOne(db, sql: "SELECT name FROM sources WHERE id = ?", arguments: [sourceID])
+                    unlinked = .init(otherPlaylistName: other.name, sourceName: sourceName ?? "its source")
+                    playlist.sourceId = nil
+                    playlist.externalId = nil
+                    playlist.isLiked = 0
+                    playlist.category = "regular"
+                }
             }
             // Back into its folder and its place (v45); a folder deleted meanwhile → the top
             // level, at the same position.
@@ -952,6 +1092,8 @@ final class PlaylistRepository: Sendable {
 enum PlaylistRepositoryError: LocalizedError, PlainCauseError {
     case noUniquePlaylistNameAvailable(String)
     case playlistNotFound
+    /// No position fits even after renumbering (never written out of order instead).
+    case noRoomForPosition
 
     var errorDescription: String? {
         switch self {
@@ -959,6 +1101,8 @@ enum PlaylistRepositoryError: LocalizedError, PlainCauseError {
             return "Could not find a free playlist name derived from '\(baseName)' after 499 suffixed attempts."
         case .playlistNotFound:
             return "The playlist does not exist."
+        case .noRoomForPosition:
+            return "No position fits between the neighbouring rows."
         }
     }
 
@@ -966,16 +1110,35 @@ enum PlaylistRepositoryError: LocalizedError, PlainCauseError {
         switch self {
         case .noUniquePlaylistNameAvailable: "every numbered name is taken"
         case .playlistNotFound: "the playlist no longer exists"
+        case .noRoomForPosition: "the playlist’s order couldn’t take another position"
         }
     }
 }
 
 // MARK: - Undo values
 
-/// Inserted rows of an append, and how many of the tracks were already in the playlist.
+/// Inserted rows of an append, how many of the tracks were already in the playlist, and the
+/// rows a renumbering re-keyed (undo puts their old keys back, redo the new ones).
 struct PlaylistAppendResult: Sendable {
     let entries: [PlaylistTrack]
     let alreadyPresent: Int
+    var renumbered: [PlaylistPositionChange] = []
+}
+
+/// One row's position before and after a placement or a renumbering.
+struct PlaylistPositionChange: Equatable, Sendable {
+    let trackID: Int64
+    let from: String
+    let to: String
+}
+
+/// What `placeTracksReturningChanges` did: members moved, rows inserted, rows re-keyed by a
+/// renumbering, and the 1-based position of the first placed track.
+struct PlaylistPlacementResult: Sendable {
+    let moves: [PlaylistPositionChange]
+    let inserted: [PlaylistTrack]
+    let renumbered: [PlaylistPositionChange]
+    let position: Int
 }
 
 /// A playlist and every row that refers to it (see `PlaylistRepository.dependentTables`).

@@ -56,6 +56,8 @@ struct PlaylistFolderSnapshot: Equatable, Sendable {
     let members: [PlaylistPlacementState]
     /// The same playlists at the top level, where the delete put them.
     let movedOut: [PlaylistPlacementState]
+    /// Top-level rows the delete had to re-key to make room (restored first on undo).
+    var relevel = PlaylistOrderChange(before: [], after: [])
 }
 
 /// The order of the sidebar's Playlists section — one comparator for the repository and the
@@ -169,24 +171,18 @@ final class PlaylistFolderRepository: Sendable {
             guard let folder = try PlaylistFolder.fetchOne(db, id: id) else { throw PlaylistFolderError.folderNotFound }
             let members = try Self.playlists(db, inFolder: id)
             let before = members.map { PlaylistPlacementState(item: .playlist($0.id ?? 0), folderID: id, position: $0.position) }
-            // Where the folder was: between the row before it and the folder itself.
-            try Self.normalizeLevel(db, folderID: nil)
-            let level = try Self.level(db, folderID: nil)
-            let folderPosition = try String.fetchOne(db, sql: "SELECT position FROM playlist_folders WHERE id = ?", arguments: [id])
-            let index = level.firstIndex { $0.item == .folder(id) } ?? level.count
-            var left = index > 0 ? level[index - 1].position : nil
-            let right = folderPosition
+            // Where the folder was: just before the folder itself.
+            let memberIDs = members.compactMap(\.id)
+            let (keys, rekeyed) = try Self.levelKeys(db, folderID: nil, count: memberIDs.count, before: .folder(id), excluding: [])
+            let relevel = try Self.change(db, from: rekeyed)
             var movedOut: [PlaylistPlacementState] = []
-            for member in members {
-                guard let memberID = member.id else { continue }
-                let position = PlaylistPlacement.strictlyBetween(left, right)
+            for (memberID, position) in zip(memberIDs, keys) {
                 try db.execute(sql: "UPDATE playlists SET folder_id = NULL, position = ? WHERE id = ?",
                                arguments: [position, memberID])
                 movedOut.append(PlaylistPlacementState(item: .playlist(memberID), folderID: nil, position: position))
-                left = position
             }
             try db.execute(sql: "DELETE FROM playlist_folders WHERE id = ?", arguments: [id])
-            return PlaylistFolderSnapshot(folder: folder, members: before, movedOut: movedOut)
+            return PlaylistFolderSnapshot(folder: folder, members: before, movedOut: movedOut, relevel: relevel)
         }
     }
 
@@ -195,6 +191,8 @@ final class PlaylistFolderRepository: Sendable {
     /// where the delete left them (one moved elsewhere since stays there).
     func restoreFolder(_ snapshot: PlaylistFolderSnapshot) async throws -> PlaylistFolder {
         try await database.write { db in
+            // Top-level rows the delete re-keyed go back first (where nothing moved them since).
+            _ = try Self.revert(db, snapshot.relevel)
             var folder = snapshot.folder
             if let id = folder.id, try PlaylistFolder.fetchOne(db, id: id) != nil {
                 folder.id = nil
@@ -238,20 +236,22 @@ final class PlaylistFolderRepository: Sendable {
     /// left alone, and a playlist whose folder is gone goes to the top level. Returns the change
     /// actually applied (empty when nothing was left to move).
     func revert(_ change: PlaylistOrderChange) async throws -> PlaylistOrderChange {
-        try await database.write { db in
-            let expected = Dictionary(change.after.map { ($0.item, $0) }, uniquingKeysWith: { first, _ in first })
-            var applied = PlaylistOrderChange(before: [], after: [])
-            for target in change.before {
-                guard let now = try Self.currentState(db, of: target.item), now == expected[target.item] else { continue }
-                var folderID = target.folderID
-                if let id = folderID, try PlaylistFolder.fetchOne(db, id: id) == nil { folderID = nil }
-                let state = PlaylistPlacementState(item: target.item, folderID: folderID, position: target.position)
-                try Self.write(db, state)
-                applied.before.append(now)
-                applied.after.append(state)
-            }
-            return applied
+        try await database.write { db in try Self.revert(db, change) }
+    }
+
+    static func revert(_ db: Database, _ change: PlaylistOrderChange) throws -> PlaylistOrderChange {
+        let expected = Dictionary(change.after.map { ($0.item, $0) }, uniquingKeysWith: { first, _ in first })
+        var applied = PlaylistOrderChange(before: [], after: [])
+        for target in change.before {
+            guard let now = try currentState(db, of: target.item), now == expected[target.item] else { continue }
+            var folderID = target.folderID
+            if let id = folderID, try PlaylistFolder.fetchOne(db, id: id) == nil { folderID = nil }
+            let state = PlaylistPlacementState(item: target.item, folderID: folderID, position: target.position)
+            try write(db, state)
+            applied.before.append(now)
+            applied.after.append(state)
         }
+        return applied
     }
 
     // MARK: - Shared with PlaylistRepository (same transaction)
@@ -263,17 +263,83 @@ final class PlaylistFolderRepository: Sendable {
 
     /// A position before every row of the level (a new playlist or folder goes first, Finder's
     /// new-folder behaviour, `playlists.html`).
+    /// A re-keying it needs isn't recorded: it keeps the order, and undoing the creation only
+    /// removes the new row.
     static func firstPosition(_ db: Database, folderID: Int64?) throws -> String {
         try normalizeLevel(db, folderID: folderID)
-        let first = try level(db, folderID: folderID).first?.position
-        return PlaylistPlacement.strictlyBetween(nil, first)
+        let first = try level(db, folderID: folderID).first?.item
+        return try levelKeys(db, folderID: folderID, count: 1, before: first, excluding: []).keys[0]
     }
 
     /// A position after every row of the level (New Playlist in Folder appends).
     static func lastPosition(_ db: Database, folderID: Int64?) throws -> String {
-        try normalizeLevel(db, folderID: folderID)
-        let last = try level(db, folderID: folderID).last?.position
-        return PlaylistPlacement.strictlyBetween(last, nil)
+        try levelKeys(db, folderID: folderID, count: 1, before: nil, excluding: []).keys[0]
+    }
+
+    /// Keys for `count` rows placed, in order, before `before` (nil = at the end) among the
+    /// level's rows other than `moving`. Rows without a position get one first; when no key
+    /// fits, or a key is longer than `FractionalIndexer.renumberLength`, the whole level is
+    /// re-keyed evenly in its shown order. Returns the re-keyed rows as they were before (for
+    /// exact undo). Never an out-of-order key: throws when even that fails.
+    static func levelKeys(_ db: Database, folderID: Int64?, count: Int, before: PlaylistSidebarItemID?,
+                          excluding moving: Set<PlaylistSidebarItemID>) throws -> (keys: [String], rekeyed: [PlaylistPlacementState]) {
+        func attempt(_ entries: [LevelEntry]) -> [String]? {
+            let remaining = entries.filter { !moving.contains($0.item) }
+            let insertAt = before.flatMap { target in remaining.firstIndex { $0.item == target } } ?? remaining.count
+            var left = insertAt > 0 ? remaining[insertAt - 1].position : nil
+            let right = insertAt < remaining.count ? remaining[insertAt].position : nil
+            var keys: [String] = []
+            for _ in 0..<count {
+                guard let key = FractionalIndexer.key(between: left, and: right) else { return nil }
+                keys.append(key)
+                left = key
+            }
+            return keys
+        }
+        var rekeyed = try normalizeLevel(db, folderID: folderID)
+        var entries = try level(db, folderID: folderID)
+        var renumbered = false
+        if entries.contains(where: { ($0.position?.utf8.count ?? 0) > FractionalIndexer.renumberLength }) {
+            rekeyed += try renumberLevel(db, folderID: folderID, entries: entries)
+            entries = try level(db, folderID: folderID)
+            renumbered = true
+        }
+        if let keys = attempt(entries) { return (keys, firstStates(rekeyed)) }
+        if !renumbered {
+            rekeyed += try renumberLevel(db, folderID: folderID, entries: entries)
+            entries = try level(db, folderID: folderID)
+            if let keys = attempt(entries) { return (keys, firstStates(rekeyed)) }
+        }
+        throw PlaylistRepositoryError.noRoomForPosition
+    }
+
+    /// Evenly spaced keys for the level in its shown order; returns the rows' earlier states.
+    private static func renumberLevel(_ db: Database, folderID: Int64?, entries: [LevelEntry]) throws -> [PlaylistPlacementState] {
+        let keys = FractionalIndexer.evenlySpaced(count: entries.count)
+        var before: [PlaylistPlacementState] = []
+        for (entry, key) in zip(entries, keys) where entry.position != key {
+            let folder = entry.item.isFolder ? nil : folderID
+            before.append(PlaylistPlacementState(item: entry.item, folderID: folder, position: entry.position))
+            try write(db, PlaylistPlacementState(item: entry.item, folderID: folder, position: key))
+        }
+        return before
+    }
+
+    /// The earliest recorded state per row (a row both placed and renumbered keeps its first).
+    private static func firstStates(_ states: [PlaylistPlacementState]) -> [PlaylistPlacementState] {
+        var seen = Set<PlaylistSidebarItemID>()
+        return states.filter { seen.insert($0.item).inserted }
+    }
+
+    /// A change from rows' earlier states to their current ones.
+    static func change(_ db: Database, from before: [PlaylistPlacementState]) throws -> PlaylistOrderChange {
+        var change = PlaylistOrderChange(before: [], after: [])
+        for state in before {
+            guard let now = try currentState(db, of: state.item) else { continue }
+            change.before.append(state)
+            change.after.append(now)
+        }
+        return change
     }
 
     struct LevelEntry: Equatable {
@@ -323,7 +389,8 @@ final class PlaylistFolderRepository: Sendable {
         var tail = entries.last { $0.position != nil }?.position
         var before: [PlaylistPlacementState] = []
         for entry in unplaced {
-            let position = PlaylistPlacement.strictlyBetween(tail, nil)
+            // After the last key a key always exists (`strictBetween(left, nil)`).
+            let position = FractionalIndexer.key(between: tail, and: nil) ?? "a0"
             before.append(PlaylistPlacementState(item: entry.item, folderID: folderID, position: nil))
             try write(db, PlaylistPlacementState(item: entry.item, folderID: folderID, position: position))
             tail = position
@@ -370,27 +437,36 @@ final class PlaylistFolderRepository: Sendable {
             }
         }
         guard !moving.isEmpty else { return PlaylistOrderChange(before: [], after: []) }
+        let movingSet = Set(moving)
+        // Nothing changes (`Move to Folder ▸` its own folder, a row dropped into its own gap):
+        // no write, no step (W3-PL review S5).
+        let current = try level(db, folderID: folderID).map(\.item)
+        // "Before a row that moves itself" = before the first row after it that stays.
+        var before = before
+        if let target = before, movingSet.contains(target), let index = current.firstIndex(of: target) {
+            before = current[index...].first { !movingSet.contains($0) }
+        }
+        if moving.allSatisfy(current.contains) {
+            let remaining = current.filter { !movingSet.contains($0) }
+            let insertAt = before.flatMap { remaining.firstIndex(of: $0) } ?? remaining.count
+            var result = remaining
+            result.insert(contentsOf: moving, at: insertAt)
+            if result == current { return PlaylistOrderChange(before: [], after: []) }
+        }
         var beforeStates: [PlaylistSidebarItemID: PlaylistPlacementState] = [:]
         for item in moving {
             beforeStates[item] = try currentState(db, of: item)
         }
-        let normalized = try normalizeLevel(db, folderID: folderID)
-        let movingSet = Set(moving)
-        let remaining = try level(db, folderID: folderID).filter { !movingSet.contains($0.item) }
-        let insertAt = before.flatMap { target in remaining.firstIndex { $0.item == target } } ?? remaining.count
-        var left = insertAt > 0 ? remaining[insertAt - 1].position : nil
-        let right = insertAt < remaining.count ? remaining[insertAt].position : nil
+        let (keys, rekeyed) = try levelKeys(db, folderID: folderID, count: moving.count, before: before, excluding: movingSet)
         var after: [PlaylistPlacementState] = []
-        for item in moving {
-            let position = PlaylistPlacement.strictlyBetween(left, right)
+        for (item, position) in zip(moving, keys) {
             let state = PlaylistPlacementState(item: item, folderID: item.isFolder ? nil : folderID, position: position)
             try write(db, state)
             after.append(state)
-            left = position
         }
-        // The rows `normalizeLevel` placed are part of the change (exact undo).
+        // The rows placed or re-keyed to make room are part of the change (exact undo).
         var change = PlaylistOrderChange(before: [], after: [])
-        for state in normalized where !movingSet.contains(state.item) {
+        for state in rekeyed where !movingSet.contains(state.item) {
             change.before.append(state)
             if let now = try currentState(db, of: state.item) { change.after.append(now) }
         }

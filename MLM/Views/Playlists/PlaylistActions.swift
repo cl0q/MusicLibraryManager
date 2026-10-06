@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 // MARK: - The playlist menu, built once (UC-CM-02, DEC-039)
 
-/// Where a playlist's menu is shown. The sidebar row (CM-SIDEBAR-PINNED), the card
+/// Where a playlist's menu is shown. The sidebar playlist row (UC §10.2 sidebar playlist row menu), the card
 /// (CM-PL-CARD), the detail's `More` (V-PLD.N01/menu) and the header cover (V-PLD.E02/menu)
 /// all render `PlaylistMenuModel.sections` — one builder, subsets in one order.
 enum PlaylistMenuPlace: Equatable, Sendable {
@@ -56,7 +56,7 @@ enum PlaylistMenuModel {
             isLiked: playlist.isLiked == 1,
             hasCustomCover: playlist.coverIsCustom == 1,
             isLinked: playlist.sourceId != nil,
-            refreshSource: PlaylistRefreshService.canRefresh(playlist) ? (sourceName ?? "Source") : nil,
+            refreshSource: PlaylistRefreshService.canRefresh(playlist, sourceName: sourceName) ? sourceName : nil,
             notDownloaded: summary?.notDownloadedTracks ?? 0,
             failed: summary?.failedTracks ?? 0
         )
@@ -280,10 +280,9 @@ struct PlaylistActions {
             do {
                 let added = try await service.refresh(playlistID: id)
                 job.finish(ActivityResult(counts: [ActivityCount(.done, added, added == 1 ? "new track" : "new tracks")]))
+                // What the tables need: this playlist changed (no `.libraryDidImport` — its
+                // `succeeded` count means library imports, which a refresh's count isn't).
                 NotificationCenter.default.post(name: .playlistDidChange, object: nil, userInfo: ["playlistId": id])
-                if added > 0 {
-                    NotificationCenter.default.post(name: .libraryDidImport, object: nil, userInfo: ["succeeded": added, "skipped": 0])
-                }
             } catch {
                 let cause = (error as? PlainCauseError)?.plainCause ?? error.localizedDescription
                 job.fail(cause: cause, fix: .runAgain)
@@ -314,7 +313,7 @@ struct PlaylistActions {
         }
     }
 
-    /// Show in All Playlists: the grid, scrolled to the card, selected (CM-SIDEBAR-PINNED.E04).
+    /// Show in All Playlists: the grid, scrolled to the card, selected (the sidebar playlist row menu, UC §10.2).
     func showInAllPlaylists(_ playlist: Playlist) {
         requests.revealInGrid = playlist.id
         navigation?.select(.allPlaylists)
@@ -442,15 +441,24 @@ struct MoveToFolderItems: View {
 
     @Environment(SidebarModel.self) private var sidebar: SidebarModel?
 
+    /// Only the playlists not already there move; choosing their own folder (the checked one)
+    /// does nothing and records no step (W3-PL review S5).
+    private func move(to folderID: Int64?) {
+        let moving = playlists.filter { p in p.id.map { sidebar?.tree.folder(containing: $0)?.id != folderID } ?? false }
+        guard !moving.isEmpty else { return }
+        actions.move(moving, toFolder: folderID)
+    }
+
     var body: some View {
         // The folder all of them are in (a check mark only when they share one place).
         let currentFolder = Set(playlists.map { p in p.id.flatMap { sidebar?.tree.folder(containing: $0)?.id } })
-        Toggle("No Folder", isOn: Binding(get: { currentFolder == [nil] }, set: { _ in actions.move(playlists, toFolder: nil) }))
+        Toggle("No Folder", isOn: Binding(get: { currentFolder == [nil] }, set: { _ in move(to: nil) }))
         ForEach(sidebar?.folders ?? []) { folder in
-            Toggle(folder.name, isOn: Binding(get: { currentFolder == [folder.id] }, set: { _ in actions.move(playlists, toFolder: folder.id) }))
+            Toggle(folder.name, isOn: Binding(get: { currentFolder == [folder.id] }, set: { _ in move(to: folder.id) }))
         }
         Divider()
-        Button("New Playlist Folder…") { actions.moveToNewFolder(playlists) }
+        // Inline, no dialog (the folder appears in rename mode, like ⌥⌘N): no `…`.
+        Button("New Playlist Folder") { actions.moveToNewFolder(playlists) }
     }
 }
 

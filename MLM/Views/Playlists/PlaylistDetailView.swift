@@ -106,7 +106,11 @@ struct PlaylistDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: .downloadDidComplete)) { _ in
             Task { await viewModel?.refresh() }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .downloadStateDidChange)) { _ in
+        // Rows and the status sentence follow a running download (W3-PL review S6).
+        .onChange(of: ActivityCenter.shared.downloadProgressKey) { _, _ in
+            Task { await viewModel?.refresh() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .trackAvailabilityDidChange)) { _ in
             Task { await viewModel?.refresh() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .libraryRootDidChange)) { _ in
@@ -395,7 +399,7 @@ struct PlaylistDetailView: View {
 
     /// Track ▸ Refresh from ‹Source› ⌘R for a linked playlist (UC-KEY-15).
     private var sourceRefresh: PlaylistSourceRefresh? {
-        guard let model = viewModel, PlaylistRefreshService.canRefresh(model.playlist), let id = model.playlist.id else { return nil }
+        guard let model = viewModel, PlaylistRefreshService.canRefresh(model.playlist, sourceName: model.source?.name), let id = model.playlist.id else { return nil }
         return PlaylistSourceRefresh(
             playlistID: id,
             sourceName: model.sourceDisplayName,

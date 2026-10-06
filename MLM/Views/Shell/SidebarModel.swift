@@ -54,6 +54,7 @@ final class SidebarModel {
         libraryKey = key
         let stored = defaults.stringArray(forKey: Self.collapsedKey(libraryID: key)) ?? []
         collapsedSections = Set(stored.compactMap(SidebarSectionID.init(rawValue:)))
+        loadCollapsedFoldersIfNeeded()
     }
 
     func isExpanded(_ section: SidebarSectionID) -> Bool {
@@ -180,9 +181,9 @@ final class SidebarModel {
         collapsedFolders = Set(stored.map(Int64.init))
     }
 
+    /// Pure read (no state change while a body evaluates); loaded in `useLibrary`.
     func isFolderExpanded(_ id: Int64) -> Bool {
-        loadCollapsedFoldersIfNeeded()
-        return !collapsedFolders.contains(id)
+        !collapsedFolders.contains(id)
     }
 
     func setFolderExpanded(_ id: Int64, _ expanded: Bool) {

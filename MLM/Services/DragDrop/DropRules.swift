@@ -151,6 +151,8 @@ enum DropDecision: Equatable, Sendable {
     /// Playlists / folders placed in the Playlists section's order (W3-PL): into `folderID`
     /// (nil = top level), before `before` (nil = at the end). One undo step.
     case movePlaylistItems([PlaylistSidebarItemID], folderID: Int64?, before: PlaylistSidebarItemID?)
+    /// Playlists / folders dropped on the Playlists section: first among the top-level rows.
+    case movePlaylistItemsToTop([PlaylistSidebarItemID])
     /// Tracks onto a playlist folder: a new playlist inside it (named inline).
     case newPlaylistInFolder([Int64], folderID: Int64)
     /// Finder audio onto a playlist folder: import, then a new playlist inside it.
@@ -311,8 +313,10 @@ enum DropRules {
             }
             return moving.isEmpty ? .refuse(nil) : .movePlaylistItems(moving, folderID: folderID, before: before)
         case .playlistsSection:
-            // The header / empty area: to the top level, at the end (UC-DND matrix).
-            return items.isEmpty ? .refuse(nil) : .movePlaylistItems(items, folderID: nil, before: nil)
+            // The Playlists header, the All Playlists row, the empty sidebar area and the grid's
+            // background: to the top level, first (UC-DND matrix; W3-PL review — one meaning
+            // for every Playlists-section drop, where a new playlist appears too).
+            return items.isEmpty ? .refuse(nil) : .movePlaylistItemsToTop(items)
         case .playlistFolder(let id, _):
             let moving = items.filter { !$0.isFolder }
             return moving.isEmpty ? .refuse(nil) : .movePlaylistItems(moving, folderID: id, before: nil)
@@ -502,16 +506,12 @@ enum PlaylistPlacement {
     /// returns the left bound itself, so a multi-track drop would share one position and fall
     /// back to the added-date order. Then the left bound is extended instead (still below the
     /// right one: a strict, non-prefix lower bound stays lower when extended).
+    ///
+    /// W3-PL review: the fixed indexer is strict wherever a key exists; writers use
+    /// `FractionalIndexer.key(between:and:)` and renumber when it returns nil — this pure
+    /// helper is kept for the drop plan tests.
     static func strictlyBetween(_ left: String?, _ right: String?) -> String {
-        let position = FractionalIndexer.positionBetween(left: left, right: right)
-        let aboveLeft = left.map { position > $0 } ?? true
-        let belowRight = right.map { position < $0 } ?? true
-        if aboveLeft && belowRight { return position }
-        if let left {
-            let extended = left + "|V"
-            if right.map({ extended < $0 }) ?? true { return extended }
-        }
-        return position
+        FractionalIndexer.positionBetween(left: left, right: right)
     }
 }
 

@@ -215,81 +215,24 @@ final class PlaylistDetailViewModel {
     /// Place one or more tracks at a given insertion index (an index into `tracks`).
     ///
     /// Not undoable: drops on the playlist table go through `ShellEdits.placeTracks` (W2-H),
-    /// one undo step with exact positions; this stays for callers without an undo center.
+    /// one undo step with exact positions; this stays for callers without an undo center. The
+    /// keys come from the same transaction (`placeTracksReturningChanges`): never out of order.
     @MainActor
     func placeTracks(_ trackIDs: [Int64], at insertionIndex: Int) async {
         guard let playlistId = playlist.id, !trackIDs.isEmpty else { return }
-
-        var seen = Set<Int64>()
-        let uniqueIDs = trackIDs.filter { seen.insert($0).inserted }
-        let memberIDSet = Set(tracks.compactMap(\.id)).intersection(uniqueIDs)
-        let nonMemberIDs = uniqueIDs.filter { !memberIDSet.contains($0) }
-
-        var fetchedNonMembers: [Track] = []
-        if !nonMemberIDs.isEmpty {
-            do {
-                let fetched = try await trackRepository.fetchTracks(ids: Set(nonMemberIDs))
-                let byID = Dictionary(uniqueKeysWithValues: fetched.compactMap { track in track.id.map { ($0, track) } })
-                fetchedNonMembers = nonMemberIDs.compactMap { byID[$0] }
-            } catch {
-                await refresh()
-                return
-            }
-        }
-
-        let remaining = tracks.filter { !memberIDSet.contains($0.id ?? -1) }
-        let clampedInput = min(max(insertionIndex, 0), tracks.count)
-        let insertAt = min(
-            tracks.prefix(clampedInput).filter { !memberIDSet.contains($0.id ?? -1) }.count,
-            remaining.count
-        )
-        let left = insertAt > 0 ? remaining[insertAt - 1].playlistPosition : nil
-        let right = insertAt < remaining.count ? remaining[insertAt].playlistPosition : nil
-
-        let memberTrackByID = Dictionary(uniqueKeysWithValues: tracks.compactMap { track in track.id.map { ($0, track) } })
-        let nonMemberByID = Dictionary(uniqueKeysWithValues: fetchedNonMembers.compactMap { track in track.id.map { ($0, track) } })
-        var resolvedTracks = uniqueIDs.compactMap { memberTrackByID[$0] ?? nonMemberByID[$0] }
-
-        var placements: [(trackId: Int64, position: String)] = []
-        var previousPosition: String? = left
-        for track in resolvedTracks {
-            guard let id = track.id else { continue }
-            let pos = PlaylistPlacement.strictlyBetween(previousPosition, right)
-            placements.append((trackId: id, position: pos))
-            previousPosition = pos
-        }
-        guard !placements.isEmpty else { return }
-
+        let moving = Set(trackIDs)
+        let clamped = min(max(insertionIndex, 0), tracks.count)
+        let before = tracks[clamped...].first { !moving.contains($0.id ?? -1) }?.id
         do {
-            try await playlistRepository.placeTracks(playlistId: playlistId, placements: placements)
+            guard try await playlistRepository.placeTracksReturningChanges(
+                playlistId: playlistId, trackIds: trackIDs, before: before
+            ) != nil else { return }
         } catch {
             await refresh()
             return
         }
-
-        let positionByID = Dictionary(uniqueKeysWithValues: placements.map { ($0.trackId, $0.position) })
-        for i in resolvedTracks.indices {
-            if let id = resolvedTracks[i].id, let pos = positionByID[id] {
-                resolvedTracks[i].playlistPosition = pos
-            }
-        }
-        var updated = remaining
-        updated.insert(contentsOf: resolvedTracks, at: insertAt)
-        tracks = updated
-        applyFilter()
-
-        if !nonMemberIDs.isEmpty {
-            await refreshAvailabilitySnapshot()
-        }
-        tableCache?.store(PlaylistTableCache.Entry(
-            playlistId: playlistId,
-            playlistName: playlist.name,
-            playlist: playlist,
-            source: source,
-            tracks: tracks,
-            availabilityByTrackID: availabilityByTrackID,
-            fetchedAt: Date()
-        ))
+        tableCache?.invalidate(playlistId: playlistId)
+        await refresh()
         NotificationCenter.default.post(name: .playlistDidChange, object: nil, userInfo: ["playlistId": playlistId])
     }
 

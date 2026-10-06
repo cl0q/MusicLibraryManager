@@ -465,6 +465,17 @@ final class SoundCloudClient: Sendable {
     /// - Returns: Number of new tracks added.
     @discardableResult
     func syncLikes() async throws -> Int {
+        try await syncLikes(updatingLikedPlaylist: true).newCount
+    }
+
+    /// The likes that have a file, newest first, after syncing the liked tracks into the
+    /// library — **without** touching the "Liked from SoundCloud" playlist. Refresh from
+    /// SoundCloud on that playlist appends only the new ones (add-only, W3-PL review S2).
+    func likedPlayableTrackIDs() async throws -> [Int64] {
+        try await syncLikes(updatingLikedPlaylist: false).playable
+    }
+
+    private func syncLikes(updatingLikedPlaylist: Bool) async throws -> (newCount: Int, playable: [Int64]) {
         let user = try await fetchProfile()
         let source = try await sourceRepository.upsert(name: "soundcloud", userId: String(user.id))
         guard let sourceId = source.id else {
@@ -537,21 +548,20 @@ final class SoundCloudClient: Sendable {
             source: "SoundCloud"
         )
 
-        // Mirror the API order into the local "Liked from SoundCloud"
-        // playlist. Replace-in-place: a removed Like upstream disappears
-        // locally on the next sync, a new Like appears at the top.
-        //
-        // We intentionally drop remote-only tracks here — the playlist is
-        // meant to be the *playable* slice of likes. Remote-only items
-        // would just be greyed-out clutter inside it.
-        if let playlistRepo = playlistRepository {
+        // The playable slice of the likes (remote-only items would just be clutter).
+        let localIds = try await trackRepository.filterLocalIds(orderedTrackIds)
+        let playable = orderedTrackIds.filter { localIds.contains($0) }
+        AppLogger.shared.info(
+            "SoundCloud: filterLocalIds → \(playable.count) playable of \(orderedTrackIds.count) collected",
+            source: "SoundCloud"
+        )
+
+        // Mirror the API order into the local "Liked from SoundCloud" playlist (Settings ▸
+        // Sources refresh). Not on the playlist's own Refresh from SoundCloud, which appends only
+        // what is new (`likedPlayableTrackIDs`). A failure here fails the sync — it is never
+        // reported as success (W3-PL review S2).
+        if updatingLikedPlaylist, let playlistRepo = playlistRepository {
             do {
-                let localIds = try await trackRepository.filterLocalIds(orderedTrackIds)
-                let playable = orderedTrackIds.filter { localIds.contains($0) }
-                AppLogger.shared.info(
-                    "SoundCloud: filterLocalIds → \(playable.count) playable of \(orderedTrackIds.count) collected",
-                    source: "SoundCloud"
-                )
                 let playlist = try await playlistRepo.findOrCreateLikedPlaylist(
                     name: "Liked from SoundCloud",
                     sourceId: sourceId,
@@ -598,15 +608,16 @@ final class SoundCloudClient: Sendable {
                         "SoundCloud: liked playlist refreshed (\(playable.count) playable of \(orderedTrackIds.count) likes)",
                         source: "SoundCloud"
                     )
-                    NotificationCenter.default.post(name: .playlistDidChange, object: nil)
+                    NotificationCenter.default.post(name: .playlistDidChange, object: nil, userInfo: ["playlistId": playlistId])
                 }
             } catch {
                 AppLogger.shared.warn(
                     "SoundCloud: liked-playlist update failed: \(error.localizedDescription)",
                     source: "SoundCloud"
                 )
+                throw error
             }
-        } else {
+        } else if updatingLikedPlaylist {
             AppLogger.shared.warn(
                 "SoundCloud: no playlistRepository wired — liked playlist not refreshed",
                 source: "SoundCloud"
@@ -627,7 +638,7 @@ final class SoundCloudClient: Sendable {
             source: "SoundCloud"
         )
 
-        return newCount
+        return (newCount, playable)
     }
 
     /// Process a batch of liked tracks — deduplicate, insert new ones,
@@ -651,7 +662,7 @@ final class SoundCloudClient: Sendable {
             // Build the track record
             var track = Track(
                 artist: scTrack.user?.username ?? "Unknown",
-                album: "SoundCloud Likes",
+                album: "",  // no source name as album (DEC-013, W3-PL review)
                 title: scTrack.title,
                 format: "soundcloud",
                 originalPath: scTrack.permalinkUrl ?? "soundcloud://\(scTrack.id)"

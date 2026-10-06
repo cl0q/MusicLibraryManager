@@ -38,7 +38,7 @@ import Testing
 
     @Test func answersThePortGotRightAreUnchanged() {
         #expect(between(nil, nil) == "a0")
-        #expect(between("a0", nil) == "a0|a0")
+        #expect(between("a0", nil) == "b", "appends: the next digit (review B3)")
         #expect(between(nil, "a0") == "I")
         #expect(between(nil, "b0") == "a0")
         #expect(between("a0", "a1") == "a0|V")
