@@ -55,7 +55,8 @@ struct NoAlbumConfirmationTests {
         dependencies.albumSuggestions = AlbumSuggestionRepository(database: env.db)
         let model = ReviewModel(dependencies: dependencies, scan: env.runner, center: env.center)
         await model.reload()
-        #expect(model.count(for: .albums) == 0 && !model.albumsLookedUp, "before the first lookup the tab stays hidden")
+        #expect(model.count(for: .albums) == 0 && !model.albumsLookedUp, "before the first lookup there is nothing yet")
+        #expect(ScopeBarRules.visibleItems(ReviewModel.scopeItems(counts: { model.count(for: $0) }), selection: .duplicates).map(\.id).contains(.albums), "IMP-103: the tab is always shown")
 
         let (a, b): (Int64, Int64) = try await env.db.write { db in
             (try AlbumTracksMigrationTests.insertTrack(db, title: "A", album: ""), try AlbumTracksMigrationTests.insertTrack(db, title: "B", album: ""))
@@ -69,9 +70,7 @@ struct NoAlbumConfirmationTests {
         #expect(model.count(for: .albums) == 1, "no-match rows are not pending suggestions")
         #expect(model.albumsLookedUp)
         #expect(model.waitingCount == 1, "the badge adds them")
-        let items = ReviewTab.allCases.map {
-            ScopeBarItem(id: $0, title: $0.title, count: model.count(for: $0), hidesWhenEmpty: $0 == .albums && !model.albumsLookedUp)
-        }
+        let items = ReviewModel.scopeItems(counts: { model.count(for: $0) })
         #expect(ScopeBarRules.visibleItems(items, selection: .duplicates).map(\.id).contains(.albums))
     }
 

@@ -84,7 +84,7 @@ extension ShellEdits {
     }
 
     @MainActor
-    private static func coverDidChange(_ albumID: Int64) {
+    static func coverDidChange(_ albumID: Int64) {
         AlbumCoverLoader.shared.forget(albumID: albumID)
         NotificationCenter.default.post(name: .trackMetadataDidChange, object: nil, userInfo: ["albumId": albumID])
     }
