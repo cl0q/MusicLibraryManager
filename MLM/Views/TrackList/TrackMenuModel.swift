@@ -25,6 +25,8 @@ enum TrackMenuItem: Hashable, Sendable {
     case addToPlaylist
     case addToSyncProfile
     case getInfo
+    /// Go to Album: pushes the album's page (one track that belongs to an album, W4-2).
+    case goToAlbum(Int64)
     /// Go to Artist: All Tracks filtered by `artist: ‹name›` (one track with an artist, W2-I).
     case goToArtist(String)
     /// `Download` · `Retry Download` · `Download 3 Not-Downloaded Tracks`.
@@ -111,7 +113,7 @@ struct TrackMenuContext: Equatable, Sendable {
     var removeTitle: String {
         switch container {
         case .playlist: "Remove from Playlist"
-        case .syncProfile(_, let name), .genre(_, let name): "Remove from “\(name)”"
+        case .syncProfile(_, let name), .genre(_, let name), .album(_, let name): "Remove from “\(name)”"
         case .queue: "Remove from Queue"
         case .library, .folder, .reviewGroup, .recommendations, .similar, .none: "Remove"
         }
@@ -198,6 +200,7 @@ struct TrackMenuModel: Equatable, Sendable {
 
         // 4 Info
         var info: [TrackMenuItem] = [.getInfo]
+        if single, let album = Self.albumToGo(to: rows[0].track, in: context.container) { info.append(.goToAlbum(album)) }
         if single, let artist = TrackMetadataPresentation.artistDisplay(rows[0].track.artist) {
             info.append(.goToArtist(artist))
         }
@@ -239,7 +242,7 @@ struct TrackMenuModel: Equatable, Sendable {
         // 7 Remove — reversible first, the irreversible one last (UC-CM-07).
         var remove: [TrackMenuItem] = []
         switch context.container {
-        case .playlist, .syncProfile, .genre:
+        case .playlist, .syncProfile, .genre, .album:
             if context.canRemoveFromContainer { remove.append(.removeFromContainer(title: context.removeTitle)) }
         case .queue, .library, .folder, .reviewGroup, .recommendations, .similar, .none:
             break
@@ -251,13 +254,20 @@ struct TrackMenuModel: Equatable, Sendable {
             break  // Remove from Library does not exist there (UC-CM-07)
         case .recommendations, .similar:
             break  // not in the library yet / Similar never deletes (V-SIMILAR.N07)
-        case .library, .playlist, .folder, .genre, .reviewGroup, .none:
+        case .library, .playlist, .folder, .genre, .album, .reviewGroup, .none:
             // Trashing files needs their disk (UC-CM-05).
             remove.append(.removeFromLibrary(enabled: unreachable == 0))
         }
 
         let sections = [header, primary, queue, addTo, info, fix, locate, remove].filter { !$0.isEmpty }
         return TrackMenuModel(sections: sections)
+    }
+
+    /// The album `Go to Album` opens for a track — its `album_id`, except inside that very album.
+    static func albumToGo(to track: Track, in container: TrackListContainer) -> Int64? {
+        guard let albumID = track.albumId else { return nil }
+        if case .album(let current, _) = container, current == albumID { return nil }
+        return albumID
     }
 
     /// The menu of a held recommendation (V-INBOX.N07, CM-REC): Preview — Keep · Keep and Add to
@@ -306,6 +316,7 @@ struct TrackMenuModel: Equatable, Sendable {
                 }
             }
             queue = [.playNext, .moveToEndOfQueue]
+            if single, let album = Self.albumToGo(to: rows[0].track, in: context.container) { info.append(.goToAlbum(album)) }
             if single, let artist = TrackMetadataPresentation.artistDisplay(rows[0].track.artist) {
                 info.append(.goToArtist(artist))
             }
@@ -323,6 +334,7 @@ struct TrackMenuModel: Equatable, Sendable {
             }
             remove = [.removeFromContainer(title: "Remove from Queue")]
         case .history(let canPlay):
+            if single, let album = Self.albumToGo(to: rows[0].track, in: context.container) { info.append(.goToAlbum(album)) }
             if single, canPlay { primary.append(.play(enabled: unreachable == 0)) }
             if reachableLocal > 0 { queue = [.playNext, .addToQueue] }
             remove = [.clearHistory]

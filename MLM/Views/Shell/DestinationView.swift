@@ -38,6 +38,10 @@ struct DestinationView: View {
         // (W3-SYNC, UC-LAYOUT-01/02).
         case .syncProfile(let id):
             SyncProfilePage(profileID: id)
+        // Albums builds its own scaffold: the scope bar with the sort control and the footer line
+        // for the tracks that have no album (W4-2, V-ALB).
+        case .albums:
+            AlbumsView()
         case .genres:
             // Own scaffold: the list's command bar and footer line (W3-GEN).
             GenresView()
@@ -67,11 +71,8 @@ struct DestinationView: View {
             // Hosted by ContentView (kept alive); nothing to draw here.
             Color.clear
         case .albums:
-            PendingDestinationView(
-                title: "Albums",
-                systemImage: SidebarDestination.albums.systemImage,
-                description: "Albums aren’t available yet."
-            )
+            // Hosted by `body` (own scaffold).
+            Color.clear
         case .genres:
             // Hosted by `body` (own scaffold).
             Color.clear
@@ -117,6 +118,10 @@ struct RouteView: View {
                 // Own scaffold: the seed header, the library matches and the online suggestions (W3-DISC-A).
                 SimilarView(trackID: trackID, onTrackActivated: onTrackActivated)
                     .id(trackID)
+            } else if case .album(let id) = route {
+                // Own scaffold: the album's header, status line and track list (W4-2, UC-LAYOUT-06).
+                AlbumDetailView(albumID: id, onTrackActivated: onTrackActivated)
+                    .id(id)
             } else if case .genre(let name) = route {
                 // Own scaffold: the genre's detail header (W3-GEN, UC-LAYOUT-06).
                 GenreDetailView(name: name, onTrackActivated: onTrackActivated)
@@ -141,11 +146,8 @@ struct RouteView: View {
             // Hosted by `body` (own scaffold).
             Color.clear
         case .album:
-            PendingDestinationView(
-                title: "Album",
-                systemImage: "square.stack",
-                description: "Album pages aren’t available yet."
-            )
+            // Hosted by `body` (own scaffold).
+            Color.clear
         case .genre:
             // Hosted by `body` (own scaffold).
             Color.clear
@@ -189,7 +191,8 @@ struct WindowTitleModifier: ViewModifier {
     private var title: String {
         navigation.title(names: PlaceNames(
             playlist: { sidebar.playlistName($0) },
-            syncProfile: { id in container.syncViewModel?.profiles.first { $0.id == id }?.name }
+            syncProfile: { id in container.syncViewModel?.profiles.first { $0.id == id }?.name },
+            album: { AlbumNames.shared.name(for: $0) }
         ))
     }
 

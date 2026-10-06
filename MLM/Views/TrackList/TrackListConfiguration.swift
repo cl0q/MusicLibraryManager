@@ -78,6 +78,16 @@ struct TrackListConfiguration {
     /// Plain letter keys of the focused table (`K` = Keep, UC-KEY-29): handled when no modifier is
     /// held and a selection exists; the closure gets the shown selected rows.
     var characterKeys: [Character: ([TrackRow]) -> Void] = [:]
+    /// Rows have no 20 pt cover — the album has one, in its header (W4-2).
+    var showsRowCover = true
+    /// The now-playing glyph replaces the number in `#` (album pages, W4-2).
+    var playingGlyphInNumber = false
+    /// Edit Order is on: `#` carries a drag handle (W4-2).
+    var showsDragHandles = false
+    /// The menu of synthetic rows alone (an album's `Not in library` positions, CM-ALBD-ABSENT);
+    /// `nil`: such rows have no menu. Synthetic rows never reach the track menu, a primary action
+    /// or a command.
+    var syntheticRowsMenu: (([TrackRow]) -> AnyView)?
 }
 
 /// A place's own track-menu items and what they do (`TrackMenuItem.extra`).
@@ -149,6 +159,35 @@ extension TrackListConfiguration {
             removeFromContainer: remove,
             dragSourcePlaylistID: id,
             onInsert: onInsert
+        )
+    }
+
+    /// An album (W4-2): `#` = the track number within its disc, the album's fixed order (no sorting,
+    /// UC-TABLE-04), no per-row cover, Artist only for a compilation, ⌫ removes from the album.
+    static func album(
+        id: Int64,
+        name: String,
+        isCompilation: Bool,
+        activate: ((Track, [Track]) -> Void)?,
+        remove: @escaping (Set<Int64>) -> Void,
+        onInsert: ((Int, [NSItemProvider], [TrackRow]) -> Void)?,
+        openAlbum: ((TrackRow) -> Void)? = nil
+    ) -> TrackListConfiguration {
+        TrackListConfiguration(
+            listContext: .album(id: id, name: name),
+            persistenceKey: "album",
+            sortPersistenceKey: "album.\(id)",
+            columns: [.number, .title] + (isCompilation ? [.artist] : []) + [.time, .status],
+            hasContainerOrder: true,
+            defaultSort: TrackSortOrder(column: .number, ascending: true),
+            isSortable: false,
+            accessibilityID: "album_track_table",
+            activate: activate,
+            removeFromContainer: remove,
+            onInsert: onInsert,
+            openAlbum: openAlbum,
+            showsRowCover: false,
+            playingGlyphInNumber: true
         )
     }
 

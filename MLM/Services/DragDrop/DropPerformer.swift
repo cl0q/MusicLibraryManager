@@ -90,6 +90,15 @@ struct DropPerformer {
                     say(refusal)
                 }
             }
+        case .setAlbumCover(let source, let albumID, let name):
+            let covers = AlbumCoverLoader.coversDirectory(container)
+            Task {
+                if let refusal = await edits?.setAlbumCover(source, albumID: albumID, name: name, coversDirectory: covers) {
+                    say(refusal)
+                }
+            }
+        case .addTracksToAlbum(let ids, let albumID, _):
+            Task { _ = try? await edits?.addTracks(toAlbum: albumID, trackIDs: ids) }
         case .movePlaylistItems(let items, let folderID, let before):
             Task { await edits?.movePlaylistItems(items, into: folderID, before: before) }
         case .movePlaylistItemsToTop(let items):

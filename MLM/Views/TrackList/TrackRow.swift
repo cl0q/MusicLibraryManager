@@ -54,8 +54,27 @@ struct TrackRow: Identifiable, Equatable, Sendable {
     /// How close a suggested track sounds to the reference, 0…100 (`Match` column, W3-GEN);
     /// nil outside suggestion lists.
     var matchPercent: Int? = nil
+    /// A row that stands for something that is not a library track: an album's `Not in library`
+    /// position or a disc heading (W4-2). Never selectable into commands, never played, no menu
+    /// of a track.
+    var synthetic: TrackRowSynthetic = .none
+    /// The number the `#` column shows when it isn't the row's position (an album's track number
+    /// within its disc).
+    var displayNumber: Int? = nil
 
     var hasFile: Bool { availability.hasFile }
+    /// The row is a real library track.
+    var isTrack: Bool { synthetic == .none }
+}
+
+/// What a synthetic row of a track table is (album detail, W4-2, IMP-076).
+enum TrackRowSynthetic: Equatable, Sendable {
+    case none
+    /// A position of the album's tracklist that no library track fills: `Track 5`, dimmed,
+    /// `Not in library`, with no actions.
+    case absent
+    /// `Disc 2 · 12 tracks · 58 min` above the disc's rows (only when the album has several discs).
+    case discHeader
 }
 
 // MARK: - Key paths the table header compares (identity only; sorting is TrackRowSorter)

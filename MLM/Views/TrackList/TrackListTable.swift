@@ -61,8 +61,11 @@ struct TrackListTable<EmptyContent: View>: View {
         .environment(\.trackTableCellOptions, TrackTableCellOptions(
             showsFailureDetail: configuration.showsFailureDetail,
             dimsPosition: configuration.hasContainerOrder && !(model.sortOrder?.isContainerOrder ?? true),
-            openAlbum: configuration.openAlbum,
-            showsAnalysingEnergy: configuration.showsAnalysingEnergy
+            openAlbum: configuration.openAlbum ?? defaultOpenAlbum,
+            showsAnalysingEnergy: configuration.showsAnalysingEnergy,
+            showsRowCover: configuration.showsRowCover,
+            playingGlyphInNumber: configuration.playingGlyphInNumber,
+            showsDragHandle: configuration.showsDragHandles
         ))
         .overlay {
             if model.isLoaded, model.rows.isEmpty {
@@ -96,6 +99,14 @@ struct TrackListTable<EmptyContent: View>: View {
             let stored = TrackSortOrder(rawValue: storedSort)
             let order = configuration.isSortable ? (stored ?? configuration.defaultSort) : configuration.defaultSort
             await model.setSortOrder(order)
+        }
+    }
+
+    /// The `Album` column's links (UC-TABLE-18, W4-2): a row that belongs to an album pushes its page.
+    private var defaultOpenAlbum: ((TrackRow) -> Void)? {
+        guard let navigation else { return nil }
+        return { row in
+            if let albumID = row.track.albumId { navigation.push(.album(albumID)) }
         }
     }
 
@@ -197,8 +208,12 @@ private struct TrackTableCore: View {
                 // Ids + the file URL of a local, reachable track (UC-DND-01/02), built when the
                 // drag starts (the payload is an autoclosure): no disk access. A drag of a
                 // selected row carries every selected row, in display order (one item each).
-                TableRow(row)
-                    .draggable(dragItem(row))
+                if row.isTrack {
+                    TableRow(row)
+                        .draggable(dragItem(row))
+                } else {
+                    TableRow(row)
+                }
             }
             .onInsert(of: configuration.onInsert == nil ? [] : TrackListConfiguration.insertableTypes) { index, providers in
                 configuration.onInsert?(index, providers, model.rows)
@@ -236,8 +251,13 @@ private struct TrackTableCore: View {
 
     @ViewBuilder
     private func menu(for ids: Set<Int64>) -> some View {
-        let rows = model.selectedRows(ids)
-        if !rows.isEmpty {
+        let shown = model.selectedRows(ids)
+        // Synthetic rows (an album's absent positions, disc headings) never get a track's menu: a
+        // selection of them alone gets their own, a mixed one is the tracks among them.
+        let rows = shown.filter(\.isTrack)
+        if rows.isEmpty, shown.contains(where: { $0.synthetic == .absent }), let menu = configuration.syntheticRowsMenu {
+            menu(shown.filter { $0.synthetic == .absent })
+        } else if !rows.isEmpty {
             let context = TrackMenuContext(
                 container: configuration.listContext.container,
                 canActivate: configuration.activate != nil,

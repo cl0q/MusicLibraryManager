@@ -59,9 +59,13 @@ struct TrackDragItem: Codable, Transferable, Equatable, Hashable, Sendable {
     /// The outline's sort when the folder was dragged (`TrackSortOrder.rawValue`): the tracks
     /// arrive in the order the outline shows them.
     var folderSort: String?
+    /// An album card of the Albums grid (W4-2): the item stands for the album's listed tracks in
+    /// album order; `trackId` is 0. `DropLoader` turns it into the tracks (`AlbumDragExpansion`)
+    /// before any target sees it.
+    var albumId: Int64?
 
     private enum CodingKeys: String, CodingKey {
-        case trackId, sourcePlaylistId, queueEntryId, libraryId, folderPath, folderSort
+        case trackId, sourcePlaylistId, queueEntryId, libraryId, folderPath, folderSort, albumId
     }
 
     init(trackId: Int64, sourcePlaylistId: Int64? = nil, queueEntryId: UUID? = nil,
@@ -81,8 +85,18 @@ struct TrackDragItem: Codable, Transferable, Equatable, Hashable, Sendable {
         return item
     }
 
+    /// An album card dragged out of the Albums grid: its tracks inside MLM.
+    static func album(_ id: Int64, libraryId: String?) -> TrackDragItem {
+        var item = TrackDragItem(trackId: 0, libraryId: libraryId)
+        item.albumId = id
+        return item
+    }
+
     /// The item is a folder of Folders, not one track.
     var isFolder: Bool { folderPath != nil }
+
+    /// The item is an album card, not one track.
+    var isAlbum: Bool { albumId != nil }
 
     /// The library file (`public.file-url`), or nil when the track has no reachable file.
     var fileURL: URL? { filePath.map { URL(fileURLWithPath: $0) } }
@@ -121,7 +135,7 @@ struct TrackDragPayload: Equatable, Sendable {
     /// Track ids in drag order, each once (a folder item not yet expanded has none).
     var trackIDs: [Int64] {
         var seen = Set<Int64>()
-        return items.filter { !$0.isFolder }.map(\.trackId).filter { seen.insert($0).inserted }
+        return items.filter { !$0.isFolder && !$0.isAlbum }.map(\.trackId).filter { seen.insert($0).inserted }
     }
 
     /// The one playlist every item was dragged from, if they share one.

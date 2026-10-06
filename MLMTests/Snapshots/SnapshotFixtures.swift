@@ -179,6 +179,33 @@ enum SnapshotFixtures {
                 ))
             }
         ),
+        // W4-2: the Albums grid (cards with covers by placeholder, one selected, one incomplete),
+        // the empty state and an album's page — header, status line, two discs with a gap.
+        Fixture(id: "albums-grid", size: .init(width: 760, height: 440), makeView: { _ in
+            let listings = SnapshotAlbumData.listings
+            return AnyView(ScrollView {
+                AlbumGrid(listings: listings) { listing in
+                    AlbumCard(listing: listing, cover: AlbumCoverRequest(albumID: listing.id, coverPath: nil, firstTrackID: nil),
+                              isSelected: listing.id == 2)
+                }
+            })
+        }),
+        Fixture(id: "albums-empty", size: .init(width: 640, height: 360), makeView: { _ in
+            AnyView(AlbumsEmptyContent(noAlbumCount: 6_341, findAlbumsReason: "Album suggestions aren’t available yet."))
+        }),
+        Fixture(id: "album-detail", size: .init(width: 1_000, height: 620), backend: .appKit, expectedTableRows: 7, makeView: { _ in
+            let model = AlbumDetailModel.preloaded(album: SnapshotAlbumData.album, members: SnapshotAlbumData.members)
+            let configuration = TrackListConfiguration.album(
+                id: 1, name: "Low Season", isCompilation: false, activate: nil, remove: { _ in }, onInsert: nil)
+            return AnyView(VStack(spacing: 0) {
+                AlbumDetailTop(model: model, playReason: nil, offlineLine: nil, callbacks: AlbumDetailCallbacks(),
+                               cover: {
+                                   AlbumCoverView(request: model.coverRequest, cornerRadius: 9).frame(width: 160, height: 160)
+                               },
+                               more: { EmptyView() })
+                AlbumDetailTableArea(model: model, configuration: configuration)
+            })
+        }),
         Fixture(id: "track-cover-placeholder", size: .init(width: 220, height: 220), makeView: { _ in
             AnyView(TrackCoverView(trackId: 1, size: .small).frame(width: 180, height: 180).padding(20))
         }),
@@ -260,6 +287,7 @@ enum SnapshotFixtures {
     }
 
     static let renderedPaths: Set<String> = [
+        "Albums/AlbumCard.swift", "Albums/AlbumDetailParts.swift",
         "Folders/FolderOutlineTable.swift", "Library/DanceabilitySteps.swift",
         "Library/EnergyBars.swift", "Library/LibraryView.swift",
         "TrackList/TrackListTable.swift", "TrackList/TrackCell.swift", "TrackList/TrackRowPresentation.swift",
@@ -273,6 +301,9 @@ enum SnapshotFixtures {
 
     private static let exclusions: [String: String] = [
         "Activity/ActivityJobTracking.swift": "Non-view: Maintenance job runner (owns the task and its Activity operation).",
+        "Albums/AlbumsView.swift": "Deferred: the grid reads the library database, the search filter and the shell; AlbumsModel (load, scope counts, sort, filter) and AlbumPresentation are unit-tested on temporary databases (W4-2).",
+        "Albums/AlbumDetailView.swift": "Deferred: the page loads its album, plays and edits through the shell and the undo center; AlbumDetailModel, AlbumLayout and AlbumOrderEditor are unit-tested, its header and table are the `album-detail` fixture (W4-2).",
+        "Albums/AlbumMenus.swift": "Deferred: menus require interactive presentation; the sections are AlbumMenuModel, unit-tested (W4-2).",
         "Activity/ActivityRouter.swift": "Non-view: popover/window routing and subject navigation.",
         "Activity/LogFeed.swift": "Non-view: log query model.",
         "Activity/LogTextRenderer.swift": "Non-view: attributed-text helper.",
@@ -403,6 +434,11 @@ Activity/ActivityToolbarItem.swift
 Activity/ActivityWindow.swift
 Activity/LogFeed.swift
 Activity/LogTextRenderer.swift
+Albums/AlbumCard.swift
+Albums/AlbumDetailParts.swift
+Albums/AlbumDetailView.swift
+Albums/AlbumMenus.swift
+Albums/AlbumsView.swift
 ContentView/ContentView.swift
 Discover/DiscoverLive.swift
 Discover/DiscoverView.swift
@@ -552,6 +588,42 @@ enum SnapshotFixtureError: LocalizedError {
         case let .missingDependency(name):
             "Snapshot fixture requires \(name)."
         }
+    }
+}
+
+/// The albums of the W4-2 fixtures: plain values, no database.
+@MainActor
+private enum SnapshotAlbumData {
+    static let album = Album(id: 1, artist: "Overmono", albumArtist: "Overmono", title: "Low Season", titleNormalized: "lowseason",
+                             year: 2019, coverPath: nil, variantOf: nil, variantKind: nil)
+
+    /// Two discs; track 2 of disc 1 is missing from the library.
+    static let members: [AlbumMember] = [(1, 1, 1), (2, 1, 3), (3, 2, 1), (4, 2, 2)].map { id, disc, number in
+        var track = Track(artist: "Overmono", album: "Low Season", title: ["Arla Fen", "Clipper", "BMW Track", "Gunk"][id - 1],
+                          format: "flac", originalPath: "/Snapshot/Music/\(id).flac")
+        track.id = Int64(id)
+        track.duration = 240 + id * 17
+        track.organizedPath = "Overmono/Low Season/\(id).flac"
+        track.genre = "Techno"
+        track.albumId = 1
+        return AlbumMember(track: track, disc: disc, number: number)
+    }
+
+    static let listings: [AlbumListing] = [
+        listing(1, "Low Season", "Overmono", 2019, tracks: 10, numbers: (1...10).map { (1, $0) }),
+        listing(2, "Good Lies", "Overmono", 2023, tracks: 12, numbers: (1...12).map { (1, $0) }),
+        listing(3, "Pool", "Skee Mask", 2021, tracks: 15, numbers: (1...15).map { n in (1, n <= 14 ? n : 18) }),
+        listing(4, "Compro", "Skee Mask", nil, tracks: 12, numbers: []),
+        listing(5, "fabric presents Overmono", "Various Artists", 2021, tracks: 26, numbers: []),
+        listing(6, "Untrue", "Burial", 2007, tracks: 13, numbers: []),
+    ]
+
+    private static func listing(_ id: Int64, _ title: String, _ artist: String, _ year: Int?, tracks: Int,
+                                numbers: [(Int, Int?)]) -> AlbumListing {
+        AlbumListing(
+            album: Album(id: id, artist: artist, albumArtist: artist, title: title, titleNormalized: AlbumKey.normalize(title),
+                         year: year, coverPath: nil, variantOf: nil, variantKind: nil),
+            trackCount: tracks, artistCount: 1, lastAdded: nil, tracklist: AlbumTracklist(numbers))
     }
 }
 

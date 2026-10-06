@@ -322,6 +322,12 @@ final class ToolbarSearchModel {
                 let list = ignored.map { "“\($0.displayText)”" }.joined(separator: ", ")
                 message = "\(place.name) filters by name only — \(list) isn’t applied here"
             }
+        case .albums:
+            let ignored = current.ignoredTokens(for: .albums)
+            if !ignored.isEmpty {
+                let list = ignored.map { "“\($0.displayText)”" }.joined(separator: ", ")
+                message = "\(place.name) filters by title, artist and year — \(list) isn’t applied here"
+            }
         case .none:
             message = "\(place.name) can’t be filtered — choose Library to search everywhere"
         }

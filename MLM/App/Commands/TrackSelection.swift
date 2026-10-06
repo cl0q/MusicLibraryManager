@@ -17,6 +17,9 @@ enum TrackListContainer: Equatable, Sendable {
     /// A genre's tracks (V-GENRED, W3-GEN): `Remove from “‹Genre›”` clears their genre
     /// (UC-KEY-17). `key` is the genre's identity (`GenreName.key`), `name` its display name.
     case genre(key: String, name: String)
+    /// An album's tracks in its own order (V-ALBD, W4-2): `Remove from “‹Album›”` takes them out
+    /// of the album (undoable, UC-KEY-17); the files and every playlist keep them.
+    case album(id: Int64, name: String)
     /// The versions of one Review group (W3-REV): no `Remove from ‹Container›`, the track menu
     /// keeps `Remove from Library…`.
     case reviewGroup(key: String)
@@ -52,6 +55,11 @@ struct TrackListContext: Equatable, Sendable {
     /// Folders rooted at `path`: `Play Folders`, or `Play “2026”` after `Open ⌘↓`.
     static func folder(path: String, name: String) -> TrackListContext {
         TrackListContext(container: .folder(path: path, name: name), viewName: path.isEmpty ? "Folders" : "“\(name)”")
+    }
+
+    /// An album's tracks (W4-2): Play / Shuffle `“Low Season”`.
+    static func album(id: Int64, name: String) -> TrackListContext {
+        TrackListContext(container: .album(id: id, name: name), viewName: "“\(name)”")
     }
 
     /// A genre's tracks (W3-GEN): Play / Shuffle `“Techno”`.
@@ -346,7 +354,7 @@ struct TrackCommandState: Equatable, Sendable {
         guard let summary, summary.count > 0 else { return }
         let inContainer: Bool
         switch summary.container {
-        case .playlist, .queue, .syncProfile, .genre: inContainer = true
+        case .playlist, .queue, .syncProfile, .genre, .album: inContainer = true
         case .library, .folder, .reviewGroup, .recommendations, .similar, .none: inContainer = false
         }
 
@@ -392,7 +400,7 @@ struct TrackCommandState: Equatable, Sendable {
         case .library: "All Tracks has nothing to remove tracks from. Remove from Library… deletes them."
         case .folder: "A folder has nothing to remove tracks from. Remove from Library… deletes them."
         case .queue: "Select tracks under Next to remove them from the queue."
-        case .playlist, .syncProfile, .genre: "These tracks can’t be removed here yet."
+        case .playlist, .syncProfile, .genre, .album: "These tracks can’t be removed here yet."
         case .reviewGroup: "A version is decided on, not removed from its group. Remove from Library… deletes it."
         case .recommendations: "Dismiss moves a recommendation you don’t want to the Trash."
         case .similar: "Nothing in this view removes a track from your library."
@@ -404,7 +412,7 @@ struct TrackCommandState: Equatable, Sendable {
     /// (UC-MENU-03, UC-CM-08); the base title where there is no container.
     static func removeTitle(_ container: TrackListContainer) -> String {
         switch container {
-        case .playlist(_, let name), .syncProfile(_, let name), .genre(_, let name): "Remove from “\(name)”"
+        case .playlist(_, let name), .syncProfile(_, let name), .genre(_, let name), .album(_, let name): "Remove from “\(name)”"
         case .queue: "Remove from Queue"
         case .library, .folder, .reviewGroup, .recommendations, .similar, .none: MenuCommand.removeFromContainer.title
         }

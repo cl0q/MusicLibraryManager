@@ -54,6 +54,10 @@ enum DropTarget: Equatable, Sendable {
     /// A genre's track table (D-STUDIO-TRACK-TO-GENRE): tracks are **staged** for the genre
     /// (`Save n Changes` commits them).
     case genreTable(key: String, name: String)
+    /// A card in the Albums grid (W4-2): tracks join the album (undoable), an image sets its cover.
+    case albumCard(id: Int64, name: String)
+    /// An album page's cover well (W4-2) — images only.
+    case albumCover(id: Int64, name: String)
     /// The whole Discover ▸ Reels view, also when the list is not empty (W3-DISC-B, V-REELS.N02):
     /// `.mp4` / `.mov` files and folders are added as reels, a reel link is fetched.
     case reels
@@ -169,6 +173,10 @@ enum DropDecision: Equatable, Sendable {
     /// files dropped with it (named in the status bar, D-LIBFILE-OPEN).
     case openLibraryFile(URL, ignored: Int)
     case setCover(CoverSource, playlistID: Int64, playlistName: String)
+    /// An image onto an album card or its cover well: `Set Cover` (W4-2, undoable).
+    case setAlbumCover(CoverSource, albumID: Int64, albumName: String)
+    /// Tracks onto an album card: `Added 3 tracks to “Low Season”` (W4-2, undoable).
+    case addTracksToAlbum([Int64], albumID: Int64, albumName: String)
     /// Playlists / folders placed in the Playlists section's order (W3-PL): into `folderID`
     /// (nil = top level), before `before` (nil = at the end). One undo step.
     case movePlaylistItems([PlaylistSidebarItemID], folderID: Int64?, before: PlaylistSidebarItemID?)
@@ -240,6 +248,9 @@ enum DropRules {
             return true
         case (.playlistCover, .files), (.playlistCover, .imageData):
             return true
+        case (.albumCard, .tracks), (.albumCard, .files), (.albumCard, .imageData),
+             (.albumCover, .files), (.albumCover, .imageData):
+            return true
         case (.playlistCard, .tracks), (.playlistCard, .playlists), (.playlistCard, .files),
              (.playlistCard, .imageData), (.playlistCard, .link):
             return true
@@ -290,6 +301,20 @@ enum DropRules {
                 return decide(content, onto: .sidebarPlaylist(id: id, name: name), context: context)
             }
         }
+        // A card of the Albums grid: tracks join the album, an image (or nothing else MLM can use)
+        // is its cover (W4-2).
+        if case .albumCard(let id, let name) = target {
+            switch content {
+            case .tracks:
+                break
+            case .imageData:
+                return decide(content, onto: .albumCover(id: id, name: name), context: context)
+            case .files(let files) where files.contains(where: { $0.kind == .image }) || files.allSatisfy({ $0.kind == .other }):
+                return decide(content, onto: .albumCover(id: id, name: name), context: context)
+            default:
+                return .refuse(nil)
+            }
+        }
         guard context.isLibraryOpen else {
             if case .files(let files) = content, target == .window { return libraryFileDecision(files) ?? .refuse(nil) }
             return .refuse(nil)
@@ -303,6 +328,7 @@ enum DropRules {
             return filesDecision(files, onto: target, context: context)
         case .imageData(let data):
             if case .playlistCover(let id, let name) = target { return .setCover(.data(data), playlistID: id, playlistName: name) }
+            if case .albumCover(let id, let name) = target { return .setAlbumCover(.data(data), albumID: id, albumName: name) }
             return .refuse(nil)
         case .link(let url):
             switch target {
@@ -330,7 +356,9 @@ enum DropRules {
         case .playlistFolder(let id, _): return .newPlaylistInFolder(ids, folderID: id)
         case .genreRow(_, let name): return .setGenre(ids, genreName: name)
         case .genreTable(let key, let name): return .stageForGenre(ids, genreKey: key, genreName: name)
-        case .fixedRow, .playlistCover, .playlistCard, .window, .playlistOrder, .playlistCardInManualOrder, .folderRow, .reels:
+        case .albumCard(let id, let name): return .addTracksToAlbum(ids, albumID: id, albumName: name)
+        case .fixedRow, .playlistCover, .playlistCard, .window, .playlistOrder, .playlistCardInManualOrder, .folderRow, .reels,
+             .albumCover:
             return .refuse(nil)
         }
     }
@@ -375,7 +403,8 @@ enum DropRules {
         case .player:
             return ids.isEmpty ? .refuse(nil) : .playNextPlaylists(ids)
         case .playlistsSection, .fixedRow, .playlistCover, .playlistCard, .window,
-             .playlistFolder, .playlistOrder, .playlistCardInManualOrder, .folderRow, .genreRow, .genreTable, .reels:
+             .playlistFolder, .playlistOrder, .playlistCardInManualOrder, .folderRow, .genreRow, .genreTable, .reels,
+             .albumCard, .albumCover:
             return .refuse(nil)
         }
     }
@@ -386,7 +415,7 @@ enum DropRules {
         // A library file: open / switch library — what the window does wherever it lands.
         if files.contains(where: { $0.kind == .libraryFile }) {
             switch target {
-            case .syncProfile, .player, .playlistCover, .playlistCard: break
+            case .syncProfile, .player, .playlistCover, .playlistCard, .albumCard, .albumCover: break
             default: return libraryFileDecision(files) ?? .refuse(nil)
             }
         }
@@ -403,6 +432,12 @@ enum DropRules {
             }
             return .setCover(.file(image.url), playlistID: id, playlistName: name)
         }
+        if case .albumCover(let id, let name) = target {
+            guard let image = files.first(where: { $0.kind == .image }) else {
+                return .refuse(DropWords.notACover(fileName: files.first?.name))
+            }
+            return .setAlbumCover(.file(image.url), albumID: id, albumName: name)
+        }
 
         // An M3U: the preview sheet (into this playlist when dropped on one).
         if let m3u = files.first(where: { $0.kind == .m3u }) {
@@ -412,7 +447,7 @@ enum DropRules {
             case .playlistsSection, .window, .fixedRow, .folderRow: return .importM3U(m3u.url, playlistID: nil)
             case .playlistFolder(let id, _): return .importM3UInFolder(m3u.url, folderID: id)
             case .syncProfile, .player, .playlistCover, .playlistCard, .playlistOrder, .playlistCardInManualOrder,
-                 .genreRow, .genreTable, .reels:
+                 .genreRow, .genreTable, .reels, .albumCard, .albumCover:
                 return .refuse(nil)
             }
         }
@@ -442,7 +477,7 @@ enum DropRules {
         case .folderRow(let path, _): return .importFilesIntoLibrary(urls, folderPath: path)
         case .playlistFolder(let id, _): return .importFilesAsNewPlaylistInFolder(urls, folderID: id)
         case .syncProfile, .player, .playlistCover, .playlistCard, .playlistOrder, .playlistCardInManualOrder,
-             .genreRow, .genreTable, .reels:
+             .genreRow, .genreTable, .reels, .albumCard, .albumCover:
             return .refuse(nil)
         }
     }

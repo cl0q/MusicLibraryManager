@@ -96,7 +96,11 @@ struct TrackCommands: Commands {
             CommandButton(.getInfo, enabled: state.canGetInfo && trailingColumn != nil) {
                 trailingColumn?.toggle(.info)
             }
-            CommandButton(.goToAlbum)
+            // The album page of the one selected track that belongs to an album (W4-2).
+            let album = GoToAlbum.album(of: selection)
+            CommandButton(.goToAlbum, enabled: album != nil && navigation != nil, disabledReason: GoToAlbum.disabledReason) {
+                if let album { navigation?.push(.album(album)) }
+            }
             // All Tracks filtered by the token `artist: ‹name›` (W2-I).
             let artist = GoToArtist.artist(of: selection)
             CommandButton(.goToArtist, enabled: artist != nil && search != nil,
