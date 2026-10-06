@@ -473,6 +473,8 @@ final class TrackRepository: Sendable {
             var track = track
             track.searchText = DatabaseManager.foldedSearchText(track.rawSearchText)
             try track.insert(db)
+            // W4-3: a row inserted with a real album text joins its album (downloads, remote lists).
+            AlbumTrackRepository.linkNewTrack(db, track)
             return track
         }
     }

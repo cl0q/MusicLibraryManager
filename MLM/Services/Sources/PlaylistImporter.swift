@@ -360,6 +360,7 @@ final class PlaylistImporter {
                 continue
             }
             guard let id = track.id else { continue }
+            AlbumTrackRepository.linkNewTrack(db, track)   // W4-3: a real album from the source joins its album
             try db.execute(sql: """
                 INSERT OR IGNORE INTO track_sources (track_id, source_id, external_id, added_at) VALUES (?, ?, ?, ?)
                 """, arguments: [id, sourceID, remote.externalID, now])

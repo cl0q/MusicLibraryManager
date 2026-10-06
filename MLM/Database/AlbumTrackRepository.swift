@@ -194,6 +194,24 @@ final class AlbumTrackRepository: Sendable {
         return albumID
     }
 
+    /// A track row just inserted by a download, a remote-playlist import or a recommendation
+    /// (inside the write that inserted it): joins its album when the row carries a real album
+    /// text, like `ImportService.saveBatch` does (W4-3). Nothing for a track without an album
+    /// (DEC-021, the usual case: sources deliver no album). Best effort in a savepoint — the
+    /// track is in either way; a failure only leaves it without an album link.
+    static func linkNewTrack(_ db: Database, _ track: Track) {
+        guard let id = track.id, !AlbumKey.isNoAlbum(track.album) else { return }
+        do {
+            try db.inSavepoint {
+                try linkImportedTrack(db, trackID: id, artist: track.artist, albumArtist: track.albumArtist,
+                                      album: track.album, year: track.year, disc: nil, number: nil)
+                return .commit
+            }
+        } catch {
+            AppLogger.shared.warn("Album link failed for “\(track.title)”: \(error.localizedDescription)", source: "Albums")
+        }
+    }
+
     // MARK: - Undo (exact rows)
 
     func snapshot(albumID: Int64) async throws -> AlbumTrackSnapshot {
