@@ -346,7 +346,6 @@ final class ReviewModel {
     /// `Apply Merge`: every differing field gets the chosen value on every version.
     func plan(mergeIn group: ReviewGroupItem) -> ReviewGroupPlan {
         var applications: [ReviewGroupPlan.TagApplication] = []
-        var oldValues: [ReviewDecisionConsequences.TagChange] = []
         var changed: [String] = []
         for (field, text) in mergedValues(group) {
             let value = field.value(from: text)
@@ -354,14 +353,9 @@ final class ReviewModel {
             guard !needing.isEmpty else { continue }
             changed.append(field.label)
             applications.append(.init(field: field.tagField, value: value, trackIDs: needing.compactMap(\.id)))
-            for track in needing {
-                guard let id = track.id else { continue }
-                oldValues.append(.init(trackId: id, field: field.tagField.rawValue, old: TrackTagValue.stored(field.tagField, of: track)))
-            }
         }
         var request = ReviewDecisionRequest(groupKey: group.key, kind: .conflict, action: .merge,
                                             memberIDs: group.memberIDs)
-        request.tags = oldValues
         request.changedFields = changed
         return ReviewGroupPlan(request: request, tagApplications: applications, title: group.title,
                                versionCount: group.members.count)
@@ -430,7 +424,7 @@ final class ReviewModel {
         let done: Applied?
         do {
             done = try await undo.perform(
-                actionName, failure: "Couldn’t save the decision",
+                actionName, failure: requested.count > 1 ? nil : "Couldn’t save the decision",
                 do: { [self] in
                     let outcomes = try await execute(plans)
                     return outcomes.isEmpty ? nil : Applied(outcomes: outcomes)
@@ -439,6 +433,7 @@ final class ReviewModel {
                 redo: { [self] _ in Applied(outcomes: try await execute(plans)) },
                 message: message)
         } catch {
+            if requested.count > 1 { bar?.post(ReviewPresentation.bulkFailed) }
             await reload()
             return false
         }
@@ -473,18 +468,43 @@ final class ReviewModel {
         }
     }
 
-    /// The writes of a step: tags, then the decision (one transaction), then — after the commit —
-    /// the files.
+    /// The writes of a step: the decision(s) in **one** transaction, then the tag edit of a merge
+    /// (with the exact previous values it returns, recorded into the decision), then — after the
+    /// commit — the files. If the tag edit fails, the decision is taken back.
     private func execute(_ plans: [ReviewGroupPlan]) async throws -> [ReviewDecisionOutcome] {
         var outcomes: [ReviewDecisionOutcome] = []
-        for plan in plans {
-            for application in plan.tagApplications {
-                try await dependencies.tagEdit().perform(application.value, field: application.field, trackIDs: application.trackIDs)
+        if plans.count > 1 {
+            outcomes = try await dependencies.decisions.decideAll(plans.map(\.request))
+        } else {
+            for plan in plans {
+                do {
+                    outcomes.append(try await dependencies.decisions.decide(plan.request))
+                } catch ReviewDecisionError.nothingPending {
+                    continue  // decided meanwhile (another window, Restore): nothing to do for this group
+                }
             }
+        }
+        let plansByKey = Dictionary(plans.map { ($0.request.groupKey, $0) }, uniquingKeysWith: { first, _ in first })
+        for index in outcomes.indices {
+            guard let plan = plansByKey[outcomes[index].groupKey], !plan.tagApplications.isEmpty else { continue }
+            var changes: [ReviewDecisionConsequences.TagChange] = []
             do {
-                outcomes.append(try await dependencies.decisions.decide(plan.request))
-            } catch ReviewDecisionError.nothingPending {
-                continue  // decided meanwhile (another window, Restore): nothing to do for this group
+                for application in plan.tagApplications {
+                    guard let step = try await dependencies.tagEdit().perform(
+                        application.value, field: application.field, trackIDs: application.trackIDs) else { continue }
+                    changes += step.snapshots.map { .init(trackId: $0.trackID, field: step.field.rawValue, old: $0.value) }
+                }
+                try await dependencies.decisions.recordTags(decisionID: outcomes[index].decisionID, tags: changes)
+                outcomes[index].consequences.tags = changes
+            } catch {
+                try? await restoreTags(changes)
+                for done in outcomes.prefix(through: index).reversed() {
+                    if let record = try? await dependencies.decisions.undo(decisionID: done.decisionID), done.decisionID != outcomes[index].decisionID {
+                        try? await restoreTags(record.consequences.tags)
+                    }
+                }
+                await reload()
+                throw error
             }
         }
         if plans.contains(where: { $0.request.unkeptMode == .trash }) {

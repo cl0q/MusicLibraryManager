@@ -331,17 +331,20 @@ final class AnalysisRepository: Sendable {
                       AND action_type IN ('fingerprint_dedup', 'metadata_conflict')
                     """
             )
-            let decided = try ReviewDecisionRepository.decidedPairs(db)
-            let resolvedKeys = Set(try String.fetchAll(db, sql: """
-                SELECT DISTINCT group_key FROM review_queue
+            // Decisions are per kind: a merged conflict can later be proposed as a duplicate.
+            let decidedDuplicates = try ReviewDecisionRepository.decidedPairs(db, kind: .duplicate)
+            let decidedConflicts = try ReviewDecisionRepository.decidedPairs(db, kind: .conflict)
+            let resolvedKeys = Set(try Row.fetchAll(db, sql: """
+                SELECT DISTINCT action_type, group_key FROM review_queue
                 WHERE status IN ('resolved', 'dismissed') AND group_key IS NOT NULL
-                """))
+                """).map { "\($0["action_type"] as String)|\($0["group_key"] as String)" })
             var duplicates = 0
             var conflicts = 0
             for item in items {
                 guard !shouldCancel() else { throw CancellationError() }
                 let members = Array(Self.trackIDs(for: [item])).sorted()
-                if let key = item.groupKey, resolvedKeys.contains(key) { continue }
+                if let key = item.groupKey, resolvedKeys.contains("\(item.actionType)|\(key)") { continue }
+                let decided = item.actionType == "metadata_conflict" ? decidedConflicts : decidedDuplicates
                 if members.count > 1, !ReviewPair.hasUndecidedPair(members, decided: decided) { continue }
                 var review = item
                 try review.insert(db)

@@ -142,6 +142,7 @@ struct ReviewDecisionRequest: Sendable {
 
 struct ReviewDecisionOutcome: Equatable, Sendable {
     var decisionID: Int64
+    var groupKey = ""
     var keptTrackID: Int64? = nil
     var unkeptTrackIDs: [Int64]
     var keptFormat: String?
@@ -195,20 +196,25 @@ final class ReviewDecisionRepository: Sendable {
 
     // MARK: Reading
 
-    /// Every decided pair.
-    func decidedPairs() async throws -> Set<ReviewPair> {
-        try await database.read { db in try Self.decidedPairs(db) }
+    /// Every decided pair — of one kind, or (`nil`) of any kind.
+    func decidedPairs(kind: ReviewDecisionKind? = nil) async throws -> Set<ReviewPair> {
+        try await database.read { db in try Self.decidedPairs(db, kind: kind) }
     }
 
-    static func decidedPairs(_ db: Database) throws -> Set<ReviewPair> {
+    static func decidedPairs(_ db: Database, kind: ReviewDecisionKind? = nil) throws -> Set<ReviewPair> {
         guard try db.tableExists("review_decided_pairs") else { return [] }
-        let rows = try Row.fetchAll(db, sql: "SELECT track_a, track_b FROM review_decided_pairs")
+        let rows: [Row]
+        if let kind {
+            rows = try Row.fetchAll(db, sql: "SELECT track_a, track_b FROM review_decided_pairs WHERE kind = ?", arguments: [kind.rawValue])
+        } else {
+            rows = try Row.fetchAll(db, sql: "SELECT track_a, track_b FROM review_decided_pairs")
+        }
         return Set(rows.map { ReviewPair($0["track_a"] as Int64, $0["track_b"] as Int64) })
     }
 
-    /// Every pair of the group is covered by a decision.
-    func isDecided(group memberIDs: [Int64]) async throws -> Bool {
-        let decided = try await decidedPairs()
+    /// Every pair of the group is covered by a decision of `kind`.
+    func isDecided(group memberIDs: [Int64], kind: ReviewDecisionKind? = nil) async throws -> Bool {
+        let decided = try await decidedPairs(kind: kind)
         return !ReviewPair.hasUndecidedPair(memberIDs, decided: decided)
     }
 
@@ -271,7 +277,28 @@ final class ReviewDecisionRepository: Sendable {
     @discardableResult
     func decide(_ request: ReviewDecisionRequest, now: Date = Date()) async throws -> ReviewDecisionOutcome {
         let stamp = ISO8601DateFormatter().string(from: now)
+        return try await database.write { db in try Self.decide(in: db, request, stamp: stamp) }
+    }
+
+    /// Decide several groups in **one** transaction: any error (a refusal, a database error)
+    /// commits nothing. A group that isn't pending any more (decided elsewhere) is skipped.
+    func decideAll(_ requests: [ReviewDecisionRequest], now: Date = Date()) async throws -> [ReviewDecisionOutcome] {
+        let stamp = ISO8601DateFormatter().string(from: now)
         return try await database.write { db in
+            var outcomes: [ReviewDecisionOutcome] = []
+            for request in requests {
+                do {
+                    outcomes.append(try Self.decide(in: db, request, stamp: stamp))
+                } catch ReviewDecisionError.nothingPending {
+                    continue
+                }
+            }
+            return outcomes
+        }
+    }
+
+    private static func decide(in db: Database, _ request: ReviewDecisionRequest, stamp: String) throws -> ReviewDecisionOutcome {
+        do {
             guard try Self.pendingRowCount(db, groupKey: request.groupKey) > 0 else { throw ReviewDecisionError.nothingPending }
             let members = Array(Set(request.memberIDs)).sorted()
             let keeps = request.action == .keepRecommended || request.action == .keepSelected
@@ -321,12 +348,14 @@ final class ReviewDecisionRepository: Sendable {
                                  keeps ? request.keptTrackID : nil, keeps ? request.unkeptMode?.rawValue : nil, json, stamp])
             let decisionID = db.lastInsertedRowID
             for pair in ReviewPair.pairs(of: members) {
+                // Per kind; an older decision's pair keeps its owner (undoing this one never
+                // removes it).
                 try db.execute(sql: """
-                    INSERT OR REPLACE INTO review_decided_pairs (track_a, track_b, decision_id) VALUES (?, ?, ?)
-                    """, arguments: [pair.a, pair.b, decisionID])
+                    INSERT OR IGNORE INTO review_decided_pairs (track_a, track_b, decision_id, kind) VALUES (?, ?, ?, ?)
+                    """, arguments: [pair.a, pair.b, decisionID, request.kind.rawValue])
             }
             try Self.setQueueStatus(db, groupKey: request.groupKey, from: "pending", to: "resolved")
-            return ReviewDecisionOutcome(decisionID: decisionID, keptTrackID: keeps ? request.keptTrackID : nil, unkeptTrackIDs: unkept,
+            return ReviewDecisionOutcome(decisionID: decisionID, groupKey: request.groupKey, keptTrackID: keeps ? request.keptTrackID : nil, unkeptTrackIDs: unkept,
                                          keptFormat: consequences.keptFormat, consequences: consequences)
         }
     }
@@ -394,6 +423,11 @@ final class ReviewDecisionRepository: Sendable {
     /// survives a crash before the batch ends.
     func recordTrashed(decisionID: Int64, item: ReviewDecisionConsequences.Trashed) async throws {
         try await edit(decisionID: decisionID) { $0.trashed.removeAll { $0.trackId == item.trackId }; $0.trashed.append(item) }
+    }
+
+    /// Record the exact previous values a merge's tag edit returned (after it ran).
+    func recordTags(decisionID: Int64, tags: [ReviewDecisionConsequences.TagChange]) async throws {
+        try await edit(decisionID: decisionID) { $0.tags = tags }
     }
 
     /// Record the counts of what didn't move (after the batch).

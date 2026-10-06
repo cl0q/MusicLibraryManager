@@ -212,6 +212,9 @@ enum ReviewPresentation {
         "Can’t keep “\(title)” — its file is missing"
     }
 
+    /// Bulk apply failed as a whole.
+    static let bulkFailed = "Couldn’t apply the decisions — nothing was changed"
+
     /// `3 groups skipped — the recommended version has no file`.
     static func groupsSkippedNoFile(_ count: Int) -> String {
         "\(count) \(count == 1 ? "group" : "groups") skipped — the recommended version has no file"
