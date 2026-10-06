@@ -167,8 +167,11 @@ struct WindowTitleModifier: ViewModifier {
     @Environment(NavigationModel.self) private var navigation
     @Environment(SidebarModel.self) private var sidebar
 
+    @State private var placeCount: String?
+
     func body(content: Content) -> some View {
         content
+            .onPreferenceChange(WindowCountKey.self) { placeCount = $0 }
             .navigationTitle(title)
             .navigationSubtitle(subtitle)
     }
@@ -182,16 +185,29 @@ struct WindowTitleModifier: ViewModifier {
     }
 
     private var subtitle: String {
-        let library = LibraryFooter.libraryName(LibraryLaunchCoordinator.shared)
-        guard navigation.currentRoute == nil else { return library }
+        WindowSubtitle.text(library: LibraryFooter.libraryName(LibraryLaunchCoordinator.shared),
+                            placeCount: placeCount, fallback: fallbackCount)
+    }
+
+    /// The count of the two places that have it without declaring one.
+    private var fallbackCount: String? {
+        guard navigation.currentRoute == nil else { return nil }
         switch navigation.selection {
         case .allTracks:
-            guard let vm = container.libraryViewModel else { return library }
-            return "\(library) · \(StatusBarText.tracks(vm.libraryTrackCount))"
+            return container.libraryViewModel.map { StatusBarText.tracks($0.libraryTrackCount) }
         case .allPlaylists:
-            return "\(library) · \(StatusBarText.playlists(sidebar.playlists.count))"
+            return StatusBarText.playlists(sidebar.playlists.count)
         default:
-            return library
+            return nil
         }
+    }
+}
+
+/// Window subtitle wording (UC-WIN-06): `‹Library›` or `‹Library› · ‹count›`; the place's own
+/// declared count (`.windowCount`) wins over the fallback.
+enum WindowSubtitle {
+    static func text(library: String, placeCount: String?, fallback: String?) -> String {
+        guard let count = placeCount ?? fallback else { return library }
+        return "\(library) · \(count)"
     }
 }
