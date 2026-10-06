@@ -187,7 +187,7 @@ struct MenuBarStructureTests {
 
     @Test func pendingCommandsNameTheirOwnerAndReason() {
         let packages: Set<String> = ["W2-A", "W2-B", "W2-C", "W2-D", "W2-I", "W3-PL", "W3-ADD", "W3-LAUNCH",
-                                     "W3-GEN", "W3-REV", "W3-SET", "W4-2", "W4-3", "W3-DISC", "W5-2"]
+                                     "W3-GEN", "W3-REV", "W3-SET", "W4-2", "W4-3", "W3-DISC"]
         let pending = MenuCommand.allCases.filter(\.isPending)
         #expect(!pending.isEmpty)
         for command in pending {
