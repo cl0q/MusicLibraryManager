@@ -27,6 +27,8 @@ final class ShellEdits {
         /// An album's track list and its name (W4-1 album edits).
         var albumTracks: @MainActor () -> AlbumTrackRepository? = { nil }
         var albums: @MainActor () -> AlbumRepository? = { nil }
+        /// Held recommendations: a drop of one on a playlist or profile keeps it too (W5-1a G37).
+        var recommendations: @MainActor () -> RecommendationRepository? = { nil }
 
         static func live(_ container: DependencyContainer) -> Dependencies {
             Dependencies(
@@ -44,7 +46,8 @@ final class ShellEdits {
                 },
                 covers: { container.playlistCoverService },
                 albumTracks: { container.databaseManager.map { AlbumTrackRepository(database: $0.pool) } },
-                albums: { container.albumRepository }
+                albums: { container.albumRepository },
+                recommendations: { container.databaseManager.map { RecommendationRepository(database: $0.pool) } }
             )
         }
     }
@@ -216,10 +219,13 @@ final class ShellEdits {
         guard !ordered.isEmpty, let repository = dependencies.playlists() else { return }
         let name = await playlistName(playlistID, repository: repository)
         let effects = self.effects
+        let held = await heldRecommendations(among: ordered)
         do {
-            let result = try await undo.perform(
+            let result = try await performKeeping(
                 "Add to “\(name)”",
                 failure: "Couldn’t add \(StatusBarText.tracks(ordered.count)) to “\(name)”",
+                held: held,
+                keptMessage: { added in Self.keptAndAddedMessage(added: added?.entries.count ?? 0, kept: held.count, destination: name) },
                 do: { () async throws -> PlaylistAppendResult? in
                     let result = try await repository.appendTracksReturningEntries(playlistId: playlistID, trackIds: ordered)
                     guard !result.entries.isEmpty else { return nil }
@@ -240,6 +246,64 @@ final class ShellEdits {
         } catch {
             // Reported in the status bar by the center.
         }
+    }
+
+    // MARK: Held recommendations dropped on a container (D-INBOX-TO-PLAYLIST, G37)
+
+    /// The held recommendations among `ids`: dropping them somewhere also keeps them, or they
+    /// would sit in the playlist yet stay hidden from All Tracks.
+    func heldRecommendations(among ids: [Int64]) async -> [Int64] {
+        guard let repository = dependencies.recommendations() else { return [] }
+        return (try? await repository.waiting(among: ids)) ?? []
+    }
+
+    /// `Kept and added 3 tracks to “Warm-up”` (the status bar adds `Undo`).
+    static func keptAndAddedMessage(added: Int, kept: Int, destination: String) -> String {
+        "Kept and added \(StatusBarText.tracks(max(added, kept))) to “\(destination)”"
+    }
+
+    /// `UndoCenter.perform`, except that held recommendations among the dropped tracks are kept
+    /// first, in the same undo group: one step (one Undo puts them back to held and out of the
+    /// destination) and one status sentence (`keptMessage`). Without held ones it is exactly
+    /// `undo.perform`.
+    func performKeeping<Done: Sendable, Undone: Sendable>(
+        _ actionName: String, failure: String?, held: [Int64],
+        keptMessage: @escaping @MainActor (Done?) -> String,
+        do work: @escaping @MainActor () async throws -> Done?,
+        undo inverse: @escaping @MainActor (Done) async throws -> Undone,
+        redo again: @escaping @MainActor (Undone) async throws -> Done,
+        message: @escaping @MainActor (Done) -> String
+    ) async throws -> Done? {
+        guard !held.isEmpty, let recommendations = dependencies.recommendations() else {
+            return try await undo.perform(actionName, failure: failure, do: work, undo: inverse, redo: again, message: message)
+        }
+        let center = NotificationCenter.default
+        let announce: @MainActor () -> Void = {
+            center.post(name: .libraryDidImport, object: nil)
+            center.post(name: .trackAvailabilityDidChange, object: nil)
+        }
+        return try await undo.performGroup(actionName, failure: failure, { group in
+            try await group.perform(
+                do: { () async throws -> [Int64] in
+                    let kept = try await recommendations.keep(ids: held)
+                    announce()
+                    return kept
+                },
+                undo: { kept in try await recommendations.undoKeep(ids: kept); announce(); return kept },
+                redo: { kept in let again = try await recommendations.keep(ids: kept); announce(); return again })
+            return try await group.perform(
+                do: { () async throws -> Done? in try await work() },
+                undo: { (done: Done?) async throws -> Undone? in
+                    guard let done else { return nil }
+                    return try await inverse(done)
+                },
+                redo: { (undone: Undone?) async throws -> Done? in
+                    guard let undone else { return nil }
+                    return try await again(undone)
+                })
+        }, message: { (done: Done?) in
+            done.map(keptMessage) ?? keptMessage(nil)
+        })
     }
 
     /// What undoing an append removed, and the keys a renumbering had replaced.
@@ -580,9 +644,12 @@ extension ShellEdits {
         guard let repository = dependencies.playlists() else { return }
         let effects = self.effects
         let isReorder = plan.kind == .reorder
-        _ = try? await undo.perform(
+        let held = isReorder ? [] : await heldRecommendations(among: plan.trackIDs)
+        _ = try? await performKeeping(
             isReorder ? DropWords.reorderActionName(name) : DropWords.addActionName(name),
             failure: isReorder ? "Couldn’t reorder “\(name)”" : "Couldn’t add \(StatusBarText.tracks(plan.trackIDs.count)) to “\(name)”",
+            held: held,
+            keptMessage: { done in Self.keptAndAddedMessage(added: done?.inserted.count ?? 0, kept: held.count, destination: name) },
             do: { () async throws -> PlacementDone? in
                 guard let result = try await repository.placeTracksReturningChanges(
                     playlistId: playlistID, trackIds: plan.trackIDs, before: plan.beforeTrackID
@@ -683,10 +750,13 @@ extension ShellEdits {
         let ordered = Self.uniqued(trackIDs)
         guard !ordered.isEmpty, let repository = dependencies.syncProfiles() else { return }
         let didChange = dependencies.syncContentDidChange
+        let held = await heldRecommendations(among: ordered)
         do {
-            let added = try await undo.perform(
+            let added = try await performKeeping(
                 DropWords.addActionName(name),
                 failure: "Couldn’t add \(StatusBarText.tracks(ordered.count)) to “\(name)”",
+                held: held,
+                keptMessage: { added in Self.keptAndAddedMessage(added: added?.count ?? 0, kept: held.count, destination: name) },
                 do: { () async throws -> [Int64]? in
                     let present = Set(try await repository.fetchProfileTracks(profileId: profileID).compactMap(\.id))
                     let new = ordered.filter { !present.contains($0) }
