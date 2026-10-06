@@ -136,9 +136,7 @@ struct AlbumActions {
             let confirmation = AlbumRemoval.confirmation(
                 titles: albums.map(\.title), trackCount: all.count, fileCount: all.filter(\.isLocal).count,
                 playlists: impact.playlists, syncProfiles: impact.syncProfiles)
-            let ids = albums.map(\.id)
             LibraryRemovalCenter.shared.ask(all, confirmation: confirmation) { _ in
-                _ = try? await repository.deleteEmpty(ids: ids)
                 NotificationCenter.default.post(name: .trackMetadataDidChange, object: nil)
             }
         }

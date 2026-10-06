@@ -61,8 +61,53 @@ struct AlbumEditsUndoTests {
         #expect(try await order(env) == [env.ids[2], env.ids[0], env.ids[1]])
     }
 
+    @Test func reorderingATwoDiscAlbumKeepsEveryDiscAndNumbersPerDisc() async throws {
+        let env = try await makeEnv()
+        let (a, b, c) = (env.ids[0], env.ids[1], env.ids[2])
+        try await env.repo.setNumbers(albumID: env.album, [a: (1, 1), b: (1, 2), c: (2, 1)])
+        let before = try await env.repo.snapshot(albumID: env.album)
+        try await env.edits.setAlbumOrder(albumID: env.album, orderedTrackIDs: [c, b, a])
+        let rows = try await env.repo.rows(of: env.album)
+        #expect(rows.map(\.trackId) == [b, a, c], "disc 1 reordered, disc 2 untouched")
+        #expect(rows.map(\.disc) == [1, 1, 2], "no disc is flattened")
+        #expect(rows.map(\.trackNumber) == [1, 2, 1], "numbers 1…k within each disc")
+        env.manager.undo()
+        await env.undo.waitUntilIdle()
+        #expect(try await env.repo.snapshot(albumID: env.album) == before)
+    }
+
+    @Test func undoAfterTheAlbumWasDeletedRefusesAndWritesNothing() async throws {
+        let env = try await makeEnv()
+        try await env.edits.setAlbumOrder(albumID: env.album, orderedTrackIDs: [env.ids[2], env.ids[0], env.ids[1]])
+        try await AlbumRepository(database: env.db).delete(id: env.album)
+        env.manager.undo()
+        await env.undo.waitUntilIdle()
+        #expect(env.status.message?.text == "Couldn’t undo Reorder “Low Season” — the album no longer exists")
+        let (rows, linked) = try await env.db.read { db in
+            (try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM album_tracks WHERE album_id = ?", arguments: [env.album]),
+             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM tracks WHERE album_id = ?", arguments: [env.album]))
+        }
+        #expect(rows == 0 && linked == 0, "no orphan rows, no track pointed at the deleted album")
+    }
+
+    @Test func anAlbumEditIsOneTransactionSoAFailureLeavesNothing() async throws {
+        let env = try await makeEnv()
+        let before = try await env.repo.snapshot(albumID: env.album)
+        struct Boom: Error {}
+        let (album, extra) = (env.album, env.ids[3])
+        await #expect(throws: Boom.self) {
+            _ = try await env.repo.edit(albumID: album) { db in
+                try AlbumTrackRepository.addRows(db, trackIDs: [extra], to: album)
+                throw Boom()
+            }
+        }
+        #expect(try await env.repo.snapshot(albumID: env.album) == before, "the half-done edit was rolled back")
+    }
+
     @Test func aReorderThatChangesNothingLeavesNoStep() async throws {
         let env = try await makeEnv()
+        // Numbered 1, 2, 3 in this order already: the same order again changes nothing.
+        try await env.repo.setNumbers(albumID: env.album, [env.ids[0]: (1, 1), env.ids[1]: (1, 2), env.ids[2]: (1, 3)])
         try await env.edits.setAlbumOrder(albumID: env.album, orderedTrackIDs: Array(env.ids.prefix(3)))
         #expect(env.manager.undoMenuItemTitle == "Undo", "no step")
         #expect(env.status.message == nil)

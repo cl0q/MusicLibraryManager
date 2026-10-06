@@ -191,17 +191,17 @@ enum AlbumInfoText {
 // MARK: - Reads
 
 extension AlbumRepository {
-    /// Another album with this (album artist, normalised title) and edition kind — the key the
-    /// unique index guards. Compared by the Swift key (`AlbumKey`), which is the stricter rule.
+    /// Another album with this (album artist, title) key and edition kind — the key the unique
+    /// index guards. Compared by the Swift key (`AlbumKey.rowKey`), never the stored
+    /// `title_normalized`, which an older app wrote in another form.
     func albumWithKey(albumArtist: String, title: String, variantKind: String?, excluding albumID: Int64) async throws -> Album? {
-        let normalized = AlbumKey.normalize(title)
-        let wanted = AlbumKey.artistKey(albumArtist)
+        let wanted = AlbumKey.key(artist: albumArtist, title: title)
         return try await database.read { db in
             try Album.fetchAll(db, sql: """
-                SELECT * FROM albums
-                WHERE id <> ? AND title_normalized = ? AND IFNULL(variant_kind, '') = IFNULL(?, '')
-                ORDER BY id
-                """, arguments: [albumID, normalized, variantKind]).first { AlbumKey.artistKey($0.albumArtist) == wanted }
+                SELECT * FROM albums WHERE id <> ? AND IFNULL(variant_kind, '') = IFNULL(?, '') ORDER BY id
+                """, arguments: [albumID, variantKind]).first {
+                AlbumKey.rowKey(albumArtist: $0.albumArtist, artist: $0.artist, title: $0.title) == wanted
+            }
         }
     }
 }

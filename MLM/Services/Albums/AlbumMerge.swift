@@ -171,10 +171,11 @@ enum AlbumMergeStore {
 
         switch mode {
         case .edition(let name):
+            let wanted = AlbumKey.rowKey(albumArtist: otherRow.albumArtist, artist: otherRow.artist, title: otherRow.title)
             let clash = try Album.fetchAll(db, sql: """
-                SELECT * FROM albums WHERE id <> ? AND title_normalized = ? AND LOWER(IFNULL(variant_kind, '')) = LOWER(?)
-                """, arguments: [otherID, otherRow.titleNormalized, name]).contains {
-                AlbumKey.artistKey($0.albumArtist) == AlbumKey.artistKey(otherRow.albumArtist)
+                SELECT * FROM albums WHERE id <> ? AND LOWER(IFNULL(variant_kind, '')) = LOWER(?)
+                """, arguments: [otherID, name]).contains {
+                AlbumKey.rowKey(albumArtist: $0.albumArtist, artist: $0.artist, title: $0.title) == wanted
             }
             if clash { throw AlbumMergeError.editionNameTaken }
             try db.execute(sql: "UPDATE albums SET variant_of = ?, variant_kind = ? WHERE id = ?", arguments: [thisID, name, otherID])
@@ -276,11 +277,13 @@ extension AlbumRepository {
     /// kind (the merge as an edition would collide).
     func editionNameIsTaken(_ name: String, forAlbum otherID: Int64) async throws -> Bool {
         guard let other = try await fetch(id: otherID) else { return false }
-        let wanted = AlbumKey.artistKey(other.albumArtist)
+        let wanted = AlbumKey.rowKey(albumArtist: other.albumArtist, artist: other.artist, title: other.title)
         return try await database.read { db in
             try Album.fetchAll(db, sql: """
-                SELECT * FROM albums WHERE id <> ? AND title_normalized = ? AND LOWER(IFNULL(variant_kind, '')) = LOWER(?)
-                """, arguments: [otherID, other.titleNormalized, name]).contains { AlbumKey.artistKey($0.albumArtist) == wanted }
+                SELECT * FROM albums WHERE id <> ? AND LOWER(IFNULL(variant_kind, '')) = LOWER(?)
+                """, arguments: [otherID, name]).contains {
+                AlbumKey.rowKey(albumArtist: $0.albumArtist, artist: $0.artist, title: $0.title) == wanted
+            }
         }
     }
 }

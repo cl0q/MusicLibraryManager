@@ -11,8 +11,7 @@ extension ShellEdits {
     /// numbers 1, 2, 3… within each disc (`AlbumOrderEditor.numbered`). One step,
     /// `Reorder “‹album›”`; undo restores the earlier rows exactly. Nil when nothing changed.
     ///
-    /// `setAlbumOrder` (W4-1) can't carry discs or numbers: it places the whole list as one disc
-    /// and leaves the numbers as they were, which would flatten a two-disc album.
+    /// `setAlbumOrder` (W4-1) is a thin wrapper over this: it keeps every row's disc.
     @discardableResult
     func setAlbumLayout(albumID: Int64, _ ordered: [(trackID: Int64, disc: Int, number: Int)]) async throws -> AlbumEditResult? {
         guard let repository = dependencies.albumTracks(), let albums = dependencies.albums(),
@@ -22,9 +21,10 @@ extension ShellEdits {
             "Reorder “\(name)”",
             failure: "Couldn’t reorder “\(name)”",
             do: { () async throws -> AlbumEditResult? in
-                let before = try await repository.snapshot(albumID: albumID)
-                guard try await repository.applyLayout(albumID: albumID, ordered) else { return nil }
-                let after = try await repository.snapshot(albumID: albumID)
+                let (before, after) = try await repository.edit(albumID: albumID) { db in
+                    try AlbumTrackRepository.writeLayout(db, albumID: albumID, ordered)
+                }
+                guard before != after else { return nil }
                 NotificationCenter.default.post(name: .trackMetadataDidChange, object: nil)
                 return AlbumEditResult(albumID: albumID, name: name, before: before, after: after)
             },
