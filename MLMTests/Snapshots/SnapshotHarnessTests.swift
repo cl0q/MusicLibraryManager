@@ -78,14 +78,16 @@ final class SnapshotsTests: XCTestCase {
         // and replaced the unhosted TrackDetail/GrooveView.swift (deferred) by Similar/SimilarView.swift (deferred).
         // W3-DISC-B replaced ReelsInbox/ReelsInboxView.swift (deferred) by the 5 files of Reels/ (all
         // deferred): 134 → 138 files, 77 → 81 deferred.
-        XCTAssertEqual(paths.count, 138, "Re-audit inventory changes explicitly.")
+        // W4-3 added Review/ReviewAlbumsView.swift (rendered: `review-albums`, `review-albums-empty`):
+        // 138 → 139 files, fixtures 21 → 23, rendered 17 → 18.
+        XCTAssertEqual(paths.count, 139, "Re-audit inventory changes explicitly.")
         XCTAssertEqual(Set(SnapshotFixtures.inventory.map(\.path)), paths)
         XCTAssertEqual(SnapshotFixtures.inventory.count, paths.count)
         XCTAssertFalse(SnapshotFixtures.inventory.contains { $0.disposition.isEmpty })
         XCTAssertEqual(Set(SnapshotFixtures.fixtures.map(\.id)).count, SnapshotFixtures.fixtures.count)
         XCTAssertFalse(SnapshotFixtures.fixtures.isEmpty)
-        XCTAssertEqual(SnapshotFixtures.fixtures.count, 21)
-        XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 17)
+        XCTAssertEqual(SnapshotFixtures.fixtures.count, 23)
+        XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 18)
         XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 40)
         XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 81)
         for fixture in SnapshotFixtures.fixtures where fixture.expectedTableRows != nil {

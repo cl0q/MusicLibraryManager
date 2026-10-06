@@ -229,6 +229,13 @@ enum SnapshotFixtures {
                 attempts: 2
             )), named: "Download failed status chip").padding(20))
         }),
+        // Review ▸ Albums (W4-3): suggestions with source, match and alternatives; and the never-looked-up state.
+        Fixture(id: "review-albums", size: .init(width: 1_100, height: 360), backend: .appKit, expectedTableRows: 4, makeView: { _ in
+            try reviewAlbumsView(rows: 4, lookedUp: true)
+        }),
+        Fixture(id: "review-albums-empty", size: .init(width: 1_100, height: 360), makeView: { _ in
+            try reviewAlbumsView(rows: 0, lookedUp: false)
+        }),
         Fixture(id: "status-chip-remote", size: .init(width: 300, height: 100), makeView: { _ in
             AnyView(try require(StatusChip(availability: .notDownloaded), named: "Remote status chip").padding(20))
         }),
@@ -251,6 +258,39 @@ enum SnapshotFixtures {
         ),
     ]
 
+    /// Review ▸ Albums over a temporary database: the model is preloaded, the table is the shared SwiftUI one.
+    static func reviewAlbumsView(rows: Int, lookedUp: Bool) throws -> AnyView {
+        let queue = try DatabaseManager.inMemory()
+        let repository = AlbumSuggestionRepository(database: queue)
+        let decisions = AlbumSuggestionDecisions(dependencies: .init(
+            repository: repository, tagEdit: { TrackTagEdit.live(undo: nil) }, volumeName: { nil }, now: Date.init, didChange: {}))
+        let lookup = AlbumLookupRunner(center: ActivityCenter(), repository: { repository }, libraryRoot: { nil },
+                                       config: { nil }, suggester: TagAlbumSuggester(), didChange: {})
+        let model = ReviewAlbumsModel(
+            dependencies: .init(repository: repository, decisions: decisions, noAlbumCount: { 0 }, writesTags: { false }),
+            lookup: lookup)
+        let samples: [(String, String, String, Int?, String, Double, Int)] = [
+            ("So U Know", "Overmono", "Good Lies", 2022, "Folder name", 95, 2),
+            ("Feel Good", "Overmono", "Good Lies", 2022, "Library tags", 92, 0),
+            ("Arpo", "Karenn", "Grapeshot", nil, "File name", 85, 1),
+            ("Tangerine", "Bonobo", "Migration", 2017, "Library tags", 64, 0),
+        ]
+        let items: [AlbumSuggestionItem] = samples.prefix(rows).enumerated().map { index, sample in
+            var track = Track(artist: sample.1, album: "", title: sample.0, format: "flac", originalPath: "/orig/\(index).flac")
+            track.id = Int64(index + 1)
+            let suggestion = AlbumSuggestion(albumTitle: sample.2, year: sample.3, source: sample.4, match: sample.5)
+            let others = (0..<sample.6).map { AlbumSuggestion(albumTitle: "Other \($0 + 1)", year: 2001, source: "Folder name", match: 60) }
+            return AlbumSuggestionItem(track: track, row: AlbumSuggestionRow(
+                trackID: track.id ?? 0, suggestion: suggestion, alternatives: others, status: .pending, decidedAt: nil))
+        }
+        model.preload(
+            items: items,
+            counts: AlbumSuggestionCounts(pending: items.count, noMatch: 0, noAlbum: 0, rows: lookedUp ? items.count : 0),
+            tracksWithoutAlbum: rows == 0 ? 0 : 6_341,
+            bulkItems: items.filter { $0.row.suggestion.match > ReviewAlbumsModel.bulkThreshold })
+        return AnyView(ReviewAlbumsView(model: model, onTrackActivated: { _, _ in }))
+    }
+
     /// Source-file accounting remains explicit even where a source contains
     /// models, AppKit adapters, or services rather than a renderable View.
     static let inventory: [InventoryEntry] = inventoryPaths.map {
@@ -268,7 +308,7 @@ enum SnapshotFixtures {
         "Shared/StatusChip.swift",
         "Shared/TrackCoverView.swift", "DragDrop/DropTargetModifier.swift", "Launch/LibraryLoadingView.swift",
         "Shared/TrackMetadataPresentation.swift", "Sync/SyncProfileSheets.swift",
-        "TrackDetail/WaveformView.swift",
+        "TrackDetail/WaveformView.swift", "Review/ReviewAlbumsView.swift",
     ]
 
     private static let exclusions: [String: String] = [
@@ -468,6 +508,7 @@ Reels/ReelThumbnail.swift
 Reels/ReelWorkbench.swift
 Reels/ReelWorkbenchSections.swift
 Reels/ReelsView.swift
+Review/ReviewAlbumsView.swift
 Review/ReviewComparison.swift
 Review/ReviewGroupList.swift
 Review/ReviewResolvedView.swift

@@ -69,6 +69,19 @@ final class ReviewAlbumsModel {
 
     func item(withID id: Int64) -> AlbumSuggestionItem? { items.first { $0.id == id } }
 
+    /// The lists exactly as `reload()` would leave them — for snapshot fixtures and previews,
+    /// which render the view without a database round trip.
+    func preload(items: [AlbumSuggestionItem], counts: AlbumSuggestionCounts, tracksWithoutAlbum: Int,
+                 filter: AlbumSuggestionFilter = .suggestions, bulkItems: [AlbumSuggestionItem] = [], writesTags: Bool = false) {
+        self.items = items
+        self.counts = counts
+        self.tracksWithoutAlbum = tracksWithoutAlbum
+        self.filter = filter
+        self.bulkItems = bulkItems
+        self.writesTags = writesTags
+        isLoaded = true
+    }
+
     func setFilter(_ newFilter: AlbumSuggestionFilter) async {
         guard newFilter != filter else { return }
         filter = newFilter

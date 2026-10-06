@@ -296,7 +296,6 @@ struct ReviewAlbumsView: View {
             }
             Section {
                 Button("Get Info") { NotificationCenter.default.post(name: .openTrackDetailForTrack, object: nil, userInfo: ["trackId": item.id]) }
-                    .keyboardShortcut("i", modifiers: .command)
                 let album = model.existingAlbums[item.id]
                 Button("Show Suggested Album") { if let album { navigation?.push(.album(album)) } }
                     .disabled(album == nil || navigation == nil)
