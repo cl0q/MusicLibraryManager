@@ -9,12 +9,14 @@ struct LibraryCommands: View {
 
     var body: some View {
         // Each brings the main window forward first (UC-WIN-01): the sheet, panel and alerts live there.
-        CommandButton(.newLibrary, enabled: true) {
+        // While a restore or a library file setup changes library files, the library items
+        // are disabled with the reason (review S1); Finder opens wait meanwhile.
+        CommandButton(.newLibrary, enabled: !launch.isBusy, disabledReason: launch.busyReason) {
             MainWindowPresenter.shared.requestNewLibrary(launch: launch)
         }
 
         // The system open panel (`.fileImporter`, UC-SHEET-24) is presented by the main window.
-        CommandButton(.openLibrary, enabled: true) {
+        CommandButton(.openLibrary, enabled: !launch.isBusy, disabledReason: launch.busyReason) {
             MainWindowPresenter.shared.show()
             launch.chooseLibraryFile()
         }
@@ -35,7 +37,8 @@ struct LibraryCommands: View {
                 } label: {
                     LibraryMenuLabel(title: LibraryFooter.recentTitle(recent))
                 }
-                .disabled(recent.availability != .available)
+                .disabled(recent.availability != .available || launch.isBusy)
+                .help(launch.busyReason ?? "")
             }
             Divider()
             // Pending (MenuCatalog): Open Recent lists every library MLM knows; there is no

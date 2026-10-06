@@ -113,6 +113,15 @@ struct LibraryOpenPhaseTests {
         #expect(LibraryOpenPhase.backingUp(bytes: nil).isWriting && !LibraryOpenPhase.reading.isWriting)
     }
 
+    /// S7: the failure follows the step the error came from.
+    @Test func failureCauseFollowsTheErrorsStep() {
+        let underlying = CocoaError(.fileReadUnknown)
+        #expect(LaunchFailure.cause(for: LibraryOpenError(stage: .opening, underlying: underlying)) == .unreadable)
+        #expect(LaunchFailure.cause(for: LibraryOpenError(stage: .backingUp, underlying: underlying)) == .backupBeforeUpdate)
+        #expect(LaunchFailure.cause(for: LibraryOpenError(stage: .updating, underlying: underlying)) == .update)
+        #expect(LaunchFailure.cause(for: underlying) == .startup)
+    }
+
     /// S7: `DatabaseManager` marks a database that can't be read as the opening step.
     @Test func anUnreadableDatabaseIsTheOpeningStep() throws {
         let root = try temporaryDirectory()

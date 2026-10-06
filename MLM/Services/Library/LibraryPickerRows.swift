@@ -12,6 +12,9 @@ struct LibraryPickerRow: Identifiable, Equatable, Sendable {
         case legacy
         /// A library file that isn't on the list and couldn't be opened this session.
         case unlisted
+        /// A library file setup whose journal is still there (interrupted, or its rollback
+        /// failed) — W3-LAUNCH review S3.
+        case interruptedSetup
     }
 
     enum State: Equatable, Sendable {
@@ -22,6 +25,8 @@ struct LibraryPickerRow: Identifiable, Equatable, Sendable {
         case mismatch(details: String)
         /// The old install: openable as it is, `Set Up…` makes it a library file.
         case needsSetup
+        /// The setup of the library file didn't finish; `Try Again` finishes or undoes it.
+        case setupInterrupted(details: String)
     }
 
     let id: String
@@ -32,9 +37,14 @@ struct LibraryPickerRow: Identifiable, Equatable, Sendable {
     let lastOpenedAt: Date?
     let state: State
 
-    /// Name as listed: `Main Library (needs setup)` for the old install.
+    /// Name as listed: `Main Library (needs setup)` for the old install,
+    /// `Main Library (setup interrupted)` for an unfinished setup.
     var listedName: String {
-        state == .needsSetup ? "\(name) (needs setup)" : name
+        switch state {
+        case .needsSetup: return "\(name) (needs setup)"
+        case .setupInterrupted: return "\(name) (setup interrupted)"
+        default: return name
+        }
     }
 
     /// Location with the home folder as `~`.
@@ -45,14 +55,14 @@ struct LibraryPickerRow: Identifiable, Equatable, Sendable {
     var canOpen: Bool {
         switch state {
         case .available, .needsSetup: return true
-        case .notFound, .notConnected, .mismatch: return false
+        case .notFound, .notConnected, .mismatch, .setupInterrupted: return false
         }
     }
 
     /// The row's state in words; nothing when all is well (UC-STATE §15.1).
     var stateText: String? {
         switch state {
-        case .available, .needsSetup: return nil
+        case .available, .needsSetup, .setupInterrupted: return nil
         case .notFound: return "Not found"
         case .notConnected(let volume): return "Not connected — on “\(volume)”"
         case .mismatch: return "Can’t be opened — the file and its database don’t match"
@@ -71,6 +81,8 @@ struct LibraryPickerRow: Identifiable, Equatable, Sendable {
             return "The library file and its database don’t belong together. This can happen when files inside a library file were replaced. MLM didn’t change anything."
         case .needsSetup:
             return "This is your library from before MLM used library files. Setting it up takes about a minute: MLM backs up first, then copies it into one library file. Audio files are not moved. You can also open it as it is."
+        case .setupInterrupted:
+            return "Setting up the library file didn’t finish. Try Again completes it, or undoes it and asks again. Your previous library is not changed until the new file is verified."
         }
     }
 
@@ -81,6 +93,7 @@ struct LibraryPickerRow: Identifiable, Equatable, Sendable {
         case .notFound: return "Can’t open — not found"
         case .notConnected: return "Can’t open — not connected"
         case .mismatch: return "Can’t open — doesn’t match its database"
+        case .setupInterrupted: return "Can’t open — setup interrupted"
         }
     }
 
@@ -97,19 +110,28 @@ struct UnlistedLibraryProblem: Equatable, Sendable {
     let state: LibraryPickerRow.State
 }
 
+/// An adoption journal that is still there (S3).
+struct InterruptedSetup: Equatable, Sendable {
+    let name: String
+    let journal: URL
+    let details: String
+}
+
 enum LibraryPickerRows {
     /// The old install's name in the picker (`Main Library (needs setup)`).
     static let legacyName = "Main Library"
 
     /// Rows in picker order: libraries that just failed and aren't listed, then the registry
-    /// most recently opened first, then the old install.
+    /// most recently opened first, then the old install (or its interrupted setup).
     ///
     /// - Parameters:
+    ///   - interruptedSetup: an adoption journal left behind; shown instead of the old install.
     ///   - mismatches: library-file paths found not to match their database this session,
     ///     with the details for the `Details` disclosure.
     static func build(
         registry: LibraryRegistry,
         legacyDatabase: URL?,
+        interruptedSetup: InterruptedSetup? = nil,
         mismatches: [String: String] = [:],
         unlisted: [UnlistedLibraryProblem] = [],
         availability: (URL) -> LibraryAvailability = { LibraryRegistry.availability(of: $0) }
@@ -136,7 +158,12 @@ enum LibraryPickerRows {
                 id: entry.libraryId, kind: .registered(libraryId: entry.libraryId), name: entry.displayName,
                 url: url, lastOpenedAt: entry.lastOpenedAt, state: state))
         }
-        if let legacyDatabase {
+        if let interruptedSetup {
+            rows.append(LibraryPickerRow(
+                id: "setup-interrupted", kind: .interruptedSetup, name: interruptedSetup.name,
+                url: interruptedSetup.journal, lastOpenedAt: nil,
+                state: .setupInterrupted(details: interruptedSetup.details)))
+        } else if let legacyDatabase {
             rows.append(LibraryPickerRow(
                 id: "legacy", kind: .legacy, name: legacyName, url: legacyDatabase,
                 lastOpenedAt: nil, state: .needsSetup))
@@ -168,7 +195,13 @@ struct LibraryPickerFacts: Equatable, Sendable {
     var libraryRoot: String?
 
     static func read(databaseAt url: URL) -> LibraryPickerFacts? {
-        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        // Reachable first, like the file check's `LibraryRootReachability` (N6): never touch a
+        // library on a volume that isn't mounted, or one that can't be read.
+        if let volume = MountObserver.extractVolumePath(from: url.standardizedFileURL.path),
+           !MountObserver.isVolumeMounted(volume) {
+            return nil
+        }
+        guard FileManager.default.isReadableFile(atPath: url.path) else { return nil }
         var config = Configuration()
         config.readonly = true
         config.foreignKeysEnabled = false

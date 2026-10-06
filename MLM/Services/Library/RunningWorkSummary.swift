@@ -11,11 +11,30 @@ struct RunningWorkSummary: Equatable, Sendable {
     /// Operations beyond the listed lines.
     let moreCount: Int
     let operationCount: Int
+    /// The operations that pick up again when the library is opened next, as counted groups
+    /// (`2 downloads and 1 sync`); `nil` when none can.
+    let continuingPhrase: String?
+    let continuingCount: Int
+    /// Running work that must not be interrupted: Quit and Switch are refused while it runs.
+    let blocker: Blocker?
+
+    struct Blocker: Equatable, Sendable {
+        let kind: ActivityKind
+        let title: String
+    }
 
     var isEmpty: Bool { operationCount == 0 }
 
     /// Lines shown before `and ‹n› more`.
     static let maxLines = 5
+
+    /// Kinds that do not continue later: they simply stop (W3-LAUNCH review S4).
+    static let nonContinuingKinds: Set<ActivityKind> = [.restore, .backup, .libraryAdoption, .transcodeCacheMove, .pathMigration]
+
+    /// Kinds that replace or move the library's files and must not be cut off: while one runs,
+    /// MLM refuses to quit or switch. Treated as past its point of no return as soon as it
+    /// runs (the operations don't report that point).
+    static let blockingKinds: Set<ActivityKind> = [.restore, .libraryAdoption, .pathMigration]
 
     /// - Parameter operations: Activity's queued, running and paused operations. Work that
     ///   waits for the library drive isn't running and picks up by itself (UC-JOB-10), so it
@@ -26,16 +45,13 @@ struct RunningWorkSummary: Equatable, Sendable {
             .filter { if case .drive = $0.wait { return false } else { return true } }
             .sorted { $0.startedAt < $1.startedAt }
         operationCount = stopping.count
+        blocker = stopping.first { $0.state == .running && Self.blockingKinds.contains($0.kind) }
+            .map { Blocker(kind: $0.kind, title: $0.title) }
 
-        var order: [ActivityNoun] = []
-        var counts: [ActivityNoun: Int] = [:]
-        for operation in stopping {
-            let noun = Self.noun(for: operation.kind)
-            if counts[noun] == nil { order.append(noun) }
-            counts[noun, default: 0] += 1
-        }
-        let parts = order.map { $0.counted(counts[$0] ?? 0) }
-        headline = parts.isEmpty ? "" : "\(Self.joined(parts)) will stop:"
+        headline = stopping.isEmpty ? "" : "\(Self.counted(stopping)) will stop:"
+        let continuing = stopping.filter { !Self.nonContinuingKinds.contains($0.kind) }
+        continuingCount = continuing.count
+        continuingPhrase = continuing.isEmpty ? nil : Self.counted(continuing)
 
         lines = stopping.prefix(maxLines).map { operation in
             if let progress = ActivityPresentation.progressText(operation.progress) {
@@ -48,15 +64,54 @@ struct RunningWorkSummary: Equatable, Sendable {
 
     /// The alert message part about running work; nil when nothing runs.
     ///
-    /// - Parameter libraryName: the open library, where the work continues.
-    func message(continuingIn libraryName: String) -> String? {
+    /// - Parameter libraryName: the open library, where work continues; `nil` while no library
+    ///   is open — then nothing is promised.
+    func message(continuingIn libraryName: String?) -> String? {
         guard !isEmpty else { return nil }
         var text = headline
         for line in lines { text += "\n• " + line }
         if moreCount > 0 { text += "\n• and \(moreCount.formatted(.number)) more" }
-        let verb = operationCount == 1 ? "It continues" : "They continue"
-        text += "\n\n\(verb) the next time you open “\(libraryName)”."
+        if let libraryName, let continuingPhrase {
+            let subject: String
+            if continuingCount == operationCount {
+                subject = operationCount == 1 ? "It continues" : "They continue"
+            } else {
+                subject = "\(continuingPhrase) \(continuingCount == 1 ? "continues" : "continue")"
+            }
+            text += "\n\n\(subject) the next time you open “\(libraryName)”."
+        }
         return text
+    }
+
+    /// The refusal while a blocker runs (`MLM can’t quit while “‹name›” is being restored.`).
+    ///
+    /// - Parameters:
+    ///   - libraryName: the library the work is about; `MLM`'s own words only when none.
+    ///   - switching: `can’t switch libraries` instead of `can’t quit`.
+    func refusal(libraryName: String?, switching: Bool = false) -> String? {
+        guard let blocker else { return nil }
+        let verb = switching ? "MLM can’t switch libraries" : "MLM can’t quit"
+        let name = libraryName.map { "“\($0)”" }
+        switch blocker.kind {
+        case .restore:
+            return "\(verb) while \(name ?? "a library") is being restored."
+        case .libraryAdoption:
+            return "\(verb) while \(name.map { "the library file \($0)" } ?? "a library file") is being set up."
+        default:
+            return "\(verb) while the files of \(name ?? "the library") are being moved."
+        }
+    }
+
+    /// `2 downloads and 1 sync`.
+    private static func counted(_ operations: [ActivityOperation]) -> String {
+        var order: [ActivityNoun] = []
+        var counts: [ActivityNoun: Int] = [:]
+        for operation in operations {
+            let noun = noun(for: operation.kind)
+            if counts[noun] == nil { order.append(noun) }
+            counts[noun, default: 0] += 1
+        }
+        return joined(order.map { $0.counted(counts[$0] ?? 0) })
     }
 
     /// The counted noun per kind (`2 downloads`, `1 sync`, `3 scans`).

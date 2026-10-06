@@ -70,6 +70,7 @@ struct RunningWorkAndQuitTests {
         guardian.activeOperations = { operations }
         guardian.reply = { replies.append($0) }
         guardian.presentWindow = { presented += 1 }
+        guardian.libraryName = { "Main Library" }
         return (guardian, { replies }, { presented })
     }
 
@@ -85,7 +86,9 @@ struct RunningWorkAndQuitTests {
         #expect(guardian.shouldTerminate() == .terminateLater)
         #expect(guardian.pending?.headline == "1 download will stop:")
         #expect(presented() == 1)
-        #expect(guardian.shouldTerminate() == .terminateCancel, "the open question answers")
+        // N7: a second ⌘Q while the question is up: still pending, no second alert.
+        #expect(guardian.shouldTerminate() == .terminateLater, "the open question answers")
+        #expect(presented() == 1)
         guardian.cancel()
         #expect(replies() == [false])
         #expect(guardian.pending == nil)
@@ -101,5 +104,61 @@ struct RunningWorkAndQuitTests {
         #expect(guardian.shouldTerminate() == .terminateNow)
         #expect(guardian.shouldTerminate() == .terminateLater, "only the next one")
         #expect(replies().isEmpty)
+    }
+
+    /// S5: the allowance expires with the relaunch timer and is cleared when the relaunch's
+    /// termination was cancelled.
+    @Test func theRelaunchAllowanceExpiresAndIsCleared() {
+        let (guardian, _, _) = quitGuard([operation(.download, "Download “Rev8617”")])
+        var clock = Date(timeIntervalSince1970: 1_000)
+        guardian.now = { clock }
+        guardian.allowNextTermination()
+        clock = clock.addingTimeInterval(QuitGuard.allowanceInterval + 1)
+        #expect(guardian.shouldTerminate() == .terminateLater, "an expired allowance asks again")
+        guardian.cancel()
+
+        guardian.allowNextTermination()
+        guardian.terminationWasCancelled()
+        #expect(guardian.shouldTerminate() == .terminateLater, "a cancelled relaunch asks again")
+    }
+
+    /// S4: Quit is refused (OK only) while a restore, a library file setup or a path migration runs.
+    @Test func quitIsRefusedWhileWorkMustNotBeCutOff() {
+        for (kind, sentence) in [
+            (ActivityKind.restore, "MLM can’t quit while “Main Library” is being restored."),
+            (.libraryAdoption, "MLM can’t quit while the library file “Main Library” is being set up."),
+            (.pathMigration, "MLM can’t quit while the files of “Main Library” are being moved."),
+        ] {
+            let (guardian, replies, presented) = quitGuard([
+                operation(.download, "Download “Rev8617”"), operation(kind, "Work", startedAt: 1),
+            ])
+            #expect(guardian.shouldTerminate() == .terminateCancel)
+            #expect(guardian.question == .refuse(sentence))
+            #expect(presented() == 1)
+            guardian.cancel()   // OK
+            #expect(guardian.question == nil)
+            #expect(replies().isEmpty, "termination was cancelled already; nothing to answer")
+        }
+        // Queued (not running yet): not a blocker.
+        let queued = RunningWorkSummary(operations: [operation(.restore, "Restore", state: .queued)])
+        #expect(queued.blocker == nil)
+        // No library open: `MLM`'s own words only.
+        #expect(RunningWorkSummary(operations: [operation(.restore, "Restore")]).refusal(libraryName: nil)
+                == "MLM can’t quit while a library is being restored.")
+    }
+
+    /// S4: work that can't continue later is listed without the continuation promise.
+    @Test func onlyContinuingWorkIsPromisedToContinue() {
+        let backupOnly = RunningWorkSummary(operations: [operation(.backup, "Back Up Now")])
+        #expect(backupOnly.message(continuingIn: "Main Library") == "1 backup will stop:\n• Back Up Now")
+        let mixed = RunningWorkSummary(operations: [
+            operation(.download, "Download “A”"), operation(.download, "Download “B”", startedAt: 1),
+            operation(.transcodeCacheMove, "Move transcode cache", startedAt: 2),
+        ])
+        #expect(mixed.headline == "2 downloads and 1 cache move will stop:")
+        #expect(mixed.message(continuingIn: "Main Library")?.hasSuffix("\n\n2 downloads continue the next time you open “Main Library”.") == true)
+        // No library open: nothing is promised.
+        let noLibrary = RunningWorkSummary(operations: [operation(.download, "Download “A”")])
+        #expect(noLibrary.message(continuingIn: nil) == "1 download will stop:\n• Download “A”")
     }
 }

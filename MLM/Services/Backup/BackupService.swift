@@ -375,6 +375,7 @@ final class BackupService: Sendable {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
             if process.isRunning {
+                QuitGuard.shared.terminationWasCancelled()
                 process.terminate()
                 AppLogger.shared.error("Relaunch was cancelled; MLM kept running", source: "App")
             }
