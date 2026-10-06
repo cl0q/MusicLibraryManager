@@ -13,6 +13,7 @@ struct AlbumCoverView: View {
     var cornerRadius: CGFloat = 7
 
     @State private var image: NSImage?
+    @State private var revision = 0
     @Environment(\.container) private var container
     @Environment(\.trackArtworkLoadingEnabled) private var loadingEnabled
 
@@ -32,13 +33,20 @@ struct AlbumCoverView: View {
         .aspectRatio(1, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .accessibilityHidden(true)
-        .task(id: request.cacheKey) {
+        .task(id: "\(request.cacheKey)#\(revision)") {
             guard loadingEnabled else { return }
             let loader = AlbumCoverLoader.shared
             // A cached picture shows at once; a changed request never keeps the old one.
             image = loader.cached(request)
             guard image == nil, !loader.isKnownMiss(request) else { return }
             image = await loader.image(for: request, container: container)
+        }
+        // The first track's embedded artwork arrived (backfill, a tag edit): look again.
+        .onReceive(NotificationCenter.default.publisher(for: .trackArtworkDidChange)) { note in
+            guard request.coverPath == nil, let trackID = request.firstTrackID,
+                  (note.userInfo?["trackId"] as? Int64) == trackID else { return }
+            AlbumCoverLoader.shared.forget(request)
+            revision += 1
         }
     }
 }

@@ -62,17 +62,17 @@ extension ShellEdits {
                 failure: "Couldn’t set the cover of “\(name)”",
                 do: { () async throws -> String?? in
                     let before = try await albums.setCoverPath(albumID: albumID, to: reference)
-                    await Self.coverDidChange(albumID)
+                    Self.coverDidChange(albumID)
                     return .some(before)
                 },
                 undo: { before in
                     let current = try await albums.setCoverPath(albumID: albumID, to: before)
-                    await Self.coverDidChange(albumID)
+                    Self.coverDidChange(albumID)
                     return current
                 },
                 redo: { _ in
                     let before = try await albums.setCoverPath(albumID: albumID, to: reference)
-                    await Self.coverDidChange(albumID)
+                    Self.coverDidChange(albumID)
                     return before
                 },
                 message: { _ in DropWords.coverSetMessage(name) }

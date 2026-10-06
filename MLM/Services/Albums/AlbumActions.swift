@@ -138,7 +138,7 @@ struct AlbumActions {
                 playlists: impact.playlists, syncProfiles: impact.syncProfiles)
             let ids = albums.map(\.id)
             LibraryRemovalCenter.shared.ask(all, confirmation: confirmation) { _ in
-                try? await repository.deleteEmpty(ids: ids)
+                _ = try? await repository.deleteEmpty(ids: ids)
                 NotificationCenter.default.post(name: .trackMetadataDidChange, object: nil)
             }
         }

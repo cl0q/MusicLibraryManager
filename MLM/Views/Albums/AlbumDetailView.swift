@@ -27,7 +27,7 @@ struct AlbumDetailView: View {
                 ContentScaffold(showsDriveBanner: true) {
                     Color.clear
                 } header: {
-                    loadingHeader
+                    AlbumLoadingHeader()
                 }
                 .modifier(WindowTitleModifier())
             }
@@ -40,7 +40,12 @@ struct AlbumDetailView: View {
         }
     }
 
-    private var loadingHeader: some View {
+}
+
+/// The real header frame while the album loads (V-ALBD first load): `Loading…`, Play and Shuffle
+/// disabled.
+private struct AlbumLoadingHeader: View {
+    var body: some View {
         HStack(alignment: .bottom, spacing: Spacing.l) {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(.quaternary)
@@ -122,6 +127,8 @@ private struct AlbumDetailPage: View {
             if model.phase == .loaded {
                 AlbumDetailTop(model: model, playReason: playReason, offlineLine: offlineLine, callbacks: callbacks,
                                cover: { cover }, more: { more })
+            } else {
+                AlbumLoadingHeader()
             }
         } selectionBar: {
             TrackSelectionBar()
@@ -202,6 +209,9 @@ private struct AlbumDetailPage: View {
             onInsert: editing ? { index, providers, _ in dropped(providers, at: index) } : nil
         )
         if editing { configuration.removeFromContainer = nil }
+        // The status bar counts tracks, never the gaps or the disc headings between them.
+        let tracks = model.list.rows.filter(\.isTrack)
+        configuration.totals = TrackListTotals(count: tracks.count, duration: tracks.reduce(0) { $0 + max($1.track.duration ?? 0, 0) })
         configuration.showsDragHandles = editing
         configuration.syntheticRowsMenu = { _ in AnyView(AbsentRowMenu()) }
         return configuration

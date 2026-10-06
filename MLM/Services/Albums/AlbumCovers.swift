@@ -32,7 +32,7 @@ final class AlbumCoverLoader {
     }
 
     /// The longest side the cards decode to.
-    static let maxPixelSize = 600
+    nonisolated static let maxPixelSize = 600
 
     func cached(_ request: AlbumCoverRequest) -> NSImage? { cache.object(forKey: request.cacheKey as NSString) }
 
@@ -40,6 +40,13 @@ final class AlbumCoverLoader {
 
     func forget(albumID: Int64) {
         misses = misses.filter { !$0.hasPrefix("\(albumID)|") }
+    }
+
+    /// The artwork of a track arrived or changed (`.trackArtworkDidChange`): albums that borrow
+    /// it look again.
+    func forget(_ request: AlbumCoverRequest) {
+        cache.removeObject(forKey: request.cacheKey as NSString)
+        misses.remove(request.cacheKey)
     }
 
     func image(for request: AlbumCoverRequest, container: DependencyContainer) async -> NSImage? {
