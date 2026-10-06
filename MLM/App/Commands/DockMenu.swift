@@ -74,7 +74,15 @@ enum DockMenuBuilder {
                 isAvailable: recent.availability == .available
             )
         }
-        return DockMenuModel(nowPlaying: nowPlaying, isPlaying: playback?.isPlaying == true, recents: recents)
+        return DockMenuModel(nowPlaying: nowPlaying, isPlaying: playback?.isPlaying == true,
+                             recents: otherLibraries(recents, excluding: launch.activePackageURL))
+    }
+
+    /// `Open Recent` lists the other known libraries (UC-DOCK-01), never the open one.
+    static func otherLibraries(_ recents: [DockMenuModel.RecentLibrary], excluding active: URL?) -> [DockMenuModel.RecentLibrary] {
+        guard let active else { return recents }
+        let open = active.standardizedFileURL.path
+        return recents.filter { $0.url.standardizedFileURL.path != open }
     }
 
     /// The menu; each item calls `perform(_:)` on `target` with the item's action.

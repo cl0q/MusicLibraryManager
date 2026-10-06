@@ -168,7 +168,7 @@ enum MenuCommand: String, CaseIterable, Sendable {
     // Window
     case minimize, zoom, activity, bringAllToFront
     // Help
-    case mlmHelp, keyboardShortcuts, showTipsAgain
+    case keyboardShortcuts, showTipsAgain
 
     struct Entry {
         let menu: MenuBarMenu
@@ -273,9 +273,7 @@ enum MenuCommand: String, CaseIterable, Sendable {
         case .refreshFromSource: Entry(menu: .track, title: "Refresh from Source", shortcut: .cmd("r"), wiring: .app)
         case .showInFinder: Entry(menu: .track, title: "Show in Finder", shortcut: .cmd("r", .shift), wiring: .app)
         case .copyTrack: Entry(menu: .track, title: "Copy", shortcut: nil, wiring: .app)
-        case .share:
-            Entry(menu: .track, title: "Share…", shortcut: nil,
-                  wiring: .pending(owner: "W5-2", reason: "Sharing a track isn’t available yet."))
+        case .share: Entry(menu: .track, title: "Share…", shortcut: nil, wiring: .app)
         // ⌫ belongs to the focused list (W2-A, `onDeleteCommand`); the menu shows the command.
         case .removeFromContainer: Entry(menu: .track, title: "Remove from Playlist", shortcut: nil, wiring: .app)
         case .removeFromLibrary: Entry(menu: .track, title: "Remove from Library…", shortcut: .cmd(.delete), wiring: .app)
@@ -336,13 +334,8 @@ enum MenuCommand: String, CaseIterable, Sendable {
         case .bringAllToFront: Entry(menu: .window, title: "Bring All to Front", shortcut: nil, wiring: .system)
 
         // MARK: Help (M-HELP)
-        case .mlmHelp:
-            Entry(menu: .help, title: "MLM Help", shortcut: .cmd("?"),
-                  wiring: .pending(owner: "W5-2", reason: "MLM Help isn’t available yet. Choose Keyboard Shortcuts for the keys."))
         case .keyboardShortcuts: Entry(menu: .help, title: "Keyboard Shortcuts", shortcut: nil, wiring: .app)
-        case .showTipsAgain:
-            Entry(menu: .help, title: "Show Tips Again", shortcut: nil,
-                  wiring: .pending(owner: "W5-2", reason: "Tips aren’t available yet."))
+        case .showTipsAgain: Entry(menu: .help, title: "Show Tips Again", shortcut: nil, wiring: .app)
         }
     }
 

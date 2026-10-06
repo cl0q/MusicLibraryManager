@@ -10,6 +10,10 @@ struct MLMApp: App {
 
     @State private var container = DependencyContainer.shared
 
+    init() {
+        MLMTips.configure()
+    }
+
     var body: some Scene {
         // One window only (A3, UC-WIN-01): opening a library file from Finder reuses it and asks
         // to switch, instead of a window group spawning a second window per opened file.

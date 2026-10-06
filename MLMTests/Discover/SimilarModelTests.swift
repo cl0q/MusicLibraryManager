@@ -149,6 +149,48 @@ struct SimilarModelTests {
         #expect(env.log.started.map(\.hold) == [true, false], "Download is held in Discover, Keep goes into the library")
     }
 
+    @Test func keepAndAddToPlaylistWaitsForTheDownloadThenPlacesInOneStep() async throws {
+        var swarm = FakeSwarm()
+        swarm.recommendations = [recommendation("One")]
+        let env = try await Self.make(swarm: swarm)
+        final class Placed: @unchecked Sendable { var calls: [(ids: [Int64], playlist: Int64)] = []; var newPlaylists: [[Int64]] = [] }
+        let placed = Placed()
+        var dependencies = env.model.dependencies
+        dependencies.trackID = { _, _ in 42 }
+        dependencies.placeInPlaylist = { _, ids, playlist in placed.calls.append((ids, playlist)); return "Gym" }
+        dependencies.newPlaylist = { ids in placed.newPlaylists.append(ids) }
+        let model = SimilarModel(trackID: env.seed, dependencies: dependencies)
+        model.undo = UndoCenter(undoManager: UndoManager(), statusBar: StatusBarCenter(), log: { _ in })
+        await model.load()
+        await model.waitForOnline()
+        model.keep(model.onlineRows[0], addingTo: .existing(7))
+        #expect(env.log.started.map(\.hold) == [false], "kept straight into the library")
+        // Still downloading: nothing is placed yet.
+        env.log.pipeline["Other - One"] = .downloading
+        await model.refreshPlacements()
+        #expect(placed.calls.isEmpty)
+        // Arrived: placed once.
+        env.log.pipeline["Other - One"] = .downloaded
+        env.log.placements["One"] = .library
+        await model.refreshPlacements()
+        await model.refreshPlacements()
+        #expect(placed.calls.count == 1 && placed.calls[0].ids == [42] && placed.calls[0].playlist == 7)
+        #expect(model.pendingPlaylists.isEmpty)
+    }
+
+    @Test func aFailedDownloadDropsThePendingPlaylist() async throws {
+        var swarm = FakeSwarm()
+        swarm.recommendations = [recommendation("One")]
+        let env = try await Self.make(swarm: swarm)
+        await env.model.load()
+        await env.model.waitForOnline()
+        env.model.keep(env.model.onlineRows[0], addingTo: .new)
+        #expect(env.model.pendingPlaylists.count == 1)
+        env.log.pipeline["Other - One"] = .failed
+        await env.model.refreshPlacements()
+        #expect(env.model.pendingPlaylists.isEmpty)
+    }
+
     @Test func aRowThatIsBusyOrAlreadyHereOffersNothing() async throws {
         var swarm = FakeSwarm()
         swarm.recommendations = [recommendation("One"), recommendation("Two")]

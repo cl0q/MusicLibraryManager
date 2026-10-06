@@ -21,6 +21,19 @@ final class SimilarModel {
         var pipelineStatus: @MainActor (_ recommendation: SwarmRecommendation) -> DownloadViewModel.DiscoveryStatus?
         /// Where a suggestion already is: held in Discover, or in the library.
         var placement: @MainActor (_ recommendation: SwarmRecommendation, _ seedID: Int64) async -> OnlineRow.Placement?
+        /// The library track a downloaded suggestion became (`nil` while it has none).
+        var trackID: @MainActor (_ recommendation: SwarmRecommendation, _ seedID: Int64) async -> Int64? = { _, _ in nil }
+        /// `Keep and Add to Playlist ▸`: put the kept track into the playlist as a part of the
+        /// same undo step; returns the playlist's name (`nil` = nothing added).
+        var placeInPlaylist: @MainActor (_ group: UndoGroup, _ trackIDs: [Int64], _ playlistID: Int64) async throws -> String? = { _, _, _ in nil }
+        /// `New Playlist…` from the same submenu: the new-playlist flow for the arrived track.
+        var newPlaylist: @MainActor (_ trackIDs: [Int64]) -> Void = { _ in }
+    }
+
+    /// Where a kept suggestion goes once it has arrived.
+    enum PlaylistTarget: Equatable, Sendable {
+        case existing(Int64)
+        case new
     }
 
     // MARK: Library section
@@ -116,6 +129,10 @@ final class SimilarModel {
     @ObservationIgnored private var onlineTask: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
     var drive = LibraryDriveState(volumeName: nil, isConnected: true)
+    /// The window's undo center (set by the view); `Keep and Add to Playlist ▸` needs it.
+    var undo: UndoCenter?
+    /// Suggestions kept with a playlist chosen: placed as soon as their download has finished.
+    private(set) var pendingPlaylists: [String: PlaylistTarget] = [:]
 
     init(trackID: Int64, dependencies: Dependencies) {
         self.trackID = trackID
@@ -304,6 +321,14 @@ final class SimilarModel {
         start(row, hold: false)
     }
 
+    /// `Keep and Add to Playlist ▸` (V-SIMILAR.N08): download it into the library, then add it to
+    /// the playlist as one undo step as soon as it has arrived (IMP-054 pattern).
+    func keep(_ row: OnlineRow, addingTo target: PlaylistTarget) {
+        guard seed != nil, !row.isBusy, !row.isPlaced else { return }
+        pendingPlaylists[row.id] = target
+        start(row, hold: false)
+    }
+
     private func start(_ row: OnlineRow, hold: Bool) {
         guard let seed, !row.isBusy, !row.isPlaced else { return }
         dependencies.startDownload(row.recommendation, seed, hold)
@@ -318,5 +343,30 @@ final class SimilarModel {
             rows[index].placement = await dependencies.placement(rows[index].recommendation, seedID)
         }
         if rows != onlineRows { onlineRows = rows }
+        await placePending(seedID: seedID)
+    }
+
+    /// The kept suggestions that have arrived join their playlist (one undo step each).
+    private func placePending(seedID: Int64) async {
+        for (rowID, target) in pendingPlaylists {
+            guard let row = onlineRows.first(where: { $0.id == rowID }), row.pipeline != .failed else {
+                pendingPlaylists[rowID] = nil
+                continue
+            }
+            guard row.placement == .library, !row.isBusy else { continue }
+            pendingPlaylists[rowID] = nil
+            guard let id = await dependencies.trackID(row.recommendation, seedID) else { continue }
+            let dependencies = self.dependencies
+            guard case .existing(let playlistID) = target else {
+                dependencies.newPlaylist([id])
+                continue
+            }
+            guard let undo else { continue }
+            let title = row.recommendation.title
+            _ = try? await undo.performGroup(
+                "Add “\(title)” to a Playlist", failure: "Couldn’t add “\(title)” to the playlist",
+                { group in try await dependencies.placeInPlaylist(group, [id], playlistID) },
+                message: { playlist in DiscoverModel.keptMessage(count: 1, title: title, playlist: playlist) })
+        }
     }
 }

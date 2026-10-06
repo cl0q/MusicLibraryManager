@@ -54,7 +54,7 @@ struct TrackSelectionBar: View {
         }
         // Never wider than the content: the capsule picks the widest layout that fits.
         .padding(.horizontal, Spacing.l)
-        .animation(.default, value: isShown)
+        .animation(reduceMotion ? nil : .default, value: isShown)
         .onChange(of: isShown) { _, nowShown in
             // Announced once when it appears, not on every count change (UC-A11Y-05).
             if nowShown, let label = presentation?.state.accessibilityLabel {
@@ -248,6 +248,7 @@ private struct SelectionBarCapsule: View {
             button(state.playNext, layout) { actions.playNext(rows) }
             addToPlaylistMenu(layout)
             button(state.editInfo, layout) { presentation.editInfo() }
+                .popoverTip(MLMTips.group.currentTip as? EditSeveralTip, arrowEdge: .top)
             if let download = state.download {
                 button(download, layout) { actions.download(rows) }
             }

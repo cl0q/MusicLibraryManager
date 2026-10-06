@@ -145,8 +145,12 @@ struct TrackCommands: Commands {
                 Button("Title — Artist") { TrackCommandActions.copyTitleAndArtist(tracks()) }
                 Button("File Path") { TrackCommandActions.copyFilePaths(tracks()) }
                     .disabled(!state.canCopyFilePath)
+                Button("Link") { TrackCommandActions.copyLinks(tracks()) }
+                    .disabled(!tracks().contains { TrackLinks.sourceURL($0) != nil })
             }
-            CommandButton(.share)
+            TrackShareItem(
+                tracks: selection.map { TrackShare.reachable($0.selectedTracks, offlineVolumePath: TrackTableLiveState.drive(.shared).offlineVolumePath) } ?? [],
+                reason: TrackShare.disabledReason(count: selection?.summary.count ?? 0, unreachable: selection?.summary.unreachableCount ?? 0))
 
             Divider()
 

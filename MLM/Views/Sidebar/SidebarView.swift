@@ -82,6 +82,7 @@ struct SidebarView: View {
                 // Tracks dropped on the header make a new playlist, named inline (IMP-018);
                 // playlists dropped here move to the top level.
                 .dropTarget(.playlistsSection)
+                .popoverTip(MLMTips.group.currentTip as? DragToPlaylistTip, arrowEdge: .trailing)
             }
 
             Section(isExpanded: expansion(.sync)) {

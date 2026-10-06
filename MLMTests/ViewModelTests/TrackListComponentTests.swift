@@ -170,7 +170,7 @@ struct TrackListComponentTests {
             [.playNext, .addToQueue],
             [.addToPlaylist, .addToSyncProfile],
             [.getInfo, .goToArtist("Artist"), .findSimilar],
-            [.showInFinder(enabled: true), .copy(filePath: true, link: true)],
+            [.showInFinder(enabled: true), .copy(filePath: true, link: true), .share(enabled: true)],
             [.removeFromLibrary(enabled: true)],
         ])
     }
@@ -241,11 +241,11 @@ struct TrackListComponentTests {
     }
 
     @Test func noDeadItemsFromLaterPackages() {
-        // Go to Album and Share… don't exist yet (Preview and Locate File… arrived with W2-C, Go to
+        // Go to Album doesn't exist in a playlist's menu here (Share… arrived with W5-1b) (Preview and Locate File… arrived with W2-C, Go to
         // Artist with W2-I, Add to Queue with W2-D, Find Similar with W3-DISC-A).
         let all = menu([track(1)], playlist).items + menu([track(2, missing: true)], library).items
         let titles = all.map { "\($0)" }.joined(separator: " ")
-        for absent in ["goToAlbum", "share"] {
+        for absent in ["goToAlbum"] {
             #expect(!titles.contains(absent))
         }
         #expect(all.contains(.addToQueue))

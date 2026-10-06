@@ -42,6 +42,9 @@ enum TrackMenuItem: Hashable, Sendable {
     case keepAndAddToPlaylist
     case showInFinder(enabled: Bool)
     case copy(filePath: Bool, link: Bool)
+    /// `Share…`: the system share sheet over the selection's files (UC-KIT-19, W5-1b); disabled
+    /// while their disk is away.
+    case share(enabled: Bool)
     /// `Remove from Playlist` / `Remove from “Warm-up”` (reversible, normal colour, ⌫).
     case removeFromContainer(title: String)
     /// `Remove from Library…` (irreversible, destructive, last, ⌘⌫).
@@ -243,6 +246,7 @@ struct TrackMenuModel: Equatable, Sendable {
             locate.append(.showInFinder(enabled: false))
         }
         locate.append(.copy(filePath: reachableLocal > 0, link: hasLink))
+        if let share = Self.shareItem(reachableLocal: reachableLocal, unreachable: unreachable) { locate.append(share) }
 
         // 7 Remove — reversible first, the irreversible one last (UC-CM-07).
         var remove: [TrackMenuItem] = []
@@ -266,6 +270,12 @@ struct TrackMenuModel: Equatable, Sendable {
 
         let sections = [header, primary, queue, addTo, info, fix, locate, remove].filter { !$0.isEmpty }
         return TrackMenuModel(sections: sections)
+    }
+
+    /// `Share…` after `Copy ▸`: there while a file can be sent, disabled while its disk is away.
+    static func shareItem(reachableLocal: Int, unreachable: Int) -> TrackMenuItem? {
+        if reachableLocal > 0 { return .share(enabled: true) }
+        return unreachable > 0 ? .share(enabled: false) : nil
     }
 
     /// The album `Go to Album` opens for a track — its `album_id`, except inside that very album.

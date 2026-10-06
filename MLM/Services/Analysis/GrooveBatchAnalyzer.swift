@@ -26,7 +26,7 @@ final class GrooveBatchAnalyzer: Sendable {
         let workerCount = BatchControl.workerCount(turboMode: turboMode)
         let limiter = BatchControl.limiter(turboMode: turboMode)
 
-        AppLogger.shared.info("Starting Groove (CoreML) batch: \(tracks.count) tracks, \(workerCount) workers (turbo: \(turboMode))", source: "GrooveBatch")
+        AppLogger.shared.info("Starting similarity analysis: \(tracks.count) tracks, \(workerCount) workers (turbo: \(turboMode))", source: "Similarity")
 
         // onCancel bridges Swift task cancellation to the tracker so the
         // per-track gates actually stop the loop.
@@ -77,7 +77,7 @@ final class GrooveBatchAnalyzer: Sendable {
             }
         }
 
-        AppLogger.shared.info("Groove batch complete: \(analyzed) analyzed, \(failed) failed", source: "GrooveBatch")
+        AppLogger.shared.info("Similarity analysis complete: \(analyzed) analyzed, \(failed) failed", source: "Similarity")
         return (analyzed, failed, tracker.isCancelled)
     }
 
@@ -158,7 +158,7 @@ final class GrooveBatchAnalyzer: Sendable {
 
             AppLogger.shared.debug(
                 "Groove [\(tracker.currentState.current)/\(tracker.currentState.total)] \(track.artist) - \(track.title) → analyzed & saved",
-                source: "GrooveBatch"
+                source: "Similarity"
             )
             return .success(())
         } catch {
@@ -168,7 +168,7 @@ final class GrooveBatchAnalyzer: Sendable {
                 trackArtist: track.artist,
                 savedToDb: false
             )
-            AppLogger.shared.log("Groove calculation failed for \(track.title): \(error)", level: .warning, source: "GrooveBatch")
+            AppLogger.shared.log("Similarity analysis failed for \(track.title): \(error)", level: .warning, source: "Similarity")
             return .failure(error)
         }
     }

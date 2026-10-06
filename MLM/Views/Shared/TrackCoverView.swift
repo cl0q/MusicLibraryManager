@@ -35,6 +35,7 @@ struct TrackCoverView: View {
 
     @Environment(\.container) private var container
     @Environment(\.trackArtworkLoadingEnabled) private var artworkLoadingEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
@@ -42,7 +43,7 @@ struct TrackCoverView: View {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFill()
-                    .transition(.opacity.animation(.easeIn(duration: 0.2)))
+                    .transition(reduceMotion ? .identity : .opacity.animation(.easeIn(duration: 0.2)))
             } else {
                 fallbackGradient
             }

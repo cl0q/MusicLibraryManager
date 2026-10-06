@@ -56,6 +56,13 @@ enum TrackCommandActions {
         tracks.map { "\($0.title) — \($0.artist)" }.joined(separator: "\n")
     }
 
+    /// Copy ▸ Link: the source page of every track that has one, one per line (UC-CM-13).
+    static func copyLinks(_ tracks: [Track]) {
+        let links = tracks.compactMap { TrackLinks.sourceURL($0)?.absoluteString }
+        guard !links.isEmpty else { return }
+        put(links.joined(separator: "\n"))
+    }
+
     /// Copy ▸ File Path: the plain path of every file that can be found, one per line.
     static func copyFilePaths(_ tracks: [Track], container: DependencyContainer = .shared) {
         let local = tracks.filter(\.isLocal)
