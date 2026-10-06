@@ -55,6 +55,9 @@ final class SnapshotsTests: XCTestCase {
         // W3-ADD replaced Sources/{RemotePlaylistsView,SourcesView} (deferred) by the 4 files of Import/
         // (deferred): 117 → 119 files, 57 → 59 deferred.
         // W3-SET added Settings/{PlaybackSettingsView,AdvancedSettingsView,SettingsRows}.swift (deferred).
+        // W3-FOLD replaced Folders/FolderTreeView.swift (deferred) and the folder tracks table by
+        // Folders/{FolderOutlineTable (rendered: `folder-outline-populated`), FolderMenus,
+        // FolderPathBar}.swift; FoldersView became deferred: 125 → 127 files, 65 → 67 deferred.
         // W3-SYNC replaced Sync/{SyncView, SyncProfileDetailView, SyncContentSections, SyncSettingsForm,
         // SyncFailedDisclosure, Pickers/PlaylistPickerSheet} (deferred) and {SyncToast,
         // IngestPreviewView, DeviceIngestResultsView} (rendered) by Sync/{SyncProfilePage,
@@ -65,7 +68,8 @@ final class SnapshotsTests: XCTestCase {
         // W3-GEN removed TrackDetail/GrooveStudioView.swift (deferred) and added the 7 files of
         // Genres/ (6 deferred, GenreRequests non-view): 125 → 131 files, 65 → 70 deferred,
         // 37 → 38 non-view.
-        XCTAssertEqual(paths.count, 126, "Re-audit inventory changes explicitly.")
+        // Merge of W3-FOLD and W3-GEN/W3-SYNC: 128 files, 24 fixtures, 20 rendered, 39 non-view, 69 deferred.
+        XCTAssertEqual(paths.count, 128, "Re-audit inventory changes explicitly.")
         XCTAssertEqual(Set(SnapshotFixtures.inventory.map(\.path)), paths)
         XCTAssertEqual(SnapshotFixtures.inventory.count, paths.count)
         XCTAssertFalse(SnapshotFixtures.inventory.contains { $0.disposition.isEmpty })
@@ -74,7 +78,7 @@ final class SnapshotsTests: XCTestCase {
         XCTAssertEqual(SnapshotFixtures.fixtures.count, 24)
         XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 20)
         XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 39)
-        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 67)
+        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 69)
         for fixture in SnapshotFixtures.fixtures where fixture.expectedTableRows != nil {
             if case .swiftUI = fixture.backend {
                 XCTFail("\(fixture.id): table readiness requires the AppKit backend.")

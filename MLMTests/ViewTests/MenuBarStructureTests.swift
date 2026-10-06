@@ -103,6 +103,9 @@ struct MenuBarStructureTests {
             // key equivalents live only while that menu is open; each one mirrors the menu-bar
             // command's key (or the focused list's ↩ / ⌫), checked in `TrackListStructureTests`.
             guard !file.path.hasSuffix("/MLM/Views/TrackList/TrackMenu.swift") else { continue }
+            // The same for the folder context menu (CM-FOLD-TREE, W3-FOLD): `Open ⌘↓`, `Scan This
+            // Folder ⌘R`, `Show in Finder ⇧⌘R` — keys of the focused outline / the menu bar.
+            guard !file.path.hasSuffix("/MLM/Views/Folders/FolderMenus.swift") else { continue }
             // UC-KEY-31: ⌘S is the genre staging bar's `Save n Changes` button — a key with no
             // menu item ("— (button)"), present only while changes are staged (W3-GEN).
             let fileAllowed = file.path.hasSuffix("/MLM/Views/Genres/GenreSuggestionsSection.swift")
@@ -300,8 +303,8 @@ struct MenuBarStructureTests {
             #expect(row.command?.isPending != true, "\(row.keys): its menu command is pending")
             #expect(!row.keys.isEmpty)
         }
-        // (⌘↓ stays: it is Volume Down; the Folders meaning is the hidden row.)
-        #expect(!shown.contains { $0.action.contains("as the root") })
+        // ⌘↓ is Volume Down, and on the focused Folders outline it opens the folder (W3-FOLD, DEC-053).
+        #expect(shown.contains { $0.action.contains("as the root") })
         for keys in ["⌫", "K"] {
             #expect(!shown.contains { $0.keys == keys }, "\(keys) doesn't work yet")
         }

@@ -170,13 +170,16 @@ struct AddToPlaylistMenuItems: View {
     /// the window's `SidebarModel`).
     var tree: PlaylistSidebarTree? = nil
     var recent: [Playlist]? = nil
+    /// The first item's title: `New Playlist…`, or `New Playlist from Folder` for a folder of
+    /// Folders (CM-FOLD-TREE, W3-FOLD).
+    var newPlaylistTitle = "New Playlist…"
     let newPlaylist: () -> Void
     let add: (Int64) -> Void
 
     @Environment(SidebarModel.self) private var sidebar: SidebarModel?
 
     var body: some View {
-        let item = Button("New Playlist…", action: newPlaylist)
+        let item = Button(newPlaylistTitle, action: newPlaylist)
         if showsKeyEquivalents {
             item
                 .keyboardShortcut("n", modifiers: [.command, .shift])

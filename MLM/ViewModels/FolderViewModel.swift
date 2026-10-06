@@ -1,605 +1,763 @@
-import AppKit
 import Foundation
+import Observation
 
-// MARK: - ViewModel
+// MARK: - Folders (V-FOLD, DEC-024)
 
-/// ViewModel for the Folder Browser.
+/// The model of the Folders place: one hierarchical outline of the library folder — folders
+/// with counts, the library tracks where their files are, and the audio files on disk that
+/// aren't in the library — rooted at the library folder or at a folder opened with `Open ⌘↓`.
 ///
-/// Drives a disk-based folder tree: the displayed hierarchy mirrors the actual
-/// filesystem under the library root, not the artist/album metadata from the DB.
+/// Where things come from:
+/// - **Counts, folders that hold tracks, the tracks of a folder:** the database
+///   (`FolderCatalog`, one query; track rows only for open folders). Works with the drive away.
+/// - **Folders without library tracks and files not in the library:** the disk, read off the
+///   main actor — the open folders' listings when they open, and one background walk of the
+///   library folder for the `‹n› not in library` counts and folder names in the filter. While
+///   the drive is away nothing is read (the banner says why).
+/// - **What is open and the root:** `FolderUIState`, per library, in `UserDefaults`.
+///
+/// The track rows live in `trackList` (a `TrackListModel` fed with the shown tracks in display
+/// order): selection, context menu, selection bar, Info, Space and ↩ work on them exactly as in
+/// every other track list. Folder and file rows have negative ids in the same selection.
+@MainActor
 @Observable
 final class FolderViewModel {
+    // MARK: Phase
 
-    // MARK: - Persistence
-
-    static let lastSelectionKey = "folders.last_selection"
-    static let lastSelectionRootKey = "folders.last_selection_root"
-    static let lastSelectionRelativePathKey = "folders.last_selection_relative_path"
-
-    /// Persist the currently selected folder path so it can be restored after a sidebar switch.
-    func persistLastSelection() {
-        guard let rootURL = libraryRootURL,
-              let selectedFolderPath,
-              let relativePath = relativePath(selectedFolderPath, within: rootURL)
-        else {
-            clearPersistedLastSelection()
-            return
-        }
-
-        UserDefaults.standard.set(rootURL.standardizedFileURL.path, forKey: Self.lastSelectionRootKey)
-        UserDefaults.standard.set(relativePath, forKey: Self.lastSelectionRelativePathKey)
-        UserDefaults.standard.removeObject(forKey: Self.lastSelectionKey)
+    enum Phase: Equatable {
+        /// The first load (placeholder rows, UC-TABLE-09).
+        case loading
+        /// No library folder is set (`No library folder · Open Settings ▸ Library`).
+        case noLibraryFolder
+        case ready
+        /// The library folder can't be read although its drive is there (V-FOLD.N08), or the
+        /// library file couldn't be read. `details` is the raw text.
+        case failed(FailureKind, details: String)
     }
 
-    /// Restore a previously selected folder path if it still exists on disk.
-    /// Silently falls back to no selection (root) when the directory is missing.
-    private func restoreLastSelection() {
-        guard selectedFolderPath == nil,
-              let rootURL = libraryRootURL,
-              let savedRoot = UserDefaults.standard.string(forKey: Self.lastSelectionRootKey),
-              let savedRelativePath = UserDefaults.standard.string(forKey: Self.lastSelectionRelativePathKey),
-              savedRoot == rootURL.standardizedFileURL.path,
-              !savedRelativePath.isEmpty
-        else {
-            clearPersistedLastSelection()
-            return
-        }
-
-        let saved = rootURL
-            .appendingPathComponent(savedRelativePath)
-            .standardizedFileURL
-        guard isPath(saved, within: rootURL) else {
-            clearPersistedLastSelection()
-            return
-        }
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: saved.path, isDirectory: &isDir), isDir.boolValue else {
-            clearPersistedLastSelection()
-            return
-        }
-        selectedFolderPath = saved.path
+    enum FailureKind: Equatable {
+        case libraryFolderUnreadable(reason: String)
+        case database
     }
 
-    private func clearPersistedLastSelection() {
-        UserDefaults.standard.removeObject(forKey: Self.lastSelectionKey)
-        UserDefaults.standard.removeObject(forKey: Self.lastSelectionRootKey)
-        UserDefaults.standard.removeObject(forKey: Self.lastSelectionRelativePathKey)
-    }
+    private(set) var phase: Phase = .loading
 
-    private func relativePath(_ path: String, within rootURL: URL) -> String? {
-        let pathURL = URL(fileURLWithPath: path).standardizedFileURL
-        guard isPath(pathURL, within: rootURL) else { return nil }
-        return pathURL.pathComponents.dropFirst(rootURL.standardizedFileURL.pathComponents.count)
-            .joined(separator: "/")
-    }
+    // MARK: State
 
-    private func isPath(_ pathURL: URL, within rootURL: URL) -> Bool {
-        let rootComponents = rootURL.standardizedFileURL.pathComponents
-        let pathComponents = pathURL.standardizedFileURL.pathComponents
-        guard pathComponents.count > rootComponents.count else { return false }
-        return zip(pathComponents, rootComponents).allSatisfy { $0 == $1 }
-    }
+    /// The library folder (absolute), once known.
+    private(set) var libraryRoot: String?
+    private(set) var catalog = FolderCatalog.empty
+    private(set) var listings: [String: FolderListingResult] = [:]
+    /// The whole library folder was read (counts of files not in the library are known).
+    private(set) var isWalkComplete = false
+    private(set) var notInLibraryFiles: [String: [String]] = [:]
+    private(set) var isOffline = false
+    private(set) var uiState = FolderUIState()
+    private(set) var sortOrder: TrackSortOrder? = TrackSortOrder(column: .title, ascending: true)
+    private(set) var filter = SearchFilter()
+    private(set) var filterMatch: FolderFilterMatch?
+    private(set) var scanning: Set<String> = []
+    /// The built outline the table shows.
+    private(set) var outline = FolderOutline()
 
-    // MARK: - Published state
+    /// The shown track rows (display order) and the table's selection — the shared track-table
+    /// model. Folder and file rows are selected through the same set (negative ids).
+    let trackList = TrackListModel()
 
-    private(set) var rootNodes: [DiskFolderNode] = []
-    private(set) var allRootNodes: [DiskFolderNode] = []
-    private(set) var tracksInFolder: [Track] = []
-    private(set) var availabilityByTrackID: [Int64: TrackAvailability] = [:]
-    private(set) var unindexedAudioFileCount = 0
-    private(set) var libraryRootURL: URL?
-    private(set) var isDriveNotMounted = false
+    @ObservationIgnored let ids = FolderOutlineIDs()
+    @ObservationIgnored private var trackRows: [Int64: TrackRow] = [:]
+    @ObservationIgnored private var loadedTrackFolders: Set<String> = []
+    @ObservationIgnored private var loadingTrackFolders: Set<String> = []
+    @ObservationIgnored private var listingFolders: Set<String> = []
+    @ObservationIgnored private var walkTask: Task<Void, Never>?
+    @ObservationIgnored private var filterTask: Task<Void, Never>?
+    @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored private var generation = 0
+    @ObservationIgnored private var rowsVersion = 0
+    /// Folders the current filter opened that the user closed.
+    @ObservationIgnored private var filterCollapsed: Set<String> = []
 
-    private(set) var searchResults: [DiskFolderNode] = []
-    private(set) var isSearching = false
-    private var searchTask: Task<Void, Never>? = nil
-    private var selectedFolderTask: Task<Void, Never>? = nil
-    private var selectedFolderRequest = UUID()
-    private(set) var loadingNodePaths = Set<String>()
+    // MARK: Dependencies
 
-    var selectedFolderPath: String? = nil {
-        didSet {
-            if oldValue != selectedFolderPath {
-                startSelectedFolderLoad()
-            }
-        }
-    }
+    /// What the model reads; live values in the app, fakes in tests.
+    struct Environment {
+        var queries: () -> FolderQueries?
+        var libraryRoot: () async -> String?
+        var libraryID: () -> String?
+        var isDriveOffline: () -> Bool
+        var defaults: UserDefaults
+        var listDirectory: @Sendable (URL) -> FolderListingResult = { FolderDiskReader.list($0) }
+        var walkDirectory: @Sendable (URL) -> [String: FolderListingResult] = { FolderDiskReader.walk($0) }
 
-    var searchQuery: String = "" {
-        didSet {
-            applyFilter()
-            triggerDiskSearch()
-        }
-    }
-
-    var sortDescriptor = TrackSortDescriptor(column: .title, ascending: true) {
-        didSet { applyTrackSort() }
-    }
-
-    var selectedTrackIDs: Set<Int64> = []
-    private(set) var isLoading = false
-    private(set) var errorMessage: String?
-
-    /// Number of top-level folders in the tree (for display in toolbar).
-    var folderCount: Int { allRootNodes.count }
-
-    // MARK: - Dependencies
-
-    private let trackRepository: TrackRepository
-    private let configRepository: ConfigRepository
-    private let diskScanner = DiskFolderScanner()
-
-    // MARK: - Init
-
-    init(trackRepository: TrackRepository, configRepository: ConfigRepository) {
-        self.trackRepository = trackRepository
-        self.configRepository = configRepository
-    }
-
-    private func setLibraryRoot(_ rootURL: URL?) {
-        let standardizedRoot = rootURL?.standardizedFileURL
-        if let previousRoot = libraryRootURL?.standardizedFileURL,
-           previousRoot != standardizedRoot {
-            libraryRootURL = standardizedRoot
-            selectedFolderPath = nil
-            clearPersistedLastSelection()
-            return
-        }
-        libraryRootURL = standardizedRoot
-    }
-
-    private func startSelectedFolderLoad() {
-        selectedFolderTask?.cancel()
-        let request = UUID()
-        selectedFolderRequest = request
-        let requestedPath = selectedFolderPath
-        let requestedRoot = libraryRootURL?.standardizedFileURL
-
-        selectedFolderTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            if let requestedPath {
-                await self.ensureAncestorsLoaded(for: requestedPath)
-                guard self.isCurrentFolderRequest(
-                    request,
-                    path: requestedPath,
-                    rootURL: requestedRoot
-                ) else { return }
-
-                if let node = self.findNode(for: requestedPath) {
-                    let hasPlaceholder = node.children.contains { $0.id.hasSuffix("/__placeholder__") }
-                    if hasPlaceholder {
-                        self.loadChildren(for: requestedPath)
-                    }
-                }
-            }
-            await self.loadTracksForSelectedFolder(
-                path: requestedPath,
-                rootURL: requestedRoot,
-                request: request
+        @MainActor
+        static func live(_ container: DependencyContainer = .shared) -> Environment {
+            Environment(
+                queries: { FolderQueries.current(container) },
+                libraryRoot: {
+                    if let root = container.mountObserver?.watchedLibraryRoot, !root.isEmpty { return root }
+                    return (try? await container.configRepository?.getLibraryRoot()) ?? nil
+                },
+                libraryID: { container.activeLibrary?.libraryId },
+                isDriveOffline: { LibraryDriveState.current(container).isOffline },
+                defaults: .standard
             )
         }
     }
 
-    private func isCurrentFolderRequest(
-        _ request: UUID,
-        path: String?,
-        rootURL: URL?
-    ) -> Bool {
-        selectedFolderRequest == request &&
-            selectedFolderPath == path &&
-            libraryRootURL?.standardizedFileURL == rootURL
+    @ObservationIgnored private let environment: Environment
+
+    init(environment: Environment) {
+        self.environment = environment
     }
 
-    // MARK: - Load tree
+    // MARK: - Derived
 
-    @MainActor
-    func loadRootFolders() async {
-        isLoading = true
-        errorMessage = nil
-        isDriveNotMounted = false
-        availabilityByTrackID = [:]
+    /// The library folder's own name (`Music`).
+    var libraryFolderName: String {
+        libraryRoot.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Folders"
+    }
 
+    var root: String { uiState.root }
+
+    /// The root's name: the opened folder, or the library folder.
+    var rootName: String { FolderPath.name(of: root, libraryFolderName: libraryFolderName) }
+
+    /// Library tracks under the root (status bar, SQL catalog).
+    var rootTrackCount: Int { catalog.trackCount(under: root) }
+
+    /// Folders under the root: those holding library tracks, and — once read — every folder
+    /// on disk.
+    var rootFolderCount: Int {
+        var folders = Set(catalog.folders.keys.filter { $0 != root && FolderPath.isWithin($0, root) })
+        if !isOffline {
+            for (path, result) in listings where FolderPath.isWithin(path, root) {
+                for name in result.listing?.subfolders ?? [] { folders.insert(FolderPath.join(path, name)) }
+            }
+        }
+        return folders.count
+    }
+
+    /// `12 folders · 1,204 tracks` (UC-STATUS-02 for Folders).
+    var statusText: String? {
+        guard phase == .ready else { return nil }
+        return "\(StatusBarText.folders(rootFolderCount)) · \(StatusBarText.tracks(rootTrackCount))"
+    }
+
+    /// The folder the `‹n› files … aren’t in the library · Import` line is about: the selected
+    /// folder (or the folder of the selected row), else the root (V-FOLD.E08).
+    var headerFolder: String {
+        guard let first = outline.order.first(where: { trackList.selection.contains($0) }) else { return root }
+        if let folder = outline.foldersByID[first] { return folder.path }
+        return outline.parentByID[first] ?? root
+    }
+
+    /// The not-in-library files of `folder` and below; nil while unknown (drive away, not read yet).
+    func notInLibraryFiles(under folder: String) -> [String]? {
+        guard !isOffline, isWalkComplete else { return nil }
+        return FolderNotInLibrary.files(under: folder, in: notInLibraryFiles)
+    }
+
+    /// The row with `id` as the outline knows it.
+    func folder(id: Int64) -> FolderRowInfo? { outline.foldersByID[id] }
+    func file(id: Int64) -> FolderFileInfo? { outline.filesByID[id] }
+
+    /// The absolute URL of a folder or file inside the library folder.
+    func url(_ relative: String) -> URL? {
+        libraryRoot.map { FolderPath.url(relative, libraryRoot: $0) }
+    }
+
+    /// The path-bar segments from the library folder to the root, then to the selected row's
+    /// folder (V-FOLD.E07): `(path, name)`.
+    var pathSegments: [(path: String, name: String)] {
+        let target = headerFolder
+        var result = [(path: "", name: libraryFolderName)]
+        var current = ""
+        for part in FolderPath.components(target) {
+            current = FolderPath.join(current, part)
+            result.append((current, part))
+        }
+        return result
+    }
+
+    // MARK: - Loading
+
+    /// First load and every full reload (Try Again, another library folder).
+    func load() async {
+        generation += 1
+        let token = generation
+        isOffline = environment.isDriveOffline()
+        guard let root = await environment.libraryRoot(), !root.isEmpty else {
+            guard token == generation else { return }
+            libraryRoot = nil
+            catalog = .empty
+            phase = .noLibraryFolder
+            rebuild()
+            return
+        }
+        let trimmed = FolderPath.trimmedRoot(root)
+        if libraryRoot != trimmed {
+            // Another library folder: fresh outline, nothing read from the old one.
+            libraryRoot = trimmed
+            uiState = FolderUIState.load(libraryID: environment.libraryID(), libraryRoot: trimmed, defaults: environment.defaults)
+            FolderUIState.forgetOtherFolders(libraryID: environment.libraryID(), keeping: trimmed, defaults: environment.defaults)
+            resetDisk()
+            trackRows = [:]
+            loadedTrackFolders = []
+        }
+        guard let queries = environment.queries() else {
+            phase = .failed(.database, details: "The library isn’t open.")
+            return
+        }
         do {
-            guard let rootPath = try await configRepository.getLibraryRoot(), !rootPath.isEmpty else {
-                allRootNodes = []
-                setLibraryRoot(nil)
-                applyFilter()
-                isLoading = false
-                return
-            }
-
-            let rootURL = URL(fileURLWithPath: rootPath)
-
-            guard FileManager.default.fileExists(atPath: rootURL.path) else {
-                isDriveNotMounted = true
-                allRootNodes = []
-                setLibraryRoot(nil)
-                applyFilter()
-                isLoading = false
-                return
-            }
-
-            setLibraryRoot(rootURL)
-
-            let nodes = try await diskScanner.scan(rootURL: rootURL, recursive: false)
-            allRootNodes = nodes
-            applyFilter()
+            let catalog = try await queries.catalog(libraryRoot: trimmed)
+            guard token == generation else { return }
+            self.catalog = catalog
         } catch {
-            errorMessage = error.localizedDescription
-        }
-
-        restoreLastSelection()
-        isLoading = false
-    }
-
-    // MARK: - Track loading
-
-    @MainActor
-    private func loadTracksForSelectedFolder(
-        path: String?,
-        rootURL: URL?,
-        request: UUID
-    ) async {
-        guard let path else {
-            guard isCurrentFolderRequest(request, path: nil, rootURL: rootURL) else { return }
-            tracksInFolder = []
-            availabilityByTrackID = [:]
-            unindexedAudioFileCount = 0
+            guard token == generation else { return }
+            phase = .failed(.database, details: error.localizedDescription)
             return
         }
-        guard let rootURL, isPath(URL(fileURLWithPath: path), within: rootURL) else {
-            guard isCurrentFolderRequest(request, path: path, rootURL: rootURL) else { return }
-            tracksInFolder = []
-            availabilityByTrackID = [:]
-            unindexedAudioFileCount = 0
-            return
+        // A stored root that no longer exists falls back to the library folder.
+        if !uiState.root.isEmpty, catalog.folders[uiState.root] == nil {
+            let exists = isOffline ? false : await listedNow(uiState.root)
+            guard token == generation else { return }
+            if !exists { setRootState("") }
         }
-
-        let start = Date()
-        do {
-            let dirURL = URL(fileURLWithPath: path)
-            let fileURLs = try await diskScanner.filesInDirectory(dirURL)
-            let paths = fileURLs.map { $0.standardizedFileURL.path }
-            let result = try await trackRepository.fetchTracksByFilesystemPaths(
-                paths,
-                libraryRoot: rootURL
-            )
-            // Persisted availability (v42) — no per-row disk probe (UC-TABLE-20).
-            let availability = TrackAvailability.byTrackID(result)
-            let ms = Int(Date().timeIntervalSince(start) * 1000)
-            let indexedPaths = Set(result.compactMap { track -> String? in
-                guard let organizedPath = track.organizedPath, !organizedPath.isEmpty else { return nil }
-                if (organizedPath as NSString).isAbsolutePath {
-                    return URL(fileURLWithPath: organizedPath).standardizedFileURL.path
-                }
-                return rootURL.appendingPathComponent(organizedPath).standardizedFileURL.path
-            })
-            let originalPaths = Set(result.compactMap { track -> String? in
-                guard (track.originalPath as NSString).isAbsolutePath else { return nil }
-                return URL(fileURLWithPath: track.originalPath).standardizedFileURL.path
-            })
-            let unindexedCount = fileURLs.reduce(into: 0) { count, fileURL in
-                let path = fileURL.standardizedFileURL.path
-                if !indexedPaths.contains(path) && !originalPaths.contains(path) {
-                    count += 1
-                }
-            }
-            guard isCurrentFolderRequest(request, path: path, rootURL: rootURL),
-                  !Task.isCancelled
-            else { return }
-            tracksInFolder = result
-            availabilityByTrackID = availability
-            unindexedAudioFileCount = unindexedCount
-            AppLogger.shared.info(
-                "folder tracks load: \(result.count) tracks in \(ms)ms",
-                source: "perf"
-            )
-            applyTrackSort()
-        } catch {
-            guard isCurrentFolderRequest(request, path: path, rootURL: rootURL),
-                  !Task.isCancelled
-            else { return }
-            tracksInFolder = []
-            availabilityByTrackID = [:]
-            unindexedAudioFileCount = 0
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    @MainActor
-    func refresh() async {
-        await loadRootFolders()
-        if selectedFolderPath != nil {
-            startSelectedFolderLoad()
-        }
-    }
-
-    /// Remove tracks in-place without a full SQL refetch.
-    @MainActor
-    func removeTracks(ids: Set<Int64>) {
-        tracksInFolder.removeAll { track in
-            guard let id = track.id else { return false }
-            return ids.contains(id)
-        }
-        availabilityByTrackID = availabilityByTrackID.filter { !ids.contains($0.key) }
-        selectedTrackIDs.subtract(ids)
-    }
-
-    // MARK: - Helpers
-
-    /// Returns the path relative to the library root (for breadcrumb display).
-    func relativePath(for fullPath: String) -> String {
-        guard let root = libraryRootURL?.path else { return fullPath }
-        let prefix = root.hasSuffix("/") ? root : root + "/"
-        guard fullPath.hasPrefix(prefix) else { return (fullPath as NSString).lastPathComponent }
-        return String(fullPath.dropFirst(prefix.count))
-    }
-
-    /// Open the currently selected folder in Finder.
-    func revealInFinder() {
-        guard let path = selectedFolderPath else { return }
-        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
-    }
-
-    // MARK: - Filtering and Lazy Loading
-
-    /// Ensures that all ancestor directories of the given path are loaded in `allRootNodes`.
-    @MainActor
-    func ensureAncestorsLoaded(for path: String) async {
-        guard let rootPath = libraryRootURL?.path else { return }
-        var current = (path as NSString).deletingLastPathComponent
-        var ancestorsToLoad: [String] = []
-        
-        while current.hasPrefix(rootPath) && current != rootPath {
-            ancestorsToLoad.append(current)
-            current = (current as NSString).deletingLastPathComponent
-        }
-        
-        // Load them from root-most to leaf-most
-        for ancestor in ancestorsToLoad.reversed() {
-            if let node = findNode(for: ancestor) {
-                let hasPlaceholder = node.children.contains { $0.id.hasSuffix("/__placeholder__") }
-                if hasPlaceholder || node.children.isEmpty {
-                    do {
-                        let url = URL(fileURLWithPath: ancestor)
-                        let subnodes = try await diskScanner.scanSubdirectories(at: url)
-                        self.allRootNodes = self.updateNodeChildren(in: self.allRootNodes, targetPath: ancestor, newChildren: subnodes)
-                    } catch {
-                        AppLogger.shared.error("Failed to load ancestor \(ancestor): \(error.localizedDescription)", source: "folders")
-                    }
-                }
-            }
-        }
-        
-        applyFilter()
-    }
-
-    /// Asynchronously scan the subdirectories of a given directory path and replace the placeholder node.
-    @MainActor
-    func loadChildren(for path: String) {
-        guard !loadingNodePaths.contains(path) else { return }
-        loadingNodePaths.insert(path)
-        
-        Task {
-            do {
-                let url = URL(fileURLWithPath: path)
-                let subnodes = try await diskScanner.scanSubdirectories(at: url)
-                
-                await MainActor.run {
-                    self.allRootNodes = self.updateNodeChildren(in: self.allRootNodes, targetPath: path, newChildren: subnodes)
-                    self.applyFilter()
-                    self.loadingNodePaths.remove(path)
-                }
-            } catch {
-                _ = await MainActor.run {
-                    self.loadingNodePaths.remove(path)
-                }
-                AppLogger.shared.error("Failed to load children for \(path): \(error.localizedDescription)", source: "folders")
-            }
-        }
-    }
-
-    private func updateNodeChildren(in nodes: [DiskFolderNode], targetPath: String, newChildren: [DiskFolderNode]) -> [DiskFolderNode] {
-        return nodes.map { node in
-            if node.id == targetPath {
-                return DiskFolderNode(id: node.id, name: node.name, children: newChildren)
-            } else if !node.children.isEmpty {
-                return DiskFolderNode(
-                    id: node.id,
-                    name: node.name,
-                    children: updateNodeChildren(in: node.children, targetPath: targetPath, newChildren: newChildren)
-                )
-            } else {
-                return node
-            }
-        }
-    }
-
-    /// Trigger a background, debounced recursive filesystem search for matching folders.
-    private func triggerDiskSearch() {
-        searchTask?.cancel()
-        
-        let query = searchQuery.trimmingCharacters(in: .whitespaces)
-        guard !query.isEmpty else {
-            searchResults = []
-            isSearching = false
-            applyFilter()
-            return
-        }
-        
-        isSearching = true
-        
-        searchTask = Task { [weak self] in
-            guard let self = self else { return }
-            
-            // 200ms debounce to avoid spamming disk reads during typing
-            try? await Task.sleep(nanoseconds: 200_000_000)
-            if Task.isCancelled { return }
-            
-            guard let rootURL = self.libraryRootURL else {
-                await MainActor.run {
-                    self.searchResults = []
-                    self.isSearching = false
-                    self.applyFilter()
-                }
+        if !isOffline {
+            // The library folder itself must be readable (V-FOLD.N08).
+            let rootURL = FolderPath.url("", libraryRoot: trimmed)
+            let list = environment.listDirectory
+            let result = await Task.detached(priority: .userInitiated) { list(rootURL) }.value
+            guard token == generation else { return }
+            if case .unreadable(let reason) = result {
+                phase = .failed(.libraryFolderUnreadable(reason: reason), details: "\(trimmed): \(reason)")
                 return
             }
-            
-            do {
-                let matches = try await self.diskScanner.searchDirectories(under: rootURL, query: query)
-                if Task.isCancelled { return }
-                
-                await MainActor.run {
-                    self.searchResults = matches
-                    self.isSearching = false
-                    self.applyFilter()
-                }
-            } catch {
-                await MainActor.run {
-                    self.searchResults = []
-                    self.isSearching = false
-                    self.applyFilter()
-                }
-            }
+            listings[""] = result
         }
+        phase = .ready
+        await reloadLoadedTracks()
+        rebuild()
+        startWalk()
     }
 
-    private func applyFilter() {
-        let query = searchQuery.trimmingCharacters(in: .whitespaces)
-        if query.isEmpty {
-            rootNodes = allRootNodes
+    private func listedNow(_ folder: String) async -> Bool {
+        guard let url = url(folder) else { return false }
+        let list = environment.listDirectory
+        let result = await Task.detached(priority: .userInitiated) { list(url) }.value
+        if result.listing != nil { listings[folder] = result }
+        return result.listing != nil
+    }
+
+    private func resetDisk() {
+        walkTask?.cancel()
+        walkTask = nil
+        listings = [:]
+        notInLibraryFiles = [:]
+        isWalkComplete = false
+        listingFolders = []
+    }
+
+    /// The drive came or went (`LibraryDriveState`): rows from the database stay; disk facts are
+    /// read again when it is back.
+    func driveStateChanged() {
+        let offline = environment.isDriveOffline()
+        guard offline != isOffline else { return }
+        isOffline = offline
+        if offline {
+            resetDisk()
+            rebuild()
         } else {
-            // Build the filtered tree from the search results paths
-            let paths = searchResults.map { $0.id }
-            rootNodes = buildTreeFromPaths(paths)
+            Task { await load() }
         }
     }
 
-    /// Reconstruct the parent directory tree for matched search paths so that they can be displayed in the sidebar tree.
-    func buildTreeFromPaths(_ paths: [String]) -> [DiskFolderNode] {
-        guard let rootPath = libraryRootURL?.path else { return [] }
-        
-        var allPaths = Set<String>()
-        for path in paths {
-            var current = path
-            while current.hasPrefix(rootPath) && current != rootPath {
-                allPaths.insert(current)
-                current = (current as NSString).deletingLastPathComponent
+    /// Files were added, moved or re-pointed, an import finished, tracks were deleted: the
+    /// catalog and (when connected) the disk are read again; the outline updates in place (the
+    /// old rows stay until the new ones are there). Notifications that arrive together (an
+    /// import posts two) are read once.
+    func libraryFilesDidChange() {
+        refreshTask?.cancel()
+        refreshTask = Task {
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, phase == .ready else { return }
+            await refreshCatalog()
+            if !isOffline {
+                for folder in Array(listings.keys) where isShownOrOpen(folder) { list(folder) }
+                restartWalk()
             }
         }
-        
-        return buildSubtree(at: rootPath, allPaths: allPaths)
     }
 
-    private func buildSubtree(at path: String, allPaths: Set<String>) -> [DiskFolderNode] {
-        let pathPrefix = path.hasSuffix("/") ? path : path + "/"
-        let childrenPaths = allPaths.filter { p in
-            guard p.hasPrefix(pathPrefix) && p != path else { return false }
-            let relative = p.dropFirst(pathPrefix.count)
-            return !relative.contains("/")
-        }
-        
-        var nodes: [DiskFolderNode] = []
-        for childPath in childrenPaths {
-            let childURL = URL(fileURLWithPath: childPath)
-            let name = childURL.lastPathComponent
-            
-            // Recursively build children
-            let childNodes = buildSubtree(at: childPath, allPaths: allPaths)
-            
-            nodes.append(DiskFolderNode(
-                id: childPath,
-                name: name,
-                children: childNodes.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-            ))
-        }
-        
-        return nodes.sorted {
-            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+    /// Tags changed (`.trackMetadataDidChange`): the shown tracks' rows are rebuilt in place.
+    func trackMetadataDidChange() {
+        Task {
+            await reloadLoadedTracks()
+            rebuild()
+            if filterMatch != nil { scheduleFilter(filter, delay: .zero) }
         }
     }
 
-    /// Recursively find a node with a matching path in the root nodes.
-    func findNode(for path: String) -> DiskFolderNode? {
-        return findNode(for: path, in: allRootNodes)
+    /// Tracks were removed from the library: out of the outline at once, then the catalog.
+    func removeTracks(ids: Set<Int64>) {
+        guard !ids.isEmpty else { return }
+        for id in ids { trackRows[id] = nil }
+        trackList.selection.subtract(ids)
+        Task {
+            await refreshCatalog()
+        }
+        rebuild()
     }
 
-    private func findNode(for path: String, in nodes: [DiskFolderNode]) -> DiskFolderNode? {
-        for node in nodes {
-            if node.id == path {
-                return node
+    private func refreshCatalog() async {
+        guard let root = libraryRoot, let queries = environment.queries() else { return }
+        guard let catalog = try? await queries.catalog(libraryRoot: root) else { return }
+        self.catalog = catalog
+        notInLibraryFiles = FolderNotInLibrary.files(listings: listings, catalog: catalog)
+        loadedTrackFolders = []
+        await reloadLoadedTracks()
+        rebuild()
+    }
+
+    private func isShownOrOpen(_ folder: String) -> Bool {
+        folder == root || uiState.expanded.contains(folder)
+    }
+
+    // MARK: - Rebuilding the outline
+
+    /// Rebuilds the rows from what is known (cheap: open folders only) and asks for what is
+    /// missing — track rows of open folders, listings of open folders.
+    func rebuild() {
+        let counts: [String: Int]? = isWalkComplete && !isOffline
+            ? FolderNotInLibrary.recursiveCounts(notInLibraryFiles, folders: listings.keys)
+            : nil
+        let input = FolderOutlineInput(
+            root: root,
+            catalog: catalog,
+            listings: listings,
+            isOffline: isOffline,
+            trackRows: trackRows,
+            loadedFolders: loadedTrackFolders,
+            expanded: uiState.expanded,
+            collapsedByUser: filterCollapsed,
+            sort: sortOrder,
+            filter: filterMatch,
+            notInLibraryCounts: counts,
+            scanning: scanning
+        )
+        let built = FolderOutline.build(input, ids: ids)
+        outline = built
+        let rows = built.trackRows
+        rowsVersion += 1
+        let version = rowsVersion
+        Task {
+            // Only the newest rows reach the table (rebuilds can follow each other quickly).
+            guard version == rowsVersion else { return }
+            await trackList.setRows(rows)
+        }
+        for folder in built.foldersMissingTracks where !loadingTrackFolders.contains(folder) {
+            loadTracks(in: folder)
+        }
+        if !isOffline, phase == .ready {
+            for folder in built.foldersToList where !listingFolders.contains(folder) {
+                list(folder)
             }
-            if let found = findNode(for: path, in: node.children) {
-                return found
+        }
+    }
+
+    private func loadTracks(in folder: String) {
+        guard let queries = environment.queries() else { return }
+        let ids = catalog.folders[folder]?.directTrackIDs ?? []
+        guard !ids.isEmpty else { return }
+        loadingTrackFolders.insert(folder)
+        Task {
+            defer { loadingTrackFolders.remove(folder) }
+            guard let tracks = try? await queries.tracks(ids: ids) else { return }
+            let rows = await Self.buildRows(tracks)
+            for row in rows { trackRows[row.id] = row }
+            loadedTrackFolders.insert(folder)
+            rebuild()
+        }
+    }
+
+    /// Rows of 1,500+ tracks are built off the main actor (a managed download folder).
+    private static func buildRows(_ tracks: [Track]) async -> [TrackRow] {
+        if tracks.count <= TrackListModel.backgroundThreshold { return TrackRowBuilder.build(tracks) }
+        return await Task.detached(priority: .userInitiated) { TrackRowBuilder.build(tracks) }.value
+    }
+
+    /// Re-reads every loaded track row (tags, availability changed).
+    private func reloadLoadedTracks() async {
+        guard let queries = environment.queries(), !trackRows.isEmpty else { return }
+        let ids = Array(trackRows.keys).filter { catalog.folderByTrackID[$0] != nil }
+        guard let tracks = try? await queries.tracks(ids: ids) else { return }
+        var rows: [Int64: TrackRow] = [:]
+        for row in await Self.buildRows(tracks) { rows[row.id] = row }
+        trackRows = rows
+    }
+
+    private func list(_ folder: String) {
+        guard let url = url(folder) else { return }
+        listingFolders.insert(folder)
+        let list = environment.listDirectory
+        let token = generation
+        Task {
+            let result = await Task.detached(priority: .userInitiated) { list(url) }.value
+            listingFolders.remove(folder)
+            guard token == generation, !isOffline else { return }
+            listings[folder] = result
+            if isWalkComplete { notInLibraryFiles = FolderNotInLibrary.files(listings: listings, catalog: catalog) }
+            rebuild()
+        }
+    }
+
+    // MARK: The background walk (files not in the library, folder names)
+
+    /// Reads the whole library folder once (again only after files changed: `restartWalk`).
+    private func startWalk(force: Bool = false) {
+        guard !isOffline, walkTask == nil, force || !isWalkComplete, let root = libraryRoot else { return }
+        let walk = environment.walkDirectory
+        let rootURL = URL(fileURLWithPath: root, isDirectory: true)
+        let token = generation
+        walkTask = Task {
+            let result = await Task.detached(priority: .utility) { walk(rootURL) }.value
+            guard !Task.isCancelled, token == generation, !isOffline else { return }
+            listings.merge(result) { _, new in new }
+            notInLibraryFiles = FolderNotInLibrary.files(listings: listings, catalog: catalog)
+            isWalkComplete = true
+            walkTask = nil
+            rebuild()
+            if !filter.isEmpty { scheduleFilter(filter, delay: .zero) }
+        }
+    }
+
+    private func restartWalk() {
+        walkTask?.cancel()
+        walkTask = nil
+        startWalk(force: true)
+    }
+
+    // MARK: - Expanding (Return / double-click / → ←, persisted)
+
+    func isExpanded(_ folder: String) -> Bool { uiState.expanded.contains(folder) }
+
+    /// Whether the folder shows open now (the user opened it, or the filter did).
+    func isShownExpanded(_ folder: String) -> Bool {
+        outline.foldersByID[ids.folder(folder)]?.isExpanded ?? isExpanded(folder)
+    }
+
+    func setExpanded(_ folder: String, _ expanded: Bool) {
+        guard expanded != isShownExpanded(folder) || expanded != isExpanded(folder) else { return }
+        if expanded {
+            uiState.expanded.insert(folder)
+            filterCollapsed.remove(folder)
+        } else {
+            uiState.expanded.remove(folder)
+            // A folder the filter opened stays closed while this filter is on.
+            if filterMatch != nil { filterCollapsed.insert(folder) }
+        }
+        persist()
+        rebuild()
+    }
+
+    func toggle(_ folder: String) {
+        setExpanded(folder, !isShownExpanded(folder))
+    }
+
+    /// ⌥→: the folder and every folder inside that holds library tracks or was read from disk.
+    func expandAll(_ folder: String) {
+        var paths: Set<String> = [folder]
+        for path in catalog.folders.keys where FolderPath.isWithin(path, folder) { paths.insert(path) }
+        if !isOffline {
+            for (path, result) in listings where FolderPath.isWithin(path, folder) {
+                paths.insert(path)
+                for name in result.listing?.subfolders ?? [] { paths.insert(FolderPath.join(path, name)) }
             }
         }
-        return nil
+        uiState.expanded.formUnion(paths)
+        persist()
+        rebuild()
     }
 
-    /// Recursively search all folders in the library and return a flat list of matches.
-    func searchMatchingFolders(query: String) -> [DiskFolderNode] {
-        let trimmed = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !trimmed.isEmpty else { return [] }
-        return findMatchingNodes(in: allRootNodes, query: trimmed)
+    /// ⌥←: the folder and everything inside it.
+    func collapseAll(_ folder: String) {
+        uiState.expanded = uiState.expanded.filter { !FolderPath.isWithin($0, folder) }
+        persist()
+        rebuild()
     }
 
-    private func findMatchingNodes(in nodes: [DiskFolderNode], query: String) -> [DiskFolderNode] {
-        var results: [DiskFolderNode] = []
-        for node in nodes {
-            if node.name.lowercased().contains(query) {
-                results.append(node)
+    // MARK: - Root (Open ⌘↓, ⌘↑, path bar)
+
+    /// `Open ⌘↓`: the folder becomes the outline's root (DEC-053).
+    func openAsRoot(_ folder: String) {
+        guard folder != root else { return }
+        trackList.selection = []
+        setRootState(folder)
+        rebuild()
+    }
+
+    /// ⌘↑: one level up; nothing at the library folder.
+    @discardableResult
+    func goUp() -> Bool {
+        guard let parent = FolderPath.parent(of: root) else { return false }
+        let previous = root
+        setRootState(parent)
+        rebuild()
+        // The folder that was the root stays selected, so ⌘↓ goes back.
+        trackList.selection = [ids.folder(previous)]
+        return true
+    }
+
+    /// A path-bar segment: the folder shows (its parents open) and is selected; a folder above
+    /// the root makes it the root.
+    func jump(to folder: String) {
+        if !FolderPath.isWithin(folder, root) {
+            setRootState(folder)
+        } else {
+            openAncestors(of: folder)
+        }
+        rebuild()
+        trackList.selection = folder == root ? [] : [ids.folder(folder)]
+    }
+
+    private func setRootState(_ folder: String) {
+        uiState.root = folder
+        persist()
+    }
+
+    private func openAncestors(of folder: String) {
+        for ancestor in FolderPath.ancestors(of: folder) where FolderPath.isWithin(ancestor, root) && ancestor != root {
+            uiState.expanded.insert(ancestor)
+        }
+        persist()
+    }
+
+    private func persist() {
+        guard let libraryRoot else { return }
+        uiState.save(libraryID: environment.libraryID(), libraryRoot: libraryRoot, defaults: environment.defaults)
+    }
+
+    // MARK: - Reveal (⌘L, the search field's Library results)
+
+    /// Shows a library track (opening the folders above it) and selects it. Returns false when
+    /// the track isn't in the library folder.
+    @discardableResult
+    func reveal(trackID: Int64) -> Bool {
+        guard let folder = catalog.folderByTrackID[trackID] else { return false }
+        if !FolderPath.isWithin(folder, root) { setRootState("") }
+        openAncestors(of: folder)
+        if folder != root { uiState.expanded.insert(folder) }
+        persist()
+        rebuild()
+        trackList.selection = [trackID]
+        return true
+    }
+
+    /// A folder chosen in the search field's Library results (absolute path): shown and selected.
+    func revealFolder(absolutePath: String) {
+        guard let libraryRoot, let relative = FolderPath.relative(absolutePath, libraryRoot: libraryRoot) else { return }
+        if !FolderPath.isWithin(relative, root) { setRootState("") }
+        openAncestors(of: relative)
+        rebuild()
+        trackList.selection = relative.isEmpty ? [] : [ids.folder(relative)]
+    }
+
+    // MARK: - Sort (within each folder, UC-TABLE-04)
+
+    func setSortOrder(_ order: TrackSortOrder?) {
+        guard order != sortOrder else { return }
+        sortOrder = order
+        rebuild()
+    }
+
+    // MARK: - Filter in place (UC-SEARCH-01, V-FOLD.E02)
+
+    /// The toolbar search for Folders: tracks by the track filter, folders and files by name.
+    func applyFilter(_ newFilter: SearchFilter) {
+        guard newFilter != filter else { return }
+        filter = newFilter
+        scheduleFilter(newFilter, delay: .milliseconds(200))
+    }
+
+    private func scheduleFilter(_ filter: SearchFilter, delay: Duration) {
+        filterTask?.cancel()
+        filterCollapsed = []
+        guard !filter.isEmpty else {
+            filterMatch = nil
+            rebuild()
+            return
+        }
+        filterTask = Task {
+            if delay > .zero { try? await Task.sleep(for: delay) }
+            guard !Task.isCancelled else { return }
+            let match = await computeMatch(filter)
+            guard !Task.isCancelled, filter == self.filter else { return }
+            filterMatch = match
+            rebuild()
+        }
+    }
+
+    /// The matches under the root (also used directly by tests).
+    func computeMatch(_ filter: SearchFilter) async -> FolderFilterMatch {
+        var match = FolderFilterMatch()
+        let inRoot: (String) -> Bool = { FolderPath.isWithin($0, self.root) }
+        if let queries = environment.queries(), let ids = try? await queries.matchingTrackIDs(filter) {
+            match.trackIDs = ids.filter { id in catalog.folderByTrackID[id].map(inRoot) ?? false }
+        }
+        // Names: free words only (tokens describe tracks).
+        if !filter.freeTerms.isEmpty {
+            var folders = Set(catalog.folders.keys)
+            if !isOffline {
+                for (path, result) in listings {
+                    folders.insert(path)
+                    for name in result.listing?.subfolders ?? [] { folders.insert(FolderPath.join(path, name)) }
+                }
             }
-            results.append(contentsOf: findMatchingNodes(in: node.children, query: query))
-        }
-        return results
-    }
-
-    // MARK: - Sorting
-
-    private func applyTrackSort() {
-        tracksInFolder.sort { a, b in
-            let result: ComparisonResult
-            switch sortDescriptor.column {
-            case .title:     result = a.title.localizedCaseInsensitiveCompare(b.title)
-            case .artist:    result = a.artist.localizedCaseInsensitiveCompare(b.artist)
-            case .album:     result = a.album.localizedCaseInsensitiveCompare(b.album)
-            case .format:    result = a.format.localizedCaseInsensitiveCompare(b.format)
-            case .bitrate:   result = compare(a.bitrate, b.bitrate)
-            case .duration:  result = compare(a.duration, b.duration)
-            case .genre:     result = (a.genre ?? "").localizedCaseInsensitiveCompare(b.genre ?? "")
-            case .year:      result = compare(a.year, b.year)
-            case .energy:    result = compare(a.energyBucket, b.energyBucket)
-            case .danceability: result = compare(a.danceability, b.danceability)
-            case .bpm:       result = compare(a.bpm, b.bpm)
-            case .dateAdded: result = (a.dateAdded ?? "").compare(b.dateAdded ?? "")
+            for path in folders where !path.isEmpty && path != root && inRoot(path) {
+                if filter.matchesName(FolderPath.components(path).last ?? path) { match.nameMatchedFolders.insert(path) }
             }
-            return sortDescriptor.ascending
-                ? result == .orderedAscending
-                : result == .orderedDescending
+            if !isOffline {
+                for (folder, files) in notInLibraryFiles where inRoot(folder) {
+                    for file in files where filter.matchesName(FolderPath.components(file).last ?? file) {
+                        match.nameMatchedFiles.insert(file)
+                    }
+                }
+            }
+        }
+        return match
+    }
+
+    /// The filter is on and nothing under the root matches (filtered-empty, UC-EMPTY-02).
+    var isFilteredEmpty: Bool {
+        guard let filterMatch else { return false }
+        return filterMatch.trackIDs.isEmpty && filterMatch.nameMatchedFolders.isEmpty && filterMatch.nameMatchedFiles.isEmpty
+    }
+
+    /// `3 folders and 12 tracks match “dek”` (V-FOLD.E02 result line).
+    var filterSummary: String? {
+        guard let filterMatch, !isFilteredEmpty else { return nil }
+        let folders = filterMatch.nameMatchedFolders.count
+        let tracks = filterMatch.trackIDs.count + filterMatch.nameMatchedFiles.count
+        let query = filter.displayText
+        return "\(StatusBarText.folders(folders)) and \(StatusBarText.tracks(tracks)) match “\(query)”"
+    }
+
+    // MARK: - Scan and import (Activity operations)
+
+    /// `Scan This Folder` ⌘R: the folder (or the root) is read and imported; its row says
+    /// `Scanning…` meanwhile.
+    func scan(_ folder: String) async {
+        guard !isOffline, let url = url(folder), !scanning.contains(folder) else { return }
+        scanning.insert(folder)
+        rebuild()
+        await FolderImports.scan(url)
+        scanning.remove(folder)
+        // The import posts `.libraryFilesDidChange`; a cancelled one may not have.
+        libraryFilesDidChange()
+    }
+
+    /// `Import ‹n› Files`: the files of `folder` (and below) that aren't in the library.
+    func importNotInLibrary(under folder: String) async {
+        guard let files = notInLibraryFiles(under: folder), !files.isEmpty else { return }
+        await importFiles(files)
+    }
+
+    /// `Import File` / `Import ‹n› Files` on file rows (relative paths).
+    func importFiles(_ relativeFiles: [String]) async {
+        guard !isOffline, let libraryRoot, !relativeFiles.isEmpty else { return }
+        let urls = relativeFiles.map { FolderPath.url($0, libraryRoot: libraryRoot) }
+        await FolderImports.importFiles(urls)
+        libraryFilesDidChange()
+    }
+
+    // MARK: - A folder as its tracks
+
+    /// The library tracks of the selected rows in display order: a folder stands for its
+    /// tracks (subfolders included), a track for itself; each track once.
+    func tracks(forRows rowIDs: Set<Int64>) async -> [Track] {
+        guard let root = libraryRoot, let queries = environment.queries() else { return [] }
+        let loader = FolderTrackLoader(queries: queries, libraryRoot: root)
+        var result: [Track] = []
+        var seen = Set<Int64>()
+        for id in outline.order where rowIDs.contains(id) {
+            if let folder = outline.foldersByID[id] {
+                for track in await loader.tracks(in: [folder.path], sort: sortOrder, catalog: catalog) {
+                    if let trackID = track.id, seen.insert(trackID).inserted { result.append(track) }
+                }
+            } else if let row = trackRows[id], seen.insert(id).inserted {
+                result.append(row.track)
+            }
+        }
+        return result
+    }
+
+    // MARK: - The Track menu on folders (UC-MENU-05)
+
+    /// The tracks of a selection that contains folders (subfolders included, display order),
+    /// for the Track menu: "with a folder selected the items act on its tracks". Nil while the
+    /// selection holds no folder or its tracks are still being read.
+    private(set) var folderSelectionTracks: (selection: Set<Int64>, tracks: [Track])?
+    @ObservationIgnored private var folderSelectionTask: Task<Void, Never>?
+
+    func selectionDidChange() {
+        folderSelectionTask?.cancel()
+        let selection = trackList.selection
+        guard selection.contains(where: { outline.foldersByID[$0] != nil }) else {
+            folderSelectionTracks = nil
+            return
+        }
+        if folderSelectionTracks?.selection != selection { folderSelectionTracks = nil }
+        folderSelectionTask = Task {
+            let tracks = await tracks(forRows: selection)
+            guard !Task.isCancelled, trackList.selection == selection else { return }
+            folderSelectionTracks = (selection, tracks)
         }
     }
 
-    private func compare(_ a: Int?, _ b: Int?) -> ComparisonResult {
-        switch (a, b) {
-        case (nil, nil):    return .orderedSame
-        case (nil, _):      return .orderedAscending
-        case (_, nil):      return .orderedDescending
-        case let (a?, b?):
-            if a < b { return .orderedAscending }
-            if a > b { return .orderedDescending }
-            return .orderedSame
-        }
+    // MARK: - Leaving the place
+
+    /// Navigating away clears the selection (UC-TABLE-08); what is open stays.
+    func placeDidDisappear() {
+        trackList.selection = []
     }
 
-    private func compare(_ a: Double?, _ b: Double?) -> ComparisonResult {
-        switch (a, b) {
-        case (nil, nil):    return .orderedSame
-        case (nil, _):      return .orderedAscending
-        case (_, nil):      return .orderedDescending
-        case let (a?, b?):
-            if a < b { return .orderedAscending }
-            if a > b { return .orderedDescending }
-            return .orderedSame
+    // MARK: - Snapshot fixtures
+
+    /// Puts `tracks` at the top of an otherwise empty outline (snapshot fixture; no database).
+    func showForFixture(_ tracks: [Track], libraryRoot: String) {
+        self.libraryRoot = libraryRoot
+        var rows: [FolderCatalog.Row] = []
+        for track in tracks {
+            guard let id = track.id else { continue }
+            rows.append(FolderCatalog.Row(id: id, organizedPath: "\(id).m4a", originalPath: ""))
         }
+        catalog = FolderCatalog.build(rows, libraryRoot: libraryRoot)
+        for row in TrackRowBuilder.build(tracks) { trackRows[row.id] = row }
+        isOffline = true
+        phase = .ready
+        rebuild()
+        trackList.setTracksNow(outline.trackRows.map(\.track))
+    }
+}
+
+// MARK: - One model per library
+
+/// Keeps the Folders model while the library is open, so coming back to Folders doesn't read the
+/// whole library folder again (the outline, what was read from disk and the counts stay; the
+/// catalog is refreshed on each visit).
+@MainActor
+final class FolderModelStore {
+    static let shared = FolderModelStore()
+
+    private var libraryID: String?
+    private var cached: FolderViewModel?
+
+    func model(_ container: DependencyContainer = .shared) -> FolderViewModel {
+        let id = container.activeLibrary?.libraryId
+        if let cached, id == libraryID { return cached }
+        let model = FolderViewModel(environment: .live(container))
+        libraryID = id
+        cached = model
+        return model
     }
 }

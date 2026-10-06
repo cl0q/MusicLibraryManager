@@ -44,6 +44,10 @@ enum DropTarget: Equatable, Sendable {
     /// A card of All Playlists sorted `Manual`: a dragged playlist or folder goes before it
     /// (the grid's manual reorder, D-PL-CARD-REORDER); everything else as on `playlistCard`.
     case playlistCardInManualOrder(id: Int64, name: String, folderID: Int64?)
+    /// A folder of Folders — its row, a path-bar segment, or the outline itself (its root)
+    /// (W3-FOLD, D-FOLD-FILES-FROM-FINDER): Finder audio files and folders are imported there.
+    /// `path` is relative to the library folder.
+    case folderRow(path: String, name: String)
     /// A genre row in Genres (W3-GEN, D-SET-GW-TRACK-TO-GENRE): tracks get this genre (one
     /// undoable tag edit). `key` = `GenreName.key`, `name` = the display name.
     case genreRow(key: String, name: String)
@@ -146,6 +150,10 @@ enum DropDecision: Equatable, Sendable {
     case importFilesAndPlace([URL], playlistID: Int64, playlistName: String)
     /// Onto the Playlists header: import, then a new playlist (named after a single folder).
     case importFilesAsNewPlaylist([URL], name: String?)
+    /// Finder audio files / folders onto a folder of Folders: `Import Files or Folder…` — copied
+    /// into the library folder when they lie elsewhere, imported in place when inside it
+    /// (`ShellActions.importChosen`). `folderPath`: the folder they were dropped on.
+    case importFilesIntoLibrary([URL], folderPath: String)
     /// `.m3u` / `.m3u8`: the preview sheet. `playlistID`: the playlist it was dropped on.
     case importM3U(URL, playlistID: Int64?)
     /// A link: Add from Link… / the playlist import (`QuickAddRouter`).
@@ -215,6 +223,8 @@ enum DropRules {
         case (.syncProfile, .tracks), (.syncProfile, .playlists):
             return true
         case (.fixedRow, .files):
+            return true
+        case (.folderRow, .files):
             return true
         case (.playlistTable, .tracks), (.playlistTable, .playlists),
              (.playlistTable, .files), (.playlistTable, .link):
@@ -308,7 +318,7 @@ enum DropRules {
         case .playlistFolder(let id, _): return .newPlaylistInFolder(ids, folderID: id)
         case .genreRow(_, let name): return .setGenre(ids, genreName: name)
         case .genreTable(let key, let name): return .stageForGenre(ids, genreKey: key, genreName: name)
-        case .fixedRow, .playlistCover, .playlistCard, .window, .playlistOrder, .playlistCardInManualOrder:
+        case .fixedRow, .playlistCover, .playlistCard, .window, .playlistOrder, .playlistCardInManualOrder, .folderRow:
             return .refuse(nil)
         }
     }
@@ -353,7 +363,7 @@ enum DropRules {
         case .player:
             return ids.isEmpty ? .refuse(nil) : .playNextPlaylists(ids)
         case .playlistsSection, .fixedRow, .playlistCover, .playlistCard, .window,
-             .playlistFolder, .playlistOrder, .playlistCardInManualOrder, .genreRow, .genreTable:
+             .playlistFolder, .playlistOrder, .playlistCardInManualOrder, .folderRow, .genreRow, .genreTable:
             return .refuse(nil)
         }
     }
@@ -381,7 +391,7 @@ enum DropRules {
             switch target {
             case .sidebarPlaylist(let id, _): return .importM3U(m3u.url, playlistID: id)
             case .playlistTable(let id, _, _): return .importM3U(m3u.url, playlistID: id)
-            case .playlistsSection, .window, .fixedRow: return .importM3U(m3u.url, playlistID: nil)
+            case .playlistsSection, .window, .fixedRow, .folderRow: return .importM3U(m3u.url, playlistID: nil)
             case .playlistFolder(let id, _): return .importM3UInFolder(m3u.url, folderID: id)
             case .syncProfile, .player, .playlistCover, .playlistCard, .playlistOrder, .playlistCardInManualOrder,
                  .genreRow, .genreTable:
@@ -411,6 +421,7 @@ enum DropRules {
             let name = importable.count == 1 && importable[0].kind == .folder ? importable[0].name : nil
             return .importFilesAsNewPlaylist(urls, name: name)
         case .fixedRow, .window: return .importFiles(urls)
+        case .folderRow(let path, _): return .importFilesIntoLibrary(urls, folderPath: path)
         case .playlistFolder(let id, _): return .importFilesAsNewPlaylistInFolder(urls, folderID: id)
         case .syncProfile, .player, .playlistCover, .playlistCard, .playlistOrder, .playlistCardInManualOrder,
              .genreRow, .genreTable:

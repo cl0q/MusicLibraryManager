@@ -232,7 +232,8 @@ struct SearchPlace: Equatable, Sendable {
         case .albums: self.init(key: SearchPlaceKey("albums"), capability: .none, name: title)
         // The genre list filters by name (W3-GEN).
         case .genres: self.init(key: .genres, capability: .names, name: title)
-        case .folders: self.init(key: .folders, capability: .names, name: title)
+        // Folders filters folders by name and tracks by the track filter (W3-FOLD).
+        case .folders: self.init(key: .folders, capability: .tracks, name: title)
         case .discover: self.init(key: .discover, capability: .names, name: title)
         case .review: self.init(key: .review, capability: .names, name: title)
         case .allPlaylists: self.init(key: .allPlaylists, capability: .names, name: title)

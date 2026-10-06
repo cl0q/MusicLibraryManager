@@ -1,806 +1,396 @@
 import SwiftUI
 
-// MARK: Accessibility labels for shotty UI automation (snake_case literals)
+// MARK: - Folders (V-FOLD, DEC-024 variant A)
 
-/// Folder browser — split pane with disk tree (left) and tracks (right).
+/// The library folder as it is laid out on disk: one hierarchical table (folders with counts,
+/// tracks with the All Tracks columns, files that aren't in the library) with a path bar at the
+/// bottom. Its own scaffold (like the playlist pages): drive banner, the place's lines (offline
+/// hint, filter result, files not in the library), the table, the path bar, the selection bar
+/// and the status bar (`12 folders · 1,204 tracks`).
 struct FoldersView: View {
-    @Environment(\.container) private var container
-    @State private var viewModel: FolderViewModel?
-    @State private var availablePlaylists: [Playlist] = []
-    @State private var availableSyncProfiles: [SyncProfile] = []
-    @Environment(ToolbarSearchModel.self) private var search: ToolbarSearchModel?
+    let onTrackActivated: TrackActivation
 
-    var onTrackDoubleClick: ((Track, [Track]) -> Void)?
+    @State private var model = FolderModelStore.shared.model()
+    @State private var live = TrackTableLive()
+
+    @Environment(\.container) private var container
+    @Environment(StatusBarCenter.self) private var statusBar: StatusBarCenter?
+    @Environment(UndoCenter.self) private var undo: UndoCenter?
+    @Environment(ShellActions.self) private var shell: ShellActions?
+    @Environment(NavigationModel.self) private var navigation: NavigationModel?
+    @Environment(ToolbarSearchModel.self) private var search: ToolbarSearchModel?
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        Group {
-            if let viewModel {
-                foldersContent(viewModel)
-            } else {
-                ProgressView("Loading folders…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.mlmBase)
-            }
+        ContentScaffold(showsDriveBanner: true) {
+            content
+                .statusBarText(statusText)
+        } scopeBar: {
+            FolderInfoLines(model: model, folderActions: folderActions, clearFilters: clearFilters)
+        } selectionBar: {
+            // Above the path bar, never over it or the status bar (UC-SELBAR-01).
+            TrackSelectionBar()
+                .padding(.bottom, model.phase == .ready ? FolderPathBar.height : 0)
         }
+        .hostsTrackSelectionBar()
+        .navigationTitle(title)
+        .navigationSubtitle(LibraryFooter.libraryName(LibraryLaunchCoordinator.shared))
+        .focusedSceneValue(\.folderScan, scanCommand)
         .task {
-            initializeViewModel()
-            await viewModel?.loadRootFolders()
-            applySearch(container.searchCoordinator.filter(for: .folders))
+            await model.load()
+            model.applyFilter(container.searchCoordinator.filter(for: .folders))
             openRequestedFolder()
-            await reloadPlaylists()
-            await reloadSyncProfiles()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .libraryDidImport)) { _ in
-            Task { await viewModel?.refresh() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .libraryDidDeleteTracks)) { note in
-            if let ids = note.userInfo?["removedIds"] as? [Int64] {
-                viewModel?.removeTracks(ids: Set(ids))
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { _ in
-            Task { await reloadPlaylists() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .syncProfileDidChange)) { _ in
-            Task { await reloadSyncProfiles() }
-        }
-        // In-place filter (W2-I): the toolbar field filters the folders by name; the view's
-        // own filter field is gone (one search field, UC-SEARCH-01).
+        // In-place filter: folders by name, tracks by the track filter (W2-I seam).
         .onChange(of: container.searchCoordinator.filter(for: .folders)) { _, filter in
-            applySearch(filter)
+            model.applyFilter(filter)
         }
-        // A folder chosen in the search field's Library results.
-        .onChange(of: FolderOpenRequest.shared.path) { _, _ in
-            openRequestedFolder()
-        }
-        .onChange(of: viewModel?.selectedFolderPath) { _, _ in
-            viewModel?.persistLastSelection()
+        .onChange(of: FolderOpenRequest.shared.path) { _, _ in openRequestedFolder() }
+        .onChange(of: LibraryDriveState.current(container)) { _, _ in model.driveStateChanged() }
+        .background { FolderRevealTaker(model: model) }
+        .onDisappear { model.placeDidDisappear() }
+        .onReceive(NotificationCenter.default.publisher(for: .libraryFilesDidChange)) { _ in model.libraryFilesDidChange() }
+        .onReceive(NotificationCenter.default.publisher(for: .libraryDidImport)) { _ in model.libraryFilesDidChange() }
+        .onReceive(NotificationCenter.default.publisher(for: .libraryRootDidChange)) { _ in Task { await model.load() } }
+        .onReceive(NotificationCenter.default.publisher(for: .trackMetadataDidChange)) { _ in model.trackMetadataDidChange() }
+        .onReceive(NotificationCenter.default.publisher(for: .trackAvailabilityDidChange)) { _ in model.trackMetadataDidChange() }
+        .onReceive(NotificationCenter.default.publisher(for: .libraryDidDeleteTracks)) { note in
+            let ids = (note.userInfo?["removedIds"] as? [Int64]) ?? (note.userInfo?["deletedIDs"] as? [Int64]) ?? []
+            model.removeTracks(ids: Set(ids))
         }
     }
 
-    // MARK: - Content
+    private var title: String {
+        model.root.isEmpty ? SidebarDestination.folders.fixedTitle : model.rootName
+    }
 
-    private func foldersContent(_ viewModel: FolderViewModel) -> some View {
-        VStack(spacing: 0) {
-            headerBar(viewModel)
+    // MARK: Content by state (UC §18)
 
-            Divider()
-                .background(Color.mlmEdge)
-
-            if viewModel.isDriveNotMounted {
-                driveNotMountedState
-            } else if viewModel.isLoading && viewModel.rootNodes.isEmpty {
-                loadingState
-            } else if viewModel.rootNodes.isEmpty {
-                emptyState(viewModel)
-            } else {
-                splitPane(viewModel)
+    @ViewBuilder
+    private var content: some View {
+        switch model.phase {
+        case .loading:
+            FolderPlaceholderTable()
+        case .noLibraryFolder:
+            ContentUnavailableView {
+                Label("No library folder", systemImage: "folder")
+            } description: {
+                Text("This library has no library folder yet, so there are no folders to show. Choose one in Settings ▸ Library.")
+            } actions: {
+                Button("Open Settings ▸ Library") { openSettings(tab: .library) }
+            }
+        case .failed(let kind, let details):
+            failure(kind, details: details)
+        case .ready:
+            VStack(spacing: 0) {
+                FolderOutlineTable(model: model, configuration: configuration, actions: trackActions,
+                                   folderActions: folderActions, live: live)
+                    .overlay {
+                        if let empty = emptyState {
+                            empty
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .background(.background)
+                                .dropTarget(.folderRow(path: model.root, name: model.rootName), cornerRadius: 0)
+                        }
+                    }
+                FolderPathBar(model: model)
             }
         }
-        .background(Color.mlmBase)
-        // The folder count moved from the window toolbar (P-TOOLBAR.E05) to the status bar.
-        .statusBarText(StatusBarText.folders(viewModel.folderCount))
     }
 
-    // MARK: - Header
-
-    private func headerBar(_ viewModel: FolderViewModel) -> some View {
-        HStack(spacing: 8) {
-            Text("Folders")
-                .font(MLMFont.pageTitle)
-                .foregroundColor(.mlmInk)
-
-            Text("\(viewModel.folderCount)")
-                .font(MLMFont.badge)
-                .foregroundColor(.mlmInkMuted)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Color.mlmRaised)
-                .clipShape(Capsule())
-
-            Spacer()
-
+    /// Filtered-empty (UC-EMPTY-02) or an empty folder.
+    private var emptyState: AnyView? {
+        if model.isFilteredEmpty {
+            let query = model.filter.displayText
+            return AnyView(ContentUnavailableView {
+                Label("No Results for “\(query)”", systemImage: "magnifyingglass")
+            } description: {
+                Text("No folder or track in “\(model.rootName)” matches “\(query)”.")
+            } actions: {
+                Button("Clear Filters") { clearFilters() }
+                Button("Search the Library") { search?.focus(scope: .library) }
+                Button("Search Online") { search?.focus(scope: .online) }
+            })
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        guard model.filterMatch == nil, model.outline.rows.isEmpty else { return nil }
+        if let volume = LibraryDriveState.current(container).isOffline ? LibraryDriveState.current(container).volumeName : nil {
+            return AnyView(ContentUnavailableView {
+                Label("No library tracks in “\(model.rootName)”", systemImage: "folder")
+            } description: {
+                Text("Folders without library tracks show when “\(volume)” is connected.")
+            })
+        }
+        return AnyView(ContentUnavailableView {
+            Label("“\(model.rootName)” is empty", systemImage: "folder")
+        } description: {
+            Text("There are no audio files or folders in it. Drop files here to import them.")
+        } actions: {
+            Button("Import Files or Folder…") { shell?.chooseImportFolder() }
+        })
     }
 
-    // MARK: - Search (W2-I)
-
-    private func applySearch(_ filter: SearchFilter) {
-        let text = filter.parsed.freeText
-        guard let viewModel, viewModel.searchQuery != text else { return }
-        viewModel.searchQuery = text
+    @ViewBuilder
+    private func failure(_ kind: FolderViewModel.FailureKind, details: String) -> some View {
+        ContentUnavailableView {
+            switch kind {
+            case .libraryFolderUnreadable:
+                Label("Can’t read the library folder", systemImage: "exclamationmark.triangle")
+            case .database:
+                Label("Couldn’t load the folders", systemImage: "exclamationmark.triangle")
+            }
+        } description: {
+            switch kind {
+            case .libraryFolderUnreadable(let reason):
+                Text("MLM couldn’t read “\(model.libraryFolderName)” — \(reason). Your music and your library file are not affected.")
+            case .database:
+                Text("MLM couldn’t read the library file. Your music is not affected.")
+            }
+        } actions: {
+            Button("Try Again") { Task { await model.load() } }
+            if case .libraryFolderUnreadable = kind, let url = model.url("") {
+                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+            }
+            Button("Show Logs") { ActivityRouter.shared.showLogs(for: nil) }
+            DisclosureGroup("Details") {
+                Text(details)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
     }
 
+    // MARK: The track-table parts
+
+    private var configuration: TrackListConfiguration {
+        TrackListConfiguration(
+            listContext: .folder(path: model.root, name: model.rootName),
+            persistenceKey: "folders",
+            columns: FolderOutlineTable.columns,
+            defaultSort: TrackSortOrder(column: .title, ascending: true),
+            // The status text is the place's own (folders and tracks, `statusText`).
+            publishesStatusText: false,
+            accessibilityID: "folders_outline_table",
+            activate: onTrackActivated
+        )
+    }
+
+    private var trackActions: TrackListActions {
+        TrackListActions(model: model.trackList, configuration: configuration, live: live,
+                         statusBar: statusBar, undo: undo, shell: shell, container: container, navigation: navigation)
+    }
+
+    private var folderActions: FolderActions {
+        FolderActions(model: model, trackActions: trackActions, shell: shell, statusBar: statusBar, undo: undo, container: container)
+    }
+
+    // MARK: Status bar (UC-STATUS-02/03)
+
+    /// `12 folders · 1,204 tracks`; with a selection of tracks the shared `‹n› selected · ‹time›`;
+    /// one folder `“2026” · 48 tracks`; a mixed selection `‹n› selected`.
+    private var statusText: String? {
+        let selection = model.trackList.selection
+        guard !selection.isEmpty else { return model.statusText }
+        let selectedRows = model.outline.order.filter(selection.contains)
+        let folders = selectedRows.compactMap { model.folder(id: $0) }
+        let tracks = model.trackList.selectedRows(selection)
+        guard !selectedRows.isEmpty else { return model.statusText }
+        if folders.isEmpty, tracks.count == selectedRows.count {
+            let seconds = tracks.reduce(0) { $0 + max($1.track.duration ?? 0, 0) }
+            return "\(tracks.count.formatted(.number)) selected · \(TrackDurationText.total(seconds))"
+        }
+        if folders.count == 1, selectedRows.count == 1 {
+            return "“\(folders[0].name)” · \(StatusBarText.tracks(folders[0].trackCount))"
+        }
+        return "\(selectedRows.count.formatted(.number)) selected"
+    }
+
+    // MARK: ⌘R (UC-KEY-15)
+
+    private var scanCommand: FolderScanCommand? {
+        guard model.phase == .ready else { return nil }
+        let folder = model.headerFolder
+        let offline = LibraryDriveState.current(container)
+        return FolderScanCommand(
+            folderName: FolderPath.name(of: folder, libraryFolderName: model.libraryFolderName),
+            disabledReason: offline.isOffline ? offline.volumeName.map(TrackMenu.notConnectedHelp)
+                : (model.scanning.contains(folder) ? "This folder is being scanned." : nil),
+            perform: { [model] in Task { await model.scan(folder) } }
+        )
+    }
+
+    // MARK: Search
+
+    private func clearFilters() {
+        if let search, search.place.key == .folders {
+            search.clear()
+        } else {
+            container.searchCoordinator.commit(.empty, for: .folders)
+        }
+        model.applyFilter(SearchFilter())
+    }
+
+    /// A folder chosen in the search field's Library results.
     private func openRequestedFolder() {
-        guard let viewModel, let path = FolderOpenRequest.shared.take() else { return }
-        Task {
-            await viewModel.ensureAncestorsLoaded(for: path)
-            viewModel.selectedFolderPath = path
-        }
+        guard model.phase == .ready, let path = FolderOpenRequest.shared.take() else { return }
+        model.revealFolder(absolutePath: path)
     }
+}
 
-    // MARK: - Split Pane
+/// `Scan This Folder` ⌘R of the visible Folders place (Track ▸ Refresh from Source, UC-KEY-15):
+/// the selected folder, else the root.
+struct FolderScanCommand {
+    let folderName: String
+    /// Why it can't run now (drive away, a scan of it runs); nil = enabled.
+    let disabledReason: String?
+    let perform: @MainActor () -> Void
+}
 
-    private func splitPane(_ viewModel: FolderViewModel) -> some View {
-        HSplitView {
-            FolderTreeView(viewModel: viewModel)
-                .frame(minWidth: 180, idealWidth: 240, maxWidth: 360)
+extension FocusedValues {
+    /// The Folders place on screen (W3-FOLD): ⌘R scans its folder.
+    @Entry var folderScan: FolderScanCommand?
+}
 
-            folderTracksPane(viewModel)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+// MARK: - The place's lines (UC-LAYOUT-01 scope-bar slot, V-FOLD.E02/E08/N06)
+
+/// One line each, only when it applies: the drive-away consequence for this screen
+/// (UC-EMPTY-07), the filter result with `Clear Filters`, the running import's echo
+/// (UC-JOB-07), and `‹n› files in this folder aren’t in the library · Import` (§15.9).
+private struct FolderInfoLines: View {
+    let model: FolderViewModel
+    let folderActions: FolderActions
+    let clearFilters: () -> Void
+
+    @Environment(\.container) private var container
+
+    var body: some View {
+        let drive = LibraryDriveState.current(container)
+        VStack(spacing: 0) {
+            if model.phase == .ready {
+                if drive.isOffline, let volume = drive.volumeName {
+                    line(systemImage: "externaldrive.badge.xmark") {
+                        Text("Files that aren’t in the library can’t be listed until “\(volume)” is connected.")
+                    }
+                }
+                if let summary = model.filterSummary {
+                    line(systemImage: "magnifyingglass") {
+                        Text(summary)
+                        Spacer(minLength: Spacing.s)
+                        Button("Clear Filters", action: clearFilters)
+                    }
+                }
+                importLine
+            }
         }
     }
 
     @ViewBuilder
-    private func folderTracksPane(_ viewModel: FolderViewModel) -> some View {
-        @Bindable var viewModel = viewModel
-        
-        if !viewModel.searchQuery.isEmpty {
-            let results = viewModel.searchResults
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 12))
-                        .foregroundColor(.accentColor)
-                    Text("Search results for \"\(viewModel.searchQuery)\"")
-                        .font(MLMFont.sectionHeader)
-                        .foregroundColor(.mlmInk)
-                    
-                    if viewModel.isSearching {
-                        ProgressView()
-                            .controlSize(.small)
-                            .padding(.leading, 4)
-                    }
-                    
-                    Spacer()
-                    Text("\(results.count) folders found")
-                        .font(MLMFont.muted)
-                        .foregroundColor(.mlmInkMuted)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color.mlmSurface)
-                
-                Divider()
-                    .background(Color.mlmEdge)
-                
-                if results.isEmpty && !viewModel.isSearching {
-                    VStack {
-                        Spacer()
-                        ContentUnavailableView.search(text: viewModel.searchQuery)
-                        Spacer()
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if results.isEmpty && viewModel.isSearching {
-                    VStack {
-                        Spacer()
-                        ProgressView("Searching…")
-                        Spacer()
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    FolderSearchResultsTable(
-                        results: results,
-                        viewModel: viewModel,
-                        onDoubleClick: { node in
-                            viewModel.selectedFolderPath = node.id
-                            // Opening a found folder ends the filter (the field clears too).
-                            search?.clear()
-                            viewModel.searchQuery = ""
-                        }
-                    )
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .background(Color.mlmBase)
-        } else if let selectedPath = viewModel.selectedFolderPath {
-            let selectedNode = viewModel.findNode(for: selectedPath)
-            let subfolders = (selectedNode?.children ?? []).filter { !$0.id.hasSuffix("/__placeholder__") }
-            let tracks = viewModel.tracksInFolder
-            let hasSubfolders = !(selectedNode?.children.isEmpty ?? true)
-
-            VStack(spacing: 0) {
-                folderBreadcrumb(selectedPath, viewModel: viewModel)
-
-                Divider()
-                    .background(Color.mlmEdge)
-
-                if viewModel.unindexedAudioFileCount > 0 {
-                    HStack(spacing: 10) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(Color.mlmAttention)
-                        Text("\(viewModel.unindexedAudioFileCount) files in this folder are not in the library")
-                            .font(MLMFont.muted)
-                            .foregroundStyle(Color.mlmInkSecondary)
-                        Spacer()
-                        Button("Import") {
-                            Task { await importUnindexedFiles(from: selectedPath, viewModel: viewModel) }
-                        }
-                        .buttonStyle(.bordered)
-                        .accessibilityIdentifier("folder_import_banner_button")
-                        .accessibilityLabel("folder_import_banner_button")
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color.mlmAttention.opacity(0.1))
-                }
-
-                if !hasSubfolders && tracks.isEmpty {
-                    VStack {
-                        Spacer()
-                        ContentUnavailableView {
-                            Label("Folder is empty", systemImage: "folder")
-                        } description: {
-                            Text("This folder contains no music tracks or subfolders.")
-                        }
-                        Spacer()
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if hasSubfolders && !tracks.isEmpty {
-                    VSplitView {
-                        VStack(alignment: .leading, spacing: 0) {
-                            HStack(spacing: 8) {
-                                Text("Subfolders")
-                                    .font(MLMFont.sectionHeader)
-                                    .foregroundColor(.mlmInk)
-                                Text("\(subfolders.count)")
-                                    .font(MLMFont.badge)
-                                    .foregroundColor(.mlmInkMuted)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.mlmRaised)
-                                    .clipShape(Capsule())
-                                
-                                if viewModel.loadingNodePaths.contains(selectedPath) {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                }
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            
-                            Divider()
-                                .background(Color.mlmEdge)
-
-                            FolderSubfoldersTable(
-                                subfolders: subfolders,
-                                viewModel: viewModel,
-                                onDoubleClick: { node in
-                                    viewModel.selectedFolderPath = node.id
-                                }
-                            )
-                        }
-                        .frame(minHeight: 120, idealHeight: 200, maxHeight: .infinity)
-
-                        VStack(alignment: .leading, spacing: 0) {
-                            HStack {
-                                Text("Tracks")
-                                    .font(MLMFont.sectionHeader)
-                                    .foregroundColor(.mlmInk)
-                                Text("\(tracks.count)")
-                                    .font(MLMFont.badge)
-                                    .foregroundColor(.mlmInkMuted)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.mlmRaised)
-                                    .clipShape(Capsule())
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            
-                            Divider()
-                                .background(Color.mlmEdge)
-
-                            FolderTracksTable(
-                                tracks: tracks,
-                                availabilityByTrackID: viewModel.availabilityByTrackID,
-                                selectedTrackIDs: $viewModel.selectedTrackIDs,
-                                availablePlaylists: availablePlaylists,
-                                availableSyncProfiles: availableSyncProfiles,
-                                onDoubleClick: onTrackDoubleClick
-                            )
-                        }
-                        .frame(minHeight: 120, idealHeight: 300, maxHeight: .infinity)
-                    }
-                } else if hasSubfolders {
-                    VStack(alignment: .leading, spacing: 0) {
-                        HStack(spacing: 8) {
-                            Text("Subfolders")
-                                .font(MLMFont.sectionHeader)
-                                .foregroundColor(.mlmInk)
-                            Text("\(subfolders.count)")
-                                .font(MLMFont.badge)
-                                .foregroundColor(.mlmInkMuted)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.mlmRaised)
-                                .clipShape(Capsule())
-                            
-                            if viewModel.loadingNodePaths.contains(selectedPath) {
-                                ProgressView()
-                                    .controlSize(.small)
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        
-                        Divider()
-                            .background(Color.mlmEdge)
-
-                        FolderSubfoldersTable(
-                            subfolders: subfolders,
-                            viewModel: viewModel,
-                            onDoubleClick: { node in
-                                viewModel.selectedFolderPath = node.id
-                            }
-                        )
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    VStack(alignment: .leading, spacing: 0) {
-                        HStack {
-                            Text("Tracks")
-                                .font(MLMFont.sectionHeader)
-                                .foregroundColor(.mlmInk)
-                            Text("\(tracks.count)")
-                                .font(MLMFont.badge)
-                                .foregroundColor(.mlmInkMuted)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.mlmRaised)
-                                .clipShape(Capsule())
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        
-                        Divider()
-                            .background(Color.mlmEdge)
-
-                        FolderTracksTable(
-                            tracks: tracks,
-                            availabilityByTrackID: viewModel.availabilityByTrackID,
-                            selectedTrackIDs: $viewModel.selectedTrackIDs,
-                            availablePlaylists: availablePlaylists,
-                            availableSyncProfiles: availableSyncProfiles,
-                            onDoubleClick: onTrackDoubleClick
-                        )
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .background(Color.mlmBase)
-        } else {
-            VStack(spacing: 12) {
-                Image(systemName: "folder")
-                    .font(.system(size: 36))
-                    .foregroundColor(.mlmInkMuted)
-                Text("Select a folder")
-                    .font(MLMFont.body)
-                    .foregroundColor(.mlmInkSecondary)
-                Text("Select a folder from the tree on the left to view its tracks.")
-                    .font(MLMFont.muted)
-                    .foregroundColor(.mlmInkMuted)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 260)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.mlmBase)
-        }
-    }
-
-    // MARK: - Breadcrumb
-
-    private func folderBreadcrumb(_ path: String, viewModel: FolderViewModel) -> some View {
-        let relPath = viewModel.relativePath(for: path)
-        let segments = relPath.split(separator: "/").map(String.init)
-        let rootPath = viewModel.libraryRootURL?.path ?? ""
-        let rootPrefix = rootPath.isEmpty ? "" : (rootPath.hasSuffix("/") ? rootPath : rootPath + "/")
-
-        return HStack(spacing: 4) {
-            Image(systemName: "folder.fill")
-                .font(.system(size: 12))
-                .foregroundColor(.accentColor)
-
-            ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
-                if index > 0 {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9))
-                        .foregroundColor(.mlmInkMuted)
-                }
-
-                let relPart = segments.prefix(index + 1).joined(separator: "/")
-                let fullSegPath = rootPrefix + relPart
-
-                Button {
-                    viewModel.selectedFolderPath = fullSegPath
-                } label: {
-                    Text(segment)
-                        .font(MLMFont.body)
-                        .foregroundColor(
-                            index == segments.count - 1 ? .mlmInk : .mlmInkSecondary
-                        )
-                }
-                .buttonStyle(.plain)
-            }
-
-            Spacer()
-
-            Text("\(viewModel.tracksInFolder.count) Tracks")
-                .font(MLMFont.muted)
-                .foregroundColor(.mlmInkMuted)
-
-            Button {
-                viewModel.revealInFinder()
-            } label: {
-                Image(systemName: "arrow.right.circle")
-                    .font(.system(size: 12))
-                    .foregroundColor(.mlmInkSecondary)
-            }
-            .buttonStyle(.plain)
-            .help("Show in Finder")
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(Color.mlmSurface)
-    }
-
-    // MARK: - States
-
-    private var driveNotMountedState: some View {
-        ContentUnavailableView {
-            Label("Drive not connected", systemImage: "externaldrive.badge.xmark")
-        } description: {
-            Text("The external drive containing the music library is not connected.")
-        }
-    }
-
-    private var loadingState: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-                .controlSize(.large)
-            Text("Loading folder structure…")
-                .font(MLMFont.body)
-                .foregroundColor(.mlmInkSecondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func emptyState(_ viewModel: FolderViewModel) -> some View {
-        Group {
-            if viewModel.searchQuery.isEmpty {
-                ContentUnavailableView {
-                    Label("No folders", systemImage: "folder")
-                } description: {
-                    Text("Import music to view the folder structure.")
-                }
-            } else {
-                ContentUnavailableView.search(text: viewModel.searchQuery)
-            }
-        }
-    }
-
-    // MARK: - Helpers
-
-    private func initializeViewModel() {
-        guard viewModel == nil,
-              let trackRepo = container.trackRepository,
-              let configRepo = container.configRepository else { return }
-        viewModel = FolderViewModel(trackRepository: trackRepo, configRepository: configRepo)
-    }
-
-    private func reloadPlaylists() async {
-        guard let repo = container.playlistRepository else { return }
-        availablePlaylists = (try? await repo.fetchAll()) ?? []
-    }
-
-    private func reloadSyncProfiles() async {
-        if let syncVM = container.syncViewModel {
-            if syncVM.profiles.isEmpty {
-                await syncVM.loadProfiles()
-            }
-            availableSyncProfiles = syncVM.profiles
-        }
-    }
-
-    private func importUnindexedFiles(from path: String, viewModel: FolderViewModel) async {
-        guard let importService = container.importService, let config = container.configRepository else { return }
-        // W3-ACT: through the registered import — `Scan “‹folder›”` with progress, Cancel and its
-        // result in Activity (was silent, errors swallowed). It posts the import notifications.
-        let importer = ImportViewModel(importService: importService, configRepository: config, activity: .shared)
-        await importer.importFromDirectory(URL(fileURLWithPath: path))
-        // A finished import posted these itself; after a cancel or an error some files may be
-        // committed — post them as the old path always did (W3-ACT S7).
-        if importer.lastResult == nil || importer.lastResult?.cancelled == true {
-            NotificationCenter.default.post(name: .libraryDidImport, object: nil)
-            NotificationCenter.default.post(name: .libraryFilesDidChange, object: nil)
-        }
-        await viewModel.refresh()
-    }
-
-}
-
-// MARK: - Folder Tracks Table
-
-struct FolderTracksTable: View {
-    let tracks: [Track]
-    let availabilityByTrackID: [Int64: TrackAvailability]
-    @Binding var selectedTrackIDs: Set<Int64>
-    var availablePlaylists: [Playlist]
-    var availableSyncProfiles: [SyncProfile]
-    var onDoubleClick: ((Track, [Track]) -> Void)?
-
-    @Environment(\.container) private var container
-
-    private struct TrackRow: Identifiable {
-        let id: Int64
-        let track: Track
-    }
-
-    @State private var sortOrder: [KeyPathComparator<TrackRow>] = [
-        KeyPathComparator(\.track.title, order: .forward)
-    ]
-
-    private var rows: [TrackRow] {
-        tracks
-            .compactMap { t in t.id.map { TrackRow(id: $0, track: t) } }
-            .sorted(using: sortOrder)
-    }
-
-    var body: some View {
-        Table(selection: $selectedTrackIDs, sortOrder: $sortOrder) {
-            TableColumn("Title", value: \.track.title) { row in
-                HStack(spacing: 6) {
-                    if isNowPlaying(row.track) {
-                        Image(systemName: "speaker.wave.2.fill")
-                            .imageScale(.small)
-                            .foregroundStyle(Color.mlmAccent)
-                            .symbolEffect(.variableColor, isActive: true)
-                    }
-                    Text(row.track.title)
-                        .lineLimit(1)
-                        .foregroundStyle(isNowPlaying(row.track) ? Color.mlmAccent : Color.mlmInk)
-                }
-            }
-            .width(min: 140, ideal: 260)
-
-            TableColumn("Artist", value: \.track.artist) { row in
-                TrackMetadataText(row.track.artist, secondary: true)
-            }
-            .width(min: 100, ideal: 180)
-
-            TableColumn("Album", value: \.track.album) { row in
-                TrackMetadataText(row.track.album, secondary: true)
-            }
-            .width(min: 100, ideal: 180)
-
-            TableColumn("Time", value: \.track.durationSortKey) { row in
-                Text(row.track.formattedDuration)
-                    .foregroundStyle(.secondary)
+    private var importLine: some View {
+        let folder = model.headerFolder
+        if let url = model.url(folder), let echo = ActivityCenter.shared.echo(for: .folder(url)),
+           echo.state == .running || echo.state == .queued {
+            line(systemImage: "square.and.arrow.down") {
+                Text(echo.playlistText)
                     .monospacedDigit()
-            }
-            .width(54)
-
-            TableColumn("Format", value: \.track.format) { row in
-                Text(displayFormat(for: row.track))
-                    .foregroundStyle(.secondary)
-            }
-            .width(60)
-
-            TableColumn("Source") { row in
-                Text(TrackMetadataPresentation.sourceName(for: row.track))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            .width(100)
-
-            TableColumn("Status") { row in
-                if let trackID = row.track.id,
-                   let availability = availabilityByTrackID[trackID],
-                   let statusChip = StatusChip(availability: availability) {
-                    statusChip
+                if let fraction = echo.fraction {
+                    ProgressView(value: fraction)
+                        .frame(width: 160)
                 }
+                Spacer(minLength: Spacing.s)
+                Button("Show in Activity") { ActivityRouter.shared.showPopover() }
+                    .buttonStyle(.link)
             }
-            .width(90)
-
-            TableColumn("kbps", value: \.track.bitrateSortKey) { row in
-                Text(row.track.bitrate.map { "\($0)" } ?? "—")
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            .width(48)
-
-            TableColumn("Energy", value: \.track.energySortKey) { row in
-                EnergyBars(level: row.track.energyBucket)
-            }
-            .width(56)
-
-            TableColumn("Dance", value: \.track.danceabilitySortKey) { row in
-                DanceabilitySteps(score: row.track.danceability)
-            }
-            .width(56)
-        } rows: {
-            ForEach(rows) { row in
-                TableRow(row)
-                    // The shared track payload: ids + the local file (W2-H, D-FOLD-TRACKS-OUT).
-                    .draggable(TrackDragContext.current(.shared).item(for: row.track)
-                        ?? TrackDragItem(trackId: row.id, libraryId: nil))
+        } else if let files = model.notInLibraryFiles(under: folder), !files.isEmpty {
+            line(systemImage: "doc.badge.plus") {
+                Text(FolderNotInLibrary.headerText(count: files.count, isLibraryFolder: folder.isEmpty))
+                if !folder.isEmpty {
+                    Text("“\(FolderPath.name(of: folder, libraryFolderName: model.libraryFolderName))”")
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: Spacing.s)
+                Button("Import") { Task { await model.importNotInLibrary(under: folder) } }
             }
         }
-        .contextMenu(forSelectionType: Int64.self) { selectedIDs in
-            TrackContextMenu(
-                selectedTrackIDs: selectedIDs,
-                tracks: tracks,
-                availablePlaylists: availablePlaylists,
-                availableSyncProfiles: availableSyncProfiles,
-                addToSyncProfile: { profile in
-                    Task {
-                        await container.syncViewModel?.addTracks(Array(selectedIDs), to: profile)
-                    }
-                }
-            )
-        } primaryAction: { selectedIDs in
-            if let trackID = selectedIDs.first,
-               let track = tracks.first(where: { $0.id == trackID }) {
-                onDoubleClick?(track, rows.map(\.track))
-            }
-        }
-        .accessibilityIdentifier("folders_tracks_table")
-        .accessibilityLabel("folders_tracks_table")
     }
 
-    private func isNowPlaying(_ track: Track) -> Bool {
-        guard let playbackVM = container.playbackViewModel,
-              let currentTrack = playbackVM.currentTrack,
-              let currentID = currentTrack.id,
-              let trackID = track.id else {
-            return false
+    private func line<Content: View>(systemImage: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack(spacing: Spacing.s) {
+            Image(systemName: systemImage)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            content()
         }
-        return currentID == trackID && playbackVM.isPlaying
-    }
-
-    private func displayFormat(for track: Track) -> String {
-        let format = track.format.trimmingCharacters(in: .whitespacesAndNewlines)
-        return format.isEmpty ? "—" : format.uppercased()
+        .font(.callout)
+        .padding(.horizontal, Spacing.m)
+        .padding(.vertical, Spacing.xs)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background)
+        .overlay(alignment: .bottom) { Divider() }
+        .accessibilityElement(children: .combine)
     }
 }
 
-// MARK: - Folder Subfolders Table
+// MARK: - First load (UC-TABLE-09)
 
-struct FolderSubfoldersTable: View {
-    let subfolders: [DiskFolderNode]
-    let viewModel: FolderViewModel
-    var onDoubleClick: (DiskFolderNode) -> Void
-
-    private struct FolderRow: Identifiable {
-        let id: String
-        let node: DiskFolderNode
-    }
-
-    @State private var selectedFolderID: String?
-    @State private var sortOrder: [KeyPathComparator<FolderRow>] = [
-        KeyPathComparator(\.node.name, order: .forward)
-    ]
-
-    private var rows: [FolderRow] {
-        subfolders
-            .map { FolderRow(id: $0.id, node: $0) }
-            .sorted(using: sortOrder)
-    }
-
+/// Redacted rows under the real column header while the folders are read the first time.
+private struct FolderPlaceholderTable: View {
     var body: some View {
-        Table(selection: $selectedFolderID, sortOrder: $sortOrder) {
-            TableColumn("Name", value: \.node.name) { row in
-                HStack(spacing: 6) {
-                    Image(systemName: "folder.fill")
-                        .foregroundColor(.accentColor)
-                        .imageScale(.medium)
-                    Text(row.node.name)
-                        .lineLimit(1)
-                }
-            }
-            .width(min: 150, ideal: 300)
-
-            TableColumn("Subfolders", value: \.node.children.count.description) { row in
-                Text(row.node.children.isEmpty ? "—" : "\(row.node.children.count)")
-                    .foregroundColor(.secondary)
-            }
-            .width(100)
-
-            TableColumn("Path", value: \.node.id) { row in
-                Text(viewModel.relativePath(for: row.node.id))
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-            }
-            .width(min: 150, ideal: 300)
-        } rows: {
-            ForEach(rows) { row in
-                TableRow(row)
-            }
+        Table(TrackTablePlaceholders.rows) {
+            TableColumn("Name") { row in Text(row.title) }
+            TableColumn("Artist") { row in Text(row.artistText ?? "") }
+            TableColumn("Album") { row in Text(row.albumText ?? "") }
+            TableColumn("Time") { row in Text(row.timeText ?? "") }
+            TableColumn("Status") { _ in Text("") }
         }
-        .contextMenu(forSelectionType: String.self) { selectedIDs in
-            if let firstID = selectedIDs.first {
-                Button("Show in Finder") {
-                    NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: firstID)
-                }
-            }
-        } primaryAction: { selectedIDs in
-            if let firstID = selectedIDs.first,
-               let node = subfolders.first(where: { $0.id == firstID }) {
-                onDoubleClick(node)
-            }
-        }
-        .accessibilityIdentifier("folders_subfolders_table")
-        .accessibilityLabel("folders_subfolders_table")
+        .redacted(reason: .placeholder)
+        .allowsHitTesting(false)
+        .accessibilityLabel("Loading folders")
     }
 }
 
-// MARK: - Folder Search Results Table
+// MARK: - Go to Current Track ⌘L (W2-C)
 
-struct FolderSearchResultsTable: View {
-    let results: [DiskFolderNode]
-    let viewModel: FolderViewModel
-    var onDoubleClick: (DiskFolderNode) -> Void
-
-    private struct FolderRow: Identifiable {
-        let id: String
-        let node: DiskFolderNode
-    }
-
-    @State private var selectedFolderID: String?
-    @State private var sortOrder: [KeyPathComparator<FolderRow>] = [
-        KeyPathComparator(\.node.name, order: .forward)
-    ]
-
-    private var rows: [FolderRow] {
-        results
-            .map { FolderRow(id: $0.id, node: $0) }
-            .sorted(using: sortOrder)
-    }
+/// Takes a `TrackListReveal` request for Folders: opens the folders above the track, selects it
+/// and scrolls to it once its row is shown.
+private struct FolderRevealTaker: View {
+    let model: FolderViewModel
+    @Environment(StatusBarCenter.self) private var statusBar: StatusBarCenter?
 
     var body: some View {
-        Table(selection: $selectedFolderID, sortOrder: $sortOrder) {
-            TableColumn("Name", value: \.node.name) { row in
-                HStack(spacing: 6) {
-                    Image(systemName: "folder.fill")
-                        .foregroundColor(.accentColor)
-                        .imageScale(.medium)
-                    Text(row.node.name)
-                        .lineLimit(1)
-                }
-            }
-            .width(min: 150, ideal: 300)
-
-            TableColumn("Subfolders", value: \.node.children.count.description) { row in
-                Text(row.node.children.isEmpty ? "—" : "\(row.node.children.count)")
-                    .foregroundColor(.secondary)
-            }
-            .width(100)
-
-            TableColumn("Path", value: \.node.id) { row in
-                Text(viewModel.relativePath(for: row.node.id))
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-            }
-            .width(min: 200, ideal: 400)
-        } rows: {
-            ForEach(rows) { row in
-                TableRow(row)
-            }
+        let request = TrackListReveal.shared.request.flatMap { request -> TrackListReveal.Request? in
+            if case .folder = request.container, request.listKey == "folders" { return request }
+            return nil
         }
-        .contextMenu(forSelectionType: String.self) { selectedIDs in
-            if let firstID = selectedIDs.first {
-                Button("Show in Finder") {
-                    NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: firstID)
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .task(id: RevealKey(requestID: request?.id, ready: model.phase == .ready, rows: model.trackList.rows.count)) {
+                guard let request, model.phase == .ready else { return }
+                if model.trackList.row(id: request.trackID) != nil {
+                    model.trackList.selection = [request.trackID]
+                    model.trackList.scrollTo(request.trackID)
+                    TrackListReveal.shared.done(request.id)
+                    return
                 }
+                if !model.reveal(trackID: request.trackID) {
+                    TrackListReveal.shared.done(request.id)
+                    statusBar?.post(TrackListReveal.absentMessage(title: request.title))
+                    return
+                }
+                // The row appears once its folder's tracks are loaded (a new row count restarts this).
+                try? await Task.sleep(for: TrackListReveal.absentGrace)
+                guard !Task.isCancelled, TrackListReveal.shared.request?.id == request.id,
+                      model.trackList.row(id: request.trackID) == nil else { return }
+                TrackListReveal.shared.done(request.id)
+                statusBar?.post(TrackListReveal.absentMessage(title: request.title))
             }
-        } primaryAction: { selectedIDs in
-            if let firstID = selectedIDs.first,
-               let node = results.first(where: { $0.id == firstID }) {
-                onDoubleClick(node)
-            }
-        }
+    }
+
+    private struct RevealKey: Equatable {
+        let requestID: UUID?
+        let ready: Bool
+        let rows: Int
     }
 }

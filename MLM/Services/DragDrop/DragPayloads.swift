@@ -51,9 +51,17 @@ struct TrackDragItem: Codable, Transferable, Equatable, Hashable, Sendable {
     /// Absolute path of the track's library file when it is local and reachable now — decided
     /// when the drag starts. Not encoded: it leaves MLM only as the file URL.
     var filePath: String?
+    /// A folder row of Folders (W3-FOLD, D-FOLD-FOLDER-TO-PLAYLIST): the item stands for every
+    /// library track in that folder (relative to the library folder, subfolders included);
+    /// `trackId` is 0. `DropLoader` turns it into the tracks (`FolderDragExpansion`) before any
+    /// target sees it. Outside MLM it is the folder itself (`filePath`).
+    var folderPath: String?
+    /// The outline's sort when the folder was dragged (`TrackSortOrder.rawValue`): the tracks
+    /// arrive in the order the outline shows them.
+    var folderSort: String?
 
     private enum CodingKeys: String, CodingKey {
-        case trackId, sourcePlaylistId, queueEntryId, libraryId
+        case trackId, sourcePlaylistId, queueEntryId, libraryId, folderPath, folderSort
     }
 
     init(trackId: Int64, sourcePlaylistId: Int64? = nil, queueEntryId: UUID? = nil,
@@ -64,6 +72,17 @@ struct TrackDragItem: Codable, Transferable, Equatable, Hashable, Sendable {
         self.libraryId = libraryId
         self.filePath = filePath
     }
+
+    /// A folder row dragged out of Folders: its tracks inside MLM, the folder outside.
+    static func folder(_ relativePath: String, libraryId: String?, folderFilePath: String?, sort: TrackSortOrder?) -> TrackDragItem {
+        var item = TrackDragItem(trackId: 0, libraryId: libraryId, filePath: folderFilePath)
+        item.folderPath = relativePath
+        item.folderSort = sort?.rawValue
+        return item
+    }
+
+    /// The item is a folder of Folders, not one track.
+    var isFolder: Bool { folderPath != nil }
 
     /// The library file (`public.file-url`), or nil when the track has no reachable file.
     var fileURL: URL? { filePath.map { URL(fileURLWithPath: $0) } }
@@ -99,10 +118,10 @@ struct LegacyTrackDrag: Codable, Transferable, Equatable, Sendable {
 struct TrackDragPayload: Equatable, Sendable {
     let items: [TrackDragItem]
 
-    /// Track ids in drag order, each once.
+    /// Track ids in drag order, each once (a folder item not yet expanded has none).
     var trackIDs: [Int64] {
         var seen = Set<Int64>()
-        return items.map(\.trackId).filter { seen.insert($0).inserted }
+        return items.filter { !$0.isFolder }.map(\.trackId).filter { seen.insert($0).inserted }
     }
 
     /// The one playlist every item was dragged from, if they share one.

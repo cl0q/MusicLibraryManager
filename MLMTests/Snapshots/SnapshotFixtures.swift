@@ -174,20 +174,28 @@ enum SnapshotFixtures {
                 return AnyView(PlaylistTable(playlist: playlist, viewModel: model))
             }
         ),
+        // W3-FOLD: the hierarchical outline replaced the folder tracks table; the fixture shows
+        // the tracks at the top of a library folder (no disk, no database reads).
         Fixture(
-            id: "folder-tracks-populated",
+            id: "folder-outline-populated",
             size: .init(width: 1_100, height: 460),
             backend: .appKit,
             expectedTableRows: 5,
             makeView: { store in
                 let tracks = try store.tracksForRendering()
-                return AnyView(FolderTracksTable(
-                    tracks: tracks,
-                    availabilityByTrackID: SnapshotFixtureData.availability(for: tracks),
-                    selectedTrackIDs: .constant([]),
-                    availablePlaylists: try store.playlists(),
-                    availableSyncProfiles: [],
-                    onDoubleClick: nil
+                let model = FolderViewModel(environment: FolderViewModel.Environment(
+                    queries: { nil }, libraryRoot: { nil }, libraryID: { nil }, isDriveOffline: { true },
+                    defaults: UserDefaults(suiteName: "mlm.snapshot.folders") ?? .standard))
+                model.showForFixture(tracks, libraryRoot: "/Snapshot/Music")
+                let configuration = TrackListConfiguration(listContext: .folder(path: "", name: "Music"), persistenceKey: "folders",
+                                                           publishesStatusText: false)
+                let live = TrackTableLive()
+                let actions = TrackListActions(model: model.trackList, configuration: configuration, live: live,
+                                               statusBar: nil, undo: nil, shell: nil)
+                return AnyView(FolderOutlineTable(
+                    model: model, configuration: configuration, actions: actions,
+                    folderActions: FolderActions(model: model, trackActions: actions, shell: nil, statusBar: nil, undo: nil),
+                    live: live
                 ))
             }
         ),
@@ -273,7 +281,7 @@ enum SnapshotFixtures {
 
     static let renderedPaths: Set<String> = [
         "Discover/DiscoverView.swift", "DiscoveryInbox/DiscoveryInboxView.swift",
-        "Folders/FoldersView.swift", "Library/DanceabilitySteps.swift",
+        "Folders/FolderOutlineTable.swift", "Library/DanceabilitySteps.swift",
         "Library/EnergyBars.swift", "Library/LibraryView.swift",
         "TrackList/TrackListTable.swift", "TrackList/TrackCell.swift", "TrackList/TrackRowPresentation.swift",
         "Playlists/PlaylistCard.swift",
@@ -306,7 +314,9 @@ enum SnapshotFixtures {
         "Activity/ActivityToolbarItem.swift": "Deferred: toolbar item and popover read the shared ActivityCenter; inject a fixture center.",
         "Activity/ActivityWindow.swift": "Deferred: window reads the shared ActivityCenter and container; inject a fixture center.",
         "ContentView/ContentView.swift": "Deferred: real shell, startup/router/toolbar lifecycle; needs application-level fixture composition.",
-        "Folders/FolderTreeView.swift": "Deferred: NSOutlineView delegate/expansion lifecycle requires hosted outline readiness contract.",
+        "Folders/FoldersView.swift": "Deferred: the place reads the live library folder, drive and Activity; its rules are unit-tested (FolderViewModelTests, FolderOutlineTests).",
+        "Folders/FolderMenus.swift": "Deferred: menus require interactive presentation; the folder actions' rules are unit-tested (FolderDropTests).",
+        "Folders/FolderPathBar.swift": "Deferred: drawn under the outline in the live Folders place; its segments come from FolderViewModel.pathSegments (tested).",
         "Library/TrackContextMenu.swift": "Deferred: menus require interactive presentation; current bitmap hosts do not open them.",
         "Player/PlayerBar.swift": "Deferred: concrete playback VM initializes audio/timer/media state; needs passive transport protocol.",
         "Player/PreviewWaveformScrubber.swift": "Deferred: drawn inside the deferred PlayerBar while previewing (W2-C).",
@@ -406,8 +416,10 @@ ContentView/ContentView.swift
 Discover/DiscoverView.swift
 DiscoveryInbox/DiscoveryInboxView.swift
 DragDrop/DropTargetModifier.swift
+Folders/FolderMenus.swift
+Folders/FolderOutlineTable.swift
+Folders/FolderPathBar.swift
 Folders/FoldersView.swift
-Folders/FolderTreeView.swift
 Genres/CreateMLExportSheet.swift
 Genres/GenreDetailView.swift
 Genres/GenreMenu.swift

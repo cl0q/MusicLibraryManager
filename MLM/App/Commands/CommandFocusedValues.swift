@@ -88,7 +88,6 @@ enum RereadCommand: Equatable {
     /// The package that implements ⌘R for a place that can't re-read yet.
     var pendingOwner: String? {
         switch self {
-        case .scanThisFolder: "W3-FOLD"
         case .runScan: "W3-REV"
         default: nil
         }

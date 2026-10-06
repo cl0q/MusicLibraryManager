@@ -104,7 +104,7 @@ struct TrackMenuContext: Equatable, Sendable {
         case .playlist: "Remove from Playlist"
         case .syncProfile(_, let name), .genre(_, let name): "Remove from “\(name)”"
         case .queue: "Remove from Queue"
-        case .library, .none: "Remove"
+        case .library, .folder, .none: "Remove"
         }
     }
 }
@@ -221,7 +221,7 @@ struct TrackMenuModel: Equatable, Sendable {
         switch context.container {
         case .playlist, .syncProfile, .genre:
             if context.canRemoveFromContainer { remove.append(.removeFromContainer(title: context.removeTitle)) }
-        case .queue, .library, .none:
+        case .queue, .library, .folder, .none:
             break
         }
         // A place's own items in the Remove group (`Not Now` on a suggestion, W3-GEN).
@@ -229,7 +229,7 @@ struct TrackMenuModel: Equatable, Sendable {
         switch context.container {
         case .queue, .syncProfile:
             break  // Remove from Library does not exist there (UC-CM-07)
-        case .library, .playlist, .genre, .none:
+        case .library, .playlist, .folder, .genre, .none:
             // Trashing files needs their disk (UC-CM-05).
             remove.append(.removeFromLibrary(enabled: unreachable == 0))
         }

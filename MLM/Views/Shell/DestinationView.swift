@@ -30,6 +30,10 @@ struct DestinationView: View {
             PlaylistDetailViewLoader(playlistId: id, onBack: { navigation.select(.allPlaylists) },
                                      onTrackDoubleClick: onTrackActivated)
                 .id(id)
+        // Folders builds its own scaffold: the path bar sits above the status bar and the
+        // window title names the opened folder (W3-FOLD, V-FOLD.E01/E07).
+        case .folders:
+            FoldersView(onTrackActivated: onTrackActivated)
         // A sync profile page builds its own scaffold: the profile header and its banner
         // (W3-SYNC, UC-LAYOUT-01/02).
         case .syncProfile(let id):
@@ -65,7 +69,8 @@ struct DestinationView: View {
             // Hosted by `body` (own scaffold).
             Color.clear
         case .folders:
-            FoldersView(onTrackDoubleClick: onTrackActivated)
+            // Hosted by `body` (own scaffold).
+            Color.clear
         case .discover:
             DiscoverView()
         case .review:

@@ -313,12 +313,16 @@ enum TrackTablePlaceholders {
 
 /// Reads the selection (O(selection)) and publishes `FocusedValues.trackSelection`, the View
 /// menu's options, the status-bar text (UC-STATUS-02/03) and Info's selection (W2-E seam).
-private struct TrackTablePublisher: ViewModifier {
+/// Also applied by the Folders outline (W3-FOLD), whose track rows are a `TrackListModel` too.
+struct TrackTablePublisher: ViewModifier {
     let model: TrackListModel
     let configuration: TrackListConfiguration
     let live: TrackTableLive
     let actions: TrackListActions
     let viewOptions: TrackTableViewOptions
+    /// Published instead of the rows' own selection when set — Folders, where a selected folder
+    /// stands for its tracks in the Track menu (UC-MENU-05, W3-FOLD).
+    var selectionOverride: TrackSelection? = nil
 
     @Environment(NavigationModel.self) private var navigation: NavigationModel?
     @Environment(\.container) private var container
@@ -359,6 +363,7 @@ private struct TrackTablePublisher: ViewModifier {
     }
 
     private func selection(summary: TrackSelectionSummary) -> TrackSelection {
+        if let selectionOverride { return selectionOverride }
         let model = self.model
         let sources = TrackMenuSources.shared
         let configuration = self.configuration
@@ -406,8 +411,9 @@ private struct TrackTablePublisher: ViewModifier {
 // MARK: - Live state
 
 /// Watches playback, downloads and the drive; writes `TrackTableLive.state` only when the
-/// derived value changes (download progress ticks don't reach the rows).
-private struct TrackTableLiveObserver: View {
+/// derived value changes (download progress ticks don't reach the rows). Also used by the
+/// Folders outline (W3-FOLD).
+struct TrackTableLiveObserver: View {
     let live: TrackTableLive
     @Environment(\.container) private var container
 

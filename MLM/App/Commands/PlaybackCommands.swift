@@ -13,6 +13,7 @@ struct PlaybackCommands: Commands {
     @FocusedValue(\.navigationModel) private var navigation
     @FocusedValue(\.shellActions) private var shellActions
     @FocusedValue(\.playlistPage) private var playlistPage
+    @FocusedValue(\.folderOutlineKeys) private var folderKeys
 
     var body: some Commands {
         CommandMenu(MenuBarMenu.playback.rawValue) {
@@ -68,13 +69,19 @@ struct PlaybackCommands: Commands {
 
             Divider()
 
-            // Remembered between launches (W2-C); a tenth per press (IMP-016).
-            CommandButton(.volumeUp, enabled: (playback?.volume ?? 1) < 1) {
+            // Remembered between launches (W2-C); a tenth per press (IMP-016). On the focused
+            // Folders outline the keys ⌘↑ / ⌘↓ go up a level / open the folder (DEC-053); a click
+            // on the item is always volume.
+            let folderUp = FolderOutlineKeyRouting.action(folderKeys?.goUp)
+            let folderOpen = FolderOutlineKeyRouting.action(folderKeys?.openAsRoot)
+            CommandButton(.volumeUp, enabled: folderUp != nil || (playback?.volume ?? 1) < 1) {
                 guard !KeyEquivalentGuard.keyBelongsToText(.textCommand(#selector(NSResponder.moveToBeginningOfDocument(_:)))) else { return }
+                if let folderUp, FolderOutlineKeyRouting.isKeyPress { return folderUp() }
                 if let playback { playback.setVolume(PlaybackStep.volume(after: playback.volume, up: true)) }
             }
-            CommandButton(.volumeDown, enabled: (playback?.volume ?? 0) > 0) {
+            CommandButton(.volumeDown, enabled: folderOpen != nil || (playback?.volume ?? 0) > 0) {
                 guard !KeyEquivalentGuard.keyBelongsToText(.textCommand(#selector(NSResponder.moveToEndOfDocument(_:)))) else { return }
+                if let folderOpen, FolderOutlineKeyRouting.isKeyPress { return folderOpen() }
                 if let playback { playback.setVolume(PlaybackStep.volume(after: playback.volume, up: false)) }
             }
 
@@ -109,6 +116,15 @@ struct PlaybackCommands: Commands {
 }
 
 // MARK: - Steps
+
+/// ⌘↑ / ⌘↓ on the focused Folders outline (DEC-053): the Volume items run the outline's action
+/// when their key was pressed there; the menu item clicked with the mouse stays volume.
+enum FolderOutlineKeyRouting {
+    static func action(_ action: (@MainActor () -> Void)?) -> (@MainActor () -> Void)? { action }
+
+    @MainActor
+    static var isKeyPress: Bool { NSApp.currentEvent?.type == .keyDown }
+}
 
 /// Seek and volume steps of the Playback menu (UC-KEY-08/09).
 enum PlaybackStep {

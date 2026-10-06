@@ -218,7 +218,7 @@ struct ActivityReviewFixTests {
         let folder = tempDir.appendingPathComponent("Music")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let center = center()
-        // As FoldersView does: an importer that nobody keeps.
+        // As the Folders imports do (`FolderImports`): an importer that nobody keeps.
         do {
             let importer = ImportViewModel(importService: ImportService(database: dbManager.pool, trackRepository: TrackRepository(database: dbManager.pool)),
                                            configRepository: ConfigRepository(database: dbManager.pool), activity: center)
@@ -233,7 +233,8 @@ struct ActivityReviewFixTests {
 
     @Test func foldersImportPostsTheNotificationsAfterACancelOrAnError() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let text = try String(contentsOf: root.appendingPathComponent("MLM/Views/Folders/FoldersView.swift"), encoding: .utf8)
+        // W3-FOLD moved the Folders imports into `FolderImports` (Scan This Folder, Import ‹n› Files).
+        let text = try String(contentsOf: root.appendingPathComponent("MLM/Services/Folders/FolderImports.swift"), encoding: .utf8)
         #expect(text.contains("if importer.lastResult == nil || importer.lastResult?.cancelled == true {"))
     }
 }
