@@ -1,9 +1,12 @@
-import SwiftUI
+import GRDB
 import AppKit
+import SwiftUI
 
-/// Settings → Backup: backup folder, the list of backups, manual backups, and restore.
+/// Settings ▸ Backup (ST-BACKUP, DEC-036, F-16): is the library safe, how often, how many,
+/// where — and a restore that says exactly what happens. Backups belong to the open library.
 ///
-/// All state and copy that depends on it lives in `BackupSettingsViewModel`.
+/// All state and copy that depends on it lives in `BackupSettingsViewModel`; the schedule and
+/// retention are implemented in `BackupService`.
 struct BackupSettingsView: View {
     @Environment(\.container) private var container
     @State private var viewModel: BackupSettingsViewModel?
@@ -13,22 +16,23 @@ struct BackupSettingsView: View {
             if let viewModel {
                 BackupSettingsForm(viewModel: viewModel)
             } else {
-                Form {
-                    Section {
-                        Text("Backups are available once the library has loaded.")
-                            .font(MLMFont.body)
-                            .foregroundStyle(Color.mlmInkSecondary)
-                    }
-                }
-                .formStyle(.grouped)
-                .padding()
+                // No library: the window-level line says why (UC-WIN-05).
+                Form {}.formStyle(.grouped)
             }
         }
         .task(id: container.backupService == nil) {
             guard viewModel == nil,
                   let service = container.backupService,
                   let configRepository = container.configRepository else { return }
-            viewModel = BackupSettingsViewModel(service: service, configRepository: configRepository)
+            let pool = container.databaseManager?.pool
+            viewModel = BackupSettingsViewModel(
+                service: service,
+                configRepository: configRepository,
+                // The restored library opens after the relaunch (PP-SETTINGS-16).
+                relaunch: BackupSettingsViewModel.relaunchIntoLibrary(package: container.activeLibrary?.packageURL),
+                // Counted like a backup's manifest counts its tracks.
+                countTracks: { try? await pool?.read { db in try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM tracks") } }
+            )
         }
     }
 }
@@ -36,65 +40,80 @@ struct BackupSettingsView: View {
 private struct BackupSettingsForm: View {
     let viewModel: BackupSettingsViewModel
     @State private var pendingRestore: BackupInfo?
+    @State private var refusal: String?
+    @State private var choosesFolder = false
+    @State private var showsAll = false
+
+    /// Rows before `Show All`.
+    private static let visibleRows = 7
+
+    private var libraryName: String {
+        LibraryLaunchCoordinator.shared.activeLibraryName ?? "the library"
+    }
 
     var body: some View {
         Form {
             if viewModel.phase == .relaunching || isRestoring {
                 Section {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text(viewModel.phase == .relaunching ? "Relaunching…" : "Restoring…")
-                            .font(MLMFont.body)
+                    HStack(spacing: Spacing.s) {
+                        ProgressView().controlSize(.small)
+                        SettingsRowLabel(viewModel.phase == .relaunching ? "Relaunching…" : "Restoring…") {
+                            Text("MLM quits and reopens in the restored “\(libraryName)”.")
+                        }
                     }
                 }
             }
 
             if let message = viewModel.errorMessage, !viewModel.isRelaunchRequired {
-                Section {
-                    errorLine(message)
-                }
+                Section { errorLine(message) }
             }
 
             Group {
                 statusSection
+                scheduleSection
+                folderSection
                 backupsSection
-                actionsSection
             }
             .disabled(viewModel.isBusy)
         }
         .formStyle(.grouped)
-        .padding()
-        .task {
-            await viewModel.refresh()
+        .task { await viewModel.refresh() }
+        .folderPanel(isPresented: $choosesFolder, message: "Choose a folder for backups.",
+                     directory: viewModel.destination) { url in
+            Task { await viewModel.changeDestination(to: url) }
         }
+        // A-SET-RESTORE: the consequence first; Cancel is the default (UC-SHEET-15).
         .alert(
-            restoreTitle,
-            isPresented: Binding(
-                get: { pendingRestore != nil },
-                set: { if !$0 { pendingRestore = nil } }
-            ),
+            pendingRestore.map(BackupSettingsViewModel.restoreTitle) ?? "",
+            isPresented: Binding(get: { pendingRestore != nil }, set: { if !$0 { pendingRestore = nil } }),
             presenting: pendingRestore
         ) { info in
-            Button("Restore and relaunch", role: .destructive) {
+            Button("Restore and Relaunch", role: .destructive) {
                 Task { await viewModel.restore(info) }
             }
             Button("Cancel", role: .cancel) {}
-        } message: { _ in
-            Text("MLM first saves a copy of your current library, then replaces the library database and playlist covers with this backup and relaunches. Audio files are not changed. Finish active downloads and syncs first. To undo, restore the \"Before restore\" backup.")
+                .keyboardShortcut(.defaultAction)
+        } message: { info in
+            Text(viewModel.restoreMessage(for: info, libraryName: libraryName))
         }
+        // Restore refused while work runs (PP-SETTINGS-15): the work is listed.
+        .alert("Can’t restore while work is running",
+               isPresented: Binding(get: { refusal != nil }, set: { if !$0 { refusal = nil } })) {
+            Button("Show in Activity") { ActivityWindowOpener.open() }
+            Button("OK", role: .cancel) {}
+                .keyboardShortcut(.defaultAction)
+        } message: {
+            Text(refusal ?? "")
+        }
+        // A-SET-RESTOREFAILED: MLM can't continue; one way forward.
         .alert(
             BackupSettingsViewModel.Copy.relaunchRequiredTitle,
-            isPresented: Binding(
-                get: { viewModel.isRelaunchRequired },
-                set: { _ in }
-            )
+            isPresented: Binding(get: { viewModel.isRelaunchRequired }, set: { _ in })
         ) {
-            Button("Relaunch") {
-                viewModel.acknowledgeRelaunchRequired()
-            }
+            Button("Relaunch") { viewModel.acknowledgeRelaunchRequired() }
+                .keyboardShortcut(.defaultAction)
         } message: {
-            Text(BackupSettingsViewModel.Copy.relaunchRequired)
+            Text("MLM couldn’t replace the library files and needs to relaunch. If your library looks wrong afterwards, restore the “Before restore” backup.")
         }
     }
 
@@ -103,168 +122,210 @@ private struct BackupSettingsForm: View {
         return false
     }
 
-    private var restoreTitle: String {
-        guard let pendingRestore else { return "" }
-        return "Restore backup from \(BackupSettingsViewModel.formatDate(pendingRestore.createdAt))?"
-    }
-
-    // MARK: - Status
+    // MARK: Status
 
     private var statusSection: some View {
         Section {
-            LabeledContent("Backup folder") {
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(viewModel.destination?.path ?? "")
-                        .font(MLMFont.data)
-                        .foregroundStyle(Color.mlmInkSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
-                    if viewModel.isDefaultDestination {
-                        Text("Default location")
-                            .font(MLMFont.muted)
-                            .foregroundStyle(Color.mlmInkMuted)
+            LabeledContent {
+                HStack(spacing: Spacing.s) {
+                    if viewModel.phase == .backingUp {
+                        ProgressView().controlSize(.small)
+                        Text("Backing up…").foregroundStyle(.secondary)
+                    } else if let result = viewModel.lastResult {
+                        Text(result).foregroundStyle(.secondary)
                     }
+                    Button("Back Up Now") { Task { await viewModel.backUpNow() } }
+                        .disabled(viewModel.phase != .idle || !viewModel.destinationReach.isReachable && !viewModel.isDefaultDestination)
                 }
+            } label: {
+                SettingsRowLabel("Last backup") { Text(lastBackupLine) }
             }
-
-            HStack {
-                Spacer()
-                Button("Change…") {
-                    chooseDestination()
-                }
-                if !viewModel.isDefaultDestination {
-                    Button("Use default") {
-                        Task { await viewModel.resetDestinationToDefault() }
-                    }
-                }
-                Button("Show in Finder") {
-                    if let destination = viewModel.destination {
-                        showInFinder(destination)
-                    }
-                }
-                .disabled(viewModel.destination == nil)
-            }
-
-            LabeledContent("Last backup", value: viewModel.lastBackupText)
-            LabeledContent("Backups", value: "\(viewModel.backups.count)")
-            LabeledContent("Total size", value: BackupSettingsViewModel.formatBytes(viewModel.totalSizeBytes))
         } header: {
             Text("Status")
         } footer: {
-            Text("Each backup contains the library database and playlist covers. Audio files and account credentials are never included.")
-                .font(MLMFont.muted)
-                .foregroundStyle(Color.mlmInkSecondary)
+            Text(BackupSettingsViewModel.Copy.footer)
         }
     }
 
-    // MARK: - Backups
+    /// `Today, 09:14 · Automatic` or `Never`.
+    private var lastBackupLine: String {
+        guard let last = viewModel.backups.first(where: \.isComplete) else { return BackupSettingsViewModel.Copy.never }
+        return "\(SettingsDate.capitalized(last.createdAt)) · \(BackupSettingsViewModel.reasonLabel(last.reason))"
+    }
 
-    private var backupsSection: some View {
-        Section("Backups") {
-            if viewModel.backups.isEmpty {
-                Text("No backups yet. MLM backs up automatically at launch, at most once a day.")
-                    .font(MLMFont.body)
-                    .foregroundStyle(Color.mlmInkSecondary)
-            } else {
-                ForEach(viewModel.backups, id: \.url) { info in
-                    backupRow(info)
+    // MARK: Schedule
+
+    private var scheduleSection: some View {
+        Section {
+            Picker("Back up automatically", selection: Binding(
+                get: { viewModel.schedule },
+                set: { schedule in Task { await viewModel.setSchedule(schedule) } }
+            )) {
+                ForEach(BackupSchedule.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            Picker(selection: Binding(
+                get: { viewModel.retention },
+                set: { retention in Task { await viewModel.setRetention(retention) } }
+            )) {
+                ForEach(BackupRetention.allCases, id: \.self) { Text($0.title).tag($0) }
+            } label: {
+                Text("Keep")
+                Text(BackupSettingsViewModel.Copy.keepFooter)
+            }
+            .pickerStyle(.segmented)
+        } header: {
+            Text("Schedule")
+        } footer: {
+            Text(BackupSettingsViewModel.Copy.scheduleFooter)
+        }
+    }
+
+    // MARK: Folder
+
+    private var folderSection: some View {
+        Section("Backup folder") {
+            LabeledContent {
+                HStack {
+                    Button("Change…") { choosesFolder = true }
+                    if !viewModel.isDefaultDestination {
+                        Button("Use Default") { Task { await viewModel.resetDestinationToDefault() } }
+                    }
+                    ShowInFinderButton(url: viewModel.destination,
+                                       disabledReason: viewModel.destinationReach.isReachable ? nil : viewModel.destinationReach.text)
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    if let destination = viewModel.destination { SettingsPath(destination) }
+                    Group {
+                        if viewModel.isDefaultDestination {
+                            Text(BackupSettingsViewModel.Copy.defaultLocation)
+                        } else {
+                            switch viewModel.destinationReach {
+                            case .notConnected, .notFound:
+                                HStack(spacing: 4) {
+                                    SettingsState(reach: viewModel.destinationReach)
+                                    Text("· automatic backups are skipped until it is connected; the backups stored there are not listed")
+                                }
+                            default:
+                                SettingsState(reach: viewModel.destinationReach)
+                            }
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
             }
+            .acceptsFolderDrop(enabled: !viewModel.isBusy) { url in
+                Task { await viewModel.changeDestination(to: url) }
+            }
+        }
+    }
+
+    // MARK: Backups
+
+    private var backupsSection: some View {
+        Section {
+            if viewModel.backups.isEmpty {
+                Text(emptyText).foregroundStyle(.secondary)
+            } else {
+                let rows = showsAll ? viewModel.backups : Array(viewModel.backups.prefix(Self.visibleRows))
+                ForEach(rows, id: \.url) { info in
+                    backupRow(info)
+                }
+                if !showsAll, viewModel.backups.count > Self.visibleRows {
+                    let more = viewModel.backups.count - Self.visibleRows
+                    LabeledContent {
+                        Button("Show All") { showsAll = true }
+                    } label: {
+                        Text(more == 1 ? "1 older backup" : "\(more) older backups").foregroundStyle(.secondary)
+                    }
+                }
+            }
+        } header: {
+            HStack {
+                Text("Backups of “\(libraryName)”")
+                if !viewModel.backups.isEmpty {
+                    Text(viewModel.backups.count == 1 ? "1 backup" : "\(viewModel.backups.count) backups")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text(BackupSettingsViewModel.formatBytes(viewModel.totalSizeBytes))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        } footer: {
+            Text(BackupSettingsViewModel.Copy.listFooter)
+        }
+    }
+
+    private var emptyText: String {
+        switch viewModel.schedule {
+        case .daily, .weekly:
+            "No backups yet. With the schedule set to \(viewModel.schedule.title), the first one is made the next time MLM opens this library."
+        case .onQuit:
+            "No backups yet. With the schedule set to On quit, the first one is made when MLM quits."
+        case .off:
+            "No backups yet. Automatic backups are off — use Back Up Now."
         }
     }
 
     private func backupRow(_ info: BackupInfo) -> some View {
-        HStack(alignment: .center, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(BackupSettingsViewModel.formatDate(info.createdAt))
-                    .font(MLMFont.body)
-                Text(viewModel.detailLine(for: info))
-                    .font(MLMFont.muted)
-                    .foregroundStyle(Color.mlmInkSecondary)
-                if !info.isComplete {
-                    Label("Incomplete — can't be restored", systemImage: "exclamationmark.circle")
-                        .font(MLMFont.muted)
-                        .foregroundStyle(Color.mlmAttention)
+        LabeledContent {
+            HStack {
+                if info.isComplete {
+                    Button("Restore…") { requestRestore(info) }
                 }
+                ShowInFinderButton(url: info.url)
             }
-            Spacer()
-            if info.isComplete {
-                Button("Restore…") {
-                    pendingRestore = info
+        } label: {
+            SettingsRowLabel(SettingsDate.capitalized(info.createdAt)) {
+                if info.isComplete {
+                    Text(viewModel.detailLine(for: info))
+                } else {
+                    HStack(spacing: 4) {
+                        Text(viewModel.detailLine(for: info) + " ·")
+                        SettingsState(text: "Incomplete — can’t be restored", systemImage: "exclamationmark.triangle", tone: .problem)
+                    }
                 }
-            }
-            Button("Show in Finder") {
-                showInFinder(info.url)
             }
         }
         .help(info.schemaVersion.map { "Database version: \($0)" } ?? "")
-    }
-
-    // MARK: - Actions
-
-    private var actionsSection: some View {
-        Section {
-            HStack(spacing: 8) {
-                Button("Back up now") {
-                    Task { await viewModel.backUpNow() }
-                }
-                if viewModel.phase == .backingUp {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Backing up…")
-                        .font(MLMFont.muted)
-                        .foregroundStyle(Color.mlmInkSecondary)
-                } else if let result = viewModel.lastResult {
-                    Label(result, systemImage: "checkmark.circle")
-                        .font(MLMFont.muted)
-                        .foregroundStyle(Color.mlmSuccess)
-                }
-            }
-        } header: {
-            Text("Actions")
-        } footer: {
-            Text("The 10 most recent backups are kept. MLM also backs up at launch (at most once a day) and before updating the library database.")
-                .font(MLMFont.muted)
-                .foregroundStyle(Color.mlmInkSecondary)
+        // ST-BACKUP.N04: the row's context menu.
+        .contextMenu {
+            Button("Restore…") { requestRestore(info) }
+                .disabled(!info.isComplete)
+            Divider()
+            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([info.url]) }
         }
     }
 
-    // MARK: - Pieces
+    /// `Restore…`: refused with the list of running work, else A-SET-RESTORE.
+    private func requestRestore(_ info: BackupInfo) {
+        if let blockers = viewModel.restoreBlockers() {
+            refusal = BackupSettingsViewModel.restoreRefusal(blockers)
+        } else {
+            pendingRestore = info
+        }
+    }
+
+    // MARK: Pieces
 
     private func errorLine(_ message: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Label(message, systemImage: "exclamationmark.triangle")
-                .font(MLMFont.body)
-                .foregroundStyle(Color.mlmError)
-            if let details = viewModel.errorDetails {
-                DisclosureGroup("Details") {
-                    Text(details)
-                        .font(MLMFont.dataSmall)
-                        .foregroundStyle(Color.mlmInkSecondary)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+        LabeledContent {
+            Button("Show Logs") { ActivityWindowOpener.open(tab: .logs) }
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                SettingsState(text: message, systemImage: "exclamationmark.triangle", tone: .problem)
+                if let details = viewModel.errorDetails {
+                    DisclosureGroup("Details") {
+                        Text(details)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .font(.caption)
                 }
-                .font(MLMFont.muted)
             }
         }
-    }
-
-    private func chooseDestination() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.directoryURL = viewModel.destination
-        panel.prompt = "Choose folder"
-
-        if panel.runModal() == .OK, let url = panel.url {
-            Task { await viewModel.changeDestination(to: url) }
-        }
-    }
-
-    private func showInFinder(_ url: URL) {
-        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 }

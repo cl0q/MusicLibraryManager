@@ -2,9 +2,10 @@ import Testing
 import Foundation
 @testable import MLM
 
-/// Source-scan contract for Settings → Backup: tab placement, native form style, the
-/// approved copy (UI-GROUNDTRUTH §3.14 / §5.6), and no banned or German strings.
-@Suite("BackupSettingsView contract (Wave 3)")
+/// Source-scan contract for Settings ▸ Backup (W3-SET, `settings.html#backup`): tab placement,
+/// native form style, the designed copy, system folder panels, Title Case buttons, and no banned
+/// or German strings.
+@Suite("BackupSettingsView contract (W3-SET)")
 struct BackupSettingsViewTests {
 
     private var projectRoot: URL {
@@ -49,28 +50,36 @@ struct BackupSettingsViewTests {
         let src = try paneSource
         #expect(src.contains(".formStyle(.grouped)"))
         #expect(src.contains("@Environment(\\.container)"))
-        #expect(src.contains("NSOpenPanel()"))
-        #expect(src.contains("activateFileViewerSelecting"))
+        // UC-SHEET-24: the system folder panel, never a hand-rolled NSOpenPanel.
+        #expect(src.contains(".folderPanel(isPresented: $choosesFolder, message: \"Choose a folder for backups.\""))
+        #expect(!src.contains("NSOpenPanel"))
+        #expect(src.contains("ShowInFinderButton"))
+        #expect(src.contains(".contextMenu {"), "ST-BACKUP.N04")
+        #expect(src.contains(".pickerStyle(.segmented)"))
+        // Cancel is the default of the restore alert (UC-SHEET-15).
+        #expect(src.contains("Button(\"Restore and Relaunch\", role: .destructive)"))
+        #expect(src.contains(".keyboardShortcut(.defaultAction)"))
     }
 
     @Test func paneContainsApprovedCopy() throws {
-        let src = try paneSource
+        let src = try paneSource + source("MLM/ViewModels/BackupSettingsViewModel.swift")
         let approved = [
-            "Backups are available once the library has loaded.",
-            "Backup folder", "Default location", "Change…", "Use default", "Show in Finder",
-            "Last backup", "Backups", "Total size",
+            "Status", "Last backup", "Back Up Now", "Backing up…", "Schedule", "Back up automatically", "Keep",
+            "Backup folder", "Default location", "Change…", "Use Default", "Restore…", "Show All", "Details",
             "Each backup contains the library database and playlist covers. Audio files and account credentials are never included.",
-            "No backups yet. MLM backs up automatically at launch, at most once a day.",
-            "Incomplete — can't be restored", "Restore…", "Database version: ",
-            "Back up now", "Backing up…",
-            "The 10 most recent backups are kept. MLM also backs up at launch (at most once a day) and before updating the library database.",
-            "Restore backup from ", "Restore and relaunch", "Cancel", "Restoring…", "Relaunching…", "Relaunch",
-            "MLM first saves a copy of your current library, then replaces the library database and playlist covers with this backup and relaunches. Audio files are not changed. Finish active downloads and syncs first. To undo, restore the \\\"Before restore\\\" backup.",
-            "Status", "Actions", "Details",
+            "MLM also backs up before updating the library database, before a restore and before library file setup, whatever the schedule.",
+            "Older backups are removed after a new one succeeds.",
+            "Only backups of the open library are listed. Restoring never crosses libraries.",
+            "Incomplete — can’t be restored", "Database version: ",
+            "· automatic backups are skipped until it is connected; the backups stored there are not listed",
+            "Restore the backup from ", "Restore and Relaunch", "Restoring…", "Relaunching…", "Relaunch",
+            "To undo, restore the “Before restore” backup.",
+            "Restore didn’t finish", "Can’t restore while work is running", "Show in Activity",
         ]
         for string in approved {
             #expect(src.contains(string), "missing approved copy: \(string)")
         }
+        #expect(!src.contains("Finish active downloads and syncs first"), "running work is listed, not asked about (UC-SHEET-13)")
     }
 
     @Test func paneHasNoBannedOrGermanStrings() throws {
@@ -99,10 +108,11 @@ struct BackupSettingsViewTests {
         }
     }
 
-    @Test func buttonsUseSentenceCase() throws {
+    @Test func buttonsUseTitleCase() throws {
         let src = try paneSource
-        for titleCase in ["Back Up Now", "Show In Finder", "Use Default", "Restore And Relaunch"] {
-            #expect(!src.contains(titleCase))
+        for sentenceCase in ["\"Back up now\"", "\"Use default\"", "\"Restore and relaunch\"", "\"Choose folder\""] {
+            #expect(!src.contains(sentenceCase), "Title Case for buttons (UC-COPY)")
         }
     }
+
 }

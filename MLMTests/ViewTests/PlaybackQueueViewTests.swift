@@ -83,22 +83,22 @@ struct PlaybackQueueViewTests {
 
     @Test
     func settingsView_containsHistorySizeKey() throws {
-        let src = try readSource("MLM/Views/Settings/SettingsView.swift")
+        let src = try readSource("MLM/Views/Settings/PlaybackSettingsView.swift")
         #expect(src.contains("playback_history_size"),
-                "SettingsView must contain playback_history_size key")
+                "PlaybackSettingsView (W3-SET) must contain playback_history_size key")
     }
 
     @Test
     func settingsView_containsContextCapKey() throws {
-        let src = try readSource("MLM/Views/Settings/SettingsView.swift")
+        let src = try readSource("MLM/Views/Settings/PlaybackSettingsView.swift")
         #expect(src.contains("playback_context_cap"),
-                "SettingsView must contain playback_context_cap key")
+                "PlaybackSettingsView (W3-SET) must contain playback_context_cap key")
     }
 
     @Test
     func settingsView_containsLUFSNormalizationKey() throws {
-        let src = try readSource("MLM/Views/Settings/SettingsView.swift")
+        let src = try readSource("MLM/Views/Settings/PlaybackSettingsView.swift")
         #expect(src.contains("playback_lufs_normalization"),
-                "SettingsView must contain playback_lufs_normalization key")
+                "PlaybackSettingsView (W3-SET) must contain playback_lufs_normalization key")
     }
 }

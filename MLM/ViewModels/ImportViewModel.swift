@@ -100,6 +100,43 @@ final class ImportViewModel {
         }
     }
 
+    // MARK: - Library folder change (S-SET-LIBFOLDER, W3-SET)
+
+    /// How many of the library's files a candidate library folder holds — the quick check of the
+    /// consequences sheet before anything is saved (S-SET-LIBFOLDER.N01).
+    struct FolderComparison: Equatable, Sendable {
+        let found: Int
+        let total: Int
+        var missing: Int { total - found }
+    }
+
+    /// Compares `folder` with the stored track locations (`organized_path`, relative to the
+    /// library folder; an absolute path outside it is checked as it is). Reads no file contents.
+    nonisolated static func compare(folder: URL, organizedPaths: [String],
+                                    fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> FolderComparison {
+        let root = folder.standardizedFileURL.path
+        var found = 0
+        for path in organizedPaths where !path.isEmpty {
+            if path.hasPrefix("/"), fileExists(path) {
+                found += 1
+                continue
+            }
+            let relative = path.hasPrefix("/") ? String(path.drop(while: { $0 == "/" })) : path
+            if fileExists(root + "/" + relative) { found += 1 }
+        }
+        return FolderComparison(found: found, total: organizedPaths.filter { !$0.isEmpty }.count)
+    }
+
+    /// `Change Folder`: the new folder becomes the base of every track's location (existing tracks
+    /// keep their relative paths); the file check runs after (`.libraryRootDidChange` →
+    /// `LibraryAvailabilityMonitor`), then — when asked — a scan of the new folder.
+    @MainActor
+    func changeLibraryFolder(to folder: URL, scanAfterwards: Bool) async {
+        await setLibraryRoot(folder.standardizedFileURL.path)
+        guard errorMessage == nil, scanAfterwards else { return }
+        await importLibrary()
+    }
+
     // MARK: - Import
 
     /// Import all audio files from the library root directory.

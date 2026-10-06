@@ -131,6 +131,11 @@ final class SourcesViewModel {
         return String(timestamp.prefix(10))
     }
 
+    /// When the source was last refreshed (Settings ▸ Sources: `last refreshed today, 09:14`).
+    func lastSyncDate(for service: TokenStorage.Service) -> Date? {
+        lastSyncTimestamps[service].flatMap { ISO8601DateFormatter().date(from: $0) }
+    }
+
     /// Error message for a source.
     func error(for service: TokenStorage.Service) -> String? {
         errors[service]

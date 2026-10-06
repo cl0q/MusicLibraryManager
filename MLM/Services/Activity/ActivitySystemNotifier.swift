@@ -12,6 +12,35 @@ final class ActivitySystemNotifier: ActivityFinishNotifying {
     static let shared = ActivitySystemNotifier()
     static let settingKey = "activity.notifyWhenFinished"
 
+    /// What may notify (Settings ▸ General, ST-GENERAL.N02 — W3-SET). Each is on unless the user
+    /// turned it off, so the setting means what it meant before.
+    enum Category: String, CaseIterable, Sendable {
+        case importsAndDownloads = "activity.notify.imports"
+        case sync = "activity.notify.sync"
+        case backups = "activity.notify.backups"
+
+        var title: String {
+            switch self {
+            case .importsAndDownloads: "Imports and downloads"
+            case .sync: "Sync to a device"
+            case .backups: "Backups and restores"
+            }
+        }
+
+        init?(kind: ActivityKind) {
+            switch kind {
+            case .download, .folderScan: self = .importsAndDownloads
+            case .sync: self = .sync
+            case .backup, .restore: self = .backups
+            default: return nil
+            }
+        }
+
+        func isEnabled(in defaults: UserDefaults = .standard) -> Bool {
+            defaults.object(forKey: rawValue) as? Bool ?? true
+        }
+    }
+
     /// Whether a notification may be posted for `operation` (pure; tested).
     static func shouldNotify(_ operation: ActivityOperation, enabled: Bool, appIsActive: Bool) -> Bool {
         guard enabled, !appIsActive, operation.kind.mayNotify, !operation.isFromHistory else { return false }
@@ -26,7 +55,8 @@ final class ActivitySystemNotifier: ActivityFinishNotifying {
     func operationDidFinish(_ operation: ActivityOperation) {
         guard Self.canUseNotificationCenter,
               Self.shouldNotify(operation, enabled: UserDefaults.standard.bool(forKey: Self.settingKey),
-                                appIsActive: NSApp?.isActive ?? true) else { return }
+                                appIsActive: NSApp?.isActive ?? true),
+              Category(kind: operation.kind)?.isEnabled() ?? true else { return }
         let content = UNMutableNotificationContent()
         content.title = operation.title
         content.body = ActivityPresentation.endMessage(operation)

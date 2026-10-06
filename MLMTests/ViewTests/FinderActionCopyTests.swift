@@ -69,7 +69,8 @@ struct FinderActionCopyTests {
 
     @Test func formerViolationsUseShowInFinder() throws {
         for path in [
-            "MLM/Views/Settings/LibrarySetupView.swift",
+            // W3-SET: the Settings tabs share one `Show in Finder` button (SettingsRows).
+            "MLM/Views/Settings/SettingsRows.swift",
             "MLM/Views/TrackList/TrackMenu.swift",
             "MLM/Views/Sync/SyncFailedDisclosure.swift",
             "MLM/Views/Sync/SyncProfileDetailView.swift",
@@ -81,7 +82,7 @@ struct FinderActionCopyTests {
 
     @Test func librarySetupUsesActivateFileViewer() throws {
         let src = try String(
-            contentsOf: projectRoot.appendingPathComponent("MLM/Views/Settings/LibrarySetupView.swift"),
+            contentsOf: projectRoot.appendingPathComponent("MLM/Views/Settings/SettingsRows.swift"),
             encoding: .utf8)
         #expect(src.contains("activateFileViewerSelecting"))
         #expect(!src.contains("selectFile(nil"))

@@ -52,12 +52,13 @@ struct DataLocationsViewTests {
         let src = try paneSource
         #expect(src.contains(".formStyle(.grouped)"))
         #expect(src.contains("@Environment(\\.container)"))
-        #expect(src.contains("activateFileViewerSelecting"))
-        #expect(src.contains(".truncationMode(.middle)"))
-        #expect(src.contains(".textSelection(.enabled)"))
+        #expect(src.contains("import Charts") && src.contains("BarMark"), "ST-STORAGE.N01: the sizes chart")
+        #expect(src.contains("ShowInFinderButton"))
+        #expect(src.contains("SettingsPath"))
         // Transparency only: no relocation UI in this pane.
         #expect(!src.contains("NSOpenPanel"))
-        #expect(!src.contains("Change…"))
+        #expect(!src.contains("folderPanel"))
+        #expect(!src.contains("\"Change…\""))
     }
 
     @Test func paneNeverReadsCredentialContents() throws {
@@ -72,21 +73,23 @@ struct DataLocationsViewTests {
     @Test func paneContainsApprovedCopy() throws {
         let src = try paneSource + viewModelSource
         let approved = [
-            "Library data", "Music", "Sign-in",
-            "Database", "database file ", "recent changes ", "Playlist covers", "Backups", "Last backup",
-            "Credentials file", "Library folder", "Transcode cache", "Sign-in tokens",
-            "Show in Finder", "Calculate size", "Cancel", " · calculated ",
-            "file", "files", "backup", "backups", "track", "tracks",
-            "Storage locations are shown once the library has loaded.",
+            "In this library file", "Moves with the file", "Library folder", "This library",
+            "On this Mac", "Stays when a library file is moved",
+            "Library file", "Database", "Inside the library file", "database file ", "recent changes ",
+            "Playlist covers", "Backups", "last backup ", "List of libraries", "All libraries",
+            "Credentials file", "Sign-in tokens", "Artwork and waveform caches", "Can be rebuilt",
+            "Path migration backups", "Logs", "Previous install", "Transcode cache",
+            "Show in Finder", "Calculate Size", "Cancel", " · calculated ",
             "Not found", "Not connected", "Calculating…", "Size not calculated", "Never",
             "No library folder set — choose one in the Library tab.",
             "The size couldn't be calculated. Check that the drive is connected and try again.",
             "Stored in the macOS Keychain",
-            "Change the backup folder in the Backup tab.",
-            "Change the location in the Maintenance tab.",
+            "Change the library folder in Library", "Change the location or clear it in Maintenance",
+            "Change the backup folder in Backup",
             "Recent changes are kept in a separate file (-wal) and merged into the database automatically.",
             "Library files and the credentials file remain on your Mac if you delete the app. Audio files are never moved by this tab.",
-            "Library file",
+            "Sizes refresh when this tab opens and when a drive is connected.",
+            "Other files", " free",
         ]
         for string in approved {
             #expect(src.contains(string), "missing approved copy: \(string)")
@@ -118,10 +121,11 @@ struct DataLocationsViewTests {
         }
     }
 
-    @Test func buttonsUseSentenceCase() throws {
+    @Test func buttonsUseTitleCase() throws {
         let src = try paneSource
-        for titleCase in ["Show In Finder", "Calculate Size"] {
-            #expect(!src.contains(titleCase))
+        for sentenceCase in ["\"Calculate size\"", "\"Show in finder\""] {
+            #expect(!src.contains(sentenceCase), "Title Case for buttons (UC-COPY)")
         }
     }
+
 }

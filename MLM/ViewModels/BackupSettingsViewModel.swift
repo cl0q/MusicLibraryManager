@@ -36,7 +36,6 @@ final class BackupSettingsViewModel {
         static let relaunchRequired = "MLM couldn't replace the library files and needs to relaunch. If your library looks wrong afterwards, restore the \"Before restore\" backup."
         static let backupCreated = "Backup created"
         static let never = "Never"
-        static let deleteLastRefused = "This is the newest backup of the library and can’t be deleted."
         static let footer = "Each backup contains the library database and playlist covers. Audio files and account credentials are never included."
         static let scheduleFooter = "MLM also backs up before updating the library database, before a restore and before library file setup, whatever the schedule."
         static let keepFooter = "Older backups are removed after a new one succeeds."
@@ -230,26 +229,6 @@ final class BackupSettingsViewModel {
         await refresh()
     }
 
-    // MARK: - Delete
-
-    func delete(_ info: BackupInfo) async {
-        guard phase == .idle else { return }
-        clearMessages()
-        do {
-            try await service.deleteBackup(info)
-        } catch BackupError.lastCompleteBackup {
-            errorMessage = Copy.deleteLastRefused
-        } catch {
-            present(error, context: .backup)
-        }
-        await refresh()
-    }
-
-    /// Whether `info` may be deleted: never the newest complete backup.
-    func canDelete(_ info: BackupInfo) -> Bool {
-        backups.first(where: \.isComplete).map { BackupService.pathKey($0.url) } != BackupService.pathKey(info.url)
-    }
-
     // MARK: - Restore guard (PP-SETTINGS-15)
 
     /// The work that blocks a restore now: everything running, queued or paused except work
@@ -363,8 +342,6 @@ final class BackupSettingsViewModel {
             return Copy.relaunchRequired
         case .wrongLibrary:
             return Copy.generic
-        case .lastCompleteBackup:
-            return Copy.deleteLastRefused
         }
     }
 
@@ -376,7 +353,7 @@ final class BackupSettingsViewModel {
             return detail
         case .bundleIncomplete(let url):
             return url.path
-        case .destinationNotWritable, .restoreSafetyBackupFailed, .wrongLibrary, .lastCompleteBackup:
+        case .destinationNotWritable, .restoreSafetyBackupFailed, .wrongLibrary:
             return nil
         }
     }

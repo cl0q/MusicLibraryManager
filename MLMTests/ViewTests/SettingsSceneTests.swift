@@ -42,7 +42,9 @@ struct SettingsSceneTests {
     }
 
     @Test func libraryTabsAreDimmedWithoutALibrary() {
-        #expect(SettingsTab.allCases.filter { !$0.belongsToLibrary } == [.general, .playback, .sources])
+        // W3-SET: Storage Location and Advanced keep their rows for this Mac usable and dim only
+        // their per-library sections.
+        #expect(SettingsTab.allCases.filter(\.belongsToLibrary) == [.library, .backup, .maintenance])
     }
 
     @Test func hostViewHostsEveryTabInOrder() throws {
@@ -54,9 +56,14 @@ struct SettingsSceneTests {
             cursor = range.upperBound
         }
         for pane in ["GeneralSettingsView()", "LibrarySetupView()", "PlaybackSettingsView()", "SourcesSetupView()",
-                     "BackupSettingsView()", "DataLocationsView()", "MaintenanceView()", "GrooveStudioView()"] {
-            #expect(src.contains(pane), "existing pane \(pane) must stay reachable")
+                     "BackupSettingsView()", "DataLocationsView()", "MaintenanceView()", "AdvancedSettingsView()"] {
+            #expect(src.contains(pane), "pane \(pane) must be hosted")
         }
+        // The genre tools stay reachable under Advanced until W3-GEN (interim label of W1-2).
+        let advanced = try source("MLM/Views/Settings/AdvancedSettingsView.swift")
+        #expect(advanced.contains("GrooveStudioView()"))
+        #expect(advanced.contains("These genre tools move to Genres in the main window’s sidebar."))
+        #expect(!advanced.contains("Genre Workshop"), "retired word (UC-GLOSS-02)")
         #expect(src.contains("TabView(selection: $router.selectedTab)"))
         #expect(src.contains(".tabItem {") && src.contains("Label(tab.title, systemImage: tab.systemImage)"))
         #expect(src.contains("No library is open. Settings that belong to a library are dimmed until you open one."))
@@ -110,12 +117,58 @@ struct SettingsSceneTests {
             ("MLM/Views/Sidebar/LibraryFooter.swift", "openSettings(tab: .library)", 1),
             ("MLM/Views/Playlists/PlaylistDetailView.swift", "openSettings(tab: .sources)", 1),
             ("MLM/Views/Sources/RemotePlaylistsView.swift", "openSettings(tab: .sources)", 2),
-            ("MLM/Views/Settings/SourcesSetupView.swift", "openSettings(tab: .sources)", 1),
+            ("MLM/Views/Settings/SourcesSetupView.swift", "openSettings(tab: .sources)", 0),
+            ("MLM/Views/Library/LibraryView.swift", "openSettings(tab: .library)", 1),
+            ("MLM/Views/Inspector/InspectorAudioTab.swift", "openSettings(tab: .sources)", 1),
+            ("MLM/Views/Search/OnlineSearchResultsView.swift", "openSettings(tab: .sources)", 2),
+            ("MLM/Views/Activity/ActivityToolbarItem.swift", "openSettings(tab: .backup)", 1),
+            ("MLM/Views/Launch/LibrarySetupFlowView.swift", "openSettings(tab: .library)", 1),
+            ("MLM/App/Commands/LibraryMenuCommands.swift", "openSettings(tab: .maintenance)", 1),
+            ("MLM/App/Commands/LibraryMenuCommands.swift", "openSettings(tab: .library)", 1),
+            ("MLM/App/Commands/LibraryMenuCommands.swift", "openSettings(tab: .backup)", 2),
         ]
         for (path, call, count) in expectations {
             let src = try source(path)
             #expect(src.components(separatedBy: call).count - 1 == count, "\(path) should call \(call) \(count)×")
             #expect(!src.contains("showSettingsWindow"))
+        }
+    }
+
+    // MARK: W3-SET
+
+    @Test func everyTabIsANativeGroupedForm() throws {
+        for file in ["GeneralSettingsView", "LibrarySetupView", "PlaybackSettingsView", "SourcesSetupView",
+                     "BackupSettingsView", "DataLocationsView", "MaintenanceView", "AdvancedSettingsView"] {
+            let src = try source("MLM/Views/Settings/\(file).swift")
+            #expect(src.contains(".formStyle(.grouped)"), "\(file)")
+            #expect(!src.contains("MLMFont") && src.range(of: #"\.mlm[A-Z]"#, options: .regularExpression) == nil,
+                    "\(file): no mlm tokens (W5-4 / brief §3)")
+            #expect(!src.contains("NSOpenPanel"), "\(file): system panels via .fileImporter (UC-SHEET-24)")
+        }
+    }
+
+    @Test func playbackHasNoSpaceBarPointer() throws {
+        let src = try source("MLM/Views/Settings/PlaybackSettingsView.swift")
+        #expect(!src.localizedCaseInsensitiveContains("space bar"), "§10 Q1")
+        #expect(src.contains("Keep the last played tracks"))
+        #expect(src.contains("When playing from a list, queue up to"))
+        #expect(src.contains("\"playback_history_size\"") && src.contains("\"playback_context_cap\""))
+    }
+
+    @Test func settingsAlertsHaveCancelAsDefault() throws {
+        for file in ["SourcesSetupView", "BackupSettingsView", "MaintenanceView"] {
+            let src = try source("MLM/Views/Settings/\(file).swift")
+            let destructive = src.components(separatedBy: "role: .destructive)").count - 1
+            #expect(destructive > 0, "\(file)")
+            #expect(src.contains("Button(\"Cancel\", role: .cancel)"), "\(file)")
+        }
+        let sources = try source("MLM/Views/Settings/SourcesSetupView.swift")
+        #expect(sources.contains("Clear the Qobuz access cookie?"), "A-SET-COOKIECLEAR")
+        #expect(sources.contains("for all libraries. Linked playlists stay in your library but can’t be refreshed until you connect again."),
+                "A-SET-DISCONNECT")
+        let maintenance = try source("MLM/Views/Settings/MaintenanceView.swift")
+        for title in ["Update organized paths?", "Roll back last path migration?", "Clear the transcode cache?"] {
+            #expect(maintenance.contains(title))
         }
     }
 }

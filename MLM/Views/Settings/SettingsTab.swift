@@ -49,14 +49,13 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Whether the tab's settings belong to the open library, so they are dimmed while no
-    /// library is open (UC-WIN-05). General, Playback and Sources (accounts and tools of this
-    /// Mac) keep working. Advanced still hosts the Genre Workshop, which reads the library;
-    /// W3-SET turns it into an app-wide tab.
+    /// Whether the whole tab belongs to the open library, so it is dimmed while no library is
+    /// open (UC-WIN-05). General, Playback, Sources (accounts and tools of this Mac), Storage
+    /// Location and Advanced keep working and dim only their per-library sections (W3-SET).
     var belongsToLibrary: Bool {
         switch self {
-        case .general, .playback, .sources: false
-        case .library, .backup, .storage, .maintenance, .advanced: true
+        case .general, .playback, .sources, .storage, .advanced: false
+        case .library, .backup, .maintenance: true
         }
     }
 }

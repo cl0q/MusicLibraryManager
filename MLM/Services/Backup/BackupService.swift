@@ -161,8 +161,6 @@ enum BackupError: Error, Equatable {
     case restoreSwapFailed(String)
     /// The bundle belongs to another library. Restores never cross libraries.
     case wrongLibrary
-    /// The newest complete backup can't be deleted (W3-SET).
-    case lastCompleteBackup
 }
 
 /// Creates, lists, prunes, and restores timestamped backup bundles of the music library.
@@ -682,20 +680,6 @@ final class BackupService: Sendable {
     @discardableResult
     func pruneBackups(keep: Int = 10) async throws -> [URL] {
         try Self.pruneBundles(in: await scope(), keep: keep, fileManager: fileManager)
-    }
-
-    // MARK: - Delete
-
-    /// Moves one backup to the Trash (`Delete…` on a backup row). Refused for the newest
-    /// complete backup of the library — the one a restore would fall back to.
-    func deleteBackup(_ info: BackupInfo) async throws {
-        let all = try await listBackups()
-        let target = Self.pathKey(info.url)
-        guard all.contains(where: { Self.pathKey($0.url) == target }) else { return }
-        if all.first(where: \.isComplete).map({ Self.pathKey($0.url) }) == target {
-            throw BackupError.lastCompleteBackup
-        }
-        try fileManager.trashItem(at: info.url, resultingItemURL: nil)
     }
 
     /// A bundle's path without a trailing slash or `/private` prefix differences.

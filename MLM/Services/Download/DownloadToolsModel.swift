@@ -87,7 +87,7 @@ final class DownloadToolsModel {
     static let shared = DownloadToolsModel()
 
     /// The tools Settings lists, in the mockup's order.
-    static let listed: [ExternalToolHealth.Tool] = [.ytdlp, .ffmpeg, .fpcalc, .scdl]
+    nonisolated static let listed: [ExternalToolHealth.Tool] = [.ytdlp, .ffmpeg, .fpcalc, .scdl]
 
     private(set) var rows: [DownloadToolRow] = []
     private(set) var checkedAt: Date?

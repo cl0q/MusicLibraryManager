@@ -2,13 +2,31 @@ import Foundation
 
 /// Where MLM keeps its files. Optional entries are locations that may not be configured.
 struct DataLocations: Sendable, Equatable {
-    var database: URL
-    var playlistCovers: URL
+    /// `nil` while no library is open (the per-library rows are dimmed, UC-WIN-05).
+    var database: URL?
+    var playlistCovers: URL?
     var credentialsFile: URL
     var transcodeCache: URL?
     var libraryFolder: URL?
     /// The open library file (A3); `nil` while the pre-A3 layout is in use.
     var libraryFile: URL? = nil
+    /// `libraries.json` — the list of libraries on this Mac (ST-STORAGE.N02).
+    var libraryList: URL? = nil
+    /// Artwork and waveform caches (can be rebuilt); the first is the one `Show in Finder` opens.
+    var caches: [URL] = []
+    /// Backups and records of organised-path migrations.
+    var pathMigrations: URL? = nil
+    /// The log file (`Show in Finder` selects it; its folder with the rotated logs is measured).
+    var logFile: URL? = nil
+    /// `legacy-adopted-…` folders kept after library file setup (can be deleted).
+    var previousInstalls: [URL] = []
+}
+
+/// One part of a storage bar (ST-STORAGE.N01).
+struct StorageSegment: Identifiable, Equatable, Sendable {
+    let name: String
+    let bytes: Int64
+    var id: String { name }
 }
 
 /// Whether a folder can be reached now, in the words Settings uses for every location
@@ -131,6 +149,10 @@ final class DataLocationsViewModel {
         case credentialsFile
         case libraryFolder
         case transcodeCache
+        case libraryList
+        case caches
+        case pathMigrations
+        case logs
     }
 
     enum LocationState: Equatable, Sendable {
@@ -165,6 +187,7 @@ final class DataLocationsViewModel {
         static let transcodeHint = "Change the location in the Maintenance tab."
         static let recentChangesHelp = "Recent changes are kept in a separate file (-wal) and merged into the database automatically."
         static let footer = "Library files and the credentials file remain on your Mac if you delete the app. Audio files are never moved by this tab."
+        static let refreshNote = "Sizes refresh when this tab opens and when a drive is connected."
     }
 
     // MARK: - State
@@ -181,6 +204,10 @@ final class DataLocationsViewModel {
     private(set) var isMeasuring = false
     private(set) var isCalculatingLibrarySize = false
     private(set) var errorMessage: String?
+    /// `legacy-adopted-…` folders with their sizes.
+    private(set) var previousInstalls: [LocationRow] = []
+    /// Capacity of the library folder's volume, when it is reachable.
+    private(set) var volumeCapacity: VolumeCapacity?
 
     @ObservationIgnored private var librarySizeTask: Task<LibrarySizeResult, Never>?
 
@@ -234,6 +261,8 @@ final class DataLocationsViewModel {
         }.value
 
         rows = measured.rows
+        previousInstalls = measured.previousInstalls
+        volumeCapacity = measured.volumeCapacity
         databaseFileBytes = measured.databaseFileBytes
         walBytes = measured.walBytes
         shmBytes = measured.shmBytes
@@ -385,6 +414,62 @@ final class DataLocationsViewModel {
         return "\(Self.formatBytes(librarySize.bytes)) · calculated \(Self.formatDate(librarySize.calculatedAt))"
     }
 
+    // MARK: - Sizes chart (ST-STORAGE.N01)
+
+    /// What MLM itself stores on this Mac, by kind (only parts with a size).
+    var macSegments: [StorageSegment] {
+        var parts: [StorageSegment] = []
+        func add(_ name: String, _ bytes: Int64?) {
+            if let bytes, bytes > 0 { parts.append(StorageSegment(name: name, bytes: bytes)) }
+        }
+        add("Library file", row(.libraryFile).sizeBytes ?? row(.database).sizeBytes)
+        if let backups = row(.backups).url, MountObserver.extractVolumePath(from: backups.path) == nil {
+            add("Backups", row(.backups).sizeBytes)
+        }
+        add("Caches", row(.caches).sizeBytes)
+        add("Path migration backups", row(.pathMigrations).sizeBytes)
+        let previous = previousInstalls.compactMap(\.sizeBytes).reduce(0, +)
+        add("Previous install and logs", previous + (row(.logs).sizeBytes ?? 0))
+        return parts
+    }
+
+    var macTotalBytes: Int64 { macSegments.map(\.bytes).reduce(0, +) }
+
+    /// The library folder's volume: the library folder (when calculated), the transcode cache
+    /// when it lives there, and everything else on it.
+    var driveSegments: [StorageSegment] {
+        guard let capacity = volumeCapacity else { return [] }
+        var parts: [StorageSegment] = []
+        var known: Int64 = 0
+        if let size = librarySize?.bytes {
+            parts.append(StorageSegment(name: "Library folder", bytes: size))
+            known += size
+        }
+        let volume = row(.libraryFolder).url.flatMap { MountObserver.extractVolumePath(from: $0.path) }
+        if let cache = row(.transcodeCache).url, let bytes = row(.transcodeCache).sizeBytes, bytes > 0,
+           MountObserver.extractVolumePath(from: cache.path) == volume {
+            parts.append(StorageSegment(name: "Transcode cache", bytes: bytes))
+            known += bytes
+        }
+        parts.append(StorageSegment(name: "Other files", bytes: max(0, capacity.used - known)))
+        return parts
+    }
+
+    /// `On “Lexxar”` / `On this Mac’s disk`.
+    var driveTitle: String {
+        guard let folder = row(.libraryFolder).url,
+              let volume = LibraryDriveState.volumeName(fromVolumePath: MountObserver.extractVolumePath(from: folder.path))
+        else { return "On this Mac’s disk" }
+        return "On “\(volume)”"
+    }
+
+    /// `430 GB of 2 TB · 1.2 TB free`.
+    var driveCapacityText: String? {
+        volumeCapacity.map {
+            "\(Self.formatBytes($0.used)) of \(Self.formatBytes($0.total)) · \(Self.formatBytes($0.available)) free"
+        }
+    }
+
     var canCalculateLibrarySize: Bool {
         !isCalculatingLibrarySize && row(.libraryFolder).state == .available
     }
@@ -396,6 +481,15 @@ final class DataLocationsViewModel {
         var databaseFileBytes: Int64?
         var walBytes: Int64?
         var shmBytes: Int64?
+        var previousInstalls: [LocationRow] = []
+        var volumeCapacity: VolumeCapacity?
+    }
+
+    /// Size and free space of a volume (`430 GB of 2 TB · 1.2 TB free`).
+    struct VolumeCapacity: Equatable, Sendable {
+        let total: Int64
+        let available: Int64
+        var used: Int64 { max(0, total - available) }
     }
 
     /// Existence and sizes for every location except the library folder, which only gets
@@ -435,7 +529,7 @@ final class DataLocationsViewModel {
         var databaseFileBytes: Int64?
         var walBytes: Int64?
         var shmBytes: Int64?
-        if databaseRow.state == .available {
+        if let database, databaseRow.state == .available {
             // Sidecars are suffixes of the full path, not path extensions.
             databaseFileBytes = fileSize(database)
             walBytes = fileSize(URL(fileURLWithPath: database.path + "-wal"))
@@ -462,7 +556,40 @@ final class DataLocationsViewModel {
 
         rows[.libraryFolder] = LocationRow(url: locations.libraryFolder, state: state(of: locations.libraryFolder))
 
-        return Measurement(rows: rows, databaseFileBytes: databaseFileBytes, walBytes: walBytes, shmBytes: shmBytes)
+        // This Mac (W3-SET, ST-STORAGE.N02/N03): the list of libraries, caches, migration
+        // backups, logs and a kept previous install.
+        if let list = locations.libraryList {
+            var row = LocationRow(url: list, state: state(of: list))
+            if row.state == .available { row.sizeBytes = fileSize(list) }
+            rows[.libraryList] = row
+        }
+        let caches = locations.caches.filter { FileManager.default.fileExists(atPath: $0.path) }
+        rows[.caches] = LocationRow(
+            url: caches.first ?? locations.caches.first,
+            state: caches.isEmpty ? .notFound : .available,
+            sizeBytes: caches.isEmpty ? nil : measureBundles(caches).values.reduce(0, +))
+        if let migrations = locations.pathMigrations {
+            rows[.pathMigrations] = directoryRow(migrations)
+        }
+        if let log = locations.logFile {
+            var row = LocationRow(url: log, state: state(of: log))
+            if row.state == .available {
+                let folder = log.deletingLastPathComponent()
+                row.sizeBytes = measureBundles([folder])[folder]
+            }
+            rows[.logs] = row
+        }
+        let previous = locations.previousInstalls.map { directoryRow($0) }.filter { $0.state == .available }
+
+        var capacity: VolumeCapacity?
+        if let folder = locations.libraryFolder, rows[.libraryFolder]?.state == .available,
+           let values = try? folder.resourceValues(forKeys: [.volumeTotalCapacityKey, .volumeAvailableCapacityKey]),
+           let total = values.volumeTotalCapacity, let available = values.volumeAvailableCapacity {
+            capacity = VolumeCapacity(total: Int64(total), available: Int64(available))
+        }
+
+        return Measurement(rows: rows, databaseFileBytes: databaseFileBytes, walBytes: walBytes, shmBytes: shmBytes,
+                           previousInstalls: previous, volumeCapacity: capacity)
     }
 
     /// Logical size of a single file, or `nil` when it doesn't exist.

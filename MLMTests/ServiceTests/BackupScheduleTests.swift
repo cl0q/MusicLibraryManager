@@ -166,18 +166,6 @@ struct BackupScheduleTests {
         #expect(left.contains { BackupService.pathKey($0.url) == BackupService.pathKey(complete.url) })
     }
 
-    @Test func deleteRefusesTheNewestCompleteBackup() async throws {
-        let f = try await Fixture()
-        defer { f.cleanup() }
-        let service = f.service()
-        let older = try await service.createBackup(reason: .manual)
-        f.clock.advance(60)
-        let newest = try await service.createBackup(reason: .manual)
-        await #expect(throws: BackupError.lastCompleteBackup) { try await service.deleteBackup(newest) }
-        try await service.deleteBackup(older)
-        #expect(try await service.listBackups().map { BackupService.pathKey($0.url) } == [BackupService.pathKey(newest.url)])
-    }
-
     @Test func preMigrationPruneFollowsTheSetting() async throws {
         let f = try await Fixture()
         defer { f.cleanup() }
