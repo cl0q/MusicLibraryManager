@@ -408,7 +408,13 @@ enum SnapshotFixtures {
         "Sync/SyncProfileDetailView.swift": "Deferred: live device file checks, cache age and preview task need filesystem/clock seams.",
         "Sync/SyncSettingsForm.swift": "Deferred: concrete sync service supplies preference state; inject settings bindings/actions.",
         "Sync/SyncView.swift": "Deferred: profile/device/preview lifecycle needs inert sync coordinator.",
-        "TrackDetail/GrooveStudioView.swift": "Deferred: audio players, model/export services and placeholder randomness need passive deck state.",
+        "Genres/GenresView.swift": "Deferred: the genre list loads its counts from the library database; GenreOverview / GenreLookalikes are unit-tested (W3-GEN).",
+        "Genres/GenreDetailView.swift": "Deferred: the genre page loads tracks and runs tag edits; GenreEdits is unit-tested on temporary databases (W3-GEN).",
+        "Genres/GenreSuggestionsSection.swift": "Deferred: suggestions are computed from the similarity analysis; GenreWorkbench / GenreSuggestionRules are unit-tested (W3-GEN).",
+        "Genres/GenreMergeSheet.swift": "Deferred: the merge sheet reads the genres' tracks; the merge edit is unit-tested (GenreEditsTests).",
+        "Genres/CreateMLExportSheet.swift": "Deferred: the export sheet reads the library and the disk; CreateMLExportPlan / CreateMLExporter are unit-tested.",
+        "Genres/GenreMenu.swift": "Deferred: the genre menu builder reads the shell environment; its sections are unit-tested (GenreMenuModelTests).",
+        "Genres/GenreRequests.swift": "Non-view: window-level genre requests (the export sheet from File ▸ Export) — hosts the sheet only.",
         "TrackDetail/GrooveView.swift": "Deferred: preview audio, recommendations and random placeholders require controlled provider/player state.",
     ]
 
@@ -426,6 +432,13 @@ DiscoveryInbox/DiscoveryInboxView.swift
 DragDrop/DropTargetModifier.swift
 Folders/FoldersView.swift
 Folders/FolderTreeView.swift
+Genres/CreateMLExportSheet.swift
+Genres/GenreDetailView.swift
+Genres/GenreMenu.swift
+Genres/GenreMergeSheet.swift
+Genres/GenreRequests.swift
+Genres/GenreSuggestionsSection.swift
+Genres/GenresView.swift
 Import/ImportPlaylistSheet.swift
 Import/ImportSheetsHost.swift
 Import/QuickAddSheet.swift
@@ -518,7 +531,6 @@ Sync/SyncProfileDetailView.swift
 Sync/SyncSettingsForm.swift
 Sync/SyncToast.swift
 Sync/SyncView.swift
-TrackDetail/GrooveStudioView.swift
 TrackDetail/GrooveView.swift
 TrackDetail/WaveformHelpers.swift
 TrackDetail/WaveformView.swift

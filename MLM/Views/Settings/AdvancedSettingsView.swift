@@ -2,9 +2,8 @@ import AppKit
 import SwiftUI
 
 /// Settings ▸ Advanced (ST-ADVANCED, DEC-025, DEC-035): the credentials file (where it is and
-/// whether it was found — never its contents), diagnostics, the list cache (moved from
-/// Maintenance, ST-MAINT.E04–E06) and — until W3-GEN builds the Genres destination — the genre
-/// tools under their interim label, so they stay reachable.
+/// whether it was found — never its contents), diagnostics and the list cache (moved from
+/// Maintenance, ST-MAINT.E04–E06). The genre tools live in the Genres destination (W3-GEN).
 ///
 /// Not built: `Log detail` (MLM has no log-level setting to switch) and `Reset Tips` (no TipKit
 /// tips exist yet — W5-2).
@@ -14,35 +13,13 @@ struct AdvancedSettingsView: View {
     @State private var copiedSummary = false
 
     var body: some View {
-        NavigationStack {
-            Form {
-                genresSection
-                credentialsSection
-                diagnosticsSection
-                listsSection
-            }
-            .formStyle(.grouped)
-            .navigationDestination(for: AdvancedDestination.self) { _ in
-                GrooveStudioView()
-                    .navigationTitle("Genres")
-            }
+        Form {
+            credentialsSection
+            diagnosticsSection
+            listsSection
         }
+        .formStyle(.grouped)
         .onAppear(perform: checkCredentials)
-    }
-
-    private enum AdvancedDestination: Hashable { case genreTools }
-
-    // MARK: Genres (interim until W3-GEN)
-
-    private var genresSection: some View {
-        Section {
-            NavigationLink(value: AdvancedDestination.genreTools) {
-                SettingsRowLabel("Genres") {
-                    Text("These genre tools move to Genres in the main window’s sidebar.")
-                }
-            }
-            .disabled(!container.isInitialized)
-        }
     }
 
     // MARK: Credentials file

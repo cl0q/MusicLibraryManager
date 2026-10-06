@@ -58,7 +58,7 @@ enum KeyboardMap {
             .menu(.toggleInfo, "Show or hide Info"),
             .menu(.download, "Download or retry the selection’s missing tracks"),
             .menu(.showInFinder),
-            .key("⌫", "Remove from the current playlist, queue or sync profile", owner: "W2-A"),
+            .key("⌫", "Remove from the current playlist, queue, sync profile or genre", owner: "W2-A"),
             .menu(.removeFromLibrary),
             .menu(.refreshFromSource, "Re-read the current place: Scan Library Folder, Refresh from ‹Source›, Recompute Plan"),
             .key("Type a name", "Jump to the first row whose title starts with it", owner: "W2-A"),
@@ -120,7 +120,7 @@ enum KeyboardMap {
             .key("⌥→ / ⌥←", "Expand or collapse everything inside", owner: "W3-FOLD"),
             .key("⌘↓", "Open the selected folder as the root (Folders)", owner: "W3-FOLD"),
             .key("⌥↑ / ⌥↓", "Move the row (Albums ▸ Edit Order)", owner: "W4-2"),
-            .key("⌘S", "Save the staged changes (genre page)", owner: "W3-GEN"),
+            .key("⌘S", "Save the staged changes (genre page)"),
         ]),
         Group(title: "MLM", rows: [
             .menu(.closeWindow), .menu(.minimize), .menu(.hideApp), .menu(.hideOthers), .menu(.quit),

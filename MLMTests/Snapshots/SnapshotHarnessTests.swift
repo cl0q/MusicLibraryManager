@@ -55,7 +55,10 @@ final class SnapshotsTests: XCTestCase {
         // W3-ADD replaced Sources/{RemotePlaylistsView,SourcesView} (deferred) by the 4 files of Import/
         // (deferred): 117 → 119 files, 57 → 59 deferred.
         // W3-SET added Settings/{PlaybackSettingsView,AdvancedSettingsView,SettingsRows}.swift (deferred).
-        XCTAssertEqual(paths.count, 125, "Re-audit inventory changes explicitly.")
+        // W3-GEN removed TrackDetail/GrooveStudioView.swift (deferred) and added the 7 files of
+        // Genres/ (6 deferred, GenreRequests non-view): 125 → 131 files, 65 → 70 deferred,
+        // 37 → 38 non-view.
+        XCTAssertEqual(paths.count, 131, "Re-audit inventory changes explicitly.")
         XCTAssertEqual(Set(SnapshotFixtures.inventory.map(\.path)), paths)
         XCTAssertEqual(SnapshotFixtures.inventory.count, paths.count)
         XCTAssertFalse(SnapshotFixtures.inventory.contains { $0.disposition.isEmpty })
@@ -63,8 +66,8 @@ final class SnapshotsTests: XCTestCase {
         XCTAssertFalse(SnapshotFixtures.fixtures.isEmpty)
         XCTAssertEqual(SnapshotFixtures.fixtures.count, 27)
         XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 23)
-        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 37)
-        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 65)
+        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 38)
+        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 70)
         for fixture in SnapshotFixtures.fixtures where fixture.expectedTableRows != nil {
             if case .swiftUI = fixture.backend {
                 XCTFail("\(fixture.id): table readiness requires the AppKit backend.")

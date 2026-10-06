@@ -103,8 +103,12 @@ struct MenuBarStructureTests {
             // key equivalents live only while that menu is open; each one mirrors the menu-bar
             // command's key (or the focused list's ↩ / ⌫), checked in `TrackListStructureTests`.
             guard !file.path.hasSuffix("/MLM/Views/TrackList/TrackMenu.swift") else { continue }
+            // UC-KEY-31: ⌘S is the genre staging bar's `Save n Changes` button — a key with no
+            // menu item ("— (button)"), present only while changes are staged (W3-GEN).
+            let fileAllowed = file.path.hasSuffix("/MLM/Views/Genres/GenreSuggestionsSection.swift")
+                ? allowed + [".keyboardShortcut(\"s\", modifiers: .command)"] : allowed
             for line in text.components(separatedBy: "\n") where line.contains(".keyboardShortcut(") {
-                #expect(allowed.contains { line.contains($0) },
+                #expect(fileAllowed.contains { line.contains($0) },
                         "\(file.lastPathComponent): \(line.trimmingCharacters(in: .whitespaces)) — menu keys belong in .commands")
             }
         }
@@ -298,9 +302,11 @@ struct MenuBarStructureTests {
         }
         // (⌘↓ stays: it is Volume Down; the Folders meaning is the hidden row.)
         #expect(!shown.contains { $0.action.contains("as the root") })
-        for keys in ["⌫", "K", "⌘S"] {
+        for keys in ["⌫", "K"] {
             #expect(!shown.contains { $0.keys == keys }, "\(keys) doesn't work yet")
         }
+        // ⌘S saves a genre's staged changes since W3-GEN (UC-KEY-31).
+        #expect(shown.contains { $0.keys == "⌘S" })
         // Space preview and the preview keys work since W2-C.
         #expect(shown.contains { $0.keys == "Space" })
         let previewing = KeyboardMap.visibleGroups.first { $0.title == "While previewing" }
