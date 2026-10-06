@@ -188,82 +188,11 @@ extension View {
 }
 
 private struct MainWindowDrops: ViewModifier {
-    @Bindable private var drops = DropCenter.shared
-
     func body(content: Content) -> some View {
         content
             .dropTarget(.window, cornerRadius: 0)
-            .sheet(item: $drops.m3uImport) { request in
-                M3UDropImportSheet(request: request)
-            }
-    }
-}
-
-/// S-PLD-M3U-PREVIEW for a dropped `.m3u`: the existing ingest preview, reached by a drop.
-private struct M3UDropImportSheet: View {
-    let request: DropCenter.M3UImport
-
-    @Environment(\.container) private var container
-    @Environment(StatusBarCenter.self) private var statusBar: StatusBarCenter?
-    @Environment(\.dismiss) private var dismiss
-    @State private var ingest: PlaylistIngestViewModel?
-
-    var body: some View {
-        Group {
-            if let ingest, let preview = ingest.preview {
-                IngestPreviewView(
-                    preview: preview,
-                    sourceFileName: request.url.lastPathComponent,
-                    onApply: { apply(ingest, added: preview.added.count) },
-                    onCancel: { cancel() },
-                    isApplying: ingest.isApplying,
-                    applyError: ingest.errorMessage
-                )
-            } else {
-                VStack(alignment: .leading, spacing: Spacing.m) {
-                    if let error = ingest?.errorMessage {
-                        Label(error, systemImage: "exclamationmark.triangle")
-                            .font(.callout)
-                    } else {
-                        HStack(spacing: Spacing.s) {
-                            ProgressView().controlSize(.small)
-                            Text("Reading “\(request.url.lastPathComponent)”…")
-                        }
-                    }
-                    HStack {
-                        Spacer()
-                        Button("Cancel", role: .cancel) { cancel() }
-                            .keyboardShortcut(.cancelAction)
-                    }
-                }
-                .padding(Spacing.xl)
-                .frame(minWidth: 360)
-            }
-        }
-        .task(id: request.id) {
-            guard let service = container.playlistIngestService else {
-                statusBar?.post("Couldn’t read “\(request.url.lastPathComponent)” — the library isn’t ready yet")
-                dismiss()
-                return
-            }
-            let model = PlaylistIngestViewModel(ingestService: service)
-            ingest = model
-            await model.loadPreview(url: request.url)
-        }
-    }
-
-    private func apply(_ ingest: PlaylistIngestViewModel, added: Int) {
-        Task {
-            guard let playlistID = await ingest.apply(url: request.url, profileId: -1) else { return }
-            NotificationCenter.default.post(name: .playlistDidChange, object: nil, userInfo: ["playlistId": playlistID])
-            statusBar?.post("Imported \(StatusBarText.tracks(added)) from “\(request.url.lastPathComponent)”")
-            dismiss()
-        }
-    }
-
-    private func cancel() {
-        ingest?.cancel()
-        dismiss()
+            // The M3U preview, file panel and export (W3-PL, `PlaylistM3UImportSheet.swift`).
+            .playlistWindowRequests()
     }
 }
 

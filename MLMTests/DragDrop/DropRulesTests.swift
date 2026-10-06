@@ -48,7 +48,9 @@ struct DropRulesTests {
     @Test func everyTargetTakesWhatTheMatrixSays() {
         let matrix: [(DropTarget, Set<DragKind>)] = [
             (warmUp, [.tracks, .playlists, .files, .link]),
-            (.playlistsSection, [.tracks, .files, .link]),
+            (.playlistsSection, [.tracks, .playlists, .files, .link]),
+            (.playlistFolder(id: 9, name: "Sets"), [.tracks, .playlists, .files]),
+            (.playlistOrder(folderID: nil, before: nil), [.playlists]),
             (profile, [.tracks, .playlists]),
             (.fixedRow, [.files]),
             (self.table, [.tracks, .playlists, .files, .link]),
@@ -124,8 +126,9 @@ struct DropRulesTests {
         #expect(DropRules.decide(two, onto: profile, context: open) == .addPlaylistsToSyncProfile([2, 1], profileID: 7, profileName: "iPod Classic"))
         #expect(DropRules.decide(two, onto: table, context: open) == .placePlaylists([2], playlistID: 1, playlistName: "Warm-up"))
         #expect(DropRules.decide(two, onto: .player, context: open) == .playNextPlaylists([2, 1]))
-        // Moving to the top level / between rows needs playlist folders (W3-PL).
-        #expect(DropRules.decide(two, onto: .playlistsSection, context: open) == .refuse(nil))
+        // W3-PL: the header / empty area moves playlists to the top level, at the end.
+        #expect(DropRules.decide(two, onto: .playlistsSection, context: open)
+                == .movePlaylistItems([.playlist(2), .playlist(1)], folderID: nil, before: nil))
     }
 
     // MARK: Finder files and folders

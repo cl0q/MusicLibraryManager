@@ -141,6 +141,19 @@ struct TrackDragPayload: Equatable, Sendable {
 struct PlaylistDragItem: Codable, Transferable, Equatable, Hashable, Sendable {
     let playlistId: Int64
     var libraryId: String?
+    /// Set when the dragged row is a playlist folder (W3-PL: folders reorder among the top-level
+    /// rows by drag; `playlistId` is then 0). Older payloads decode without it.
+    var folderId: Int64? = nil
+
+    /// A playlist folder row as a drag (reorder only; no other target takes it).
+    static func folder(_ id: Int64, libraryId: String?) -> PlaylistDragItem {
+        PlaylistDragItem(playlistId: 0, libraryId: libraryId, folderId: id)
+    }
+
+    /// The row it stands for in the sidebar's order.
+    var sidebarItem: PlaylistSidebarItemID {
+        folderId.map(PlaylistSidebarItemID.folder) ?? .playlist(playlistId)
+    }
 
     static var transferRepresentation: some TransferRepresentation {
         CodableRepresentation(contentType: .draggedPlaylist)

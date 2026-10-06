@@ -1,575 +1,371 @@
+import AppKit
 import SwiftUI
 
-// MARK: Accessibility labels for shotty UI automation (snake_case literals)
-
-/// Playlists grid view — shows all playlists as cards with create/search.
+/// All Playlists (V-PL, DEC-003): the cover view of what the sidebar lists — the same
+/// playlists, in the same order when sorted `Manual`, with playlist folders as collapsible
+/// groups (no filter, no scope); any other sort, scope or filter shows one flat grid.
 ///
-/// Layout:
-/// ```
-/// ┌──────────────────────────────────────────────────────────────┐
-/// │  Playlists                       🔍 Search    [+ New]       │  Header
-/// ├──────────────────────────────────────────────────────────────┤
-/// │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐       │
-/// │  │  📌 Fav  │ │  Chill   │ │  Workout │ │  New     │       │  Grid
-/// │  │  42 trks │ │  18 trks │ │  31 trks │ │  0 trks  │       │
-/// │  └──────────┘ └──────────┘ └──────────┘ └──────────┘       │
-/// │                                                              │
-/// └──────────────────────────────────────────────────────────────┘
-/// ```
+/// Single click selects, double-click / Return opens (pushed, Back ⌘[), ⌥-double-click or the
+/// cover's play badge plays (UC-SEL-04, UC-PRIM-05, §10 Q11). Scope bar `All · Local · ‹sources›
+/// · Needs attention` with live counts and the sort control; the toolbar's search filters by
+/// name in place. No toolbar items and no New Playlist button: New Playlist lives in the Add
+/// menu, the File menu and the Playlists section's ＋ (the naming popover S-PL-NEWPLAYLIST is
+/// gone — new playlists are named inline in the sidebar).
 ///
-/// Opening a card pushes `DetailRoute.playlist` onto the content column's navigation stack
-/// (Back ⌘[ returns to the grid). Without a shell navigation model (previews, fixtures) it
-/// shows the detail in place as before.
+/// Built on the sidebar's data (`SidebarModel`: tree, summaries, sources) — one query for
+/// every playlist, nothing per card.
 struct PlaylistsView: View {
     @Environment(\.container) private var container
-    @Environment(NavigationModel.self) private var navigation: NavigationModel?
-    @State private var viewModel: PlaylistViewModel?
-    @State private var selectedPlaylist: Playlist?
-    @State private var showFailedTracksWhenOpened = false
-    @State private var showNewPlaylistPopover = false
-    @State private var availableSyncProfiles: [SyncProfile] = []
-    @State private var pendingDeletion: Playlist?
+    @Environment(SidebarModel.self) private var sidebar
+    @Environment(NavigationModel.self) private var navigation
+    @Environment(ShellActions.self) private var shell: ShellActions?
+    @Environment(StatusBarCenter.self) private var statusBar: StatusBarCenter?
+    @Environment(UndoCenter.self) private var undo: UndoCenter?
+    @Environment(ToolbarSearchModel.self) private var search: ToolbarSearchModel?
 
-    /// Callback when a track is double-clicked in the detail view.
-    var onTrackDoubleClick: ((Track, [Track]) -> Void)?
+    /// UC-SCOPE-05 / V-PL.N01: remembered per window.
+    @SceneStorage("allPlaylists.sort") private var sortRaw = PlaylistGridSort.manual.rawValue
+    @SceneStorage("allPlaylists.scope") private var scopeKey = PlaylistGridScope.all.storageKey
 
-    private let columns = [
-        GridItem(.adaptive(minimum: 200, maximum: 260), spacing: 12)
-    ]
+    @State private var selection: Set<Int64> = []
+    @State private var anchor: Int64?
+    @State private var renamingID: Int64?
+    @State private var renameText = ""
+    @State private var collapsedGroups: Set<Int64> = []
+    @State private var refusals: [Int64: String] = [:]
+    @FocusState private var gridFocused: Bool
+
+    private let columns = [GridItem(.adaptive(minimum: 150, maximum: 190), spacing: Spacing.l, alignment: .top)]
+
+    private var sort: PlaylistGridSort { PlaylistGridSort(rawValue: sortRaw) ?? .manual }
+    private var filter: SearchFilter { container.searchCoordinator.filter(for: .allPlaylists) }
+
+    private var actions: PlaylistActions {
+        PlaylistActions(container: container, shell: shell, navigation: navigation, statusBar: statusBar, undo: undo)
+    }
+
+    // MARK: Data
+
+    private var items: [Int64: PlaylistGridItem] {
+        let unusable = container.tokenAccessStatus?.inaccessibleServices ?? []
+        var result: [Int64: PlaylistGridItem] = [:]
+        for playlist in sidebar.playlists {
+            guard let id = playlist.id else { continue }
+            let sourceName = playlist.sourceId.flatMap { sidebar.sourceNames[$0] }
+            let summary = sidebar.summaries[id]
+            result[id] = PlaylistGridItem(
+                playlist: playlist,
+                summary: summary,
+                status: PlaylistStatus.make(
+                    summary: summary,
+                    echo: ActivityCenter.shared.echo(for: .playlist(id, name: playlist.name)),
+                    expiredSignIn: PlaylistStatus.expiredSignIn(sourceName: sourceName, unusable: unusable)
+                ),
+                source: sourceName.map(PlaylistSourceIdentity.init(sourceName:))
+            )
+        }
+        return result
+    }
+
+    private func scope(in all: [PlaylistGridItem]) -> PlaylistGridScope {
+        PlaylistGridRules.scopes(all).first { $0.storageKey == scopeKey } ?? .all
+    }
+
+    // MARK: Body
 
     var body: some View {
-        Group {
-            if let selectedPlaylist, viewModel != nil, navigation == nil {
-                PlaylistDetailView(
-                    playlist: selectedPlaylist,
-                    initiallyShowFailedTracks: showFailedTracksWhenOpened,
-                    onBack: {
-                        self.selectedPlaylist = nil
-                        self.showFailedTracksWhenOpened = false
+        let items = self.items
+        let all = Array(items.values)
+        let scope = scope(in: all)
+        let layout = PlaylistGridRules.layout(tree: sidebar.tree, items: items, sort: sort, scope: scope, filter: filter)
+        ContentScaffold(showsDriveBanner: false) {
+            content(layout: layout, all: all, scope: scope)
+                .statusBarText(statusText(layout: layout, total: all.count, items: items))
+        } scopeBar: {
+            if sidebar.hasLoadedPlaylists && !sidebar.playlists.isEmpty {
+                ScopeBar(
+                    items: PlaylistGridRules.scopes(all).map { scope in
+                        ScopeBarItem(id: scope, title: scope.title, count: PlaylistGridRules.count(all, in: scope),
+                                     hidesWhenEmpty: scope == .needsAttention)
                     },
-                    onTrackDoubleClick: onTrackDoubleClick
-                )
-            } else if let viewModel {
-                gridContent(viewModel)
-            } else {
-                ProgressView("Loading playlists…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.mlmBase)
-            }
-        }
-        .task {
-            initializeViewModel()
-            await viewModel?.loadPlaylists()
-            await reloadSyncProfiles()
-        }
-        // In-place filter (W2-I): the toolbar field filters the grid by name; the grid's own
-        // search field is gone (one search field, UC-SEARCH-01).
-        .onChange(of: container.searchCoordinator.filter(for: .allPlaylists), initial: true) { _, filter in
-            viewModel?.searchQuery = filter.parsed.freeText
-        }
-        .onChange(of: viewModel != nil) { _, _ in
-            viewModel?.searchQuery = container.searchCoordinator.filter(for: .allPlaylists).parsed.freeText
-        }
-        .onChange(of: selectedPlaylist?.id) { _, id in
-            guard let navigation, let id else { return }
-            navigation.push(.playlist(id, showFailedTracks: showFailedTracksWhenOpened))
-            selectedPlaylist = nil
-            showFailedTracksWhenOpened = false
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { _ in
-            Task { await viewModel?.refresh() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .downloadStateDidChange)) { _ in
-            Task { await viewModel?.refresh() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .downloadDidComplete)) { _ in
-            Task { await viewModel?.refresh() }
-        }
-        .background {
-            if let viewModel {
-                PlaylistDownloadHealthObserver(viewModel: viewModel)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .syncProfileDidChange)) { _ in
-            Task { await reloadSyncProfiles() }
-        }
-        .onAppear {
-            // Revalidate covers for all displayed playlists when the grid becomes visible.
-            // This catches the case where artwork backfill ran while the view was not shown
-            // (e.g., user was in LibraryView during Maintenance → Refresh embedded artwork).
-            // Post one notification per displayed playlist so PlaylistCoverService can
-            // coalesce via inFlight. Tagged coverRevalidation so PlaylistDetailView's
-            // track-refresh receiver skips these noise posts.
-            guard let vm = viewModel else { return }
-            for playlist in vm.displayedPlaylists {
-                guard let pid = playlist.id else { continue }
-                NotificationCenter.default.post(
-                    name: .playlistDidChange,
-                    object: nil,
-                    userInfo: ["playlistId": pid, "coverRevalidation": pid]
-                )
-            }
-        }
-        .confirmationDialog(
-            "Delete playlist?",
-            isPresented: Binding(
-                get: { pendingDeletion != nil },
-                set: { if !$0 { pendingDeletion = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button("Delete Playlist", role: .destructive) {
-                guard let playlistID = pendingDeletion?.id else { return }
-                pendingDeletion = nil
-                Task { await viewModel?.deletePlaylist(id: playlistID) }
-            }
-            Button("Cancel", role: .cancel) {
-                pendingDeletion = nil
-            }
-        } message: {
-            Text("Delete “\(pendingDeletion?.name ?? "")”? Its music files will remain in your library.")
-        }
-    }
-
-    // MARK: - Grid Content
-
-    private func gridContent(_ viewModel: PlaylistViewModel) -> some View {
-        VStack(spacing: 0) {
-            // Header bar
-            headerBar(viewModel)
-
-            // D-10: 8-pin soft-limit hint banner — appears above the divider
-            // when togglePin hard-blocks the 9th attempt; auto-clears after 3s.
-            if let hintMessage = viewModel.pinLimitHintMessage {
-                pinLimitBanner(message: hintMessage)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-
-            Divider()
-                .background(Color.mlmEdge)
-
-            // Grid or empty state
-            if viewModel.displayedPlaylists.isEmpty && !viewModel.isLoading {
-                emptyState(viewModel)
-            } else {
-                scrollableGrid(viewModel)
-            }
-        }
-        .background(Color.mlmBase)
-        .animation(.easeInOut(duration: 0.2), value: viewModel.pinLimitHintMessage)
-    }
-
-    // MARK: - Header
-
-    private func headerBar(_ viewModel: PlaylistViewModel) -> some View {
-        HStack(spacing: 8) {
-            Text("Playlists")
-                .font(MLMFont.pageTitle)
-                .foregroundColor(.mlmInk)
-
-            // Count badge
-            Text("\(viewModel.playlists.count)")
-                .font(MLMFont.badge)
-                .foregroundColor(.mlmInkMuted)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Color.mlmRaised)
-                .clipShape(Capsule())
-
-            Spacer()
-
-            // Source filter picker
-            sourceFilterPicker(viewModel)
-
-            // Incomplete toggle
-            Button {
-                viewModel.incompleteOnly.toggle()
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: viewModel.incompleteOnly ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 11))
-                    Text("Incomplete")
-                        .font(MLMFont.body)
-                }
-                .foregroundColor(viewModel.incompleteOnly ? .mlmAccent : .mlmInkSecondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(Color.mlmRaised)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("playlist_incomplete_filter")
-            .accessibilityLabel("playlist_incomplete_filter")
-
-            // New playlist button
-            Button {
-                viewModel.newPlaylistName = ""
-                showNewPlaylistPopover = true
-            } label: {
-                Label("New Playlist", systemImage: "plus")
-                    .font(MLMFont.bodyBold)
-                    .foregroundColor(.mlmBase)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color.mlmAccent)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-            }
-            .buttonStyle(.plain)
-            // No ⌘N here: File ▸ New Playlist owns ⌘N (one meaning per key, UC-KEY-39).
-            .accessibilityIdentifier("new_playlist_button")
-            .accessibilityLabel("new_playlist_button")
-            .popover(isPresented: $showNewPlaylistPopover, arrowEdge: .bottom) {
-                newPlaylistPopover(viewModel)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
-
-    // MARK: - Source Filter Picker
-
-    private func sourceFilterPicker(_ viewModel: PlaylistViewModel) -> some View {
-        Menu {
-            Button {
-                viewModel.sourceFilter = .all
-            } label: {
-                if case .all = viewModel.sourceFilter { Label("All", systemImage: "checkmark") } else { Text("All") }
-            }
-            Button {
-                viewModel.sourceFilter = .local
-            } label: {
-                if case .local = viewModel.sourceFilter { Label("Local", systemImage: "checkmark") } else { Text("Local") }
-            }
-            ForEach(viewModel.availableSourceIdentities, id: \.self) { identity in
-                Button {
-                    viewModel.sourceFilter = .identity(identity)
-                } label: {
-                    if case .identity(identity) = viewModel.sourceFilter {
-                        Label(identity.displayName, systemImage: "checkmark")
-                    } else {
-                        Text(identity.displayName)
+                    selection: Binding(get: { scope }, set: { scopeKey = $0.storageKey }),
+                    countNoun: .playlists
+                ) {
+                    Picker("Sort by", selection: $sortRaw) {
+                        ForEach(PlaylistGridSort.allCases) { sort in
+                            Text(sort.title).tag(sort.rawValue)
+                        }
                     }
+                    .pickerStyle(.menu)
+                    .fixedSize()
+                    .help("Sort the playlists")
                 }
             }
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "line.3.horizontal.decrease.circle")
-                    .font(.system(size: 11))
-                Text(sourceFilterLabel(viewModel))
-                    .font(MLMFont.body)
-            }
-            .foregroundColor(.mlmInkSecondary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(Color.mlmRaised)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
         }
-        .menuStyle(.borderlessButton)
-        .accessibilityIdentifier("playlist_source_filter")
-        .accessibilityLabel("playlist_source_filter")
+        .modifier(WindowTitleModifier())
+        // Export ▸ Playlist as M3U… with one card selected.
+        .focusedSceneValue(\.selectedPlaylists, selection.compactMap { items[$0]?.playlist })
+        .onChange(of: PlaylistRequests.shared.revealInGrid) { _, id in reveal(id) }
+        .onAppear { reveal(PlaylistRequests.shared.revealInGrid) }
     }
 
-    private func sourceFilterLabel(_ viewModel: PlaylistViewModel) -> String {
-        switch viewModel.sourceFilter {
-        case .all: return "All"
-        case .local: return "Local"
-        case .identity(let id): return id.displayName
-        }
-    }
-
-    // MARK: - New Playlist Popover
-
-    private func newPlaylistPopover(_ viewModel: PlaylistViewModel) -> some View {
-        VStack(spacing: 8) {
-            Text("New Playlist")
-                .font(MLMFont.sectionHeader)
-                .foregroundColor(.mlmInk)
-
-            TextField("Playlist name", text: Binding(
-                get: { viewModel.newPlaylistName },
-                set: { viewModel.newPlaylistName = $0 }
-            ))
-            .textFieldStyle(.roundedBorder)
-            .font(MLMFont.body)
-            .onSubmit {
-                Task {
-                    await viewModel.createPlaylist(name: viewModel.newPlaylistName)
-                    showNewPlaylistPopover = false
-                }
-            }
-            .accessibilityIdentifier("new_playlist_name_field")
-            .accessibilityLabel("new_playlist_name_field")
-
-            HStack {
-                Button("Cancel") {
-                    showNewPlaylistPopover = false
-                }
-                .keyboardShortcut(.cancelAction)
-                .accessibilityIdentifier("new_playlist_cancel_button")
-                .accessibilityLabel("new_playlist_cancel_button")
-
-                Spacer()
-
-                Button("Create") {
-                    Task {
-                        await viewModel.createPlaylist(name: viewModel.newPlaylistName)
-                        showNewPlaylistPopover = false
-                    }
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(viewModel.newPlaylistName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .accessibilityIdentifier("new_playlist_create_button")
-                .accessibilityLabel("new_playlist_create_button")
-            }
-        }
-        .padding(12)
-        .frame(width: 260)
-    }
-
-    // MARK: - Scrollable Grid
-
-    private func scrollableGrid(_ viewModel: PlaylistViewModel) -> some View {
-        ScrollView {
-            LazyVGrid(columns: columns, spacing: 12) {
-                ForEach(viewModel.displayedPlaylists) { playlist in
-                    PlaylistsGridCard(
-                        playlist: playlist,
-                        viewModel: viewModel,
-                        availableSyncProfiles: availableSyncProfiles,
-                        selectedPlaylist: $selectedPlaylist,
-                        showFailedTracksWhenOpened: $showFailedTracksWhenOpened,
-                        pendingDeletion: $pendingDeletion
-                    )
-                }
-            }
-            .padding(16)
-        }
-        // The grid's background: a new playlist from dropped tracks (D-PL-SELECTION-TO-NEW);
-        // the cards take their own drops.
-        .dropTarget(.playlistsSection, cornerRadius: 0)
-    }
-
-    // MARK: - Empty State
-
-    private func emptyState(_ viewModel: PlaylistViewModel) -> some View {
-        VStack(spacing: 16) {
-            Spacer()
-
-            Image(systemName: "list.bullet.rectangle.portrait")
-                .font(.system(size: 48))
-                .foregroundColor(.mlmInkMuted)
-
-            if viewModel.playlists.isEmpty {
-                Text("No Playlists Yet")
-                    .font(MLMFont.sectionHeader)
-                    .foregroundColor(.mlmInk)
-
-                Text("Create your first playlist with ⌘N or the + button above.")
-                    .font(MLMFont.body)
-                    .foregroundColor(.mlmInkSecondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 60)
-            } else if !viewModel.searchQuery.isEmpty
-                        || viewModel.sourceFilter != .all
-                        || viewModel.incompleteOnly {
-                Text("No Playlists Match Your Filters")
-                    .font(MLMFont.sectionHeader)
-                    .foregroundColor(.mlmInk)
-
-                Text("Try clearing or adjusting your filters.")
-                    .font(MLMFont.body)
-                    .foregroundColor(.mlmInkSecondary)
-            } else {
-                Text("No matching playlists")
-                    .font(MLMFont.sectionHeader)
-                    .foregroundColor(.mlmInk)
-
-                Text("Try a different search term.")
-                    .font(MLMFont.body)
-                    .foregroundColor(.mlmInkSecondary)
-            }
-
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    // MARK: - Banners (Phase 36)
-
-    /// 8-pin soft-limit hint banner (D-10, UI-SPEC §"8-pin Soft-Limit Hint UI").
-    /// Inline row between the header and the grid; pushes the grid down ~44pt
-    /// while visible. Auto-dismiss is owned by `PlaylistViewModel` (3s).
     @ViewBuilder
-    private func pinLimitBanner(message: String) -> some View {
-        HStack(spacing: 8) {
-            // 3pt-wide warning accent bar
-            Rectangle()
-                .fill(Color.mlmWarning)
-                .frame(width: 3)
-                .frame(maxHeight: .infinity)
-
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 14))
-                .foregroundColor(.mlmWarning)
-                .padding(.leading, 4)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(message)
-                    .font(MLMFont.bodyBold)
-                    .foregroundColor(.mlmInk)
+    private func content(layout: PlaylistGridLayout, all: [PlaylistGridItem], scope: PlaylistGridScope) -> some View {
+        if sidebar.playlistLoadFailed && sidebar.playlists.isEmpty {
+            ContentUnavailableView {
+                Label("Can’t load the playlists", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text("The library database didn’t answer. Your playlists and your music are not affected.")
+            } actions: {
+                Button("Try Again") { Task { await sidebar.reloadPlaylists(container.playlistRepository) } }
+                Button("Show Logs") { ActivityRouter.shared.showLogs(for: nil) }
             }
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.mlmRaised)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("pin_limit_banner")
-        .accessibilityLabel("Pin limit reached (8). Unpin one first.")
-    }
-
-    // MARK: - Initialization
-
-    private func initializeViewModel() {
-        guard viewModel == nil,
-              let playlistRepo = container.playlistRepository,
-              let sourceRepo = container.sourceRepository else { return }
-        viewModel = PlaylistViewModel(
-            playlistRepository: playlistRepo,
-            sourceRepository: sourceRepo
-        )
-    }
-
-    private func reloadSyncProfiles() async {
-        if let syncVM = container.syncViewModel {
-            if syncVM.profiles.isEmpty {
-                await syncVM.loadProfiles()
+        } else if !sidebar.hasLoadedPlaylists {
+            placeholderGrid
+        } else if sidebar.playlists.isEmpty {
+            ContentUnavailableView {
+                Label("No playlists yet", systemImage: "music.note.list")
+            } description: {
+                Text("Create an empty playlist and drag tracks onto it, or import one from SoundCloud, YouTube or Spotify.")
+            } actions: {
+                Button("New Playlist") { shell?.newPlaylist() }
+                    .buttonStyle(.borderedProminent)
+                Button("Import Playlist from Source…") { shell?.showSources() }
             }
-            availableSyncProfiles = syncVM.profiles
-        }
-    }
-
-}
-
-/// Observes live download activity separately from the grid's large routed
-/// view expression, then refreshes only persisted playlist health while a
-/// batch is active.
-private struct PlaylistDownloadHealthObserver: View {
-    let viewModel: PlaylistViewModel
-
-    @Environment(\.container) private var container
-    @State private var observationTask: Task<Void, Never>?
-
-    var body: some View {
-        Color.clear
-            .frame(width: 0, height: 0)
-            .task {
-                startObservation(isDownloading: container.downloadViewModel?.isDownloading == true)
-            }
-            .onChange(of: container.downloadViewModel?.isDownloading) { _, isDownloading in
-                startObservation(isDownloading: isDownloading == true)
-            }
-            .onDisappear {
-                observationTask?.cancel()
-                observationTask = nil
-            }
-    }
-
-    private func startObservation(isDownloading: Bool) {
-        observationTask?.cancel()
-        guard isDownloading else {
-            observationTask = Task {
-                await viewModel.refreshDownloadHealth()
-            }
-            return
-        }
-
-        let downloadViewModel = container.downloadViewModel
-        observationTask = Task {
-            repeat {
-                await viewModel.refreshDownloadHealth()
-                guard !Task.isCancelled, downloadViewModel?.isDownloading == true else { break }
-                try? await Task.sleep(for: .milliseconds(250))
-            } while !Task.isCancelled
-        }
-    }
-}
-
-/// Helper view to avoid Swift compiler timeout by breaking up complex nested grid card layout.
-private struct PlaylistsGridCard: View {
-    let playlist: Playlist
-    @Bindable var viewModel: PlaylistViewModel
-    let availableSyncProfiles: [SyncProfile]
-    @Binding var selectedPlaylist: Playlist?
-    @Binding var showFailedTracksWhenOpened: Bool
-    @Binding var pendingDeletion: Playlist?
-
-    @Environment(\.container) private var container
-
-    var body: some View {
-        PlaylistCard(
-            playlist: playlist,
-            source: viewModel.source(for: playlist),
-            trackCount: viewModel.trackCounts[playlist.id ?? 0] ?? 0,
-            downloadStatus: viewModel.downloadStatus(for: playlist),
-            isRenaming: viewModel.renamingPlaylistID == playlist.id,
-            renameText: Binding(
-                get: { viewModel.renameText },
-                set: { viewModel.renameText = $0 }
-            ),
-            onTap: {
-                showFailedTracksWhenOpened = false
-                selectedPlaylist = playlist
-            },
-            onRename: {
-                viewModel.startRename(playlist: playlist)
-            },
-            onConfirmRename: {
-                Task { await viewModel.confirmRename() }
-            },
-            onCancelRename: {
-                viewModel.cancelRename()
-            },
-            onTogglePin: {
-                Task { await viewModel.togglePin(id: playlist.id!) }
-            },
-            onDelete: {
-                pendingDeletion = playlist
-            },
-            onSpringLoad: {
-                showFailedTracksWhenOpened = false
-                selectedPlaylist = playlist
-            },
-            onResetCover: {
-                guard let pid = playlist.id else { return }
-                Task {
-                    await container.playlistCoverService?.resetToAuto(playlistId: pid)
+            // Drop targets stay active on an empty state (UC-EMPTY-01).
+            .dropTarget(.playlistsSection, cornerRadius: 0)
+        } else if layout.items.isEmpty && !isGroupedWithFolders(layout) {
+            ContentUnavailableView {
+                Label("No playlists match", systemImage: "magnifyingglass")
+            } description: {
+                Text(PlaylistGridRules.filteredEmptyText(query: filter.displayText, scope: scope))
+            } actions: {
+                Button("Clear Filters") {
+                    scopeKey = PlaylistGridScope.all.storageKey
+                    search?.clear()
                 }
-            },
-            availableSyncProfiles: availableSyncProfiles,
-            onAddToSyncProfile: { profile, playlistId in
-                Task {
-                    container.syncViewModel?.selectedProfile = profile
-                    await container.syncViewModel?.addPlaylists([playlistId])
-                }
-            },
-            onDownloadMissing: {
-                guard let playlistID = playlist.id,
-                      let playlistRepository = container.playlistRepository,
-                      let downloadViewModel = container.downloadViewModel else { return }
-                let tracks = (try? await playlistRepository.fetchTracks(playlistId: playlistID)) ?? []
-                let missingTracks = tracks.filter { $0.availability() == .notDownloaded }
-                await downloadViewModel.downloadTracks(
-                    missingTracks,
-                    preferredSource: viewModel.source(for: playlist)?.playlistSourceIdentity.downloadPin ?? .auto,
-                    context: .playlist(playlistID, name: playlist.name)  // W3-ACT
-                )
-            },
-            onShowFailedTracks: {
-                showFailedTracksWhenOpened = true
-                selectedPlaylist = playlist
             }
-        )
+        } else {
+            grid(layout)
+        }
     }
 
+    private func isGroupedWithFolders(_ layout: PlaylistGridLayout) -> Bool {
+        if case .grouped(let groups) = layout { return groups.contains { $0.folder != nil } }
+        return false
+    }
+
+    /// First load only: placeholder cards under the real scope bar (V-PL.E16, UC-EMPTY-04).
+    private var placeholderGrid: some View {
+        ScrollView {
+            LazyVGrid(columns: columns, spacing: Spacing.l) {
+                ForEach(0..<12, id: \.self) { _ in
+                    VStack(alignment: .leading, spacing: Spacing.xxs) {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous).fill(.quaternary).aspectRatio(1, contentMode: .fit)
+                        Text("Playlist name")
+                        Text("00 tracks").font(.subheadline)
+                    }
+                    .redacted(reason: .placeholder)
+                }
+            }
+            .padding(Spacing.xl)
+        }
+        .accessibilityLabel("Loading playlists")
+    }
+
+    private func grid(_ layout: PlaylistGridLayout) -> some View {
+        let manualOrder = sort == .manual && scope(in: Array(items.values)) == .all && filter.isEmpty
+        let orderedIDs = layout.items.map(\.id)
+        return ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: Spacing.m) {
+                    switch layout {
+                    case .flat(let items):
+                        cards(items, manualOrder: false, orderedIDs: orderedIDs)
+                    case .grouped(let groups):
+                        ForEach(groups) { group in
+                            if let folder = group.folder, let folderID = folder.id {
+                                folderHeading(folder, id: folderID, count: group.items.count)
+                                if !collapsedGroups.contains(folderID) {
+                                    cards(group.items, manualOrder: manualOrder, orderedIDs: orderedIDs)
+                                }
+                            } else {
+                                cards(group.items, manualOrder: manualOrder, orderedIDs: orderedIDs)
+                            }
+                        }
+                    }
+                }
+                .padding(Spacing.xl)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .scrollEdgeEffectStyle(.soft, for: .top)
+            // The grid's background: a new playlist from dropped tracks, playlists back to the
+            // top level (D-PL-SELECTION-TO-NEW); the cards take their own drops.
+            .dropTarget(.playlistsSection, cornerRadius: 0)
+            .focusable()
+            .focused($gridFocused)
+            .focusEffectDisabled()
+            .onKeyPress(.return) {
+                guard renamingID == nil, selection.count == 1, let id = selection.first,
+                      let playlist = items[id]?.playlist else { return .ignored }
+                actions.open(playlist)
+                return .handled
+            }
+            .onKeyPress(.escape) {
+                guard renamingID == nil, !selection.isEmpty else { return .ignored }
+                selection = []
+                return .handled
+            }
+            .onKeyPress(keys: [.leftArrow, .rightArrow]) { press in
+                move(press.key == .rightArrow ? 1 : -1, in: orderedIDs, proxy: proxy)
+            }
+            .onChange(of: PlaylistRequests.shared.revealInGrid) { _, id in
+                guard let id else { return }
+                proxy.scrollTo(id, anchor: .center)
+            }
+        }
+    }
+
+    private func folderHeading(_ folder: PlaylistFolder, id: Int64, count: Int) -> some View {
+        Button {
+            if collapsedGroups.contains(id) { collapsedGroups.remove(id) } else { collapsedGroups.insert(id) }
+        } label: {
+            HStack(spacing: Spacing.xs) {
+                Image(systemName: collapsedGroups.contains(id) ? "chevron.right" : "chevron.down")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 12)
+                Image(systemName: "folder")
+                    .foregroundStyle(.secondary)
+                Text(folder.name).fontWeight(.semibold)
+                Text(StatusBarText.playlists(count)).font(.subheadline).foregroundStyle(.secondary)
+                Spacer()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.top, Spacing.s)
+        .accessibilityLabel("\(folder.name), \(StatusBarText.playlists(count))")
+        .accessibilityValue(collapsedGroups.contains(id) ? "Collapsed" : "Expanded")
+        // V-PL.N04: the heading takes dropped playlists (move into the folder).
+        .dropTarget(.playlistFolder(id: id, name: folder.name))
+        .contextMenu {
+            // Rename happens in the folder's sidebar row (its inline field).
+            PlaylistFolderMenu(folder: folder) { sidebar.requestRename(folder: id) }
+        }
+    }
+
+    private func cards(_ items: [PlaylistGridItem], manualOrder: Bool, orderedIDs: [Int64]) -> some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: Spacing.l) {
+            ForEach(items) { item in
+                card(item, manualOrder: manualOrder, orderedIDs: orderedIDs)
+                    .id(item.id)
+            }
+        }
+    }
+
+    private func card(_ item: PlaylistGridItem, manualOrder: Bool, orderedIDs: [Int64]) -> some View {
+        let id = item.id
+        let playlist = item.playlist
+        return PlaylistCard(
+            item: item,
+            isSelected: selection.contains(id),
+            isRenaming: renamingID == id,
+            renameText: $renameText,
+            onCommitRename: { commitRename(playlist) },
+            onCancelRename: { renamingID = nil },
+            onPlay: { actions.play(playlist) }
+        )
+        .inPlaceRefusal(Binding(get: { refusals[id] }, set: { refusals[id] = $0 }))
+        .gesture(TapGesture(count: 2).modifiers(.option).onEnded { actions.play(playlist) })
+        .gesture(TapGesture(count: 2).onEnded { if renamingID != id { actions.open(playlist) } })
+        .simultaneousGesture(TapGesture().onEnded { select(id, in: orderedIDs) })
+        .contextMenu {
+            let subjects = selection.contains(id) && selection.count > 1
+                ? orderedIDs.filter(selection.contains).compactMap { self.items[$0]?.playlist }
+                : [playlist]
+            PlaylistMenu(playlists: subjects, place: .card) { startRename(playlist) }
+        }
+        // Tracks / files / links like its sidebar row, an image sets the cover; in Manual order
+        // a dragged playlist goes before it (D-PL-CARD-REORDER).
+        .dropTarget(
+            manualOrder
+                ? .playlistCardInManualOrder(id: id, name: playlist.name, folderID: sidebar.tree.folder(containing: id)?.id)
+                : .playlistCard(id: id, name: playlist.name),
+            cornerRadius: 9,
+            sayRefusal: { refusals[id] = $0 }
+        )
+        .draggable(PlaylistDragItem(playlistId: id, libraryId: container.activeLibrary?.libraryId))
+    }
+
+    // MARK: Selection (UC-SEL-01/04)
+
+    private func select(_ id: Int64, in ordered: [Int64]) {
+        gridFocused = true
+        let flags = NSEvent.modifierFlags
+        if flags.contains(.command) {
+            if selection.contains(id) { selection.remove(id) } else { selection.insert(id) }
+            anchor = id
+        } else if flags.contains(.shift), let anchor, let from = ordered.firstIndex(of: anchor), let to = ordered.firstIndex(of: id) {
+            selection = Set(ordered[min(from, to)...max(from, to)])
+        } else {
+            selection = [id]
+            anchor = id
+        }
+    }
+
+    private func move(_ step: Int, in ordered: [Int64], proxy: ScrollViewProxy) -> KeyPress.Result {
+        guard renamingID == nil, !ordered.isEmpty else { return .ignored }
+        let current = anchor.flatMap { ordered.firstIndex(of: $0) } ?? -step
+        let next = min(max(current + step, 0), ordered.count - 1)
+        selection = [ordered[next]]
+        anchor = ordered[next]
+        proxy.scrollTo(ordered[next])
+        return .handled
+    }
+
+    private func reveal(_ id: Int64?) {
+        guard let id else { return }
+        scopeKey = PlaylistGridScope.all.storageKey
+        if let folder = sidebar.tree.folder(containing: id)?.id { collapsedGroups.remove(folder) }
+        selection = [id]
+        anchor = id
+        Task { @MainActor in PlaylistRequests.shared.revealInGrid = nil }
+    }
+
+    // MARK: Rename (V-PL.E11)
+
+    private func startRename(_ playlist: Playlist) {
+        guard let id = playlist.id else { return }
+        renameText = playlist.name
+        renamingID = id
+    }
+
+    private func commitRename(_ playlist: Playlist) {
+        guard renamingID == playlist.id, let id = playlist.id else { return }
+        renamingID = nil
+        let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Empty or unchanged keeps the old name (UC-KEY-20).
+        guard !name.isEmpty, name != playlist.name, let edits = shell?.edits else { return }
+        Task {
+            do {
+                try await edits.renamePlaylist(id, from: playlist.name, to: name)
+            } catch {
+                statusBar?.post(ShellEdits.renameFailure(error, kind: "playlist"))
+            }
+        }
+    }
+
+    // MARK: Status bar (UC-STATUS-02)
+
+    private func statusText(layout: PlaylistGridLayout, total: Int, items: [Int64: PlaylistGridItem]) -> String {
+        let chosen = selection.compactMap { items[$0] }
+        if chosen.count == 1, let one = chosen.first {
+            return "“\(one.playlist.name)” selected · \(StatusBarText.tracks(one.trackCount))"
+        }
+        if chosen.count > 1 {
+            return "\(StatusBarText.playlists(chosen.count)) selected · \(StatusBarText.tracks(chosen.reduce(0) { $0 + $1.trackCount }))"
+        }
+        return PlaylistGridRules.statusText(shown: layout.items.count, total: total)
+    }
 }

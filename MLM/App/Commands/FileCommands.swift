@@ -8,6 +8,8 @@ struct FileCommands: Commands {
     @FocusedValue(\.shellActions) private var shellActions
     @FocusedValue(\.navigationModel) private var navigation
     @FocusedValue(\.trackSelection) private var focusedSelection
+    @FocusedValue(\.playlistPage) private var playlistPage
+    @FocusedValue(\.selectedPlaylists) private var selectedPlaylists
 
     var body: some Commands {
         // Replaces the system New item: one main window, no documents (UC-WIN-01).
@@ -20,7 +22,10 @@ struct FileCommands: Commands {
             CommandButton(.newPlaylistFromSelection, enabled: hasSelection && shellActions != nil) {
                 TrackCommandActions.newPlaylistFromSelection(selection?.selectedTracks ?? [], shell: shellActions)
             }
-            CommandButton(.newPlaylistFolder)
+            // ⌥⌘N: `untitled folder` first in the Playlists section, its name in edit mode (W3-PL).
+            CommandButton(.newPlaylistFolder, enabled: shellActions != nil) {
+                if let edits = shellActions?.edits { Task { await edits.newPlaylistFolder() } }
+            }
             // With a selection, the selection becomes the new profile's first content (M-FILE.N03).
             CommandButton(.newSyncProfile, enabled: shellActions != nil) {
                 if !hasSelection {
@@ -40,9 +45,19 @@ struct FileCommands: Commands {
             CommandButton(.importFilesOrFolder, enabled: shellActions != nil) {
                 shellActions?.chooseImportFolder()
             }
-            CommandButton(.importM3U)
+            // A new playlist named after the file, through the preview sheet (W3-PL).
+            CommandButton(.importM3U, enabled: shellActions != nil) {
+                DropCenter.shared.chooseM3U(into: nil)
+            }
             CommandSubmenu(.export) {
-                CommandButton(.exportPlaylistAsM3U)
+                // The playlist on screen, or the one selected in All Playlists.
+                let exportable = playlistPage?.playlist ?? (selectedPlaylists?.count == 1 ? selectedPlaylists?.first : nil)
+                CommandButton(.exportPlaylistAsM3U, enabled: exportable != nil && shellActions != nil,
+                              disabledReason: "Open a playlist or select one in All Playlists to export it.") {
+                    guard let exportable else { return }
+                    PlaylistActions(container: .shared, shell: shellActions, navigation: navigation,
+                                    statusBar: nil, undo: nil).exportM3U(exportable)
+                }
                 CommandButton(.createMLTrainingSet)
             }
 

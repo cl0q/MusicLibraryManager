@@ -12,6 +12,8 @@ struct Playlist: Codable, FetchableRecord, MutablePersistableRecord, Identifiabl
     var category: String
     var isLiked: Int
     var isSmart: Int
+    /// Retired with pinning (DEC-003, W3-PL): the column stays in the schema and snapshots carry
+    /// it along, but nothing reads or writes it for the UI.
     var isPinned: Int
     /// Auto/custom cover lock (Phase 36 / migration v20).
     /// 0 = auto-generated (eligible for regeneration); 1 = user-set custom (skip auto-regen).
@@ -24,6 +26,13 @@ struct Playlist: Codable, FetchableRecord, MutablePersistableRecord, Identifiabl
     var dateCreated: String?
     /// Stable UUID identity for iOS sidecar sync (lazy UUIDv4 uppercase string).
     var mlmUuid: String? = nil
+    /// The playlist folder it is in (`playlist_folders.id`, v45); nil = the top level of the
+    /// sidebar's Playlists section (DEC-003). One level only.
+    var folderId: Int64? = nil
+    /// Its place among its siblings (fractional index, like `playlist_tracks.position`, v45):
+    /// top-level playlists and playlist folders share one order; nil = after every placed row
+    /// (playlists created by imports), by name.
+    var position: String? = nil
 
     static let databaseTableName = "playlists"
 
@@ -39,6 +48,8 @@ struct Playlist: Codable, FetchableRecord, MutablePersistableRecord, Identifiabl
         case externalId = "external_id"
         case dateCreated = "date_created"
         case mlmUuid = "mlm_uuid"
+        case folderId = "folder_id"
+        case position
     }
 
     enum Columns {
@@ -52,6 +63,8 @@ struct Playlist: Codable, FetchableRecord, MutablePersistableRecord, Identifiabl
         static let sourceId = Column(CodingKeys.sourceId)
         static let dateCreated = Column(CodingKeys.dateCreated)
         static let mlmUuid = Column(CodingKeys.mlmUuid)
+        static let folderId = Column(CodingKeys.folderId)
+        static let position = Column(CodingKeys.position)
     }
 
     /// Whether this is a native (local-only) playlist.

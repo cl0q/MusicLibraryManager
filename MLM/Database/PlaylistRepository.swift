@@ -5,7 +5,8 @@ import GRDB
 ///
 /// Encapsulates all SQL for playlists, playlist_tracks, and playlist_tags.
 final class PlaylistRepository: Sendable {
-    private let database: any DatabaseWriter
+    /// Internal so the aggregate queries (`PlaylistAggregates.swift`) read the same database.
+    let database: any DatabaseWriter
 
     // Must match SQLite CURRENT_TIMESTAMP format (space-separated, no T/Z)
     // because playlist_tracks.added_at is TEXT and sorted as a string.
@@ -23,13 +24,27 @@ final class PlaylistRepository: Sendable {
 
     // MARK: - Playlist CRUD
 
-    /// Fetch all playlists, pinned first, then alphabetical.
+    /// Fetch all playlists in the sidebar's order (DEC-003, W3-PL): the user's manual order,
+    /// each playlist folder's playlists where the folder is. Pinning is retired.
     func fetchAll() async throws -> [Playlist] {
-        try await database.read { db in
-            try Playlist
-                .order(Playlist.Columns.isPinned.desc, Playlist.Columns.name)
-                .fetchAll(db)
+        try await database.read { db in try Self.sidebarOrdered(db) }
+    }
+
+    /// Every playlist in sidebar order: the top-level rows in order, a folder's playlists in
+    /// its place (`PlaylistSidebarOrder`).
+    static func sidebarOrdered(_ db: Database) throws -> [Playlist] {
+        let all = try Playlist.fetchAll(db)
+        let byID = Dictionary(all.compactMap { playlist in playlist.id.map { ($0, playlist) } }, uniquingKeysWith: { first, _ in first })
+        var ordered: [Playlist] = []
+        for entry in try PlaylistFolderRepository.level(db, folderID: nil) {
+            switch entry.item {
+            case .playlist(let id):
+                if let playlist = byID[id] { ordered.append(playlist) }
+            case .folder(let id):
+                ordered.append(contentsOf: try PlaylistFolderRepository.playlists(db, inFolder: id))
+            }
         }
+        return ordered
     }
 
     /// Fetch a single playlist by ID.
@@ -84,12 +99,10 @@ final class PlaylistRepository: Sendable {
         }
     }
 
-    /// Delete a playlist.
+    /// Delete a playlist. A Liked playlist can be deleted too (UC §23 C10); a later Refresh
+    /// from its source in Settings ▸ Sources creates it again (the alert says so).
     func delete(id: Int64) async throws {
         try await database.write { db in
-            if let playlist = try Playlist.fetchOne(db, id: id), playlist.isLiked == 1 {
-                throw PlaylistRepositoryError.cannotDeleteLikedPlaylist
-            }
             try Self.deleteWithDependents(db, id: id)
         }
     }
@@ -104,16 +117,6 @@ final class PlaylistRepository: Sendable {
             try db.execute(sql: "DELETE FROM \(table) WHERE playlist_id = ?", arguments: [id])
         }
         try Playlist.deleteOne(db, id: id)
-    }
-
-    /// Toggle pin status.
-    func togglePin(id: Int64) async throws {
-        try await database.write { db in
-            try db.execute(
-                sql: "UPDATE playlists SET is_pinned = CASE WHEN is_pinned = 1 THEN 0 ELSE 1 END WHERE id = ?",
-                arguments: [id]
-            )
-        }
     }
 
     /// Set the playlist's cover image path and the auto/custom lock flag.
@@ -161,16 +164,14 @@ final class PlaylistRepository: Sendable {
         }
     }
 
-    /// Fetch the playlists that contain a given track, pinned first then
-    /// alphabetical — the same ordering `fetchAll()` uses.
+    /// Fetch the playlists that contain a given track, in sidebar order — the same ordering
+    /// `fetchAll()` uses.
     func fetchPlaylists(forTrackId trackId: Int64) async throws -> [Playlist] {
         try await database.read { db in
-            try Playlist.fetchAll(db, sql: """
-                SELECT p.* FROM playlists p
-                INNER JOIN playlist_tracks pt ON pt.playlist_id = p.id
-                WHERE pt.track_id = ?
-                ORDER BY p.is_pinned DESC, p.name
-            """, arguments: [trackId])
+            let containing = Set(try Int64.fetchAll(db, sql: """
+                SELECT playlist_id FROM playlist_tracks WHERE track_id = ?
+            """, arguments: [trackId]))
+            return try Self.sidebarOrdered(db).filter { $0.id.map(containing.contains) ?? false }
         }
     }
 
@@ -694,13 +695,24 @@ final class PlaylistRepository: Sendable {
     /// Create a native playlist named `baseName` (numbered when the name is taken) holding
     /// `trackIds` in that order, in one transaction — New Playlist and New Playlist from
     /// Selection are one step each (UC-UNDO-08).
-    func createNumbered(baseName: String, trackIds: [Int64] = []) async throws -> Playlist {
+    ///
+    /// - Parameter folderID: a playlist folder (New Playlist in Folder, tracks dropped on a folder):
+    ///   the new playlist goes last in it. Without one it goes first among the top-level rows
+    ///   (`playlists.html`: a new row appears at the top, in rename mode).
+    func createNumbered(baseName: String, trackIds: [Int64] = [], inFolder folderID: Int64? = nil) async throws -> Playlist {
         let orderedIDs = trackIds.reduce(into: [Int64]()) { result, id in
             if !result.contains(id) { result.append(id) }
         }
         return try await database.write { db in
             let taken = Set(try String.fetchAll(db, sql: "SELECT name FROM playlists").map { $0.lowercased() })
             var playlist = Playlist.createNative(name: Self.numberedName(base: baseName, taken: taken))
+            playlist.dateCreated = Self.addedAtFormatter.string(from: Date())
+            if let folderID, try PlaylistFolder.fetchOne(db, id: folderID) != nil {
+                playlist.folderId = folderID
+                playlist.position = try PlaylistFolderRepository.lastPosition(db, folderID: folderID)
+            } else {
+                playlist.position = try PlaylistFolderRepository.firstPosition(db, folderID: nil)
+            }
             try playlist.insert(db)
             if let id = playlist.id {
                 _ = try Self.insertEntries(db, playlistId: id, trackIds: orderedIDs, after: nil)
@@ -720,9 +732,6 @@ final class PlaylistRepository: Sendable {
         try await database.write { db in
             guard let snapshot = try Self.snapshot(db, id: id) else {
                 throw PlaylistRepositoryError.playlistNotFound
-            }
-            if snapshot.playlist.isLiked == 1 {
-                throw PlaylistRepositoryError.cannotDeleteLikedPlaylist
             }
             try Self.deleteWithDependents(db, id: id)
             return snapshot
@@ -765,6 +774,11 @@ final class PlaylistRepository: Sendable {
                 unlinked = .init(otherPlaylistName: other.name, sourceName: sourceName ?? "its source")
                 playlist.sourceId = nil
                 playlist.externalId = nil
+            }
+            // Back into its folder and its place (v45); a folder deleted meanwhile → the top
+            // level, at the same position.
+            if let folderID = playlist.folderId, try PlaylistFolder.fetchOne(db, id: folderID) == nil {
+                playlist.folderId = nil
             }
             let nameTaken = try Bool.fetchOne(db, sql: """
                 SELECT EXISTS(SELECT 1 FROM playlists WHERE LOWER(name) = LOWER(?))
@@ -936,14 +950,11 @@ final class PlaylistRepository: Sendable {
 }
 
 enum PlaylistRepositoryError: LocalizedError, PlainCauseError {
-    case cannotDeleteLikedPlaylist
     case noUniquePlaylistNameAvailable(String)
     case playlistNotFound
 
     var errorDescription: String? {
         switch self {
-        case .cannotDeleteLikedPlaylist:
-            return "Cannot delete a synchronized 'Liked' playlist."
         case .noUniquePlaylistNameAvailable(let baseName):
             return "Could not find a free playlist name derived from '\(baseName)' after 499 suffixed attempts."
         case .playlistNotFound:
@@ -953,7 +964,6 @@ enum PlaylistRepositoryError: LocalizedError, PlainCauseError {
 
     var plainCause: String {
         switch self {
-        case .cannotDeleteLikedPlaylist: "a Liked playlist stays while its source is linked"
         case .noUniquePlaylistNameAvailable: "every numbered name is taken"
         case .playlistNotFound: "the playlist no longer exists"
         }

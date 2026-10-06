@@ -12,6 +12,13 @@ struct GoCommands: Commands {
         (.goFolders, .folders), (.goDiscover, .discover), (.goReview, .review),
     ]
 
+    @ViewBuilder
+    private func goButton(_ playlist: Playlist) -> some View {
+        if let id = playlist.id {
+            Button(playlist.name) { navigation?.select(.playlist(id)) }
+        }
+    }
+
     var body: some Commands {
         CommandMenu(MenuBarMenu.go.rawValue) {
             ForEach(Self.fixedRows.indices, id: \.self) { index in
@@ -32,16 +39,22 @@ struct GoCommands: Commands {
 
             Divider()
 
-            // Playlist folders become submenus with W3-PL.
+            // All Playlists — the sidebar's structure: playlist folders as submenus, playlists in
+            // sidebar order (UC-MENU-05 Go, W3-PL).
             CommandSubmenu(.goPlaylists, enabled: navigation != nil) {
                 Button(SidebarDestination.allPlaylists.fixedTitle) {
                     navigation?.select(.allPlaylists)
                 }
-                if let playlists = sidebar?.playlists, !playlists.isEmpty {
+                if let nodes = sidebar?.tree.nodes, !nodes.isEmpty {
                     Divider()
-                    ForEach(playlists) { playlist in
-                        if let id = playlist.id {
-                            Button(playlist.name) { navigation?.select(.playlist(id)) }
+                    ForEach(nodes) { node in
+                        switch node {
+                        case .playlist(let playlist):
+                            goButton(playlist)
+                        case .folder(let folder, let playlists):
+                            Menu(folder.name) {
+                                ForEach(playlists) { goButton($0) }
+                            }
                         }
                     }
                 }

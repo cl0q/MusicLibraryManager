@@ -4,17 +4,21 @@ import SwiftUI
 /// The main window's sidebar (P-SIDEBAR, UC-SIDE-01…12): a system sidebar `List` with four
 /// collapsible sections — Library · Inbox · Playlists · Sync — and the library footer.
 ///
-/// No Sources, Queue, Settings or Search rows (DEC-004, DEC-006). Playlists are listed flat
-/// in the repository's order until playlist folders and manual order arrive (W3-PL).
-/// Rows are destinations of `NavigationModel`; ⌘1…⌘6 live in the Go menu.
+/// No Sources, Queue, Settings or Search rows (DEC-004, DEC-006). The Playlists section lists
+/// `All Playlists`, then playlist folders (`DisclosureGroup`) and playlists in the user's
+/// order (DEC-003, W3-PL); a playlist row has a second line only when it isn't healthy, in the
+/// §15.5 words. Rows are destinations of `NavigationModel`; ⌘1…⌘6 live in the Go menu.
 struct SidebarView: View {
     @Environment(\.container) private var container
     @Environment(NavigationModel.self) private var navigation
     @Environment(SidebarModel.self) private var model
     @Environment(ShellActions.self) private var actions
+    @Environment(StatusBarCenter.self) private var statusBar: StatusBarCenter?
+    @Environment(UndoCenter.self) private var undo: UndoCenter?
 
     private enum RenameTarget: Hashable {
         case playlist(Int64)
+        case folder(Int64)
         case syncProfile(Int64)
     }
 
@@ -24,8 +28,6 @@ struct SidebarView: View {
     @State private var isCommittingRename = false
     @FocusState private var renameFocused: Bool
 
-    /// The playlist waiting for the Delete Playlist confirmation, with its wording.
-    @State private var pendingPlaylistDeletion: PendingPlaylistDeletion?
     @State private var pendingProfileDeletion: SyncProfile?
     @State private var deviceIngestProfile: SyncProfile?
 
@@ -52,28 +54,36 @@ struct SidebarView: View {
 
             Section(isExpanded: expansion(.playlists)) {
                 fixedRow(.allPlaylists)
-                ForEach(model.playlists) { playlist in
-                    playlistRow(playlist)
+                // Playlist folders and playlists in the user's order (UC-SIDE-01/08); a drag
+                // between the rows reorders (D-PL-CARD-REORDER), one undo step.
+                ForEach(model.tree.nodes) { node in
+                    playlistNode(node)
+                }
+                .onInsert(of: [.draggedPlaylist]) { index, providers in
+                    let nodes = model.tree.nodes
+                    reorder(providers, folderID: nil, before: index < nodes.count ? nodes[index].id : nil)
                 }
             } header: {
                 SidebarSectionHeader(title: SidebarSectionID.playlists.title) {
+                    // P-SIDEBAR.E03/add: New Playlist ⌘N · New Playlist Folder ⌥⌘N.
                     Menu {
                         Button("New Playlist") {
                             actions.newPlaylist()
                         }
-                        Button("New Playlist Folder") {}
-                            .disabled(true)
-                            .help(AddMenu.Unavailable.playlistFolder)
+                        Button("New Playlist Folder") {
+                            Task { await actions.edits.newPlaylistFolder() }
+                        }
                     } label: {
                         Image(systemName: "plus")
                     }
                     .menuStyle(.button)
                     .menuIndicator(.hidden)
                     .buttonStyle(.borderless)
-                    .help("New Playlist")
-                    .accessibilityLabel("Add Playlist")
+                    .help("New Playlist or Playlist Folder")
+                    .accessibilityLabel("Add Playlist or Playlist Folder")
                 }
-                // Tracks dropped on the header make a new playlist, named inline (IMP-018).
+                // Tracks dropped on the header make a new playlist, named inline (IMP-018);
+                // playlists dropped here move to the top level.
                 .dropTarget(.playlistsSection)
             }
 
@@ -127,8 +137,15 @@ struct SidebarView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { note in
             // Cover regeneration posts are noise for the sidebar.
-            guard note.userInfo?["coverRevalidation"] == nil else { return }
+            guard note.userInfo?["coverRevalidation"] == nil, (note.userInfo?["origin"] as? String) != "coverService" else { return }
             Task { await reloadPlaylists() }
+        }
+        // The rows' second lines follow downloads and file checks (one aggregate query).
+        .onReceive(NotificationCenter.default.publisher(for: .downloadStateDidChange)) { _ in
+            Task { await model.reloadSummaries(container.playlistRepository) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .trackAvailabilityDidChange)) { _ in
+            Task { await model.reloadSummaries(container.playlistRepository) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .reviewQueueDidChange)) { _ in
             Task { await reloadBadges() }
@@ -137,7 +154,10 @@ struct SidebarView: View {
             Task { await reloadBadges() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .downloadDidComplete)) { _ in
-            Task { await reloadBadges() }
+            Task {
+                await reloadBadges()
+                await model.reloadSummaries(container.playlistRepository)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .syncProfileDidChange)) { _ in
             Task { await container.syncViewModel?.loadProfiles() }
@@ -151,7 +171,13 @@ struct SidebarView: View {
         .onChange(of: model.renameRequest) { _, _ in
             beginRequestedRename()
         }
+        .onChange(of: model.folderRenameRequest) { _, _ in
+            beginRequestedRename()
+        }
         .onChange(of: model.playlists.compactMap(\.id)) { _, _ in
+            beginRequestedRename()
+        }
+        .onChange(of: model.folders.compactMap(\.id)) { _, _ in
             beginRequestedRename()
         }
         .onChange(of: syncProfiles.compactMap(\.id)) { old, new in
@@ -159,26 +185,6 @@ struct SidebarView: View {
             for removed in Set(old).subtracting(new) {
                 navigation.removeSyncProfile(removed)
             }
-        }
-        // A-PL-DELETE: asked because the playlist also leaves its sync profiles, and still
-        // restorable with Undo until MLM quits (UC-UNDO-05, DEC-049). Cancel is the default.
-        .alert(
-            pendingPlaylistDeletion?.confirmation.title ?? "",
-            isPresented: Binding(
-                get: { pendingPlaylistDeletion != nil },
-                set: { if !$0 { pendingPlaylistDeletion = nil } }
-            ),
-            presenting: pendingPlaylistDeletion
-        ) { pending in
-            Button(PlaylistDeletionConfirmation.confirmTitle, role: .destructive) {
-                deletePlaylist(pending)
-            }
-            Button("Cancel", role: .cancel) {
-                pendingPlaylistDeletion = nil
-            }
-            .keyboardShortcut(.defaultAction)
-        } message: { pending in
-            Text(pending.confirmation.message)
         }
         // A-SYNC-DELETEPROFILE: not undoable, so confirmed (UC-UNDO-03). Cancel is the default.
         .alert(
@@ -221,6 +227,13 @@ struct SidebarView: View {
         )
     }
 
+    private func folderExpansion(_ id: Int64) -> Binding<Bool> {
+        Binding(
+            get: { model.isFolderExpanded(id) },
+            set: { model.setFolderExpanded(id, $0) }
+        )
+    }
+
     private func badgeText(_ count: Int) -> Text? {
         count > 0 ? Text(count.formatted(.number)) : nil
     }
@@ -244,6 +257,48 @@ struct SidebarView: View {
     }
 
     @ViewBuilder
+    private func playlistNode(_ node: PlaylistSidebarTree.Node) -> some View {
+        switch node {
+        case .playlist(let playlist):
+            playlistRow(playlist)
+        case .folder(let folder, let children):
+            if let id = folder.id {
+                DisclosureGroup(isExpanded: folderExpansion(id)) {
+                    ForEach(children) { child in
+                        playlistRow(child)
+                    }
+                    .onInsert(of: [.draggedPlaylist]) { index, providers in
+                        reorder(providers, folderID: id, before: index < children.count ? children[index].id.map(PlaylistSidebarItemID.playlist) : nil)
+                    }
+                } label: {
+                    folderLabel(folder, id: id)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func folderLabel(_ folder: PlaylistFolder, id: Int64) -> some View {
+        if renaming == .folder(id) {
+            renameField(systemImage: "folder")
+        } else {
+            Label(folder.name, systemImage: "folder")
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .help(folder.name)
+                .contextMenu {
+                    PlaylistFolderMenu(folder: folder) {
+                        startRename(.folder(id), currentName: folder.name)
+                    }
+                }
+                // Playlists move into it; tracks, Finder files and M3U files make a new
+                // playlist inside (UC-SIDE-08, UC-DND matrix).
+                .dropTarget(.playlistFolder(id: id, name: folder.name))
+                .draggable(PlaylistDragItem.folder(id, libraryId: container.activeLibrary?.libraryId))
+        }
+    }
+
+    @ViewBuilder
     private func playlistRow(_ playlist: Playlist) -> some View {
         if let id = playlist.id {
             let icon = playlist.isLiked == 1 ? "heart" : "music.note.list"
@@ -251,18 +306,13 @@ struct SidebarView: View {
                 renameField(systemImage: icon)
                     .tag(SidebarDestination.playlist(id))
             } else {
-                playlistLabel(playlist, systemImage: icon)
+                playlistLabel(playlist, id: id, systemImage: icon)
                     .help(playlist.name)
                     .tag(SidebarDestination.playlist(id))
+                    // CM-SIDEBAR-PINNED, the one playlist-menu builder (UC-CM-02).
                     .contextMenu {
-                        Button("Rename") {
+                        PlaylistMenu(playlists: [playlist], place: .sidebarRow) {
                             startRename(.playlist(id), currentName: playlist.name)
-                        }
-                        if playlist.isLiked == 0 {
-                            Divider()
-                            Button("Delete Playlist…", role: .destructive) {
-                                askToDelete(playlist)
-                            }
                         }
                     }
                     // A playlist row takes tracks, playlists, Finder files, M3U files and links
@@ -277,22 +327,28 @@ struct SidebarView: View {
         }
     }
 
-    /// One line when healthy; a second line only to state a condition (UC-SIDE-04/06).
+    /// One line when healthy; a second line only to state a condition (UC-SIDE-04/06), in the
+    /// §15.5 words from the one aggregate query and Activity's echo.
     @ViewBuilder
-    private func playlistLabel(_ playlist: Playlist, systemImage: String) -> some View {
-        let condition = SidebarModel.playlistSecondLine(
-            sourceName: playlist.sourceId.flatMap { model.sourceNames[$0] },
-            unusableSignIns: container.tokenAccessStatus?.inaccessibleServices ?? []
+    private func playlistLabel(_ playlist: Playlist, id: Int64, systemImage: String) -> some View {
+        let status = PlaylistStatus.make(
+            summary: model.summaries[id],
+            echo: ActivityCenter.shared.echo(for: .playlist(id, name: playlist.name)),
+            expiredSignIn: PlaylistStatus.expiredSignIn(
+                sourceName: playlist.sourceId.flatMap { model.sourceNames[$0] },
+                unusable: container.tokenAccessStatus?.inaccessibleServices ?? []
+            )
         )
         Label {
             VStack(alignment: .leading, spacing: 2) {
                 Text(playlist.name)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                if let condition {
+                if let condition = status.text {
                     Text(condition)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .monospacedDigit()
                         .lineLimit(1)
                 }
             }
@@ -391,6 +447,17 @@ struct SidebarView: View {
         )
     }
 
+    // MARK: - Reorder by drag (D-PL-CARD-REORDER, between rows)
+
+    private func reorder(_ providers: [NSItemProvider], folderID: Int64?, before: PlaylistSidebarItemID?) {
+        let performer = DropPerformer(container: container, shell: actions, statusBar: statusBar, undo: undo ?? .main)
+        let target = DropTarget.playlistOrder(folderID: folderID, before: before)
+        Task { @MainActor in
+            guard let content = await DropLoader.load(providers) else { return }
+            performer.perform(DropRules.decide(content, onto: target, context: DropContext.current(container)))
+        }
+    }
+
     // MARK: - Inline rename (UC-SIDE-09)
 
     private func renameField(systemImage: String) -> some View {
@@ -436,6 +503,7 @@ struct SidebarView: View {
         guard let target = renaming, !isCommittingRename else { return }
         let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else {
+            // An empty name keeps the old one (UC-KEY-20).
             cancelRename()
             return
         }
@@ -453,6 +521,15 @@ struct SidebarView: View {
                     renameError = ShellEdits.renameFailure(error, kind: "playlist")
                     renameFocused = true
                 }
+            case .folder(let id):
+                guard let oldName = model.folderName(id), name != oldName else { return cancelRename() }
+                do {
+                    try await actions.edits.renamePlaylistFolder(id, from: oldName, to: name)
+                    cancelRename()
+                } catch {
+                    renameError = ShellEdits.renameFailure(error, kind: "playlist folder")
+                    renameFocused = true
+                }
             case .syncProfile(let id):
                 guard let profile = syncProfiles.first(where: { $0.id == id }),
                       name != profile.name else { return cancelRename() }
@@ -467,27 +544,18 @@ struct SidebarView: View {
         }
     }
 
-    /// A playlist just created (⌘N, New Playlist from Selection) gets its name edited inline
-    /// once its row is listed (S-PL-NEWPLAYLIST).
+    /// A playlist or folder just created (⌘N, ⌥⌘N, New Playlist from Selection) gets its name
+    /// edited inline once its row is listed (S-PL-NEWPLAYLIST, S-PLFOLDER-NEW).
     private func beginRequestedRename() {
-        guard let playlist = model.takeRenameRequest(), let id = playlist.id else { return }
-        startRename(.playlist(id), currentName: playlist.name)
-    }
-
-    // MARK: - Deleting
-
-    private func askToDelete(_ playlist: Playlist) {
-        Task {
-            let confirmation = await actions.edits.deletionConfirmation(for: playlist)
-            pendingPlaylistDeletion = PendingPlaylistDeletion(playlist: playlist, confirmation: confirmation)
+        if let playlist = model.takeRenameRequest(), let id = playlist.id {
+            model.reveal(playlist: id)
+            startRename(.playlist(id), currentName: playlist.name)
+        } else if let folder = model.takeFolderRenameRequest(), let id = folder.id {
+            startRename(.folder(id), currentName: folder.name)
         }
     }
 
-    private func deletePlaylist(_ pending: PendingPlaylistDeletion) {
-        pendingPlaylistDeletion = nil
-        guard let id = pending.playlist.id else { return }
-        Task { await actions.edits.deletePlaylist(id, name: pending.playlist.name) }
-    }
+    // MARK: - Deleting
 
     private func deletePendingProfile() {
         guard let profile = pendingProfileDeletion, let vm = container.syncViewModel else { return }
@@ -512,12 +580,6 @@ struct SidebarView: View {
             analysisRepository: container.analysisRepository
         )
     }
-}
-
-/// A Delete Playlist question on screen.
-private struct PendingPlaylistDeletion {
-    let playlist: Playlist
-    let confirmation: PlaylistDeletionConfirmation
 }
 
 /// The space below the sidebar's last row as a drop target (new playlist). Not a row: it can't

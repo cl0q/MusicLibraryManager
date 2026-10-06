@@ -84,19 +84,18 @@ enum SnapshotFixtures {
                 store.playlists().first,
                 named: "populated playlist"
             )
+            // W3-PL card: facts line and the §15.5 words (`Not downloaded · 1 track`).
+            let summary = PlaylistSummary(playlistID: 1, totalTracks: 2, localTracks: 1, notDownloadedTracks: 1)
             return AnyView(PlaylistCard(
-                playlist: playlist,
-                source: nil,
-                trackCount: 2,
-                downloadStatus: PlaylistDownloadStatus(
-                    playlistID: 1, totalTracks: 2, localTracks: 1,
-                    downloadingTracks: 0, failedTracks: 0, notDownloadedTracks: 1
+                item: PlaylistGridItem(
+                    playlist: playlist,
+                    summary: summary,
+                    status: PlaylistStatus.make(summary: summary, echo: nil, expiredSignIn: nil),
+                    source: nil
                 ),
-                isRenaming: false,
-                renameText: .constant(""),
-                onTap: {}, onRename: {}, onConfirmRename: {}, onCancelRename: {},
-                onTogglePin: {}, onDelete: {}
-            ))
+                renameText: .constant("")
+            )
+            .frame(width: 180))
         }),
         Fixture(id: "ingest-preview", size: .init(width: 700, height: 580), makeView: { _ in
             let preview = IngestPreview(
@@ -342,6 +341,9 @@ enum SnapshotFixtures {
         "TrackList/SelectionBar.swift": "Deferred: the Liquid Glass selection bar needs a window with a live selection; its rules are unit-tested (SelectionBarStateTests).",
         "Playlists/PlaylistDetailView.swift": "Deferred: lifecycle reloads, source sync and cover work not isolated by table fixture.",
         "Playlists/PlaylistDetailViewLoader.swift": "Deferred: loader async outcomes require controlled ready/not-found/failure injection.",
+        "Playlists/PlaylistActions.swift": "Deferred: the playlist menu builder reads the shell environment; its sections are unit-tested (PlaylistMenuModelTests).",
+        "Playlists/PlaylistLinkSheet.swift": "Deferred: the Link sheet checks a live source link; its wording is unit-tested.",
+        "Playlists/PlaylistM3UImportSheet.swift": "Deferred: the M3U preview reads a file and the library; its plan is unit-tested (PlaylistFolderEditsTests).",
         "Playlists/PlaylistsView.swift": "Deferred: live playlist/cover loading and root view state need a preloaded composition.",
         "ReelsInbox/ReelsInboxView.swift": "Deferred: AVKit/Shazam/Vision work and detached tasks require service/clock seams.",
         "Search/SearchResultsView.swift": "Deferred: Library-scope results read the open library and the shell environment (W2-I); its model is unit-tested.",
@@ -446,9 +448,12 @@ Player/PlaybackWindowSupport.swift
 Player/PlayerBar.swift
 Player/PlayerDisplay.swift
 Player/PreviewWaveformScrubber.swift
+Playlists/PlaylistActions.swift
 Playlists/PlaylistCard.swift
 Playlists/PlaylistDetailView.swift
 Playlists/PlaylistDetailViewLoader.swift
+Playlists/PlaylistLinkSheet.swift
+Playlists/PlaylistM3UImportSheet.swift
 Playlists/PlaylistsView.swift
 Playlists/PlaylistTable.swift
 Queue/QueueEditCommands.swift

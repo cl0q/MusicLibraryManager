@@ -1,75 +1,112 @@
 import SwiftUI
 
-/// Sidebar-to-detail routing shim (Plan 36-04, D-09).
-///
-/// `SidebarDestination.playlist(id)` (a sidebar row) and `DetailRoute.playlist(id)`
-/// (pushed from the All Playlists grid) route through `DestinationView` / `RouteView`
-/// into this view, which lazily fetches the `Playlist` by id and renders
-/// `PlaylistDetailView`.
-///
-/// Why a loader rather than embedding `Playlist` directly in the enum:
-/// the sidebar's pinned-list snapshot can lag behind a rename, delete, or
-/// cover regeneration — always fetch fresh from the repo (cheap single-row
-/// `Playlist.fetchOne(db, id:)`).
-///
-/// The `.task(id: playlistId)` reload-on-change makes the loader survive
-/// sidebar re-clicks to *different* pinned playlists without unmounting.
+/// The playlist page by id — a sidebar row (`SidebarDestination.playlist`), a card
+/// (`DetailRoute.playlist`, pushed) or the import window's `Open playlist`. Fetches the row
+/// fresh, then shows `PlaylistDetailView` in its own content scaffold (the header slot is
+/// the page's, UC-LAYOUT-06). States: loading (the real header frame with `Loading…` and
+/// disabled Play / Shuffle, V-PLD.E29), not found (V-PLD.N03), error.
 struct PlaylistDetailViewLoader: View {
     let playlistId: Int64
-    /// Open with the failed-download section expanded (the grid's "show failed" action).
+    /// Open in the `Download failed` scope (Show Failed Downloads).
     var initiallyShowFailedTracks = false
     let onBack: () -> Void
     let onTrackDoubleClick: ((Track, [Track]) -> Void)?
 
     @Environment(\.container) private var container
-    @State private var playlist: Playlist?
-    @State private var loadFailed = false
+
+    private enum Phase: Equatable {
+        case loading
+        case loaded(Playlist)
+        case notFound
+        case failed
+    }
+
+    @State private var phase = Phase.loading
 
     var body: some View {
         Group {
-            if let pl = playlist {
+            switch phase {
+            case .loaded(let playlist):
                 PlaylistDetailView(
-                    playlist: pl,
+                    playlist: playlist,
                     initiallyShowFailedTracks: initiallyShowFailedTracks,
                     onBack: onBack,
                     onTrackDoubleClick: onTrackDoubleClick
                 )
-            } else if loadFailed {
-                VStack(spacing: 12) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 32))
-                        .foregroundColor(.mlmInkMuted)
-                    Text("Playlist not found")
-                        .font(MLMFont.body)
-                        .foregroundColor(.mlmInkSecondary)
-                    Button("Back to Playlists") { onBack() }
+            case .loading:
+                ContentScaffold(showsDriveBanner: true) {
+                    Color.clear
+                } header: {
+                    loadingHeader
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.mlmBase)
-            } else {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.mlmBase)
+                .modifier(WindowTitleModifier())
+            case .notFound:
+                ContentScaffold(showsDriveBanner: false) {
+                    PlaylistNotFoundView()
+                }
+                .modifier(WindowTitleModifier())
+            case .failed:
+                ContentScaffold(showsDriveBanner: false) {
+                    ContentUnavailableView {
+                        Label("Can’t load the playlist", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text("The library database didn’t answer. Your playlists and your music are not affected.")
+                    } actions: {
+                        Button("Try Again") { Task { await load() } }
+                        Button("Show Logs") { ActivityRouter.shared.showLogs(for: nil) }
+                    }
+                }
+                .modifier(WindowTitleModifier())
             }
         }
-        .task(id: playlistId) {
-            loadFailed = false
-            playlist = nil
-            guard let repo = container.playlistRepository else {
-                loadFailed = true
-                return
-            }
-            do {
-                let fetched = try await repo.fetch(id: playlistId)
-                if let fetched {
-                    playlist = fetched
-                } else {
-                    loadFailed = true
-                }
-            } catch {
-                loadFailed = true
-            }
+        .task(id: playlistId) { await load() }
+        // Deleted elsewhere while open (its creation undone): the not-found page, not a stale one.
+        .onReceive(NotificationCenter.default.publisher(for: .playlistDidChange)) { note in
+            guard note.userInfo?["coverRevalidation"] == nil, (note.userInfo?["origin"] as? String) != "coverService",
+                  (note.userInfo?["playlistId"] as? Int64).map({ $0 == playlistId }) ?? true else { return }
+            Task { await recheck() }
         }
     }
 
+    private var loadingHeader: some View {
+        HStack(alignment: .bottom, spacing: Spacing.l) {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(.quaternary)
+                .frame(width: 160, height: 160)
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                Text("Playlist").font(.subheadline).foregroundStyle(.secondary)
+                Text("Loading…").font(.title.bold()).foregroundStyle(.tertiary)
+                HStack {
+                    Button("Play") {}.buttonStyle(.borderedProminent).disabled(true)
+                    Button("Shuffle") {}.disabled(true)
+                }
+                .padding(.top, Spacing.s)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, Spacing.xl)
+        .padding(.vertical, Spacing.l)
+    }
+
+    private func load() async {
+        guard let repository = container.playlistRepository else {
+            phase = .failed
+            return
+        }
+        do {
+            phase = try await repository.fetch(id: playlistId).map(Phase.loaded) ?? .notFound
+        } catch {
+            phase = .failed
+        }
+    }
+
+    /// Only the gone case matters here; the page itself reloads its rows.
+    private func recheck() async {
+        guard case .loaded = phase, let repository = container.playlistRepository else { return }
+        do {
+            if try await repository.fetch(id: playlistId) == nil { phase = .notFound }
+        } catch {
+            // A read error is not "deleted": the page keeps what it shows.
+        }
+    }
 }
