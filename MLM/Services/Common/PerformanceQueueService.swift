@@ -502,7 +502,7 @@ actor PerformanceQueueActor {
             // --- Step C: CoreML Groove Embedding ---
             if let embeddingService = DependencyContainer.shared.audioEmbeddingService, embeddingService.isAvailable {
                 do {
-                    AppLogger.shared.debug("PerformanceQueue [C/3]: Extracting CoreML Groove Embedding for \(track.title)", source: "PerformanceQueue")
+                    AppLogger.shared.debug("PerformanceQueue [C/3]: Extracting the similarity embedding for \(track.title)", source: "PerformanceQueue")
                     let totalDuration = Double(track.duration ?? 0)
                     let res = try await embeddingService.analyzeTrackDrop(at: filePath, totalDuration: totalDuration)
                     
@@ -521,9 +521,9 @@ actor PerformanceQueueActor {
                         dropOffset: res.offset,
                         mixCategory: mixCatString
                     )
-                    AppLogger.shared.debug("PerformanceQueue [C/3]: Saved Groove Embedding for \(track.title)", source: "PerformanceQueue")
+                    AppLogger.shared.debug("PerformanceQueue [C/3]: Saved the similarity embedding for \(track.title)", source: "PerformanceQueue")
                 } catch {
-                    AppLogger.shared.log("PerformanceQueue [C/3]: Groove Embedding failed for \(track.title) — \(error.localizedDescription)", level: .warning, source: "PerformanceQueue")
+                    AppLogger.shared.log("PerformanceQueue [C/3]: Similarity embedding failed for \(track.title) — \(error.localizedDescription)", level: .warning, source: "PerformanceQueue")
                 }
             }
             

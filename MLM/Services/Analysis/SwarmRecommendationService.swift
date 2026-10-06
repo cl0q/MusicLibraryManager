@@ -80,48 +80,48 @@ final class SwarmRecommendationService: Sendable {
 
             // A: If it is already a SoundCloud track, use its URL to resolve the track ID
             if originalPath.lowercased().contains("soundcloud.com/") {
-                AppLogger.shared.info("SwarmService: Starting SoundCloud related lookup via URL for \(track.title)", source: "Swarm")
+                AppLogger.shared.info("Starting SoundCloud related lookup via URL for \(track.title)", source: "Recommendations")
                 do {
                     let trackId = try await resolveSoundCloudTrackId(url: originalPath, clientId: clientId)
                     let recs = try await fetchSoundCloudRelated(trackId: trackId, clientId: clientId, limit: limit)
-                    AppLogger.shared.info("SwarmService: Successfully resolved \(recs.count) SoundCloud recommendations.", source: "Swarm")
+                    AppLogger.shared.info("Successfully resolved \(recs.count) SoundCloud recommendations.", source: "Recommendations")
                     return recs
                 } catch {
-                    AppLogger.shared.error("SwarmService: SoundCloud related lookup failed: \(error.localizedDescription)", source: "Swarm")
+                    AppLogger.shared.error("SoundCloud related lookup failed: \(error.localizedDescription)", source: "Recommendations")
                     throw error
                 }
             } else {
                 // B: If it is a local track, search SoundCloud by artist + title first
                 let searchQuery = "\(track.artist) \(track.title)"
-                AppLogger.shared.info("SwarmService: Searching SoundCloud for local track: '\(searchQuery)'", source: "Swarm")
+                AppLogger.shared.info("Searching SoundCloud for local track: '\(searchQuery)'", source: "Recommendations")
                 
                 let trackId: Int64
                 do {
                     trackId = try await searchSoundCloudTrack(query: searchQuery, clientId: clientId)
-                    AppLogger.shared.info("SwarmService: Resolved local track to SoundCloud ID \(trackId)", source: "Swarm")
+                    AppLogger.shared.info("Resolved local track to SoundCloud ID \(trackId)", source: "Recommendations")
                 } catch {
-                    AppLogger.shared.error("SwarmService: SoundCloud search failed: \(error.localizedDescription)", source: "Swarm")
+                    AppLogger.shared.error("SoundCloud search failed: \(error.localizedDescription)", source: "Recommendations")
                     throw error
                 }
                 
                 do {
                     let recs = try await fetchSoundCloudRelated(trackId: trackId, clientId: clientId, limit: limit)
-                    AppLogger.shared.info("SwarmService: Successfully resolved \(recs.count) SoundCloud recommendations for search ID \(trackId).", source: "Swarm")
+                    AppLogger.shared.info("Successfully resolved \(recs.count) SoundCloud recommendations for search ID \(trackId).", source: "Recommendations")
                     return recs
                 } catch {
-                    AppLogger.shared.error("SwarmService: SoundCloud related lookup failed for search ID \(trackId): \(error.localizedDescription)", source: "Swarm")
+                    AppLogger.shared.error("SoundCloud related lookup failed for search ID \(trackId): \(error.localizedDescription)", source: "Recommendations")
                     throw error
                 }
             }
             
         case .lastfm:
-            AppLogger.shared.info("SwarmService: Starting Last.fm similar lookup for '\(track.title)' by \(track.artist)", source: "Swarm")
+            AppLogger.shared.info("Starting Last.fm similar lookup for '\(track.title)' by \(track.artist)", source: "Recommendations")
             do {
                 let recs = try await fetchLastFmSimilar(artist: track.artist, title: track.title, limit: limit)
-                AppLogger.shared.info("SwarmService: Successfully fetched \(recs.count) Last.fm recommendations.", source: "Swarm")
+                AppLogger.shared.info("Successfully fetched \(recs.count) Last.fm recommendations.", source: "Recommendations")
                 return recs
             } catch {
-                AppLogger.shared.error("SwarmService: Last.fm similar lookup failed: \(error.localizedDescription)", source: "Swarm")
+                AppLogger.shared.error("Last.fm similar lookup failed: \(error.localizedDescription)", source: "Recommendations")
                 throw error
             }
         }
@@ -133,7 +133,7 @@ final class SwarmRecommendationService: Sendable {
 
     private func fetchLastFmSimilar(artist: String, title: String, limit: Int = 10) async throws -> [SwarmRecommendation] {
         guard let apiKey = CredentialsLoader.credential(key: "LASTFM_API_KEY"), !apiKey.isEmpty else {
-            AppLogger.shared.warn("SwarmService: LASTFM_API_KEY not configured in .env", source: "Swarm")
+            AppLogger.shared.warn("LASTFM_API_KEY not configured in .env", source: "Recommendations")
             throw SwarmError.lastFmApiKeyMissing
         }
 

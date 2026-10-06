@@ -120,7 +120,7 @@ private struct FolderStep: View {
     private var dropZone: some View {
         VStack(spacing: Spacing.s) {
             Image(systemName: "folder")
-                .font(.system(size: 36))
+                .font(.largeTitle)
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
             if let folder = model.folder {
@@ -237,7 +237,7 @@ private struct SetupDone: View {
     var body: some View {
         VStack(spacing: Spacing.m) {
             Image(systemName: "checkmark.circle")
-                .font(.system(size: 40))
+                .font(.largeTitle)
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
             Text("“\(model.libraryName)” is ready")

@@ -38,7 +38,7 @@ final class LibraryRepairService {
             track.id.map { !protected.contains($0) } ?? false
         }
         if !protected.isEmpty {
-            AppLogger.shared.info("Rescan Metadata: \(protected.count) tracks with edits made in MLM are skipped", source: "Repair")
+            AppLogger.shared.info("Reread tags: \(protected.count) tracks with edits made in MLM are skipped", source: "Repair")
         }
 
         let tracker = MaintenanceProgressTracker(
@@ -51,7 +51,7 @@ final class LibraryRepairService {
         var failed = 0
 
         AppLogger.shared.info(
-            "Rescan Metadata: scanning \(tracks.count) tracks...",
+            "Reread tags: scanning \(tracks.count) tracks...",
             source: "Repair"
         )
 
@@ -93,7 +93,7 @@ final class LibraryRepairService {
                     succeeded += 1
                 } catch {
                     AppLogger.shared.error(
-                        "Rescan Metadata: Error for \(track.artist) - \(track.title) [\(resolvedURL.lastPathComponent)]: \(error.localizedDescription)",
+                        "Reread tags: Error for \(track.artist) - \(track.title) [\(resolvedURL.lastPathComponent)]: \(error.localizedDescription)",
                         source: "Repair"
                     )
                     tracker.updateProgress(
