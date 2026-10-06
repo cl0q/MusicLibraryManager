@@ -128,9 +128,11 @@ enum SyncDestination {
         return (free, Int64(total))
     }
 
-    /// A mounted volume that can be ejected (a removable or ejectable disk, never the boot disk).
-    static func isEjectable(_ path: String) -> Bool {
+    /// A mounted volume that can be ejected (a removable or ejectable disk, never the boot disk
+    /// and never the drive that holds the library).
+    static func isEjectable(_ path: String, libraryVolumePath: String? = nil) -> Bool {
         guard let volume = volumePath(for: path), MountObserver.isVolumeMounted(volume) else { return false }
+        if volume == libraryVolumePath { return false }
         let values = try? URL(fileURLWithPath: volume, isDirectory: true)
             .resourceValues(forKeys: [.volumeIsRemovableKey, .volumeIsEjectableKey, .volumeIsInternalKey])
         return values?.volumeIsRemovable == true || values?.volumeIsEjectable == true

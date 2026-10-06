@@ -155,6 +155,22 @@ struct SyncViewModelTests {
         #expect(try await env.results.fetch(profileID: a.id!) == nil, "no result is written for a deleted profile")
     }
 
+    @Test func theLibraryDriveIsNeverOfferedForEject() async throws {
+        let env = try await SyncTestEnv()
+        let vm = env.viewModel()
+        vm.libraryVolumePath = { "/Volumes/LIBDRIVE" }
+        let onLibraryDrive = SyncProfile(id: 1, name: "Home", outputFolder: "/Volumes/LIBDRIVE/Sync")
+        #expect(vm.ejectRefusal(onLibraryDrive) == "Can’t eject — “LIBDRIVE” holds the library")
+        #expect(!vm.canEject(onLibraryDrive))
+        #expect(!SyncDestination.isEjectable("/Volumes/LIBDRIVE/Sync", libraryVolumePath: "/Volumes/LIBDRIVE"))
+        // Another disk gets no library refusal.
+        let other = SyncProfile(id: 2, name: "iPod", outputFolder: "/Volumes/IPOD/Music")
+        #expect(vm.ejectRefusal(other) == nil)
+        // The refusal is posted as it is, not wrapped in a second "Couldn’t eject —".
+        await vm.eject(onLibraryDrive)
+        #expect(env.status.message?.text == "Can’t eject — “LIBDRIVE” holds the library")
+    }
+
     @Test func optionsSaveAtOnceAndKeepTheirKeys() async throws {
         let env = try await SyncTestEnv()
         let a = try await env.profile("A", device: try env.device("A"))

@@ -70,6 +70,8 @@ final class SyncViewModel {
     @ObservationIgnored private let notificationCenter: NotificationCenter
     @ObservationIgnored private let workspaceCenter: NotificationCenter
     @ObservationIgnored var libraryDrive: @MainActor () -> LibraryDriveState = { LibraryDriveState.current(.shared) }
+    /// `/Volumes/<name>` of the drive that holds the library (never offered for Eject).
+    @ObservationIgnored var libraryVolumePath: @MainActor () -> String? = { DependencyContainer.shared.mountObserver?.libraryVolumePath }
     @ObservationIgnored var statusBar: @MainActor () -> StatusBarCenter? = { ShellWindowModels.main.statusBar }
     @ObservationIgnored var edits: @MainActor () -> ShellEdits = {
         ShellEdits(dependencies: .live(.shared), undo: .main, window: .main)
@@ -573,7 +575,7 @@ final class SyncViewModel {
             var ejectable = false
             do {
                 let result = try await service.executeSync(profileId: id, onlyTrackIDs: onlyTrackIDs)
-                ejectable = SyncDestination.isEjectable(profile.outputFolder)
+                ejectable = self?.canEjectVolume(of: profile) ?? false
                 message = Self.endMessage(result, retry: onlyTrackIDs != nil)
             } catch let error as SyncError {
                 if case .insufficientSpace = error {
@@ -663,6 +665,7 @@ final class SyncViewModel {
     func ejectRefusal(_ profile: SyncProfile) -> String? {
         guard let volume = SyncDestination.volumePath(for: profile.outputFolder) else { return "Not a removable disk." }
         let deviceName = SyncDestination.deviceName(for: profile.outputFolder)
+        if volume == libraryVolumePath() { return "Can’t eject — “\(deviceName)” holds the library" }
         let busy = profiles.contains { other in
             SyncDestination.volumePath(for: other.outputFolder) == volume && run(for: other) != nil
         }
@@ -672,14 +675,19 @@ final class SyncViewModel {
     @MainActor
     func canEject(_ profile: SyncProfile) -> Bool {
         guard let id = profile.id, destinations[id] == .connected || destinations[id] == .folderNotFound else { return false }
-        return SyncDestination.isEjectable(profile.outputFolder)
+        return canEjectVolume(of: profile)
+    }
+
+    @MainActor
+    private func canEjectVolume(of profile: SyncProfile) -> Bool {
+        SyncDestination.isEjectable(profile.outputFolder, libraryVolumePath: libraryVolumePath())
     }
 
     @MainActor
     func eject(_ profile: SyncProfile) async {
         let deviceName = SyncDestination.deviceName(for: profile.outputFolder)
         if let refusal = ejectRefusal(profile) {
-            statusBar()?.post("Couldn’t eject — \(refusal)")
+            statusBar()?.post(refusal.hasPrefix("Can’t eject") ? refusal : "Couldn’t eject — \(refusal)")
             return
         }
         guard let volume = SyncDestination.volumePath(for: profile.outputFolder) else { return }
