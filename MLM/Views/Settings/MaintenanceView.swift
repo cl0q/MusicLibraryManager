@@ -44,6 +44,8 @@ struct MaintenanceView: View {
                 jobRow(MaintenanceJob.artworkEmbedded, "Refresh embedded artwork", "Reads cover art from the audio files. No network.")
                 jobRow(MaintenanceJob.artworkMusicBrainz, "Fetch artwork from MusicBrainz", "Downloads missing album covers. Slow on purpose (rate-limited).")
                 jobRow(MaintenanceJob.rereadTags, "Reread tags from files", "Use after editing tags in another app.")
+                jobRow(MaintenanceJob.clearSourceNames, "Clear source names from Album",
+                       "Empties the Album field where it holds SoundCloud, YouTube or another source name. Where the tracks came from stays recorded.")
             }
             duplicatesSection
             transcodeCacheSection
@@ -92,6 +94,15 @@ struct MaintenanceView: View {
                 .keyboardShortcut(.defaultAction)
         } message: {
             Text(MaintenanceJobs.rereadMessage)
+        }
+        .alert(SourceAlbumCleanup.alertTitle(jobs.coverage?.sourceNamedAlbums ?? 0),
+               isPresented: Binding(get: { jobs.clearSourceNamesConfirmationRequested },
+                                    set: { jobs.clearSourceNamesConfirmationRequested = $0 })) {
+            Button(SourceAlbumCleanup.alertButton(jobs.coverage?.sourceNamedAlbums ?? 0)) { jobs.start(MaintenanceJob.clearSourceNames) }
+            Button("Cancel", role: .cancel) {}
+                .keyboardShortcut(.defaultAction)
+        } message: {
+            Text(SourceAlbumCleanup.alertMessage)
         }
         .alert("Clear the transcode cache?", isPresented: $confirmsCacheClear) {
             Button("Clear Cache", role: .destructive) {
@@ -150,6 +161,8 @@ struct MaintenanceView: View {
                     // Rereading replaces database values: it asks first (review S2).
                     if action == MaintenanceJob.rereadTags {
                         jobs.rereadConfirmationRequested = true
+                    } else if action == MaintenanceJob.clearSourceNames {
+                        jobs.clearSourceNamesConfirmationRequested = true
                     } else {
                         jobs.start(action)
                     }

@@ -31,7 +31,11 @@ struct LibraryMenuCommands: Commands {
                           disabledReason: hasLibrary ? ReviewScanRunner.shared.blockedReason : "No library is open.") {
                 ReviewScanRunner.shared.startWithConfirmation(statusBar: statusBar)
             }
-            CommandButton(.findAlbums)
+            // W4-3: the same Activity operation as Review ▸ Albums ▸ Look Up Albums; it never opens Review (P3).
+            CommandButton(.findAlbums, enabled: hasLibrary && AlbumLookupRunner.shared.blockedReason == nil,
+                          disabledReason: hasLibrary ? AlbumLookupRunner.shared.blockedReason : "No library is open.") {
+                AlbumLookupRunner.shared.startWithConfirmation(statusBar: statusBar)
+            }
 
             Divider()
 
@@ -71,6 +75,13 @@ struct LibraryMenuCommands: Commands {
                 CommandButton(.readTrackNumbers, enabled: jobBlockedReason(MaintenanceJob.readTrackNumbers) == nil,
                               disabledReason: jobBlockedReason(MaintenanceJob.readTrackNumbers)) {
                     MaintenanceJobs.shared.start(MaintenanceJob.readTrackNumbers)
+                }
+                CommandButton(.clearSourceNames, enabled: jobBlockedReason(MaintenanceJob.clearSourceNames) == nil,
+                              disabledReason: jobBlockedReason(MaintenanceJob.clearSourceNames)) {
+                    // It changes the Album field of many tracks: the question is asked in
+                    // Settings ▸ Maintenance, where the job's row is (like Reread Tags).
+                    MaintenanceJobs.shared.clearSourceNamesConfirmationRequested = true
+                    openSettings(tab: .maintenance)
                 }
                 Divider()
                 CommandButton(.maintenanceSettings, enabled: hasLibrary) {

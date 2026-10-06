@@ -473,6 +473,8 @@ final class TrackRepository: Sendable {
             var track = track
             track.searchText = DatabaseManager.foldedSearchText(track.rawSearchText)
             try track.insert(db)
+            // W4-3: a row inserted with a real album text joins its album (downloads, remote lists).
+            AlbumTrackRepository.linkNewTrack(db, track)
             return track
         }
     }
@@ -536,6 +538,7 @@ final class TrackRepository: Sendable {
             let hasSavedQueue = try db.tableExists("playback_queue_entries")
             let hasDecidedPairs = try db.tableExists("review_decided_pairs")
             let hasAlbumTracks = try db.tableExists("album_tracks")   // v50 (W4-1)
+            let hasAlbumSuggestions = try db.tableExists("album_suggestions")   // v52 (W4-3)
             let hasHiddenColumn = try db.columns(in: "tracks").contains { $0.name == "hidden_by_review" }
             for id in uniqueIDs {
                 if hasSavedQueue {
@@ -554,6 +557,9 @@ final class TrackRepository: Sendable {
                 try db.execute(sql: "DELETE FROM playlist_tracks WHERE track_id = ?", arguments: [id])
                 if hasAlbumTracks {
                     try db.execute(sql: "DELETE FROM album_tracks WHERE track_id = ?", arguments: [id])
+                }
+                if hasAlbumSuggestions {
+                    try db.execute(sql: "DELETE FROM album_suggestions WHERE track_id = ?", arguments: [id])
                 }
                 try db.execute(sql: "DELETE FROM sync_profile_tracks WHERE track_id = ?", arguments: [id])
                 try db.execute(sql: "DELETE FROM sync_state WHERE track_id = ?", arguments: [id])

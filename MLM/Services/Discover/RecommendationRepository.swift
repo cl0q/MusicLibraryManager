@@ -53,6 +53,8 @@ final class RecommendationRepository: Sendable {
             try track.insert(db)
             guard let id = track.id else { return track }
             try db.execute(sql: "UPDATE tracks SET is_pending_recommendation = ? WHERE id = ?", arguments: [hold ? 1 : 0, id])
+            // W4-3: a kept download joins its album now; a held one when it is kept (`keep`).
+            if !hold { AlbumTrackRepository.linkNewTrack(db, track) }
             var row = TrackDiscoveryLog(discoveredTrackId: id, seedTrackId: seedTrackID, discoverySource: source,
                                         status: hold ? Status.waiting : Status.kept)
             try row.insert(db, onConflict: .replace)
@@ -83,6 +85,7 @@ final class RecommendationRepository: Sendable {
                 try db.execute(sql: "UPDATE tracks SET is_pending_recommendation = 0 WHERE id = ?", arguments: [id])
                 try db.execute(sql: "UPDATE track_discovery_log SET status = ? WHERE discovered_track_id = ?",
                                arguments: [Status.kept, id])
+                if let kept = try Track.fetchOne(db, key: id) { AlbumTrackRepository.linkNewTrack(db, kept) }
                 // What the user keeps teaches Similar (the old thumbs-up, now the real gesture):
                 // the seed's score for this track is boosted. Undo removes the row again.
                 if let seed = try Int64.fetchOne(db, sql: "SELECT seed_track_id FROM track_discovery_log WHERE discovered_track_id = ?",

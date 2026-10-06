@@ -1088,7 +1088,8 @@ final class DownloadViewModel {
                     id: nil,
                     artist: metadata?.artist.isEmpty == false ? metadata!.artist : request.artist,
                     albumArtist: metadata?.albumArtist.isEmpty == false ? metadata!.albumArtist : request.artist,
-                    album: metadata?.album.isEmpty == false ? metadata!.album : "Discovered Neighbors",
+                    // No album unless the file has one: the folder's name is not an album (DEC-013).
+                    album: metadata?.album ?? "",
                     title: metadata?.title.isEmpty == false ? metadata!.title : request.title,
                     genre: metadata?.genre,
                     year: metadata?.year,

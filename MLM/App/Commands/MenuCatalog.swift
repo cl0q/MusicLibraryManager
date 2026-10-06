@@ -158,7 +158,7 @@ enum MenuCommand: String, CaseIterable, Sendable {
     case maintenance
     case fingerprintAllTracks, replayGainAnalysis, danceabilityAnalysis, similarityAnalysis
     case refreshEmbeddedArtwork, fetchArtworkFromMusicBrainz, rereadTagsFromFiles
-    case readTrackNumbers
+    case readTrackNumbers, clearSourceNames
     case maintenanceSettings
     case backUpNow, librarySettings
     // Go
@@ -301,8 +301,7 @@ enum MenuCommand: String, CaseIterable, Sendable {
         case .findDuplicates:
             Entry(menu: .library, title: "Find Duplicates", shortcut: nil, wiring: .app)
         case .findAlbums:
-            Entry(menu: .library, title: "Find Albums", shortcut: nil,
-                  wiring: .pending(owner: "W4-3", reason: "Album suggestions aren’t available yet."))
+            Entry(menu: .library, title: "Find Albums", shortcut: nil, wiring: .app)
         case .maintenance: Entry(menu: .library, title: "Maintenance", shortcut: nil, wiring: .app)
         case .fingerprintAllTracks: Self.maintenanceJob("Fingerprint All Tracks")
         case .replayGainAnalysis: Self.maintenanceJob("ReplayGain Analysis")
@@ -312,6 +311,7 @@ enum MenuCommand: String, CaseIterable, Sendable {
         case .fetchArtworkFromMusicBrainz: Self.maintenanceJob("Fetch Artwork from MusicBrainz")
         case .rereadTagsFromFiles: Self.maintenanceJob("Reread Tags from Files…")
         case .readTrackNumbers: Self.maintenanceJob("Read Track Numbers")
+        case .clearSourceNames: Self.maintenanceJob("Clear Source Names from Album…")
         case .maintenanceSettings:
             Entry(menu: .library, title: "Maintenance Settings…", shortcut: nil, wiring: .app, parent: .maintenance)
         case .backUpNow: Entry(menu: .library, title: "Back Up Now", shortcut: nil, wiring: .app)

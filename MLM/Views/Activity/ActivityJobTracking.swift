@@ -217,6 +217,7 @@ struct MaintenanceJob: Equatable {
         case "path-rollback": "Roll back last path migration"
         case "rescan": "Reread tags from files"
         case "read-track-numbers": "Read track numbers"
+        case "clear-source-names": "Clear source names from Album"
         case "create-liked-playlist": "Recreate the Liked playlist"
         default: action
         }
@@ -227,7 +228,7 @@ struct MaintenanceJob: Equatable {
         ["fingerprint", "replaygain", "danceability", "groove", "artwork-embedded", "artwork-musicbrainz", "rescan", "read-track-numbers"].contains(action)
     }
 
-    var isShort: Bool { ["path-audit", "create-liked-playlist"].contains(action) }
+    var isShort: Bool { ["path-audit", "create-liked-playlist", "clear-source-names"].contains(action) }
 
     /// Ends the operation from the pane's result line (`ReplayGain: 9,412 analyzed, 31 failed`,
     /// `ffmpeg not found. Install via: brew install ffmpeg`). A run that returned without a line
@@ -263,7 +264,7 @@ struct MaintenanceJob: Equatable {
 
     private var verb: String {
         if action == "artwork-embedded" { return "read" }
-        if action == "rescan" || action == "read-track-numbers" { return "updated" }
+        if action == "rescan" || action == "read-track-numbers" || action == "clear-source-names" { return "updated" }
         return kind == .artwork ? "fetched" : (kind == .pathMigration ? "updated" : "analysed")
     }
 
