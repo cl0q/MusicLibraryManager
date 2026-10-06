@@ -275,7 +275,8 @@ final class TagWriteQueue {
         let rootURL = URL(fileURLWithPath: root, isDirectory: true)
 
         let activityJob = TagWriteActivity.begin()  // W3-ACT: `Write tags to files`, Automatic
-        defer { TagWriteActivity.end(activityJob, with: report) }
+        var flushError: Error?
+        defer { TagWriteActivity.end(activityJob, with: report, error: flushError) }
         let token = deps.statusBar()?.beginLoading(loadingPhase)
         defer { if let token { deps.statusBar()?.endLoading(token) } }
 
@@ -284,6 +285,7 @@ final class TagWriteQueue {
             try await writeAll(&report, deps: deps, repository: repository, root: root, rootURL: rootURL)
         } catch {
             AppLogger.shared.error("Tag writes stopped: \(error)", source: "Tags")
+            flushError = error is CancellationError ? nil : error
             report.outcome = .cancelled
         }
         if report.written > 0 {

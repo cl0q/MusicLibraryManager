@@ -71,7 +71,11 @@ struct ActivityStructureTests {
         let item = try source("MLM/Views/Activity/ActivityToolbarItem.swift")
         #expect(item.contains("accessibilityReduceMotion"))
         #expect(item.contains(".symbolEffect(.bounce, value: center.finishedCount)"))
-        #expect(item.contains("ViewThatFits(in: .horizontal)"))
+        // NSToolbar proposes no width: the text collapses by the main window's width (UC-TB-03).
+        #expect(item.contains("ActivityToolbarText.collapse(width: router.mainWindowWidth)"))
+        #expect(ActivityToolbarText.collapse(width: 1_400) == (true, true))
+        #expect(ActivityToolbarText.collapse(width: 950) == (false, true), "running words go first")
+        #expect(ActivityToolbarText.collapse(width: 700) == (false, false))
         #expect(item.contains(".accessibilityValue(summary.sentence)"))
     }
 

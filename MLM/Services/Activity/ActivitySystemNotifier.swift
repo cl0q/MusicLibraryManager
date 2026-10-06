@@ -52,10 +52,20 @@ final class ActivitySystemNotifier: ActivityFinishNotifying {
 }
 
 extension ActivityCenter {
+    /// A test run (never the app): XCTest's configuration, Swift Testing's environment or a
+    /// loaded `XCTestCase` — not Xcode's build-product paths, which a debug app run also has (N7).
+    nonisolated static func isTestProcess(environment: [String: String] = ProcessInfo.processInfo.environment,
+                                          classLookup: (String) -> Any? = { NSClassFromString($0) }) -> Bool {
+        if environment["XCTestConfigurationFilePath"] != nil { return true }
+        if environment["XCTestSessionIdentifier"] != nil { return true }
+        if environment.keys.contains(where: { $0.hasPrefix("SWT_") }) { return true }
+        return classLookup("XCTestCase") != nil
+    }
+
     /// At launch (app only, never in tests): the app-level history (operations without a
     /// library, `ActivityAppLevelStore` next to the library registry) and the opt-in notifier.
     func startForApp() {
-        guard !AppLogger.isTestProcess(environment: ProcessInfo.processInfo.environment) else { return }
+        guard !Self.isTestProcess() else { return }
         finishNotifier = ActivitySystemNotifier.shared
         Task { await attachAppLevel(store: ActivityAppLevelStore()) }
     }

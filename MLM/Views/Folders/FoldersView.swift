@@ -511,6 +511,12 @@ struct FoldersView: View {
         // result in Activity (was silent, errors swallowed). It posts the import notifications.
         let importer = ImportViewModel(importService: importService, configRepository: config, activity: .shared)
         await importer.importFromDirectory(URL(fileURLWithPath: path))
+        // A finished import posted these itself; after a cancel or an error some files may be
+        // committed — post them as the old path always did (W3-ACT S7).
+        if importer.lastResult == nil || importer.lastResult?.cancelled == true {
+            NotificationCenter.default.post(name: .libraryDidImport, object: nil)
+            NotificationCenter.default.post(name: .libraryFilesDidChange, object: nil)
+        }
         await viewModel.refresh()
     }
 

@@ -23,7 +23,8 @@ struct TrackCommands: Commands {
             let state = TrackCommandState(
                 summary: selection?.summary,
                 capabilities: TrackListCapabilities(target),
-                isDownloadBusy: DependencyContainer.shared.downloadViewModel?.isDownloading ?? false
+                // Downloads queue behind a running batch (W3-ACT N4): never busy.
+                isDownloadBusy: false
             )
 
             CommandButton(.play, enabled: state.canPlay) {

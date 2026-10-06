@@ -230,10 +230,15 @@ actor PerformanceQueueActor {
         self.service = service
     }
     
+    /// Counted, not a flag (W3-ACT N1): each start is paired with one end, so a late `false` of
+    /// an earlier batch can't clear the `true` of the batch that started after it.
+    private var externalDownloadCount = 0
+
     func setExternalDownloadActive(_ active: Bool) async {
-        self.isExternalDownloadActive = active
+        externalDownloadCount += active ? 1 : -1
+        self.isExternalDownloadActive = externalDownloadCount > 0
         await updateServiceState()
-        if !active {
+        if !isExternalDownloadActive {
             triggerWorker()
         }
     }

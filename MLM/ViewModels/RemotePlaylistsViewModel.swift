@@ -42,10 +42,24 @@ final class RemotePlaylistsViewModel {
     var downloadNote: String? { provider.downloadNote }
     var selectedTitle: String? { preview?.title }
     var selectedTracks: [RemotePlaylistTrack] { preview?.tracks ?? [] }
-    var isDownloading: Bool { downloadViewModel.isDownloading }
-    var downloadCompletedCount: Int { downloadViewModel.completedCount }
-    var downloadTotalCount: Int { downloadViewModel.totalCount }
-    var downloadProgress: Double { downloadViewModel.progress }
+    /// This sheet's own batch (W3-ACT S1): its operation in Activity, not the shared state.
+    private(set) var downloadTicket: DownloadTicket?
+    private var ownOperation: ActivityOperation? {
+        downloadTicket?.operationID.flatMap { downloadViewModel.activity.operation(id: $0) }
+    }
+    private(set) var isRequestingDownload = false
+    var isDownloading: Bool { isRequestingDownload || (ownOperation?.state.isActive ?? false) }
+    var downloadCompletedCount: Int { ownOperation?.progress.completed ?? 0 }
+    var downloadTotalCount: Int { ownOperation?.progress.total ?? 0 }
+    var downloadProgress: Double { ownOperation?.progress.fraction ?? 0 }
+    /// `Downloading… 12 of 44` · `Queued · Starts after “…”` · `Waiting for “Lexxar”`.
+    var downloadStatusText: String {
+        guard let op = ownOperation else { return "Downloading…" }
+        if op.state != .running, let wait = op.wait {
+            return op.state == .queued ? "Queued · \(wait.sentence)" : wait.sentence
+        }
+        return "Downloading… \(op.progress.position.formatted(.number)) of \((op.progress.total ?? 0).formatted(.number))"
+    }
     var failedDownloadItems: [DownloadItem] {
         downloadViewModel.queueItems.filter { $0.status == .failed }
     }
@@ -126,10 +140,15 @@ final class RemotePlaylistsViewModel {
 
         // W3-ACT: `Import “‹playlist›”` in Activity; a batch requested while another runs queues
         // behind it, and this sheet reads its own batch's numbers (was: the previous batch's).
+        let ticket = DownloadTicket()
+        downloadTicket = ticket
+        isRequestingDownload = true
+        defer { isRequestingDownload = false }
         let result = await downloadViewModel.downloadTracks(
             newTracks,
             preferredSource: provider.preferredSource,
-            context: preview.map { .playlist(persistence.playlistID, name: $0.title) }
+            context: preview.map { .playlist(persistence.playlistID, name: $0.title) },
+            ticket: ticket
         )
         importResult = RemotePlaylistImportResult(
             playlistID: persistence.playlistID,
@@ -146,7 +165,8 @@ final class RemotePlaylistsViewModel {
     }
 
     func cancelDownload() {
-        downloadViewModel.cancel()
+        // This sheet's own batch only (W3-ACT S1).
+        downloadTicket?.cancel()
     }
 
     func userFacingDownloadFailure(for item: DownloadItem) -> String {

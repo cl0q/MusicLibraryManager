@@ -103,6 +103,17 @@ protocol ActivityHistoryStore: Sendable {
     /// plain text. Returns the number of records changed.
     @discardableResult
     func markMissingSubjects() async throws -> Int
+    /// The per-item outcomes of one operation (`load` leaves them out to keep memory small, N12).
+    func items(for id: UUID) async throws -> [ActivityItemOutcome]
+}
+
+extension ActivityOperationRecord {
+    /// The record without its per-item outcomes (counts and failures stay).
+    var withoutItems: ActivityOperationRecord {
+        var copy = self
+        copy.result?.items = []
+        return copy
+    }
 }
 
 /// Pure retention rule shared by both stores (and tested once).
@@ -149,12 +160,33 @@ actor ActivityAppLevelStore: ActivityHistoryStore {
         self.fileURL = fileURL
     }
 
+    /// Reads every record it can (element by element, unknown ones skipped). A file that can't
+    /// be read at all is moved aside as `activity.json.unreadable-‹timestamp›` — never
+    /// overwritten (S9).
     private func read() -> [ActivityOperationRecord] {
-        guard let data = try? Data(contentsOf: fileURL) else { return [] }
-        return (try? Self.decoder.decode([ActivityOperationRecord].self, from: data)) ?? []
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
+        guard let data = try? Data(contentsOf: fileURL),
+              let records = try? Self.decoder.decode(LossyArray<ActivityOperationRecord>.self, from: data) else {
+            let stamp = Int(Date().timeIntervalSince1970)
+            let aside = fileURL.deletingLastPathComponent()
+                .appendingPathComponent("\(fileURL.lastPathComponent).unreadable-\(stamp)")
+            do {
+                try FileManager.default.moveItem(at: fileURL, to: aside)
+                AppLogger.shared.error("The app-level Activity history couldn’t be read; kept as \(aside.lastPathComponent)", source: "Activity")
+            } catch {
+                // Can't move it aside: never overwrite it.
+                readBlocked = true
+            }
+            return []
+        }
+        return records.elements
     }
 
+    /// The file couldn't be read nor moved aside: nothing is written over it.
+    private var readBlocked = false
+
     private func write(_ records: [ActivityOperationRecord]) throws {
+        guard !readBlocked else { return }
         try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)
         let data = try Self.encoder.encode(records)
@@ -168,7 +200,11 @@ actor ActivityAppLevelStore: ActivityHistoryStore {
     }
 
     func load(now: Date) async throws -> [ActivityOperationRecord] {
-        ActivityRetentionRule.apply(read(), now: now)
+        ActivityRetentionRule.apply(read(), now: now).map(\.withoutItems)
+    }
+
+    func items(for id: UUID) async throws -> [ActivityItemOutcome] {
+        read().first { $0.id == id }?.result?.items ?? []
     }
 
     func closeInterrupted(at date: Date) async throws -> Int {

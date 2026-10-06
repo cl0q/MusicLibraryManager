@@ -98,7 +98,9 @@ struct ActivityPersistenceTests {
         #expect(loaded.count == 1)
         let back = try #require(loaded.first)
         #expect(back.id == original.id)
-        #expect(back.result == original.result)
+        // Items stay in the row and are read on demand (N12).
+        #expect(back.result == original.withoutItems.result)
+        #expect(try await repo.items(for: original.id) == original.result?.items)
         #expect(back.subject == original.subject)
         #expect(back.needsAttention)
         #expect(abs(back.startedAt.timeIntervalSince(original.startedAt)) < 0.01)

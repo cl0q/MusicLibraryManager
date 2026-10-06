@@ -152,11 +152,16 @@ enum ActivityPresentation {
         let operationIDs: [UUID]
         let trackIDs: [Int64]
         let isWaiting: Bool
+        /// `Retry All` can run for this group now (a live closure or the app's retry handler).
         let isRetryable: Bool
         /// Where it came from: the newest operation (`From “Dekmantel 2024”`) and its end.
         let originTitle: String?
         let originSubject: ActivitySubject?
         let originDate: Date?
+        /// Download groups: which operation owns which of the group's tracks (each track once).
+        var tracksByOperation: [UUID: [Int64]] = [:]
+        /// Failures without an operation row (`Earlier downloads`).
+        var isEarlier = false
     }
 
     struct DriveWait: Equatable {
@@ -203,6 +208,12 @@ enum ActivityPresentation {
     }
 
     /// Needs attention, grouped by cause across operations (largest first), drive waits first.
+    ///
+    /// Each failing track counts **once**, for the newest operation that recorded it
+    /// (`ActivityCenter.failureOwners`), whatever its cause (S4). Failing tracks no operation
+    /// recorded form `Earlier downloads`, so the toolbar's `‹n› failed` equals the `Download
+    /// failed` scope count minus what the user dismissed. A fix is offered only when it can run
+    /// (S5).
     @MainActor
     static func attentionGroups(_ center: ActivityCenter) -> [AttentionGroup] {
         var groups: [AttentionGroup] = driveWaiting(center).map { wait in
@@ -221,17 +232,18 @@ enum ActivityPresentation {
             var retryable: Bool
             var ops: [ActivityOperation] = []
             var tracks: [Int64] = []
-            var seen: Set<Int64> = []
+            var byOperation: [UUID: [Int64]] = [:]
             var otherCount = 0
             var isDownload: Bool
         }
+        let owners = center.failureOwners()
         var order: [String] = []
         var buckets: [String: Bucket] = [:]
-        // Newest first, so a track failing in two batches counts once, for the newest.
+        // Newest first.
         let attention = center.finishedOperations.filter { $0.needsAttention && $0.dismissedAt == nil }
         for op in attention {
             let result = op.result ?? .empty
-            let live = center.stillFailing(op)
+            let live = center.stillFailing(op, owners: owners)
             for group in result.failureGroups {
                 let isTrackGroup = !group.trackIDs.isEmpty
                 let tracks = isTrackGroup ? group.trackIDs.filter { live.contains($0) } : []
@@ -244,10 +256,8 @@ enum ActivityPresentation {
                 }
                 buckets[key]?.ops.append(op)
                 if isTrackGroup {
-                    for id in tracks where !(buckets[key]?.seen.contains(id) ?? true) {
-                        buckets[key]?.seen.insert(id)
-                        buckets[key]?.tracks.append(id)
-                    }
+                    buckets[key]?.tracks.append(contentsOf: tracks)
+                    buckets[key]?.byOperation[op.id, default: []].append(contentsOf: tracks)
                 } else {
                     buckets[key]?.otherCount += max(group.count, 1)
                 }
@@ -272,15 +282,50 @@ enum ActivityPresentation {
             } else {
                 headline = bucket.cause
             }
-            return AttentionGroup(
-                id: key, headline: headline, count: count, fix: bucket.fix, note: bucket.note,
+            let canRetry = bucket.isDownload
+                ? bucket.retryable && bucket.ops.contains(where: center.canRetry)
+                : bucket.ops.contains { $0.controls.runAgain != nil }
+            let fix = availableFix(bucket.fix, isDownload: bucket.isDownload, canRetry: canRetry,
+                                   canRunAgain: bucket.ops.contains { $0.controls.runAgain != nil })
+            var group = AttentionGroup(
+                id: key, headline: headline, count: count, fix: fix, note: bucket.note,
                 operationIDs: bucket.ops.map(\.id), trackIDs: bucket.tracks, isWaiting: false,
-                isRetryable: bucket.retryable, originTitle: newest?.subject.name ?? newest?.title,
+                isRetryable: canRetry, originTitle: newest?.subject.name ?? newest?.title,
                 originSubject: newest?.subject, originDate: newest?.endedAt)
+            group.tracksByOperation = bucket.byOperation
+            return group
+        }
+        let earlier = center.earlierFailingTrackIDs(owners: owners)
+        if !earlier.isEmpty {
+            let canRetry = center.retryHandler != nil
+            var group = AttentionGroup(
+                id: "earlier", headline: "Earlier downloads — \(earlier.count.formatted(.number)) failed",
+                count: earlier.count, fix: canRetry ? .retry : .showTracks,
+                note: "Failed before Activity kept a record. The reasons are in All Tracks ▸ Download failed.",
+                operationIDs: [], trackIDs: earlier, isWaiting: false, isRetryable: canRetry,
+                originTitle: nil, originSubject: .tracks(earlier), originDate: nil)
+            group.isEarlier = true
+            failureGroups.append(group)
         }
         failureGroups.sort { $0.count > $1.count }
         groups.append(contentsOf: failureGroups)
         return groups
+    }
+
+    /// The fix a group may offer: only one that can run now (S5).
+    static func availableFix(_ fix: ActivityFix?, isDownload: Bool, canRetry: Bool, canRunAgain: Bool) -> ActivityFix? {
+        switch fix {
+        case .retry?: return isDownload ? (canRetry ? .retry : .showTracks) : (canRunAgain ? .runAgain : nil)
+        case .runAgain?: return canRunAgain ? .runAgain : nil
+        case .showTracks?: return isDownload ? .showTracks : nil
+        default: return fix
+        }
+    }
+
+    /// `No progress for 12 min` (stall watchdog).
+    @MainActor
+    static func stallText(_ op: ActivityOperation, center: ActivityCenter) -> String? {
+        center.stalledMinutes(op).map { "No progress for \($0.formatted(.number)) min" }
     }
 
     // MARK: - Times (UC-COPY-10)

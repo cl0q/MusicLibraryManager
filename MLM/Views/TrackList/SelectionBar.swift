@@ -87,7 +87,8 @@ struct TrackSelectionBar: View {
             rows: rows,
             context: context,
             live: live,
-            isDownloadBusy: container.downloadViewModel?.isDownloading ?? false,
+            // Downloads queue behind a running batch (W3-ACT N4): never busy.
+            isDownloadBusy: false,
             canShowInfo: trailingColumn != nil
         ) else { return nil }
         return SelectionBarPresentation(

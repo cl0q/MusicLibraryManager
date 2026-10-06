@@ -90,13 +90,9 @@ struct TrackListActions {
             }
             configuration.activate?(row.track, model.tracks)
         case .download:
-            guard let downloads = container.downloadViewModel else { return }
-            if downloads.isDownloading {
-                statusBar?.post(TrackCommandState.downloadBusyReason)
-                return
-            }
-            TrackCommandActions.download([row.track], container: container)
-            awaitDownload(row)
+            // A batch that runs already doesn't refuse this one: it queues (W3-ACT N4).
+            let ticket = TrackCommandActions.download([row.track], container: container)
+            awaitDownload(row, ticket: ticket)
         case .awaitDownload:
             awaitDownload(row)
         case .fileMissing:
@@ -112,7 +108,7 @@ struct TrackListActions {
     }
 
     /// `Downloading “‹title›” — it will play when it’s ready · Cancel`
-    private func awaitDownload(_ row: TrackRow) {
+    private func awaitDownload(_ row: TrackRow, ticket: DownloadTicket? = nil) {
         guard let activate = configuration.activate else {
             statusBar?.post(TrackPrimaryAction.downloadStartedMessage(count: 1))
             return
@@ -122,7 +118,8 @@ struct TrackListActions {
         statusBar?.post(TrackPrimaryAction.downloadingMessage(title: row.title), actions: [
             StatusAction("Cancel") {
                 PendingTrackPlayback.shared.cancel()
-                downloads?.cancel()
+                // Only this track's own batch (W3-ACT S1), never whatever happens to run.
+                if let ticket { ticket.cancel() } else { downloads?.cancelDownload(containing: row.id) }
             },
         ])
     }
@@ -183,11 +180,7 @@ struct TrackListActions {
 
     func download(_ rows: [TrackRow]) {
         let downloadable = rows.filter { $0.availability.isDownloadable }
-        guard !downloadable.isEmpty, let downloads = container.downloadViewModel else { return }
-        if downloads.isDownloading {
-            statusBar?.post(TrackCommandState.downloadBusyReason)
-            return
-        }
+        guard !downloadable.isEmpty, container.downloadViewModel != nil else { return }
         TrackCommandActions.download(downloadable.map(\.track), container: container)
         statusBar?.post(TrackPrimaryAction.downloadStartedMessage(count: downloadable.count))
     }
@@ -198,10 +191,6 @@ struct TrackListActions {
         let ids = Set(rows.filter { $0.availability == .fileMissing }.map(\.id))
         guard !ids.isEmpty, let repository = container.trackRepository, let downloads = container.downloadViewModel,
               let monitor = container.availabilityMonitor else { return }
-        if downloads.isDownloading {
-            statusBar?.post(TrackCommandState.downloadBusyReason)
-            return
-        }
         let statusBar = self.statusBar
         let volumeName = LibraryDriveState.current(container).volumeName
         Task {

@@ -354,6 +354,8 @@ struct ActivityOperationDetail: View {
     let center: ActivityCenter
     let open: (ActivitySubject) -> Void
     let showLogs: (ActivityOperation) -> Void
+    /// Items of a history row, read on demand (N12).
+    @State private var loadedItems: [ActivityItemOutcome] = []
 
     var body: some View {
         if let operation {
@@ -382,7 +384,8 @@ struct ActivityOperationDetail: View {
                 .padding(.horizontal, Spacing.xl)
                 .padding(.vertical, Spacing.s)
                 Divider()
-                if let items = operation.result?.items, !items.isEmpty {
+                let items = operation.result?.items.isEmpty == false ? operation.result!.items : loadedItems
+                if !items.isEmpty {
                     Table(items.enumerated().map { NumberedOutcome(id: $0.offset, element: $0.element) }) {
                         TableColumn("#") { pair in
                             Text((pair.id + 1).formatted(.number))
@@ -426,6 +429,7 @@ struct ActivityOperationDetail: View {
                     .formStyle(.grouped)
                 }
             }
+            .task(id: operation.id) { loadedItems = await center.items(for: operation) }
         } else {
             Text("Select an operation to see its details.")
                 .foregroundStyle(.secondary)

@@ -110,7 +110,10 @@ final class BackupSettingsViewModel {
         phase = .backingUp
         clearMessages()
         // Activity (W3-ACT): `Back Up Now` — no Cancel (it has none).
-        let job = ActivityCenter.shared.begin(.backup, title: "Back Up Now", subject: .settings(.backup))
+        // The row is written with the result only: the backup's own snapshot must not contain a
+        // running row that a restore would show as "Stopped when MLM quit" (N5).
+        let job = ActivityCenter.shared.begin(.backup, title: "Back Up Now", subject: .settings(.backup),
+                                              recordsStart: false)
         do {
             let info = try await service.createBackup(reason: .manual)
             lastResult = Copy.backupCreated

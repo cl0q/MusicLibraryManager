@@ -277,9 +277,15 @@ final class DependencyContainer {
         // Activity (W3-ACT): this library's history of operations (v46), and which failed
         // downloads still fail (the `Download failed` scope's own predicate).
         let activityRepository = ActivityOperationRepository(database: dbPool)
-        await ActivityCenter.shared.attachLibrary(id: library.libraryId, store: activityRepository,
-                                                  failureSource: activityRepository)
-        await MainActor.run { ActivityCenter.shared.observeLibraryChanges() }
+        // Not awaited (N12): the history loads off the start-up path; operations started meanwhile
+        // belong to this library and their rows are written after the interrupted ones are closed.
+        let libraryID = library.libraryId
+        await MainActor.run { ActivityCenter.shared.beginAttaching(libraryID: libraryID) }
+        Task { @MainActor in
+            await ActivityCenter.shared.attachLibrary(id: libraryID, store: activityRepository,
+                                                      failureSource: activityRepository)
+            ActivityCenter.shared.observeLibraryChanges()
+        }
 
         self.downloadViewModel = DownloadViewModel(
             trackRepository: self.trackRepository,
@@ -289,7 +295,9 @@ final class DependencyContainer {
         let downloads = self.downloadViewModel
         // `Retry All` for failures restored from the history (no job of this session behind them).
         await MainActor.run {
-            ActivityCenter.shared.retryHandler = { ids in Task { await downloads?.retryAllFailed(trackIds: ids) } }
+            ActivityCenter.shared.retryHandler = { ids, pin in
+                Task { await downloads?.retryAllFailed(trackIds: ids, preferredSource: .init(storageKey: pin)) }
+            }
         }
 
         // Phase 36 — Playlist cover orchestrator. Observes `.playlistDidChange`
@@ -344,7 +352,7 @@ final class DependencyContainer {
                 await service.ensureDefaultDestinationExists()
                 let job = ActivityCenter.shared.begin(
                     .backup, title: "Backup (scheduled)", subject: .settings(.backup),
-                    automatic: true, graceful: true, quiet: true)
+                    automatic: true, graceful: true, quiet: true, recordsStart: false)
                 do {
                     if let info = try await service.createBackupIfDue() {
                         AppLogger.shared.info("Launch backup created: \(info.url.lastPathComponent)", source: "Backup")
@@ -504,8 +512,24 @@ final class DependencyContainer {
     /// after the current file and moves what was moved back, so the cache stays in one place
     /// (fixes PP-ACTIVITY-02: the old Cancel cancelled a sync instead). The new folder is used
     /// only when every file arrived.
+    /// Why the transcode cache can't move now (N9): a sync reads it, or a move runs.
+    @MainActor
+    var transcodeCacheMoveBlockedReason: String? {
+        if isTranscodeCacheMoving { return "The transcode cache is being moved." }
+        if syncViewModel?.isSyncing == true { return "The cache can’t move while a sync runs." }
+        return nil
+    }
+
+    /// A transcode-cache move is running (one at a time).
+    @MainActor private(set) var isTranscodeCacheMoving = false
+
+    @MainActor
     func relocateTranscodeCache(to newPath: String) {
         guard let transcodeCache = self.transcodeCache, let configRepo = self.configRepository else { return }
+        if let reason = transcodeCacheMoveBlockedReason {
+            AppLogger.shared.info("Cache migration not started: \(reason)", source: "Sync")
+            return
+        }
 
         let oldDir = transcodeCache.cacheDir.standardizedFileURL
         let newDir = URL(fileURLWithPath: newPath).standardizedFileURL
@@ -520,24 +544,29 @@ final class DependencyContainer {
             .transcodeCacheMove, title: "Move transcode cache to “\(newDir.lastPathComponent)”",
             subject: .settings(.maintenance), itemNoun: .file,
             controls: ActivityControls(cancelStyle: .afterThisFile, cancel: { stop.cancel() },
-                                       runAgain: { [weak self] in self?.relocateTranscodeCache(to: newPath) })
+                                       runAgain: { [weak self] in Task { @MainActor in self?.relocateTranscodeCache(to: newPath) } })
         )
 
-        Task.detached {
+        isTranscodeCacheMoving = true
+        Task.detached { [weak self] in
+            defer { Task { @MainActor in self?.isTranscodeCacheMoving = false } }
             AppLogger.shared.info("Cache migration: Moving transcode cache from \(oldDir.path) to \(newDir.path)", source: "Sync")
             let outcome = await TranscodeCacheMove.run(from: oldDir, to: newDir, isCancelled: { stop.isCancelled },
                                                        progress: { done, total, name in
                 job.update(completed: done, total: total, currentItem: name)
             })
             switch outcome {
-            case .moved(let count):
+            case .moved(let moved):
                 transcodeCache.updateCacheDir(to: newDir)
                 do {
                     try await configRepo.setTranscodeCachePath(newPath)
-                    AppLogger.shared.info("Cache migration complete. Moved \(count) files and removed the old cache.", source: "Sync")
-                    job.finish(ActivityResult(counts: [ActivityCount(.done, count, "moved")]))
+                    AppLogger.shared.info("Cache migration complete. Moved \(moved.count) files and removed the old cache.", source: "Sync")
+                    job.finish(ActivityResult(counts: [ActivityCount(.done, moved.count, "moved")]))
                 } catch {
-                    job.fail(cause: "The new folder couldn’t be saved — \(error.localizedDescription)", fix: .runAgain)
+                    // The setting still names the old folder: go back to it, files included (N9).
+                    transcodeCache.updateCacheDir(to: oldDir)
+                    TranscodeCacheMove.moveBack(moved)
+                    job.fail(cause: "The new folder couldn’t be saved — \(error.localizedDescription)")
                 }
             case .cancelled(let movedBack):
                 AppLogger.shared.info("Cache migration cancelled; \(movedBack) files moved back.", source: "Sync")
@@ -561,40 +590,48 @@ final class CacheMoveCancellation: @unchecked Sendable {
 /// Moves the transcode cache's files one by one; on cancel or failure it moves the moved ones
 /// back, so the cache is never split between two folders.
 enum TranscodeCacheMove {
-    enum Outcome: Equatable {
-        case moved(Int)
+    /// A file this run moved (`from` → `to`).
+    typealias Moved = (from: URL, to: URL)
+
+    enum Outcome {
+        case moved([Moved])
         case cancelled(movedBack: Int)
         case failed(String, movedBack: Int)
     }
 
+    /// Moves the cache's files one by one. A file already at the target is left alone (and its
+    /// source stays): a cancel or a failure moves back only what **this run** moved, so no file
+    /// that existed at the target before is ever removed (N9).
     static func run(from oldDir: URL, to newDir: URL, fileManager: FileManager = .default,
                     isCancelled: () -> Bool, progress: (Int, Int, String) -> Void) async -> Outcome {
-        var moved: [(from: URL, to: URL)] = []
-        func moveBack() -> Int {
-            var count = 0
-            for pair in moved.reversed() {
-                try? fileManager.removeItem(at: pair.from)
-                if (try? fileManager.moveItem(at: pair.to, to: pair.from)) != nil { count += 1 }
-            }
-            return count
-        }
+        var moved: [Moved] = []
         do {
             try fileManager.createDirectory(at: newDir, withIntermediateDirectories: true)
             let files = try fileManager.contentsOfDirectory(at: oldDir, includingPropertiesForKeys: nil)
                 .filter { $0.pathExtension.lowercased() == "m4a" }
             for (index, file) in files.enumerated() {
-                if isCancelled() { return .cancelled(movedBack: moveBack()) }
+                if isCancelled() { return .cancelled(movedBack: moveBack(moved, fileManager: fileManager)) }
                 progress(index, files.count, file.lastPathComponent)
                 let target = newDir.appendingPathComponent(file.lastPathComponent)
-                try? fileManager.removeItem(at: target)
+                if fileManager.fileExists(atPath: target.path) { continue }
                 try fileManager.copyItem(at: file, to: target)
                 try fileManager.removeItem(at: file)
                 moved.append((file, target))
             }
-            return .moved(files.count)
+            return .moved(moved)
         } catch {
-            return .failed(error.localizedDescription, movedBack: moveBack())
+            return .failed(error.localizedDescription, movedBack: moveBack(moved, fileManager: fileManager))
         }
+    }
+
+    /// Moves files back where they came from; returns how many.
+    @discardableResult
+    static func moveBack(_ moved: [Moved], fileManager: FileManager = .default) -> Int {
+        var count = 0
+        for pair in moved.reversed() where !fileManager.fileExists(atPath: pair.from.path) {
+            if (try? fileManager.moveItem(at: pair.to, to: pair.from)) != nil { count += 1 }
+        }
+        return count
     }
 }
 

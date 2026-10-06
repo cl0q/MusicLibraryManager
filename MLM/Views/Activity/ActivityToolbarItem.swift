@@ -5,8 +5,10 @@ import SwiftUI
 /// The toolbar Activity item: idle = plain symbol; running = determinate ring + the oldest
 /// running operation in words + `+‹k›`; waiting = `‹n› waiting for “Lexxar”`; needs attention =
 /// `‹n› failed` until dismissed or fixed. Never colour only. The text gives way at narrow
-/// widths (UC-TB-03 step 2, `ViewThatFits`) — the failure words stay longest. One bounce when a
-/// job ends (not with Reduce Motion). Click: the Activity popover. Present in launch states too.
+/// widths (UC-TB-03 step 2) by the main window's width (`ActivityToolbarText.collapse`):
+/// `NSToolbar` proposes no width to its items, so `ViewThatFits` can't shorten them. The
+/// running words go first; the failure words stay longest. One bounce when a job ends (not with
+/// Reduce Motion). Click: the Activity popover. Present in launch states too.
 struct ActivityToolbarItem: View {
     var center: ActivityCenter = .shared
     @Bindable private var router = ActivityRouter.shared
@@ -14,15 +16,14 @@ struct ActivityToolbarItem: View {
 
     var body: some View {
         let summary = ActivityPresentation.toolbarSummary(center)
+        let shown = ActivityToolbarText.collapse(width: router.mainWindowWidth)
         Button {
             router.isPopoverPresented.toggle()
         } label: {
-            ViewThatFits(in: .horizontal) {
-                label(summary, showRunning: true, showSecondary: true)
-                label(summary, showRunning: false, showSecondary: true)
-                label(summary, showRunning: false, showSecondary: false)
-            }
+            label(summary, showRunning: shown.running, showSecondary: shown.secondary)
         }
+        .onAppear { router.isToolbarItemVisible = true }
+        .onDisappear { router.isToolbarItemVisible = false }
         .help(summary.isIdle ? "Activity ⌥⌘0" : summary.sentence)
         .accessibilityLabel("Activity")
         .accessibilityValue(summary.sentence)
@@ -66,6 +67,17 @@ struct ActivityToolbarItem: View {
         } else {
             image.symbolEffect(.bounce, value: center.finishedCount)
         }
+    }
+}
+
+/// Which words the item shows at a main-window width (UC-TB-03): (1) the player's title column
+/// gives way first (its own thresholds), (2) then the running words, then the failure words.
+enum ActivityToolbarText {
+    static let runningTextMinWidth: CGFloat = 1_100
+    static let secondaryTextMinWidth: CGFloat = 860
+
+    static func collapse(width: CGFloat) -> (running: Bool, secondary: Bool) {
+        (width >= runningTextMinWidth, width >= secondaryTextMinWidth)
     }
 }
 
@@ -125,7 +137,7 @@ struct ActivityPopover: View {
                         }
                         if !failures.isEmpty {
                             Button("Dismiss") {
-                                center.dismiss(failures.flatMap(\.operationIDs))
+                                ActivitySubjectNavigator.dismiss(failures, center: center)
                             }
                             .help("The tracks keep their Download failed status and stay retryable from All Tracks.")
                         }
@@ -307,6 +319,9 @@ private struct RunningRow: View {
                 if operation.state != .running {
                     Label(operation.state.word, systemImage: operation.state.systemImage)
                         .labelStyle(.titleAndIcon)
+                }
+                if let stall = ActivityPresentation.stallText(operation, center: center) {
+                    Text(stall)
                 }
                 if let line = ActivityPresentation.activeLine(operation) {
                     Text(line)

@@ -1,46 +1,82 @@
+import Observation
 import SwiftUI
 
-/// Registers the jobs of Settings ▸ Maintenance with Activity (W3-ACT, DEC-044) from the pane's
-/// existing state (`isRunning` action key, its progress and result line) — a thin adapter, so
-/// the pane needs no rewrite until W3-SET. Cancel is offered only for the runs whose work really
-/// stops on it (the analyses and the artwork runs check cancellation per track; the path
-/// migration can't stop half-way; the metadata rescan has no cancel).
-struct MaintenanceActivityTracking: ViewModifier {
-    let running: String?
-    let progress: MaintenanceProgressTracker.ProgressState?
-    let result: String?
-    let cancel: @MainActor () -> Void
+/// Runs the jobs of Settings ▸ Maintenance and registers each as an Activity operation
+/// (W3-ACT, DEC-044). It owns the running task, the operation handle and the pane's job state
+/// (running action, progress, result line), so closing Settings or switching tabs neither stops
+/// the job nor leaves its operation Running: the operation begins and ends inside the task that
+/// does the work (B3). The pane is not redesigned (W3-SET); it reads and writes this state.
+/// Cancel is offered only where the work really stops on it (the analyses and the artwork runs
+/// check cancellation per track; the path migration can't stop half-way; the metadata rescan has
+/// no cancel).
+@MainActor
+@Observable
+final class MaintenanceJobRunner {
+    static let shared = MaintenanceJobRunner()
 
-    @State private var job: ActivityOperationHandle?
-    @State private var cancelRequested = false
+    /// The running action key (`fingerprint`, `path-apply`, …), as the pane shows it.
+    var running: String?
+    var progress: MaintenanceProgressTracker.ProgressState? {
+        didSet { reportProgress() }
+    }
+    var resultMessage: String?
 
-    func body(content: Content) -> some View {
-        content
-            .onChange(of: running) { old, new in
-                if let job, old != nil {
-                    MaintenanceJob(action: old ?? "").end(job, message: result, cancelled: cancelRequested)
-                    self.job = nil
-                }
-                if let new { start(new) }
-            }
-            .onChange(of: progress?.current) { _, _ in
-                guard let job, let progress, progress.total > 0 else { return }
-                let item = [progress.currentTrackArtist, progress.currentTrackTitle].filter { !$0.isEmpty }.joined(separator: " — ")
-                job.update(completed: progress.current, total: progress.total, currentItem: item.isEmpty ? nil : item)
-            }
+    @ObservationIgnored private var task: Task<Void, Never>?
+    @ObservationIgnored private var job: ActivityOperationHandle?
+    @ObservationIgnored private var action: String?
+    @ObservationIgnored private(set) var cancelRequested = false
+    @ObservationIgnored let center: ActivityCenter
+
+    init(center: ActivityCenter = .shared) {
+        self.center = center
     }
 
-    private func start(_ action: String) {
+    var isBusy: Bool { task != nil }
+
+    /// Starts `work` (the pane's own run function) as the job `action`. One job at a time.
+    func run(_ action: String, _ work: @escaping @MainActor () async -> Void) {
+        guard task == nil else { return }
         let kind = MaintenanceJob(action: action)
         cancelRequested = false
-        let cancel = self.cancel
-        let flag = $cancelRequested
-        job = ActivityCenter.shared.begin(
+        self.action = action
+        job = center.begin(
             kind.kind, title: kind.title, subject: .settings(.maintenance), itemNoun: .track,
             controls: kind.isCancellable
-                ? ActivityControls(cancel: { Task { @MainActor in flag.wrappedValue = true; cancel() } })
+                ? ActivityControls(cancel: { [weak self] in Task { @MainActor in self?.cancel() } })
                 : .none,
             graceful: kind.isShort)
+        task = Task { [weak self] in
+            await work()
+            self?.finish()
+        }
+    }
+
+    /// The pane's Cancel and Activity's Cancel: the task really stops; the operation ends as
+    /// Cancelled when the work returns.
+    func cancel() {
+        guard task != nil, let action, MaintenanceJob(action: action).isCancellable else { return }
+        cancelRequested = true
+        task?.cancel()
+    }
+
+    /// Waits for the running job (tests).
+    func waitUntilIdle() async {
+        await task?.value
+    }
+
+    private func finish() {
+        if let job, let action {
+            MaintenanceJob(action: action).end(job, message: resultMessage, cancelled: cancelRequested)
+        }
+        job = nil
+        action = nil
+        task = nil
+    }
+
+    private func reportProgress() {
+        guard let job, let progress, progress.total > 0 else { return }
+        let item = [progress.currentTrackArtist, progress.currentTrackTitle].filter { !$0.isEmpty }.joined(separator: " — ")
+        job.update(completed: progress.current, total: progress.total, currentItem: item.isEmpty ? nil : item)
     }
 }
 
@@ -80,28 +116,39 @@ struct MaintenanceJob: Equatable {
     var isShort: Bool { ["path-audit", "create-liked-playlist"].contains(action) }
 
     /// Ends the operation from the pane's result line (`ReplayGain: 9,412 analyzed, 31 failed`,
-    /// `ffmpeg not found. Install via: brew install ffmpeg`).
+    /// `ffmpeg not found. Install via: brew install ffmpeg`). A run that returned without a line
+    /// (its preconditions weren't met) leaves no trace.
     func end(_ job: ActivityOperationHandle, message: String?, cancelled: Bool) {
+        guard message != nil || cancelled else {
+            job.discard()
+            return
+        }
         let text = message ?? ""
         let failed = Self.number(before: "failed", in: text) ?? 0
         let done = Self.number(before: "analyzed", in: text) ?? Self.number(before: "processed", in: text)
             ?? Self.number(before: "updated", in: text) ?? Self.number(before: "fetched", in: text)
             ?? Self.number(before: "organized paths", in: text)
         let lower = text.lowercased()
-        if cancelled || lower.contains("cancel") {
-            job.cancelled(ActivityResult(summary: "Stopped — done work is kept"))
-        } else if lower.contains("not found") && done == nil || lower.contains("failed:") || lower.contains("not available")
-                    || lower.contains("did not start") {
+        if cancelled {
+            var counts: [ActivityCount] = []
+            if let done { counts.append(ActivityCount(.done, done, verb)) }
+            job.cancelled(ActivityResult(counts: counts, summary: done == nil ? "Stopped — done work is kept" : nil))
+        } else if (lower.contains("not found") && done == nil) || lower.contains("failed:") || lower.contains("not available")
+                    || lower.contains("did not start") || lower.contains("cancelled:") {
             let tool = lower.contains("not found") || lower.contains("not available")
-            job.fail(cause: Self.plain(text), fix: tool ? .openSettings(SettingsTab.sources.rawValue) : .runAgain)
+            job.fail(cause: Self.plain(text), fix: tool ? .openSettings(SettingsTab.sources.rawValue) : nil)
         } else {
             var counts: [ActivityCount] = []
-            if let done { counts.append(ActivityCount(.done, done, kind == .artwork ? "fetched" : (kind == .pathMigration ? "updated" : "analysed"))) }
+            if let done { counts.append(ActivityCount(.done, done, verb)) }
             counts.append(ActivityCount(.failed, failed, "failed"))
-            let groups = failed > 0 ? [ActivityFailureGroup(cause: "Couldn’t be analysed — the details are in the log", count: failed, fix: .runAgain)] : []
+            let groups = failed > 0 ? [ActivityFailureGroup(cause: "Couldn’t be analysed — the details are in the log", count: failed)] : []
             job.finish(ActivityResult(counts: counts, failureGroups: groups,
                                       summary: done == nil && !text.isEmpty ? Self.plain(text) : nil))
         }
+    }
+
+    private var verb: String {
+        kind == .artwork ? "fetched" : (kind == .pathMigration ? "updated" : "analysed")
     }
 
     /// The integer right before `word` (`31 failed` → 31).
