@@ -135,6 +135,22 @@ final class DependencyContainer {
         await tokenRefresh.start()
     }
 
+    /// Registers Spotify for background token refresh (W3-SET). Without a client id there is
+    /// nothing to refresh with; the account then shows `Sign-in expired` once its token lapses.
+    static func configureSpotifyTokenRefresh(
+        _ tokenRefresh: any TokenRefreshConfiguring,
+        clientId: String,
+        clientSecret: String?
+    ) async {
+        guard !clientId.isEmpty else { return }
+        await tokenRefresh.register(
+            service: .spotify,
+            tokenURL: SpotifyClient.tokenURL,
+            clientId: clientId,
+            clientSecret: clientSecret
+        )
+    }
+
     deinit {
         if let token = libraryRootObserver {
             NotificationCenter.default.removeObserver(token)
@@ -196,7 +212,8 @@ final class DependencyContainer {
         self.tokenStorage = tokens
         let oauth = OAuthManager()
         self.oauthManager = oauth
-        let accessStatus = await MainActor.run { TokenAccessStatus() }
+        // W3-SET: one account-state model for Settings, sidebar and import sheet.
+        let accessStatus = await MainActor.run { TokenAccessStatus(accounts: .shared) }
         self.tokenAccessStatus = accessStatus
         let tokenRefresh = TokenRefreshService(
             tokenStorage: tokens,
@@ -213,6 +230,14 @@ final class DependencyContainer {
             clientId: CredentialsLoader.credential(key: "SOUNDCLOUD_CLIENT_ID") ?? "",
             clientSecret: CredentialsLoader.credential(key: "SOUNDCLOUD_CLIENT_SECRET")
         )
+        // W3-SET: Spotify sign-ins are refreshed too (they lasted one hour before).
+        await Self.configureSpotifyTokenRefresh(
+            tokenRefresh,
+            clientId: CredentialsLoader.credential(key: "SPOTIFY_CLIENT_ID") ?? "",
+            clientSecret: CredentialsLoader.credential(key: "SPOTIFY_CLIENT_SECRET")
+        )
+        // The account states (Settings ▸ Sources, sidebar) from the keychain, without prompting.
+        Task { await SourceAccounts.shared.reload(using: tokens) }
 
         // Unified Search Service
         let scClient = SoundCloudClient(

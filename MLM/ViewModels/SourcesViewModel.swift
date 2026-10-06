@@ -39,6 +39,8 @@ final class SourcesViewModel {
     private let oauthManager: OAuthManager?
     private let tokenAccessStatus: TokenAccessStatus?
     private let tokenRefreshService: TokenRefreshService?
+    /// The one account-state model (W3-SET), reached through the shared access status.
+    @MainActor private var accounts: SourceAccounts? { tokenAccessStatus?.accounts }
 
     // Source clients (lazy-initialized)
     private var soundCloudClient: SoundCloudClient?
@@ -159,6 +161,7 @@ final class SourcesViewModel {
         // Check Keychain for stored credentials, and keep the shared access
         // state in sync (also covers services not registered with the
         // background refresh loop).
+        var readings: [TokenStorage.Service: StoredSignIn] = [:]
         for service in TokenStorage.Service.allCases {
             connectionStatus[service] = tokenStorage.hasCredentials(service: service)
             do {
@@ -170,7 +173,10 @@ final class SourcesViewModel {
                 // Unreadable for another reason — hasCredentials above
                 // already answered the UI question.
             }
+            readings[service] = SourceAccounts.reading(tokenStorage, service: service)
         }
+        // W3-SET: the one account-state model gets the same reading.
+        accounts?.apply(readings)
 
         // Load track counts from sources table
         do {
@@ -230,6 +236,7 @@ final class SourcesViewModel {
             }
 
             connectionStatus[service] = true
+            accounts?.didConnect(service)
         } catch {
             errors[service] = error.localizedDescription
             AppLogger.shared.error(
@@ -283,6 +290,7 @@ final class SourcesViewModel {
             trackCounts.removeValue(forKey: service)
             lastSyncTimestamps.removeValue(forKey: service)
             tokenAccessStatus?.markAccessible(service)
+            accounts?.didDisconnect(service)
         } catch {
             errors[service] = error.localizedDescription
         }
@@ -344,6 +352,8 @@ final class SourcesViewModel {
             // so the Connect button reappears.
             connectionStatus[service] = false
             errors[service] = SoundCloudClient.SoundCloudError.tokenExpired.errorDescription
+            // W3-SET: `Sign-in expired`, not `Disconnected`, until the user reconnects.
+            accounts?.recordRefreshRejected(service)
             job.fail(cause: "Sign-in expired (\(sourceName))", fix: .reconnect(source: sourceName))
         } catch {
             errors[service] = error.localizedDescription

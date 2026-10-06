@@ -23,7 +23,7 @@ final class SpotifyClient {
     private let redirectURI = LoopbackOAuthServer.redirectURI
 
     private static let authURL = URL(string: "https://accounts.spotify.com/authorize")!
-    private static let tokenURL = URL(string: "https://accounts.spotify.com/api/token")!
+    static let tokenURL = URL(string: "https://accounts.spotify.com/api/token")!
     private static let apiBase = URL(string: "https://api.spotify.com/v1")!
 
     private let scopes = ["user-library-read", "playlist-read-private", "playlist-read-collaborative"]
