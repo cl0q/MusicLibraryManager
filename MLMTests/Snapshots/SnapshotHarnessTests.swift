@@ -46,7 +46,7 @@ final class SnapshotsTests: XCTestCase {
         // (deferred) and ActivityRouter, ActivityJobTracking (non-view): counts unchanged.
         // W2-H replaced Shared/SpringLoadableHover.swift (rendered) by DragDrop/DropTargetModifier.swift
         // (rendered: the resting drop target); its payloads and rules live in MLM/Services/DragDrop.
-        XCTAssertEqual(paths.count, 112, "Re-audit inventory changes explicitly.")
+        XCTAssertEqual(paths.count, 115, "Re-audit inventory changes explicitly.")
         XCTAssertEqual(Set(SnapshotFixtures.inventory.map(\.path)), paths)
         XCTAssertEqual(SnapshotFixtures.inventory.count, paths.count)
         XCTAssertFalse(SnapshotFixtures.inventory.contains { $0.disposition.isEmpty })
@@ -55,7 +55,7 @@ final class SnapshotsTests: XCTestCase {
         XCTAssertEqual(SnapshotFixtures.fixtures.count, 27)
         XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 23)
         XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 36)
-        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 53)
+        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 56)
         for fixture in SnapshotFixtures.fixtures where fixture.expectedTableRows != nil {
             if case .swiftUI = fixture.backend {
                 XCTFail("\(fixture.id): table readiness requires the AppKit backend.")

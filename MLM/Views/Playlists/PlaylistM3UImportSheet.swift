@@ -15,27 +15,78 @@ extension View {
 
 private struct PlaylistWindowRequests: ViewModifier {
     @Bindable private var center = DropCenter.shared
+    @Bindable private var requests = PlaylistRequests.shared
     @Environment(SidebarModel.self) private var sidebar: SidebarModel?
     @Environment(StatusBarCenter.self) private var statusBar: StatusBarCenter?
+    @Environment(ShellActions.self) private var shell: ShellActions?
 
     func body(content: Content) -> some View {
         content
+            // A-PL-DELETE: one alert for the sidebar, the grid and the detail. Cancel is the
+            // default; restorable with Undo until MLM quits (UC-UNDO-05, DEC-049).
+            .alert(requests.deletion?.confirmation.title ?? "",
+                   isPresented: Binding(get: { requests.deletion != nil }, set: { if !$0 { requests.deletion = nil } }),
+                   presenting: requests.deletion) { pending in
+                Button(PlaylistDeletionConfirmation.confirmTitle, role: .destructive) {
+                    requests.deletion = nil
+                    guard let id = pending.playlist.id else { return }
+                    Task { await shell?.edits.deletePlaylist(id, name: pending.playlist.name) }
+                }
+                Button("Cancel", role: .cancel) { requests.deletion = nil }
+                    .keyboardShortcut(.defaultAction)
+            } message: { pending in
+                Text(pending.confirmation.message)
+            }
+            .sheet(item: $requests.link) { request in
+                PlaylistLinkSheet(model: PlaylistLinkModel(playlist: request.playlist))
+            }
             .sheet(item: $center.m3uImport) { request in
                 PlaylistM3UImportSheet(request: request)
             }
-            .fileImporter(isPresented: $center.isChoosingM3U, allowedContentTypes: PlaylistM3U.contentTypes,
-                          allowsMultipleSelection: false) { result in
-                if case .success(let urls) = result, let url = urls.first {
-                    center.m3uChosen(url)
-                }
+            // Each file panel on its own view: two `.fileImporter`s on one view conflict.
+            .background {
+                // Choose Cover… (V-PLD.N06): the system panel for an image; undoable like a drop.
+                Color.clear
+                    .fileImporter(isPresented: Binding(get: { requests.coverPlaylist != nil },
+                                                       set: { if !$0 { requests.coverPlaylist = nil } }),
+                                  allowedContentTypes: [.image], allowsMultipleSelection: false) { result in
+                        coverChosen(result)
+                    }
+                    .fileDialogMessage(requests.coverPlaylist.map { "Choose an image for the cover of “\($0.name)”." } ?? "")
             }
-            .fileDialogMessage(chooseMessage)
-            .fileExporter(isPresented: Binding(get: { center.m3uExport != nil }, set: { if !$0 { center.m3uExport = nil } }),
-                          document: center.m3uExport?.document,
-                          contentType: UTType(filenameExtension: "m3u8") ?? .plainText,
-                          defaultFilename: center.m3uExport?.name) { result in
-                exported(result)
+            .background {
+                Color.clear
+                    .fileImporter(isPresented: $center.isChoosingM3U, allowedContentTypes: PlaylistM3U.contentTypes,
+                                  allowsMultipleSelection: false) { result in
+                        if case .success(let urls) = result, let url = urls.first {
+                            center.m3uChosen(url)
+                        }
+                    }
+                    .fileDialogMessage(chooseMessage)
             }
+            .background {
+                Color.clear
+                    .fileExporter(isPresented: Binding(get: { center.m3uExport != nil }, set: { if !$0 { center.m3uExport = nil } }),
+                                  document: center.m3uExport?.document,
+                                  contentType: UTType(filenameExtension: "m3u8") ?? .plainText,
+                                  defaultFilename: center.m3uExport?.name) { result in
+                        exported(result)
+                    }
+                    .fileDialogMessage(center.m3uExport.map { "Choose where to save “\($0.name)” as an M3U playlist." } ?? "")
+            }
+    }
+
+    private func coverChosen(_ result: Result<[URL], Error>) {
+        guard let playlist = requests.coverPlaylist, let id = playlist.id else { return }
+        requests.coverPlaylist = nil
+        guard case .success(let urls) = result, let url = urls.first else { return }
+        Task {
+            let access = url.startAccessingSecurityScopedResource()
+            defer { if access { url.stopAccessingSecurityScopedResource() } }
+            if let refusal = await shell?.edits.setCover(.file(url), ofPlaylist: id, name: playlist.name) {
+                statusBar?.post(refusal)
+            }
+        }
     }
 
     /// UC-SHEET-25: `Choose an M3U playlist to import into “‹playlist›”.`

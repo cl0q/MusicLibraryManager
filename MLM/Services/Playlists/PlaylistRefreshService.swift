@@ -47,7 +47,7 @@ struct PlaylistRefreshService {
     let remote: Remote
 
     /// Whether a playlist can be refreshed at all (`Refresh from ‹Source›` is offered).
-    static func canRefresh(_ playlist: Playlist) -> Bool {
+    nonisolated static func canRefresh(_ playlist: Playlist) -> Bool {
         playlist.sourceId != nil && (playlist.isLiked == 1 || !(playlist.externalId ?? "").isEmpty)
     }
 
