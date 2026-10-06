@@ -14,6 +14,8 @@ import Observation
 /// | link | Add from Link… (`QuickAddRouter`) |
 /// | library file | Open Library… (`MainWindowPresenter.openLibrary`) |
 /// | cover | Choose Cover… (`ShellEdits.setCover`, undoable) |
+/// | genre row | Info's Genre field (`GenreEdits.setGenre`, one undoable tag edit) |
+/// | genre table | `Add to “‹Genre›”` on a suggestion (`GenreWorkbench.stage`) |
 ///
 /// Placements at a position (`placeTracks`, `placePlaylists`, `importFilesAndPlace`) need the
 /// table's rows and are run by `PlaylistTable`; here they fall back to appending.
@@ -97,6 +99,16 @@ struct DropPerformer {
             }
         case .importM3UInFolder(let url, let folderID):
             DropCenter.shared.requestM3UImport(url, droppedOnPlaylist: nil, inFolder: folderID)
+        case .setGenre(let ids, let name):
+            // Same as Info's Genre field on the selection: one undoable tag edit (W3-GEN).
+            Task { _ = try? await GenreEdits.live(undo: undo, container: container)?.setGenre(of: ids, to: name) }
+        case .stageForGenre(let ids, let key, _):
+            // Same as `Add to “‹Genre›”` on the suggestions: staged until Save (W3-GEN).
+            Task {
+                guard let pool = container.databaseManager?.pool else { return }
+                let tracks = (try? await TrackTagRepository(database: pool).fetchTracks(ids: ids)) ?? []
+                GenreWorkbench.shared.stage(tracks, genreKey: key)
+            }
         case .refuse(let message):
             if let message { say(message) }
         }

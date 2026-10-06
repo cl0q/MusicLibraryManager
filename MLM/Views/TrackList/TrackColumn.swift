@@ -6,8 +6,17 @@ import SwiftUI
 /// mockup's `COLS`): `#` first in containers with an own order, then Title … Status.
 enum TrackColumnID: String, CaseIterable, Codable, Sendable, Identifiable {
     case number, title, artist, album, time, bpm, energy, dance, genre, year, format, kbps, added, status
+    /// Context columns: only the lists that ask for them have them (never in `standardColumns`).
+    /// `Match` = how close a suggestion sounds (`93 %`, V-GENRED.N10); `suggestion` = the
+    /// row's state and verdicts (`Add to Genre` · `Not Now` / `Staged` · `Remove`, W3-GEN).
+    case match, suggestion
 
     var id: String { rawValue }
+
+    /// The columns of an ordinary track list (no `#`, no context columns), in table order.
+    static let standardColumns: [TrackColumnID] = [
+        .title, .artist, .album, .time, .bpm, .energy, .dance, .genre, .year, .format, .kbps, .added, .status,
+    ]
 
     /// Column header (UC-TABLE-02).
     var title: String {
@@ -26,6 +35,8 @@ enum TrackColumnID: String, CaseIterable, Codable, Sendable, Identifiable {
         case .kbps: "kbps"
         case .added: "Added"
         case .status: "Status"
+        case .match: "Match"
+        case .suggestion: ""
         }
     }
 
@@ -45,7 +56,7 @@ enum TrackColumnID: String, CaseIterable, Codable, Sendable, Identifiable {
     /// Numbers right-align and use monospaced digits (UC-TYPE-03).
     var isNumeric: Bool {
         switch self {
-        case .number, .time, .bpm, .year, .kbps: true
+        case .number, .time, .bpm, .year, .kbps, .match: true
         default: false
         }
     }
@@ -67,6 +78,8 @@ enum TrackColumnID: String, CaseIterable, Codable, Sendable, Identifiable {
         case .kbps: (40, 50, 72)
         case .added: (72, 104, 160)
         case .status: (90, 146, 220)
+        case .match: (52, 64, 80)
+        case .suggestion: (170, 210, 260)
         }
     }
 }
@@ -119,6 +132,8 @@ struct TrackSortOrder: Equatable, Hashable, Codable, Sendable, RawRepresentable 
         case .kbps: return KeyPathComparator(\TrackRow.bitrateSortKey, order: order)
         case .added: return KeyPathComparator(\TrackRow.addedSortKey, order: order)
         case .status: return KeyPathComparator(\TrackRow.statusSortKey, order: order)
+        case .match: return KeyPathComparator(\TrackRow.matchSortKey, order: order)
+        case .suggestion: return KeyPathComparator(\TrackRow.suggestionSortKey, order: order)
         }
     }
 
@@ -149,6 +164,8 @@ extension TrackColumnID {
         case .kbps: \TrackRow.bitrateSortKey
         case .added: \TrackRow.addedSortKey
         case .status: \TrackRow.statusSortKey
+        case .match: \TrackRow.matchSortKey
+        case .suggestion: \TrackRow.suggestionSortKey
         }
     }
 }

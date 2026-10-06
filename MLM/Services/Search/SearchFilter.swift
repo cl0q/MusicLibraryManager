@@ -146,6 +146,7 @@ struct SearchFilter: Equatable, Hashable, Sendable {
         case .downloadFailed: return TrackAvailabilityScope.downloadFailed.contains(track.availability())
         case .fileMissing: return TrackAvailabilityScope.fileMissing.contains(track.availability())
         case .noAlbum: return !TrackMetadataPresentation.isRealAlbum(track.album)
+        case .noGenre: return GenreName.key(track.genre) == nil
         case .notAnalysed: return track.energyBucket == nil
         case .inNoPlaylist: return isInAnyPlaylist?(track).map { !$0 } ?? false
         case .linkedToSoundCloud: return track.linkedSourceName == "soundcloud"
@@ -193,6 +194,9 @@ struct SearchPlaceKey: Hashable, Sendable, CustomStringConvertible {
     static let review = SearchPlaceKey("review")
     static let discover = SearchPlaceKey("discover")
     static func playlist(_ id: Int64) -> SearchPlaceKey { SearchPlaceKey("playlist.\(id)") }
+    static let genres = SearchPlaceKey("genres")
+    /// A genre page by its name (`DetailRoute.genre`).
+    static func genre(_ name: String) -> SearchPlaceKey { SearchPlaceKey("genre.\(name)") }
 
     var description: String { rawValue }
 }
@@ -216,7 +220,8 @@ struct SearchPlace: Equatable, Sendable {
             case .album(let id):
                 self.init(key: SearchPlaceKey("album.\(id)"), capability: .none, name: title)
             case .genre(let name):
-                self.init(key: SearchPlaceKey("genre.\(name)"), capability: .none, name: title)
+                // The genre's tracks, filtered in memory (W3-GEN).
+                self.init(key: .genre(name), capability: .tracks, name: title)
             case .similar(let id):
                 self.init(key: SearchPlaceKey("similar.\(id)"), capability: .none, name: title)
             }
@@ -225,7 +230,8 @@ struct SearchPlace: Equatable, Sendable {
         switch navigation.selection {
         case .allTracks: self.init(key: .allTracks, capability: .tracks, name: title)
         case .albums: self.init(key: SearchPlaceKey("albums"), capability: .none, name: title)
-        case .genres: self.init(key: SearchPlaceKey("genres"), capability: .none, name: title)
+        // The genre list filters by name (W3-GEN).
+        case .genres: self.init(key: .genres, capability: .names, name: title)
         case .folders: self.init(key: .folders, capability: .names, name: title)
         case .discover: self.init(key: .discover, capability: .names, name: title)
         case .review: self.init(key: .review, capability: .names, name: title)

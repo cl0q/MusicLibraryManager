@@ -51,6 +51,9 @@ struct TrackRow: Identifiable, Equatable, Sendable {
     let danceLevel: Int?
     /// `‹reason› · ‹n› attempts left` for a failed download (UC-TABLE-13, second line).
     let failureDetail: String?
+    /// How close a suggested track sounds to the reference, 0…100 (`Match` column, W3-GEN);
+    /// nil outside suggestion lists.
+    var matchPercent: Int? = nil
 
     var hasFile: Bool { availability.hasFile }
 }
@@ -71,6 +74,9 @@ extension TrackRow {
     var bitrateSortKey: Int { track.bitrate ?? -1 }
     var addedSortKey: String { addedSortValue }
     var statusSortKey: Int { availability.statusSortRank }
+    var matchSortKey: Int { matchPercent ?? -1 }
+    /// The suggestion column sorts like Match (best first).
+    var suggestionSortKey: Double { Double(matchPercent ?? -1) }
 }
 
 // MARK: - Building rows
@@ -83,6 +89,8 @@ struct TrackRowBuildContext: Sendable {
     var addedMeaning: AddedMeaning = .library
     /// Container `added_at` per track id (playlist membership).
     var containerAddedDates: [Int64: String] = [:]
+    /// `Match` per track id (suggestion lists, W3-GEN).
+    var matchPercents: [Int64: Int] = [:]
 
     static let library = TrackRowBuildContext()
 }
@@ -143,7 +151,8 @@ enum TrackRowBuilder {
             addedSortValue: added ?? "",
             energyLevel: track.energyBucket.flatMap { (1...5).contains($0) ? $0 : nil },
             danceLevel: track.danceability.map(DanceabilitySteps.scoreToLevel),
-            failureDetail: failureDetail
+            failureDetail: failureDetail,
+            matchPercent: context.matchPercents[id]
         )
     }
 
@@ -242,6 +251,7 @@ enum TrackRowSorter {
         case .year: { $0.track.year.flatMap { $0 > 0 ? Double($0) : nil } }
         case .kbps: { $0.track.bitrate.flatMap { $0 > 0 ? Double($0) : nil } }
         case .status: { Double($0.availability.statusSortRank) }
+        case .match, .suggestion: { $0.matchPercent.map(Double.init) }
         default: { Double($0.position) }
         }
     }

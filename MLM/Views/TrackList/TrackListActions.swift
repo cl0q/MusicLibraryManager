@@ -237,6 +237,11 @@ struct TrackListActions {
         configuration.removeFromContainer?(Set(rows.map(\.id)))
     }
 
+    /// A place's own menu item (`TrackMenuItem.extra`, W3-GEN).
+    func performExtra(_ id: String, _ rows: [TrackRow]) {
+        configuration.menuExtras?.perform(id, rows)
+    }
+
     func removeFromLibrary(_ rows: [TrackRow]) {
         TrackCommandActions.removeFromLibrary(rows.map(\.track), container: container)
     }
