@@ -46,8 +46,22 @@ struct LibraryFinderIntegrationTests {
         #expect(plist.contains("<key>LSHandlerRank</key><string>Owner</string>"))
         #expect(plist.contains("<key>LSTypeIsPackage</key><true/>"))
         #expect(plist.contains("<key>LSItemContentTypes</key>"))
-        // No custom icon yet (Step-0 decision 11): macOS derives one from the app icon.
-        #expect(!plist.contains("CFBundleTypeIconFile"))
+        // The library-file icon (ICON-MLIBM variant A, DEC-033); W3-LAUNCH replaces Step-0
+        // decision 11's "no custom icon yet".
+        #expect(plist.contains("<key>CFBundleTypeIconFile</key><string>LibraryFile</string>"))
+        #expect(plist.contains("<key>UTTypeIconFile</key><string>LibraryFile</string>"))
+        #expect(!plist.contains("TODO"))
+    }
+
+    @Test func libraryFileIconIsBuiltAndInstalled() throws {
+        let icon = projectRoot.appendingPathComponent("MLM/Resources/LibraryFile.icns")
+        let data = try Data(contentsOf: icon)
+        #expect(data.prefix(4) == Data("icns".utf8))
+        let script = try source("scripts/run.sh")
+        #expect(script.contains(#"cp "${LIBRARY_ICON_SRC}" "${APP_BUNDLE}/Contents/Resources/LibraryFile.icns""#))
+        #expect(FileManager.default.fileExists(atPath: projectRoot.appendingPathComponent("scripts/render-library-icon.swift").path))
+        let package = try source("Package.swift")
+        #expect(package.contains(#".process("Resources/LibraryFile.icns")"#))
     }
 
     @Test func plistIsStillWellFormed() throws {

@@ -113,6 +113,7 @@ cat > "${APP_BUNDLE}/Contents/Info.plist" <<'PLIST'
     <dict>
       <key>UTTypeIdentifier</key><string>com.ilczuk.mlm.library</string>
       <key>UTTypeDescription</key><string>MLM Library File</string>
+      <key>UTTypeIconFile</key><string>LibraryFile</string>
       <key>UTTypeConformsTo</key>
       <array>
         <string>com.apple.package</string>
@@ -157,11 +158,13 @@ cat > "${APP_BUNDLE}/Contents/Info.plist" <<'PLIST'
       </array>
     </dict>
   </array>
-  <!-- TODO(B1): dedicated .mlibm document icon; until then macOS derives one from the app icon. -->
+  <!-- Library-file icon (ICON-MLIBM variant A, DEC-033): Contents/Resources/LibraryFile.icns,
+       built by scripts/render-library-icon.swift. -->
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>
       <key>CFBundleTypeName</key><string>MLM Library File</string>
+      <key>CFBundleTypeIconFile</key><string>LibraryFile</string>
       <key>CFBundleTypeRole</key><string>Editor</string>
       <key>LSHandlerRank</key><string>Owner</string>
       <key>LSTypeIsPackage</key><true/>
@@ -183,6 +186,13 @@ ICON_SRC="${APP_ROOT}/MLM/Resources/AppIcon.icns"
 if [[ -f "${ICON_SRC}" ]]; then
   cp "${ICON_SRC}" "${APP_BUNDLE}/Contents/Resources/AppIcon.icns"
   echo "› app icon installed"
+fi
+
+# Library-file icon (ICON-MLIBM, A0 D9): referenced by CFBundleTypeIconFile / UTTypeIconFile.
+LIBRARY_ICON_SRC="${APP_ROOT}/MLM/Resources/LibraryFile.icns"
+if [[ -f "${LIBRARY_ICON_SRC}" ]]; then
+  cp "${LIBRARY_ICON_SRC}" "${APP_BUNDLE}/Contents/Resources/LibraryFile.icns"
+  echo "› library file icon installed"
 fi
 
 # Copy SPM resource bundle and YAMNet model into the app bundle
