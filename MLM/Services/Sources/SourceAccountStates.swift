@@ -115,7 +115,8 @@ final class SourcesViewModelAccountStates: SourceAccountStateReading {
         guard let tokenStorage,
               (try? tokenStorage.getCredentials(service: service, interactive: true)) != nil else {
             expired.insert(service)
-            accounts.recordRefreshRejected(service)
+            // A denied prompt isn't a refusal by the provider (review S1).
+            accounts.recordKeychainDenied(service)
             generation += 1
             return false
         }

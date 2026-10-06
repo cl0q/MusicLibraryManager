@@ -87,6 +87,39 @@ struct SourceAccountsTests {
         #expect(SidebarModel.playlistSecondLine(sourceName: "soundcloud", unusableSignIns: accounts.unusableSignIns) == nil)
     }
 
+    // MARK: Review S1
+
+    @Test func reconnectGoesToTheBrowserForARefusedSignIn() {
+        let accounts = SourceAccounts(defaults: makeDefaults())
+        accounts.apply([.spotify: .valid])
+        accounts.recordRefreshRejected(.spotify)
+        // The rejected token is still readable — Reconnect must not stop at a keychain read.
+        #expect(ReconnectStep.step(for: accounts.state(for: .spotify)) == .browserSignIn)
+        accounts.didConnect(.spotify)   // what a successful `signIn` does
+        #expect(accounts.state(for: .spotify) == .connected(account: nil))
+        #expect(accounts.refreshRejected.isEmpty)
+    }
+
+    @Test func reconnectReadsALockedKeychainOnce() {
+        let accounts = SourceAccounts(defaults: makeDefaults())
+        accounts.apply([.soundcloud: .unreadable])
+        #expect(ReconnectStep.step(for: accounts.state(for: .soundcloud)) == .allowKeychainAccess)
+        accounts.markKeychainReadable(.soundcloud)
+        #expect(accounts.state(for: .soundcloud) == .connected(account: nil))
+    }
+
+    @Test func aDeniedPromptIsNeitherPersistedNorARefusal() {
+        let defaults = makeDefaults()
+        let accounts = SourceAccounts(defaults: defaults)
+        accounts.apply([.soundcloud: .unreadable])
+        accounts.recordKeychainDenied(.soundcloud)
+        #expect(accounts.state(for: .soundcloud) == .signInExpired)
+        #expect(accounts.expiredCause(for: .soundcloud) == .keychainDenied)
+        #expect(!SourceAccounts.detail(for: .signInExpired, cause: .keychainDenied, service: .soundcloud).contains("refused"))
+        #expect(ReconnectStep.step(for: accounts.state(for: .soundcloud)) == .browserSignIn)
+        #expect(SourceAccounts(defaults: defaults).state(for: .soundcloud) == .disconnected, "not remembered")
+    }
+
     @Test func onlyAProviderRefusalCountsAsRejected() {
         #expect(TokenRefreshService.isRejection(OAuthManager.OAuthError.tokenExchangeFailed(statusCode: 400, body: "invalid_grant")))
         #expect(TokenRefreshService.isRejection(OAuthManager.OAuthError.tokenExchangeFailed(statusCode: 401, body: "")))
