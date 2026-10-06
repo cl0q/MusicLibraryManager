@@ -531,6 +531,7 @@ final class TrackRepository: Sendable {
             // The saved playback queue (v43, W2-D) — absent in databases before it.
             let hasSavedQueue = try db.tableExists("playback_queue_entries")
             let hasDecidedPairs = try db.tableExists("review_decided_pairs")
+            let hasHiddenColumn = try db.columns(in: "tracks").contains { $0.name == "hidden_by_review" }
             for id in uniqueIDs {
                 if hasSavedQueue {
                     try db.execute(sql: "DELETE FROM playback_queue_entries WHERE track_id = ?", arguments: [id])
@@ -539,6 +540,11 @@ final class TrackRepository: Sendable {
                 if hasDecidedPairs {
                     try db.execute(sql: "DELETE FROM review_decided_pairs WHERE track_a = ? OR track_b = ?", arguments: [id, id])
                 }
+                // Versions that were hidden behind this one come back to the lists (the song
+                // stays findable); their Review decision keeps its record.
+                try db.execute(sql: hasHiddenColumn
+                    ? "UPDATE tracks SET hidden_by_review = 0, is_duplicate = 0, variant_of = NULL WHERE variant_of = ?"
+                    : "UPDATE tracks SET is_duplicate = 0, variant_of = NULL WHERE variant_of = ?", arguments: [id])
                 try db.execute(sql: "DELETE FROM track_sources WHERE track_id = ?", arguments: [id])
                 try db.execute(sql: "DELETE FROM playlist_tracks WHERE track_id = ?", arguments: [id])
                 try db.execute(sql: "DELETE FROM sync_profile_tracks WHERE track_id = ?", arguments: [id])

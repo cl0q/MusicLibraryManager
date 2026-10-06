@@ -446,30 +446,53 @@ final class ReviewDecisionRepository: Sendable {
                                arguments: [flag.isDuplicate, flag.variantOf, flag.trackId])
             }
             let kept = record.keptTrackID
+            func exists(_ table: String, _ column: String, _ id: Int64) throws -> Bool {
+                try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM \(table) WHERE \(column) = ?)", arguments: [id]) ?? false
+            }
             for row in c.playlistRows.reversed() {
+                // The version the row belonged to may have been deleted since.
+                guard try exists("tracks", "id", row.trackId) else { continue }
                 switch row.change {
                 case .repointed:
                     guard let kept else { continue }
-                    try db.execute(sql: "UPDATE playlist_tracks SET track_id = ? WHERE id = ? AND playlist_id = ? AND track_id = ?",
-                                   arguments: [row.trackId, row.id, row.playlistId, kept])
-                case .deleted:
-                    let taken = try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM playlist_tracks WHERE id = ?)", arguments: [row.id]) ?? false
                     let present = try Bool.fetchOne(db, sql: """
                         SELECT EXISTS(SELECT 1 FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?)
                         """, arguments: [row.playlistId, row.trackId]) ?? false
-                    let playlistExists = try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM playlists WHERE id = ?)", arguments: [row.playlistId]) ?? false
-                    guard playlistExists, !present else { continue }
+                    if present {
+                        // The user added the old version again meanwhile: drop the re-pointed row.
+                        try db.execute(sql: "DELETE FROM playlist_tracks WHERE id = ? AND playlist_id = ? AND track_id = ?",
+                                       arguments: [row.id, row.playlistId, kept])
+                    } else {
+                        try db.execute(sql: "UPDATE playlist_tracks SET track_id = ? WHERE id = ? AND playlist_id = ? AND track_id = ?",
+                                       arguments: [row.trackId, row.id, row.playlistId, kept])
+                    }
+                case .deleted:
+                    let taken = try exists("playlist_tracks", "id", row.id)
+                    let present = try Bool.fetchOne(db, sql: """
+                        SELECT EXISTS(SELECT 1 FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?)
+                        """, arguments: [row.playlistId, row.trackId]) ?? false
+                    guard try exists("playlists", "id", row.playlistId), !present else { continue }
                     try db.execute(sql: "INSERT INTO playlist_tracks (id, playlist_id, track_id, position, added_at) VALUES (?, ?, ?, ?, ?)",
                                    arguments: [taken ? nil : row.id, row.playlistId, row.trackId, row.position, row.addedAt])
                 }
             }
             for row in c.syncRows.reversed() {
+                guard try exists("tracks", "id", row.trackId) else { continue }
                 switch row.change {
                 case .repointed:
                     guard let kept else { continue }
-                    try db.execute(sql: "UPDATE sync_profile_tracks SET track_id = ? WHERE profile_id = ? AND track_id = ?",
-                                   arguments: [row.trackId, row.profileId, kept])
+                    let present = try Bool.fetchOne(db, sql: """
+                        SELECT EXISTS(SELECT 1 FROM sync_profile_tracks WHERE profile_id = ? AND track_id = ?)
+                        """, arguments: [row.profileId, row.trackId]) ?? false
+                    if present {
+                        try db.execute(sql: "DELETE FROM sync_profile_tracks WHERE profile_id = ? AND track_id = ?",
+                                       arguments: [row.profileId, kept])
+                    } else {
+                        try db.execute(sql: "UPDATE sync_profile_tracks SET track_id = ? WHERE profile_id = ? AND track_id = ?",
+                                       arguments: [row.trackId, row.profileId, kept])
+                    }
                 case .deleted:
+                    guard try exists("sync_profiles", "id", row.profileId) else { continue }
                     try db.execute(sql: "INSERT OR IGNORE INTO sync_profile_tracks (profile_id, track_id) VALUES (?, ?)",
                                    arguments: [row.profileId, row.trackId])
                 }
