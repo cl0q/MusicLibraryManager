@@ -2,7 +2,7 @@
 
 **Status:** Planning document. Sequences the five workstreams from `todo_dump.md`.
 **Written:** 2026-10-04. Every number below was read off the live code or the live database on that date; re-verify before acting on it.
-**Design authority:** `UI-GROUNDTRUTH.md` remains **binding** until the design session (Track B) produces a successor. Nothing here authorizes deviating from it.
+**Design authority (updated 2026-10-06):** `UI-CONVENTIONS.md` and `design/b1/` (`THOUGHTS.md` §10 first) are binding; `UI-GROUNDTRUTH.md` is superseded (history only). Track B is done: the redesign is implemented on `redesign/b3`; `B3-CONFORMANCE.md` is the status and `B3-PLAN.md` §4 the decisions.
 
 ---
 
@@ -179,7 +179,7 @@ Also fixed by A0: registry schema `libraries.json` outside any DB (D5), manifest
 
 **Why gated:** `todo_dump.md` is explicit that conventions must *not* be derived from the current design. So the session runs first and the conventions are its output. `UI-GROUNDTRUTH.md` stays binding in the meantime — code written before B3 lands must still conform to it.
 
-### B1 — Design session *(large, interactive)*
+### B1 — Design session *(large, interactive)* — ✔ APPROVED 2026-10-05 (`design/b1/`; `THOUGHTS.md` §10 holds Oliver's binding answers)
 HTML/CSS/JS mockups, continuing `sketches/`. Scope from `todo_dump.md` is every view, flow, and element. Concretely, the checklist is §1.3: 17 view directories, 9 sidebar sections, plus toolbar, player bar, Activity panel, Settings, menu bar, search, and all empty/error/unmounted states. Add the new screens Track A3 and Track C2 introduce:
 - Library picker + "remember last library" empty state
 - Album list, album detail with fixed track order, album-variant chooser
@@ -189,33 +189,40 @@ Decisions recorded as they are made — a running decision log, not a post-hoc s
 
 **Constraint carried forward from settled decisions:** the native macOS toolbar is the accepted chrome. Custom `.windowStyle(.hiddenTitleBar)` / floating-player experiments were rejected repeatedly. Any redesign keeps the native toolbar; `.principal` centers between leading and trailing groups, not in the window.
 
-### B2 — Conventions *(medium)*
+### B2 — Conventions *(medium)* — ✔ DONE 2026-10-05 (`UI-CONVENTIONS.md`, rule IDs `UC-<AREA>-<nn>`; extended 2026-10-06 with the sentences introduced during B3 and §25 Decisions during B3)
 Output of B1, replacing `UI-GROUNDTRUTH.md` section by section:
 - Design tokens, typography, spacing, iconography
 - Per-pattern rules: tables, cards, logs, settings, sheets, alerts, menu items
 - State vocabulary — `UI-GROUNDTRUTH.md` §1.6 already establishes this well; carry it forward unless B1 overturns it
 - Written as agent-consumable rules, since `todo_dump.md` explicitly wants "guidelines for any agent that works in this code"
 
-### B3 — Implementation conformance *(large, follows B1/B2)*
+### B3 — Implementation conformance *(large, follows B1/B2)* — ✔ IMPLEMENTED 2026-10-05 … 2026-10-06 on `redesign/b3` (tag `v0.9` = state before)
+Work packages, owners and decisions (`IMP-001` … `IMP-124`) are in `B3-PLAN.md`; the per-ID verdicts against `design/b1/COVERAGE.md` are in `B3-CONFORMANCE.md`.
+- **Wave 0** (2026-10-05): branch, design packet, `UI-CONVENTIONS.md`, macOS 27 deployment target, plan.
+- **Wave 1** (2026-10-05): navigation model, sidebar, toolbar, scaffolding; Settings scene and menu bar.
+- **Wave 2** (2026-10-05): undo center, shared track table with persisted availability, All Tracks, playback and Space preview, queue panel, Info, selection bar, drag and drop, search.
+- **Wave 3** (2026-10-05 … 2026-10-06): playlists, Folders, Activity, launch and libraries, Settings, Add and import, Sync, Review, Discover and Reels, Genres.
+- **Wave 4** (2026-10-06): Albums — see Track C.
+- **Wave 5** (2026-10-06): conformance — dead code and theme tokens removed, follow-ups, audit (374 IDs), gap fixes, menu bar and Dock completed, three TipKit tips, snapshot baselines re-recorded for macOS 27 (27 fixtures, 54 images).
 
 ### B-track open questions
 1. Does B2 keep the foundations of `UI-GROUNDTRUTH.md` (color tokens, glossary, state vocabulary) and redesign only screens/shell, or start clean? Carrying the foundations forward saves the most time; the glossary and state vocabulary are design-independent and already good.
-2. Snapshot baselines: 60 Light/Dark baselines are recorded for `macos27-arm64`. A redesign invalidates all of them. Decide before B3 whether they are re-recorded or deleted.
+2. ~~Snapshot baselines~~ — answered 2026-10-05: the 60 old baselines were deleted (recoverable from `v0.9`); 54 new ones (27 fixtures, Light and Dark) were recorded for `macos27-arm64` in W5-5.
 
 ---
 
 ## 4. Track C — Albums, and removal of source-as-album
 
-### C1 — Album track ordering *(medium)*
+### C1 — Album track ordering *(medium)* — ✔ DONE 2026-10-06 (W4-1: `album_tracks` v50, album dedup v51, fix round)
 - `tracks` has no `track_number`/`disc_number`; no `album_tracks` join exists
 - Two options: (a) add `track_number` + `disc_number` to `tracks`, (b) add an `album_tracks` join mirroring `playlist_tracks`, which already uses a **fractional-index `position TEXT`** for stable ordering
 - Recommendation: (b) if album membership must stay independent of the file's own tags, (a) if the tag is authoritative. Decide in design — this is the "extensive thinking" `todo_dump.md` calls for
 - Cover art: `albums.cover_path` exists; the `artwork` table and `ArtworkResolver` already resolve remote artwork
 
-### C2 — Album UI *(large, gated on B1)*
+### C2 — Album UI *(large, gated on B1)* — ✔ DONE 2026-10-06 (W4-2 grid, page, Go to Album, edit order; W4-2b Edit Album Info, Merge with Another Album, Use a Track from the Library…, album picker)
 Album list, album detail with respected ordering, variant chooser wired to the existing `user_album_variant_pref`. Cannot be designed before B1 — the screens do not exist yet.
 
-### C3 — Source removal + metadata backfill *(large, gated on C1)*
+### C3 — Source removal + metadata backfill *(large, gated on C1)* — ✔ DONE except the online lookup (2026-10-06, W4-3: v52 album suggestions, Review ▸ Albums, `No album`, source-as-album writes stopped, `Clear Source Names from Album…`; lookup provider is the local `TagAlbumSuggester` behind the `AlbumSuggesting` seam — an online provider waits for `B3-PLAN.md` §5 Q2, no MusicBrainz client exists)
 - Stop writing source names into `album` — `ContentView.swift:400-407`
 - Persist provenance in `track_sources` (19,596 rows, ~1.5 per track) instead of the album field. **Provenance must survive** — `todo_dump.md` wants it hidden when sharing, not deleted
 - Backfill real album metadata for the 132 literal-source tracks and the 6,209 `unknown album` tracks
@@ -253,7 +260,7 @@ Track A (storage)                                        Track B (design)
 - **A and B in parallel.** They share no files. A is backend/storage — well-suited to autonomous TDD workers with clear test contracts. B is aesthetic and open-ended — interactive, human-steered. Do not try to swarm B.
 - **C last.** C2 needs B1's screens; C3 needs C1's schema. C1 can start earlier if the ordering question is settled, but nothing in C is urgent against A2.
 
-**Recommended next concrete step:** A1 and A2 are done (2026-10-04). Next is either **A3** (relocatable DB + multi-library, large, now protected by A2's pre-migration backups) or **B1** (interactive design session, human-steered).
+**State (2026-10-06):** A0–A3, B1–B3 and C1–C3 are done (C3 except the online lookup). Remaining: Oliver's launch checklist in `B3-CONFORMANCE.md` (what no agent can verify without starting the app), the open questions in `B3-PLAN.md` §5 (Q2 album lookup source, Q4 Activity history, Q5 add-only refresh, Q6 tag writing default), and the online album lookup behind the `AlbumSuggesting` seam.
 
 ---
 
