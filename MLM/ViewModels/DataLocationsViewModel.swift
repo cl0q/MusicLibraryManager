@@ -500,3 +500,21 @@ final class DataLocationsViewModel {
         return FileManager.default.fileExists(atPath: volume)
     }
 }
+
+/// Dates in Settings (UC-COPY-10): `today, 09:14` · `yesterday, 18:02` · `4 Oct 2026, 08:57`.
+enum SettingsDate {
+    static func text(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
+        let time = date.formatted(date: .omitted, time: .shortened)
+        if calendar.isDate(date, inSameDayAs: now) { return "today, \(time)" }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: yesterday) {
+            return "yesterday, \(time)"
+        }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    /// Sentence start: `Today, 09:14`.
+    static func capitalized(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
+        let text = self.text(date, now: now, calendar: calendar)
+        return text.prefix(1).uppercased() + text.dropFirst()
+    }
+}
