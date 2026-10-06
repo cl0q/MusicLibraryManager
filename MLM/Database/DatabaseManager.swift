@@ -1511,6 +1511,27 @@ final class DatabaseManager: Sendable {
             }
         }
 
+        // ──────────────────────────────────────────────────────────────
+        // Migration v55_reel_state (W3-DISC-B, IMP-059, DEC-029): a reel keeps
+        // its state (`new` | `identified` | `done`), the competing guesses with
+        // their provenance (JSON) and when it was marked done. Backfill: a reel
+        // that already has both an artist and a title is `identified`.
+        // Guarded by `columns(in:)` so a partially applied run migrates cleanly.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v55_reel_state") { db in
+            let columns = try db.columns(in: "imported_reels").map(\.name)
+            if !columns.contains("state") {
+                try db.execute(sql: "ALTER TABLE imported_reels ADD COLUMN state TEXT NOT NULL DEFAULT 'new'")
+            }
+            if !columns.contains("guesses_json") {
+                try db.execute(sql: "ALTER TABLE imported_reels ADD COLUMN guesses_json TEXT")
+            }
+            if !columns.contains("done_at") {
+                try db.execute(sql: "ALTER TABLE imported_reels ADD COLUMN done_at TEXT")
+            }
+            try db.execute(sql: "UPDATE imported_reels SET state = 'identified' WHERE state = 'new' AND artist <> '' AND title <> ''")
+        }
+
         return migrator
     }
 
