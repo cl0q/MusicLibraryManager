@@ -284,35 +284,4 @@ struct LibraryFileLockAdoptionTests {
 
     // MARK: Discover / Similar delete
 
-    @Test func discoveryDeleteWaitsForTheFileAndFreesItAfterwards() async throws {
-        let database = try DatabaseManager.inMemory()
-        let trackRepository = TrackRepository(database: database)
-        let folder = try temporaryFolder()
-        defer { try? FileManager.default.removeItem(at: folder) }
-        let file = folder.appendingPathComponent("test.flac")
-        try Data("audio".utf8).write(to: file)
-        let trash = folder.appendingPathComponent("Trash")
-        try FileManager.default.createDirectory(at: trash, withIntermediateDirectories: true)
-        let track = try await database.write { db -> Track in
-            var track = Track(artist: "A", album: "B", title: "C", format: "flac", originalPath: file.path)
-            try track.insert(db)
-            return track
-        }
-        let harness = LockedWriteHarness(url: file)
-        _ = await harness.run(untouched: { FileManager.default.fileExists(atPath: file.path) }) { lock in
-            let service = DiscoveryReviewService(
-                trackRepository: trackRepository,
-                configRepository: ConfigRepository(database: database),
-                trashFile: { url in
-                    let destination = trash.appendingPathComponent(url.lastPathComponent)
-                    try FileManager.default.moveItem(at: url, to: destination)
-                    return destination
-                },
-                deleteFromDatabase: { id in try await trackRepository.delete(id: id) })
-            service.lock = lock
-            try? await service.delete(track: track)
-        }
-        #expect(!FileManager.default.fileExists(atPath: file.path))
-        #expect(FileManager.default.fileExists(atPath: trash.appendingPathComponent("test.flac").path))
-    }
 }

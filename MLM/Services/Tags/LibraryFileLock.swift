@@ -8,7 +8,7 @@ import Foundation
 /// `TrackTagWriter`, `ArtworkService.embedArtwork` (the audio file), `DownloadOrchestrator.placeFinal`
 /// (the destination, incl. the Download Again replace), `TranscodeService.transcode` (its output
 /// path), Remove from Library (`TrackLibraryRemoval`), Review's Trash mode and put back
-/// (`ReviewConsequences`) and `DiscoveryReviewService.delete`. Not adopters, on purpose: the
+/// (`ReviewConsequences`). Not adopters, on purpose: the
 /// downloaders (`SoundCloudDownloader`, `DABClient`, `SquidWtfClient`) write into a per-download
 /// staging folder, `DownloadQueue` writes its own JSON, `OrganizedPathMigrationService` only
 /// edits database rows, and `SyncService.embedMlmUuid` / `TranscodeCache` rewrite device or
