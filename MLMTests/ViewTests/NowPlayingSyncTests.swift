@@ -63,7 +63,7 @@ struct NowPlayingSyncTests {
     @Test
     func playlistTable_appliesAccentForegroundStyle() throws {
         let src = try readSource(Self.playlistTablePath)
-        #expect(src.contains(".symbolEffect(.variableColor.iterative, isActive: live.isPlaying)"),
+        #expect(src.contains(".symbolEffect(.variableColor.iterative, isActive: live.isPlaying && !reduceMotion)"),
                 "The glyph animates while playing and is static while paused (UC-TABLE-16)")
         #expect(try readSource("MLM/Views/Playlists/PlaylistTable.swift").contains("TrackListTable("),
                 "The playlist table is the shared table")
