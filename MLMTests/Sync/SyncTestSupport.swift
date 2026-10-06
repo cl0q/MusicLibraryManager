@@ -36,7 +36,21 @@ final class ScriptedDestinations: SyncDestinationChecking, @unchecked Sendable {
         }
     }
 
-    func isLibraryReachable(_ libraryRoot: String) -> Bool { lock.withLock { libraryReachable } }
+    /// `true` answers left before the library drive "leaves" (`nil` = it stays as `libraryReachable` says).
+    private var libraryAllowance: Int?
+
+    func script(libraryLeavesAfter allowance: Int?) {
+        lock.withLock { libraryAllowance = allowance }
+    }
+
+    func isLibraryReachable(_ libraryRoot: String) -> Bool {
+        lock.withLock {
+            if let left = libraryAllowance {
+                if left <= 0 { libraryReachable = false; libraryAllowance = nil } else { libraryAllowance = left - 1 }
+            }
+            return libraryReachable
+        }
+    }
 
     func volumeIdentity(_ path: String) -> String? { lock.withLock { identity } }
 

@@ -793,6 +793,15 @@ final class SyncService {
 
     // MARK: - Execute
 
+    /// The space a run needs. A full run uses the plan's own verdict (removals free space first,
+    /// with Clean up on); Retry Failed copies only the retried tracks and removes nothing, so it
+    /// needs room for those tracks alone.
+    static func spaceCheck(preview: PreviewResult, filesToAdd: [FilePreview], isRetry: Bool) -> (needed: Int64, isSufficient: Bool) {
+        guard isRetry else { return (preview.totalNewSize, preview.hasSufficientSpace) }
+        let needed = filesToAdd.reduce(Int64(0)) { $0 + $1.size }
+        return (needed, preview.deviceAvailableSpace >= needed + spaceBuffer)
+    }
+
     /// Execute sync for a profile.
     ///
     /// W3-SYNC — named fixes only; what is copied, transcoded, deleted and written to `sync_state`
@@ -850,19 +859,18 @@ final class SyncService {
             operationId?.discard()
             return SyncResult()
         }
-        guard preview.hasSufficientSpace else {
-            operationId?.fail(cause: "Not enough space on “\(deviceName)”", fix: .runAgain)
-            throw SyncError.insufficientSpace(
-                needed: preview.totalNewSize,
-                available: preview.deviceAvailableSpace
-            )
-        }
         // Never write into a path whose disk is gone (a folder under /Volumes would be created on
-        // the Mac's own disk).
+        // the Mac's own disk). Checked before the space: a missing device is "not connected",
+        // never "not enough space".
         if !filesToAdd.isEmpty || !filesToRemove.isEmpty,
            !destinations.isDestinationReachable(profile.outputFolder) {
             operationId?.fail(cause: "“\(deviceName)” is not connected", fix: .runAgain)
             throw SyncRunError.destinationNotConnected(deviceName)
+        }
+        let space = Self.spaceCheck(preview: preview, filesToAdd: filesToAdd, isRetry: isRetry)
+        guard space.isSufficient else {
+            operationId?.fail(cause: "Not enough space on “\(deviceName)”", fix: .runAgain)
+            throw SyncError.insufficientSpace(needed: space.needed, available: preview.deviceAvailableSpace)
         }
 
         // Reset cancellation flag + progress tracking at start (D-14)
@@ -992,6 +1000,12 @@ final class SyncService {
                                     await self.uncountProcessed()
                                     return .interrupted(file.trackId)
                                 }
+                                // The library drive left while the file was being read: not the
+                                // track's failure — it is skipped with that reason (P6).
+                                if case .failed(_, let reason) = outcome, reason != "Cancelled",
+                                   self.isLibraryDriveAway(libraryRoot) {
+                                    return .skipped(file.trackId, .libraryDriveAway)
+                                }
                                 return outcome
                             }
                         } catch is CancellationError {
@@ -999,6 +1013,13 @@ final class SyncService {
                         } catch {
                             if !self.destinations.isDestinationReachable(profile.outputFolder) {
                                 return .interrupted(file.trackId)
+                            }
+                            if self.isLibraryDriveAway(libraryRoot) {
+                                await self.incrementProcessed(
+                                    currentFile: "Skipped: \(file.artist) – \(file.title)",
+                                    operationId: operationId
+                                )
+                                return .skipped(file.trackId, .libraryDriveAway)
                             }
                             AppLogger.shared.error(
                                 "Sync failed for \(file.artist) - \(file.title): \(error.localizedDescription)",
@@ -1146,8 +1167,13 @@ final class SyncService {
 
         // This profile's result (v47) — never another profile's (PP-SYNC-02).
         if isRetry {
+            // A retried track that now has nothing to copy (skipped, or no longer in the profile)
+            // is no longer a failure of the last run.
+            let attempted = Set(filesToAdd.map(\.trackId))
+            let settled = (onlyTrackIDs ?? []).subtracting(attempted)
+                .union(result.skippedTracks.map(\.trackID))
             try? await results?.applyRetry(profileID: profileId, copiedTrackIDs: Set(result.syncedTrackIDs),
-                                           stillFailing: Self.resultFailures(result))
+                                           stillFailing: Self.resultFailures(result), retried: settled)
         } else {
             try? await results?.finish(
                 profileID: profileId, outcome: result.wasCancelled ? .cancelled : .completed, endedAt: Date(),
@@ -1197,6 +1223,11 @@ final class SyncService {
     }
 
     private let attemptLock = NSLock()
+
+    /// The library's drive is not connected now (with no library folder there is no drive).
+    private func isLibraryDriveAway(_ libraryRoot: String) -> Bool {
+        !libraryRoot.isEmpty && !destinations.isLibraryReachable(libraryRoot)
+    }
 
     private func noteAttempt(_ trackId: Int64) {
         attemptLock.withLock { attemptedTrackIds.append(trackId) }

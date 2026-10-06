@@ -258,12 +258,15 @@ final class SyncProfileResultRepository: Sendable {
 
     /// Retry Failed of this profile: the retried tracks that copied leave the failures, the ones
     /// that failed again keep their (new) reason; the copied count grows.
-    func applyRetry(profileID: Int64, copiedTrackIDs: Set<Int64>, stillFailing: [SyncResultFailure]) async throws {
+    /// `retried` are further retried tracks with nothing left to copy (now skipped, or no longer
+    /// in the profile): they leave the failures too.
+    func applyRetry(profileID: Int64, copiedTrackIDs: Set<Int64>, stillFailing: [SyncResultFailure],
+                    retried settled: Set<Int64> = []) async throws {
         try await database.write { db in
             guard let row = try Row.fetchOne(db, sql: "SELECT * FROM sync_profile_results WHERE profile_id = ?",
                                              arguments: [profileID]) else { return }
             let current = Self.decode(row)
-            let retried = copiedTrackIDs.union(stillFailing.map(\.trackID))
+            let retried = copiedTrackIDs.union(stillFailing.map(\.trackID)).union(settled)
             var failures = current.failures.filter { !retried.contains($0.trackID) }
             failures.append(contentsOf: stillFailing)
             try db.execute(sql: """
