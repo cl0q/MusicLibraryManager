@@ -271,8 +271,11 @@ final class ReviewModel {
 
     static func item(for group: ReviewGroup, members: [Track], usage: [Int64: Int]) -> ReviewGroupItem? {
         let recommendation = group.details?.recommendation
-        let best = DuplicateReviewRecommendation.recommendedTrack(in: members)
-        let recommendedTrack = recommendation?.trackId.flatMap { id in members.first { $0.id == id } } ?? best
+        // Recomputed from the current rows: availability may have changed since the scan.
+        let recommendedTrack = DuplicateReviewRecommendation.recommendedTrack(in: members)
+        let reasons = recommendation?.action == .keepBoth
+            ? (recommendation?.reasons ?? [])
+            : (DuplicateReviewRecommendation.recommendation(for: members, keepBoth: false)?.reasons ?? [])
         guard let recommendedID = recommendedTrack?.id ?? members.first?.id else { return nil }
         let others = members.filter { $0.id != recommendedID }
         let similarity = group.details?.evidence?.fingerprintSimilarity ?? group.details?.similarityScore
@@ -282,7 +285,7 @@ final class ReviewModel {
             members: members,
             recommendedID: recommendedID,
             recommendsKeepAll: recommendation?.action == .keepBoth,
-            why: ReviewPresentation.why(reasons: recommendation?.reasons ?? [], recommended: recommendedTrack, others: others),
+            why: ReviewPresentation.why(reasons: reasons, recommended: recommendedTrack, others: others),
             matchPercent: similarity.map { Int(($0 * 100).rounded()) },
             usedIn: usage)
     }
@@ -364,6 +367,14 @@ final class ReviewModel {
                                versionCount: group.members.count)
     }
 
+    /// The recommended version has no file while another version has one: `Apply Recommended to
+    /// All…` skips the group (deciding it is refused).
+    static func recommendedHasNoFile(_ group: ReviewGroupItem) -> Bool {
+        guard !group.recommendsKeepAll, let recommended = group.recommended else { return false }
+        return !DuplicateReviewRecommendation.hasRealFile(recommended)
+            && group.members.contains { $0.id != recommended.id && DuplicateReviewRecommendation.hasRealFile($0) }
+    }
+
     /// The mode a decision uses: Trash only while the drive is connected.
     var effectiveMode: UnkeptMode { unkeptMode == .trash && trashRefusal != nil ? .hidden : unkeptMode }
 
@@ -378,11 +389,33 @@ final class ReviewModel {
 
     /// Decide `plans` as one undo step. Returns whether anything was decided.
     @discardableResult
-    func apply(_ plans: [ReviewGroupPlan], actionName: String, undo: UndoCenter?, statusBar: StatusBarCenter? = nil) async -> Bool {
-        guard !plans.isEmpty else { return false }
+    func apply(_ requested: [ReviewGroupPlan], actionName: String, undo: UndoCenter?, statusBar: StatusBarCenter? = nil) async -> Bool {
+        guard !requested.isEmpty else { return false }
+        // Keeping a version without a file over one that has a file is refused (never decided).
+        var allowed: [ReviewGroupPlan] = []
+        var refusals: [ReviewDecisionError] = []
+        for plan in requested {
+            if let refusal = try? await dependencies.decisions.refusal(for: plan.request) {
+                refusals.append(refusal)
+            } else {
+                allowed.append(plan)
+            }
+        }
+        let bar = statusBar ?? undo?.statusBar
+        if allowed.isEmpty {
+            if requested.count == 1, let refusal = refusals.first {
+                bar?.post(refusal.localizedDescription)
+            } else {
+                bar?.post(ReviewPresentation.groupsSkippedNoFile(refusals.count))
+            }
+            return false
+        }
+        let skipped = requested.count > 1 ? refusals.count : 0
+        let plans = allowed
         let mode = plans.first?.request.unkeptMode ?? .hidden
         let message: @MainActor (Applied) -> String = { applied in
-            Self.message(for: plans, applied: applied, mode: mode)
+            let text = Self.message(for: plans, applied: applied, mode: mode)
+            return skipped > 0 ? text + " · " + ReviewPresentation.groupsSkippedNoFile(skipped) : text
         }
         guard let undo else {
             let applied = Applied(outcomes: (try? await execute(plans)) ?? [])

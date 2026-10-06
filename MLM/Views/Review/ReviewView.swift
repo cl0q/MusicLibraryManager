@@ -336,17 +336,19 @@ struct ReviewView: View {
     private var applyAllButton: String { ReviewPresentation.applyAllButton(groups: applyGroups.count) }
 
     private var applyAllMessage: String {
-        let kept = applyGroups.filter { !$0.recommendsKeepAll }
+        let skipped = applyGroups.filter { ReviewModel.recommendedHasNoFile($0) }.count
+        let kept = applyGroups.filter { !$0.recommendsKeepAll && !ReviewModel.recommendedHasNoFile($0) }
         let others = kept.reduce(0) { $0 + $1.members.count - 1 }
         let entries = kept.reduce(0) { sum, group in
             sum + group.members.reduce(0) { $0 + ($1.id == group.recommendedID ? 0 : (group.usedIn[$1.id ?? -1] ?? 0)) }
         }
-        return ReviewPresentation.applyAllMessage(others: others, playlistEntries: entries, mode: model?.effectiveMode ?? .hidden)
+        let text = ReviewPresentation.applyAllMessage(others: others, playlistEntries: entries, mode: model?.effectiveMode ?? .hidden)
+        return skipped > 0 ? text + " " + ReviewPresentation.groupsSkippedNoFile(skipped) + "." : text
     }
 
     private func applyRecommendedToAll() {
         guard let model else { return }
-        let plans = model.visibleDuplicates.map { model.plan(keepRecommendedIn: $0) }
+        let plans = model.visibleDuplicates.filter { !ReviewModel.recommendedHasNoFile($0) }.map { model.plan(keepRecommendedIn: $0) }
         decide(plans, "Keep Recommended Versions")
     }
 }

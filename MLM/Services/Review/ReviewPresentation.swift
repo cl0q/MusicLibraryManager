@@ -99,8 +99,8 @@ enum ReviewPresentation {
     /// The scan's reasons in the mockup's words.
     static func why(reasons: [String], recommended: Track?, others: [Track]) -> String {
         if !reasons.isEmpty { return reasons.joined(separator: ", ") }
-        if let recommended, recommended.organizedPath?.isEmpty == false,
-           others.allSatisfy({ $0.organizedPath?.isEmpty != false }) {
+        if let recommended, DuplicateReviewRecommendation.hasRealFile(recommended),
+           others.allSatisfy({ !DuplicateReviewRecommendation.hasRealFile($0) }) {
             return "the only downloaded version"
         }
         return "same quality, most complete tags"
@@ -199,6 +199,16 @@ enum ReviewPresentation {
 
     static func restoredMessage(title: String) -> String {
         "Restored “\(title)” — it is back in its tab"
+    }
+
+    /// `Can’t keep “Title” — its file is missing`.
+    static func cantKeepFileMissing(title: String) -> String {
+        "Can’t keep “\(title)” — its file is missing"
+    }
+
+    /// `3 groups skipped — the recommended version has no file`.
+    static func groupsSkippedNoFile(_ count: Int) -> String {
+        "\(count) \(count == 1 ? "group" : "groups") skipped — the recommended version has no file"
     }
 
     static func couldntTrash(_ count: Int) -> String {

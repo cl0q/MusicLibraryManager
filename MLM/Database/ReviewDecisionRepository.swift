@@ -141,9 +141,12 @@ enum ReviewDecisionError: LocalizedError, Equatable {
     case nothingPending
     case invalidKeep
     case noDecision
+    /// The version to keep has no local file while another version has one.
+    case keptVersionHasNoFile(title: String)
 
     var errorDescription: String? {
         switch self {
+        case .keptVersionHasNoFile(let title): ReviewPresentation.cantKeepFileMissing(title: title)
         case .nothingPending: "This group has already been decided."
         case .invalidKeep: "Choose one version to keep before deciding this group."
         case .noDecision: "Earlier decision cannot be restored"
@@ -249,6 +252,11 @@ final class ReviewDecisionRepository: Sendable {
             if keeps {
                 guard let kept = request.keptTrackID, members.contains(kept) else { throw ReviewDecisionError.invalidKeep }
             }
+            let byIDEarly = try Self.tracksByID(db, ids: members)
+            if keeps, let kept = request.keptTrackID {
+                guard byIDEarly[kept] != nil else { throw ReviewDecisionError.invalidKeep }
+                if let refusal = Self.keepRefusal(kept: kept, in: byIDEarly) { throw refusal }
+            }
             var consequences = ReviewDecisionConsequences()
             consequences.tags = request.tags
             consequences.changedFields = request.changedFields
@@ -294,6 +302,26 @@ final class ReviewDecisionRepository: Sendable {
             try Self.setQueueStatus(db, groupKey: request.groupKey, from: "pending", to: "resolved")
             return ReviewDecisionOutcome(decisionID: decisionID, unkeptTrackIDs: unkept,
                                          keptFormat: consequences.keptFormat, consequences: consequences)
+        }
+    }
+
+    private static func tracksByID(_ db: Database, ids: [Int64]) throws -> [Int64: Track] {
+        let found = try Track.filter(ids.contains(Track.Columns.id)).fetchAll(db)
+        return Dictionary(uniqueKeysWithValues: found.compactMap { track in track.id.map { ($0, track) } })
+    }
+
+    /// Keeping a version without a local file over one that has a file is refused.
+    static func keepRefusal(kept: Int64, in tracks: [Int64: Track]) -> ReviewDecisionError? {
+        guard let keptTrack = tracks[kept], !DuplicateReviewRecommendation.hasRealFile(keptTrack) else { return nil }
+        let othersHaveFile = tracks.contains { $0.key != kept && DuplicateReviewRecommendation.hasRealFile($0.value) }
+        return othersHaveFile ? .keptVersionHasNoFile(title: keptTrack.title) : nil
+    }
+
+    /// Would `decide` refuse this request now (kept version without a file)?
+    func refusal(for request: ReviewDecisionRequest) async throws -> ReviewDecisionError? {
+        guard request.action == .keepRecommended || request.action == .keepSelected, let kept = request.keptTrackID else { return nil }
+        return try await database.read { db in
+            Self.keepRefusal(kept: kept, in: try Self.tracksByID(db, ids: request.memberIDs))
         }
     }
 
