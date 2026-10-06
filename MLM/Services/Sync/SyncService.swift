@@ -226,7 +226,7 @@ final class SyncService {
     static let lane = ActivityLane("sync")
 
     /// Space buffer: require 50MB free beyond needed space.
-    private static let spaceBuffer: Int64 = 50_000_000
+    static let spaceBuffer: Int64 = 50_000_000
 
     init(
         trackRepository: TrackRepository,

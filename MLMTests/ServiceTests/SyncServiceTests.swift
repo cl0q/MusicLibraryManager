@@ -7,6 +7,13 @@ import GRDB
 @MainActor
 struct SyncServiceTests {
 
+    /// The source files of one test; removed when the test's suite instance goes away.
+    private final class SourceFiles {
+        var urls: [URL] = []
+        deinit { for url in urls { try? FileManager.default.removeItem(at: url) } }
+    }
+    private let sources = SourceFiles()
+
     /// Correct init chain — all required params:
     /// TranscodeCache.init(cacheDir: URL)
     /// SyncService.init(trackRepository:syncRepository:configRepository:transcodeCache:)
@@ -15,6 +22,7 @@ struct SyncServiceTests {
     private func sourceFile(_ name: String = "source-\(UUID().uuidString).flac") throws -> String {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
         try Data(repeating: 1, count: 16).write(to: url)
+        sources.urls.append(url)
         return url.path
     }
 

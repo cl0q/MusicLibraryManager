@@ -75,6 +75,8 @@ struct SyncProfileMenu: View {
                 Button("Change Destination…") { vm.presenter.changingDestination = profile }
                 if connected {
                     Button("Read Playlist Changes from Device…") { readChanges(vm) }
+                        .disabled(run != nil)
+                        .help(run != nil ? "A sync of this profile is running." : "")
                     // ⌘R is Track ▸ Recompute Plan on the profile page (menu keys live in
                     // `.commands`, not in view menus).
                     Button("Recompute Plan") { vm.recomputePlan(id) }

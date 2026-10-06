@@ -35,7 +35,7 @@ final class ShellEdits {
                 syncContentDidChange: { id in
                     // The profile's page shows the new content and a fresh plan (W3-SYNC: every
                     // profile has its own state; nothing switches, D-SYNC-TRACKS-TO-PROFILE).
-                    await container.syncViewModel?.profileDidChange(id)
+                    // One notification: `SyncViewModel` observes it and reloads and re-plans.
                     NotificationCenter.default.post(name: .syncProfileDidChange, object: nil, userInfo: ["profileId": id])
                 },
                 covers: { container.playlistCoverService }

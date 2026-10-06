@@ -131,6 +131,10 @@ final class SyncViewModel {
     func loadProfiles() async {
         isLoading = true
         defer { isLoading = false }
+        if observers.isEmpty {
+            // First load of this launch: a run that was still `running` when the app quit ended.
+            try? await resultRepository.markStaleRunsInterrupted()
+        }
         do {
             profiles = try await syncRepository.fetchAll()
             let timestamps = try await syncRepository.fetchLastSyncTimestamps()
@@ -505,7 +509,13 @@ final class SyncViewModel {
             plans[profileID] = nil
             await loadProfiles()
             schedulePlan(profileID, after: .zero)
-            statusBar()?.post("Changed the destination of “\(profile.name)” to “\(SyncDestination.deviceName(for: path))”")
+            var message = "Changed the destination of “\(profile.name)” to “\(SyncDestination.deviceName(for: path))”"
+            if syncService.runningProfileId == profileID {
+                // The running sync keeps writing to the old destination.
+                optionsChangedWhileSyncing.insert(profileID)
+                message += " · Applies to the next sync"
+            }
+            statusBar()?.post(message)
         } catch {
             statusBar()?.post(UndoFailure.sentence("Couldn’t change the destination", error))
         }

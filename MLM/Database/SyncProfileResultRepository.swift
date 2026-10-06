@@ -192,6 +192,18 @@ final class SyncProfileResultRepository: Sendable {
 
     // MARK: Write
 
+    /// A row still `running` at launch belongs to a run that died with the app: it is
+    /// `interrupted` (the copied count it kept stays). Call once per launch, before any run.
+    func markStaleRunsInterrupted() async throws {
+        try await database.write { db in
+            try db.execute(sql: """
+                UPDATE sync_profile_results
+                SET outcome = 'interrupted', last_interrupted_at = COALESCE(last_interrupted_at, started_at)
+                WHERE outcome = 'running'
+            """)
+        }
+    }
+
     /// A run starts: replaces the profile's previous result (keeps `last_connected_at`).
     func begin(profileID: Int64, startedAt: Date, plannedCount: Int, plan: SyncPlanSummary?,
                operationID: UUID?) async throws {
@@ -306,6 +318,17 @@ final class SyncProfileResultRepository: Sendable {
         return try? JSONDecoder().decode(type, from: data)
     }
 
+    /// A stored list, element by element: an element this version can't read (a value a newer
+    /// version wrote) is dropped, the others stay.
+    private static func decodeElements<T: Decodable>(_ type: T.Type, _ text: String?) -> [T]? {
+        guard let text, let data = text.data(using: .utf8),
+              let array = (try? JSONSerialization.jsonObject(with: data)) as? [Any] else { return nil }
+        return array.compactMap { element in
+            guard let data = try? JSONSerialization.data(withJSONObject: element, options: [.fragmentsAllowed]) else { return nil }
+            return try? JSONDecoder().decode(type, from: data)
+        }
+    }
+
     static func decode(_ row: Row) -> SyncProfileResult {
         let outcome = SyncProfileResult.Outcome(rawValue: row["outcome"] ?? "none") ?? .none
         let operation: String? = row["operation_id"]
@@ -319,8 +342,8 @@ final class SyncProfileResultRepository: Sendable {
             removedCount: row["removed_count"] ?? 0,
             failedCount: row["failed_count"] ?? 0,
             skippedCount: row["skipped_count"] ?? 0,
-            failures: decodeJSON([SyncResultFailure].self, row["failures"]) ?? [],
-            skipped: decodeJSON([SyncResultSkip].self, row["skipped"]) ?? [],
+            failures: decodeElements(SyncResultFailure.self, row["failures"]) ?? [],
+            skipped: decodeElements(SyncResultSkip.self, row["skipped"]) ?? [],
             plan: decodeJSON(SyncPlanSummary.self, row["plan_summary"]),
             failureCause: row["failure_cause"],
             operationID: operation.flatMap(UUID.init(uuidString:)),
