@@ -296,6 +296,9 @@ struct FolderViewModelTests {
         model.libraryFilesDidChange()
         await waitUntil("the refreshed catalog") { model.catalog.trackCount(under: "_Inbox") == 1 }
         await waitUntil("the new walk") { model.isWalkComplete && model.notInLibraryFiles(under: "_Inbox")?.isEmpty == true }
+        // `restartWalk` keeps `isWalkComplete` true while the second walk runs (the old listing stays
+        // on screen), so the condition above can hold before the detached walk has counted itself.
+        await waitUntil("the second read") { fixture.box.walks >= 2 }
         #expect(fixture.box.walks >= 2, "read again after the change")
     }
 }
