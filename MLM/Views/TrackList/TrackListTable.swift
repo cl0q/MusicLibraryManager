@@ -340,7 +340,7 @@ struct TrackTablePublisher: ViewModifier {
         let summary = TrackSelectionSummary(rows: selected, container: configuration.listContext.container, live: live.state)
         content
             .disabled(!visible)
-            .focusedValue(\.trackSelection, visible ? (selectionOverride ?? selection(summary: summary)) : nil)
+            .focusedValue(\.trackSelection, visible ? selection(summary: summary) : nil)
             .focusedValue(\.trackTableViewOptions, visible ? viewOptions : nil)
             .statusBarText(configuration.publishesStatusText ? statusText(selected) : nil)
             .onChange(of: model.selection) { _, _ in
@@ -360,6 +360,7 @@ struct TrackTablePublisher: ViewModifier {
     }
 
     private func selection(summary: TrackSelectionSummary) -> TrackSelection {
+        if let selectionOverride { return selectionOverride }
         let model = self.model
         let sources = TrackMenuSources.shared
         let configuration = self.configuration
