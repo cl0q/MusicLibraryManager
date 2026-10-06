@@ -220,7 +220,7 @@ enum MenuCommand: String, CaseIterable, Sendable {
         case .openRecent: Entry(menu: .file, title: "Open Recent", shortcut: nil, wiring: .app)
         case .clearRecentLibraries:
             Entry(menu: .file, title: "Clear Menu", shortcut: nil,
-                  wiring: .pending(owner: "W3-LAUNCH", reason: "Removing libraries from this list isn’t available yet."), parent: .openRecent)
+                  wiring: .pending(owner: "W3-LAUNCH", reason: "Open Recent lists every library MLM knows. Remove one from the list in the library picker."), parent: .openRecent)
         case .showLibraryFileInFinder: Entry(menu: .file, title: "Show Library File in Finder", shortcut: nil, wiring: .app)
         case .closeWindow: Entry(menu: .file, title: "Close Window", shortcut: .cmd("w"), wiring: .system)
 

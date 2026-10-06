@@ -114,6 +114,32 @@ struct LibraryRegistry: Codable, Equatable, Sendable {
         lastActiveLibraryId = libraryId
     }
 
+    /// An entry taken off the list by `Remove from List` (V-PICKER.N08), kept so the picker
+    /// can put it back exactly (`Undo`).
+    struct Removal: Equatable, Sendable {
+        let entry: Entry
+        let index: Int
+        let wasLastActive: Bool
+    }
+
+    /// Takes the entry off the list. Only the list changes — never a file (A0 D5).
+    mutating func remove(libraryId: String) -> Removal? {
+        guard let index = libraries.firstIndex(where: { $0.libraryId == libraryId }) else { return nil }
+        let removal = Removal(entry: libraries[index], index: index, wasLastActive: lastActiveLibraryId == libraryId)
+        libraries.remove(at: index)
+        if removal.wasLastActive { lastActiveLibraryId = nil }
+        return removal
+    }
+
+    /// Puts a removed entry back where it was (unless the library was added again meanwhile).
+    mutating func reinsert(_ removal: Removal) {
+        guard entry(withId: removal.entry.libraryId) == nil else { return }
+        libraries.insert(removal.entry, at: min(removal.index, libraries.count))
+        if removal.wasLastActive, lastActiveLibraryId == nil {
+            lastActiveLibraryId = removal.entry.libraryId
+        }
+    }
+
     // MARK: - Availability
 
     static func availability(

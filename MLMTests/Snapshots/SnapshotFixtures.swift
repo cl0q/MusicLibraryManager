@@ -236,8 +236,9 @@ enum SnapshotFixtures {
         Fixture(id: "drop-target-resting", size: .init(width: 300, height: 100), makeView: { _ in
             AnyView(Text("Snapshot drop target").padding(20).dropTarget(.fixedRow))
         }),
-        Fixture(id: "first-run-welcome", size: .init(width: 560, height: 460), makeView: { _ in
-            AnyView(FirstRunWizard(onComplete: {}).padding(20))
+        // W3-LAUNCH: the in-window launch states replaced the first-run scrim wizard.
+        Fixture(id: "launch-loading-update", size: .init(width: 640, height: 360), makeView: { _ in
+            AnyView(LibraryLoadingView(name: "Main Library", phase: .updating(step: 3, total: 5)))
         }),
         Fixture(id: "new-sync-profile-sheet", size: .init(width: 460, height: 400), makeView: { _ in
             AnyView(NewSyncProfileFromSelectionSheet(trackIds: [1, 4]))
@@ -301,7 +302,7 @@ enum SnapshotFixtures {
         "Playlists/PlaylistTable.swift", "Queue/QueuePanel.swift",
         "ReviewQueue/ReviewQueueView.swift",
         "Shared/SelectionCreationSheets.swift", "Shared/StatusChip.swift",
-        "Shared/TrackCoverView.swift", "DragDrop/DropTargetModifier.swift", "Shared/FirstRunWizard.swift",
+        "Shared/TrackCoverView.swift", "DragDrop/DropTargetModifier.swift", "Launch/LibraryLoadingView.swift",
         "Shared/TrackMetadataPresentation.swift", "Sync/DeviceIngestResultsView.swift",
         "Sync/IngestPreviewView.swift", "Sync/SyncToast.swift",
         "TrackDetail/WaveformView.swift",
@@ -350,9 +351,14 @@ enum SnapshotFixtures {
         "Settings/BackupSettingsView.swift": "Deferred: container-backed backup service and folder/Finder panels require an inert backup model.",
         "Settings/DataLocationsView.swift": "Deferred: container-backed paths, backup service and filesystem sizes require an inert locations model.",
         "Settings/LibrarySetupView.swift": "Deferred: import/filesystem state and folder panels require inert import model.",
-        "Shared/LibraryAdoptionSheet.swift": "Deferred: A3 adoption sheet driven by the launch coordinator; baselines wait for the B1 library picker design.",
-        "Shared/LibraryLaunchStateView.swift": "Deferred: A3 launch placeholder with open panel; baselines wait for the B1 library picker design.",
-        "Shared/NewLibrarySheet.swift": "Deferred: A3 New Library sheet; baselines wait for the B1 library picker design.",
+        "Launch/LaunchRootView.swift": "Deferred: switches on the shared launch coordinator's screen; needs an injected coordinator (W3-LAUNCH).",
+        "Launch/LibraryPickerView.swift": "Deferred: the picker reads the launch coordinator's registry rows and mount events; needs a fixture registry (W3-LAUNCH).",
+        "Launch/LibraryAdoptionSheet.swift": "Deferred: a sheet driven by the launch coordinator's adoption state (W3-LAUNCH).",
+        "Launch/LibraryFilePresentation.swift": "Deferred: alerts, sheet and file panel; bitmap hosts don't present them (W3-LAUNCH).",
+        "Launch/LibraryLaunchFailureView.swift": "Deferred: failed/invalid states load restore options from the launch coordinator (W3-LAUNCH).",
+        "Launch/LibrarySetupFlowView.swift": "Deferred: setup steps read the launch coordinator and the import model (W3-LAUNCH).",
+        "Launch/NewLibrarySheet.swift": "Deferred: a sheet validating against the launch coordinator's libraries folder (W3-LAUNCH).",
+        "Launch/LibraryFileIcon.swift": "Non-view: the library-file icon image and the .mlibm type for the open panel (W3-LAUNCH).",
         "Settings/MaintenanceView.swift": "Deferred: reads shared BatchControl/maintenance queues and paths; inject passive state.",
         "Settings/SettingsView.swift": "Deferred: AppStorage selection and PlaybackSettings read real defaults; inject preference store.",
         "Settings/SourcesSetupView.swift": "Deferred: AppStorage cookie and credential state require isolated preferences and auth provider.",
@@ -421,6 +427,15 @@ Inspector/InspectorFileStatus.swift
 Inspector/InspectorFileTab.swift
 Inspector/InspectorModel.swift
 Inspector/InspectorView.swift
+Launch/LaunchRootView.swift
+Launch/LibraryAdoptionSheet.swift
+Launch/LibraryFileIcon.swift
+Launch/LibraryFilePresentation.swift
+Launch/LibraryLaunchFailureView.swift
+Launch/LibraryLoadingView.swift
+Launch/LibraryPickerView.swift
+Launch/LibrarySetupFlowView.swift
+Launch/NewLibrarySheet.swift
 Library/DanceabilitySteps.swift
 Library/EnergyBars.swift
 Library/LibraryView.swift
@@ -455,10 +470,6 @@ Settings/SettingsTab.swift
 Settings/SettingsView.swift
 Settings/SourcesSetupView.swift
 Shared/DownloadRetryBudget.swift
-Shared/FirstRunWizard.swift
-Shared/LibraryAdoptionSheet.swift
-Shared/LibraryLaunchStateView.swift
-Shared/NewLibrarySheet.swift
 Shared/SelectionCreationSheets.swift
 Shared/StatusChip.swift
 Shared/TrackCoverView.swift

@@ -26,9 +26,16 @@ final class DatabaseManager: Sendable {
     /// Creates the database file and directory if they don't exist, enables WAL, backs up
     /// if migrations are pending, then runs all pending migrations.
     ///
-    /// - Parameter backupsRoot: root of the default backup folders (injected by tests).
+    /// - Parameters:
+    ///   - backupsRoot: root of the default backup folders (injected by tests).
+    ///   - progress: the phases for the loading screen (`Backing up before update…`,
+    ///     `Updating the library… 3 of 5`, W3-LAUNCH); reporting changes nothing that is done.
     /// - Throws: DatabaseError if the database cannot be opened or migrated
-    init(databaseURL databasePath: URL, backupsRoot: URL = BackupService.defaultBackupsRoot) throws {
+    init(
+        databaseURL databasePath: URL,
+        backupsRoot: URL = BackupService.defaultBackupsRoot,
+        progress: LibraryOpenProgress? = nil
+    ) throws {
         // Ensure the parent directory exists
         let directory = databasePath.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -50,11 +57,14 @@ final class DatabaseManager: Sendable {
             pool: pool,
             databasePath: databasePath,
             coversDirectory: Self.playlistCoversDirectory(forDatabaseAt: databasePath),
-            backupsRoot: backupsRoot
+            backupsRoot: backupsRoot,
+            willBackUp: progress.map { report in
+                { report(.backingUp(bytes: Self.fileSize(of: databasePath))) }
+            }
         )
 
-        // Run all migrations
-        try migrator.migrate(pool)
+        // Run all migrations (one by one when the loading screen counts them).
+        try DatabaseMigrationSteps.migrate(migrator, pool, progress: progress)
 
         // Clean up orphaned track_tags from v11 SoundCloud resync migration
         try? pool.write { db in
@@ -94,6 +104,13 @@ final class DatabaseManager: Sendable {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let appDir = appSupport.appendingPathComponent("com.musiclibrary.app")
         return appDir.appendingPathComponent("music_library.db")
+    }
+
+    /// Size of the database and its WAL, for `Backing up before update…` (nil if unreadable).
+    static func fileSize(of databasePath: URL) -> Int64? {
+        let paths = [databasePath.path, databasePath.path + "-wal"]
+        let sizes = paths.compactMap { (try? FileManager.default.attributesOfItem(atPath: $0))?[.size] as? Int64 }
+        return sizes.isEmpty ? nil : sizes.reduce(0, +)
     }
 
     // MARK: - Playlist Covers

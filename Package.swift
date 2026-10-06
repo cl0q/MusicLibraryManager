@@ -26,6 +26,7 @@ let package = Package(
             resources: [
                 .copy("Resources/YAMNet.mlmodelc"),
                 .process("Resources/AppIcon.icns"),
+                .process("Resources/LibraryFile.icns"),
                 .process("Resources/MLM.entitlements"),
                 .process("Resources/README.md")
             ],

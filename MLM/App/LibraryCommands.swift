@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// File menu items for library files (A3, M-FILE.E02–E04, N08): `New Library…`,
 /// `Open Library…` ⌘O, `Open Recent ▸` and `Show Library File in Finder`. Switching
@@ -9,31 +8,39 @@ struct LibraryCommands: View {
     let launch: LibraryLaunchCoordinator
 
     var body: some View {
-        // Each brings the main window forward first (UC-WIN-01): the sheet and alerts live there.
+        // Each brings the main window forward first (UC-WIN-01): the sheet, panel and alerts live there.
         CommandButton(.newLibrary, enabled: true) {
             MainWindowPresenter.shared.requestNewLibrary(launch: launch)
         }
 
+        // The system open panel (`.fileImporter`, UC-SHEET-24) is presented by the main window.
         CommandButton(.openLibrary, enabled: true) {
-            if let url = LibraryFilePanel.chooseLibraryFile() {
-                MainWindowPresenter.shared.openLibrary(url, launch: launch)
-            }
+            MainWindowPresenter.shared.show()
+            launch.chooseLibraryFile()
         }
 
         // The open library checked first, then the others with their state; unreachable ones
-        // are disabled with the suffix ` — Not connected` / ` — Not found` (M-FILE.E04).
+        // are disabled with the suffix ` — Not connected` / ` — Not found` (M-FILE.E04). Each
+        // with the library-file icon (ICON-MLIBM.N03).
         CommandSubmenu(.openRecent) {
             if launch.activePackageURL != nil {
-                Toggle(LibraryFooter.libraryName(launch), isOn: .constant(true))
-                    .disabled(true)
+                Toggle(isOn: .constant(true)) {
+                    LibraryMenuLabel(title: LibraryFooter.libraryName(launch))
+                }
+                .disabled(true)
             }
             ForEach(launch.recentLibraries) { recent in
-                Button(title(for: recent)) {
+                Button {
                     MainWindowPresenter.shared.openLibrary(recent.entry.url, launch: launch)
+                } label: {
+                    LibraryMenuLabel(title: LibraryFooter.recentTitle(recent))
                 }
                 .disabled(recent.availability != .available)
             }
             Divider()
+            // Pending (MenuCatalog): Open Recent lists every library MLM knows; there is no
+            // separate "recent" list in the registry to clear. Libraries leave the list with
+            // `Remove from List` in the picker.
             CommandButton(.clearRecentLibraries)
         }
 
@@ -43,33 +50,17 @@ struct LibraryCommands: View {
             }
         }
     }
-
-    private func title(for recent: LibraryLaunchCoordinator.RecentLibrary) -> String {
-        let name = recent.entry.displayName
-        switch recent.availability {
-        case .available: return name
-        case .notFound: return name + " — Not found"
-        case .notConnected: return name + " — Not connected"
-        }
-    }
 }
 
-/// Open panel for library files. With the document type registered (app bundle) library
-/// files are offered as files; without it (`swift run`) they show as folders.
-enum LibraryFilePanel {
-    @MainActor
-    static func chooseLibraryFile() -> URL? {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
-        if let type = UTType("com.ilczuk.mlm.library"), type.conforms(to: .package) {
-            panel.canChooseFiles = true
-            panel.canChooseDirectories = false
-            panel.allowedContentTypes = [type]
-        } else {
-            panel.canChooseFiles = false
-            panel.canChooseDirectories = true
-            panel.treatsFilePackagesAsDirectories = false
+/// A library in a menu: the library-file icon and its name (with the state suffix).
+struct LibraryMenuLabel: View {
+    let title: String
+
+    var body: some View {
+        Label {
+            Text(title)
+        } icon: {
+            Image(nsImage: LibraryFileIcon.menuImage)
         }
-        return panel.runModal() == .OK ? panel.url : nil
     }
 }

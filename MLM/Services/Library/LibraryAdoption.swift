@@ -128,6 +128,12 @@ struct LibraryAdoption: Sendable {
         return .completed(try finish())
     }
 
+    /// The name chosen for an interrupted adoption (`Opening “‹name›”…` while it finishes).
+    /// Reads the journal only.
+    func pendingName() -> String? {
+        try? readJournal().name
+    }
+
     /// The library file, once the adoption is past its point of no return.
     func installedPackageURL() -> URL? {
         guard let journal = try? readJournal(), isInstalled(journal) else { return nil }

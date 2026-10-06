@@ -18,19 +18,19 @@ struct LibraryFooter: View {
         let detail = secondLine
         Menu {
             Section("Open Recent") {
-                Toggle(name, isOn: .constant(true))
+                Toggle(isOn: .constant(true)) { LibraryMenuLabel(title: name) }
                 ForEach(launch.recentLibraries) { recent in
-                    Button(Self.recentTitle(recent)) {
+                    Button {
                         Task { await launch.handleOpen(recent.entry.url) }
+                    } label: {
+                        LibraryMenuLabel(title: Self.recentTitle(recent))
                     }
                     .disabled(recent.availability != .available)
                 }
             }
             Divider()
             Button("Open Library…") {
-                if let url = LibraryFilePanel.chooseLibraryFile() {
-                    Task { await launch.handleOpen(url) }
-                }
+                launch.chooseLibraryFile()
             }
             Button("New Library…") {
                 launch.requestNewLibrary()

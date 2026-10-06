@@ -368,6 +368,8 @@ final class BackupService: Sendable {
         // cancel termination. If MLM is still running a few seconds later, termination was
         // cancelled — stop the waiter, or it would relaunch MLM whenever the user quits.
         DispatchQueue.main.async {
+            // The relaunch was confirmed already (switch, restore): no second `Quit MLM?`.
+            QuitGuard.shared.allowNextTermination()
             NSApplication.shared.terminate(nil)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
@@ -408,7 +410,8 @@ final class BackupService: Sendable {
         coversDirectory: URL? = nil,
         destinationOverride: URL? = nil,
         backupsRoot: URL = defaultBackupsRoot,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        willBackUp: (() -> Void)? = nil
     ) throws -> URL? {
         let migrator = DatabaseManager.buildMigrator()
         let applied = try pool.read { db in
@@ -423,6 +426,8 @@ final class BackupService: Sendable {
         let destination = scope.destination
         let libraryId: String? = scope.libraryId
 
+        // The loading screen's `Backing up before update…` (W3-LAUNCH); reporting only.
+        willBackUp?()
         let info = try writeBundle(
             database: pool,
             databasePath: databasePath,

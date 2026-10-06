@@ -56,10 +56,9 @@ private struct NoLibraryOpenLine: View {
             Text(Self.message)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: Spacing.s)
+            // The library picker fills the main window while no library is open (V-PICKER).
             Button("Choose Library…") {
-                if let url = LibraryFilePanel.chooseLibraryFile() {
-                    MainWindowPresenter.shared.openLibrary(url, launch: .shared)
-                }
+                MainWindowPresenter.shared.show()
             }
         }
         .padding(.horizontal, Spacing.l)

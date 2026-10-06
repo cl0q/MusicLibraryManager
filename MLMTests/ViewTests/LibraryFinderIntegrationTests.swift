@@ -46,8 +46,22 @@ struct LibraryFinderIntegrationTests {
         #expect(plist.contains("<key>LSHandlerRank</key><string>Owner</string>"))
         #expect(plist.contains("<key>LSTypeIsPackage</key><true/>"))
         #expect(plist.contains("<key>LSItemContentTypes</key>"))
-        // No custom icon yet (Step-0 decision 11): macOS derives one from the app icon.
-        #expect(!plist.contains("CFBundleTypeIconFile"))
+        // The library-file icon (ICON-MLIBM variant A, DEC-033); W3-LAUNCH replaces Step-0
+        // decision 11's "no custom icon yet".
+        #expect(plist.contains("<key>CFBundleTypeIconFile</key><string>LibraryFile</string>"))
+        #expect(plist.contains("<key>UTTypeIconFile</key><string>LibraryFile</string>"))
+        #expect(!plist.contains("TODO"))
+    }
+
+    @Test func libraryFileIconIsBuiltAndInstalled() throws {
+        let icon = projectRoot.appendingPathComponent("MLM/Resources/LibraryFile.icns")
+        let data = try Data(contentsOf: icon)
+        #expect(data.prefix(4) == Data("icns".utf8))
+        let script = try source("scripts/run.sh")
+        #expect(script.contains(#"cp "${LIBRARY_ICON_SRC}" "${APP_BUNDLE}/Contents/Resources/LibraryFile.icns""#))
+        #expect(FileManager.default.fileExists(atPath: projectRoot.appendingPathComponent("scripts/render-library-icon.swift").path))
+        let package = try source("Package.swift")
+        #expect(package.contains(#".process("Resources/LibraryFile.icns")"#))
     }
 
     @Test func plistIsStillWellFormed() throws {
@@ -102,7 +116,8 @@ struct LibraryFinderIntegrationTests {
                        "\"Show Library File in Finder\""] {
             #expect(catalog.contains(string), "missing catalog entry: \(string)")
         }
-        // Clear Menu exists (UC-MENU-05) but stays disabled until W3-LAUNCH can remove libraries.
+        // Clear Menu exists (UC-MENU-05) but stays pending: Open Recent lists every library MLM
+        // knows; there is no separate recent list to clear (W3-LAUNCH).
         #expect(src.contains("CommandButton(.clearRecentLibraries)"))
         #expect(catalog.contains("title: \"Clear Menu\""))
         let file = try source("MLM/App/Commands/FileCommands.swift")
@@ -110,10 +125,10 @@ struct LibraryFinderIntegrationTests {
     }
 
     @Test func switchAlertUsesApprovedCopy() throws {
-        let src = try source("MLM/Views/ContentView/ContentView.swift")
+        let src = try source("MLM/Views/Launch/LibraryFilePresentation.swift")
         for string in [
-            "Switch to \\\"", "MLM relaunches to open this library. Finish active downloads and syncs first.",
-            "Relaunch", "Cancel",
+            "Switch to “", "MLM quits and reopens with “", "Switch and Relaunch", "Cancel",
+            "RunningWorkSummary(operations: ActivityCenter.shared.activeOperations)",
         ] {
             #expect(src.contains(string), "missing switch copy: \(string)")
         }
@@ -135,10 +150,10 @@ struct LibraryFinderIntegrationTests {
     }
 
     @Test func duplicatePromptUsesApprovedCopy() throws {
-        let src = try source("MLM/Views/Shared/LibraryLaunchStateView.swift")
+        let src = try source("MLM/Views/Launch/LibraryFilePresentation.swift")
         for string in [
             "is a copy of", "To open it, MLM makes the copy a separate library.", "is not changed.",
-            "Open as separate library", "Cancel",
+            "Open as Separate Library", "Cancel",
         ] {
             #expect(src.contains(string), "missing duplicate copy: \(string)")
         }
