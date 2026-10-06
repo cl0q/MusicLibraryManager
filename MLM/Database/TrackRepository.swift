@@ -535,6 +535,7 @@ final class TrackRepository: Sendable {
             // The saved playback queue (v43, W2-D) — absent in databases before it.
             let hasSavedQueue = try db.tableExists("playback_queue_entries")
             let hasDecidedPairs = try db.tableExists("review_decided_pairs")
+            let hasAlbumTracks = try db.tableExists("album_tracks")   // v50 (W4-1)
             let hasHiddenColumn = try db.columns(in: "tracks").contains { $0.name == "hidden_by_review" }
             for id in uniqueIDs {
                 if hasSavedQueue {
@@ -551,7 +552,9 @@ final class TrackRepository: Sendable {
                     : "UPDATE tracks SET is_duplicate = 0, variant_of = NULL WHERE variant_of = ?", arguments: [id])
                 try db.execute(sql: "DELETE FROM track_sources WHERE track_id = ?", arguments: [id])
                 try db.execute(sql: "DELETE FROM playlist_tracks WHERE track_id = ?", arguments: [id])
-                try db.execute(sql: "DELETE FROM album_tracks WHERE track_id = ?", arguments: [id])
+                if hasAlbumTracks {
+                    try db.execute(sql: "DELETE FROM album_tracks WHERE track_id = ?", arguments: [id])
+                }
                 try db.execute(sql: "DELETE FROM sync_profile_tracks WHERE track_id = ?", arguments: [id])
                 try db.execute(sql: "DELETE FROM sync_state WHERE track_id = ?", arguments: [id])
                 try db.execute(sql: "DELETE FROM fingerprints WHERE track_id = ?", arguments: [id])
