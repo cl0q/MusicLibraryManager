@@ -17,6 +17,8 @@ import Foundation
 struct FractionalIndexer {
     static let alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
     static let delimiter: Character = "|"
+    /// The alphabet's byte values, ascending.
+    private static let digitValues: [Int] = alphabet.utf8.map(Int.init)
 
     /// Keys longer than this are renumbered the next time their list is edited (they come from
     /// long legacy append chains).
@@ -36,10 +38,32 @@ struct FractionalIndexer {
         return strictBetween(left, right)
     }
 
-    /// `key(between:and:)` for callers that can't renumber; when no key exists it returns the
-    /// port's answer (out of order). Writers use `key(between:and:)` and renumber instead.
+    /// `key(between:and:)` for callers that can't renumber: **always** strictly between ordered
+    /// bounds (W5-F1). Where no digit key fits (`right` = `left` + `0…0`, or `0…0` with no left
+    /// bound) the key grows with a byte below `0` (`/`), which still sorts between and leaves
+    /// room for the next one; such keys are long-lived only until their list is renumbered.
+    /// Writers that can renumber use `key(between:and:)` (nil = renumber first). Bounds that are
+    /// not in order have no key between them: the port's answer is returned (garbage in).
     static func positionBetween(left: String?, right: String?) -> String {
-        key(between: left, and: right) ?? portedPositionBetween(left: left, right: right)
+        if let key = key(between: left, and: right) { return key }
+        if let forced = forcedBetween(left, right) { return forced }
+        return portedPositionBetween(left: left, right: right)
+    }
+
+    /// A key strictly between ordered bounds when `strictBetween` found none: `left` extended by
+    /// a suffix below `right`'s remainder, made by lowering the last byte of that remainder that
+    /// can still be lowered (a `0` becomes `/`, which sorts under it) and adding `z`.
+    private static func forcedBetween(_ left: String?, _ right: String?) -> String? {
+        guard let right else { return nil }
+        let lower = Array((left ?? "").utf8)
+        let upper = Array(right.utf8)
+        guard lower.lexicographicallyPrecedes(upper), upper.starts(with: lower) else { return nil }
+        let rest = Array(upper[lower.count...])
+        guard let index = rest.lastIndex(where: { $0 > 0x01 }) else { return nil }
+        // The trailing `z` leaves room above the lowered byte for the next insert at this spot.
+        let suffix = Array(rest[..<index]) + [rest[index] - 1, UInt8(ascii: "z")]
+        let key = String(decoding: lower + suffix, as: UTF8.self)
+        return isStrictlyBetween(key, left, right) ? key : nil
     }
 
     /// `position` sorts after `left` and before `right` (nil bounds are open), byte order.
@@ -179,8 +203,8 @@ struct FractionalIndexer {
         let a = Array((left ?? "").utf8)
         var upper: [UInt8]? = right.map { Array($0.utf8) }
         if let upper, !a.lexicographicallyPrecedes(upper) { return nil }
-        let digits = Array(alphabet.utf8)
-        let zero = Int(digits[0])
+        let digits = digitValues
+        let zero = digits[0]
         var key: [UInt8] = []
         var index = 0
         // Bounded by: the left bound while `key` equals its prefix; the right one while `upper`.
@@ -196,7 +220,7 @@ struct FractionalIndexer {
             } else {
                 hi = 256
             }
-            let fits = digits.map(Int.init).filter { d in
+            let fits = digits.filter { d in
                 d > lo && d < hi && !(lo == -1 && d == zero)
             }
             if !fits.isEmpty {
