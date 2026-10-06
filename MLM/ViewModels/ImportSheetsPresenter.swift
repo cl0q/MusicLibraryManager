@@ -86,9 +86,19 @@ final class ImportSheetsPresenter: QuickAddPresenting {
     // MARK: Menu commands
 
     /// `Add from Link…` ⌘U: the field is pre-filled when the pasteboard holds a link.
+    ///
+    /// The pasteboard is asked whether it holds a web link first (`detectedPatterns`), so ⌘U
+    /// never shows the paste-privacy prompt when there is no link to take.
     func addFromLink(pasteboard: NSPasteboard = .general) {
-        let text = Self.pasteboardLink(pasteboard.string(forType: .string))
-        sheet = .quickAdd(QuickAddModel(environment: quickAddEnvironment(), text: text ?? ""))
+        let model = QuickAddModel(environment: quickAddEnvironment())
+        sheet = .quickAdd(model)
+        Task {
+            let webURL = \NSPasteboard.DetectedValues.probableWebURL
+            guard let found = try? await pasteboard.detectedPatterns(for: [webURL]), found.contains(webURL),
+                  let text = Self.pasteboardLink(pasteboard.string(forType: .string)),
+                  model.urlText.isEmpty else { return }
+            model.urlText = text
+        }
     }
 
     /// The pasteboard's text when it is a single http(s) link.
@@ -174,7 +184,12 @@ final class ImportSheetsPresenter: QuickAddPresenting {
             reveal: { [weak self] id in self?.revealTrack(id) },
             importPlaylist: { [weak self] link in self?.presentImport(with: link) },
             openInBrowser: { NSWorkspace.shared.open($0) },
-            openSettingsSources: { [weak self] in self?.openSettingsSources() }
+            openSettingsSources: { [weak self] in self?.openSettingsSources() },
+            resolveShortLink: { await SoundCloudLink.resolveShortLink($0) },
+            existingPlaylistIDs: {
+                guard let playlists = try? await container.playlistRepository?.fetchAll() else { return nil }
+                return Set(playlists.compactMap(\.id))
+            }
         )
     }
 

@@ -28,6 +28,10 @@ struct QuickAddEnvironment {
     var importPlaylist: (LinkSuggestion) -> Void = { _ in }
     var openInBrowser: (URL) -> Void = { _ in }
     var openSettingsSources: () -> Void = {}
+    /// Follows an `on.soundcloud.com` share link to its address (`nil`: it doesn't resolve).
+    var resolveShortLink: (String) async -> String? = { _ in nil }
+    /// The playlists that exist now (`nil`: unknown) — the remembered target is checked.
+    var existingPlaylistIDs: () async -> Set<Int64>? = { nil }
     /// Debounce before looking up a typed link.
     var debounce: Duration = .milliseconds(400)
     var sleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
@@ -77,6 +81,15 @@ final class QuickAddModel {
         self.environment = environment
         self.playlistID = Self.lastPlaylistID
         self.urlText = text
+        // A remembered playlist that was deleted meanwhile is forgotten (S8).
+        if let remembered = playlistID {
+            Task {
+                if let existing = await environment.existingPlaylistIDs(), !existing.contains(remembered),
+                   self.playlistID == remembered {
+                    self.playlistID = nil
+                }
+            }
+        }
         if let link = LinkSuggestion.classify(text), let lookup {
             Task { await self.resolve(link, known: lookup) }
         } else if !text.isEmpty {
@@ -131,7 +144,17 @@ final class QuickAddModel {
     private func resolve(_ link: LinkSuggestion, known: LinkLookup?) async {
         let current = generation
         switch link {
-        case .unsupported:
+        case .unsupported(_, let url):
+            // `on.soundcloud.com/…` share links are followed to the real address first (S1).
+            if SoundCloudLink.isShortLink(url) {
+                phase = .lookingUp(link)
+                let resolved = await environment.resolveShortLink(url)
+                guard generation == current else { return }
+                if let resolved, let real = LinkSuggestion.classify(resolved), real.source != nil {
+                    await resolve(real, known: nil)
+                    return
+                }
+            }
             phase = .unsupported(link)
             return
         case .track(let source, _), .playlist(let source, _):
@@ -217,15 +240,14 @@ final class QuickAddModel {
         switch (primary, phase) {
         case (.download, .track(let link, let metadata)):
             isStarting = true
-            let queued = environment.downloadsRunning()
             let outcome = await environment.download(link, metadata)
             isStarting = false
             let title = metadata?.title ?? LinkSuggestion.shortURL(link.url)
             switch outcome {
-            case .started(let trackID, let started):
+            case .started(let trackID, _):
+                // The download announces its own start in the status bar when it starts (Activity,
+                // UC-JOB-08) — a queued one when its turn comes; nothing is posted twice here.
                 if let playlistID { environment.addToPlaylist(playlistID, trackID) }
-                environment.post(queued ? Self.queuedMessage(started) : SearchDownloadService.startedMessage(started),
-                                 [StatusAction("Show in Activity") { ActivityRouter.shared.showPopover() }])
                 isFinished = true
             case .alreadyInLibrary(let id):
                 environment.post(SearchDownloadService.alreadyInLibraryMessage(title), [StatusAction("Show") { [environment] in environment.reveal(id) }])
@@ -235,11 +257,10 @@ final class QuickAddModel {
             case .failed(let cause):
                 error = SearchDownloadService.failedMessage(cause)
             }
-        case (.download, .inLibrary(let link, let trackID, let title, _, _)):
+        case (.download, .inLibrary(let link, let trackID, _, _, _)):
             guard let source = link.source else { return }
             await environment.downloadExisting(trackID, source)
             if let playlistID { environment.addToPlaylist(playlistID, trackID) }
-            environment.post(SearchDownloadService.startedMessage(title), [])
             isFinished = true
         case (.showInLibrary, .inLibrary(_, let trackID, _, _, _)):
             environment.reveal(trackID)
@@ -250,11 +271,6 @@ final class QuickAddModel {
         default:
             break
         }
-    }
-
-    /// `Download queued — “Rev8617” starts after the running downloads`.
-    static func queuedMessage(_ title: String) -> String {
-        "Download queued — “\(title)” starts after the running downloads"
     }
 
     func openInBrowser() {

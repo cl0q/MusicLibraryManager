@@ -51,8 +51,55 @@ struct QuickAddModelTests {
 
         await model.performPrimary()
         #expect(log.downloads.count == 1)
-        #expect(log.posted == ["Download started — “Rev8617”"])
+        #expect(log.posted.isEmpty, "the download announces its own start (UC-JOB-08)")
         #expect(model.isFinished, "the sheet closes")
+    }
+
+    /// Review S1: SoundCloud links are looked up and stored without share parameters.
+    @Test func soundCloudLinksLoseShareParametersBeforeLookupAndStorage() async throws {
+        let messy = "https://m.soundcloud.com/skeemask/rev8617/?si=abc123&utm_source=clipboard#t=0:30"
+        #expect(LinkSuggestion.classify(messy) == .track(source: .soundcloud, url: trackURL))
+        #expect(SoundCloudLink.canonical("https://www.soundcloud.com/a/sets/b?in=x") == "https://soundcloud.com/a/sets/b")
+        #expect(SearchDownloadService.linkedTrack(url: LinkSuggestion.classify(messy)!.url, source: .soundcloud, metadata: nil)
+                    .originalPath == trackURL)
+
+        let db = try DatabaseManager.inMemory()
+        let stored = try await TrackRepository(database: db).insert(
+            Track(artist: "Skee Mask", album: "", title: "Rev8617", format: "soundcloud", originalPath: trackURL))
+        let found = try await TrackSearchQueries(database: db).trackID(forLink: LinkSuggestion.classify(messy)!.url)
+        #expect(found == stored.id, "Already in your library — even with ?si=…")
+    }
+
+    @Test func aShortLinkIsFollowedBeforeLookup() async {
+        let log = Log()
+        var environment = environment(log)
+        environment.resolveShortLink = { _ in "https://soundcloud.com/skeemask/rev8617?si=x" }
+        let model = QuickAddModel(environment: environment, text: "https://on.soundcloud.com/AbC123")
+        await model.settle()
+        #expect(model.phase == .track(.track(source: .soundcloud, url: trackURL),
+                                      LinkMetadata(title: "Rev8617", artist: "Skee Mask", durationSeconds: 348)))
+
+        var unresolved = self.environment(log)
+        unresolved.resolveShortLink = { _ in nil }
+        let stays = QuickAddModel(environment: unresolved, text: "https://on.soundcloud.com/AbC123")
+        await stays.settle()
+        if case .unsupported = stays.phase {} else { Issue.record("an unresolved short link is unsupported: \(stays.phase)") }
+    }
+
+    /// Review S8: a remembered `Add to playlist` target that no longer exists is forgotten.
+    @Test func aDeletedRememberedPlaylistIsForgotten() async {
+        let log = Log()
+        QuickAddModel.lastPlaylistID = 99
+        defer { QuickAddModel.lastPlaylistID = nil }
+        var environment = environment(log)
+        environment.existingPlaylistIDs = { [1, 2] }
+        let model = QuickAddModel(environment: environment)
+        await waitUntil { model.playlistID == nil }
+        #expect(QuickAddModel.lastPlaylistID == nil)
+
+        QuickAddModel.lastPlaylistID = 2
+        let kept = QuickAddModel(environment: environment)
+        #expect(kept.playlistID == 2)
     }
 
     @Test func aDownloadWhileOthersRunIsQueuedNotRejected() async {
@@ -61,7 +108,8 @@ struct QuickAddModelTests {
         await model.settle()
         #expect(model.queuedNote != nil)
         await model.performPrimary()
-        #expect(log.posted == ["Download queued — “Rev8617” starts after the running downloads"])
+        #expect(log.downloads.count == 1, "queued, not rejected")
+        #expect(log.posted.isEmpty, "a queued download announces itself when it starts")
     }
 
     @Test func theChosenPlaylistGetsTheNewTrack() async {
