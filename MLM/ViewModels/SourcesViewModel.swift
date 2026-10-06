@@ -46,11 +46,6 @@ final class SourcesViewModel {
     private var soundCloudClient: SoundCloudClient?
     private var spotifyClient: SpotifyClient?
     private var appleMusicClient: AppleMusicClient?
-    /// `Refresh from ‹Source›` (W3-ADD): the refresh lives in `SourceRefreshService`, shared with
-    /// the Add menu's `Refresh from Sources`.
-    private var refreshService: SourceRefreshService?
-    private let trackRepository: TrackRepository?
-    private let playlistRepository: PlaylistRepository?
 
     // MARK: - Init
 
@@ -68,8 +63,6 @@ final class SourcesViewModel {
         self.oauthManager = oauthManager
         self.tokenAccessStatus = tokenAccessStatus
         self.tokenRefreshService = tokenRefreshService
-        self.trackRepository = trackRepository
-        self.playlistRepository = playlistRepository
 
         // Initialize source clients if dependencies are available
         if let oauth = oauthManager, let trackRepo = trackRepository {
@@ -329,39 +322,8 @@ final class SourcesViewModel {
         }
     }
 
-    // MARK: - Sync
-
-    /// Refresh one connected source (`Refresh from ‹Source›`) through `SourceRefreshService`
-    /// (W3-ADD): one Activity operation, new likes as `Not downloaded`, linked playlists
-    /// refreshed — the same refresh as the Add menu's `Refresh from Sources`.
-    @MainActor
-    func syncSource(_ service: TokenStorage.Service) async {
-        guard isConnected(service), !isSyncing(service) else { return }
-        if refreshService == nil, let oauthManager, let trackRepository {
-            refreshService = SourceRefreshService(refresher: LiveSourceLibraryRefresher(
-                tokenStorage: tokenStorage, oauthManager: oauthManager, trackRepository: trackRepository,
-                sourceRepository: sourceRepository, playlistRepository: playlistRepository))
-        }
-        guard let refreshService else { return }
-
-        errors.removeValue(forKey: service)
-        syncingServices.insert(service)
-        defer { syncingServices.remove(service) }
-        switch await refreshService.refresh(service) {
-        case .refreshed:
-            await loadSources()
-        case .signInExpired:
-            // The client deleted the rejected tokens; the source is no longer connected.
-            connectionStatus[service] = false
-            errors[service] = "Sign-in expired (\(service.displayName))"
-            // W3-SET: `Sign-in expired`, not `Disconnected`, until the user reconnects.
-            accounts?.recordRefreshRejected(service)
-        case .failed(let cause):
-            errors[service] = cause
-        case .alreadyRunning:
-            break
-        }
-    }
+    // `Refresh from ‹Source›` lives in `SourceRefreshService` (W3-ADD; the Add menu's `Refresh from
+    // Sources`): linked playlists, add-only.
 
     // MARK: - Helpers
 

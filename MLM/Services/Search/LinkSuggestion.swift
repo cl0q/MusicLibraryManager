@@ -57,7 +57,9 @@ enum LinkSuggestion: Equatable, Sendable {
     /// What the field offers for `text`; `nil` when it isn't a link. Uses `URLDetector`.
     static func classify(_ text: String) -> LinkSuggestion? {
         guard isLink(text) else { return nil }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // SoundCloud links lose `?si=…`, fragments and the `www.`/`m.` host before lookup and
+        // before they are stored (W3-ADD review S1, `SoundCloudLink`).
+        let trimmed = SoundCloudLink.canonical(text.trimmingCharacters(in: .whitespacesAndNewlines))
         switch URLDetector.classify(trimmed) {
         case .youtubeVideo:
             return .track(source: .youtube, url: URLDetector.normalize(trimmed))

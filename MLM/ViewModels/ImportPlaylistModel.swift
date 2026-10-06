@@ -207,7 +207,10 @@ final class ImportPlaylistModel {
     }
 
     var canGoNextFromSource: Bool {
-        selectedPlaylistID != nil || LinkSuggestion.isLink(linkText)
+        if LinkSuggestion.isLink(linkText) { return true }
+        // A playlist chosen under another source doesn't count here.
+        guard let id = selectedPlaylistID else { return false }
+        return (playlists[selectedSource] ?? []).contains { $0.id == id }
     }
 
     /// Loads the selected source's account playlists once it is connected.
@@ -301,9 +304,28 @@ final class ImportPlaylistModel {
         await lastLoad?()
     }
 
+    @ObservationIgnored private var loadGeneration = 0
+
+    var isLoadingPreview: Bool { step == .preview && previewPhase == .loading }
+
+    /// Cancel (Esc) while the preview loads returns to step 1 (S-IMPORT.N09); the sheet stays.
+    func cancelPreviewLoad() {
+        guard isLoadingPreview else { return }
+        loadGeneration += 1
+        previewPhase = .idle
+        step = .source
+    }
+
+    /// Cancel / Esc: back to step 1 while a preview loads, else the sheet closes.
+    func cancel() {
+        if isLoadingPreview { cancelPreviewLoad() } else { close() }
+    }
+
     private func loadPreview(source: ImportSourceKind,
                              fetch: @escaping @MainActor (any RemotePlaylistProvider) async throws -> RemotePlaylistPreview) async {
         lastLoad = { [weak self] in await self?.loadPreview(source: source, fetch: fetch) }
+        loadGeneration += 1
+        let generation = loadGeneration
         step = .preview
         previewSource = source
         previewPhase = .loading
@@ -315,7 +337,10 @@ final class ImportPlaylistModel {
         }
         do {
             let preview = try await fetch(provider)
+            guard generation == loadGeneration else { return }   // Cancel returned to step 1
             await adopt(preview, source: source)
+        } catch where generation != loadGeneration {
+            return
         } catch RemotePlaylistProviderError.notAPlaylistURL {
             // An error for the link belongs under the field (step 1), not in place of the list.
             step = .source
@@ -538,7 +563,6 @@ final class ImportPlaylistModel {
         request.keepLinked = effectiveKeepLinked
         request.downloadNow = downloadNow
         request.alsoDownloadKnown = alsoDownloadKnown && downloadNow
-        let queued = request.downloadNow && downloadCount > 0 && environment.downloadsRunning()
         let post = environment.post
         let showPlaylist = environment.showPlaylist
         let title = preview.title
@@ -551,7 +575,7 @@ final class ImportPlaylistModel {
                     return id
                 })
                 let show = StatusAction("Show Playlist") { showPlaylist(outcome.playlistID) }
-                if let message = Self.statusMessage(outcome, queued: queued) {
+                if let message = Self.statusMessage(outcome) {
                     post(message, [show])
                 }
                 self?.isCommitting = false
@@ -568,12 +592,11 @@ final class ImportPlaylistModel {
         }
     }
 
-    /// The status-bar line after the playlist exists. A running download announces itself
-    /// (`Import started — 31 tracks`, UC-JOB-08), so only the other cases speak here.
-    static func statusMessage(_ outcome: PlaylistImportOutcome, queued: Bool) -> String? {
-        if outcome.downloadCount > 0 {
-            return queued ? "Import queued — \(ActivityNoun.track.counted(outcome.downloadCount))" : nil
-        }
+    /// The status-bar line after the playlist exists. Downloads announce their own start and end
+    /// through Activity (UC-JOB-08 — a queued one when it starts), so only an import without
+    /// downloads speaks here (it has no operation of its own).
+    static func statusMessage(_ outcome: PlaylistImportOutcome) -> String? {
+        if outcome.downloadCount > 0 { return nil }
         let total = outcome.addedToLibrary + outcome.alreadyInLibrary
         return "Imported “\(outcome.playlistName)” — \(ActivityNoun.track.counted(total)), nothing downloaded"
     }

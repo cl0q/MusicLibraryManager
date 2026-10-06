@@ -82,8 +82,9 @@ struct ImportPlaylistSheet: View {
                 ProgressView().controlSize(.small)
                 Text("Adding the tracks…").foregroundStyle(.secondary)
             }
-            // Closes the sheet only: a running import goes on (DEC-044).
-            Button("Cancel", role: .cancel) { model.close() }
+            // Closes the sheet only: a running import goes on (DEC-044). While a preview loads it
+            // returns to step 1 (S-IMPORT.N09).
+            Button("Cancel", role: .cancel) { model.cancel() }
                 .keyboardShortcut(.cancelAction)
             switch model.step {
             case .source:
@@ -180,7 +181,7 @@ private struct SourcePane: View {
             HStack {
                 TextField("Playlist link", text: $model.linkText, prompt: Text(source.linkPlaceholder))
                     .labelsHidden()
-                    .onSubmit { Task { await model.loadLink() } }
+                    // Return is the sheet's default button (Next), which loads the link — once.
                 Button("Load") { Task { await model.loadLink() } }
                     .disabled(!LinkSuggestion.isLink(model.linkText))
             }
@@ -511,7 +512,7 @@ private struct ConfirmStep: View {
             .formStyle(.grouped)
             .scrollDisabled(true)
             .fixedSize(horizontal: false, vertical: true)
-            Text("After you click Import this sheet closes. Progress shows on the playlist (Importing · 12 of 44, then Incomplete · 9 failed · Retry All if something fails) and in Activity. Failed tracks can be retried there at any time.")
+            Text("After you click Import this sheet closes. Progress shows on the playlist and in Activity. Failed tracks can be retried there at any time.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

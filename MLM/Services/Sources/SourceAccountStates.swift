@@ -91,9 +91,20 @@ final class SourcesViewModelAccountStates: SourceAccountStateReading {
         return accounts.state(for: service)
     }
 
+    /// Re-reads the accounts. A source marked expired comes back as `Connected` once its saved
+    /// sign-in is readable again and present (review S2: `expired` was never cleared).
     func reload() async {
         await viewModel.loadSources()
+        for service in expired where viewModel.isConnected(service) && !viewModel.isTokenInaccessible(service)
+            && Self.isReadable(service, tokenStorage) {
+            expired.remove(service)
+        }
         generation += 1
+    }
+
+    private static func isReadable(_ service: TokenStorage.Service, _ storage: TokenStorage?) -> Bool {
+        guard let storage, let credentials = try? storage.getCredentials(service: service) else { return false }
+        return !credentials.accessToken.isEmpty
     }
 
     func markSignInExpired(_ service: TokenStorage.Service) {
