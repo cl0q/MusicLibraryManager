@@ -245,12 +245,15 @@ final class SidebarModel {
         return "\(service.displayName) sign-in expired"
     }
 
-    /// UC-SIDE-05: Discover = recommendations waiting + reels not Done; Review = groups + conflicts.
+    /// UC-SIDE-05: Discover = recommendations waiting + reels not Done; Review = groups +
+    /// conflicts + pending album suggestions (W4-3, IMP-086).
     func reloadBadges(
-        trackRepository: TrackRepository?, analysisRepository: AnalysisRepository?, reelRepository: ReelRepository? = nil
+        trackRepository: TrackRepository?, analysisRepository: AnalysisRepository?, reelRepository: ReelRepository? = nil,
+        albumSuggestions: AlbumSuggestionRepository? = nil
     ) async {
         if let analysisRepository, let counts = try? await analysisRepository.pendingReviewCounts() {
-            reviewCount = counts.duplicates + counts.conflicts
+            let albums = (try? await albumSuggestions?.counts().pending) ?? 0
+            reviewCount = counts.duplicates + counts.conflicts + albums
         }
         if let trackRepository, let inbox = try? await trackRepository.fetchDiscoveryInboxTracks() {
             let reels = (try? await reelRepository?.notDoneCount()) ?? 0

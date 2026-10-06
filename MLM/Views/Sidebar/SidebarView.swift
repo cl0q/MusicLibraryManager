@@ -499,7 +499,8 @@ struct SidebarView: View {
         await model.reloadBadges(
             trackRepository: container.trackRepository,
             analysisRepository: container.analysisRepository,
-            reelRepository: container.reelRepository
+            reelRepository: container.reelRepository,
+            albumSuggestions: container.databaseManager.map { AlbumSuggestionRepository(database: $0.pool) }
         )
     }
 }

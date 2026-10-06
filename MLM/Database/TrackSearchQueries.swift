@@ -43,7 +43,10 @@ enum TrackSearchSQL {
             """
     }()
 
-    static let noAlbum: String = noAlbumText
+    /// The one predicate `is: no album`, `TrackScopeQueries.noAlbumCount()` and Review ▸ Albums
+    /// share: no album text, and not confirmed `No album` (`tracks.no_album`, v52, W4-3). The
+    /// in-memory twin is `SearchFilter.matches` (`Track.noAlbum`) — keep them in agreement.
+    static let noAlbum: String = "(\(noAlbumText) AND no_album = 0)"
 
     private static func predicate(for token: SearchToken) -> (String, StatementArguments) {
         switch (token.kind, token.value) {
