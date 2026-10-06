@@ -23,6 +23,11 @@ struct PlaylistTable: View {
                 ContentUnavailableView.search(text: viewModel.searchFilter.displayText)
             }
         }
+        // ⌥↑ / ⌥↓: the keyboard way to reorder, Manual order only (IMP-117, UC-A11Y-01).
+        .onKeyPress(keys: [.upArrow, .downArrow], phases: [.down, .repeat]) { press in
+            guard press.modifiers == .option else { return .ignored }
+            return moveSelection(by: press.key == .upArrow ? -1 : 1) ? .handled : .ignored
+        }
         .task(id: loadKey) { await load() }
         .background { SelectionMirror(list: list, viewModel: viewModel) }
         // A file check changed persisted availability: reload in place.
@@ -87,6 +92,19 @@ struct PlaylistTable: View {
 
     private var isPlaylistOrder: Bool {
         list.sortOrder?.isContainerOrder ?? true
+    }
+
+    /// Moves the selected rows one place; false (key left alone) while sorted by a column,
+    /// filtered, in the `Download failed` scope, or when nothing would move.
+    private func moveSelection(by step: Int) -> Bool {
+        guard let playlistID = playlist.id, let edits = shell?.edits,
+              let plan = PlaylistKeyboardMove.plan(
+                selected: list.selectedRows().map(\.id), playlistOrder: viewModel.tracks.compactMap(\.id), step: step,
+                isPlaylistOrder: isPlaylistOrder, isFiltered: !viewModel.searchFilter.isEmpty || failedOnly)
+        else { return false }
+        let name = viewModel.playlist.name
+        Task { await edits.placeTracks(plan, inPlaylist: playlistID, name: name) }
+        return true
     }
 
     /// The column the table is sorted by when it isn't in playlist order.

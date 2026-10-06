@@ -52,6 +52,7 @@ struct AlbumInfoSheet: View {
             guard case .success(let url) = result else { return }
             stage(url)
         }
+        .fileDialogMessage("Choose an image for the cover of “\(album?.title ?? "")”.")
     }
 
     // MARK: Content
