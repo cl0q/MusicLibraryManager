@@ -88,11 +88,13 @@ struct ArtworkBackfillServiceTests {
         // Rapid double-post should not cause double backfill
         center.post(name: .libraryDidImport, object: nil)
         center.post(name: .libraryDidImport, object: nil)
-        // Wait for idle, then confirm it stays idle (no second backfill started).
-        let idle = await eventually { svc.isBackfilling == false }
+        // Wait for the backfill to have run (idle before it starts is not idle after it),
+        // then confirm it stays idle (no second backfill started).
+        #expect(await waitUntil { svc.progress.total == 1 }, "the first post starts one backfill")
+        #expect(await waitUntil { !svc.isBackfilling }, "the backfill returns to idle")
         try await Task.sleep(for: .milliseconds(200))
-        #expect(idle)
         #expect(svc.isBackfilling == false)
+        #expect(svc.progress.total == 1)
     }
 
     @Test func testNotificationPosting() async throws {
