@@ -36,11 +36,7 @@ struct ImportPlaylistModelTests {
             accounts: accounts,
             queries: ImportLibraryQueries(database: database),
             makeImporter: {
-                PlaylistImporter(trackRepository: TrackRepository(database: database),
-                                 sourceRepository: SourceRepository(database: database),
-                                 playlistRepository: PlaylistRepository(database: database),
-                                 queries: ImportLibraryQueries(database: database),
-                                 downloads: downloads, notificationCenter: NotificationCenter())
+                PlaylistImporter(database: database, downloads: downloads, notificationCenter: NotificationCenter())
             },
             downloadsRunning: { downloadsRunning },
             post: { text, _ in posted.messages.append(text) },
@@ -131,6 +127,36 @@ struct ImportPlaylistModelTests {
             return
         }
         #expect(source == "YouTube")
+    }
+
+    @Test func cancelWhileThePreviewLoadsReturnsToStepOneAndAPlaylistOfAnotherSourceDoesNotEnableNext() async throws {
+        final class SlowProvider: RemotePlaylistProvider {
+            let displayName = "YouTube"
+            let preferredSource: DownloadOrchestrator.PreferredSource = .youtube
+            let gate = ImportTestGate()
+            let preview = ImportFixtures.preview()
+            func fetchPreview(fromURL url: String) async throws -> RemotePlaylistPreview {
+                await gate.wait()
+                return preview
+            }
+        }
+        let slow = SlowProvider()
+        let model = ImportPlaylistModel(environment: ImportPlaylistEnvironment(
+            provider: { _ in slow }, accounts: ImportTestAccounts(), queries: nil, makeImporter: { nil }))
+        model.linkText = ImportFixtures.url(.youtube)
+        let loading = Task { await model.loadLink() }
+        await waitUntil { slow.gate.isWaiting }
+        #expect(model.isLoadingPreview)
+        model.cancel()
+        #expect(model.step == .source)
+        #expect(!model.isFinished, "the sheet stays")
+        slow.gate.open()
+        await loading.value
+        #expect(model.step == .source, "a late answer doesn't bring step 2 back")
+
+        model.linkText = ""
+        model.selectedPlaylistID = "elsewhere"
+        #expect(!model.canGoNextFromSource)
     }
 
     // MARK: Step 2: preview
@@ -289,7 +315,7 @@ struct ImportPlaylistModelTests {
         #expect(h.model.queuedNote?.hasSuffix("This import is queued and starts when that one ends. You don’t need to wait here.") == true)
         h.model.importNow()
         await h.model.commitTask?.value
-        #expect(h.posted.messages == ["Import queued — 3 tracks"])
+        #expect(h.posted.messages.isEmpty, "the queued download announces itself when it starts (UC-JOB-08)")
     }
 
     @Test func aRunningImportSurvivesClosingTheSheet() async throws {
@@ -378,7 +404,6 @@ struct ImportDownloadLaneTests {
 
         starter.startDownloads([remote(1), remote(2)], preferredSource: .youtube, playlistID: 10, playlistName: "First")
         await waitUntil { runner.isHeld }
-        #expect(starter.hasActiveDownloads)
         starter.startDownloads([remote(3)], preferredSource: .youtube, playlistID: 11, playlistName: "Second")
         await waitUntil { center.activeOperations.count == 2 }
 

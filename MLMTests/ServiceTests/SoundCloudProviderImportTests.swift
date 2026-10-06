@@ -252,10 +252,8 @@ struct SoundCloudProviderImportTests {
     /// The commit the import sheet makes (W3-ADD `PlaylistImporter`; the provider no longer persists).
     private static func commit(_ preview: RemotePlaylistPreview, _ tracks: [RemotePlaylistTrack],
                                provider: SoundCloudPlaylistProvider, database: DatabaseQueue) async throws -> PlaylistImportOutcome {
-        let importer = PlaylistImporter(
-            trackRepository: TrackRepository(database: database), sourceRepository: SourceRepository(database: database),
-            playlistRepository: PlaylistRepository(database: database), queries: ImportLibraryQueries(database: database),
-            downloads: RecordingPlaylistDownloads(), notificationCenter: NotificationCenter())
+        let importer = PlaylistImporter(database: database, downloads: RecordingPlaylistDownloads(),
+                                        notificationCenter: NotificationCenter())
         return try await importer.run(
             PlaylistImportRequest(preview: preview, tracks: tracks, source: .soundcloud, downloadNow: false),
             sourceRowID: { try await provider.sourceRowForLinking().id! })

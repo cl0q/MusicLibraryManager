@@ -205,12 +205,8 @@ final class ImportSheetsPresenter: QuickAddPresenting {
             accounts: accounts,
             queries: container.databaseManager.map { ImportLibraryQueries(database: $0.pool) },
             makeImporter: {
-                guard let tracks = container.trackRepository, let sources = container.sourceRepository,
-                      let playlists = container.playlistRepository, let database = container.databaseManager,
-                      let downloads = container.downloadViewModel else { return nil }
-                return PlaylistImporter(trackRepository: tracks, sourceRepository: sources, playlistRepository: playlists,
-                                        queries: ImportLibraryQueries(database: database.pool),
-                                        downloads: LivePlaylistDownloadStarter(downloads: downloads))
+                guard let database = container.databaseManager, let downloads = container.downloadViewModel else { return nil }
+                return PlaylistImporter(database: database.pool, downloads: LivePlaylistDownloadStarter(downloads: downloads))
             },
             downloadsRunning: downloadsRunning,
             runningImportSentence: { Self.runningImportSentence(ActivityCenter.shared) },

@@ -38,7 +38,7 @@ enum SourceAccountState: Equatable, Sendable {
 /// **Swap point (W3-SET):** W3-SET owns the account-state model (`Connected` / `Disconnected` /
 /// `Sign-in expired` per source). Until it lands, `SourcesViewModelAccountStates` reads the
 /// state from `SourcesViewModel` as before. When W3-SET's model exists, make it conform to this
-/// protocol and change the one line in `ImportServices.makeAccountStates`.
+/// protocol and change the one line in `ImportSheetsPresenter.makeAccountStates`.
 @MainActor
 protocol SourceAccountStateReading: AnyObject {
     func state(of service: TokenStorage.Service) -> SourceAccountState
@@ -91,9 +91,20 @@ final class SourcesViewModelAccountStates: SourceAccountStateReading {
         return viewModel.isConnected(service) ? .connected(account: nil) : .disconnected
     }
 
+    /// Re-reads the accounts. A source marked expired comes back as `Connected` once its saved
+    /// sign-in is readable again and present (review S2: `expired` was never cleared).
     func reload() async {
         await viewModel.loadSources()
+        for service in expired where viewModel.isConnected(service) && !viewModel.isTokenInaccessible(service)
+            && Self.isReadable(service, tokenStorage) {
+            expired.remove(service)
+        }
         generation += 1
+    }
+
+    private static func isReadable(_ service: TokenStorage.Service, _ storage: TokenStorage?) -> Bool {
+        guard let storage, let credentials = try? storage.getCredentials(service: service) else { return false }
+        return !credentials.accessToken.isEmpty
     }
 
     func markSignInExpired(_ service: TokenStorage.Service) {

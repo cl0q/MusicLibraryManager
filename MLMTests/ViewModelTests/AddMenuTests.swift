@@ -216,8 +216,8 @@ struct SourceSignInModelTests {
 struct SourceRefreshServiceTests {
     final class Refresher: SourceLibraryRefreshing {
         var results: [TokenStorage.Service: Result<Int, Error>] = [:]
-        func refresh(_ service: TokenStorage.Service) async throws -> Int {
-            try (results[service] ?? .success(0)).get()
+        func refresh(_ service: TokenStorage.Service) async throws -> SourceRefreshSummary {
+            SourceRefreshSummary(newTracks: try (results[service] ?? .success(0)).get())
         }
     }
 
@@ -230,7 +230,7 @@ struct SourceRefreshServiceTests {
         service.onSignInExpired = { expired.append($0) }
 
         let outcomes = await service.refreshAll([.soundcloud, .spotify])
-        #expect(outcomes[.soundcloud] == .refreshed(newTracks: 6))
+        #expect(outcomes[.soundcloud] == .refreshed(SourceRefreshSummary(newTracks: 6)))
         #expect(outcomes[.spotify] == .signInExpired)
         #expect(expired == [.spotify])
 
