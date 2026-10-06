@@ -58,14 +58,14 @@ struct LibraryLaunchCoordinatorTests {
                     take: { [unowned self] in defer { self.pendingPath = nil }; return self.pendingPath },
                     set: { [unowned self] in self.pendingPath = $0 }),
                 openLibrary: { [unowned self] location, progress in
-                    for phase in await self.phasesDuringOpen { progress(phase) }
-                    if let openError = await self.openError { throw openError }
-                    if let duringOpen = await self.takeDuringOpen() { await duringOpen() }
-                    await self.record(location)
+                    for phase in self.phasesDuringOpen { progress(phase) }
+                    if let openError = self.openError { throw openError }
+                    if let duringOpen = self.takeDuringOpen() { await duringOpen() }
+                    self.record(location)
                 },
                 reportFailure: { [unowned self] in self.failures.append(String(describing: $0)) },
                 relaunch: { [unowned self] in self.relaunches += 1 },
-                needsSetup: { [unowned self] in await self.needsSetup },
+                needsSetup: { [unowned self] in self.needsSetup },
                 setupServices: .init(makeImporter: { nil }, activity: nil)
             )
         }
