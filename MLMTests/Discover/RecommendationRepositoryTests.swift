@@ -64,6 +64,20 @@ struct RecommendationRepositoryTests {
         #expect(try await env.recs.waiting().count == 3)
     }
 
+    @Test func keepTeachesSimilarAndUndoTakesItBack() async throws {
+        let env = try await Self.make()
+        let kept = try await env.recs.keep(ids: [env.held[0]])
+        func feedback() async throws -> [Int] {
+            try await env.db.read { db in
+                try Int.fetchAll(db, sql: "SELECT feedback_value FROM track_similarity_feedback WHERE seed_track_id = ? AND target_track_id = ?",
+                                 arguments: [env.seed, env.held[0]])
+            }
+        }
+        #expect(try await feedback() == [1])
+        try await env.recs.undoKeep(ids: kept)
+        #expect(try await feedback().isEmpty)
+    }
+
     @Test func dismissKeepsTheFlagRecordsTrashAndUndoRestoresWaiting() async throws {
         let env = try await Self.make()
         let dismissed = try await env.recs.dismiss(ids: [env.held[1]])

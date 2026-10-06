@@ -27,8 +27,7 @@ private struct InspectorSingleAudio: View {
     @Environment(\.container) private var container
     @Environment(\.openSettings) private var openSettings
     @State private var fileURL: URL?
-    @State private var hasSimilarityAnalysis = false
-    @State private var similar: [Track] = []
+    @Environment(NavigationModel.self) private var navigation: NavigationModel?
     @State private var loadedTrackID: Int64?
 
     private var analysis: InspectorAnalysis { InspectorAnalysis.shared }
@@ -74,20 +73,13 @@ private struct InspectorSingleAudio: View {
             analyzeRow(status)
         }
 
+        // The matches live in their own view (V-SIMILAR, DEC-030); Info only offers the way in.
         Section("Similar") {
-            if !hasSimilarityAnalysis {
-                Text("Analyze this track to find similar ones in your library.")
-                    .foregroundStyle(.secondary)
-            } else if similar.isEmpty {
-                Text("No similar tracks in your library yet.")
-                    .foregroundStyle(.secondary)
-            } else {
-                // Plain rows: no delete, no download here (PP-INSPECTOR-21). `Show All` → the
-                // Similar view arrives with W3-DISC (DEC-030); until then it is left out.
-                ForEach(similar, id: \.rowID) { match in
-                    InspectorSimilarRow(track: match)
-                }
+            Button("Find Similar") {
+                if let id = track.id { navigation?.push(.similar(trackID: id)) }
             }
+            .disabled(track.id == nil || navigation == nil)
+            .help("Shows the tracks in your library that sound like this one, and suggestions from SoundCloud or Last.fm")
         }
         .task(id: TaskKey(trackID: track.id, analysing: analysis.isRunning(track.id ?? -1))) {
             await load()
@@ -166,49 +158,11 @@ private struct InspectorSingleAudio: View {
         loadedTrackID = track.id
         if trackChanged {
             fileURL = nil
-            similar = []
         }
-        guard let id = track.id else { return }
+        guard track.id != nil else { return }
         if track.availability() == .local, InspectorDrive.offlineVolume(container) == nil {
             fileURL = await TrackFileLocator.localURL(for: track, container: container)
         }
-        guard let pool = container.databaseManager?.pool else { return }
-        hasSimilarityAnalysis = (try? await InspectorQueries(database: pool).hasSimilarityAnalysis(trackID: id)) ?? false
-        if hasSimilarityAnalysis, let repository = container.trackRepository {
-            similar = ((try? await repository.fetchSimilarTracks(seedTrackId: id, limit: 5)) ?? []).map(\.track)
-        } else {
-            similar = []
-        }
-    }
-}
-
-/// One similar track: cover, title, artist · BPM. Ranked; no percentage (P-INSPECTOR-SIMILAR).
-private struct InspectorSimilarRow: View {
-    let track: Track
-
-    var body: some View {
-        HStack(spacing: Spacing.s) {
-            Group {
-                if track.availability().hasFile, let id = track.id {
-                    TrackCoverView(trackId: id, size: .small, cornerRadius: 4)
-                } else {
-                    TrackPlaceholderArtwork()
-                }
-            }
-            .frame(width: 24, height: 24)
-            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-            .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(track.title).lineLimit(1)
-                Text([TrackMetadataPresentation.artistDisplay(track.artist), track.bpm.flatMap { $0 > 0 ? "\($0) BPM" : nil }]
-                    .compactMap { $0 }.joined(separator: " · "))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                    .lineLimit(1)
-            }
-        }
-        .accessibilityElement(children: .combine)
     }
 }
 

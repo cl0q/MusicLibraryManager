@@ -388,7 +388,7 @@ enum SnapshotFixtures {
         "Discover/RecommendationsView.swift": "Deferred: the groups are the shared track table over live tracks; their verdicts are DiscoverModel, unit-tested (W3-DISC-A).",
         "Discover/RecommendationCells.swift": "Deferred: the source cell of the shared track table (word and 6 pt dot); the words are DiscoverModel.sourceWord, unit-tested (W3-DISC-A).",
         "Discover/DiscoverLive.swift": "Non-view: the app\u{2019}s wiring of DiscoverModel (repositories, downloads, analysis, playlist placement) (W3-DISC-A).",
-        "TrackDetail/GrooveView.swift": "Deferred: preview audio, recommendations and random placeholders require controlled provider/player state.",
+        "Similar/SimilarView.swift": "Deferred: the page reads the library database, the sources and the download pipeline; SimilarModel (matches, online rows, Download and Keep, failures) is unit-tested on temporary databases (W3-DISC-A).",
     ]
 
     private static let inventoryPaths = """
@@ -501,13 +501,13 @@ Shell/TrailingColumnView.swift
 Shell/UndoCenter.swift
 Sidebar/LibraryFooter.swift
 Sidebar/SidebarView.swift
+Similar/SimilarView.swift
 Sync/NewSyncProfileSheet.swift
 Sync/Pickers/PlaylistPickerModel.swift
 Sync/SyncProfileMenu.swift
 Sync/SyncProfilePage.swift
 Sync/SyncProfileSections.swift
 Sync/SyncProfileSheets.swift
-TrackDetail/GrooveView.swift
 TrackDetail/WaveformHelpers.swift
 TrackDetail/WaveformView.swift
 TrackList/DownloadFailureReasonText.swift

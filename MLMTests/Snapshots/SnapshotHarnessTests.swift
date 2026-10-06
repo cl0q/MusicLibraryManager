@@ -74,7 +74,8 @@ final class SnapshotsTests: XCTestCase {
         // deferred 69 → 74.
         // W3-DISC-A replaced DiscoveryInbox/DiscoveryInboxView.swift (rendered: `discovery-inbox-empty`)
         // and made Discover/DiscoverView.swift (rendered: `discover-screen`) deferred; added
-        // Discover/{RecommendationsView, RecommendationCells} (deferred) and Discover/DiscoverLive (non-view).
+        // Discover/{RecommendationsView, RecommendationCells} (deferred) and Discover/DiscoverLive (non-view),
+        // and replaced the unhosted TrackDetail/GrooveView.swift (deferred) by Similar/SimilarView.swift (deferred).
         XCTAssertEqual(paths.count, 134, "Re-audit inventory changes explicitly.")
         XCTAssertEqual(Set(SnapshotFixtures.inventory.map(\.path)), paths)
         XCTAssertEqual(SnapshotFixtures.inventory.count, paths.count)

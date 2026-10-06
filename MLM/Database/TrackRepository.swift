@@ -1175,6 +1175,8 @@ final class TrackRepository: Sendable {
     ///   - seedTrackId: The track ID to find matches for.
     ///   - limit: Maximum matches to return.
     /// - Returns: A ranked list of matching tracks with their similarity score and best matching segment timestamp.
+    ///   Held recommendations and versions hidden by Review are not candidates (W3-DISC-A: Similar and
+    ///   the Inspector listed them although every other list hides them).
     func fetchSimilarTracks(seedTrackId: Int64, limit: Int = 10, temperature: Double = 0.0) async throws -> [(track: Track, score: Float, bestMatchOffset: Double)] {
         // 1. Fetch seed track with its embeddings and acoustics
         guard let seedTrack = try await fetchTrack(id: seedTrackId),
@@ -1223,6 +1225,7 @@ final class TrackRepository: Sendable {
                     WHERE e.mix_category = ? 
                       AND e.track_id != ?
                       AND NOT (LOWER(t.artist) = LOWER(?) AND LOWER(t.title) = LOWER(?))
+                      AND t.is_duplicate = 0 AND t.is_pending_recommendation = 0
                 """
                 args = [cat, seedTrackId, seedArtist, seedTitle]
             } else {
@@ -1234,6 +1237,7 @@ final class TrackRepository: Sendable {
                     WHERE e.mix_category IS NULL 
                       AND e.track_id != ?
                       AND NOT (LOWER(t.artist) = LOWER(?) AND LOWER(t.title) = LOWER(?))
+                      AND t.is_duplicate = 0 AND t.is_pending_recommendation = 0
                 """
                 args = [seedTrackId, seedArtist, seedTitle]
             }

@@ -201,11 +201,12 @@ struct TrackMenuModel: Equatable, Sendable {
         if single, let artist = TrackMetadataPresentation.artistDisplay(rows[0].track.artist) {
             info.append(.goToArtist(artist))
         }
-        info += context.extras.info.map(TrackMenuItem.extra)
         // `Find Similar` (W3-DISC-A): one track, in every list that is a place of the library.
         if single, context.canFindSimilar {
             if case .reviewGroup = context.container {} else { info.append(.findSimilar) }
         }
+        // A place's own items stay last in the Info group.
+        info += context.extras.info.map(TrackMenuItem.extra)
 
         // 5 Fix
         var fix: [TrackMenuItem] = context.extras.fix.map(TrackMenuItem.extra)

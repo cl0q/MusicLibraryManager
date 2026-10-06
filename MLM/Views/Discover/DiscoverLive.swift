@@ -77,3 +77,61 @@ enum DiscoverLive {
         return name
     }
 }
+
+// MARK: - Similar
+
+extension DiscoverLive {
+    /// `nil` before a library is open.
+    static func similarDependencies(_ container: DependencyContainer) -> SimilarModel.Dependencies? {
+        guard let manager = container.databaseManager, let tracks = container.trackRepository,
+              let discover = dependencies(container, shell: nil) else { return nil }
+        let recommendations = RecommendationRepository(database: manager.pool)
+        return SimilarModel.Dependencies(
+            fetchTrack: discover.fetchTrack,
+            similarInLibrary: { seedID, limit in
+                ((try? await tracks.fetchSimilarTracks(seedTrackId: seedID, limit: limit)) ?? []).map { ($0.track, $0.score) }
+            },
+            isAnalysed: discover.isAnalysed,
+            analyse: discover.analyse,
+            swarm: discover.swarm,
+            startDownload: { recommendation, seed, hold in
+                container.downloadViewModel?.downloadDiscoveryTrack(
+                    artist: recommendation.artist, title: recommendation.title,
+                    soundcloudURL: recommendation.scDownloadUrl, source: recommendation.source,
+                    seedTrack: seed, hold: hold)
+            },
+            pipelineStatus: { recommendation in
+                let key = recommendation.scDownloadUrl ?? "\(recommendation.artist) - \(recommendation.title)"
+                return container.downloadViewModel?.discoveryStatuses[key]
+            },
+            placement: { recommendation, seedID in
+                await placement(of: recommendation, seedID: seedID, tracks: tracks, recommendations: recommendations)
+            }
+        )
+    }
+
+    /// Where a suggestion already is: a track downloaded for this seed (matched by title, as the
+    /// old sheet did), else the same artist and title anywhere in the library. A dismissed one is
+    /// nowhere.
+    static func placement(
+        of recommendation: SwarmRecommendation, seedID: Int64, tracks: TrackRepository,
+        recommendations: RecommendationRepository
+    ) async -> SimilarModel.OnlineRow.Placement? {
+        func normal(_ text: String) -> String { text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) }
+        let wanted = normal(recommendation.title)
+        let discovered = (try? await tracks.fetchDiscoveryTracksForSeed(seedTrackId: seedID)) ?? []
+        var match = discovered.first { track in
+            let title = normal(track.title)
+            return title == wanted || title.contains(wanted) || wanted.contains(title)
+        }
+        if match == nil {
+            match = (try? await tracks.fetchTrackByArtistAndTitle(artist: recommendation.artist, title: recommendation.title)) ?? nil
+        }
+        guard let id = match?.id else { return nil }
+        switch (try? await recommendations.statuses(for: [id]))?[id] {
+        case RecommendationRepository.Status.waiting: return .held
+        case RecommendationRepository.Status.dismissed: return nil
+        default: return .library
+        }
+    }
+}

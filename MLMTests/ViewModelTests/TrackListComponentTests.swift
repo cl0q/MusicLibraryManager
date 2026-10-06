@@ -169,7 +169,7 @@ struct TrackListComponentTests {
             [.play(enabled: true), .preview(enabled: true)],
             [.playNext, .addToQueue],
             [.addToPlaylist, .addToSyncProfile],
-            [.getInfo, .goToArtist("Artist")],
+            [.getInfo, .goToArtist("Artist"), .findSimilar],
             [.showInFinder(enabled: true), .copy(filePath: true, link: true)],
             [.removeFromLibrary(enabled: true)],
         ])

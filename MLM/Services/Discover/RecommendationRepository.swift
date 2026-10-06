@@ -83,6 +83,15 @@ final class RecommendationRepository: Sendable {
                 try db.execute(sql: "UPDATE tracks SET is_pending_recommendation = 0 WHERE id = ?", arguments: [id])
                 try db.execute(sql: "UPDATE track_discovery_log SET status = ? WHERE discovered_track_id = ?",
                                arguments: [Status.kept, id])
+                // What the user keeps teaches Similar (the old thumbs-up, now the real gesture):
+                // the seed's score for this track is boosted. Undo removes the row again.
+                if let seed = try Int64.fetchOne(db, sql: "SELECT seed_track_id FROM track_discovery_log WHERE discovered_track_id = ?",
+                                                 arguments: [id]) {
+                    try db.execute(sql: """
+                        INSERT OR REPLACE INTO track_similarity_feedback (seed_track_id, target_track_id, feedback_value)
+                        VALUES (?, ?, 1)
+                    """, arguments: [seed, id])
+                }
             }
             return waiting
         }
@@ -95,6 +104,8 @@ final class RecommendationRepository: Sendable {
                 try db.execute(sql: "UPDATE tracks SET is_pending_recommendation = 1 WHERE id = ?", arguments: [id])
                 try db.execute(sql: "UPDATE track_discovery_log SET status = ? WHERE discovered_track_id = ?",
                                arguments: [Status.waiting, id])
+                try db.execute(sql: "DELETE FROM track_similarity_feedback WHERE target_track_id = ? AND feedback_value = 1",
+                               arguments: [id])
             }
         }
     }
