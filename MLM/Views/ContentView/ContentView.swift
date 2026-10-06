@@ -66,6 +66,7 @@ struct ContentView: View {
                 .modifier(LibraryRemovalAlert())
                 .installsMainWindowPresenter()
                 .environment(shell.navigation)
+                .modifier(TrackRemovalFailureAlert())
                 .environment(shell.trailing)
                 .environment(shell.statusBar)
                 .environment(shell.sidebar)
