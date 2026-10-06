@@ -32,13 +32,18 @@ enum TrackSearchSQL {
     }
 
     /// Album values that aren't albums (UC-TABLE-11, `TrackMetadataPresentation`).
-    static let noAlbum: String = {
+    ///
+    /// `noAlbumText` is the album *text* alone (no album, source name or URL); `noAlbum` is what
+    /// `is: no album`, the Albums footer and Review ▸ Albums use.
+    static let noAlbumText: String = {
         let literals = TrackMetadataPresentation.nonAlbumLiterals.sorted().map { "'\($0.replacingOccurrences(of: "'", with: "''"))'" }
         return """
             (TRIM(COALESCE(album, '')) = '' OR LOWER(TRIM(album)) IN (\(literals.joined(separator: ", "))) \
             OR LOWER(TRIM(album)) LIKE 'http://%' OR LOWER(TRIM(album)) LIKE 'https://%' OR LOWER(TRIM(album)) LIKE 'www.%')
             """
     }()
+
+    static let noAlbum: String = noAlbumText
 
     private static func predicate(for token: SearchToken) -> (String, StatementArguments) {
         switch (token.kind, token.value) {

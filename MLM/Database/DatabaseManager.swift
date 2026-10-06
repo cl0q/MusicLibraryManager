@@ -1553,6 +1553,16 @@ final class DatabaseManager: Sendable {
             try AlbumMigrations.v51AlbumDedup(db)
         }
 
+        // ──────────────────────────────────────────────────────────────
+        // Migration v52_album_suggestions (W4-3, IMP-082/084): Review ▸ Albums keeps one
+        // suggestion per track (`album_suggestions`, status pending | accepted | rejected |
+        // no_album | no_match) and a confirmed `No album` on the track (`tracks.no_album`).
+        // No backfill. Body: `AlbumSuggestionMigration`.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v52_album_suggestions") { db in
+            try AlbumSuggestionMigration.v52(db)
+        }
+
         return migrator
     }
 
