@@ -49,22 +49,40 @@ final class DatabaseManager: Sendable {
             try? db.execute(sql: "PRAGMA journal_mode = WAL")
         }
 
-        self.pool = try DatabasePool(path: databasePath.path, configuration: config)
+        // Each step's errors carry the step (`LibraryOpenError`), so the launch failure says
+        // what is true (W3-LAUNCH review S7). What each step does is unchanged.
+        let pool: DatabasePool
+        do {
+            pool = try DatabasePool(path: databasePath.path, configuration: config)
+            // Readable at all? (The backup check below reads the same thing.)
+            _ = try pool.read { db in try Self.buildMigrator().appliedIdentifiers(db) }
+        } catch {
+            throw LibraryOpenError(stage: .opening, underlying: error)
+        }
+        self.pool = pool
 
         // Pre-migration backup: if any migrations are pending, back up before running them.
         // Failure aborts startup — migrations must never run unprotected.
-        _ = try BackupService.performPreMigrationBackupIfNeeded(
-            pool: pool,
-            databasePath: databasePath,
-            coversDirectory: Self.playlistCoversDirectory(forDatabaseAt: databasePath),
-            backupsRoot: backupsRoot,
-            willBackUp: progress.map { report in
-                { report(.backingUp(bytes: Self.fileSize(of: databasePath))) }
-            }
-        )
+        do {
+            _ = try BackupService.performPreMigrationBackupIfNeeded(
+                pool: pool,
+                databasePath: databasePath,
+                coversDirectory: Self.playlistCoversDirectory(forDatabaseAt: databasePath),
+                backupsRoot: backupsRoot,
+                willBackUp: progress.map { report in
+                    { report(.backingUp(bytes: Self.fileSize(of: databasePath))) }
+                }
+            )
+        } catch {
+            throw LibraryOpenError(stage: .backingUp, underlying: error)
+        }
 
         // Run all migrations (one by one when the loading screen counts them).
-        try DatabaseMigrationSteps.migrate(migrator, pool, progress: progress)
+        do {
+            try DatabaseMigrationSteps.migrate(migrator, pool, progress: progress)
+        } catch {
+            throw LibraryOpenError(stage: .updating, underlying: error)
+        }
 
         // Clean up orphaned track_tags from v11 SoundCloud resync migration
         try? pool.write { db in

@@ -113,10 +113,106 @@ struct LibraryOpenPhaseTests {
         #expect(LibraryOpenPhase.backingUp(bytes: nil).isWriting && !LibraryOpenPhase.reading.isWriting)
     }
 
-    @Test func failureCauseFollowsThePhase() {
-        #expect(LaunchFailure.cause(after: nil) == .unreadable)
-        #expect(LaunchFailure.cause(after: .reading) == .unreadable)
-        #expect(LaunchFailure.cause(after: .backingUp(bytes: 1)) == .backupBeforeUpdate)
-        #expect(LaunchFailure.cause(after: .updating(step: 1, total: 2)) == .update)
+    /// S7: `DatabaseManager` marks a database that can't be read as the opening step.
+    @Test func anUnreadableDatabaseIsTheOpeningStep() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let database = root.appendingPathComponent("music_library.db")
+        try Data(repeating: 0x5A, count: 8_192).write(to: database)
+        do {
+            _ = try DatabaseManager(databaseURL: database, backupsRoot: root.appendingPathComponent("backups"))
+            Issue.record("a garbage file must not open")
+        } catch let error as LibraryOpenError {
+            #expect(error.stage == .opening)
+        }
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("backups").path),
+                "nothing was backed up from it")
+    }
+
+    /// A migration that fails in the middle: the stepped path stops at the same place, with the
+    /// same applied set and the error surfaced, as `migrate()` does.
+    @Test func aMigrationFailingMidStepLeavesTheSameStateAsMigrate() throws {
+        struct Boom: Error {}
+        func migrator() -> DatabaseMigrator {
+            var migrator = DatabaseMigrator()
+            for index in 1...5 {
+                migrator.registerMigration("m\(index)") { db in
+                    if index == 4 { throw Boom() }
+                    try db.execute(sql: "CREATE TABLE IF NOT EXISTS t\(index) (id INTEGER PRIMARY KEY)")
+                }
+            }
+            return migrator
+        }
+        let plain = try DatabaseQueue()
+        let stepped = try DatabaseQueue()
+        try migrator().migrate(plain, upTo: "m2")
+        try migrator().migrate(stepped, upTo: "m2")
+        #expect(throws: Boom.self) { try migrator().migrate(plain) }
+        let recorder = Recorder()
+        #expect(throws: Boom.self) {
+            try DatabaseMigrationSteps.migrate(migrator(), stepped, progress: { recorder.record($0) })
+        }
+        let appliedPlain = try plain.read { try migrator().appliedIdentifiers($0) }
+        let appliedStepped = try stepped.read { try migrator().appliedIdentifiers($0) }
+        #expect(appliedPlain == ["m1", "m2", "m3"])
+        #expect(appliedStepped == appliedPlain)
+        #expect(recorder.phases == [.updating(step: 1, total: 3), .updating(step: 2, total: 3)])
+    }
+
+    /// The real migrator: stepped and plain migration leave identical schemas — for an older
+    /// database (stepping) and for one with a gap (one block, like before).
+    @Test func steppedAndPlainAreEquivalentWithTheRealMigrator() throws {
+        let ids = DatabaseManager.buildMigrator().migrations
+        try #require(ids.count > 6)
+
+        func schema(_ queue: DatabaseQueue) -> [String] {
+            do {
+                return try queue.read { db in
+                    try Row.fetchAll(db, sql: "SELECT type, name, sql FROM sqlite_master ORDER BY type, name")
+                        .map { row in "\(row["type"] as String? ?? "") \(row["name"] as String? ?? "") \(row["sql"] as String? ?? "")" }
+                        // Some existing migrations bake "now" into column defaults; compare the shape.
+                        .map { $0.replacingOccurrences(of: #"'\d{4}-\d{2}-\d{2} [0-9:.]+'"#, with: "'<now>'", options: .regularExpression) }
+                }
+            } catch {
+                Issue.record("schema unreadable: \(error)")
+                return []
+            }
+        }
+        func outcome(_ queue: DatabaseQueue, stepped: Bool) -> String {
+            do {
+                if stepped {
+                    try DatabaseMigrationSteps.migrate(DatabaseManager.buildMigrator(), queue, progress: { _ in })
+                } else {
+                    try DatabaseManager.buildMigrator().migrate(queue)
+                }
+                return "ok"
+            } catch {
+                return "\(type(of: error))"
+            }
+        }
+        func prepared(gap: Bool) throws -> DatabaseQueue {
+            var config = Configuration()
+            config.foreignKeysEnabled = false
+            let queue = try DatabaseQueue(configuration: config)
+            if gap {
+                try DatabaseManager.buildMigrator().migrate(queue)
+                try queue.write { db in
+                    try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier = ?", arguments: [ids[ids.count / 2]])
+                }
+            } else {
+                try DatabaseManager.buildMigrator().migrate(queue, upTo: ids[ids.count - 5])
+            }
+            return queue
+        }
+
+        for gap in [false, true] {
+            let plain = try prepared(gap: gap)
+            let stepped = try prepared(gap: gap)
+            #expect(outcome(plain, stepped: false) == outcome(stepped, stepped: true), "gap: \(gap)")
+            let a = schema(plain), b = schema(stepped)
+            #expect(a == b, "gap: \(gap) — only plain: \(Set(a).subtracting(b)) — only stepped: \(Set(b).subtracting(a))")
+            #expect(try plain.read { try DatabaseManager.buildMigrator().appliedIdentifiers($0) }
+                    == stepped.read { try DatabaseManager.buildMigrator().appliedIdentifiers($0) })
+        }
     }
 }
