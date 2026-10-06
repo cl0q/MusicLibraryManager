@@ -80,7 +80,8 @@ final class SyncTestEnv {
         self.destinations = destinations
         service.destinations = destinations
         undoManager.groupsByEvent = false
-        status = StatusBarCenter(sleep: { _ in }, announce: { _ in })
+        // Messages stay until replaced (a sleep that never ends; the test never waits on it).
+        status = StatusBarCenter(sleep: { _ in try await Task.sleep(for: .seconds(3600)) }, announce: { _ in })
         undo = UndoCenter(undoManager: undoManager, statusBar: status, log: { _ in })
         let sync = self.sync
         let playlists = self.playlists
