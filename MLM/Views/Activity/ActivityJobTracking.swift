@@ -216,6 +216,7 @@ struct MaintenanceJob: Equatable {
         case "path-apply": "Update organized paths"
         case "path-rollback": "Roll back last path migration"
         case "rescan": "Reread tags from files"
+        case "read-track-numbers": "Read track numbers"
         case "create-liked-playlist": "Recreate the Liked playlist"
         default: action
         }
@@ -223,7 +224,7 @@ struct MaintenanceJob: Equatable {
 
     var isCancellable: Bool {
         // `rescan` stops after the current file (review S2).
-        ["fingerprint", "replaygain", "danceability", "groove", "artwork-embedded", "artwork-musicbrainz", "rescan"].contains(action)
+        ["fingerprint", "replaygain", "danceability", "groove", "artwork-embedded", "artwork-musicbrainz", "rescan", "read-track-numbers"].contains(action)
     }
 
     var isShort: Bool { ["path-audit", "create-liked-playlist"].contains(action) }
@@ -262,7 +263,7 @@ struct MaintenanceJob: Equatable {
 
     private var verb: String {
         if action == "artwork-embedded" { return "read" }
-        if action == "rescan" { return "updated" }
+        if action == "rescan" || action == "read-track-numbers" { return "updated" }
         return kind == .artwork ? "fetched" : (kind == .pathMigration ? "updated" : "analysed")
     }
 

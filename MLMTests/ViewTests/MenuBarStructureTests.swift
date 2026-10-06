@@ -149,7 +149,7 @@ struct MenuBarStructureTests {
             .library: ["Refresh from Sources", "Scan Library Folder", "Find Duplicates", "Find Albums",
                        "Maintenance", "Fingerprint All Tracks", "ReplayGain Analysis", "Danceability Analysis",
                        "Similarity Analysis", "Refresh Embedded Artwork", "Fetch Artwork from MusicBrainz",
-                       "Reread Tags from Files…", "Maintenance Settings…", "Back Up Now", "Library Settings…"],
+                       "Reread Tags from Files…", "Read Track Numbers", "Maintenance Settings…", "Back Up Now", "Library Settings…"],
             .go: ["All Tracks", "Albums", "Genres", "Folders", "Discover", "Review", "Back", "Forward",
                   "Playlists", "Sync Profiles"],
             .window: ["Minimize", "Zoom", "Activity", "Bring All to Front"],

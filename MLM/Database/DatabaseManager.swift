@@ -1532,6 +1532,27 @@ final class DatabaseManager: Sendable {
             try db.execute(sql: "UPDATE imported_reels SET state = 'identified' WHERE state = 'new' AND artist <> '' AND title <> ''")
         }
 
+        // ──────────────────────────────────────────────────────────────
+        // Migration v50_album_tracks (W4-1, IMP-067, DEC-019): the order of an album's tracks
+        // (`disc`, fractional `position`, `track_number` from the file) and the link of every
+        // track with album text to an `albums` row (DB only). Registered after v55 (the numbers
+        // were reserved before the later migrations existed). Body: `AlbumMigrations`.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v50_album_tracks") { db in
+            try AlbumMigrations.v50AlbumTracks(db)
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        // Migration v51_album_dedup (W4-1, IMP-068): albums with the same album artist
+        // (NFC, case-folded) and normalised title are merged into the row with the most
+        // `album_tracks` rows (ties: lowest id); tracks, joins, variant preferences and variant_of
+        // are re-pointed; variants are untouched; the log {old: new} is kept in `app_config`
+        // key `albums.dedup.v51`. The launch coordinator makes the pre-migration backup.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v51_album_dedup") { db in
+            try AlbumMigrations.v51AlbumDedup(db)
+        }
+
         return migrator
     }
 

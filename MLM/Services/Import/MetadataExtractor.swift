@@ -16,6 +16,15 @@ struct TrackMetadata: Sendable {
     let duration: Int?
     let format: String
     let originalPath: String
+    /// Position on the disc / disc number from the `track` / `disc` tags (`3`, `3/12`); nil when absent (W4-1).
+    var trackNumber: Int? = nil
+    var discNumber: Int? = nil
+}
+
+/// The track and disc number a file's tags carry.
+struct TrackNumbers: Equatable, Sendable {
+    var track: Int?
+    var disc: Int?
 }
 
 /// Audio metadata extraction using AVFoundation.
@@ -108,6 +117,7 @@ enum MetadataExtractor {
 
         // Year extraction: try common creation date
         let rawYear = await extractYear(from: commonMetadata)
+        let numbers = await trackNumbers(in: allMetadata)
 
         // Format from file extension
         let format = url.pathExtension.lowercased()
@@ -166,8 +176,63 @@ enum MetadataExtractor {
             bitrate: bitrate,
             duration: durationSeconds,
             format: format,
-            originalPath: url.path
+            originalPath: url.path,
+            trackNumber: numbers.track,
+            discNumber: numbers.disc
         )
+    }
+
+    /// Just the track and disc number of a file (the `Read Track Numbers` job; no other tag).
+    static func extractNumbers(from url: URL) async throws -> TrackNumbers {
+        let asset = AVAsset(url: url)
+        guard try await asset.load(.isPlayable) else {
+            throw ExtractionError.cannotOpenFile(path: url.path, underlying: "Asset is not playable")
+        }
+        return await trackNumbers(in: try await asset.load(.metadata))
+    }
+
+    // MARK: - Track and disc numbers
+
+    /// `3` → 3, `3/12` → 3, ` 03 ` → 3; nothing usable (`/12`, `abc`, `0`) → nil. A number below 1 is no number.
+    static func parseTagNumber(_ raw: String) -> Int? {
+        let head = raw.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false).first ?? ""
+        guard let value = Int(head.trimmingCharacters(in: .whitespacesAndNewlines)), value > 0 else { return nil }
+        return value
+    }
+
+    /// The iTunes `trkn` / `disk` atom: two zero bytes, the number (16 bit), the total (16 bit).
+    static func parseTagNumber(atom data: Data) -> Int? {
+        guard data.count >= 4 else { return nil }
+        let bytes = [UInt8](data)
+        let value = Int(bytes[2]) << 8 | Int(bytes[3])
+        return value > 0 ? value : nil
+    }
+
+    private static let trackKeys: Set<String> = ["TRCK", "TRACKNUMBER", "TRACK", "TRKN"]
+    private static let discKeys: Set<String> = ["TPOS", "DISCNUMBER", "DISC", "DISK"]
+
+    private static func trackNumbers(in items: [AVMetadataItem]) async -> TrackNumbers {
+        var result = TrackNumbers()
+        for item in items {
+            let identifier = item.identifier
+            let key = (item.key as? String)?.uppercased() ?? ""
+            let isTrack = identifier == .id3MetadataTrackNumber || identifier == .iTunesMetadataTrackNumber || trackKeys.contains(key)
+            let isDisc = identifier == .id3MetadataPartOfASet || identifier == .iTunesMetadataDiscNumber || discKeys.contains(key)
+            guard (isTrack && result.track == nil) || (isDisc && result.disc == nil) else { continue }
+            var value: Int?
+            if let text = try? await item.load(.stringValue) {
+                value = parseTagNumber(text)
+            }
+            if value == nil, let data = try? await item.load(.dataValue) {
+                value = parseTagNumber(atom: data)
+            }
+            if value == nil, let number = try? await item.load(.numberValue), number.intValue > 0 {
+                value = number.intValue
+            }
+            guard let value else { continue }
+            if isTrack, result.track == nil { result.track = value } else if isDisc, result.disc == nil { result.disc = value }
+        }
+        return result
     }
 
     // MARK: - Private Helpers

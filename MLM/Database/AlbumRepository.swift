@@ -3,7 +3,8 @@ import GRDB
 
 /// Repository for album detection, variants, and sibling discovery.
 final class AlbumRepository: Sendable {
-    private let database: any DatabaseWriter
+    /// Internal so the grid queries (`AlbumRepository+Listing.swift`) read the same database.
+    let database: any DatabaseWriter
 
     init(database: any DatabaseWriter) {
         self.database = database
@@ -64,6 +65,21 @@ final class AlbumRepository: Sendable {
                 ORDER BY album_artist
             """)
             return rows.compactMap { $0["album_artist"] as? String }
+        }
+    }
+
+    // MARK: - Delete
+
+    /// Delete an album and everything that points at it (foreign keys are disabled, so the
+    /// cascades are written out): its `album_tracks` rows, variant preferences that name it,
+    /// the `tracks.album_id` of its tracks and the `variant_of` of its variants.
+    func delete(id: Int64) async throws {
+        try await database.write { db in
+            try db.execute(sql: "DELETE FROM album_tracks WHERE album_id = ?", arguments: [id])
+            try db.execute(sql: "DELETE FROM user_album_variant_pref WHERE base_album_id = ? OR selected_album_id = ?", arguments: [id, id])
+            try db.execute(sql: "UPDATE tracks SET album_id = NULL WHERE album_id = ?", arguments: [id])
+            try db.execute(sql: "UPDATE albums SET variant_of = NULL WHERE variant_of = ?", arguments: [id])
+            try db.execute(sql: "DELETE FROM albums WHERE id = ?", arguments: [id])
         }
     }
 

@@ -43,6 +43,16 @@ struct TrackScopeQueries: Sendable {
         container.databaseManager.map { TrackScopeQueries(database: $0.pool) }
     }
 
+    /// Listed tracks that have no album — `is: no album`'s predicate (`TrackSearchSQL.noAlbum`:
+    /// empty, `unknown album`, a source name or a URL as album): the Albums footer line
+    /// `‹n› tracks have no album` (W4-1, DEC-021). W4-3 adds the tracks confirmed `No album`
+    /// (`tracks.no_album`) to the exclusion.
+    func noAlbumCount() async throws -> Int {
+        try await database.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM tracks WHERE \(TrackVisibility.listed(TrackSearchSQL.noAlbum))") ?? 0
+        }
+    }
+
     /// One pass over `tracks`: per-scope counts and durations for `search`, plus the library
     /// size. `search` matches like the table's in-place filter (each whitespace-separated term
     /// against the folded `search_text`, AND-ed).

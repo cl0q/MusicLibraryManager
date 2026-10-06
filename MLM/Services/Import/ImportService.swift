@@ -464,6 +464,20 @@ final class ImportService: Sendable {
                 do {
                     try track.insert(db)
                     succeeded += 1
+                    // W4-1: a track with album text joins its album with the file's disc and
+                    // track number (find-or-create by the same key as v50; no album = no row).
+                    let newID = track.id ?? db.lastInsertedRowID
+                    do {
+                        try AlbumTrackRepository.linkImportedTrack(
+                            db, trackID: newID, artist: metadata.artist, albumArtist: metadata.albumArtist,
+                            album: metadata.album, year: metadata.year,
+                            disc: metadata.discNumber, number: metadata.trackNumber)
+                        track.albumId = try Int64.fetchOne(db, sql: "SELECT album_id FROM tracks WHERE id = ?", arguments: [newID])
+                    } catch {
+                        // The track is in; it only lacks its album link (a failed statement leaves the transaction usable).
+                        AppLogger.shared.warn("Import: album link failed for \(metadata.originalPath): \(error.localizedDescription)",
+                                              source: "Import")
+                    }
                     insertedTracks.append(track)
                 } catch let error as DatabaseError where error.resultCode == .SQLITE_CONSTRAINT {
                     // A UNIQUE-constraint violation here means a row with
