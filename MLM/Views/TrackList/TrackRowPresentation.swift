@@ -84,7 +84,22 @@ struct TrackRowPresentation: Equatable, Sendable {
     let isNowPlaying: Bool
 
     init(row: TrackRow, live: TrackTableLiveState) {
-        self.init(availability: row.availability, fileLocation: row.fileLocation, id: row.id, live: live)
+        switch row.synthetic {
+        case .none:
+            self.init(availability: row.availability, fileLocation: row.fileLocation, id: row.id, live: live)
+        case .absent:
+            // An album's position no library track fills (IMP-076): dimmed, `Not in library`.
+            self.init(status: .notInLibrary, isDimmed: true, showsPlaceholderArtwork: true, isNowPlaying: false)
+        case .discHeader:
+            self.init(status: nil, isDimmed: false, showsPlaceholderArtwork: false, isNowPlaying: false)
+        }
+    }
+
+    init(status: TrackStatusDisplay?, isDimmed: Bool, showsPlaceholderArtwork: Bool, isNowPlaying: Bool) {
+        self.status = status
+        self.isDimmed = isDimmed
+        self.showsPlaceholderArtwork = showsPlaceholderArtwork
+        self.isNowPlaying = isNowPlaying
     }
 
     init(availability: TrackAvailability, fileLocation: TrackFileLocation, id: Int64, live: TrackTableLiveState) {

@@ -263,8 +263,7 @@ enum MenuCommand: String, CaseIterable, Sendable {
         // ⌘I is registered once, by View ▸ Show Info (UC-KEY-12); this is the same command.
         case .getInfo: Entry(menu: .track, title: "Get Info", shortcut: nil, wiring: .app)
         case .goToAlbum:
-            Entry(menu: .track, title: "Go to Album", shortcut: nil,
-                  wiring: .pending(owner: "W4-2", reason: "Album pages aren’t available yet."))
+            Entry(menu: .track, title: "Go to Album", shortcut: nil, wiring: .app)
         case .goToArtist:
             Entry(menu: .track, title: "Go to Artist", shortcut: nil, wiring: .app)
         case .findSimilar:

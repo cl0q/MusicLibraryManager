@@ -56,6 +56,8 @@ struct SearchFilter: Equatable, Hashable, Sendable {
         switch capability {
         case .tracks: return self
         case .names: return SearchFilter(text: parsed.freeText)
+        case .albums:
+            return SearchFilter(text: parsed.freeText, tokens: allTokens.filter { AlbumFilterRules.applies($0.kind) })
         case .none: return .empty
         }
     }
@@ -64,6 +66,7 @@ struct SearchFilter: Equatable, Hashable, Sendable {
     func ignoredTokens(for capability: SearchFilterCapability) -> [SearchToken] {
         switch capability {
         case .tracks: []
+        case .albums: allTokens.filter { !AlbumFilterRules.applies($0.kind) }
         case .names, .none: allTokens
         }
     }
@@ -177,6 +180,9 @@ enum SearchFilterCapability: Equatable, Sendable {
     /// Lists of named things (playlists grid, folders, review groups, recommendations): free
     /// words against the name; tokens are ignored there.
     case names
+    /// The Albums grid (W4-2): free words against title, album artist and year, plus the
+    /// `artist:`, `album:` and `year:` tokens; the other tokens are ignored there.
+    case albums
     /// Nothing to filter (placeholders, settings-like pages): the text waits for a wider scope.
     case none
 }
@@ -197,6 +203,9 @@ struct SearchPlaceKey: Hashable, Sendable, CustomStringConvertible {
     static let genres = SearchPlaceKey("genres")
     /// A genre page by its name (`DetailRoute.genre`).
     static func genre(_ name: String) -> SearchPlaceKey { SearchPlaceKey("genre.\(name)") }
+    /// The Albums grid, and an album's page by its id (W4-2).
+    static let albums = SearchPlaceKey("albums")
+    static func album(_ id: Int64) -> SearchPlaceKey { SearchPlaceKey("album.\(id)") }
 
     var description: String { rawValue }
 }
@@ -218,7 +227,8 @@ struct SearchPlace: Equatable, Sendable {
             case .playlist(let id, _):
                 self.init(key: .playlist(id), capability: .tracks, name: title)
             case .album(let id):
-                self.init(key: SearchPlaceKey("album.\(id)"), capability: .none, name: title)
+                // The album's tracks, filtered in memory (W4-2).
+                self.init(key: SearchPlaceKey("album.\(id)"), capability: .tracks, name: title)
             case .genre(let name):
                 // The genre's tracks, filtered in memory (W3-GEN).
                 self.init(key: .genre(name), capability: .tracks, name: title)
@@ -229,7 +239,7 @@ struct SearchPlace: Equatable, Sendable {
         }
         switch navigation.selection {
         case .allTracks: self.init(key: .allTracks, capability: .tracks, name: title)
-        case .albums: self.init(key: SearchPlaceKey("albums"), capability: .none, name: title)
+        case .albums: self.init(key: SearchPlaceKey("albums"), capability: .albums, name: title)
         // The genre list filters by name (W3-GEN).
         case .genres: self.init(key: .genres, capability: .names, name: title)
         // Folders filters folders by name and tracks by the track filter (W3-FOLD).
@@ -250,7 +260,11 @@ struct SearchPlace: Equatable, Sendable {
 
     /// The filter words this place offers in the suggestions (none where tokens don't apply).
     var offeredKinds: [SearchTokenKind] {
-        capability == .tracks ? SearchTokenKind.allCases : []
+        switch capability {
+        case .tracks: SearchTokenKind.allCases
+        case .albums: [.artist, .album, .year]
+        case .names, .none: []
+        }
     }
 }
 

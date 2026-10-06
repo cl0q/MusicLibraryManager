@@ -11,6 +11,12 @@ struct TrackTableCellOptions {
     /// A row without an energy bucket says `Analyzing…` (Discover ▸ Recommendations, V-INBOX.N04):
     /// its automatic analysis is still running.
     var showsAnalysingEnergy = false
+    /// The title cell has its 20 pt cover (album pages have one cover, in the header, W4-2).
+    var showsRowCover = true
+    /// The now-playing glyph sits in the `#` column, not before the title (album pages).
+    var playingGlyphInNumber = false
+    /// Edit Order: the `#` cell carries a drag handle.
+    var showsDragHandle = false
 }
 
 extension EnvironmentValues {
@@ -36,18 +42,27 @@ struct TrackCell: View {
     @ViewBuilder
     private func content(_ presentation: TrackRowPresentation) -> some View {
         let dimmed = presentation.isDimmed
+        // An album's `Not in library` positions and disc headings carry only what they are.
+        if !row.isTrack, ![.number, .title, .status].contains(column) {
+            EmptyView()
+        } else {
+            columnContent(presentation, dimmed: dimmed)
+        }
+    }
+
+    @ViewBuilder
+    private func columnContent(_ presentation: TrackRowPresentation, dimmed: Bool) -> some View {
         switch column {
         case .number:
-            Text(row.position, format: .number)
-                .monospacedDigit()
-                .foregroundStyle(dimmed || options.dimsPosition ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
+            numberCell(presentation, dimmed: dimmed)
         case .title:
             TrackTitleCell(row: row, presentation: presentation, live: live?.state ?? .idle,
-                           showsFailureDetail: options.showsFailureDetail)
+                           showsFailureDetail: options.showsFailureDetail, showsCover: options.showsRowCover,
+                           showsPlayingGlyph: !options.playingGlyphInNumber)
         case .artist:
             value(row.artistText, dimmed: dimmed)
         case .album:
-            if let album = row.albumText, let openAlbum = options.openAlbum {
+            if let album = row.albumText, row.track.albumId != nil, let openAlbum = options.openAlbum {
                 Button(album) { openAlbum(row) }
                     .buttonStyle(.link)
                     .lineLimit(1)
@@ -95,6 +110,34 @@ struct TrackCell: View {
             ReviewUsedInCell(rowID: row.id)
         case .source:
             RecommendationSourceCell(rowID: row.id)
+        }
+    }
+
+    /// `#`: the position, or an album's number within its disc; an album's playing row shows the
+    /// speaker here; Edit Order adds the drag handle; a disc heading has none.
+    @ViewBuilder
+    private func numberCell(_ presentation: TrackRowPresentation, dimmed: Bool) -> some View {
+        if row.synthetic == .discHeader {
+            EmptyView()
+        } else {
+            HStack(spacing: Spacing.xs) {
+                if options.showsDragHandle, row.isTrack {
+                    Image(systemName: "line.3.horizontal")
+                        .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
+                }
+                if options.playingGlyphInNumber, presentation.isNowPlaying {
+                    Image(systemName: "speaker.wave.2.fill")
+                        .imageScale(.small)
+                        .foregroundStyle(.tint)
+                        .symbolEffect(.variableColor.iterative, isActive: live?.state.isPlaying ?? false)
+                        .accessibilityLabel("Now playing")
+                } else {
+                    Text(row.displayNumber ?? row.position, format: .number)
+                        .monospacedDigit()
+                        .foregroundStyle(dimmed || options.dimsPosition ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
+                }
+            }
         }
     }
 
@@ -167,15 +210,30 @@ private struct TrackTitleCell: View {
     let presentation: TrackRowPresentation
     let live: TrackTableLiveState
     let showsFailureDetail: Bool
+    var showsCover = true
+    var showsPlayingGlyph = true
 
     static let coverSize: CGFloat = 20
 
     var body: some View {
+        if row.synthetic == .discHeader {
+            Text(row.title)
+                .fontWeight(.semibold)
+                .lineLimit(1)
+                .accessibilityAddTraits(.isHeader)
+        } else {
+            trackTitle
+        }
+    }
+
+    private var trackTitle: some View {
         HStack(spacing: Spacing.s) {
-            artwork
-                .frame(width: Self.coverSize, height: Self.coverSize)
-                .opacity(presentation.isDimmed ? 0.5 : 1)
-            if presentation.isNowPlaying {
+            if showsCover {
+                artwork
+                    .frame(width: Self.coverSize, height: Self.coverSize)
+                    .opacity(presentation.isDimmed ? 0.5 : 1)
+            }
+            if presentation.isNowPlaying, showsPlayingGlyph {
                 Image(systemName: "speaker.wave.2.fill")
                     .imageScale(.small)
                     .foregroundStyle(.tint)
@@ -216,6 +274,7 @@ private struct TrackTitleCell: View {
 
     /// Title, artist and the Status word; `Now playing`; the reason a row is dimmed (UC-A11Y-07).
     private var accessibilityText: String {
+        if row.synthetic == .absent { return "\(row.title), not in library" }
         var parts = [row.title, row.artistText ?? "Unknown artist"]
         if let status = presentation.status { parts.append(status.text) }
         if presentation.isNowPlaying { parts.append("Now playing") }

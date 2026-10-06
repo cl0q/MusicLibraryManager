@@ -91,7 +91,7 @@ enum DetailRoute: Hashable, Codable, Sendable {
     /// A playlist opened from the All Playlists grid. `showFailedTracks` opens it with the
     /// failed-download section expanded (the grid's "Show failed" action).
     case playlist(Int64, showFailedTracks: Bool = false)
-    /// Reserved for W4-2 (album detail).
+    /// An album's page (W4-2): its tracks in the album's own order.
     case album(Int64)
     /// Reserved for W3-GEN (genre detail).
     case genre(String)
@@ -178,6 +178,8 @@ final class NavigationModel {
             case .similar(let trackID):
                 if let title = names.track(trackID) { return "Similar to “\(title)”" }
                 return route.fallbackTitle
+            case .album(let id):
+                return names.album(id) ?? route.fallbackTitle
             default:
                 return route.fallbackTitle
             }
@@ -272,6 +274,8 @@ struct PlaceNames {
     var playlist: (Int64) -> String? = { _ in nil }
     var syncProfile: (Int64) -> String? = { _ in nil }
     var track: (Int64) -> String? = { _ in nil }
+    /// An album page's title: the album's name (W4-2, `AlbumNames`).
+    var album: (Int64) -> String? = { _ in nil }
 }
 
 // MARK: - Focused values for menu commands

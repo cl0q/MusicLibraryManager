@@ -234,10 +234,16 @@ private struct LargeCoverPopover: View {
                 }
             }
             HStack {
-                // Album pages arrive with W4-2: present, disabled with the reason (UC-COPY-13).
-                Button(MenuCommand.goToAlbum.title) {}
-                    .disabled(true)
-                    .help(MenuCommand.goToAlbum.pendingReason ?? "")
+                // The album page of the playing track (W4-2); disabled with the reason (UC-COPY-13)
+                // when it belongs to no album.
+                let albumID = viewModel.currentTrack?.albumId
+                Button(MenuCommand.goToAlbum.title) {
+                    guard let albumID else { return }
+                    navigation?.push(.album(albumID))
+                    dismiss()
+                }
+                .disabled(albumID == nil || navigation == nil)
+                .help(albumID == nil ? GoToAlbum.disabledReason : "")
                 Spacer(minLength: Spacing.s)
                 Button("Go to Current Track") {
                     GoToCurrentTrack.perform(playback: viewModel, navigation: navigation, search: search)

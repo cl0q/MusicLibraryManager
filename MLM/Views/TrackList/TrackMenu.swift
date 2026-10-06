@@ -98,6 +98,9 @@ struct TrackMenu: View {
             } else {
                 item
             }
+        case .goToAlbum(let albumID):
+            // Navigates (the verb says so, UC-CM-09): pushes the album's page (W4-2).
+            Button("Go to Album") { actions.goToAlbum(albumID) }
         case .goToArtist(let artist):
             // Navigates (the verb says so, UC-CM-09): All Tracks with `artist: ‹name›` (W2-I).
             Button("Go to Artist") { search?.goToArtist(artist) }
@@ -266,10 +269,13 @@ protocol TrackMenuActions {
     func performExtra(_ id: String, _ rows: [TrackRow])
     /// `Find Similar` (W3-DISC-A).
     func findSimilar(_ rows: [TrackRow])
+    /// `Go to Album` (W4-2).
+    func goToAlbum(_ albumID: Int64)
 }
 
 extension TrackMenuActions {
     func findSimilar(_ rows: [TrackRow]) {}
+    func goToAlbum(_ albumID: Int64) {}
     func moveToEndOfQueue(_ rows: [TrackRow]) {}
     func showInContext(_ rows: [TrackRow]) {}
     func clearHistory() {}

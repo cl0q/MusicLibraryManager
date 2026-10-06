@@ -70,7 +70,7 @@ struct TrackListActions {
 
     /// The first displayed row of `ids` (a multi-row Return acts on the first one).
     func primary(_ ids: Set<Int64>) {
-        guard let row = model.selectedRows(ids).first else { return }
+        guard let row = model.selectedRows(ids).first(where: \.isTrack) else { return }
         perform(TrackPrimaryAction.resolve(row: row, live: live.state), on: row)
     }
 
@@ -241,6 +241,11 @@ struct TrackListActions {
     func findSimilar(_ rows: [TrackRow]) {
         guard rows.count == 1, let row = rows.first else { return }
         navigation?.push(.similar(trackID: row.id))
+    }
+
+    /// `Go to Album`: push the album's page (W4-2).
+    func goToAlbum(_ albumID: Int64) {
+        navigation?.push(.album(albumID))
     }
 
     func removeFromLibrary(_ rows: [TrackRow]) {

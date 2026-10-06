@@ -22,6 +22,8 @@ enum DropLoader {
             }
             // Folder rows of Folders stand for their tracks (D-FOLD-FOLDER-TO-PLAYLIST).
             if items.contains(where: \.isFolder) { items = await FolderDragExpansion.expand(items) }
+            // Album cards of the Albums grid stand for their tracks, in album order (W4-2).
+            if items.contains(where: \.isAlbum) { items = await AlbumDragExpansion.expand(items) }
             return items.isEmpty ? nil : .tracks(TrackDragPayload(items: items))
         }
         if has(.draggedPlaylist) {

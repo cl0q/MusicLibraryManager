@@ -191,16 +191,25 @@ final class LibraryRemovalCenter {
         let id = UUID()
         let tracks: [Track]
         let confirmation: LibraryRemovalConfirmation
+        /// Runs after the tracks left the library, with their ids (an album page removes the
+        /// albums that were emptied, W4-2).
+        var afterRemoval: (@MainActor ([Int64]) async -> Void)?
     }
 
     private(set) var pending: Request?
 
-    func ask(_ tracks: [Track]) {
+    /// - Parameters:
+    ///   - confirmation: the question in the caller's words (an album's, A-ALB-REMOVE); the
+    ///     track wording when nil.
+    ///   - afterRemoval: runs once the rows are gone.
+    func ask(_ tracks: [Track], confirmation: LibraryRemovalConfirmation? = nil,
+             afterRemoval: (@MainActor ([Int64]) async -> Void)? = nil) {
         let removable = tracks.filter { $0.id != nil }
         guard !removable.isEmpty else { return }
         pending = Request(
             tracks: removable,
-            confirmation: .make(trackCount: removable.count, fileCount: removable.filter(\.isLocal).count)
+            confirmation: confirmation ?? .make(trackCount: removable.count, fileCount: removable.filter(\.isLocal).count),
+            afterRemoval: afterRemoval
         )
         MainWindowPresenter.shared.show()
     }
@@ -208,7 +217,8 @@ final class LibraryRemovalCenter {
     func confirm(container: DependencyContainer = .shared) {
         guard let request = pending else { return }
         pending = nil
-        TrackLibraryRemoval.remove(request.tracks, ids: request.tracks.compactMap(\.id), container: container)
+        TrackLibraryRemoval.remove(request.tracks, ids: request.tracks.compactMap(\.id), container: container,
+                                   afterRemoval: request.afterRemoval)
     }
 
     func cancel() {
@@ -254,7 +264,8 @@ enum TrackLibraryRemoval {
         }
     }
 
-    static func remove(_ snapshot: [Track], ids: [Int64], container: DependencyContainer) {
+    static func remove(_ snapshot: [Track], ids: [Int64], container: DependencyContainer,
+                       afterRemoval: (@MainActor ([Int64]) async -> Void)? = nil) {
         guard let trackRepo = container.trackRepository else { return }
         Task {
             var removableIDs = Set(snapshot.filter(\.isRemote).compactMap(\.id))
@@ -286,6 +297,7 @@ enum TrackLibraryRemoval {
                 }
                 AppLogger.shared.log("Removed \(deletableIDs.count) track(s) from library", level: .info, source: "Library")
                 if !deletableIDs.isEmpty {
+                    await afterRemoval?(deletableIDs)
                     NotificationCenter.default.post(name: .libraryDidDeleteTracks, object: nil, userInfo: ["removedIds": deletableIDs])
                 }
                 if !failures.isEmpty {
