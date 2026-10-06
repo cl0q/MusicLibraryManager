@@ -147,6 +147,9 @@ struct SidebarView: View {
         .onReceive(NotificationCenter.default.publisher(for: .reviewQueueDidChange)) { _ in
             Task { await reloadBadges() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .reelsDidChange)) { _ in
+            Task { await reloadBadges() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .libraryDidImport)) { _ in
             Task { await reloadBadges() }
         }
@@ -495,7 +498,8 @@ struct SidebarView: View {
     private func reloadBadges() async {
         await model.reloadBadges(
             trackRepository: container.trackRepository,
-            analysisRepository: container.analysisRepository
+            analysisRepository: container.analysisRepository,
+            reelRepository: container.reelRepository
         )
     }
 }
