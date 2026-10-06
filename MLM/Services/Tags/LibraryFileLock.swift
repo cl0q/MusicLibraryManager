@@ -4,14 +4,15 @@ import Foundation
 /// that rewrites a library file should hold it while it reads, rewrites and swaps the file, so
 /// two rewriters never interleave on one path.
 ///
-/// Today only `TrackTagWriter` takes it. Other code that rewrites or moves library files (to be
-/// routed through it by its owners): `ArtworkService.embedArtwork` (Services/Analysis, cover
-/// embedding), `DownloadOrchestrator.embedArtworkIfNeeded` and the orchestrator's move of a
-/// finished download into the library folder (also the Download Again replace),
-/// `SoundCloudDownloader` / `SquidWtfClient` / `DownloadQueue` moves, `TranscodeService` when
-/// its output lands in the library, `OrganizedPathMigrationService` (moves) and Remove from
-/// Library (Trash). `SyncService.embedMlmUuid` / `TranscodeCache` rewrite device or cache
-/// copies, not library files.
+/// Adopters (W5-F1), each through `holding(_:_:)` so the lock is released on every exit:
+/// `TrackTagWriter`, `ArtworkService.embedArtwork` (the audio file), `DownloadOrchestrator.placeFinal`
+/// (the destination, incl. the Download Again replace), `TranscodeService.transcode` (its output
+/// path), Remove from Library (`TrackLibraryRemoval`), Review's Trash mode and put back
+/// (`ReviewConsequences`) and `DiscoveryReviewService.delete`. Not adopters, on purpose: the
+/// downloaders (`SoundCloudDownloader`, `DABClient`, `SquidWtfClient`) write into a per-download
+/// staging folder, `DownloadQueue` writes its own JSON, `OrganizedPathMigrationService` only
+/// edits database rows, and `SyncService.embedMlmUuid` / `TranscodeCache` rewrite device or
+/// cache copies, not library files.
 actor LibraryFileLock {
     static let shared = LibraryFileLock()
 
@@ -39,4 +40,32 @@ actor LibraryFileLock {
     }
 
     func isHeld(_ path: String) -> Bool { held.contains(path) }
+
+    /// How many callers wait for `path` (tests wait for this instead of sleeping).
+    func waiterCount(_ path: String) -> Int { waiters[path]?.count ?? 0 }
+
+    /// The key a file is locked under: standardised and symlink-resolved, the same spelling
+    /// `TrackTagWriter` uses, so two writers reaching one file by two paths still meet.
+    nonisolated static func key(for url: URL) -> String {
+        url.standardizedFileURL.resolvingSymlinksInPath().path
+    }
+
+    /// Run `body` holding the lock on `url` (waiting while another writer has it) and release
+    /// it afterwards, also when `body` throws.
+    nonisolated static func holding<T>(
+        _ url: URL,
+        in lock: LibraryFileLock = .shared,
+        _ body: () async throws -> T
+    ) async rethrows -> T {
+        let path = key(for: url)
+        await lock.acquire(path)
+        do {
+            let result = try await body()
+            await lock.release(path)
+            return result
+        } catch {
+            await lock.release(path)
+            throw error
+        }
+    }
 }

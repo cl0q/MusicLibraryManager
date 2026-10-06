@@ -197,7 +197,7 @@ struct ReviewConsequencesTests {
         let consequences = ReviewConsequences(files: files)
         let report = await consequences.trash([Self.candidate(1, "/lib/a.mp3"), Self.candidate(2, "/lib/b.mp3")], guards: Self.guards)
         files.removeFromTrash("b.mp3")
-        let back = consequences.putBack(report.trashed)
+        let back = await consequences.putBack(report.trashed)
         #expect(back.restored == 1)
         #expect(back.gone == 1)
         #expect(files.fileExists(atPath: "/lib/a.mp3"))
@@ -210,7 +210,7 @@ struct ReviewConsequencesTests {
         _ = files.fileExists(atPath: "/lib/a.mp3")
         // Something else was put at the original place meanwhile.
         try? files.moveBack(from: URL(fileURLWithPath: "/nowhere"), to: URL(fileURLWithPath: "/lib/a.mp3"))
-        #expect(consequences.putBack(report.trashed).gone == 1)
+        #expect(await consequences.putBack(report.trashed).gone == 1)
     }
 
     @Test func theSystemFileManagerMovesWithinATemporaryFolder() throws {

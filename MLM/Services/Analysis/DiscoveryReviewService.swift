@@ -15,6 +15,8 @@ final class DiscoveryReviewService: @unchecked Sendable {
     nonisolated(unsafe) private(set) var lastDeleteRecovery: DeleteRecovery?
 
     var trashFile: @Sendable (URL) throws -> URL
+    /// The library file lock held while the file moves to the Trash.
+    var lock: LibraryFileLock = .shared
     var deleteFromDatabase: @Sendable (Int64) async throws -> Void
 
     init(
@@ -61,7 +63,8 @@ final class DiscoveryReviewService: @unchecked Sendable {
 
         if let fileURL = try await localFileURL(for: track),
            FileManager.default.fileExists(atPath: fileURL.path) {
-            let trashedURL = try trashFile(fileURL)
+            let trash = trashFile
+            let trashedURL = try await LibraryFileLock.holding(fileURL, in: lock) { try trash(fileURL) }
             lastDeleteRecovery = DeleteRecovery(trackID: trackID, originalURL: fileURL, trashedURL: trashedURL)
         }
         try await deleteFromDatabase(trackID)

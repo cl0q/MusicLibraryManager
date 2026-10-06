@@ -312,8 +312,24 @@ actor BatchResultCollector {
 
             // 2. Embed via ffmpeg
             guard let ffmpeg = ProcessRunner.findExecutable("ffmpeg") else { return false }
+            return await Self.embedCover(coverPath, into: audioURL, ffmpeg: ffmpeg, workDir: tmpDir)
+        }.value
+    }
 
-            let outputPath = tmpDir.appendingPathComponent("out" + audioURL.pathExtension)
+    /// Rewrite `audioURL` with `coverPath` attached. Holds the library file lock on the audio file
+    /// from the moment ffmpeg reads it until the swap is done (W5-F1), so a tag write or another
+    /// cover embed never interleaves with it. `replaceItem` and `lock` are test seams.
+    static func embedCover(
+        _ coverPath: URL,
+        into audioURL: URL,
+        ffmpeg: String,
+        workDir: URL,
+        lock: LibraryFileLock = .shared,
+        replaceItem: ((URL, URL) throws -> Void)? = nil
+    ) async -> Bool {
+        await LibraryFileLock.holding(audioURL, in: lock) { () async -> Bool in
+            let fm = FileManager.default
+            let outputPath = workDir.appendingPathComponent("out." + audioURL.pathExtension)
             let ext = audioURL.pathExtension.lowercased()
 
             var args: [String] = [
@@ -323,9 +339,7 @@ actor BatchResultCollector {
                 "-map", "1:0",
                 "-c", "copy",
             ]
-            if ext == "m4a" || ext == "aac" {
-                args += ["-disposition:v:0", "attached_pic"]
-            } else if ext == "mp3" {
+            if ext == "mp3" {
                 args += ["-id3v2_version", "3", "-metadata:s:v", "title=Album cover", "-metadata:s:v", "comment=Cover (front)"]
             } else {
                 args += ["-disposition:v:0", "attached_pic"]
@@ -344,11 +358,11 @@ actor BatchResultCollector {
                 guard process.terminationStatus == 0, fm.fileExists(atPath: outputPath.path) else { return false }
 
                 // 3. Replace the original with the artwork-embedded version.
-                return Self.replaceArtworkOutput(outputPath, into: audioURL)
+                return Self.replaceArtworkOutput(outputPath, into: audioURL, replaceItem: replaceItem)
             } catch {
                 return false
             }
-        }.value
+        }
     }
 
     /// Stage the generated artwork output beside its destination, then swap it in

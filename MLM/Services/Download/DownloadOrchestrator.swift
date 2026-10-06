@@ -1318,15 +1318,19 @@ final class DownloadOrchestrator {
     func placeFinal(
         _ produced: URL,
         into finalDir: URL,
-        fileName: String? = nil
-    ) throws -> URL {
+        fileName: String? = nil,
+        lock: LibraryFileLock = .shared
+    ) async throws -> URL {
         try FileManager.default.createDirectory(at: finalDir, withIntermediateDirectories: true)
         let dest = finalDir.appendingPathComponent(fileName ?? produced.lastPathComponent)
         let fm = FileManager.default
-        if fm.fileExists(atPath: dest.path) {
-            _ = try fm.replaceItemAt(dest, withItemAt: produced)
-        } else {
-            try fm.moveItem(at: produced, to: dest)
+        // The destination is a library file: hold its lock while the move or replace runs.
+        try await LibraryFileLock.holding(dest, in: lock) {
+            if fm.fileExists(atPath: dest.path) {
+                _ = try fm.replaceItemAt(dest, withItemAt: produced)
+            } else {
+                try fm.moveItem(at: produced, to: dest)
+            }
         }
         return dest
     }
@@ -1376,7 +1380,7 @@ final class DownloadOrchestrator {
 
         let transcodeInput: URL
         if preservesOriginal(for: source) {
-            transcodeInput = try placeFinal(
+            transcodeInput = try await placeFinal(
                 sourcePath, into: flacDir,
                 fileName: Self.finalFileName(for: request, pathExtension: sourcePath.pathExtension)
             )
@@ -1390,7 +1394,7 @@ final class DownloadOrchestrator {
 
         switch transcodeResult {
         case .transcoded(let produced):
-            let dest = try placeFinal(
+            let dest = try await placeFinal(
                 produced, into: finalDirectory(for: source),
                 fileName: Self.finalFileName(for: request, pathExtension: produced.pathExtension)
             )
@@ -1403,7 +1407,7 @@ final class DownloadOrchestrator {
                 await embedArtworkIfNeeded(request: request, at: transcodeInput)
                 return (transcodeInput, transcodeInput.pathExtension.lowercased(), kbps)
             }
-            let dest = try placeFinal(
+            let dest = try await placeFinal(
                 transcodeInput, into: sourceFileDirectory(for: source),
                 fileName: Self.finalFileName(for: request, pathExtension: transcodeInput.pathExtension)
             )
@@ -1425,7 +1429,7 @@ final class DownloadOrchestrator {
                 let kbps = await transcodeService.detectBitrateKbps(transcodeInput)
                 return (transcodeInput, transcodeInput.pathExtension.lowercased(), kbps)
             }
-            let dest = try placeFinal(
+            let dest = try await placeFinal(
                 transcodeInput, into: sourceFileDirectory(for: source),
                 fileName: Self.finalFileName(for: request, pathExtension: transcodeInput.pathExtension)
             )

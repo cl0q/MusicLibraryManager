@@ -331,7 +331,7 @@ final class DiscoverModel {
         _ dismissal: Dismissal, dependencies: Dependencies, statusBar: StatusBarCenter?
     ) async throws -> Dismissal {
         let recommendations = dependencies.recommendations
-        let report = dependencies.consequences.putBack(dismissal.trashed)
+        let report = await dependencies.consequences.putBack(dismissal.trashed)
         let trashedIDs = Set(dismissal.trashed.map(\.trackId))
         let filelessIDs = dismissal.ids.filter { !trashedIDs.contains($0) }
         // Which trashed files came back: those no longer in the Trash but at their old place.

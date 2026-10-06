@@ -544,21 +544,21 @@ struct DownloadOrchestratorTests {
     }
 
     @Test
-    func placeFinalMovesTempFileIntoFinalDirectory() throws {
+    func placeFinalMovesTempFileIntoFinalDirectory() async throws {
         let root = try makeTempLibrary()
         defer { try? FileManager.default.removeItem(at: root) }
         let orchestrator = DownloadOrchestrator(libraryRoot: root.path, tokenStorage: TokenStorage())
         let finalDir = root.appendingPathComponent(ManagedLibraryLayout.soundCloudDownloads)
         let tempFile = root.appendingPathComponent("scratch-temp.m4a")
         try Data("new bytes".utf8).write(to: tempFile)
-        let dest = try orchestrator.placeFinal(tempFile, into: finalDir)
+        let dest = try await orchestrator.placeFinal(tempFile, into: finalDir)
         #expect(dest.standardizedFileURL == finalDir.appendingPathComponent("scratch-temp.m4a").standardizedFileURL)
         #expect(FileManager.default.fileExists(atPath: dest.path))
         #expect(!FileManager.default.fileExists(atPath: tempFile.path))
     }
 
     @Test
-    func placeFinalReplacesCollidingFileWithNewContent() throws {
+    func placeFinalReplacesCollidingFileWithNewContent() async throws {
         let root = try makeTempLibrary()
         defer { try? FileManager.default.removeItem(at: root) }
         let orchestrator = DownloadOrchestrator(libraryRoot: root.path, tokenStorage: TokenStorage())
@@ -568,7 +568,7 @@ struct DownloadOrchestratorTests {
         try Data("old bytes".utf8).write(to: existing)
         let producedTemp = root.appendingPathComponent("collide.m4a")
         try Data("new bytes".utf8).write(to: producedTemp)
-        let dest = try orchestrator.placeFinal(producedTemp, into: finalDir)
+        let dest = try await orchestrator.placeFinal(producedTemp, into: finalDir)
         let matches = try FileManager.default
             .contentsOfDirectory(at: finalDir, includingPropertiesForKeys: nil)
             .filter { $0.lastPathComponent == "collide.m4a" }
