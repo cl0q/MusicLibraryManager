@@ -267,6 +267,20 @@ struct FolderViewModelTests {
         await waitUntil("the catalog") { model.rootTrackCount == 2 }
     }
 
+    @Test func aTagEditRebuildsTheShownRowsInPlace() async throws {
+        let fixture = try await makeFixture()
+        defer { fixture.cleanUp() }
+        let model = fixture.model
+        await model.load()
+        await waitUntil("root rows") { model.outline.trackRows.count == 1 }
+        let loose = try #require(model.outline.trackRows.first?.id)
+        _ = try await fixture.database.write { db in
+            try db.execute(sql: "UPDATE tracks SET title = 'Renamed' WHERE id = ?", arguments: [loose])
+        }
+        model.trackMetadataDidChange()
+        await waitUntil("the new title") { model.outline.trackRows.first?.track.title == "Renamed" }
+    }
+
     @Test func aSelectedFolderStandsForItsTracksInTheTrackMenu() async throws {
         let fixture = try await makeFixture()
         defer { fixture.cleanUp() }

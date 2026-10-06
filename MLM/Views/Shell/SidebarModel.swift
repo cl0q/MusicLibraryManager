@@ -214,6 +214,52 @@ final class SidebarModel {
         }
     }
 
+    // MARK: Tag edits (W5-F1)
+
+    @ObservationIgnored nonisolated(unsafe) private var metadataObserver: NSObjectProtocol?
+    @ObservationIgnored nonisolated(unsafe) private var metadataCenter: NotificationCenter?
+    @ObservationIgnored private var metadataReloadRunning = false
+    @ObservationIgnored private var metadataReloadPending = false
+
+    /// Run `reload` after every `.trackMetadataDidChange` (tag edits, undo, album edits): the
+    /// playlist rows' second lines and the Review badge (duplicates, conflicts) depend on tags.
+    /// Posts that arrive while a reload runs coalesce into one more reload. Calling it again
+    /// replaces the earlier subscription.
+    func observeMetadataChanges(
+        notificationCenter: NotificationCenter = .default,
+        reload: @escaping @MainActor () async -> Void
+    ) {
+        stopObservingMetadataChanges()
+        metadataCenter = notificationCenter
+        metadataObserver = notificationCenter.addObserver(
+            forName: .trackMetadataDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.metadataDidChange(reload) }
+        }
+    }
+
+    func stopObservingMetadataChanges() {
+        if let metadataObserver { metadataCenter?.removeObserver(metadataObserver) }
+        metadataObserver = nil
+    }
+
+    private func metadataDidChange(_ reload: @escaping @MainActor () async -> Void) {
+        metadataReloadPending = true
+        guard !metadataReloadRunning else { return }
+        metadataReloadRunning = true
+        Task { @MainActor [weak self] in
+            while let self, self.metadataReloadPending {
+                self.metadataReloadPending = false
+                await reload()
+            }
+            self?.metadataReloadRunning = false
+        }
+    }
+
+    deinit {
+        if let metadataObserver { metadataCenter?.removeObserver(metadataObserver) }
+    }
+
     // MARK: Playlist second line (UC-SIDE-06)
 
     /// Source names (`soundcloud`, `spotify`, …) by source id, for linked playlists.

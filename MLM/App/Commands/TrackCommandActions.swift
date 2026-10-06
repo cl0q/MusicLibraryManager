@@ -271,7 +271,7 @@ enum TrackLibraryRemoval {
         try await LibraryFileLock.holding(url, in: lock) { try trash(url) }
     }
 
-    static let systemTrash: @Sendable (URL) throws -> URL? = { url in
+    nonisolated static let systemTrash: @Sendable (URL) throws -> URL? = { url in
         var trashed: NSURL?
         try FileManager.default.trashItem(at: url, resultingItemURL: &trashed)
         return trashed as URL?
