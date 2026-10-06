@@ -152,6 +152,10 @@ struct TrackMenu: View {
                     Button("Link") { actions.copyLinks(rows) }
                 }
             }
+        case .share(let enabled):
+            TrackShareItem(
+                tracks: enabled ? TrackShare.reachable(rows.map(\.track), offlineVolumePath: TrackTableLiveState.drive(.shared).offlineVolumePath) : [],
+                reason: offlineVolumeName.map { "Can’t share — “\($0)” is not connected" } ?? "Can’t share — the track isn’t downloaded.")
         case .removeFromContainer(let title):
             // Shown without a key: a plain ⌫ equivalent could fire while the menu is open
             // instead of the highlighted item; ⌫ belongs to the focused list (IMP-014).

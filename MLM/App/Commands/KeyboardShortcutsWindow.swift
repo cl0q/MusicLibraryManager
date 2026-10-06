@@ -120,7 +120,7 @@ enum KeyboardMap {
             .key("⌥→ / ⌥←", "Expand or collapse everything inside"),
             .key("⌘↓", "Open the selected folder as the root (Folders)"),
             .key("⌘↑", "Go up one folder (Folders)"),
-            .key("⌥↑ / ⌥↓", "Move the row (Albums ▸ Edit Order)", owner: "W4-2"),
+            .key("⌥↑ / ⌥↓", "Move selected rows up / down (playlist in Manual order, Edit Order)", owner: "W4-2"),
             .key("⌘S", "Save the staged changes (genre page)"),
         ]),
         Group(title: "MLM", rows: [

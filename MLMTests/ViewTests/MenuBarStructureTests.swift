@@ -69,7 +69,7 @@ struct MenuBarStructureTests {
             .volumeUp: "⌘↑", .volumeDown: "⌘↓",
             .goAllTracks: "⌘1", .goAlbums: "⌘2", .goGenres: "⌘3", .goFolders: "⌘4",
             .goDiscover: "⌘5", .goReview: "⌘6", .goBack: "⌘[", .goForward: "⌘]",
-            .minimize: "⌘M", .activity: "⌥⌘0", .mlmHelp: "⌘?",
+            .minimize: "⌘M", .activity: "⌥⌘0",
         ]
         for command in MenuCommand.allCases {
             #expect(command.shortcut?.description == expected[command],
@@ -160,7 +160,7 @@ struct MenuBarStructureTests {
             .go: ["All Tracks", "Albums", "Genres", "Folders", "Discover", "Review", "Back", "Forward",
                   "Playlists", "Sync Profiles"],
             .window: ["Minimize", "Zoom", "Activity", "Bring All to Front"],
-            .help: ["MLM Help", "Keyboard Shortcuts", "Show Tips Again"],
+            .help: ["Keyboard Shortcuts", "Show Tips Again"],
         ]
         for menu in MenuBarMenu.allCases {
             #expect(MenuCommand.items(in: menu).map(\.title) == expected[menu], "\(menu.rawValue) menu")
@@ -216,15 +216,16 @@ struct MenuBarStructureTests {
     private func referencedCommands(in text: String) throws -> [MenuCommand] {
         // `CommandButton(.x` / `CommandSubmenu(.x`, the Go menu's `(.goX, .destination)` rows, and
         // the Track menu's `rereadItem` (Refresh from Source, built per place below the body).
-        let regex = try NSRegularExpression(pattern: #"(?:Command(?:Button|Submenu)\(\.(\w+))|(?:\(\.(go\w+), \.)|(rereadItem)\b"#)
+        let regex = try NSRegularExpression(pattern: #"(?:Command(?:Button|Submenu)\(\.(\w+))|(?:\(\.(go\w+), \.)|(rereadItem)\b|(TrackShareItem)\("#)
         var result: [MenuCommand] = []
         for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
             var name: String?
-            for group in 1...3 {
+            for group in 1...4 {
                 if let range = Range(match.range(at: group), in: text) { name = String(text[range]) }
             }
             guard let name else { continue }
-            let command = name == "rereadItem" ? MenuCommand.refreshFromSource : MenuCommand(rawValue: name)
+            let command = name == "rereadItem" ? MenuCommand.refreshFromSource
+                : name == "TrackShareItem" ? MenuCommand.share : MenuCommand(rawValue: name)
             if let command, !result.contains(command) { result.append(command) }
         }
         return result

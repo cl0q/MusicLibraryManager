@@ -248,6 +248,7 @@ private struct SelectionBarCapsule: View {
             button(state.playNext, layout) { actions.playNext(rows) }
             addToPlaylistMenu(layout)
             button(state.editInfo, layout) { presentation.editInfo() }
+                .popoverTip(MLMTips.group.currentTip as? EditSeveralTip, arrowEdge: .top)
             if let download = state.download {
                 button(download, layout) { actions.download(rows) }
             }

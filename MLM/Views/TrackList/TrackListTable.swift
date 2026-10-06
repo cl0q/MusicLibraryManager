@@ -58,6 +58,7 @@ struct TrackListTable<EmptyContent: View>: View {
             live: live
         )
         .environment(live)
+        .popoverTip(model.rows.isEmpty ? nil : MLMTips.group.currentTip as? PreviewTip, arrowEdge: .top)
         .environment(\.trackTableCellOptions, TrackTableCellOptions(
             showsFailureDetail: configuration.showsFailureDetail,
             dimsPosition: configuration.hasContainerOrder && !(model.sortOrder?.isContainerOrder ?? true),

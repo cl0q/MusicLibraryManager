@@ -5,21 +5,43 @@ import SwiftUI
 /// whether it was found — never its contents), diagnostics and the list cache (moved from
 /// Maintenance, ST-MAINT.E04–E06). The genre tools live in the Genres destination (W3-GEN).
 ///
-/// Not built: `Log detail` (MLM has no log-level setting to switch) and `Reset Tips` (no TipKit
-/// tips exist yet — W5-2).
+/// Not built: `Log detail` (MLM has no log-level setting to switch). `Show Tips Again` (UC-KIT-27)
+/// starts the three tips over.
 struct AdvancedSettingsView: View {
     @Environment(\.container) private var container
     @State private var credentialsFound = true
     @State private var copiedSummary = false
+    @State private var tipsReset = false
 
     var body: some View {
         Form {
             credentialsSection
             diagnosticsSection
             listsSection
+            tipsSection
         }
         .formStyle(.grouped)
         .onAppear(perform: checkCredentials)
+    }
+
+    // MARK: Tips (UC-KIT-27)
+
+    private var tipsSection: some View {
+        Section {
+            LabeledContent {
+                Button("Show Tips Again") {
+                    MLMTips.showAgain()
+                    tipsReset = true
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Tips")
+                    Text(tipsReset ? "Tips will show again." : "Shows the three tips again, one at a time.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 
     // MARK: Credentials file
