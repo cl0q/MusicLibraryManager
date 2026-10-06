@@ -406,7 +406,7 @@ struct InspectorDiagnostics: View {
 // MARK: - Source brand dot (UC-COLOR-07)
 
 /// The 6 pt brand dot before a source name — the only place a brand colour appears. Values are
-/// the adaptive ones of the retired `mlmBrand*` tokens; other sources get a `.tertiary` dot.
+/// the adaptive ones of the retired brand tokens; other sources get a `.tertiary` dot.
 /// (UC-COLOR-07's shared `SourceBrand` type; move to `Views/Shared` when a second view needs it.)
 struct SourceBrandDot: View {
     let source: String
