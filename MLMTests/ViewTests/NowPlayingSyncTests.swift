@@ -27,7 +27,8 @@ struct NowPlayingSyncTests {
     /// shared `TrackCell`, so the now-playing rules are checked there once (UC-TABLE-16).
     private static let trackTablePath = "MLM/Views/TrackList/TrackCell.swift"
     private static let playlistTablePath = "MLM/Views/TrackList/TrackCell.swift"
-    private static let foldersViewPath = "MLM/Views/Folders/FoldersView.swift"
+    /// W3-FOLD: the Folders outline draws its track rows with the shared `TrackCell` too.
+    private static let foldersViewPath = "MLM/Views/Folders/FolderOutlineTable.swift"
 
     // MARK: - Task B (revised): Info never follows the playing track
 
@@ -71,10 +72,9 @@ struct NowPlayingSyncTests {
     @Test
     func foldersView_appliesAccentForegroundStyle() throws {
         let src = try readSource(Self.foldersViewPath)
-        #expect(src.contains("Color.mlmAccent"),
-                "FoldersView must use Color.mlmAccent for now-playing highlight")
-        #expect(src.contains("foregroundStyle(isNowPlaying(row.track)"),
-                "FoldersView title must apply conditional foregroundStyle based on isNowPlaying")
+        #expect(src.contains("TrackCell(column: column, row: track)"),
+                "Folders track rows are drawn by the shared TrackCell (accent title and glyph, UC-TABLE-16)")
+        #expect(!src.contains("mlm"), "no mlm* tokens in the rebuilt Folders table")
     }
 
     // MARK: - Existing invariants preserved
@@ -95,9 +95,9 @@ struct NowPlayingSyncTests {
 
     @Test
     func foldersView_stillContainsSpeakerIcon() throws {
-        let src = try readSource(Self.foldersViewPath)
-        #expect(src.contains("speaker.wave.2.fill"),
-                "FoldersView must still contain the speaker.wave.2.fill icon")
+        // The glyph lives in the shared cell the Folders rows use.
+        #expect(try readSource(Self.trackTablePath).contains("speaker.wave.2.fill"))
+        #expect(try readSource(Self.foldersViewPath).contains("TrackCell("))
     }
 
     @Test
@@ -116,9 +116,8 @@ struct NowPlayingSyncTests {
 
     @Test
     func foldersView_stillContainsIsNowPlaying() throws {
-        let src = try readSource(Self.foldersViewPath)
-        #expect(src.contains("isNowPlaying"),
-                "FoldersView must still contain the isNowPlaying helper")
+        #expect(try readSource(Self.trackTablePath).contains("isNowPlaying"),
+                "the shared cell the Folders rows use decides now playing")
     }
 
     /// W2-E: Info follows the selection (`InspectedTrackSelection`); playing a track never

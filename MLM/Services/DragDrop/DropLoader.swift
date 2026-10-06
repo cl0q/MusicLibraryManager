@@ -20,6 +20,8 @@ enum DropLoader {
                 || provider.hasItemConformingToTypeIdentifier(UTType.legacyTrackDrag.identifier) {
                 if let item = await transferable(TrackDragItem.self, from: provider) { items.append(item) }
             }
+            // Folder rows of Folders stand for their tracks (D-FOLD-FOLDER-TO-PLAYLIST).
+            if items.contains(where: \.isFolder) { items = await FolderDragExpansion.expand(items) }
             return items.isEmpty ? nil : .tracks(TrackDragPayload(items: items))
         }
         if has(.draggedPlaylist) {

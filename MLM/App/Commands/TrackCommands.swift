@@ -15,6 +15,7 @@ struct TrackCommands: Commands {
     @FocusedValue(\.sidebarModel) private var sidebar
     @FocusedValue(\.undoCenter) private var undoCenter
     @FocusedValue(\.toolbarSearch) private var search
+    @FocusedValue(\.folderScan) private var folderScan
 
     var body: some Commands {
         CommandMenu(MenuBarMenu.track.rawValue) {
@@ -184,7 +185,14 @@ struct TrackCommands: Commands {
                           enabled: profile != nil && sync?.selectedProfile?.id == id && sync?.isPreviewUpdating == false) {
                 if let sync, let profile { Task { await sync.refreshPreviewNow(for: profile) } }
             }
-        case .scanThisFolder, .runScan, .none:
+        case .scanThisFolder:
+            // Folders (W3-FOLD): the selected folder, else the root (`Scan “‹folder›”` in Activity).
+            CommandButton(.refreshFromSource, title: reread.title(),
+                          enabled: folderScan != nil && folderScan?.disabledReason == nil,
+                          disabledReason: folderScan?.disabledReason ?? "The folders aren’t loaded yet.") {
+                folderScan?.perform()
+            }
+        case .runScan, .none:
             CommandButton(.refreshFromSource, title: reread.title(), enabled: false,
                           disabledReason: reread == .none
                               ? "Nothing here can be refreshed from outside."

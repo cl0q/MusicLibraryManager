@@ -10,6 +10,10 @@ enum TrackListContainer: Equatable, Sendable {
     case playlist(id: Int64, name: String)
     case queue
     case syncProfile(id: Int64, name: String)
+    /// The Folders outline (W3-FOLD), rooted at `path` (relative to the library folder, `""` =
+    /// the library folder; `name` is the root's name). A folder holds files, not a list: there is
+    /// no `Remove from ‹Container›` (⌫ does nothing), `Remove from Library…` exists.
+    case folder(path: String, name: String)
     /// Search results, sheet tables and other lists without a container.
     case none
 }
@@ -31,6 +35,11 @@ struct TrackListContext: Equatable, Sendable {
 
     static func playlist(id: Int64, name: String) -> TrackListContext {
         TrackListContext(container: .playlist(id: id, name: name), viewName: "“\(name)”")
+    }
+
+    /// Folders rooted at `path`: `Play Folders`, or `Play “2026”` after `Open ⌘↓`.
+    static func folder(path: String, name: String) -> TrackListContext {
+        TrackListContext(container: .folder(path: path, name: name), viewName: path.isEmpty ? "Folders" : "“\(name)”")
     }
 }
 
@@ -321,7 +330,7 @@ struct TrackCommandState: Equatable, Sendable {
         let inContainer: Bool
         switch summary.container {
         case .playlist, .queue, .syncProfile: inContainer = true
-        case .library, .none: inContainer = false
+        case .library, .folder, .none: inContainer = false
         }
 
         canPlay = capabilities.canActivate && summary.firstIsLocal
@@ -364,6 +373,7 @@ struct TrackCommandState: Equatable, Sendable {
     static func removeDisabledReason(_ container: TrackListContainer) -> String {
         switch container {
         case .library: "All Tracks has nothing to remove tracks from. Remove from Library… deletes them."
+        case .folder: "A folder has nothing to remove tracks from. Remove from Library… deletes them."
         case .queue: "Select tracks under Next to remove them from the queue."
         case .playlist, .syncProfile: "These tracks can’t be removed here yet."
         case .none: "This list has nothing to remove tracks from."
@@ -376,7 +386,7 @@ struct TrackCommandState: Equatable, Sendable {
         switch container {
         case .playlist(_, let name), .syncProfile(_, let name): "Remove from “\(name)”"
         case .queue: "Remove from Queue"
-        case .library, .none: MenuCommand.removeFromContainer.title
+        case .library, .folder, .none: MenuCommand.removeFromContainer.title
         }
     }
 }

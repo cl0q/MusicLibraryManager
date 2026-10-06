@@ -9,7 +9,7 @@ import Observation
 /// | append / new playlist | Add to Playlist ▸ / New Playlist from Selection (`ShellEdits`) |
 /// | sync profile | Add to Sync Profile ▸ (`ShellEdits.addTracks(_:toSyncProfile:)`, undoable) |
 /// | Play Next | Play Next (`QueueEditCommands.dropOnPlayer`) |
-/// | import | Import Files or Folder… (`ShellActions.importDropped`) |
+/// | import | Import Files or Folder… (`ShellActions.importDropped`; onto Folders: `importChosen`) |
 /// | M3U | Import M3U… (preview sheet, `DropCenter`) |
 /// | link | Add from Link… (`QuickAddRouter`) |
 /// | library file | Open Library… (`MainWindowPresenter.openLibrary`) |
@@ -97,6 +97,10 @@ struct DropPerformer {
             }
         case .importM3UInFolder(let url, let folderID):
             DropCenter.shared.requestM3UImport(url, droppedOnPlaylist: nil, inFolder: folderID)
+        case .importFilesIntoLibrary(let urls, _):
+            // `Import Files or Folder…`'s own path: copied into the library folder when they
+            // come from elsewhere, imported where they are when inside it (W3-ADD).
+            shell?.importChosen(urls)
         case .refuse(let message):
             if let message { say(message) }
         }
@@ -111,7 +115,9 @@ extension TrackDragPayload {
     /// The queue's own drop type (`QueueEditCommands.drop` / `dropOnPlayer`): track ids, and the
     /// entry ids of rows dragged inside the Queue panel.
     var queueRows: [QueueRowDrag] {
-        items.map { QueueRowDrag(trackId: $0.trackId, sourcePlaylistId: $0.sourcePlaylistId, queueEntryId: $0.queueEntryId) }
+        // A folder of Folders that wasn't expanded (the Queue panel's own drop) carries no track.
+        items.filter { !$0.isFolder }
+            .map { QueueRowDrag(trackId: $0.trackId, sourcePlaylistId: $0.sourcePlaylistId, queueEntryId: $0.queueEntryId) }
     }
 
     /// Items dropped on the Queue panel as the queue's drop type — none when they come from

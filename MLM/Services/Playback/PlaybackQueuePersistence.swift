@@ -232,6 +232,8 @@ struct SavedPlaybackOrigin: Codable, Equatable {
         case playlist(id: Int64, name: String)
         case queue
         case syncProfile(id: Int64, name: String)
+        /// The Folders outline (W3-FOLD); older saved origins never contain it.
+        case folder(path: String, name: String)
         case none
     }
 
@@ -249,6 +251,7 @@ struct SavedPlaybackOrigin: Codable, Equatable {
         case .playlist(let id, let name): container = .playlist(id: id, name: name)
         case .queue: container = .queue
         case .syncProfile(let id, let name): container = .syncProfile(id: id, name: name)
+        case .folder(let path, let name): container = .folder(path: path, name: name)
         case .none: container = .none
         }
     }
@@ -260,6 +263,7 @@ struct SavedPlaybackOrigin: Codable, Equatable {
         case .playlist(let id, let name): listContainer = .playlist(id: id, name: name)
         case .queue: listContainer = .queue
         case .syncProfile(let id, let name): listContainer = .syncProfile(id: id, name: name)
+        case .folder(let path, let name): listContainer = .folder(path: path, name: name)
         case .none: listContainer = .none
         }
         return PlaybackOrigin(place: place, path: path, listKey: listKey, container: listContainer)

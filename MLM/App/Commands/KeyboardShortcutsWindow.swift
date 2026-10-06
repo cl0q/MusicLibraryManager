@@ -116,9 +116,10 @@ enum KeyboardMap {
         ]),
         Group(title: "Other places", rows: [
             .key("K", "Keep the selected recommendation (Discover)", owner: "W3-DISC"),
-            .key("→ / ←", "Expand or collapse (Folders, playlist folders, Review groups)", owner: "W3-FOLD"),
-            .key("⌥→ / ⌥←", "Expand or collapse everything inside", owner: "W3-FOLD"),
-            .key("⌘↓", "Open the selected folder as the root (Folders)", owner: "W3-FOLD"),
+            .key("→ / ←", "Expand or collapse (Folders, playlist folders, Review groups)"),
+            .key("⌥→ / ⌥←", "Expand or collapse everything inside"),
+            .key("⌘↓", "Open the selected folder as the root (Folders)"),
+            .key("⌘↑", "Go up one folder (Folders)"),
             .key("⌥↑ / ⌥↓", "Move the row (Albums ▸ Edit Order)", owner: "W4-2"),
             .key("⌘S", "Save the staged changes (genre page)", owner: "W3-GEN"),
         ]),

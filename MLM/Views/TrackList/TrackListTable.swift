@@ -310,7 +310,8 @@ enum TrackTablePlaceholders {
 
 /// Reads the selection (O(selection)) and publishes `FocusedValues.trackSelection`, the View
 /// menu's options, the status-bar text (UC-STATUS-02/03) and Info's selection (W2-E seam).
-private struct TrackTablePublisher: ViewModifier {
+/// Also applied by the Folders outline (W3-FOLD), whose track rows are a `TrackListModel` too.
+struct TrackTablePublisher: ViewModifier {
     let model: TrackListModel
     let configuration: TrackListConfiguration
     let live: TrackTableLive
@@ -403,8 +404,9 @@ private struct TrackTablePublisher: ViewModifier {
 // MARK: - Live state
 
 /// Watches playback, downloads and the drive; writes `TrackTableLive.state` only when the
-/// derived value changes (download progress ticks don't reach the rows).
-private struct TrackTableLiveObserver: View {
+/// derived value changes (download progress ticks don't reach the rows). Also used by the
+/// Folders outline (W3-FOLD).
+struct TrackTableLiveObserver: View {
     let live: TrackTableLive
     @Environment(\.container) private var container
 

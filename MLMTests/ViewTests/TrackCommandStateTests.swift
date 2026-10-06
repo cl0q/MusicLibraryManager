@@ -235,7 +235,7 @@ struct RereadCommandTests {
         #expect(RereadCommand.recomputePlan(1).title() == "Recompute Plan")
         #expect(RereadCommand.runScan.title() == "Run Scan")
         #expect(RereadCommand.none.title() == "Refresh from Source")
-        #expect(RereadCommand.scanThisFolder.pendingOwner == "W3-FOLD")
+        #expect(RereadCommand.scanThisFolder.pendingOwner == nil, "Folders scans since W3-FOLD")
         #expect(RereadCommand.runScan.pendingOwner == "W3-REV")
     }
 }

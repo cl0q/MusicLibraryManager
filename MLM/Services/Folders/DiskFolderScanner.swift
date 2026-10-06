@@ -1,177 +1,133 @@
 import Foundation
 
-// MARK: - DiskFolderNode
+// MARK: - Reading folders on disk (off the main actor only)
+
+/// What one directory holds, as the Folders outline uses it: the folders inside and the audio
+/// files directly in it — hidden files, symbolic links and MLM's own temporary files
+/// (`FolderPath.isListable`) left out. Names only, sorted like Finder.
+struct FolderListing: Sendable, Equatable {
+    var subfolders: [String] = []
+    var audioFiles: [String] = []
+}
+
+/// One directory's listing, or why it couldn't be read (`Can’t read this folder`, V-FOLD.N09).
+enum FolderListingResult: Sendable, Equatable {
+    case listed(FolderListing)
+    case unreadable(reason: String)
+
+    var listing: FolderListing? {
+        if case .listed(let listing) = self { return listing }
+        return nil
+    }
+}
+
+/// Reads directories. Every function here blocks on the file system and must run off the main
+/// actor (a sleeping disk can take seconds to answer) — callers use `Task.detached`.
+enum FolderDiskReader {
+    /// The direct listing of `url` (one level).
+    static func list(_ url: URL) -> FolderListingResult {
+        let fileManager = FileManager.default
+        let contents: [URL]
+        do {
+            contents = try fileManager.contentsOfDirectory(
+                at: url,
+                includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )
+        } catch {
+            return .unreadable(reason: plainReason(error))
+        }
+        var listing = FolderListing()
+        for item in contents {
+            let name = item.lastPathComponent
+            guard FolderPath.isListable(name) else { continue }
+            let values = try? item.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isRegularFileKey])
+            if values?.isSymbolicLink == true { continue }
+            if values?.isDirectory == true {
+                listing.subfolders.append(name)
+            } else if values?.isRegularFile == true, MetadataExtractor.isAudioFile(item) {
+                listing.audioFiles.append(name)
+            }
+        }
+        listing.subfolders.sort(by: FolderSort.nameAscending)
+        listing.audioFiles.sort(by: FolderSort.nameAscending)
+        return .listed(listing)
+    }
+
+    /// Every directory under `root` (itself included), keyed by its path relative to `root`.
+    /// Stops early (returning what it has) when `isCancelled` says so.
+    static func walk(_ root: URL, isCancelled: @Sendable () -> Bool = { Task.isCancelled }) -> [String: FolderListingResult] {
+        var result: [String: FolderListingResult] = [:]
+        var pending = [""]
+        while let relative = pending.popLast() {
+            if isCancelled() { break }
+            let listed = list(FolderPath.url(relative, libraryRoot: root.path))
+            result[relative] = listed
+            if let listing = listed.listing {
+                for name in listing.subfolders.reversed() {
+                    pending.append(FolderPath.join(relative, name))
+                }
+            }
+        }
+        return result
+    }
+
+    /// `Permission denied` and the like, without error codes (UC-COPY-11).
+    static func plainReason(_ error: Error) -> String {
+        let nsError = error as NSError
+        if nsError.domain == NSCocoaErrorDomain {
+            switch nsError.code {
+            case NSFileReadNoPermissionError: return "permission denied"
+            case NSFileReadNoSuchFileError, NSFileNoSuchFileError: return "the folder isn’t there any more"
+            default: break
+            }
+        }
+        if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError, underlying.domain == NSPOSIXErrorDomain {
+            if underlying.code == Int(EACCES) || underlying.code == Int(EPERM) { return "permission denied" }
+            if underlying.code == Int(ENOENT) { return "the folder isn’t there any more" }
+        }
+        return nsError.localizedDescription
+    }
+}
+
+// MARK: - Folder names for the search field's Library results (W2-I)
 
 struct DiskFolderNode: Identifiable, Hashable, Sendable {
     let id: String            // Full filesystem path, e.g. /Volumes/Lexxar/Music/00_Artists
     let name: String          // Last path component
     let children: [DiskFolderNode]
 
-    var childrenOptional: [DiskFolderNode]? {
-        children.isEmpty ? nil : children
-    }
-
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
-// MARK: - DiskFolderScanner
-
-/// Single-pass filesystem scanner that builds a directory tree.
-///
-/// Runs entirely off the main thread (actor isolation). FileManager calls
-/// are cheap for directory enumeration but must not block the UI.
+/// Folder-name search of the search field's `Library` scope (`LibraryFolderSearch`). Runs off
+/// the main actor (actor isolation).
 actor DiskFolderScanner {
-
-    private static let maxDepth = 8
-
-    /// Scan `rootURL` and return the directory tree.
-    ///
-    /// - Parameter recursive: If true, scans recursively down to maxDepth. If false (default), scans only the first level lazily.
-    /// - Throws: FileManager errors if the root is inaccessible.
-    func scan(rootURL: URL, recursive: Bool = true) async throws -> [DiskFolderNode] {
-        let start = Date()
-        let nodes: [DiskFolderNode]
-        if recursive {
-            nodes = try buildTree(at: rootURL, depth: 0)
-        } else {
-            nodes = try await scanSubdirectories(at: rootURL)
-        }
-        let total = countNodes(nodes)
-        let ms = Int(Date().timeIntervalSince(start) * 1000)
-        AppLogger.shared.info("disk folder scan (recursive=\(recursive)): \(total) dirs in \(ms)ms", source: "perf")
-        return nodes
-    }
-
-    /// List audio files directly inside `dirURL` (one level, no recursion).
-    func filesInDirectory(_ dirURL: URL) async throws -> [URL] {
-        let contents = try FileManager.default.contentsOfDirectory(
-            at: dirURL,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: .skipsHiddenFiles
-        )
-        return contents.filter { url in
-            guard MetadataExtractor.isAudioFile(url) else { return false }
-            return (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) ?? false
-        }
-    }
-
-    /// Scan direct subdirectories of a given URL (one level only) and add placeholders if subdirectories exist.
-    func scanSubdirectories(at url: URL) async throws -> [DiskFolderNode] {
-        let contents = try FileManager.default.contentsOfDirectory(
-            at: url,
-            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
-            options: .skipsHiddenFiles
-        )
-        
-        var nodes: [DiskFolderNode] = []
-        for item in contents {
-            let values = try item.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-            guard values.isDirectory == true && values.isSymbolicLink != true else { continue }
-            
-            // Check if this subdirectory has subdirectories of its own using ultra-fast check
-            let hasSubs = hasSubdirectories(at: item)
-            let children: [DiskFolderNode]
-            if hasSubs {
-                // Add placeholder child to trigger SwiftUI disclosure arrow and lazy loading
-                children = [DiskFolderNode(id: item.path + "/__placeholder__", name: "", children: [])]
-            } else {
-                children = []
-            }
-            
-            nodes.append(DiskFolderNode(id: item.path, name: item.lastPathComponent, children: children))
-        }
-        
-        return nodes.sorted {
-            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-        }
-    }
-
-    /// Recursively search the filesystem under `rootURL` for directories matching the query.
-    func searchDirectories(under rootURL: URL, query: String) async throws -> [DiskFolderNode] {
-        let start = Date()
+    /// Folders under `rootURL` whose name contains `query`, at most `limit` (the Library results
+    /// show five rows and a total).
+    func searchDirectories(under rootURL: URL, query: String, limit: Int = 200) async throws -> [DiskFolderNode] {
         let trimmedQuery = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !trimmedQuery.isEmpty else { return [] }
-        
+
         guard let enumerator = FileManager.default.enumerator(
             at: rootURL,
             includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
             options: [.skipsHiddenFiles]
         ) else { return [] }
-        
+
         var matches: [DiskFolderNode] = []
-        
         while let item = enumerator.nextObject() as? URL {
             if Task.isCancelled { break }
-            
             let values = try? item.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
             guard values?.isDirectory == true && values?.isSymbolicLink != true else { continue }
-            
             let folderName = item.lastPathComponent
+            guard FolderPath.isListable(folderName) else { continue }
             if folderName.lowercased().contains(trimmedQuery) {
-                // Match found!
-                let hasSubs = hasSubdirectories(at: item)
-                let children = hasSubs ? [DiskFolderNode(id: item.path + "/__placeholder__", name: "", children: [])] : []
-                matches.append(DiskFolderNode(id: item.path, name: folderName, children: children))
+                matches.append(DiskFolderNode(id: item.path, name: folderName, children: []))
             }
-            
-            // Safety limit to avoid locking up on massive directories
-            if matches.count >= 200 {
-                break
-            }
+            if matches.count >= limit { break }
         }
-        
-        let ms = Int(Date().timeIntervalSince(start) * 1000)
-        AppLogger.shared.info("disk folder search for '\(query)': found \(matches.count) in \(ms)ms", source: "perf")
         return matches
-    }
-
-    // MARK: - Private
-
-    private func hasSubdirectories(at url: URL) -> Bool {
-        guard let enumerator = FileManager.default.enumerator(
-            at: url,
-            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
-            options: [.skipsSubdirectoryDescendants, .skipsHiddenFiles]
-        ) else { return false }
-        
-        while let item = enumerator.nextObject() as? URL {
-            let values = try? item.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-            if values?.isDirectory == true && values?.isSymbolicLink != true {
-                return true
-            }
-        }
-        return false
-    }
-
-    private func buildTree(at url: URL, depth: Int) throws -> [DiskFolderNode] {
-        guard depth < Self.maxDepth else { return [] }
-
-        let contents = try FileManager.default.contentsOfDirectory(
-            at: url,
-            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
-            options: .skipsHiddenFiles
-        )
-
-        var nodes: [DiskFolderNode] = []
-        for item in contents {
-            let values = try item.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-            guard values.isDirectory == true else { continue }
-            if values.isSymbolicLink == true { continue }
-
-            let children = (try? buildTree(at: item, depth: depth + 1)) ?? []
-            let sorted = children.sorted {
-                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-            }
-            nodes.append(DiskFolderNode(id: item.path, name: item.lastPathComponent, children: sorted))
-        }
-
-        return nodes.sorted {
-            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-        }
-    }
-
-    private func countNodes(_ nodes: [DiskFolderNode]) -> Int {
-        nodes.reduce(nodes.count) { $0 + countNodes($1.children) }
     }
 }

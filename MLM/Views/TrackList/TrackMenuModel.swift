@@ -81,7 +81,7 @@ struct TrackMenuContext: Equatable, Sendable {
         case .playlist: "Remove from Playlist"
         case .syncProfile(_, let name): "Remove from “\(name)”"
         case .queue: "Remove from Queue"
-        case .library, .none: "Remove"
+        case .library, .folder, .none: "Remove"
         }
     }
 }
@@ -197,13 +197,13 @@ struct TrackMenuModel: Equatable, Sendable {
         switch context.container {
         case .playlist, .syncProfile:
             if context.canRemoveFromContainer { remove.append(.removeFromContainer(title: context.removeTitle)) }
-        case .queue, .library, .none:
+        case .queue, .library, .folder, .none:
             break
         }
         switch context.container {
         case .queue, .syncProfile:
             break  // Remove from Library does not exist there (UC-CM-07)
-        case .library, .playlist, .none:
+        case .library, .playlist, .folder, .none:
             // Trashing files needs their disk (UC-CM-05).
             remove.append(.removeFromLibrary(enabled: unreachable == 0))
         }
