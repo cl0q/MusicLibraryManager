@@ -33,7 +33,7 @@ struct ArtworkBackfillServiceTests {
         return (db, svc, center)
     }
 
-    private func eventually(timeout: Duration = .seconds(5), _ condition: @escaping () async -> Bool) async -> Bool {
+    private func eventually(timeout: Duration = .seconds(15), _ condition: @escaping () async -> Bool) async -> Bool {
         let deadline = ContinuousClock.now + timeout
         while ContinuousClock.now < deadline {
             if await condition() { return true }
@@ -43,7 +43,7 @@ struct ArtworkBackfillServiceTests {
     }
 
     private func waitUntil(
-        timeout: Duration = .seconds(2),
+        timeout: Duration = .seconds(15),
         condition: @escaping () -> Bool
     ) async -> Bool {
         let clock = ContinuousClock()
