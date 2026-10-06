@@ -125,6 +125,9 @@ final class ActivityCenter {
     nonisolated let progressInterval: TimeInterval
     /// Short jobs (`graceful: true`) stay invisible this long (UC-JOB-01 "~2 s").
     nonisolated let graceInterval: TimeInterval
+    /// A running operation without any progress or state change for this long is flagged
+    /// `No progress for ‹n› min` (state stays Running). Not for queued, paused or drive waits.
+    nonisolated let stallInterval: TimeInterval
 
     // MARK: Observable state
 
@@ -134,8 +137,9 @@ final class ActivityCenter {
     private(set) var history: [ActivityOperation] = []
     /// Increments once per visible operation that ends — the Activity item's bounce value.
     private(set) var finishedCount = 0
-    /// Track ids that still fail, per attention operation (from `ActivityFailureSource`).
-    private(set) var liveFailing: [UUID: Set<Int64>] = [:]
+    /// Every track of the library in the `Download failed` state now (`ActivityFailureSource`,
+    /// the scope's own predicate); `nil` until the first check.
+    private(set) var failingNow: Set<Int64>?
     /// The open library's id; operations started without one are app-level.
     private(set) var currentLibraryID: String?
     /// History couldn't be read (P-ACTIVITY-OPS.N04).
@@ -153,6 +157,14 @@ final class ActivityCenter {
     @ObservationIgnored private var laneOf: [UUID: ActivityLane] = [:]
     @ObservationIgnored private var turnWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
     @ObservationIgnored private var lastProgressAt: [UUID: Date] = [:]
+    /// Last progress or state change per operation (the stall watchdog).
+    private(set) var lastChangeAt: [UUID: Date] = [:]
+    /// Operations whose start is not written (their row appears with the result only).
+    @ObservationIgnored private var noStartRecord: Set<UUID> = []
+    /// History writes that arrive while a store is being attached (written after the close of
+    /// interrupted rows, so this session's rows are never mistaken for interrupted ones).
+    @ObservationIgnored private var heldWrites: [String: [@Sendable (any ActivityHistoryStore) async throws -> Void]] = [:]
+    @ObservationIgnored private var attaching: Set<String> = []
     @ObservationIgnored private var pendingProgress: [UUID: ActivityProgress] = [:]
     @ObservationIgnored private var flushScheduled: Set<UUID> = []
     /// Updates that arrived (from another thread) before their `begin` was applied.
@@ -167,10 +179,12 @@ final class ActivityCenter {
 
     nonisolated init(scheduler: any ActivityScheduling = SystemActivityScheduler(),
                      progressInterval: TimeInterval = 0.25,
-                     graceInterval: TimeInterval = 2) {
+                     graceInterval: TimeInterval = 2,
+                     stallInterval: TimeInterval = 600) {
         self.scheduler = scheduler
         self.progressInterval = progressInterval
         self.graceInterval = graceInterval
+        self.stallInterval = stallInterval
     }
 
     // MARK: - Begin
@@ -187,6 +201,9 @@ final class ActivityCenter {
     ///   - persists: write the result into the history (default `true`).
     ///   - appLevel: keep it in the app-level history, not the open library's (a restore that
     ///     replaces the library file, library adoption).
+    ///   - recordsStart: write the running row at the start (so a quit mid-job is closed honestly
+    ///     next launch). `false` for a job whose snapshot must not contain itself (a backup).
+    ///   - id: a caller-chosen id (to claim resources under it before registering).
     nonisolated func begin(
         _ kind: ActivityKind,
         title: String,
@@ -200,11 +217,13 @@ final class ActivityCenter {
         graceful: Bool = false,
         quiet: Bool = false,
         persists: Bool = true,
-        appLevel: Bool = false
+        appLevel: Bool = false,
+        recordsStart: Bool = true,
+        id: UUID = UUID()
     ) -> ActivityOperationHandle {
-        let id = UUID()
         let startedAt = scheduler.now()
         perform { center in
+            if !recordsStart { center.noStartRecord.insert(id) }
             center.register(
                 id: id, kind: kind, title: title, subject: subject, progress: progress,
                 itemNoun: itemNoun, messageName: messageName ?? kind.messageName, controls: controls,
@@ -243,13 +262,14 @@ final class ActivityCenter {
         if isQuiet { quiet.insert(id) }
         if persists { persistent.insert(id) }
         lastProgressAt[id] = startedAt
+        lastChangeAt[id] = startedAt
 
         if graceful {
             hidden[id] = operation
             scheduler.schedule(after: graceInterval) { [weak self] in self?.reveal(id) }
         } else {
             operations.append(operation)
-            persist(operation)
+            if !noStartRecord.contains(id) { persist(operation) }
             if announce.contains(id), state == .running { postStart(operation) }
         }
         // Calls that raced ahead of this registration (another thread).
@@ -260,7 +280,7 @@ final class ActivityCenter {
     private func reveal(_ id: UUID) {
         guard let operation = hidden.removeValue(forKey: id) else { return }
         operations.append(operation)
-        persist(operation)
+        if !noStartRecord.contains(id) { persist(operation) }
     }
 
     // MARK: - Lookup
@@ -296,6 +316,7 @@ final class ActivityCenter {
     fileprivate func applyProgress(_ id: UUID, _ progress: ActivityProgress) {
         guard let current = operation(id: id) ?? hidden[id], current.state.isActive else { return }
         let now = scheduler.now()
+        if progress != current.progress { lastChangeAt[id] = now }
         let last = lastProgressAt[id] ?? .distantPast
         let elapsed = now.timeIntervalSince(last)
         if elapsed >= progressInterval {
@@ -322,6 +343,7 @@ final class ActivityCenter {
 
     fileprivate func applyState(_ id: UUID, _ state: ActivityState, wait: ActivityWait?) {
         guard state.isActive else { return }
+        lastChangeAt[id] = scheduler.now()
         update(id) { operation in
             guard operation.state.isActive else { return }
             operation.state = state
@@ -332,7 +354,8 @@ final class ActivityCenter {
     fileprivate func applyControls(_ id: UUID, _ controls: ActivityControls) {
         // A finished operation keeps only `Run Again` — never a Cancel that can't cancel.
         update(id) { operation in
-            operation.controls = operation.state.isActive ? controls : ActivityControls(runAgain: controls.runAgain)
+            operation.controls = operation.state.isActive ? controls
+                : ActivityControls(retry: controls.retry, runAgain: controls.runAgain)
         }
     }
 
@@ -356,7 +379,8 @@ final class ActivityCenter {
         ended.result = result
         ended.endedAt = scheduler.now()
         ended.needsAttention = needsAttention
-        ended.controls = ActivityControls(runAgain: current.controls.runAgain)
+        // A finished operation keeps only what still works: Retry (its failed tracks) and Run Again.
+        ended.controls = ActivityControls(retry: current.controls.retry, runAgain: current.controls.runAgain)
         if let total = ended.progress.total, state == .completed { ended.progress.completed = total }
 
         leaveLane(id, title: current.title)
@@ -402,6 +426,8 @@ final class ActivityCenter {
 
     private func forget(_ id: UUID) {
         lastProgressAt[id] = nil
+        lastChangeAt[id] = nil
+        noStartRecord.remove(id)
         flushScheduled.remove(id)
         announce.remove(id)
         quiet.remove(id)
@@ -454,7 +480,12 @@ final class ActivityCenter {
     /// `Cancel` / `Cancel After This Track`. A queued operation in a lane is cancelled by the
     /// center (it never started); a running one calls the job's own cancel.
     func cancel(_ id: UUID) {
-        guard let current = operation(id: id), current.state.isActive else { return }
+        // A cancel can overtake the registration of its operation (another thread): keep it.
+        guard isKnown(id) || history.contains(where: { $0.id == id }) else {
+            early[id, default: []].append { $0.cancel(id) }
+            return
+        }
+        guard let current = operation(id: id) ?? hidden[id], current.state.isActive else { return }
         if current.state == .queued, laneOf[id] != nil, lanes[laneOf[id]!]?.first != id {
             end(id, state: .cancelled, result: ActivityResult(summary: "Cancelled before it started"))
             return
@@ -474,17 +505,44 @@ final class ActivityCenter {
         applyState(id, .running, wait: nil)
     }
 
-    /// Retry the failed tracks of an operation through its own retry control.
+    /// Retry the failed tracks of an operation: its own retry control (the batch's own source
+    /// policy), else — restored from history — the app's handler with the source pin stored with
+    /// the failure group (`nil` = `auto`).
     func retryFailed(_ id: UUID, trackIDs: [Int64]? = nil) {
         guard let op = operation(id: id) else { return }
         let ids = trackIDs ?? Array(stillFailing(op))
         guard !ids.isEmpty else { return }
-        (op.controls.retry ?? retryHandler)?(ids)
+        if let retry = op.controls.retry {
+            retry(ids)
+        } else {
+            let pins = Dictionary(grouping: ids) { id in
+                op.result?.failureGroups.first { $0.trackIDs.contains(id) }?.sourcePin
+            }
+            for (pin, group) in pins { retryHandler?(group, pin) }
+        }
     }
 
-    /// Fallback retry for failed downloads of operations restored from history (no closure of
-    /// their own): set by the app to `DownloadViewModel.retryAllFailed`.
-    @ObservationIgnored var retryHandler: (@Sendable ([Int64]) -> Void)?
+    /// Retries failures that have no operation row (`Earlier downloads`): the full chain.
+    func retryEarlier(_ trackIDs: [Int64]) {
+        guard !trackIDs.isEmpty else { return }
+        retryHandler?(trackIDs, nil)
+    }
+
+    /// Whether a retry of this operation's failed downloads can run now.
+    func canRetry(_ op: ActivityOperation) -> Bool {
+        op.controls.retry != nil || retryHandler != nil
+    }
+
+    /// Fallback retry for failed downloads without a live closure (from history, `Earlier
+    /// downloads`): set by the app to `DownloadViewModel.retryAllFailed(trackIds:sourcePin:)`.
+    @ObservationIgnored var retryHandler: (@Sendable ([Int64], String?) -> Void)?
+
+    /// A short status-bar note without a button (`Already queued`).
+    nonisolated func postNote(_ text: String) {
+        perform { center in
+            center.messageSink?(ActivityStatusMessage(text: text, operationID: UUID(), actionTitle: nil))
+        }
+    }
 
     /// `Dismiss` in Needs attention: the groups leave the toolbar text and the list; the tracks
     /// keep their `Download failed` state and stay retryable from All Tracks.
@@ -506,12 +564,29 @@ final class ActivityCenter {
         }
     }
 
+    /// `Dismiss` for failures that have no operation row (`Earlier downloads`): recorded as one
+    /// dismissed operation, so they leave the toolbar text like any other dismissed group.
+    func dismissEarlier(_ trackIDs: [Int64]) {
+        guard !trackIDs.isEmpty else { return }
+        let now = scheduler.now()
+        let op = ActivityOperation(
+            id: UUID(), kind: .download, title: "Earlier downloads", subject: .tracks(trackIDs), state: .completed,
+            wait: nil, progress: .indeterminate,
+            result: ActivityResult(counts: [ActivityCount(.failed, trackIDs.count, "failed")],
+                                   failureGroups: [ActivityFailureGroup(cause: "Download failed earlier", count: trackIDs.count,
+                                                                        fix: .retry, trackIDs: trackIDs)]),
+            startedAt: now, endedAt: now, isAutomatic: true, libraryID: currentLibraryID, needsAttention: true,
+            dismissedAt: now, itemNoun: .track, messageName: "Download", controls: .none, isFromHistory: false)
+        operations.append(op)
+        let record = ActivityOperationRecord(op)
+        enqueueWrite(for: op.libraryID) { store in try await store.save(record) }
+    }
+
     /// `Remove from History` (CM-OPS-ROW).
     func removeFromHistory(_ id: UUID) {
         guard let op = operation(id: id), op.state.isTerminal else { return }
         operations.removeAll { $0.id == id }
         history.removeAll { $0.id == id }
-        liveFailing[id] = nil
         enqueueWrite(for: op.libraryID) { store in try await store.delete(id: id) }
     }
 
@@ -519,26 +594,55 @@ final class ActivityCenter {
 
     /// Attaches the open library's history: closes what a quit interrupted, flags missing
     /// subjects, prunes, loads, and refreshes which failures still fail.
+    ///
+    /// Interrupted rows are closed **once per launch, before** this session's rows reach the
+    /// store: writes that arrive meanwhile are held and written after (S8).
+    /// Marks `libraryID` as the open library at once — operations started from now on belong
+    /// to it, their writes are held until `attachLibrary` has closed interrupted rows — so the
+    /// attach itself can run in the background (N12).
+    func beginAttaching(libraryID: String) {
+        currentLibraryID = libraryID
+        attaching.insert(libraryID)
+    }
+
     func attachLibrary(id libraryID: String, store: any ActivityHistoryStore,
                        failureSource: (any ActivityFailureSource)?) async {
         currentLibraryID = libraryID
-        libraryStore = store
         self.failureSource = failureSource
+        attaching.insert(libraryID)
+        try? await store.closeInterrupted(at: scheduler.now())
+        libraryStore = store
+        releaseHeldWrites(key: libraryID, store: store)
         await loadHistory(from: store, libraryID: libraryID)
         await refreshFailing()
     }
 
     /// Attaches the app-level store (operations without a library).
     func attachAppLevel(store: any ActivityHistoryStore) async {
+        attaching.insert(Self.appKey)
+        try? await store.closeInterrupted(at: scheduler.now())
         appStore = store
+        releaseHeldWrites(key: Self.appKey, store: store)
         await loadHistory(from: store, libraryID: nil)
+    }
+
+    private static let appKey = "\u{0}app"
+
+    private func releaseHeldWrites(key: String, store: any ActivityHistoryStore) {
+        attaching.remove(key)
+        for write in heldWrites.removeValue(forKey: key) ?? [] {
+            writer.enqueue {
+                do { try await write(store) } catch {
+                    AppLogger.shared.error("Couldn’t save an Activity result: \(error.localizedDescription)", source: "Activity")
+                }
+            }
+        }
     }
 
     private func loadHistory(from store: any ActivityHistoryStore, libraryID: String?) async {
         let now = scheduler.now()
         let sessionIDs = Set(operations.map(\.id))
         do {
-            try await store.closeInterrupted(at: now)
             try await store.markMissingSubjects()
             try await store.prune(now: now)
             let records = try await store.load(now: now)
@@ -604,6 +708,11 @@ final class ActivityCenter {
 
     private func enqueueWrite(for libraryID: String?,
                               _ write: @escaping @Sendable (any ActivityHistoryStore) async throws -> Void) {
+        let key = libraryID ?? Self.appKey
+        if attaching.contains(key) {
+            heldWrites[key, default: []].append(write)
+            return
+        }
         let store: (any ActivityHistoryStore)?
         if let libraryID {
             store = libraryID == currentLibraryID ? libraryStore : nil
@@ -623,6 +732,24 @@ final class ActivityCenter {
         await writer.drain()
     }
 
+    /// At quit (`applicationWillTerminate`): waits — at most `timeout` — for the queued history
+    /// writes, so end states and failure ids are not lost (S8).
+    nonisolated func flushBeforeQuit(timeout: TimeInterval = 2) {
+        let semaphore = DispatchSemaphore(value: 0)
+        let writer = self.writer
+        Task.detached { await writer.drain(); semaphore.signal() }
+        _ = semaphore.wait(timeout: .now() + timeout)
+    }
+
+    /// Per-item outcomes of an operation, from memory or — for history — from its store
+    /// (items are not kept in memory for history rows, N12).
+    func items(for op: ActivityOperation) async -> [ActivityItemOutcome] {
+        if let items = op.result?.items, !items.isEmpty { return items }
+        guard op.isFromHistory else { return [] }
+        let store = op.libraryID == nil ? appStore : (op.libraryID == currentLibraryID ? libraryStore : nil)
+        return (try? await store?.items(for: op.id)) ?? []
+    }
+
     /// Keep the session's finished operations within the retention count.
     private func trimSessionOperations() {
         let finished = operations.filter { $0.state.isTerminal }
@@ -634,24 +761,21 @@ final class ActivityCenter {
 
     // MARK: - Live failures (the `‹n› failed` agreement)
 
-    /// Asks the failure source which named tracks still fail (call after downloads and edits).
-    /// An operation whose tracks were all fixed leaves Needs attention for good.
     /// Schedules `refreshFailing` from any thread (after a download batch, an edit).
     nonisolated func scheduleFailingRefresh(ids: [UUID]? = nil) {
-        perform { center in Task { await center.refreshFailing(ids: ids) } }
+        perform { center in Task { await center.refreshFailing() } }
     }
 
+    /// Reads which tracks fail now (the `Download failed` scope's predicate) and lets every
+    /// operation whose failures were all fixed leave Needs attention for good.
     func refreshFailing(ids: [UUID]? = nil) async {
         guard let failureSource else { return }
-        let candidates = allOperations.filter { op in
-            op.needsAttention && !(op.result?.failedTrackIDs.isEmpty ?? true) && (ids?.contains(op.id) ?? true)
-        }
-        for op in candidates {
-            guard let failing = try? await failureSource.failingTrackIDs(in: op.result?.failedTrackIDs ?? []) else { continue }
-            liveFailing[op.id] = failing
-            if failing.isEmpty, op.state != .failed {
-                markFixed(op.id)
-            }
+        guard let failing = try? await failureSource.allFailingTrackIDs() else { return }
+        failingNow = failing
+        let owners = failureOwners()
+        for op in allOperations where op.needsAttention && op.state != .failed && !(op.result?.failedTrackIDs.isEmpty ?? true) {
+            let still = op.result!.failedTrackIDs.contains { failing.contains($0) && owners[$0] == op.id }
+            if !still { markFixed(op.id) }
         }
     }
 
@@ -662,12 +786,42 @@ final class ActivityCenter {
         enqueueWrite(for: libraryID) { store in try await store.clearAttention(id: id) }
     }
 
-    /// Failed tracks of an operation that still fail (falls back to the recorded ids before the
-    /// first check).
-    func stillFailing(_ operation: ActivityOperation) -> Set<Int64> {
-        let recorded = Set(operation.result?.failedTrackIDs ?? [])
-        guard let live = liveFailing[operation.id] else { return recorded }
-        return recorded.intersection(live)
+    /// Track id → the newest operation (by end) that recorded it as failed — each failing track
+    /// belongs to exactly one operation, so it is counted and retried once (S4).
+    func failureOwners() -> [Int64: UUID] {
+        var owners: [Int64: UUID] = [:]
+        let ordered = (operations + history).filter { $0.state.isTerminal }
+            .sorted { ($0.endedAt ?? $0.startedAt) < ($1.endedAt ?? $1.startedAt) }
+        for op in ordered {
+            for id in op.result?.failedTrackIDs ?? [] { owners[id] = op.id }
+        }
+        return owners
+    }
+
+    /// Failed tracks this operation owns that still fail (before the first check: the recorded
+    /// ones it owns).
+    func stillFailing(_ operation: ActivityOperation, owners: [Int64: UUID]? = nil) -> Set<Int64> {
+        let owners = owners ?? failureOwners()
+        let recorded = (operation.result?.failedTrackIDs ?? []).filter { owners[$0] == operation.id }
+        guard let failingNow else { return Set(recorded) }
+        return Set(recorded.filter(failingNow.contains))
+    }
+
+    /// Failing tracks no operation recorded (failures from before Activity kept history, or
+    /// pruned): shown as `Earlier downloads` so the toolbar count equals the scope count.
+    func earlierFailingTrackIDs(owners: [Int64: UUID]? = nil) -> [Int64] {
+        guard let failingNow else { return [] }
+        let owners = owners ?? failureOwners()
+        return failingNow.filter { owners[$0] == nil }.sorted()
+    }
+
+    /// `No progress for ‹n› min` — a running operation without progress or state change for
+    /// `stallInterval` (never queued, paused or drive waits); `nil` otherwise.
+    func stalledMinutes(_ op: ActivityOperation) -> Int? {
+        guard op.state == .running, let last = lastChangeAt[op.id] else { return nil }
+        let quiet = scheduler.now().timeIntervalSince(last)
+        guard quiet >= stallInterval else { return nil }
+        return Int(quiet / 60)
     }
 
     // MARK: - Reading
@@ -698,6 +852,7 @@ final class ActivityCenter {
             switch subject.kind {
             case .playlist, .syncProfile: return op.subject.id == subject.id
             case .settings, .folder: return op.subject.detail == subject.detail
+            case .tracks: return Set(op.subject.trackIDs) == Set(subject.trackIDs)
             default: return true
             }
         }
@@ -713,7 +868,9 @@ final class ActivityCenter {
             )
         }
         guard let last = finishedOperations.first(where: matches) else { return nil }
-        let failed = last.needsAttention && last.dismissedAt == nil ? stillFailing(last).count : 0
+        let recorded = last.result?.failedTrackIDs ?? []
+        let failed = last.needsAttention && last.dismissedAt == nil
+            ? (failingNow.map { now in recorded.filter(now.contains).count } ?? recorded.count) : 0
         return ActivityEcho(
             operationID: last.id, kind: last.kind, state: last.state,
             verb: ActivityPresentation.verb(for: last), progressText: nil, fraction: nil,

@@ -48,6 +48,9 @@ struct MLMApp: App {
                 .environment(\.container, container)
         }
         .defaultSize(width: 980, height: 620)
+        // Never reopens by itself at launch; only Window ▸ Activity, ⌥⌘0 or a deep link open it.
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
         .commandsRemoved()
 
         // Help ▸ Keyboard Shortcuts (UC-WIN-02, M-HELP.N02). Not listed as an openable window

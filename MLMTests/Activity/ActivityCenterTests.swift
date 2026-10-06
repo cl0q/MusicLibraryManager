@@ -381,5 +381,6 @@ actor InMemoryHistoryStore: ActivityHistoryStore {
     func markDismissed(ids: [UUID], at date: Date) async throws { for id in ids { records[id]?.dismissedAt = date } }
     func clearAttention(id: UUID) async throws { records[id]?.needsAttention = false }
     func markMissingSubjects() async throws -> Int { 0 }
+    func items(for id: UUID) async throws -> [ActivityItemOutcome] { records[id]?.result?.items ?? [] }
     func all() -> [ActivityOperationRecord] { Array(records.values) }
 }

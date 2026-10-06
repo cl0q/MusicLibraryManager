@@ -38,13 +38,21 @@ final class ActivityOperationRepository: ActivityHistoryStore, ActivityFailureSo
     }
 
     func load(now: Date) async throws -> [ActivityOperationRecord] {
+        // Runs on the database's reader queue (off the main actor); per-item outcomes stay in
+        // the row until the detail pane asks (`items(for:)`, N12).
         let records = try await database.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT * FROM activity_operations
                 ORDER BY COALESCE(ended_at, started_at) DESC
-                """).compactMap(Self.record(from:))
+                """).compactMap { Self.record(from: $0)?.withoutItems }
         }
         return ActivityRetentionRule.apply(records, now: now)
+    }
+
+    func items(for id: UUID) async throws -> [ActivityItemOutcome] {
+        try await database.read { db in
+            try String.fetchOne(db, sql: "SELECT result FROM activity_operations WHERE id = ?", arguments: [id.uuidString])
+        }.flatMap(Self.decodeResult)?.items ?? []
     }
 
     func closeInterrupted(at date: Date) async throws -> Int {
@@ -65,20 +73,22 @@ final class ActivityOperationRepository: ActivityHistoryStore, ActivityFailureSo
         }
     }
 
+    /// `ActivityRetention` in SQL, without reading any result JSON (N12): finished rows that
+    /// don't need attention are kept only within 30 days and among the newest 200.
     func prune(now: Date) async throws {
-        let records = try await database.read { db in
-            try Row.fetchAll(db, sql: "SELECT * FROM activity_operations").compactMap(Self.record(from:))
-        }
-        let kept = Set(ActivityRetentionRule.apply(records, now: now).map(\.id))
-        let drop = records.map(\.id).filter { !kept.contains($0) }
-        guard !drop.isEmpty else { return }
+        let cutoff = Self.string(from: ActivityRetention.cutoff(now: now))
         try await database.write { db in
-            for chunk in stride(from: 0, to: drop.count, by: 500) {
-                let ids = drop[chunk..<min(chunk + 500, drop.count)].map(\.uuidString)
-                let marks = Array(repeating: "?", count: ids.count).joined(separator: ",")
-                try db.execute(sql: "DELETE FROM activity_operations WHERE id IN (\(marks))",
-                               arguments: StatementArguments(ids))
-            }
+            let prunable = """
+                state IN ('completed', 'failed', 'cancelled')
+                AND (needs_attention = 0 OR dismissed_at IS NOT NULL)
+                """
+            try db.execute(sql: """
+                DELETE FROM activity_operations
+                WHERE \(prunable)
+                  AND (COALESCE(ended_at, started_at) < ?
+                       OR id NOT IN (SELECT id FROM activity_operations WHERE \(prunable)
+                                     ORDER BY COALESCE(ended_at, started_at) DESC LIMIT ?))
+                """, arguments: [cutoff, ActivityRetention.maxCount])
         }
     }
 
@@ -125,6 +135,12 @@ final class ActivityOperationRepository: ActivityHistoryStore, ActivityFailureSo
     }
 
     // MARK: - ActivityFailureSource
+
+    func allFailingTrackIDs() async throws -> Set<Int64> {
+        try await database.read { db in
+            Set(try Int64.fetchAll(db, sql: "SELECT id FROM tracks WHERE \(TrackAvailabilitySQL.failed)"))
+        }
+    }
 
     /// The ids among `trackIDs` that are in the `Download failed` state now — the same SQL
     /// predicate the `Download failed` scope and the playlist header count.
@@ -173,10 +189,11 @@ final class ActivityOperationRepository: ActivityHistoryStore, ActivityFailureSo
 
     static func record(from row: Row) -> ActivityOperationRecord? {
         guard let idText: String = row["id"], let id = UUID(uuidString: idText),
-              let kindText: String = row["kind"], let kind = ActivityKind(rawValue: kindText),
+              let kindText: String = row["kind"],
               let stateText: String = row["state"], let state = ActivityState(rawValue: stateText),
               let startedText: String = row["started_at"], let startedAt = date(from: startedText)
         else { return nil }
+        let kind = ActivityKind(rawValue: kindText) ?? .other  // a newer build's kind: shown generically
         let subjectKind = (row["subject_kind"] as String?).flatMap(ActivitySubject.Kind.init(rawValue:)) ?? .none
         let trackIDs: [Int64] = (row["subject_track_ids"] as String?)
             .flatMap { $0.data(using: .utf8) }

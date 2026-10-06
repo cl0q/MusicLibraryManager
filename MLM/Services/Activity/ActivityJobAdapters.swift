@@ -16,7 +16,12 @@ enum TagWriteActivity {
     }
 
     /// `27 files updated · 2 failed`; failures grouped by their plain reason (W2-E words).
-    static func end(_ job: ActivityOperationHandle, with report: TagFlushReport) {
+    static func end(_ job: ActivityOperationHandle, with report: TagFlushReport, error: Error? = nil) {
+        // A database error is a failure with its cause, not a cancel (N11).
+        if let error {
+            job.fail(cause: "Tag changes couldn’t be written — \(error.localizedDescription)")
+            return
+        }
         var groups = report.failures
             .sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }
             .map { ActivityFailureGroup(cause: $0.key, count: $0.value, isRetryable: false) }

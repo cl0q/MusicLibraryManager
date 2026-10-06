@@ -47,6 +47,7 @@ struct FixedFailureSource: ActivityFailureSource {
     func failingTrackIDs(in trackIDs: [Int64]) async throws -> Set<Int64> {
         failing.intersection(trackIDs)
     }
+    func allFailingTrackIDs() async throws -> Set<Int64> { failing }
 }
 
 /// A unique temporary directory, removed by the caller.

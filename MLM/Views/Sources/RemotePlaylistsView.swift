@@ -356,7 +356,7 @@ private struct RemotePlaylistDetailView: View {
 
     private var downloadProgress: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Downloading… \(viewModel.downloadCompletedCount) of \(viewModel.downloadTotalCount)")
+            Text(viewModel.downloadStatusText)
                 .font(.headline)
             ProgressView(value: viewModel.downloadProgress)
             Button("Cancel") {

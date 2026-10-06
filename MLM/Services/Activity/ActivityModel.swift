@@ -43,6 +43,13 @@ enum ActivityKind: String, Codable, CaseIterable, Sendable {
     case tagWrite
     /// Info ▸ Analyze for the selected tracks.
     case trackAnalysis
+    /// A kind this build doesn't know (a row written by a newer MLM) — shown generically.
+    case other
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = ActivityKind(rawValue: raw) ?? .other
+    }
 
     /// The Kind column word (`activity.html` K map).
     var label: String {
@@ -59,6 +66,7 @@ enum ActivityKind: String, Codable, CaseIterable, Sendable {
         case .sourceRefresh, .playlistRefresh: "Refresh"
         case .duplicateScan: "Review"
         case .tagWrite: "Tags"
+        case .other: "Other"
         }
     }
 
@@ -77,6 +85,7 @@ enum ActivityKind: String, Codable, CaseIterable, Sendable {
         case .sourceRefresh, .playlistRefresh: "arrow.clockwise"
         case .duplicateScan: "checklist"
         case .tagWrite: "pencil"
+        case .other: "gearshape"
         }
     }
 
@@ -100,6 +109,7 @@ enum ActivityKind: String, Codable, CaseIterable, Sendable {
         case .duplicateScan: "Comparing"
         case .fileCheck: "Checking files"
         case .tagWrite: "Writing tags"
+        case .other: "Working"
         }
     }
 
@@ -123,6 +133,7 @@ enum ActivityKind: String, Codable, CaseIterable, Sendable {
         case .duplicateScan: "Duplicate scan"
         case .fileCheck: "File check"
         case .tagWrite: "Tag writing"
+        case .other: "Operation"
         }
     }
 
@@ -350,7 +361,12 @@ struct ActivityProgress: Codable, Equatable, Sendable {
 
 /// One outcome count of a result sentence (`35 downloaded`, `9 failed`, `2 skipped`).
 struct ActivityCount: Codable, Equatable, Hashable, Sendable {
-    enum Outcome: String, Codable, Sendable { case done, failed, skipped }
+    enum Outcome: String, Codable, Sendable {
+        case done, failed, skipped
+        init(from decoder: Decoder) throws {
+            self = Outcome(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .done
+        }
+    }
     var outcome: Outcome
     var count: Int
     /// Past participle or noun phrase after the number (`downloaded`, `imported`, `synced`).
@@ -406,16 +422,55 @@ struct ActivityFailureGroup: Codable, Equatable, Hashable, Sendable {
     var isRetryable: Bool
     /// A remark under the group (`Retrying won’t help. Try another source …`).
     var note: String?
+    /// Downloads: the source policy of the batch that failed
+    /// (`DownloadOrchestrator.PreferredSource.storageKey`); a retry uses the same one. `nil` (or a
+    /// group restored from before this field) = `auto`, the full fallback chain.
+    var sourcePin: String?
 
     init(cause: String, count: Int, fix: ActivityFix? = nil, trackIDs: [Int64] = [],
-         isRetryable: Bool = true, note: String? = nil) {
+         isRetryable: Bool = true, note: String? = nil, sourcePin: String? = nil) {
         self.cause = cause
         self.count = count
         self.fix = fix
         self.trackIDs = trackIDs
         self.isRetryable = isRetryable
         self.note = note
+        self.sourcePin = sourcePin
     }
+
+    private enum CodingKeys: String, CodingKey { case cause, count, fix, trackIDs, isRetryable, note, sourcePin }
+
+    /// Lenient (S9): an unknown fix decodes as none; the failed track ids are always kept.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        cause = (try? c.decode(String.self, forKey: .cause)) ?? "Reason unknown"
+        trackIDs = (try? c.decode([Int64].self, forKey: .trackIDs)) ?? []
+        count = (try? c.decode(Int.self, forKey: .count)) ?? trackIDs.count
+        fix = try? c.decodeIfPresent(ActivityFix.self, forKey: .fix)
+        isRetryable = (try? c.decode(Bool.self, forKey: .isRetryable)) ?? true
+        note = try? c.decodeIfPresent(String.self, forKey: .note)
+        sourcePin = try? c.decodeIfPresent(String.self, forKey: .sourcePin)
+    }
+}
+
+/// Decodes an array element by element, skipping elements this build can't read.
+struct LossyArray<Element: Decodable>: Decodable {
+    var elements: [Element]
+
+    init(from decoder: Decoder) throws {
+        var container = try decoder.unkeyedContainer()
+        var result: [Element] = []
+        while !container.isAtEnd {
+            if let element = try? container.decode(Element.self) {
+                result.append(element)
+            } else {
+                _ = try? container.decode(SkipElement.self)
+            }
+        }
+        elements = result
+    }
+
+    private struct SkipElement: Decodable {}
 }
 
 /// Per-item outcome of an operation (per-track rows of a batch, P-ACTIVITY-OPS.E14).
@@ -451,6 +506,18 @@ struct ActivityResult: Codable, Equatable, Sendable {
     var items: [ActivityItemOutcome]
 
     static let maxItems = 2_000
+
+    private enum CodingKeys: String, CodingKey { case counts, failureGroups, summary, failureCause, items }
+
+    /// Lenient (S9): unreadable elements are skipped, never the whole result.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        counts = (try? c.decode(LossyArray<ActivityCount>.self, forKey: .counts))?.elements ?? []
+        failureGroups = (try? c.decode(LossyArray<ActivityFailureGroup>.self, forKey: .failureGroups))?.elements ?? []
+        summary = try? c.decodeIfPresent(String.self, forKey: .summary)
+        failureCause = try? c.decodeIfPresent(String.self, forKey: .failureCause)
+        items = (try? c.decode(LossyArray<ActivityItemOutcome>.self, forKey: .items))?.elements ?? []
+    }
 
     init(counts: [ActivityCount] = [], failureGroups: [ActivityFailureGroup] = [],
          summary: String? = nil, failureCause: String? = nil, items: [ActivityItemOutcome] = []) {
@@ -513,7 +580,7 @@ struct ActivityControls: Sendable {
     var resume: (@Sendable () -> Void)?
     /// `Clear Waiting…` of a standing queue (A-OPS-CLEARQUEUE).
     var clearWaiting: (@Sendable () -> Void)?
-    /// Retry the given failed track ids.
+    /// Retry the given failed track ids (with the failed batch's own source policy).
     var retry: (@Sendable ([Int64]) -> Void)?
     /// `Run Again` for a finished / cancelled / failed operation (this session only).
     var runAgain: (@Sendable () -> Void)?

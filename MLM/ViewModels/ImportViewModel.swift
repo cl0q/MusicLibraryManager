@@ -207,7 +207,8 @@ final class ImportViewModel {
         box.task = task
         job?.setControls(ActivityControls(
             cancelStyle: .afterThisFile, cancel: { box.task?.cancel() },
-            runAgain: { [weak self] in Task { @MainActor in await self?.importFromDirectory(directory) } }
+            // Strong: a throwaway importer (Folders) must still run again (W3-ACT S5).
+            runAgain: { Task { @MainActor in await self.importFromDirectory(directory) } }
         ))
 
         await task.value

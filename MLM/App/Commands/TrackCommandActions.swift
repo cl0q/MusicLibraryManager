@@ -23,10 +23,14 @@ enum TrackCommandActions {
 
     /// Download / Retry Download: hands the tracks without a file to the download pipeline,
     /// which reports in Activity.
-    static func download(_ tracks: [Track], container: DependencyContainer = .shared) {
+    /// Returns the batch's ticket: its `cancel()` cancels exactly this batch (W3-ACT S1).
+    @discardableResult
+    static func download(_ tracks: [Track], container: DependencyContainer = .shared) -> DownloadTicket? {
         let missing = tracks.filter(\.isRemote)
-        guard !missing.isEmpty, let downloads = container.downloadViewModel else { return }
-        Task { await downloads.downloadTracks(missing) }
+        guard !missing.isEmpty, let downloads = container.downloadViewModel else { return nil }
+        let ticket = DownloadTicket()
+        Task { await downloads.downloadTracks(missing, ticket: ticket) }
+        return ticket
     }
 
     /// Show in Finder: selects every selected file that can be found.

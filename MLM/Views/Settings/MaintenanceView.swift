@@ -7,16 +7,29 @@ import SwiftUI
 /// reindex search, and orphan detection.
 struct MaintenanceView: View {
     @Environment(\.container) private var container
-    @State private var isRunning: String? = nil
-    @State private var resultMessage: String? = nil
     @State private var selectedSource = "soundcloud"
-    @State private var progressState: MaintenanceProgressTracker.ProgressState? = nil
     @State private var pathMigrationReport: OrganizedPathMigrationService.AuditReport? = nil
     @State private var showPathMigrationReport = false
     @State private var showPathMigrationConfirmation = false
     @State private var showPathRollbackConfirmation = false
     @State private var backgroundProcessing: SyncTurboLevel = .standard
-    @State private var runningTask: Task<Void, Never>?
+
+    // W3-ACT (B3): the running job, its progress and result line live in `MaintenanceJobRunner`,
+    // which outlives this pane — the job keeps running and ends its Activity operation when
+    // Settings closes or the tab changes. The pane reads and writes them as before.
+    private var runner: MaintenanceJobRunner { .shared }
+    private var isRunning: String? {
+        get { runner.running }
+        nonmutating set { runner.running = newValue }
+    }
+    private var resultMessage: String? {
+        get { runner.resultMessage }
+        nonmutating set { runner.resultMessage = newValue }
+    }
+    private var progressState: MaintenanceProgressTracker.ProgressState? {
+        get { runner.progress }
+        nonmutating set { runner.progress = newValue }
+    }
 
     /// Legacy maintenance workers accept a Boolean. Derive it from the shared
     /// persisted sync preference rather than maintaining a second setting.
@@ -29,14 +42,6 @@ struct MaintenanceView: View {
     }
 
     var body: some View {
-        maintenanceForm
-            // Every job of this pane is an Activity operation (W3-ACT, DEC-044); the rows below
-            // keep their inline progress until W3-SET rebuilds the pane.
-            .modifier(MaintenanceActivityTracking(running: isRunning, progress: progressState,
-                                                  result: resultMessage, cancel: { runningTask?.cancel() }))
-    }
-
-    private var maintenanceForm: some View {
         Form {
             Section("Background processing") {
                 Picker("Background processing", selection: $backgroundProcessing) {
@@ -86,7 +91,8 @@ struct MaintenanceView: View {
                         Button("Change…") {
                             chooseNewCacheFolder()
                         }
-                        .disabled(isRunning != nil)
+                        .disabled(isRunning != nil || container.transcodeCacheMoveBlockedReason != nil)
+                        .help(container.transcodeCacheMoveBlockedReason ?? "")
                     }
                     
                     Text("Changing the location moves existing cache files in the background and removes the old copies to free storage space.")
@@ -274,9 +280,7 @@ struct MaintenanceView: View {
                                 .controlSize(.small)
                         } else {
                             Button("Create or link playlist") {
-                                Task {
-                                    await runCreateLikedPlaylist()
-                                }
+                                runner.run("create-liked-playlist") { await runCreateLikedPlaylist() }
                             }
                             .disabled(isRunning != nil)
                         }
@@ -306,7 +310,7 @@ struct MaintenanceView: View {
             titleVisibility: .visible
         ) {
             Button("Confirm and apply", role: .destructive) {
-                Task { await applyPathMigration() }
+                runner.run("path-apply") { await applyPathMigration() }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -318,7 +322,7 @@ struct MaintenanceView: View {
             titleVisibility: .visible
         ) {
             Button("Confirm rollback", role: .destructive) {
-                Task { await rollbackPathMigration() }
+                runner.run("path-rollback") { await rollbackPathMigration() }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -349,7 +353,7 @@ struct MaintenanceView: View {
                     ProgressView().controlSize(.small)
                 } else {
                     Button("Preview changes") {
-                        Task { await runPathMigrationAudit() }
+                        runner.run("path-audit") { await runPathMigrationAudit() }
                     }
                     .disabled(isRunning != nil)
                 }
@@ -460,7 +464,7 @@ struct MaintenanceView: View {
                 } else {
                     Button("Run") {
                         progressState = nil
-                        runningTask = Task { await task() }
+                        runner.run(action) { await task() }
                     }
                     .disabled(isRunning != nil)
                 }
@@ -500,7 +504,7 @@ struct MaintenanceView: View {
 
             if isRunning == action {
                 Button("Cancel", role: .cancel) {
-                    runningTask?.cancel()
+                    runner.cancel()
                     resultMessage = "\(title): cancellation requested"
                 }
                 .buttonStyle(.bordered)

@@ -180,6 +180,9 @@ final class DownloadOrchestrator {
         /// extension without the dot (e.g. `"m4a"`, `"flac"`) and `bitrate`
         /// is in kbps.
         var downloadedMetadata: [Int64: DownloadedFileInfo] = [:]
+        /// Tracks not tried (or interrupted) because the library drive went away — waits, not
+        /// failures (UC-JOB-10): no failure is recorded, nothing is enqueued for retry (W3-ACT S3).
+        var driveWaitingTrackIds: Set<Int64> = []
     }
 
     /// Container-format and bitrate metadata for a freshly downloaded file.
@@ -377,6 +380,44 @@ final class DownloadOrchestrator {
         cancelRequested = true
     }
 
+    /// Removes leftovers in MLM's own hidden staging folders (`.mlm-download-tmp`,
+    /// `.mlm-transcode-tmp`) older than an hour — e.g. a track interrupted when the drive went
+    /// away — so no partial file stays in the library folder (W3-ACT S3). Batches run one at a
+    /// time, so nothing that old is in use.
+    private func removeStaleStaging(now: Date = Date()) {
+        let fm = FileManager.default
+        let root = aacDir.deletingLastPathComponent()
+        for folder in [".mlm-download-tmp", ".mlm-transcode-tmp"] {
+            let dir = root.appendingPathComponent(folder)
+            guard let entries = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { continue }
+            for entry in entries {
+                let modified = (try? entry.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? now
+                if now.timeIntervalSince(modified) > 3600 { try? fm.removeItem(at: entry) }
+            }
+        }
+    }
+
+    /// Clears a stop request left from an earlier batch, right before a new batch starts — a
+    /// cancel belongs to one batch only (W3-ACT S1).
+    func clearCancelRequest() {
+        cancelRequested = false
+    }
+
+    /// A track that has a file by the time its turn comes is skipped (W3-ACT B1). Set by
+    /// `DownloadViewModel.configure`.
+    var isAlreadyLocal: (@Sendable (Int64) async -> Bool)?
+
+    /// Whether `/Volumes/<name>` is mounted — the reconciler's check (`MountObserver`); tests
+    /// fake it.
+    var isVolumeMounted: @Sendable (String) -> Bool = { MountObserver.isVolumeMounted($0) }
+
+    /// The library drive is away (the folder is under `/Volumes/<name>` and that volume isn't
+    /// mounted). A folder on the Mac's own disk is never away.
+    private var isLibraryDriveAway: Bool {
+        guard let volume = MountObserver.extractVolumePath(from: aacDir.deletingLastPathComponent().path) else { return false }
+        return !isVolumeMounted(volume)
+    }
+
     /// Download a batch of tracks following the fallback chain.
     ///
     /// Processing is sequential (not parallel) to simplify rate limiting.
@@ -416,6 +457,14 @@ final class DownloadOrchestrator {
             return result
         }
 
+        // The drive is away before anything starts: every track waits for it (W3-ACT S3).
+        if isLibraryDriveAway {
+            result.driveWaitingTrackIds = Set(requests.map(\.trackId))
+            AppLogger.shared.info("Library drive not connected — \(total) download(s) wait for it", source: "Download")
+            return result
+        }
+        removeStaleStaging()
+
         // The staging directory is intentionally hidden and is not part of
         // the managed layout. Source folders are created only in finalization.
         do {
@@ -440,7 +489,7 @@ final class DownloadOrchestrator {
             return result
         }
 
-        for (index, request) in requests.enumerated() {
+        trackLoop: for (index, request) in requests.enumerated() {
             if cancelRequested {
                 result.cancelledTrackIds.formUnion(
                     requests[index...].map(\.trackId)
@@ -453,10 +502,24 @@ final class DownloadOrchestrator {
                 break
             }
 
+            // The drive went away: this track and the rest wait for it (S3).
+            if isLibraryDriveAway {
+                result.driveWaitingTrackIds.formUnion(requests[index...].map(\.trackId))
+                AppLogger.shared.info("Library drive went away — \(total - index) download(s) wait for it", source: "Download")
+                break
+            }
+
             currentItem = "\(request.artist) - \(request.title)"
             progress = Double(index) / Double(max(total, 1))
             onProgress?(index, total, currentItem)
             onTrackProgress?(0)
+
+            // Already downloaded meanwhile (another path): don't download it again (B1).
+            if let isAlreadyLocal, await isAlreadyLocal(request.trackId) {
+                result.skipped += 1
+                result.skippedTrackIds.insert(request.trackId)
+                continue
+            }
 
             do {
                 let stagingDir = aacDir
@@ -495,6 +558,11 @@ final class DownloadOrchestrator {
                     )
                     result.succeeded += 1
                 case .failure(let failure):
+                    if isLibraryDriveAway {
+                        // Not this track's fault: it and the rest wait for the drive (S3).
+                        result.driveWaitingTrackIds.formUnion(requests[index...].map(\.trackId))
+                        break trackLoop
+                    }
                     result.failed += 1
                     result.failedTrackIds.insert(request.trackId)
                     let terminalMessage = failure.userMessage
@@ -515,6 +583,13 @@ final class DownloadOrchestrator {
                         source: "Download"
                     )
                     continue
+                }
+                if isLibraryDriveAway {
+                    // The drive went away mid-track: no failure is recorded; it and the rest
+                    // wait (S3). Its staging/transcode folders are cleaned when a later batch starts.
+                    result.driveWaitingTrackIds.formUnion(requests[index...].map(\.trackId))
+                    AppLogger.shared.info("Library drive went away during track \(request.trackId) — waiting", source: "Download")
+                    break trackLoop
                 }
                 result.failed += 1
                 result.failedTrackIds.insert(request.trackId)

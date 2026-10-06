@@ -5,6 +5,8 @@ import Foundation
 /// toolbar's `‹n› failed`, the playlist header and the scope count agree by construction.
 protocol ActivityFailureSource: Sendable {
     func failingTrackIDs(in trackIDs: [Int64]) async throws -> Set<Int64>
+    /// Every track in the `Download failed` state now — the scope's own predicate.
+    func allFailingTrackIDs() async throws -> Set<Int64>
 }
 
 /// Failures grouped by cause with their fix (UC-JOB-11, P-ACTIVITY-OPS.E03): hundreds of

@@ -28,6 +28,11 @@ final class ActivityRouter {
     /// Bumped to ask the main window to open the Activity window (from places without
     /// `openWindow`, e.g. a status-bar button).
     private(set) var windowRequest = 0
+    /// The toolbar Activity item is on screen (not removed by customisation, not in overflow).
+    var isToolbarItemVisible = false
+    /// The main window's width — drives the item's text collapse (UC-TB-03); `NSToolbar` gives
+    /// its items an unconstrained proposal, so `ViewThatFits` alone can't shorten them.
+    var mainWindowWidth: CGFloat = .infinity
     /// Operation to select in the Operations table when the window opens.
     var selectedOperationID: UUID?
 
@@ -35,7 +40,14 @@ final class ActivityRouter {
         tab = UserDefaults.standard.string(forKey: Self.tabKey).flatMap(Tab.init(rawValue:)) ?? .operations
     }
 
-    func showPopover() { isPopoverPresented = true }
+    /// `Show` (status bar): the popover, or — when the toolbar item isn't shown — the window (S6).
+    func showPopover() {
+        if isToolbarItemVisible {
+            isPopoverPresented = true
+        } else {
+            requestWindow(tab: .operations)
+        }
+    }
 
     func requestWindow(tab: Tab? = nil) {
         if let tab { self.tab = tab }
@@ -124,16 +136,26 @@ enum ActivitySubjectNavigator {
         }
     }
 
-    /// `Retry All`: every retryable failed track of the group, once.
+    /// `Retry All`: every retryable failed track of the group, once — each through the operation
+    /// that owns it, with that batch's own source policy (B2, S4).
     static func retry(_ group: ActivityPresentation.AttentionGroup, center: ActivityCenter) {
         guard group.isRetryable else { return }
+        if group.isEarlier {
+            center.retryEarlier(group.trackIDs)
+            return
+        }
         if group.trackIDs.isEmpty {
             for id in group.operationIDs { center.operation(id: id)?.controls.runAgain?() }
             return
         }
-        // One batch for the whole group, through the newest operation's retry.
-        if let newest = group.operationIDs.first {
-            center.retryFailed(newest, trackIDs: group.trackIDs)
+        for (operation, tracks) in group.tracksByOperation where !tracks.isEmpty {
+            center.retryFailed(operation, trackIDs: tracks)
         }
+    }
+
+    /// `Dismiss` for groups (the `Earlier downloads` group is recorded as dismissed).
+    static func dismiss(_ groups: [ActivityPresentation.AttentionGroup], center: ActivityCenter) {
+        center.dismiss(groups.flatMap(\.operationIDs))
+        for group in groups where group.isEarlier { center.dismissEarlier(group.trackIDs) }
     }
 }

@@ -148,6 +148,8 @@ struct ContentView: View {
         }
         // Activity's status-bar messages (UC-JOB-08) and window requests (status-bar `Show`).
         .onAppear { connectActivity() }
+        // The Activity item's text collapse follows the window width (UC-TB-03).
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { ActivityRouter.shared.mainWindowWidth = $0 }
         .onChange(of: ActivityRouter.shared.windowRequest) { _, _ in
             openWindow(id: ActivityWindow.id)
         }
