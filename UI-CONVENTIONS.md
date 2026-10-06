@@ -204,7 +204,7 @@ Tables, lists, grids, album/playlist cards, headers, banners, status chips/text,
 | UC-TB-02 | No section-specific toolbar items: Play, Shuffle, Sync Now, Scan, Refresh, counters live in the content header, the Playback/Library/Track menus or the status bar. (DEC-048, P-TOOLBAR.E04/E05 removed) |
 | UC-TB-03 | Narrow windows give way in this fixed order: (1) the player's title/artist column, (2) the Activity item's text, (3) the Add button moves into the overflow menu. Transport, scrubber, queue button, Info and search never collapse. (§7.1, `shell.html` P-TOOLBAR) |
 | UC-TB-04 | The toolbar is customizable (`.toolbar(id:)`): the user may remove Add and Activity; nothing else changes it. View ▸ Customize Toolbar… exists. (§6, M-VIEW.N09) |
-| UC-TB-05 | Add menu (＋), exactly: `New Playlist ⌘N` · `New Playlist Folder ⌥⌘N` · — · `Add from Link… ⌘U` · `Import Playlist from Source… ⇧⌘I` · `Import Files or Folder…` · `Import M3U…` · — · `Refresh from Sources`. With no source connected `Refresh from Sources` is disabled with help `No source is connected`. (`patterns-context-menus.html` P-ADDMENU, `shell.html` P-ADDMENU.N01) |
+| UC-TB-05 | Add menu (＋), exactly: `New Playlist ⌘N` · `New Playlist Folder ⌥⌘N` · — · `Add from Link… ⌘U` · `Import Playlist from Source… ⇧⌘I` · `Import Files or Folder…` · `Import M3U…` · — · `Refresh from Sources`. With no source connected `Refresh from Sources` is disabled with help `No source is connected`. (`patterns-context-menus.html` P-ADDMENU, `shell.html` P-ADDMENU.N01) The window menu carries no key equivalents of its own: the glyphs name the File-menu keys, which own them (IMP-111, extends IMP-032). |
 | UC-TB-06 | Player anatomy, left to right: Previous · Play/Pause · Next · cover (28 pt; click → large-cover popover; draggable as the track) · title / state line + artist line + scrubber (click title → Go to Current Track ⌘L) · elapsed / duration (hidden when idle) · volume button (popover with slider; level persisted; ⌘↑/⌘↓) · queue button (toggles the Queue column). The player has no background of its own. (§7.8, `player.html` P-PLAYER.E01–E10, N01) |
 | UC-TB-07 | Player states are words in the title area, exactly: `Not playing` · `Preview` (tag before the previewed title; second line `Space to stop · Return to play`; waveform scrubber) · `Can’t play — not downloaded · Download` · `Can’t play — file missing · Locate…` · `Can’t play — “Lexxar” is not connected`. An online result previews as `Preview · from YouTube`. (§7.8, DEC-045, `patterns-states.html` G-PLAYBACK-ERROR) |
 | UC-TB-08 | The toolbar player is a drop target: tracks dropped on it = Play Next (UC-DND matrix). (DEC-040, D-LIB-TO-QUEUE) |
@@ -218,7 +218,7 @@ Tables, lists, grids, album/playlist cards, headers, banners, status chips/text,
 | UC-SIDE-02 | Section headers are system headers (not uppercase, not hand-styled), collapsible via `Section(isExpanded:)`; expansion state of sections and playlist folders persists per library. A collapsed section still accepts drops. (`shell.html` P-SIDEBAR, P-SIDEBAR.N09) |
 | UC-SIDE-03 | Only the Playlists and Sync section headers show a ＋ on hover. Playlists ＋ is a menu (`New Playlist ⌘N`, `New Playlist Folder ⌥⌘N`); Sync ＋ opens New Sync Profile… (help `New Sync Profile…`). (P-SIDEBAR.E03/add, `sync.html` header) |
 | UC-SIDE-04 | Row anatomy: SF Symbol + name on one line, truncated at the tail. A second line (`.subheadline`, `.secondary`) appears **only** to state a condition; a trailing `.badge(n)` appears **only** on Inbox rows. Never a coloured dot. (§7.1, P4, `shell.html` P-SIDEBAR.N04) |
-| UC-SIDE-05 | Inbox badges count decisions waiting: Discover = recommendations + reels waiting for a verdict; Review = duplicate groups + conflicts + album suggestions. Plain number with thousands separators; zero shows nothing; no capsule colour. (P-SIDEBAR.E08/E09) |
+| UC-SIDE-05 | Inbox badges count decisions waiting: Discover = recommendations + reels waiting for a verdict; Review = duplicate groups + conflicts + album suggestions (built, IMP-086). Plain number with thousands separators; zero shows nothing; no capsule colour. (P-SIDEBAR.E08/E09) |
 | UC-SIDE-06 | Playlist rows have a second line only when not healthy, in the playlist status words of §15.5 (`Importing · 12 of 44`, `Incomplete · 9 failed`, `Not downloaded · 61 tracks`, `SoundCloud sign-in expired`). (DEC-023, P-SIDEBAR.N04/N12/N13) |
 | UC-SIDE-07 | Sync profile rows always have a second line with the profile state (§15.8): `Not connected` · `‹n› to add` · `Syncing ‹n› of ‹m›` (with a thin linear `ProgressView` under the text) · `Synced ‹relative time›` · `Synced ‹relative time› · ‹n› failed`. (DEC-027, P-SIDEBAR.N05–N08, N14) |
 | UC-SIDE-08 | Playlist folders are `DisclosureGroup` rows; they group playlists, accept dropped playlists (move) and tracks (new playlist inside), and remember their expand state. Deleting a folder moves its playlists up one level. (DEC-003, P-SIDEBAR.N03) |
@@ -276,7 +276,7 @@ Applies to every list of tracks: All Tracks, album / playlist / genre detail, Fo
 |---|---|
 | UC-TABLE-01 | Use a native SwiftUI `Table(_:selection:sortOrder:columnCustomization:)` with `selection: Binding<Set<Track.ID>>`. No `List` of custom rows, no `LazyVStack` tables, no `NSTableView` wrappers for track lists. Folders uses the hierarchical `Table(_:children:…)` / `DisclosureTableRow`. (§4.1, §6, DEC-024) |
 | UC-TABLE-02 | Default columns, in this order: **Title** (cover + now-playing glyph + title), **Artist**, **Album**, **Time**, **BPM**, **Energy**, **Genre**, **Added**, **Status**. Optional (off by default): **Dance**, **Year**, **Format**, **kbps**. In containers with an own order (playlist, queue, album) `#` is the first column. Title cannot be hidden. (DEC-012, §7.2, app.js COLS) |
-| UC-TABLE-03 | Column show/hide and reorder through `TableColumnCustomization`, persisted per view with `@SceneStorage`. The header context menu lists the hideable columns (`Artist, Album, Time, BPM, Energy, Dance, Genre, Year, Format, kbps, Added, Status`) with check marks, then `Auto Size All Columns`; View ▸ Columns shows the same list. (DEC-012, V-TRACK-TABLE.N01, M-VIEW.N04) |
+| UC-TABLE-03 | Column show/hide and reorder through `TableColumnCustomization`, persisted per view with `@SceneStorage`. The header context menu lists the hideable columns (`Artist, Album, Time, BPM, Energy, Dance, Genre, Year, Format, kbps, Added, Status`) with check marks, View ▸ Columns shows the same list. There is no `Auto Size All Columns`: SwiftUI `Table` offers no API to reset widths (IMP-112). (DEC-012, V-TRACK-TABLE.N01, M-VIEW.N04) |
 | UC-TABLE-04 | Every column is sortable by clicking its header (`KeyPathComparator`), including **Status** and Energy/Dance; View ▸ Sort By mirrors it (with `Ascending` / `Descending`). In a playlist the first Sort By entry is `Playlist Order`; album detail has no sort headers (fixed disc/track order). Sort order is persisted per view. (DEC-011, DEC-012, M-VIEW.N05, §7.3) |
 | UC-TABLE-05 | In a playlist sorted by anything but `#`: `#` is dimmed but keeps showing the playlist position (no renumbering), drag-to-reorder is off, and one line above the table says `Sorted by ‹Column› — reordering is off · Sort by #`. Dropping tracks from elsewhere still works (they are appended, and the status message says so). (`playlists.html` reorder hint, D-PLD-REORDER, D-PLD-INSERT) |
 | UC-TABLE-06 | Context menu and primary action come from one modifier: `.contextMenu(forSelectionType: Track.ID.self, menu:, primaryAction:)`. The primary action (double-click / Return) follows UC-PRIM. A right-click on a row outside the selection acts on that row only and leaves the selection unchanged. (§4.1, §6, PATTERN-CM.N07) |
@@ -291,7 +291,7 @@ Applies to every list of tracks: All Tracks, album / playlist / genre detail, Fo
 | UC-TABLE-15 | Row density: one line per row, `.body` text, 20 pt cover thumbnail; no extra vertical padding (rows come out at the mockup's ~28 pt). Two-line rows only for UC-TABLE-13. Use the system's alternating row backgrounds. (`mlm.css` `.table td`, `tr.tall`) |
 | UC-TABLE-16 | Now playing: the playing row's Title cell shows a now-playing glyph (`speaker.wave.2.fill`, `.foregroundStyle(.tint)`, `.symbolEffect(.variableColor.iterative)` while playing, static while paused) between cover and title, and the title text in `.tint`. No other row decoration. *(glyph name unspecified in B1 — convention set here)* (§5 Motion, `mlm.css` `tr.playing`) |
 | UC-TABLE-17 | Not-downloaded / failed rows show a neutral placeholder thumbnail (`music.note` on `.quaternary`), never a broken image. (app.js COLS.title) |
-| UC-TABLE-18 | `Album` column values are links to the album (`Go to Album`) when an album exists. (§7.3) |
+| UC-TABLE-18 | `Album` column values are links to the album (`Go to Album`) when an album exists; built in W4-2, the link opens the preferred edition (IMP-092). (§7.3) |
 | UC-TABLE-19 | `Added` means "added to the library" in library views and "added to this playlist" in a playlist. (§7.6) |
 | UC-TABLE-20 | Availability is persisted state (refreshed by scans and mount events). Rendering a row must never touch the disk: no `FileManager.fileExists` per row, per cell or per scroll. (§7.2 Risks, W2-A) |
 | UC-TABLE-21 | Counts shown with a table (scope counts, status bar) come from SQL aggregates, not from counting loaded rows. Tables load lazily. (PATTERN-STATES.N21) |
@@ -319,7 +319,7 @@ Applies to every list of tracks: All Tracks, album / playlist / genre detail, Fo
 | UC-STATUS-02 | Default text for a track view: `‹n› tracks · ‹total duration› · ‹total size›` (`12,935 tracks · 38 days · 412 GB`). Grids: `‹n› albums` / `‹n› playlists` / `‹n› genres`, `‹shown› of ‹total›` while filtered. *(grid wording unspecified in B1 — convention set here)* (§7.2, §4.9) |
 | UC-STATUS-03 | With a selection: `‹n› selected · ‹duration›` (`14 selected · 52 min`). (§7.2; see §23 C12) |
 | UC-STATUS-04 | Transient message = what happened (+ the consequence that used to need an alert, + counts of what was skipped) + at most two plain buttons (`Undo`, `Show`, `Try Again`, `Download`, `Locate…`, `Cancel`, `Resume`). It replaces the default text for **8 s**, then the default returns; a newer message replaces an older one at once. `Undo` in the message and Edit ▸ Undo do the same thing; after 8 s ⌘Z still works. (DEC-016, §4.6, PATTERN-SHEETS.N06) |
-| UC-STATUS-05 | Patterns (verbatim shapes): `Added 3 tracks to “Warm-up” · Undo` · `Added 2 tracks to “Warm-up” · 1 was already in it · Undo` · `Removed 9 tracks from “Warm-up” — the files stay in the library · Undo` · `Playing next: 3 tracks · Undo` · `Download started — 44 tracks` · `Import finished — 35 downloaded, 9 failed · Show` · `Downloading “‹title›” — it will play when it’s ready · Cancel` · `Skipped 2 tracks that aren’t downloaded · Download` · `Couldn’t dismiss “‹title›” — the file is in use by another app. · Try Again` · `“Lexxar” connected. · Resume`. (`patterns-states.html`, `patterns-dnd.html` PATTERN-DND.N04, `patterns-sheets-alerts.html`) |
+| UC-STATUS-05 | Patterns (verbatim shapes): `Added 3 tracks to “Warm-up” · Undo` · `Added 2 tracks to “Warm-up” · 1 was already in it · Undo` · `Removed 9 tracks from “Warm-up” — the files stay in the library · Undo` · `Playing next: 3 tracks · Undo` · `Download started — 44 tracks` · `Import finished — 35 downloaded, 9 failed · Show` · `Downloading “‹title›” — it will play when it’s ready · Cancel` · `Skipped 2 tracks that aren’t downloaded · Download` · `Couldn’t dismiss “‹title›” — the file is in use by another app. · Try Again` · `“Lexxar” connected. · Resume` · `Import started — ‹n› files · Show in Activity` (UC-JOB-08 shape) · `Couldn’t create the playlist — ‹cause›` · `Rockbox device detected — device defaults applied` · `Couldn’t undo ‹action› — ‹cause›` (also `… — the album no longer exists`) · `All ‹n› tracks were already in “‹playlist›”` · `Kept and added ‹n› tracks to “‹playlist›” · Undo` · `Set the artwork of “‹title›”` / `Set the artwork of ‹n› tracks` · `Tips will show again`. (`patterns-states.html`, `patterns-dnd.html` PATTERN-DND.N04, `patterns-sheets-alerts.html`) |
 | UC-STATUS-06 | Loading: when a refresh or background read of the current view takes longer than 300 ms, a small `ProgressView().controlSize(.small)` with a short phase text (`Refreshing from SoundCloud…`) appears at the left of the status bar; nothing appears for faster work. (§4.9, PATTERN-STATES.N13) |
 | UC-STATUS-07 | Space / Return refusals are status-bar messages (`Space previews one track. Select a single track.`, `Can’t preview — not downloaded. Press ⌘D to download.`, `Can’t preview — file missing.`, `Can’t preview — “Lexxar” is not connected.`, `Can’t play — “Lexxar” is not connected.`). (§10 Q1, `player.html` K-LIB-SPACE, §4.3) |
 
@@ -377,12 +377,12 @@ Applies to every list of tracks: All Tracks, album / playlist / genre detail, Fo
 | UC-KEY-24 | ⌘[ · ⌘] | Back · Forward | Main window | Go |
 | UC-KEY-25 | ⌘F · ⌥⌘F | Search (filters the current view) · Search Library. In the Activity window ⌘F focuses the log search; Settings and sheets keep their own ⌘F. | Main window | Edit ▸ Find |
 | UC-KEY-26 | ⌃⌘S · ⌃⌘F | Show/Hide Sidebar · Enter/Exit Full Screen | Main / key window | View |
-| UC-KEY-27 | ⌥⌘0 · ⌘, · ⌘? | Activity window · Settings… · MLM Help | Always | Window · MLM · Help |
+| UC-KEY-27 | ⌥⌘0 · ⌘, | Activity window · Settings… | Always | Window · MLM |
 | UC-KEY-28 | ⌘W · ⌘M · ⌘H · ⌥⌘H · ⌘Q | Close Window · Minimize · Hide MLM · Hide Others · Quit MLM (asks only when work is running) | System | File · Window · MLM |
 | UC-KEY-29 | K | Keep the selected recommendation | Discover ▸ Recommendations | — (context menu) |
 | UC-KEY-30 | → (Review group) · ↩ (Review group) | Show Comparison (expand) · Keep Recommended / Apply Merge | Review group rows | — (context menu) |
 | UC-KEY-31 | ⌘S | Save ‹n› Changes (staged genre edits) | Genre detail with staged changes | — (button) |
-| UC-KEY-32 | ⌥↑ / ⌥↓ | Move the row | Albums ▸ Edit Order | — |
+| UC-KEY-32 | ⌥↑ / ⌥↓ | Move the row | Albums ▸ Edit Order; playlist rows in Manual order (off while sorted by a column or filtered, IMP-117) | — |
 | UC-KEY-33 | → / ← · ⌥→ / ⌥← · ⌘↓ (outline) | Expand / collapse (← on a child goes to its parent) · expand / collapse everything inside · open the folder as root | Folders, sidebar folders, Review groups | — |
 | UC-KEY-34 | ↩ / Esc / ⌘. / ⌘⌫ / Tab in a sheet or alert | The primary button (never a destructive one) / Cancel / Cancel / the destructive button of a confirmation / next field | Sheets, alerts | — |
 | UC-KEY-35 | Media keys | Play/Pause, Next, Previous via `MPRemoteCommandCenter` — the only keyboard Play/Pause. | System | — |
@@ -393,6 +393,7 @@ Applies to every list of tracks: All Tracks, album / playlist / genre detail, Fo
 | UC-KEY-37 | Never bind Space or plain Return as a menu key equivalent. Track ▸ Play / Track ▸ Preview do not register ↩ / Space; the keys are handled by the focused list. Playback ▸ Play/Pause has **no** shortcut. (§10 Q1, UC-KEY-01/02) *(display of ↩ / Space next to those items is optional — convention set here)* |
 | UC-KEY-38 | Playback keys never fire while a text field has focus. (PATTERN-MENUS.N06) |
 | UC-KEY-39 | No shortcut may be added, reassigned or given a second meaning without an `IMP` entry. Conflicts resolved for good: ⌘N one meaning; ⌘R one concept; ⌘F a normal menu key of the main window; ⌘8 gone; plain ←/→ not window-wide. (§4.2, PATTERN-MENUS.N03) |
+| UC-KEY-40 | The Discover header may show the key-hint line `Space Preview · K Keep · ⌫ Dismiss · ⌘Z Undo`; hint lines are plain secondary text, never buttons. (`discover.html`, W3-DISC-A) |
 
 ### 9.3 Primary action (double-click / Return) per row kind
 
@@ -423,7 +424,7 @@ The primary action is always the first item of the row's context menu, except wh
 |---|---|
 | UC-MENU-01 | Ten menus in this order: **MLM · File · Edit · View · Track · Playback · Library · Go · Window · Help**. Built with `.commands` on the main `Window` scene (`CommandMenu`, `CommandGroup`, `SidebarCommands()`, `ToolbarCommands()`, `InspectorCommands()`), driven by `FocusedValue`. (DEC-038, PATTERN-MENUS.N01) |
 | UC-MENU-02 | Menu-bar items never disappear: a command that can't run now is disabled (unlike context menus). Every command in the app has a menu-bar item. No dead items: an item that is enabled works. (PATTERN-MENUS.N01) |
-| UC-MENU-03 | Titles name their subject where it helps: `Undo Add to “Warm-up”`, `Refresh from SoundCloud`, `Shuffle All Tracks`, `Shuffle “Warm-up”`, `Remove from “Warm-up”`, `Hide Sidebar` / `Show Sidebar`, `Show Info` / `Hide Info`, `Retry Download`, `Download 3 Tracks`. (PATTERN-MENUS.N01) |
+| UC-MENU-03 | Titles name their subject where it helps: `Undo Add to “Warm-up”`, `Refresh from SoundCloud`, `Shuffle All Tracks`, `Shuffle “Warm-up”`, `Remove from “Warm-up”`, `Hide Sidebar` / `Show Sidebar`, `Show Info` / `Hide Info`, `Retry Download`, `Download 3 Tracks`; while a preview plays Track ▸ Preview reads `Stop Preview`. (PATTERN-MENUS.N01, IMP-035) |
 | UC-MENU-04 | With Settings or the Activity window in front, selection commands are disabled. With no library open only these work: File ▸ New Library…, Open Library…, Open Recent; MLM ▸ Settings…; Window ▸ Activity; Help. (PATTERN-MENUS.N01) |
 | UC-MENU-05 | Contents, exactly (— = separator): |
 
@@ -438,7 +439,7 @@ The primary action is always the first item of the row's context menu, except wh
 | **Library** | Refresh from Sources · Scan Library Folder · — · Find Duplicates · Find Albums · — · Maintenance ▸ (Fingerprint All Tracks · ReplayGain Analysis · Danceability Analysis · Similarity Analysis · — · Refresh Embedded Artwork · Fetch Artwork from MusicBrainz · Reread Tags from Files · — · Maintenance Settings…; a running job reads `‹Job› (Running)` and is disabled) · Back Up Now · — · Library Settings… |
 | **Go** | All Tracks ⌘1 · Albums ⌘2 · Genres ⌘3 · Folders ⌘4 · Discover ⌘5 · Review ⌘6 · — · Back ⌘[ · Forward ⌘] · — · Playlists ▸ (All Playlists · — · playlist folders as submenus, playlists in sidebar order) · Sync Profiles ▸ (profiles in sidebar order) |
 | **Window** | Minimize ⌘M · Zoom · (system tiling items) · — · Activity ⌥⌘0 · — · Bring All to Front · — · window list (`‹Place› — ‹Library name›`, `Activity`, `Settings`) |
-| **Help** | Search (system) · MLM Help ⌘? · Keyboard Shortcuts (window with the map of §9.2) · — · Show Tips Again |
+| **Help** | Search (system) · Keyboard Shortcuts (window with the map of §9.2) · — · Show Tips Again (no `MLM Help`: no Help Book exists, IMP-116) |
 
 (`patterns-menus-shortcuts.html` M-APP … M-HELP, corrected by §10 Q1; `Find Duplicates` / `Find Albums` without ellipsis per UC-COPY-05, see §23 C20)
 
@@ -453,7 +454,7 @@ The primary action is always the first item of the row's context menu, except wh
 | ID | Rule |
 |---|---|
 | UC-SEARCH-01 | One system search field (`.searchable` on the `NavigationSplitView`, in the toolbar). Typing always filters the current view in place — tracks, albums, playlists, folders, genres, review groups. No results pane, nothing navigates. (DEC-017, §4.7) |
-| UC-SEARCH-02 | While searching, `.searchScopes($scope, activation: .onSearchPresentation)` shows `This view` (default, always restored) · `Library` (everything, grouped: Tracks, Albums, Playlists, Folders; sections without hits are left out) · `Online` (SoundCloud, YouTube, Spotify, DAB). (§4.7, `search.html`) |
+| UC-SEARCH-02 | While searching, `.searchScopes($scope, activation: .onSearchPresentation)` shows `This view` (default, always restored) · `Library` (everything, grouped: Tracks, Albums, Playlists, Folders; sections without hits are left out; the Albums section — five rows and `Show All`, rows open the album — is built, W5-1a) · `Online` (SoundCloud, YouTube, Spotify, DAB). (§4.7, `search.html`) |
 | UC-SEARCH-03 | Online results are transient: nothing is written to the library until the user presses `Download` or `Add` / `Keep`. (§4.7, DEC-013) |
 | UC-SEARCH-04 | Tokens: typing `artist:`, `album:`, `genre:`, `year:`, `bpm:`, `is:` offers library values that become tokens (`genre: Techno`, `is: not downloaded`, `is: no album`, `bpm: 120–128`); different kinds combine with AND, values of one kind with OR. Suggestions also list recent searches. (§4.7, `search.html` token suggestions) |
 | UC-SEARCH-05 | A pasted or dropped URL shows suggestion rows instead of results: `Download track from YouTube — “‹title›”` / `Import playlist from SoundCloud… (44 tracks)` / `Add from Link… ⌘U`, leading to S-QUICKADD / S-IMPORT. (DEC-018) |
@@ -572,7 +573,7 @@ The primary action is always the first item of the row's context menu, except wh
 | Genre | Append its tracks | New playlist named after the genre | New playlist inside | Add its tracks | Insert its tracks | Play Next · Add to Queue | — | — | — | — | — |
 | Queue rows | Append | New playlist from the rows | New playlist inside | Add | Insert at the line | Reorder (insertion line) | — | — | Copies the files | — | — |
 | Recommendation | Keep and add | Keep, new playlist | Keep, new playlist inside | Keep and add | Keep and insert | Play Next · Add to Queue (not kept) | — | — | Copies the file | — | — |
-| Reel result / online result | Download and add (row shows Not downloaded → Downloading…) | Download, new playlist | — | — | Download and insert | — | — | — | The link (`public.url`) | — | — |
+| Reel result / online result | Menu only: `Add to Playlist ▸` / `Keep and Add to Playlist ▸` (a result is not a track until downloaded; no drag, IMP-114) | — | — | — | — | — | — | — | — | — | — |
 | Finder audio files / folders | Import and add | Import, new playlist (folder name) | Import, new playlist inside | — | Import and insert at the line | — | — | — | — | Import (any track list, Library section, Folders: into that folder) | — |
 | Finder / browser image | — | — | — | — | — | — | — | Set cover (playlist, album, Info track artwork); non-images: no ring | — | — | — |
 | `.m3u` / `.m3u8` | Import into this playlist (preview sheet) | Import as a new playlist (preview sheet) | Import as a new playlist inside | — | Import into this playlist (preview sheet) | — | — | — | — | Import as a new playlist (preview sheet) | — |
@@ -580,7 +581,7 @@ The primary action is always the first item of the row's context menu, except wh
 | `.mlibm` library file | — | — | — | — | — | — | — | — | — | Open / switch library (also picker, Dock icon) | — |
 | Finder folder / disk | — | — | — | — | — | — | — | — | — | (as audio folder: import) | Set that location (library folder, backup folder, cache, export destination, sync destination, setup step 2) |
 
-Also: Reels list accepts `.mp4` / `.mov` files, folders and links (import / fetch as an Activity operation); a reel row drags out as its video file; Review version rows, Similar ▸ In library rows and the Info header cover drag as tracks. (PATTERN-DND.N06, §4.5, D-* entries)
+Also: Reels list accepts `.mp4` / `.mov` files, folders and links (import / fetch as an Activity operation); a reel row drags out as its video file; Review version rows, Similar ▸ In library rows and the Info header cover drag as tracks; Similar ▸ Online and Reels results are not drag sources (IMP-114). A sync profile row drags only to reorder the Sync section (IMP-106, IMP-120). (PATTERN-DND.N06, §4.5, D-* entries)
 
 ---
 
@@ -636,7 +637,7 @@ Also: Reels list accepts `.mp4` / `.mov` files, folders and links (import / fetc
 | ID | Rule |
 |---|---|
 | UC-SHEET-24 | Every file or folder choice is the system panel via `.fileImporter(isPresented:allowedContentTypes:…)` / `.fileExporter`, with `.fileDialogMessage(_:)` saying what is being chosen; only selectable types enabled; the default button is the system's. No hand-rolled `NSOpenPanel` / `NSSavePanel`. (PATTERN-SHEETS.N08, §6) |
-| UC-SHEET-25 | Message lines, verbatim: Open Library… `Choose a library file.` · library folder `Choose the folder that contains your music.` · import `Choose audio files or a folder to import.` · backups `Choose a folder for backups.` · transcode cache `Choose a folder for the transcode cache.` · Create ML `Choose a folder for the Create ML training set` · sync destination `Choose the folder or disk to sync to.` · M3U `Choose an M3U playlist to import into “‹playlist›”.` · Reels `Choose video files or a folder of videos.` (PATTERN-SHEETS.N08 table) |
+| UC-SHEET-25 | Message lines, verbatim: Open Library… `Choose a library file.` · library folder `Choose the folder that contains your music.` · import `Choose audio files or a folder to import.` · backups `Choose a folder for backups.` · transcode cache `Choose a folder for the transcode cache.` · Create ML `Choose a folder for the Create ML training set` · sync destination `Choose the folder or disk to sync to.` · M3U `Choose an M3U playlist to import into “‹playlist›”.` · Reels `Choose video files or a folder of videos.` · library file `Choose a folder for the library file.` · log lines `Choose where to save the log lines.` · cover `Choose an image for the cover of “‹name›”.` (playlist and album) · M3U export `Choose where to save “‹name›” as an M3U playlist.` · M3U import as a new playlist `Choose an M3U playlist to import as a new playlist.` · Locate File… `Choose the file of “‹title›”. It must be inside the library folder.` (PATTERN-SHEETS.N08 table, W3-LAUNCH / W3-ACT / W3-PL / W4-2, IMP-036) |
 
 ---
 
@@ -715,6 +716,9 @@ One word per meaning, spelled exactly as here in tables, headers, sidebar, Info,
 | `Not found` (library folder gone on a connected disk) | red symbol | Settings ▸ Library state line | `Locate…` |
 | `Connected — on this Mac` / `Connected` | — | Settings ▸ Library state line | `Change…` |
 | `No library folder` / `This library has no library folder yet, so there are no folders to show. Choose one in Settings ▸ Library.` / Settings: `No library folder set` | — | Folders (`ContentUnavailableView`), Settings ▸ Library | `Open Settings ▸ Library` |
+| `“‹V›” is still not connected.` | — | Status bar after `Try Again` while the disk is still away | `Try Again` |
+| `Can’t ‹verb› — “‹V›” is not connected.` with ‹verb› = `scan` · `analyse` · `check the file` · `export now` (one spelling: `analyse`, as in `Not analysed`) | — | Help text of the disabled control and the sentence beside it | none — resumes by itself |
+| `The waveform needs the file. “‹V›” is not connected.` | — | Info ▸ Audio waveform area | none |
 
 `File missing` is **never** used for an unplugged drive. (DEC-014)
 
@@ -748,6 +752,8 @@ Retired: `Not connected` for a source, `Token inaccessible`, `‹Source› disco
 | `New` | — | Import preview (track not yet in library) | — |
 | `Possible duplicate of “‹title›” (‹format›, ‹kbps› kbps).` | — | Info ▸ File | `Show in Review` |
 | `—` | `.tertiary` | Absent album / value | `is: no album` filter; Review ▸ Albums |
+| `On “‹Volume›”, ready to play` | — | Info ▸ File, Local track | — |
+| `Choose the file of “‹title›”. It must be inside the library folder.` · refusals `Couldn’t use “‹file›” — the file must be inside the library folder` / `— it is the file of “‹other›”` / `— the file can’t be read` | — | Locate File… panel message and refusals (IMP-036) | `Locate File…` |
 
 Rows are dimmed only per UC-TABLE-10; `Download failed` rows are not dimmed. (DEC-051)
 
@@ -763,7 +769,7 @@ Rows are dimmed only per UC-TABLE-10; `Download failed` rows are not dimmed. (DE
 | `Not downloaded · ‹n› tracks` | `icloud`, secondary | `Download All` | 4 |
 | `Sorted by ‹Column› — reordering is off` | — | `Sort by #` | (table hint, not a status) |
 | `This playlist is empty. Drag tracks here or use Add to Playlist.` | — | — | empty state |
-| `Playlist not found` (deleted elsewhere / creation undone) | — | — | view state |
+| **Playlist not found** (state name, not shown): `This playlist no longer exists` + `It was deleted, or its creation was undone. Its tracks are still in the library.` | — | — | view state |
 
 With the drive not connected the playlist adds nothing of its own; Play / Shuffle stay, disabled with `Can’t play — “Lexxar” is not connected`. (DEC-023, G-PL-*)
 
@@ -792,6 +798,13 @@ Exactly these six job words. Retired: `Stalled`, lowercase enum names, blue/gree
 | `Can’t play — file missing` | `Locate…` |
 | `Can’t play — “Lexxar” is not connected` | — |
 | `Skipped ‹n› tracks that aren’t downloaded` (status bar, queue playback) | `Download` |
+| `Can’t play — the file can’t be read` | — |
+| `Skipped ‹n› tracks that ‹reason›` with ‹reason› = `aren’t downloaded` (the pattern; a skip run of missing files reads `Skipped “‹title›” — file missing` / `Skipped ‹n› tracks — files missing`, unreadable ones the same shape with `can’t be read`) | `Download` (not-downloaded skips) · `Locate…` (one missing file) |
+| `Couldn’t play “‹title›” — ‹cause›` (UC-SHEET-19 shape) | — |
+| `Playback stopped — files on “‹V›” can’t be read` (the cause is not the drive; when it is the drive the §15.2 sentence `“Lexxar” was disconnected — playback paused at ‹time›.` is used) | — |
+| `“‹title›” isn’t in this list any more` | — |
+| `Resolving…` (second player line while a preview link resolves) · `Esc to stop` (while a stream preview plays) | — |
+| `Couldn’t preview “‹title›” — ‹cause›` (status bar) | — |
 
 Retired: `Playback unavailable: … file could not be found on disk.` (DEC-045, G-PLAYBACK-ERROR)
 
@@ -811,6 +824,10 @@ Retired: `Playback unavailable: … file could not be found on disk.` (DEC-045, 
 | `“‹DEVICE›” was disconnected — ‹n› of ‹m› copied` | — | Window banner on the profile page (interrupted sync) | `Resume When Connected` |
 | Plan: `Add ‹n› · Remove ‹n› · Skip ‹n› · ‹x› GB of ‹y› GB free`; `Remove 0 — Clean up is off` | — | Plan section | `Download` (per skipped track) |
 | `Applies to the next sync` | — | Options while syncing | — |
+| `Can’t undo — “‹name›” has synced since` · `Can’t eject — “‹volume›” holds the library` | — | Status bar | — |
+| `Changed the destination of “‹name›” to “‹device›” · Applies to the next sync` | — | Status bar | `Undo` |
+| `‹n› playlist(s) to update` (plan sentence, sidebar line, header fact; Sync Now enabled, IMP-105) | — | Plan, sidebar, header | `Sync Now` |
+| `Moved “‹name›”` · `Moved ‹n› sync profiles` (undo name `Reorder Sync Profiles`, IMP-106) | — | Status bar after a profile drag | `Undo` |
 
 ### 15.9 Discover, Review, Albums, Folders, Reels
 
@@ -820,6 +837,7 @@ Retired: `Playback unavailable: … file could not be found on disk.` (DEC-045, 
 | Recommendations: `Because of “‹track›”` (group) · match `92 % match` (plain text, no capsule) | Discover |
 | Review: `recommended` (in words in the comparison) · tabs `Duplicates · Conflicts · Albums · Resolved` · session choice `Unkept versions: ○ Stay in library, hidden from lists ○ Move to Trash` | Review |
 | Review ▸ Albums: `Suggested: “‹album›” — ‹provider›, ‹n› % match` · `No album` (deliberate, confirmed) | Review |
+| Review: `Can’t keep “‹title›” — its file is missing` (Keep on a version whose file is gone) | Review |
 | Albums: `Complete` · `Incomplete` (tracklist known, ≥ 1 track not in library) · `Compilations` · footer `‹n› tracks have no album · Show · Find Albums…` | Albums |
 | Album edition picker: `‹Edition› edition ▾`; shelf `Other versions` | Album detail |
 | Folders: `Managed by MLM` (small secondary label) · `‹n› files in this folder aren’t in the library · Import` | Folders |
@@ -883,6 +901,7 @@ The only user-facing words for these concepts. UI-GROUNDTRUTH §1.5 carried forw
 |---|---|
 | UC-GLOSS-02 | Banned in every user-facing string: `Turbo`, `Swarm`, `Vector Gravity`, `Warp Embeddings`, `Drop-Fokus`, `Groove`, `Groove Studio`, `Neighbor`, `Genre Workshop`, `kept_higher_quality`, `flagged`, `fingerprint_dedup`, raw IDs (`Track #123`), lowercase enum names, `Stream`, `Reveal`, `Sync` for a playlist, `Sync to`, `Re-scan`, `Pin` / `Unpin`, `Token inaccessible`, `Loading Library...`, `Failed to Initialize`, `Playback unavailable`, `Error` as a title, `Are you sure?`, `This cannot be undone.`, the literals `unknown album` / `youtube` / `soundcloud likes` as values, any German string. (UI-GROUNDTRUTH §1.5, PATTERN-STATES.N04 retired words, §8.7 drift) |
 | UC-GLOSS-03 | "drive", "volume", "mount", "database", "registry", "job", "token", "WAL" are not UI words; name the thing (`“Lexxar”`, `the library file`, `sign-in`). Exception: sentences that must explain a database failure (`The library database didn’t answer.`). (PATTERN-STATES.N15, G-LIB-FAILED) |
+| UC-GLOSS-04 | Button titles that are part of the vocabulary (Title Case verbs, no change to the glossary): `Rename and Relaunch` · `Restore and Open…` · `Continue in Background` · `Scan and Import` · `Pick a Typical Track` · `Identify by Audio (Shazam)` · `Reset to Device Defaults` · `Show All` · `Show Tips Again`. (W3-SET, W3-LAUNCH, W3-GEN, W3-DISC-B, W3-SYNC, W5-1b) |
 
 ---
 
@@ -902,7 +921,7 @@ The only user-facing words for these concepts. UI-GROUNDTRUTH §1.5 carried forw
 | UC-COPY-10 | Times and durations: track time `m:ss` (`h:mm:ss` from one hour); totals < 90 min `52 min`, < 24 h `2 h 51 min`, ≥ 24 h `38 days`; elapsed / duration in the player `1:12 / 5:48`. Sizes with `ByteCountFormatStyle` (`412 GB`, `124.8 MB`). Dates and times with `Date.FormatStyle` in the user's locale (abbreviated month, `4 Oct 2026, 08:57` style); relative times with `Date.RelativeFormatStyle` (`2 hours ago`, `yesterday`). Never hand-built date strings. (app.js `fmtTime`/`fmtDur`, §7.2) *(exact formatter choice unspecified in B1 — convention set here)* |
 | UC-COPY-11 | Error anatomy: a sentence that says what couldn't be done · the cause in plain words (and what is safe: `Your music and your library file are not affected.`) · **one** action that helps (`Try Again`, `Reconnect`, `Open Settings ▸ Sources`, `Locate…`) · a `Details` disclosure with the raw text and a way to its log lines (`Show Logs` / `Show in Logs`). No error codes in the sentence, no "Error" title, no OK-only dead ends. (§4.9, PATTERN-STATES.N15–N17) |
 | UC-COPY-12 | Confirmations state the consequence in numbers, not the action (UC-SHEET-13). Status messages say what happened plus what was skipped (`· 1 was already in it`). (DEC-016, PATTERN-DND.N04) |
-| UC-COPY-13 | Disabled controls explain themselves: `.help(reason)` on every disabled button/menu item, and next to primary buttons the reason is also written (`Connect “IPOD CLASSIC” to sync.`). (DEC-014, PATTERN-STATES.N19, `sync.html` Sync Now) |
+| UC-COPY-13 | Disabled controls explain themselves: `.help(reason)` on every disabled button/menu item, and next to primary buttons the reason is also written (`Connect “IPOD CLASSIC” to sync.`; `Nothing to read — every album track has a number`). (DEC-014, PATTERN-STATES.N19, `sync.html` Sync Now) |
 | UC-COPY-14 | Say "you" sparingly and never "please", "oops", "sorry", "simply", "just". MLM speaks about itself as `MLM`. (mockup copy) *(unspecified in B1 — convention set here)* |
 | UC-COPY-15 | Implementation jargon never reaches the UI (enum cases, table names, `LUFS` without explanation, `Temperature 0.0–1.0`); use the words the design chose (`Close · Balanced · Wide`, `Normalize loudness`). (UI-GROUNDTRUTH §1.1.3, `genres.html` suggestion controls, ST-PLAYBACK.E03) |
 
@@ -912,7 +931,7 @@ The only user-facing words for these concepts. UI-GROUNDTRUTH §1.5 carried forw
 
 | ID | Rule |
 |---|---|
-| UC-EMPTY-01 | **Empty (first use):** `ContentUnavailableView { Label } description: { Text } actions: { … }` with one sentence and the one action that fills the view; drop targets stay active on it. Never a blank pane. Catalogue: All Tracks `No tracks yet` / `Import music from a folder, or import a playlist from SoundCloud, YouTube or Spotify. You can also drop files here.` · `Import Files or Folder…` · `Import Playlist from Source…`; Playlist `This playlist is empty. Drag tracks here or use Add to Playlist.`; Review ▸ Duplicates `No duplicates to review.` · `Run Scan`; Discover `No recommendations waiting.` · `Find Recommendations…`; Sync `No sync profiles yet.` · `New Sync Profile…`; Folders `No library folder` · `Open Settings ▸ Library`; Info `No selection`. (§4.9, PATTERN-STATES.N10 table, V-LIB.E22) |
+| UC-EMPTY-01 | **Empty (first use):** `ContentUnavailableView { Label } description: { Text } actions: { … }` with one sentence and the one action that fills the view; drop targets stay active on it. Never a blank pane. Catalogue: All Tracks `No tracks yet` / `Import music from a folder, or import a playlist from SoundCloud, YouTube or Spotify. You can also drop files here.` · `Import Files or Folder…` · `Import Playlist from Source…`; Playlist `This playlist is empty. Drag tracks here or use Add to Playlist.`; Review `Nothing to review` + `No duplicates, tag conflicts or album suggestions are waiting. Run a scan after importing more music.` (variants per tab) · `Run Scan`; All Tracks scopes `No local tracks` · `Every track is downloaded` · `No tracks with failed downloads` · `No missing files` (each with `Show All`, IMP-028); Discover `No recommendations waiting.` · `Find Recommendations…`; Sync `No sync profiles yet.` · `New Sync Profile…`; Folders `No library folder` · `Open Settings ▸ Library`; Info `No selection`. (§4.9, PATTERN-STATES.N10 table, V-LIB.E22) |
 | UC-EMPTY-02 | **Empty (filtered):** `ContentUnavailableView.search(text:)` naming the query, plus `Clear Filters` (and `Search the Library` / `Search Online` for search). The scope bar and its counts stay visible. It never looks like an empty library. (§4.9, PATTERN-STATES.N11) |
 | UC-EMPTY-03 | Lists that keep their shape when empty (the Queue's three sections, Activity's sections) show one sentence inside each empty section instead of a full-pane view. (`queue.html` V-QUEUE.E04) |
 | UC-EMPTY-04 | **Loading:** content stays. Only the first load of a view shows `.redacted(reason: .placeholder)` rows/cards under the real header and scope bar; later refreshes update in place with the status-bar spinner after 300 ms (UC-STATUS-06). Countable work shows determinate progress with the same numbers as Activity. Never a full-pane spinner, never an anonymous spinner. (§4.9, PATTERN-STATES.N12–N14) |
@@ -946,7 +965,7 @@ The only user-facing words for these concepts. UI-GROUNDTRUTH §1.5 carried forw
 | UC-KIT-16 | Swift Charts | Use, narrowly | Storage Location breakdown, sync size vs free space, BPM/energy histogram in a genre detail. Never in tables |
 | UC-KIT-17 | `Canvas` | Use | Waveform (Info ▸ Audio, preview scrubber) |
 | UC-KIT-18 | SF Symbols + `.symbolEffect`, `.symbolVariant`, `.contentTransition(.symbolEffect(.replace))` | Use | Play/pause morph, now-playing, Activity completion (UC-MOTION-02) |
-| UC-KIT-19 | `ShareLink` | Use | Share a track file (the source is never shared) |
+| UC-KIT-19 | `ShareLink` | Use | Share a track file (the source is never shared). `Share…` is in the Track menu and the track context menu only, not in the Queue or Recommendation menus whose groups are pinned; omitted when nothing is shareable, disabled with the drive reason while the drive is away (IMP-124) |
 | UC-KIT-20 | `Settings` scene + `TabView`, `openSettings` + tab binding | Use | Settings |
 | UC-KIT-21 | `Window(id: "activity")`, `openWindow` | Use | Activity window |
 | UC-KIT-22 | `.fileImporter`, `.fileExporter`, `.fileDialogMessage` | Use | Every file/folder choice |
@@ -954,7 +973,7 @@ The only user-facing words for these concepts. UI-GROUNDTRUTH §1.5 carried forw
 | UC-KIT-24 | `.navigationTitle` / `.navigationSubtitle` | Use | UC-WIN-06 |
 | UC-KIT-25 | Now Playing / `MPRemoteCommandCenter` | Keep | Media keys = Play/Pause, Next, Previous |
 | UC-KIT-26 | Dock menu (`applicationDockMenu(_:)`) | Use, small | UC-DOCK-01 |
-| UC-KIT-27 | TipKit (`.popoverTip`) | Use, three tips only | `Press Space to preview`, `Drag tracks onto a playlist`, `Edit several tracks at once`; one at a time; never again after dismissal or use; none while a sheet is open or a preview plays; reset via Help ▸ Show Tips Again / Settings ▸ Advanced (V-MAIN-LAYOUT.N01–N03) |
+| UC-KIT-27 | TipKit (`.popoverTip`) | Use, three tips only | `Press Space to preview`, `Drag tracks onto a playlist`, `Edit several tracks at once`; one at a time; never again after dismissal or use; none while a sheet is open or a preview plays; reset via Help ▸ Show Tips Again / Settings ▸ Advanced; TipKit allows a reset only before `configure`, so the reset also takes effect at the next launch and the status bar says `Tips will show again` (IMP-123) (V-MAIN-LAYOUT.N01–N03) |
 | UC-KIT-28 | Liquid Glass: `glassEffect(_:in:)`, `GlassEffectContainer`, `Glass.interactive`, `glassEffectID`, `backgroundExtensionEffect()`, `scrollEdgeEffectStyle(_:for:)`, `ToolbarSpacer` | Use, unconditionally, only per §5 | No `#available`, no helper (§10 Q10) |
 | UC-KIT-29 | System notifications (`UNUserNotificationCenter`) | Use, opt-in | Jobs that finish while MLM is in the background; off by default |
 | UC-KIT-30 | App Intents / Shortcuts, Spotlight (`CSSearchableItem`) | Later | Not in B3 |
@@ -1114,3 +1133,30 @@ Rules the B1 packet does not specify, decided here for consistency with the prin
 | S27 | Commit prefixes `docs/test/refactor` allowed besides `feat/fix` | UC-ENG-09 |
 | S28 | `Find Duplicates` / `Find Albums` without ellipsis | C20 |
 | S29 | A-REELS-DELETE wording `Tracks you downloaded …`, button `Delete Reel` | C24 |
+
+---
+
+## 25. Decisions during B3
+
+Every decision taken while the redesign was built is an `IMP-nnn` row in `B3-PLAN.md` §4 (the table there is authoritative; this section only points to it). By area:
+
+| Area | IMP IDs | In one line |
+|---|---|---|
+| Workflow | IMP-001, IMP-002, IMP-003 | Worker models; snapshot baselines re-recorded at the end; B2 resolutions C1–C27 and S1–S29 accepted |
+| Shell, navigation, windows | IMP-004 … IMP-013, IMP-111 | Back/Forward scope, legacy library name, symbols, spacing location, main window never quits, no key equivalents in window menus |
+| Undo, menus, keys | IMP-014 … IMP-017, IMP-116, IMP-117, IMP-123, IMP-124 | ⌫ is the list's key, pending commands are catalogued, undo names, no `MLM Help`, ⌥↑/⌥↓ reorder playlists, tip reset, Share scope |
+| Track table, All Tracks, availability | IMP-020 … IMP-029, IMP-112, IMP-118 | Status sort order, persisted availability, plain failure reasons, no `Auto Size All Columns`, Queue group for not-downloaded tracks |
+| Inspector, tag writing | IMP-030, IMP-031, IMP-121 | Fields and formats written, Info sentences, user artwork lives in the cache |
+| Playback, queue, preview | IMP-032 … IMP-038, IMP-109, IMP-119 | Skip-don't-stall, preview details, lanes, Locate File…, stream preview through a temporary file |
+| Drag and drop | IMP-040, IMP-107, IMP-114, IMP-120 | One declared payload, folder to Queue, online results are menu only, profile reorder payload |
+| Search | IMP-037, IMP-091 | Token semantics, album search |
+| Activity | IMP-039, IMP-064 | History size, inline identification |
+| Launch and libraries | IMP-041 | Picker, switch alert, Remove from List |
+| Import, Sources, Settings | IMP-043, IMP-044, IMP-113 | Copy-into-library import, settings details, Maintenance wording |
+| Playlists | IMP-018, IMP-019, IMP-042 | Inline naming, one name space, one folder level |
+| Folders, Review, Discover, Reels | IMP-047 … IMP-066, IMP-108, IMP-110, IMP-115 | Where a track lies, sticky decisions, held recommendations, Reels state and logic, review nits, reel links, Find Recommendations without a sheet |
+| Sync | IMP-045, IMP-048, IMP-104 … IMP-106 | Sync details, device scan, probe cache, playlist-only Sync Now, profile order |
+| Albums | IMP-067 … IMP-103 | `album_tracks`, dedup, listing, suggestions, sheets, Review ▸ Albums |
+| Sentences and alerts | IMP-008, IMP-122 | Status-bar sentences without a pattern, remove-failed alert details |
+
+Open questions that remain Oliver's are in `B3-PLAN.md` §5; the state of every inventory ID is in `B3-CONFORMANCE.md`.

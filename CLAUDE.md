@@ -1,6 +1,6 @@
 # MLM — instructions for every agent
 
-MLM is a native macOS music library manager: SwiftUI (+ AppKit where SwiftUI has no equivalent), SwiftPM, GRDB/SQLite, deployment target **macOS 27**. The app is being rebuilt to an approved redesign on branch `redesign/b3` (tag `v0.9` = state before the redesign).
+MLM is a native macOS music library manager: SwiftUI (+ AppKit where SwiftUI has no equivalent), SwiftPM, GRDB/SQLite, deployment target **macOS 27**. The approved redesign is implemented on branch `redesign/b3` (2026-10-06; tag `v0.9` = state before the redesign). `B3-CONFORMANCE.md` is the status (verdict per inventory ID, residual differences, Oliver's launch checklist) and `B3-PLAN.md` §4 holds the decisions (`IMP-001` … `IMP-124`).
 
 ## Read before you write UI code
 
