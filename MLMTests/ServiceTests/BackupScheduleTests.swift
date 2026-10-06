@@ -105,6 +105,27 @@ struct BackupScheduleTests {
         #expect(try f.bundles().count == 1)
     }
 
+    @Test func onQuitSkipsAnUnreachableDestination() async throws {
+        let f = try await Fixture()
+        defer { f.cleanup() }
+        let service = f.service()
+        try await service.setSchedule(.onQuit)
+        try await f.config.set(key: "backup_destination", value: "/Volumes/MLM-Not-Mounted-\(UUID().uuidString)/Backups")
+        #expect(service.backUpOnQuitIfScheduled() == nil)
+        #expect(!BackupService.isOnMountedLocalVolume(URL(fileURLWithPath: "/Volumes/MLM-Not-Mounted-x/B")))
+        #expect(BackupService.isOnMountedLocalVolume(f.destination))
+    }
+
+    @Test func onQuitAsksTheReachabilityCheck() async throws {
+        let f = try await Fixture()
+        defer { f.cleanup() }
+        let service = f.service()
+        try await service.setSchedule(.onQuit)
+        #expect(service.backUpOnQuitIfScheduled(isReachable: { _ in false }) == nil)
+        #expect(try f.bundles().isEmpty)
+        #expect(service.backUpOnQuitIfScheduled(timeout: 20, isReachable: { _ in true }) != nil)
+    }
+
     @Test func onQuitAfterTheDatabaseClosedDoesNothing() async throws {
         let f = try await Fixture()
         defer { f.cleanup() }
