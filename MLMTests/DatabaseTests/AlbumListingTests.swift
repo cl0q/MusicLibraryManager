@@ -51,12 +51,15 @@ struct AlbumListingTests {
         }
     }
 
-    @Test func theGridListsAlbumsWithTwoTracksOrAKnownTracklist() async throws {
+    @Test func theGridListsAlbumsWithTwoTracksOrATracklistNumberedPastOne() async throws {
         let lib = try Library()
         try await lib.album("Two", count: 2)
         try await lib.album("One", count: 1)
         try await lib.album("Single Numbered", count: 1, numbers: [(1, 1)])
-        #expect(try await lib.titles(.all, .title) == ["Single Numbered", "Two"])
+        try await lib.album("Track Two Of A Release", count: 1, numbers: [(1, 2)])
+        #expect(try await lib.titles(.all, .title) == ["Track Two Of A Release", "Two"],
+                "a single track numbered 1 is not a tracklist; one numbered 2 or more is")
+        #expect(try await lib.albums.scopeCounts(filter: .empty)[.all] == 2)
     }
 
     @Test func completeAndIncompleteFollowTheKnownTracklist() async throws {

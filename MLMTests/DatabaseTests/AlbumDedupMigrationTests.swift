@@ -182,6 +182,14 @@ struct AlbumDedupMigrationTests {
                 try Self.album(db, artist: Self.nfd, title: "Lemonade")
                 try AlbumTracksMigrationTests.insertTrack(db, title: "Hold Up", artist: Self.nfc, album: "Lemonade")
                 try AlbumTracksMigrationTests.insertTrack(db, title: "Sandcastles", artist: Self.nfd, album: "lemonade")
+                // Tauri-style rows (S6): stem-form key, NULL variant kind, empty album artist.
+                try db.execute(sql: """
+                    INSERT INTO albums (artist, album_artist, title, title_normalized, variant_kind, variant_of)
+                    VALUES ('Overmono', 'Overmono', 'Good Lies', 'good_lies', NULL, NULL),
+                           ('Queen', '', 'Greatest Hits', 'greatest_hits', NULL, NULL)
+                    """)
+                try AlbumTracksMigrationTests.insertTrack(db, title: "So U Know", artist: "overmono", album: "good lies")
+                try AlbumTracksMigrationTests.insertTrack(db, title: "Bohemian", artist: "Queen", album: "Greatest Hits")
             }
             try queue.close()
         }
@@ -197,15 +205,72 @@ struct AlbumDedupMigrationTests {
             .filter { $0.split(separator: "/").last?.hasPrefix("mlm-backup-") == true }
         #expect(bundles.count == 1, "the backup is taken for a database at v49/v55 before v50/v51 run")
 
+        // The backup bundle is the database as it was before v50 / v51: still the old version, both
+        // Lemonade rows, no album_tracks, every track.
+        let bundle = try #require(bundles.first)
+        let snapshot = try DatabaseQueue(path: backups.appendingPathComponent(bundle).appendingPathComponent("music_library.db").path,
+                                         configuration: { var c = Configuration(); c.readonly = true; return c }())
+        try snapshot.read { db in
+            let applied = try DatabaseManager.buildMigrator().appliedIdentifiers(db)
+            #expect(applied.contains(identifier), "the backup keeps the pre-migration version")
+            #expect(!applied.contains("v50_album_tracks") && !applied.contains(Self.v51))
+            #expect(try db.tableExists("album_tracks") == false)
+            #expect(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM albums WHERE title = 'Lemonade'") == 2)
+            #expect(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM tracks") == 4)
+            #expect(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM albums") == 4)
+        }
+
         try manager.pool.read { db in
             let applied = try DatabaseManager.buildMigrator().appliedIdentifiers(db)
             #expect(applied.contains("v50_album_tracks") && applied.contains(Self.v51))
+            #expect(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM tracks") == 4, "no track is lost")
+            #expect(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM albums") == 3, "only the Lemonade pair merged")
+            #expect(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM albums WHERE title = 'Good Lies'") == 1, "the Tauri row is the album")
+            #expect(try String.fetchOne(db, sql: "SELECT title_normalized FROM albums WHERE title = 'Good Lies'") == "goodlies")
+            #expect(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM tracks WHERE album_id IS NULL") == 0)
             #expect(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM albums WHERE title = 'Lemonade'") == 1, "one album remains")
-            #expect(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM album_tracks") == 2)
-            #expect(try Int.fetchOne(db, sql: "SELECT COUNT(DISTINCT album_id) FROM tracks WHERE album_id IS NOT NULL") == 1)
+            #expect(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM album_tracks") == 4)
+            #expect(try Int.fetchOne(db, sql: "SELECT COUNT(DISTINCT album_id) FROM tracks WHERE album_id IS NOT NULL") == 3)
         }
         // The fixture itself is untouched (still at v55, no album_tracks).
         let untouched = try DatabaseQueue(path: fixture.path)
         #expect(try untouched.read { try $0.tableExists("album_tracks") } == false)
+    }
+}
+
+/// S7 and S2 (W4-1 fix round).
+@Suite("AlbumMigrationEdgeTests")
+struct AlbumMigrationEdgeTests {
+    @Test func albumsWithAnEmptyAlbumArtistDoNotMergeAcrossArtists() throws {
+        let (queue, migrator) = try AlbumDedupMigrationTests.preV51()
+        try queue.write { db in
+            try db.execute(sql: """
+                INSERT INTO albums (artist, album_artist, title, title_normalized) VALUES
+                    ('Queen', '', 'Greatest Hits', 'greatesthits'),
+                    ('ABBA', '', 'Greatest Hits', 'greatest_hits'),
+                    ('queen', '', 'GREATEST HITS', 'greatest_hits_2')
+                """)
+        }
+        try migrator.migrate(queue)
+        let artists = try queue.read { db in try String.fetchAll(db, sql: "SELECT artist FROM albums ORDER BY id") }
+        #expect(artists == ["Queen", "ABBA"], "Queen's two rows merged, ABBA's stays apart")
+    }
+
+    @Test func anEmptyVariantKindIsABaseLikeNull() throws {
+        let (queue, migrator) = try AlbumTracksMigrationTests.preV50()
+        let track: Int64 = try queue.write { db in
+            try db.execute(sql: """
+                INSERT INTO albums (artist, album_artist, title, title_normalized, variant_kind)
+                VALUES ('Overmono', 'Overmono', 'Good Lies', 'goodlies', '')
+                """)
+            return try AlbumTracksMigrationTests.insertTrack(db, title: "A", artist: "Overmono", album: "Good Lies")
+        }
+        try migrator.migrate(queue)
+        let (albums, link) = try queue.read { db in
+            (try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM albums") ?? 0,
+             try Int64.fetchOne(db, sql: "SELECT album_id FROM tracks WHERE id = ?", arguments: [track]))
+        }
+        #expect(albums == 1, "linked into the existing row, did not throw")
+        #expect(link != nil)
     }
 }

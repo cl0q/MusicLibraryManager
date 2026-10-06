@@ -141,16 +141,7 @@ extension AlbumRepository {
     /// version, a track whose file couldn't be trashed — stay. Returns how many went.
     @discardableResult
     func deleteEmpty(ids: [Int64]) async throws -> Int {
-        var removed = 0
-        for id in Set(ids) {
-            let members = try await database.read { db in
-                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM album_tracks WHERE album_id = ?", arguments: [id]) ?? 0
-            }
-            guard members == 0 else { continue }
-            try await delete(id: id)
-            removed += 1
-        }
-        return removed
+        try await database.write { db in try Self.pruneEmpty(db, ids: ids) }
     }
 }
 
@@ -161,7 +152,13 @@ extension AlbumTrackRepository {
     /// disc. One transaction; undo restores `snapshot` exactly. Returns whether anything changed.
     @discardableResult
     func applyLayout(albumID: Int64, _ ordered: [(trackID: Int64, disc: Int, number: Int)]) async throws -> Bool {
-        try await database.write { db in
+        try await database.write { db in try Self.writeLayout(db, albumID: albumID, ordered) }
+    }
+
+    /// `applyLayout` inside a transaction.
+    @discardableResult
+    static func writeLayout(_ db: Database, albumID: Int64, _ ordered: [(trackID: Int64, disc: Int, number: Int)]) throws -> Bool {
+        do {
             let before = try Self.orderedRows(db, albumID: albumID)
             let layout = Dictionary(ordered.map { ($0.trackID, $0) }, uniquingKeysWith: { first, _ in first })
             // The new full order: listed members as given, hidden ones after their disc's.

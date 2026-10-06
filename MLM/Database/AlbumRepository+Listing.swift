@@ -194,8 +194,9 @@ struct AlbumListing: Identifiable, Equatable, Sendable {
 
     var id: Int64 { album.id ?? 0 }
 
-    /// IMP-069: two or more tracks, or a known tracklist.
-    var isListed: Bool { trackCount >= 2 || tracklist.isKnown }
+    /// IMP-069 / IMP-073 (amended): two or more listed tracks, or a known tracklist with a
+    /// number of 2 or more (one track numbered 1 is not a tracklist).
+    var isListed: Bool { trackCount >= 2 || (tracklist.isKnown && (tracklist.expectedCount ?? 0) >= 2) }
 
     /// No known tracklist and at least two tracks, or a known tracklist with every position filled.
     var isComplete: Bool { tracklist.isKnown ? tracklist.isFilled : trackCount >= 2 }

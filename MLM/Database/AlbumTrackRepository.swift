@@ -18,9 +18,16 @@ struct AlbumNumbering: Equatable, Sendable {
     let resorted: Bool
 }
 
-enum AlbumTrackRepositoryError: Error, Equatable {
+enum AlbumTrackRepositoryError: Error, Equatable, PlainCauseError {
     case albumNotFound
     case noRoomForPosition
+
+    var plainCause: String {
+        switch self {
+        case .albumNotFound: "the album no longer exists"
+        case .noRoomForPosition: "the track order couldn’t be changed"
+        }
+    }
 }
 
 /// An album's track list: membership, order and numbers (`album_tracks`, IMP-067).
@@ -73,43 +80,53 @@ final class AlbumTrackRepository: Sendable {
     /// no number, in the given order. Returns the rows it inserted. Throws if the album is gone.
     @discardableResult
     func add(trackIDs: [Int64], to albumID: Int64) async throws -> [AlbumTrack] {
-        try await database.write { db in
-            guard try Self.albumExists(db, albumID) else { throw AlbumTrackRepositoryError.albumNotFound }
-            var seen = Set<Int64>()
-            var fresh: [Int64] = []
-            for id in trackIDs where seen.insert(id).inserted {
-                let exists = try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM tracks WHERE id = ?)", arguments: [id]) ?? false
-                let member = try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM album_tracks WHERE album_id = ? AND track_id = ?)",
-                                               arguments: [albumID, id]) ?? false
-                if exists, !member { fresh.append(id) }
-            }
-            guard !fresh.isEmpty else { return [] }
-            let (keys, disc) = try Self.positionKeys(db, albumID: albumID, count: fresh.count, at: nil, disc: nil, excluding: [])
-            var inserted: [AlbumTrack] = []
-            for (id, key) in zip(fresh, keys) {
-                let row = AlbumTrack(albumId: albumID, trackId: id, disc: disc, position: key, trackNumber: nil)
-                try row.insert(db)
-                try db.execute(sql: "UPDATE tracks SET album_id = ? WHERE id = ? AND album_id IS NULL", arguments: [albumID, id])
-                inserted.append(row)
-            }
-            return inserted
+        try await database.write { db in try Self.addRows(db, trackIDs: trackIDs, to: albumID) }
+    }
+
+    /// `add` inside a transaction.
+    @discardableResult
+    static func addRows(_ db: Database, trackIDs: [Int64], to albumID: Int64) throws -> [AlbumTrack] {
+        guard try albumExists(db, albumID) else { throw AlbumTrackRepositoryError.albumNotFound }
+        var seen = Set<Int64>()
+        var fresh: [Int64] = []
+        for id in trackIDs where seen.insert(id).inserted {
+            let exists = try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM tracks WHERE id = ?)", arguments: [id]) ?? false
+            let member = try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM album_tracks WHERE album_id = ? AND track_id = ?)",
+                                           arguments: [albumID, id]) ?? false
+            if exists, !member { fresh.append(id) }
         }
+        guard !fresh.isEmpty else { return [] }
+        let (keys, disc) = try positionKeys(db, albumID: albumID, count: fresh.count, at: nil, disc: nil, excluding: [])
+        var inserted: [AlbumTrack] = []
+        for (id, key) in zip(fresh, keys) {
+            let row = AlbumTrack(albumId: albumID, trackId: id, disc: disc, position: key, trackNumber: nil)
+            try row.insert(db)
+            try db.execute(sql: "UPDATE tracks SET album_id = ? WHERE id = ? AND album_id IS NULL", arguments: [albumID, id])
+            inserted.append(row)
+        }
+        return inserted
     }
 
     /// Removes the tracks from the album; returns the rows removed.
     @discardableResult
     func remove(trackIDs: [Int64], from albumID: Int64) async throws -> [AlbumTrack] {
-        try await database.write { db in
-            var removed: [AlbumTrack] = []
-            for id in Set(trackIDs) {
-                guard let row = try AlbumTrack.fetchOne(db, sql: "SELECT * FROM album_tracks WHERE album_id = ? AND track_id = ?",
-                                                        arguments: [albumID, id]) else { continue }
-                try db.execute(sql: "DELETE FROM album_tracks WHERE album_id = ? AND track_id = ?", arguments: [albumID, id])
-                try db.execute(sql: "UPDATE tracks SET album_id = NULL WHERE id = ? AND album_id = ?", arguments: [id, albumID])
-                removed.append(row)
-            }
-            return removed.sorted { ($0.disc, $0.position) < ($1.disc, $1.position) }
+        try await database.write { db in try Self.removeRows(db, trackIDs: trackIDs, from: albumID) }
+    }
+
+    /// `remove` inside a transaction. A track that is still a member of another album is linked
+    /// to that album, not left without one.
+    @discardableResult
+    static func removeRows(_ db: Database, trackIDs: [Int64], from albumID: Int64) throws -> [AlbumTrack] {
+        var removed: [AlbumTrack] = []
+        for id in Set(trackIDs) {
+            guard let row = try AlbumTrack.fetchOne(db, sql: "SELECT * FROM album_tracks WHERE album_id = ? AND track_id = ?",
+                                                    arguments: [albumID, id]) else { continue }
+            try db.execute(sql: "DELETE FROM album_tracks WHERE album_id = ? AND track_id = ?", arguments: [albumID, id])
+            let other = try Int64.fetchOne(db, sql: "SELECT MIN(album_id) FROM album_tracks WHERE track_id = ?", arguments: [id])
+            try db.execute(sql: "UPDATE tracks SET album_id = ? WHERE id = ? AND album_id = ?", arguments: [other, id, albumID])
+            removed.append(row)
         }
+        return removed.sorted { ($0.disc, $0.position) < ($1.disc, $1.position) }
     }
 
     /// Places `trackIDs` (members, in this order) so the first lands at `index` among the album's
@@ -118,21 +135,35 @@ final class AlbumTrackRepository: Sendable {
     /// (evenly spaced, same order) — never an out-of-order key. Returns whether the order changed.
     @discardableResult
     func move(trackIDs: [Int64], to index: Int, in albumID: Int64) async throws -> Bool {
+        try await database.write { db in try Self.moveRows(db, trackIDs: trackIDs, to: index, in: albumID) }
+    }
+
+    /// `move` inside a transaction.
+    @discardableResult
+    static func moveRows(_ db: Database, trackIDs: [Int64], to index: Int, in albumID: Int64) throws -> Bool {
+        let before = try orderedRows(db, albumID: albumID)
+        let members = Set(before.map(\.trackId))
+        var seen = Set<Int64>()
+        let moving = trackIDs.filter { members.contains($0) && seen.insert($0).inserted }
+        guard !moving.isEmpty else { return false }
+        let movingSet = Set(moving)
+        let (keys, disc) = try positionKeys(db, albumID: albumID, count: moving.count, at: index, disc: nil, excluding: movingSet)
+        for (id, key) in zip(moving, keys) {
+            try db.execute(sql: "UPDATE album_tracks SET position = ?, disc = ? WHERE album_id = ? AND track_id = ?",
+                           arguments: [key, disc, albumID, id])
+        }
+        let after = try orderedRows(db, albumID: albumID)
+        return after.map(\.trackId) != before.map(\.trackId)
+            || zip(after, before).contains { $0.disc != $1.disc }
+    }
+
+    /// One album edit as one transaction: the rows before, the edit, the rows after. An import
+    /// that links a track into the album meanwhile can't become part of the step.
+    func edit(albumID: Int64, _ body: @escaping @Sendable (Database) throws -> Void) async throws -> (before: AlbumTrackSnapshot, after: AlbumTrackSnapshot) {
         try await database.write { db in
-            let before = try Self.orderedRows(db, albumID: albumID)
-            let members = Set(before.map(\.trackId))
-            var seen = Set<Int64>()
-            let moving = trackIDs.filter { members.contains($0) && seen.insert($0).inserted }
-            guard !moving.isEmpty else { return false }
-            let movingSet = Set(moving)
-            let (keys, disc) = try Self.positionKeys(db, albumID: albumID, count: moving.count, at: index, disc: nil, excluding: movingSet)
-            for (id, key) in zip(moving, keys) {
-                try db.execute(sql: "UPDATE album_tracks SET position = ?, disc = ? WHERE album_id = ? AND track_id = ?",
-                               arguments: [key, disc, albumID, id])
-            }
-            let after = try Self.orderedRows(db, albumID: albumID)
-            return after.map(\.trackId) != before.map(\.trackId)
-                || zip(after, before).contains { $0.disc != $1.disc }
+            let before = try Self.snapshot(db, albumID: albumID)
+            try body(db)
+            return (before, try Self.snapshot(db, albumID: albumID))
         }
     }
 
@@ -183,15 +214,22 @@ final class AlbumTrackRepository: Sendable {
     static func linkImportedTrack(_ db: Database, trackID: Int64, artist: String, albumArtist: String, album: String,
                                   year: Int?, disc: Int?, number: Int?) throws -> Int64? {
         guard !AlbumKey.isNoAlbum(album) else { return nil }
-        let albumID = try AlbumKey.findOrCreate(db, artist: artist, albumArtist: albumArtist, title: album, year: year)
-        let alreadyMember = try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM album_tracks WHERE album_id = ? AND track_id = ?)",
-                                              arguments: [albumID, trackID]) ?? false
-        try db.execute(sql: "UPDATE tracks SET album_id = ? WHERE id = ? AND album_id IS NULL", arguments: [albumID, trackID])
-        guard !alreadyMember else { return albumID }
-        let (keys, usedDisc) = try positionKeys(db, albumID: albumID, count: 1, at: nil, disc: disc, excluding: [])
-        try AlbumTrack(albumId: albumID, trackId: trackID, disc: usedDisc, position: keys[0], trackNumber: number).insert(db)
-        if number != nil { _ = try resortIfNumbered(db, albumID: albumID) }
-        return albumID
+        // A savepoint: a failure part-way leaves no new album row, no link and no join row behind.
+        var linked: Int64?
+        try db.inSavepoint {
+            let albumID = try AlbumKey.findOrCreate(db, artist: artist, albumArtist: albumArtist, title: album, year: year)
+            linked = albumID
+            let alreadyMember = try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM album_tracks WHERE album_id = ? AND track_id = ?)",
+                                                  arguments: [albumID, trackID]) ?? false
+            try db.execute(sql: "UPDATE tracks SET album_id = ? WHERE id = ? AND album_id IS NULL", arguments: [albumID, trackID])
+            if !alreadyMember {
+                let (keys, usedDisc) = try positionKeys(db, albumID: albumID, count: 1, at: nil, disc: disc, excluding: [])
+                try AlbumTrack(albumId: albumID, trackId: trackID, disc: usedDisc, position: keys[0], trackNumber: number).insert(db)
+                if number != nil { _ = try resortIfNumbered(db, albumID: albumID) }
+            }
+            return .commit
+        }
+        return linked
     }
 
     /// A track row just inserted by a download, a remote-playlist import or a recommendation
@@ -224,6 +262,7 @@ final class AlbumTrackRepository: Sendable {
     func restore(_ snapshot: AlbumTrackSnapshot) async throws {
         try await database.write { db in
             let albumID = snapshot.albumID
+            guard try Self.albumExists(db, albumID) else { throw AlbumTrackRepositoryError.albumNotFound }
             let wanted = Set(snapshot.rows.map(\.trackId))
             for row in try Self.orderedRows(db, albumID: albumID) where !wanted.contains(row.trackId) {
                 try db.execute(sql: "UPDATE tracks SET album_id = NULL WHERE id = ? AND album_id = ?", arguments: [row.trackId, albumID])
@@ -248,7 +287,7 @@ final class AlbumTrackRepository: Sendable {
 
     // MARK: - Positions (the W3-PL rule)
 
-    private static func albumExists(_ db: Database, _ id: Int64) throws -> Bool {
+    static func albumExists(_ db: Database, _ id: Int64) throws -> Bool {
         try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM albums WHERE id = ?)", arguments: [id]) ?? false
     }
 

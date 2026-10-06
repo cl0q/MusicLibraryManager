@@ -74,13 +74,35 @@ final class AlbumRepository: Sendable {
     /// cascades are written out): its `album_tracks` rows, variant preferences that name it,
     /// the `tracks.album_id` of its tracks and the `variant_of` of its variants.
     func delete(id: Int64) async throws {
-        try await database.write { db in
-            try db.execute(sql: "DELETE FROM album_tracks WHERE album_id = ?", arguments: [id])
-            try db.execute(sql: "DELETE FROM user_album_variant_pref WHERE base_album_id = ? OR selected_album_id = ?", arguments: [id, id])
-            try db.execute(sql: "UPDATE tracks SET album_id = NULL WHERE album_id = ?", arguments: [id])
-            try db.execute(sql: "UPDATE albums SET variant_of = NULL WHERE variant_of = ?", arguments: [id])
-            try db.execute(sql: "DELETE FROM albums WHERE id = ?", arguments: [id])
+        try await database.write { db in try Self.cascadeDelete(db, id: id) }
+    }
+
+    static func cascadeDelete(_ db: Database, id: Int64) throws {
+        try db.execute(sql: "DELETE FROM album_tracks WHERE album_id = ?", arguments: [id])
+        try db.execute(sql: "DELETE FROM user_album_variant_pref WHERE base_album_id = ? OR selected_album_id = ?", arguments: [id, id])
+        try db.execute(sql: "UPDATE tracks SET album_id = NULL WHERE album_id = ?", arguments: [id])
+        try db.execute(sql: "UPDATE albums SET variant_of = NULL WHERE variant_of = ?", arguments: [id])
+        try db.execute(sql: "DELETE FROM albums WHERE id = ?", arguments: [id])
+    }
+
+    /// The one prune: deletes each base album among `ids` that has no `album_tracks` row, no track
+    /// still linked through `tracks.album_id` and no variant pointing at it (a base of editions
+    /// stays). Used by the track-delete cascade and `deleteEmpty`. Returns how many went.
+    @discardableResult
+    static func pruneEmpty(_ db: Database, ids: some Collection<Int64>) throws -> Int {
+        var removed = 0
+        for id in Set(ids) {
+            let empty = try Bool.fetchOne(db, sql: """
+                SELECT EXISTS(SELECT 1 FROM albums WHERE id = ? AND IFNULL(variant_kind, '') = '' AND variant_of IS NULL)
+                   AND NOT EXISTS(SELECT 1 FROM album_tracks WHERE album_id = ?)
+                   AND NOT EXISTS(SELECT 1 FROM tracks WHERE album_id = ?)
+                   AND NOT EXISTS(SELECT 1 FROM albums WHERE variant_of = ?)
+                """, arguments: [id, id, id, id]) ?? false
+            guard empty else { continue }
+            try cascadeDelete(db, id: id)
+            removed += 1
         }
+        return removed
     }
 
     // MARK: - Variant Preferences
