@@ -126,6 +126,20 @@ final class AnalysisRepository: Sendable {
         }
     }
 
+    /// Put a row back exactly as it was (`saveArtwork` keeps the old `remote_url` when the new one
+    /// is nil, which is wrong for an undo).
+    func replaceArtwork(_ artwork: Artwork) async throws {
+        try await database.write { db in try artwork.save(db) }
+    }
+
+    /// Remove the artwork rows of these tracks (undo of a first artwork).
+    func deleteArtwork(trackIds: [Int64]) async throws {
+        guard !trackIds.isEmpty else { return }
+        try await database.write { db in
+            for id in trackIds { try db.execute(sql: "DELETE FROM artwork WHERE track_id = ?", arguments: [id]) }
+        }
+    }
+
     /// Delete the "no embedded art" sentinel rows (`source = 'none'`, no path) of these tracks, so
     /// `fetchTracksWithoutArtwork()` lists them again. Real artwork rows are never touched.
     func clearNoArtworkSentinels(trackIds: [Int64]) async throws {
