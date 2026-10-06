@@ -187,6 +187,14 @@ final class ReviewAlbumsModel {
         await reload()
     }
 
+    /// `Choose Another Album…`: the picked album becomes the row's suggestion (source `Chosen by
+    /// you`, match 100); nothing is written until Accept.
+    func choose(album: Album, for id: Int64) async {
+        guard let item = item(withID: id) else { return }
+        await dependencies.decisions.choose(album: album, for: item)
+        await reload()
+    }
+
     // MARK: Words of a row
 
     /// `Suggested: “Good Lies” — Folder name, 90 % match` (the year follows the title in the cell).

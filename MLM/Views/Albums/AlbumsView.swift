@@ -32,6 +32,8 @@ struct AlbumsView: View {
     @State private var refusals: [Int64: String] = [:]
     @State private var columnCount = 1
     @State private var typeSelect = AlbumTypeSelect()
+    /// The album whose info sheet is open (`Get Info`, CM-ALB-CARD.N06).
+    @State private var infoAlbumID: Int64?
     @FocusState private var gridFocused: Bool
 
     private var sort: AlbumSort { AlbumSort(rawValue: sortRaw) ?? .artist }
@@ -78,6 +80,9 @@ struct AlbumsView: View {
             }
         }
         .modifier(WindowTitleModifier())
+        .sheet(isPresented: Binding(get: { infoAlbumID != nil }, set: { if !$0 { infoAlbumID = nil } })) {
+            if let infoAlbumID { AlbumInfoSheet(albumID: infoAlbumID) }
+        }
         .task {
             model.setSort(sort)
             TrackMenuSources.shared.loadIfNeeded(container: container)
@@ -233,7 +238,8 @@ struct AlbumsView: View {
                 let subjects = selection.contains(id) && selection.count > 1
                     ? orderedIDs.filter(selection.contains).compactMap { subject($0, model: model) }
                     : [subject(id, model: model)].compactMap { $0 }
-                AlbumMenu(albums: subjects, place: .card, missing: model.missingCount(subjects.map(\.id)))
+                AlbumMenu(albums: subjects, place: .card, missing: model.missingCount(subjects.map(\.id)),
+                          showInfo: { infoAlbumID = subjects.first?.id })
             }
             // Tracks join the album, an image sets its cover (D-ALB-CARD).
             .dropTarget(.albumCard(id: id, name: title), cornerRadius: 9, sayRefusal: { refusals[id] = $0 })

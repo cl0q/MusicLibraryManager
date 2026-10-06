@@ -15,7 +15,7 @@ enum AlbumMenuItem: Hashable, Sendable {
     case addToQueue
     case addToPlaylist
     case addToSyncProfile
-    /// Get Info = Edit Album Info… (the sheet arrives with W4-2b: present, disabled).
+    /// Get Info = Edit Album Info… (the same sheet, S-ALB-EDIT).
     case getInfo
     case goToArtist(String)
     case editAlbumInfo
@@ -40,8 +40,7 @@ enum AlbumMenuModel {
     }
 
     /// Sections in the DEC-039 order: Primary · Queue · Add to · Info / edit · Fix · Locate · Remove.
-    /// Groups that don't apply disappear; the three items of W4-2b (Get Info / Edit Album Info…,
-    /// Merge with Another Album…) stay in their place, disabled — the views say why.
+    /// Groups that don't apply disappear.
     static func sections(_ place: AlbumMenuPlace, facts: Facts) -> [[AlbumMenuItem]] {
         let primary: [AlbumMenuItem] = place == .card ? [.play] : []
         let queue: [AlbumMenuItem] = [.playNext, .addToQueue]
@@ -78,9 +77,6 @@ enum AlbumMenuModel {
         case .removeFromLibrary: "Remove from Library…"
         }
     }
-
-    /// Help of an item that exists but arrives with the next package (W4-2b).
-    static let nextPackageHelp = "Arrives with the next package"
 
     /// `Go to Artist` is plain text for a compilation (`Various Artists`).
     static func artistLink(albumArtist: String, isCompilation: Bool) -> String? {

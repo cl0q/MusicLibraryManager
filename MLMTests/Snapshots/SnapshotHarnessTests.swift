@@ -84,7 +84,9 @@ final class SnapshotsTests: XCTestCase {
                 // W4-3 added Review/ReviewAlbumsView.swift (rendered: `review-albums`, `review-albums-empty`):
         // 138 → 139 files, fixtures 21 → 23, rendered 17 → 18.
         // Merged W4-2 + W4-3: 144 files, 26 fixtures, 20 rendered, 84 deferred.
-        XCTAssertEqual(paths.count, 144, "Re-audit inventory changes explicitly.")
+        // W4-2b added Albums/{AlbumInfoSheet, AlbumMergeSheet, AlbumPickerSheet, AlbumTrackPickerSheet}
+        // (deferred): 144 → 148 files, 84 → 88 deferred.
+        XCTAssertEqual(paths.count, 148, "Re-audit inventory changes explicitly.")
         XCTAssertEqual(Set(SnapshotFixtures.inventory.map(\.path)), paths)
         XCTAssertEqual(SnapshotFixtures.inventory.count, paths.count)
         XCTAssertFalse(SnapshotFixtures.inventory.contains { $0.disposition.isEmpty })
@@ -93,7 +95,7 @@ final class SnapshotsTests: XCTestCase {
         XCTAssertEqual(SnapshotFixtures.fixtures.count, 26)
         XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 20)
         XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 40)
-        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 84)
+        XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 88)
         for fixture in SnapshotFixtures.fixtures where fixture.expectedTableRows != nil {
             if case .swiftUI = fixture.backend {
                 XCTFail("\(fixture.id): table readiness requires the AppKit backend.")

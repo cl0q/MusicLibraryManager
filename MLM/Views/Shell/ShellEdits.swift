@@ -92,11 +92,17 @@ final class ShellEdits {
     }
 
     /// `Added ‹n› tracks to “‹album›”` (n counts the tracks that were not members yet).
+    ///
+    /// `target` (Use a Track from the Library…, W4-2b) gives the tracks added the disc and number
+    /// of the gap they fill.
     @discardableResult
-    func addTracks(toAlbum albumID: Int64, trackIDs: [Int64]) async throws -> AlbumEditResult? {
+    func addTracks(toAlbum albumID: Int64, trackIDs: [Int64], target: (disc: Int, number: Int)? = nil) async throws -> AlbumEditResult? {
         try await editAlbum(albumID, actionName: { "Add to “\($0)”" },
                             message: { "Added \(Self.tracks($1)) to “\($0)”" }) { db in
-            try AlbumTrackRepository.addRows(db, trackIDs: trackIDs, to: albumID)
+            let added = try AlbumTrackRepository.addRows(db, trackIDs: trackIDs, to: albumID)
+            if let target, !added.isEmpty {
+                _ = try AlbumTrackRepository.writeNumbers(db, albumID: albumID, Dictionary(uniqueKeysWithValues: added.map { ($0.trackId, target) }))
+            }
         }
     }
 

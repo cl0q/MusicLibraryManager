@@ -106,12 +106,8 @@ struct ReviewView: View {
     // MARK: Scope bar (UC-SCOPE-01)
 
     private var scopeBar: some View {
-        let items = ReviewTab.allCases.map { tab in
-            ScopeBarItem(id: tab, title: tab.title, count: model?.count(for: tab),
-                         hidesWhenEmpty: tab == .albums && model?.albumsLookedUp != true)
-        }
-        return ScopeBar(
-            items: items,
+        ScopeBar(
+            items: ReviewModel.scopeItems(counts: { model?.count(for: $0) }),
             selection: Binding(get: { tab }, set: { storedTab = $0.rawValue }),
             countNoun: .items
         ) { EmptyView() }

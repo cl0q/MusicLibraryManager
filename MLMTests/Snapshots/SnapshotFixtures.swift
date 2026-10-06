@@ -343,6 +343,10 @@ enum SnapshotFixtures {
         "Activity/ActivityJobTracking.swift": "Non-view: Maintenance job runner (owns the task and its Activity operation).",
         "Albums/AlbumsView.swift": "Deferred: the grid reads the library database, the search filter and the shell; AlbumsModel (load, scope counts, sort, filter) and AlbumPresentation are unit-tested on temporary databases (W4-2).",
         "Albums/AlbumDetailView.swift": "Deferred: the page loads its album, plays and edits through the shell and the undo center; AlbumDetailModel, AlbumLayout and AlbumOrderEditor are unit-tested, its header and table are the `album-detail` fixture (W4-2).",
+        "Albums/AlbumInfoSheet.swift": "Deferred: the sheet loads its album, tracks and genres from the database; the form rules, words and the one undo step are unit-tested (AlbumInfoEditTests, W4-2b).",
+        "Albums/AlbumMergeSheet.swift": "Deferred: the sheet reads the album picker's candidates and the merge numbers from the database; ranking, consequence text, the merge and its undo are unit-tested (AlbumPickingTests, AlbumMergeTests, W4-2b).",
+        "Albums/AlbumPickerSheet.swift": "Deferred: the picker loads the library's albums; ranking and the Review row it changes are unit-tested (AlbumPickingTests, W4-2b).",
+        "Albums/AlbumTrackPickerSheet.swift": "Deferred: the sheet searches the library database; the query, the placement and its undo are unit-tested (AlbumPlacementTests, W4-2b).",
         "Albums/AlbumMenus.swift": "Deferred: menus require interactive presentation; the sections are AlbumMenuModel, unit-tested (W4-2).",
         "Activity/ActivityRouter.swift": "Non-view: popover/window routing and subject navigation.",
         "Activity/LogFeed.swift": "Non-view: log query model.",
@@ -477,7 +481,11 @@ Activity/LogTextRenderer.swift
 Albums/AlbumCard.swift
 Albums/AlbumDetailParts.swift
 Albums/AlbumDetailView.swift
+Albums/AlbumInfoSheet.swift
 Albums/AlbumMenus.swift
+Albums/AlbumMergeSheet.swift
+Albums/AlbumPickerSheet.swift
+Albums/AlbumTrackPickerSheet.swift
 Albums/AlbumsView.swift
 ContentView/ContentView.swift
 Discover/DiscoverLive.swift

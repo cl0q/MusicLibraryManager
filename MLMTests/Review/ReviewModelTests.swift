@@ -33,11 +33,9 @@ struct ReviewModelTests {
         #expect(env.model.waitingCount == 3, "the sidebar badge adds groups and conflicts")
         #expect(env.model.count(for: .albums) == 0, "W4-3: the pending album suggestions (none yet)")
         #expect(!env.model.albumsLookedUp)
-        let items = ReviewTab.allCases.map {
-            ScopeBarItem(id: $0, title: $0.title, count: env.model.count(for: $0),
-                         hidesWhenEmpty: $0 == .albums && !env.model.albumsLookedUp)
-        }
-        #expect(ScopeBarRules.visibleItems(items, selection: .duplicates).map(\.id) == [.duplicates, .conflicts, .resolved])
+        // IMP-103: the Albums tab is always shown, even before the first lookup.
+        let items = ReviewModel.scopeItems(counts: { env.model.count(for: $0) })
+        #expect(ScopeBarRules.visibleItems(items, selection: .duplicates).map(\.id) == [.duplicates, .conflicts, .albums, .resolved])
     }
 
     @Test func countIsNilBeforeTheFirstLoad() throws {

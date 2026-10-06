@@ -1,8 +1,8 @@
 import Foundation
 import Observation
 
-/// The tabs of Review. `Albums` (W4-3) is hidden until a lookup has run (IMP-050, IMP-086); its
-/// count is the pending suggestions.
+/// The tabs of Review. `Albums` (W4-3) is always shown (IMP-103: the grid's `Find Albums…` must
+/// not lead to a hidden tab); its count is the pending suggestions.
 enum ReviewTab: String, CaseIterable, Identifiable, Sendable {
     case duplicates, conflicts, albums, resolved
 
@@ -97,7 +97,7 @@ final class ReviewModel {
     private(set) var conflicts: [ReviewGroupItem] = []
     private(set) var resolved: [ReviewResolvedRow] = []
     /// Pending album suggestions, and whether a lookup has ever written a row (IMP-086: the
-    /// Albums tab stays hidden until the first lookup ran).
+    /// the Albums tab is always shown, IMP-103; this only picks its empty state).
     private(set) var albumPending = 0
     private(set) var albumsLookedUp = false
     private(set) var isLoaded = false
@@ -135,6 +135,11 @@ final class ReviewModel {
     /// What the sidebar badge adds up (UC-SIDE-05): groups waiting + conflicts + album suggestions.
     var waitingCount: Int { duplicates.count + conflicts.count + albumPending }
     var isNothingToReview: Bool { isLoaded && duplicates.isEmpty && conflicts.isEmpty }
+
+    /// The scope bar's items: every tab, none hidden (IMP-103).
+    static func scopeItems(counts: (ReviewTab) -> Int?) -> [ScopeBarItem<ReviewTab>] {
+        ReviewTab.allCases.map { ScopeBarItem(id: $0, title: $0.title, count: counts($0)) }
+    }
 
     func count(for tab: ReviewTab) -> Int? {
         guard isLoaded else { return nil }
