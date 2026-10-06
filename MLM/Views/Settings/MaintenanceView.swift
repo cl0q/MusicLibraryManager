@@ -84,6 +84,15 @@ struct MaintenanceView: View {
         } message: {
             Text(rollbackMessage)
         }
+        .alert(MaintenanceJobs.rereadTitle(tracks: jobs.coverage?.tracksWithFile ?? 0),
+               isPresented: Binding(get: { jobs.rereadConfirmationRequested },
+                                    set: { jobs.rereadConfirmationRequested = $0 })) {
+            Button("Reread Tags", role: .destructive) { jobs.start(MaintenanceJob.rereadTags) }
+            Button("Cancel", role: .cancel) {}
+                .keyboardShortcut(.defaultAction)
+        } message: {
+            Text(MaintenanceJobs.rereadMessage)
+        }
         .alert("Clear the transcode cache?", isPresented: $confirmsCacheClear) {
             Button("Clear Cache", role: .destructive) {
                 Task {
@@ -137,7 +146,14 @@ struct MaintenanceView: View {
                     Button("Cancel") { runner.cancel(action) }
                 }
             } else {
-                Button("Run") { jobs.start(action) }
+                Button("Run") {
+                    // Rereading replaces database values: it asks first (review S2).
+                    if action == MaintenanceJob.rereadTags {
+                        jobs.rereadConfirmationRequested = true
+                    } else {
+                        jobs.start(action)
+                    }
+                }
                     .disabled(blocked != nil)
                     .help(blocked ?? "")
             }

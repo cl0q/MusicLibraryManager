@@ -109,6 +109,16 @@ final class MaintenanceJobs {
     private(set) var lastMigration: OrganizedPathMigrationService.MigrationSummary?
     /// The last apply / rollback, for the block's own result line.
     private(set) var pathResult: String?
+    /// `Reread tags from files` asks first (review S2); set by the row and by Library ▸
+    /// Maintenance ▸, answered by Settings ▸ Maintenance.
+    var rereadConfirmationRequested = false
+
+    /// A-SET-REREAD (W3-SET review S2): the question with the count.
+    static func rereadTitle(tracks: Int) -> String {
+        "Reread tags of \(tracks == 1 ? "1 track" : "\(tracks.formatted()) tracks") from their files?"
+    }
+
+    static let rereadMessage = "Edits made in MLM that were not written to files are replaced. Tracks with tag edits that are still waiting to be written are left as they are."
 
     @ObservationIgnored let runner: MaintenanceJobRunner
     @ObservationIgnored private let container: () -> DependencyContainer

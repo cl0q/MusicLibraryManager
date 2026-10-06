@@ -32,8 +32,15 @@ final class LibraryRepairService {
             ? String(libraryRoot.dropLast())
             : libraryRoot
 
-        let tracks = try await trackRepository.fetchLocalTracks()
-        
+        // Review S2: edits made in MLM (pending writes, typed fields) are never replaced.
+        let protected = try await trackRepository.trackIDsWithTagIntents()
+        let tracks = try await trackRepository.fetchLocalTracks().filter { track in
+            track.id.map { !protected.contains($0) } ?? false
+        }
+        if !protected.isEmpty {
+            AppLogger.shared.info("Rescan Metadata: \(protected.count) tracks with edits made in MLM are skipped", source: "Repair")
+        }
+
         let tracker = MaintenanceProgressTracker(
             total: tracks.count,
             turboMode: turboMode,
@@ -51,8 +58,8 @@ final class LibraryRepairService {
         // Bridge Swift task cancellation to the tracker so the loop's
         // isCancelled gates actually fire when the user taps Cancel.
         await withTaskCancellationHandler {
-            for (index, var track) in tracks.enumerated() {
-                guard !tracker.isCancelled else { break }
+            for (index, track) in tracks.enumerated() {
+                guard !tracker.isCancelled, !Task.isCancelled else { break }
 
                 // Resolve track file
                 guard let resolvedURL = resolveLocalURL(for: track, normalizedRoot: normalizedRoot) else {
@@ -71,25 +78,16 @@ final class LibraryRepairService {
                     // Extract metadata
                     let metadata = try await MetadataExtractor.extract(from: resolvedURL)
 
-                    // Update track fields
-                    track.artist = metadata.artist
-                    track.albumArtist = metadata.albumArtist
-                    track.album = metadata.album
-                    track.title = metadata.title
-                    track.genre = metadata.genre
-                    track.year = metadata.year
-                    track.bitrate = metadata.bitrate
-                    track.duration = metadata.duration
-                    track.format = metadata.format
-
-                    // Save to database
-                    try await trackRepository.update(track)
+                    // Only the tag columns (review S2): no full-row write-back of the snapshot
+                    // fetched before the loop, so changes made meanwhile survive.
+                    guard let id = track.id else { continue }
+                    try await trackRepository.updateTagColumns(id: id, from: metadata)
 
                     tracker.updateProgress(
                         current: index + 1,
                         trackId: track.id ?? 0,
-                        trackTitle: track.title,
-                        trackArtist: track.artist,
+                        trackTitle: metadata.title,
+                        trackArtist: metadata.artist,
                         savedToDb: true
                     )
                     succeeded += 1

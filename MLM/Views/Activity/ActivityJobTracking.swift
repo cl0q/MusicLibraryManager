@@ -217,7 +217,8 @@ struct MaintenanceJob: Equatable {
     }
 
     var isCancellable: Bool {
-        ["fingerprint", "replaygain", "danceability", "groove", "artwork-embedded", "artwork-musicbrainz"].contains(action)
+        // `rescan` stops after the current file (review S2).
+        ["fingerprint", "replaygain", "danceability", "groove", "artwork-embedded", "artwork-musicbrainz", "rescan"].contains(action)
     }
 
     var isShort: Bool { ["path-audit", "create-liked-playlist"].contains(action) }

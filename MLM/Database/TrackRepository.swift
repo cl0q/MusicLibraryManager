@@ -482,6 +482,40 @@ final class TrackRepository: Sendable {
         }
     }
 
+    // MARK: Reread tags from files (W3-SET review S2)
+
+    /// Tracks with an edit made in MLM that a reread must not replace: a pending tag write, or a
+    /// field the user typed (`tag_write_fields.intent = 'typed'`).
+    func trackIDsWithTagIntents() async throws -> Set<Int64> {
+        try await database.read { db in
+            var ids = Set<Int64>()
+            if try db.tableExists("pending_tag_writes") {
+                ids.formUnion(try Int64.fetchAll(db, sql: "SELECT track_id FROM pending_tag_writes"))
+            }
+            if try db.tableExists("tag_write_fields") {
+                ids.formUnion(try Int64.fetchAll(db, sql: "SELECT DISTINCT track_id FROM tag_write_fields WHERE intent = 'typed'"))
+            }
+            return ids
+        }
+    }
+
+    /// Writes only the tag columns read from a file (no full-row write-back of a snapshot taken
+    /// before the read). Returns whether the row exists.
+    @discardableResult
+    func updateTagColumns(id: Int64, from metadata: TrackMetadata) async throws -> Bool {
+        try await database.write { db in
+            let raw = "\(metadata.artist) \(metadata.albumArtist) \(metadata.album) \(metadata.title) \(metadata.genre ?? "") \(metadata.format)"
+            try db.execute(sql: """
+                UPDATE tracks SET artist = ?, album_artist = ?, album = ?, title = ?, genre = ?, year = ?,
+                                  bitrate = ?, duration = ?, format = ?, search_text = ?
+                WHERE id = ?
+                """, arguments: [metadata.artist, metadata.albumArtist, metadata.album, metadata.title,
+                                 metadata.genre, metadata.year, metadata.bitrate, metadata.duration,
+                                 metadata.format, DatabaseManager.foldedSearchText(raw), id])
+            return db.changesCount > 0
+        }
+    }
+
     /// Delete a track by ID.
     func delete(id: Int64) async throws {
         try await delete(ids: [id])
