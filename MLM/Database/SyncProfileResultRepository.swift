@@ -68,6 +68,8 @@ struct SyncPlanSummary: Codable, Equatable, Hashable, Sendable {
     var cleanUp: Bool
     /// Everything in the profile, a track in several playlists counted once.
     var totalTracks: Int
+    /// Playlist files that are out of date on the device (IMP-105); 0 in plans stored before.
+    var playlistsToUpdate: Int
 
     enum CodingKeys: String, CodingKey {
         case add, remove, skip
@@ -76,10 +78,25 @@ struct SyncPlanSummary: Codable, Equatable, Hashable, Sendable {
         case freeBytes = "free_bytes"
         case cleanUp = "clean_up"
         case totalTracks = "total_tracks"
+        case playlistsToUpdate = "playlists_to_update"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        add = try c.decode(Int.self, forKey: .add)
+        remove = try c.decode(Int.self, forKey: .remove)
+        skip = try c.decode(Int.self, forKey: .skip)
+        addBytes = try c.decode(Int64.self, forKey: .addBytes)
+        removeBytes = try c.decode(Int64.self, forKey: .removeBytes)
+        freeBytes = try c.decode(Int64.self, forKey: .freeBytes)
+        cleanUp = try c.decode(Bool.self, forKey: .cleanUp)
+        totalTracks = try c.decode(Int.self, forKey: .totalTracks)
+        playlistsToUpdate = try c.decodeIfPresent(Int.self, forKey: .playlistsToUpdate) ?? 0
     }
 
     init(add: Int, remove: Int, skip: Int, addBytes: Int64, removeBytes: Int64 = 0,
-         freeBytes: Int64, cleanUp: Bool, totalTracks: Int = 0) {
+         freeBytes: Int64, cleanUp: Bool, totalTracks: Int = 0, playlistsToUpdate: Int = 0) {
+        self.playlistsToUpdate = playlistsToUpdate
         self.add = add
         self.remove = remove
         self.skip = skip

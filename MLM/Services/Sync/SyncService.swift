@@ -63,12 +63,17 @@ final class SyncService {
         var cleanupEnabled: Bool = true
         /// The library folder's disk was connected when the plan was made.
         var isLibraryReachable: Bool = true
+        /// Playlists of the profile whose file on the device is out of date: members or order
+        /// changed since MLM last wrote it (IMP-105). A run with only these rewrites the
+        /// playlist files and copies nothing.
+        var playlistsToUpdate: Int = 0
 
         /// `Add · Remove · Skip · space` for the profile page and the stored result (v47).
         var summary: SyncPlanSummary {
             SyncPlanSummary(add: filesToAdd.count, remove: filesToRemove.count, skip: filesToSkip.count,
                             addBytes: totalNewSize, removeBytes: cleanupEnabled ? totalRemoveSize : 0,
-                            freeBytes: deviceAvailableSpace, cleanUp: cleanupEnabled, totalTracks: totalTracks)
+                            freeBytes: deviceAvailableSpace, cleanUp: cleanupEnabled, totalTracks: totalTracks,
+                            playlistsToUpdate: playlistsToUpdate)
         }
     }
 
@@ -139,6 +144,8 @@ final class SyncService {
         let tracksByID: [Int64: Track]
         let isDeviceConnected: Bool
         let isLibraryReachable: Bool
+        /// Members vs last written snapshot per playlist (IMP-105; empty without playlist files).
+        let playlistStates: [PlaylistUpdateState]
         let hash: String
 
         var total: Int { trackIds.count + syncedTrackIds.subtracting(trackIds).count }
@@ -380,6 +387,12 @@ final class SyncService {
             }
         }
 
+        // Playlist files that would change (IMP-105): members that are on the device after the run.
+        if !input.playlistStates.isEmpty {
+            let onDevice = syncedTrackIds.union(preview.filesToAdd.map(\.trackId))
+            preview.playlistsToUpdate = PlaylistUpdateState.count(input.playlistStates, onDevice: onDevice)
+        }
+
         // Space check
         if let attrs = try? FileManager.default.attributesOfFileSystem(forPath: outputURL.path) {
             let available = (attrs[.systemFreeSize] as? Int64) ?? 0
@@ -427,6 +440,15 @@ final class SyncService {
         })
         let isLibraryReachable = libraryRoot.isEmpty || destinations.isLibraryReachable(libraryRoot)
 
+        // IMP-105: a playlist whose members or order changed since its file was written is a plan
+        // item of its own — and part of the cache key, so a reorder alone refreshes the plan.
+        var playlistStates: [PlaylistUpdateState] = []
+        if profile.generateM3U8 {
+            playlistStates = try await syncRepository.databaseWriter.read { db in
+                try PlaylistUpdateState.fetch(db, profileID: profileId)
+            }
+        }
+
         return PreviewInput(
             profile: profile,
             libraryRoot: libraryRoot,
@@ -435,6 +457,7 @@ final class SyncService {
             tracksByID: tracksByID,
             isDeviceConnected: isDeviceConnected,
             isLibraryReachable: isLibraryReachable,
+            playlistStates: playlistStates,
             hash: Self.previewInputHash(
                 profile: profile,
                 libraryRoot: libraryRoot,
@@ -443,6 +466,7 @@ final class SyncService {
                 tracksByID: tracksByID,
                 isDeviceConnected: isDeviceConnected
             ) + (isLibraryReachable ? "|lib" : "|nolib")
+                + (playlistStates.isEmpty ? "" : "|" + playlistStates.map(\.hashComponent).joined(separator: ";"))
         )
     }
 
@@ -910,7 +934,7 @@ final class SyncService {
         // Never write into a path whose disk is gone (a folder under /Volumes would be created on
         // the Mac's own disk). Checked before the space: a missing device is "not connected",
         // never "not enough space".
-        if !filesToAdd.isEmpty || !filesToRemove.isEmpty,
+        if !filesToAdd.isEmpty || !filesToRemove.isEmpty || preview.playlistsToUpdate > 0,
            !destinations.isDestinationReachable(profile.outputFolder) {
             operationId?.fail(cause: "“\(deviceName)” is not connected", fix: .runAgain)
             throw SyncRunError.destinationNotConnected(deviceName)
