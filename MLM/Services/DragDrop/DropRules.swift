@@ -35,6 +35,15 @@ enum DropTarget: Equatable, Sendable {
     /// A card in All Playlists: a playlist for tracks, playlists, files and links (like its
     /// sidebar row, D-PL-TRACKS-TO-CARD) and a cover well for images (D-PL-COVER-TO-CARD).
     case playlistCard(id: Int64, name: String)
+    /// A playlist folder row (sidebar) or group heading (grid, Manual order) — W3-PL, UC-SIDE-08:
+    /// playlists move into it; tracks, Finder files and M3U files make a new playlist inside.
+    case playlistFolder(id: Int64, name: String)
+    /// Between the rows of the sidebar's Playlists section (in `folderID`, nil = top level),
+    /// before `before` (nil = at the end): playlists and folders reorder (D-PL-CARD-REORDER).
+    case playlistOrder(folderID: Int64?, before: PlaylistSidebarItemID?)
+    /// A card of All Playlists sorted `Manual`: a dragged playlist or folder goes before it
+    /// (the grid's manual reorder, D-PL-CARD-REORDER); everything else as on `playlistCard`.
+    case playlistCardInManualOrder(id: Int64, name: String, folderID: Int64?)
     /// The window anywhere no other target takes the drag.
     case window
 }
@@ -139,6 +148,15 @@ enum DropDecision: Equatable, Sendable {
     /// files dropped with it (named in the status bar, D-LIBFILE-OPEN).
     case openLibraryFile(URL, ignored: Int)
     case setCover(CoverSource, playlistID: Int64, playlistName: String)
+    /// Playlists / folders placed in the Playlists section's order (W3-PL): into `folderID`
+    /// (nil = top level), before `before` (nil = at the end). One undo step.
+    case movePlaylistItems([PlaylistSidebarItemID], folderID: Int64?, before: PlaylistSidebarItemID?)
+    /// Tracks onto a playlist folder: a new playlist inside it (named inline).
+    case newPlaylistInFolder([Int64], folderID: Int64)
+    /// Finder audio onto a playlist folder: import, then a new playlist inside it.
+    case importFilesAsNewPlaylistInFolder([URL], folderID: Int64)
+    /// An `.m3u` onto a playlist folder: the preview sheet, as a new playlist inside it.
+    case importM3UInFolder(URL, folderID: Int64)
     /// Refused. `message`: where the refusal is said (status bar, or in place for covers);
     /// nil = nothing to say (the not-allowed cursor already said it).
     case refuse(String?)
@@ -171,7 +189,16 @@ enum DropRules {
         case (.sidebarPlaylist, .tracks), (.sidebarPlaylist, .playlists),
              (.sidebarPlaylist, .files), (.sidebarPlaylist, .link):
             return true
-        case (.playlistsSection, .tracks), (.playlistsSection, .files), (.playlistsSection, .link):
+        case (.playlistsSection, .tracks), (.playlistsSection, .files), (.playlistsSection, .link),
+             (.playlistsSection, .playlists):
+            return true
+        case (.playlistFolder, .tracks), (.playlistFolder, .playlists), (.playlistFolder, .files):
+            return true
+        case (.playlistOrder, .playlists):
+            return true
+        case (.playlistCardInManualOrder, .tracks), (.playlistCardInManualOrder, .playlists),
+             (.playlistCardInManualOrder, .files), (.playlistCardInManualOrder, .imageData),
+             (.playlistCardInManualOrder, .link):
             return true
         case (.syncProfile, .tracks), (.syncProfile, .playlists):
             return true
@@ -208,6 +235,13 @@ enum DropRules {
     // MARK: Drop
 
     static func decide(_ content: DropContent, onto target: DropTarget, context: DropContext) -> DropDecision {
+        // A card in Manual order: a playlist or folder goes before it; the rest as on any card.
+        if case .playlistCardInManualOrder(let id, let name, let folderID) = target {
+            if case .playlists = content {
+                return decide(content, onto: .playlistOrder(folderID: folderID, before: .playlist(id)), context: context)
+            }
+            return decide(content, onto: .playlistCard(id: id, name: name), context: context)
+        }
         // A card is its playlist's row for everything but images, which set its cover.
         if case .playlistCard(let id, let name) = target {
             switch content {
@@ -255,7 +289,9 @@ enum DropRules {
         case .syncProfile(let id, let name): return .addTracksToSyncProfile(ids, profileID: id, profileName: name)
         case .playlistTable(let id, let name, _): return .placeTracks(payload, playlistID: id, playlistName: name)
         case .player: return .playNext(payload)
-        case .fixedRow, .playlistCover, .playlistCard, .window: return .refuse(nil)
+        case .playlistFolder(let id, _): return .newPlaylistInFolder(ids, folderID: id)
+        case .fixedRow, .playlistCover, .playlistCard, .window, .playlistOrder, .playlistCardInManualOrder:
+            return .refuse(nil)
         }
     }
 
@@ -264,8 +300,27 @@ enum DropRules {
            playlists.contains(where: { $0.libraryId.map { $0 != libraryID } ?? false }) {
             return .refuse(DropWords.otherLibrary)
         }
+        // Folder rows only reorder (W3-PL); every other target takes playlists alone.
+        var seenItems = Set<PlaylistSidebarItemID>()
+        let items = playlists.map(\.sidebarItem).filter { seenItems.insert($0).inserted }
+        switch target {
+        case .playlistOrder(let folderID, let before):
+            // Into a folder only playlists go (one level); a row is never placed before itself.
+            let moving = items.filter { item in
+                item != before && (folderID == nil || !item.isFolder)
+            }
+            return moving.isEmpty ? .refuse(nil) : .movePlaylistItems(moving, folderID: folderID, before: before)
+        case .playlistsSection:
+            // The header / empty area: to the top level, at the end (UC-DND matrix).
+            return items.isEmpty ? .refuse(nil) : .movePlaylistItems(items, folderID: nil, before: nil)
+        case .playlistFolder(let id, _):
+            let moving = items.filter { !$0.isFolder }
+            return moving.isEmpty ? .refuse(nil) : .movePlaylistItems(moving, folderID: id, before: nil)
+        default:
+            break
+        }
         var seen = Set<Int64>()
-        let ids = playlists.map(\.playlistId).filter { seen.insert($0).inserted }
+        let ids = playlists.filter { $0.folderId == nil }.map(\.playlistId).filter { seen.insert($0).inserted }
         switch target {
         case .sidebarPlaylist(let id, let name):
             let others = ids.filter { $0 != id }
@@ -277,8 +332,8 @@ enum DropRules {
             return ids.isEmpty ? .refuse(nil) : .addPlaylistsToSyncProfile(ids, profileID: id, profileName: name)
         case .player:
             return ids.isEmpty ? .refuse(nil) : .playNextPlaylists(ids)
-        case .playlistsSection, .fixedRow, .playlistCover, .playlistCard, .window:
-            // Moving to the top level / reordering playlists needs folders and manual order (W3-PL).
+        case .playlistsSection, .fixedRow, .playlistCover, .playlistCard, .window,
+             .playlistFolder, .playlistOrder, .playlistCardInManualOrder:
             return .refuse(nil)
         }
     }
@@ -307,7 +362,9 @@ enum DropRules {
             case .sidebarPlaylist(let id, _): return .importM3U(m3u.url, playlistID: id)
             case .playlistTable(let id, _, _): return .importM3U(m3u.url, playlistID: id)
             case .playlistsSection, .window, .fixedRow: return .importM3U(m3u.url, playlistID: nil)
-            case .syncProfile, .player, .playlistCover, .playlistCard: return .refuse(nil)
+            case .playlistFolder(let id, _): return .importM3UInFolder(m3u.url, folderID: id)
+            case .syncProfile, .player, .playlistCover, .playlistCard, .playlistOrder, .playlistCardInManualOrder:
+                return .refuse(nil)
             }
         }
 
@@ -333,7 +390,9 @@ enum DropRules {
             let name = importable.count == 1 && importable[0].kind == .folder ? importable[0].name : nil
             return .importFilesAsNewPlaylist(urls, name: name)
         case .fixedRow, .window: return .importFiles(urls)
-        case .syncProfile, .player, .playlistCover, .playlistCard: return .refuse(nil)
+        case .playlistFolder(let id, _): return .importFilesAsNewPlaylistInFolder(urls, folderID: id)
+        case .syncProfile, .player, .playlistCover, .playlistCard, .playlistOrder, .playlistCardInManualOrder:
+            return .refuse(nil)
         }
     }
 

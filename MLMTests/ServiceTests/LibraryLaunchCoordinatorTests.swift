@@ -30,6 +30,12 @@ struct LibraryLaunchCoordinatorTests {
         /// Phases the fake open reports before it finishes (or throws).
         var phasesDuringOpen: [LibraryOpenPhase] = []
         var needsSetup = false
+        /// Activity's running work as the coordinator sees it.
+        var operations: [ActivityOperation] = []
+        /// What `Set Up Later` / a saved folder wrote (`setup_dismissed`).
+        var setUpLaterWrites: [Bool] = []
+        /// `isBusy` at the moment the fake relaunch happened.
+        var busyAtRelaunch: Bool?
         /// Runs while the container is "opening" (a suspension point during launch).
         var duringOpen: (@MainActor () async -> Void)?
         var coordinator: LibraryLaunchCoordinator!
@@ -64,9 +70,14 @@ struct LibraryLaunchCoordinatorTests {
                     self.record(location)
                 },
                 reportFailure: { [unowned self] in self.failures.append(String(describing: $0)) },
-                relaunch: { [unowned self] in self.relaunches += 1 },
+                relaunch: { [unowned self] in
+                    self.relaunches += 1
+                    self.busyAtRelaunch = self.coordinator?.isBusy
+                },
                 needsSetup: { [unowned self] in self.needsSetup },
-                setupServices: .init(makeImporter: { nil }, activity: nil)
+                setupServices: .init(makeImporter: { nil }, activity: nil,
+                                     rememberSetUpLater: { [unowned self] in self.setUpLaterWrites.append($0) }),
+                activeOperations: { [unowned self] in self.operations }
             )
         }
 
@@ -405,7 +416,7 @@ struct LibraryLaunchCoordinatorTests {
         let f = try Fixture(now: fixedNow)
         let package = try f.makePackage("Main Library", id: "lib-a")
         try f.register(package, id: "lib-a", name: "Main Library")
-        f.openError = CocoaError(.fileReadCorruptFile)
+        f.openError = LibraryOpenError(stage: .opening, underlying: CocoaError(.fileReadCorruptFile))
         await f.coordinator.start()
         #expect(f.failures.count == 1)
         guard case .failed(let failure) = f.coordinator.screen else {
@@ -419,24 +430,39 @@ struct LibraryLaunchCoordinatorTests {
         #expect(failure.details.contains("music_library.db"))
         #expect(failure.location == .package(f.canonical(package)))
         #expect(failure.offersChooseAnother && failure.mayOfferRestore)
+        #expect(failure.tryAgainIsDefault)
     }
 
-    @Test func theFailurePhaseDecidesWhatIsSafeToSay() async throws {
-        for (phases, cause) in [
-            ([LibraryOpenPhase.backingUp(bytes: nil)], LaunchFailure.Cause.backupBeforeUpdate),
-            ([.backingUp(bytes: nil), .updating(step: 2, total: 3)], .update),
-        ] {
+    /// S7: the error's own step decides the sentence — never the last phase that was shown.
+    @Test func theErrorsStepDecidesWhatIsSafeToSay() async throws {
+        let cases: [(phases: [LibraryOpenPhase], error: Error, cause: LaunchFailure.Cause)] = [
+            ([.backingUp(bytes: nil)], LibraryOpenError(stage: .backingUp, underlying: CocoaError(.fileWriteUnknown)), .backupBeforeUpdate),
+            ([.backingUp(bytes: nil), .updating(step: 2, total: 3)],
+             LibraryOpenError(stage: .updating, underlying: CocoaError(.fileWriteUnknown)), .update),
+            // Failing after the update (e.g. reading the library folder setting) is not an update failure.
+            ([.backingUp(bytes: nil), .updating(step: 3, total: 3)], CocoaError(.fileReadUnknown), .startup),
+            ([], CocoaError(.fileReadUnknown), .startup),
+        ]
+        for item in cases {
             let f = try Fixture(now: fixedNow)
             let package = try f.makePackage("Main Library", id: "lib-a")
             try f.register(package, id: "lib-a", name: "Main Library")
-            f.phasesDuringOpen = phases
-            f.openError = CocoaError(.fileWriteUnknown)
+            f.phasesDuringOpen = item.phases
+            f.openError = item.error
             await f.coordinator.start()
             guard case .failed(let failure) = f.coordinator.screen else {
                 Issue.record("expected failed, got \(f.coordinator.screen)")
                 continue
             }
-            #expect(failure.cause == cause)
+            #expect(failure.cause == item.cause)
+            if item.cause == .startup {
+                #expect(!failure.mayOfferRestore, "no restore for a failure that isn't the database's")
+                #expect(!failure.message.contains("didn’t change"))
+                #expect(failure.message.hasPrefix("MLM couldn’t open the library."))
+            }
+            if item.cause == .update {
+                #expect(!failure.tryAgainIsDefault, "Try Again would start the update again")
+            }
         }
     }
 
@@ -468,7 +494,7 @@ struct LibraryLaunchCoordinatorTests {
         let f = try Fixture(now: fixedNow)
         let package = try f.makePackage("Main Library", id: "lib-a")
         try f.register(package, id: "lib-a", name: "Main Library")
-        f.openError = CocoaError(.fileReadCorruptFile)
+        f.openError = LibraryOpenError(stage: .opening, underlying: CocoaError(.fileReadCorruptFile))
         await f.coordinator.start()
 
         // No backups yet: nothing to offer.
@@ -924,5 +950,208 @@ struct LibraryLaunchCoordinatorTests {
         #expect(file.cause == .noDatabase)
         #expect(f.relaunches == 0)
         #expect(f.pendingPath == nil)
+    }
+
+    // MARK: - Review fixes (W3-LAUNCH review round)
+
+    private func runningOperation(_ kind: ActivityKind, _ title: String) -> ActivityOperation {
+        ActivityOperation(
+            id: UUID(), kind: kind, title: title, subject: .none, state: .running, wait: nil, progress: .indeterminate,
+            result: nil, startedAt: fixedNow, endedAt: nil, isAutomatic: false, libraryID: nil, needsAttention: false,
+            dismissedAt: nil, itemNoun: .item, messageName: kind.messageName, controls: .none, isFromHistory: false)
+    }
+
+    /// A failed library with one complete backup of its own (temporary backups root).
+    private func failedWithBackup(_ f: Fixture) async throws -> URL {
+        let package = try f.makePackage("Main Library", id: "lib-a")
+        try f.register(package, id: "lib-a", name: "Main Library")
+        let queue = try DatabaseQueue(path: LibraryPackage.databaseURL(in: package).path)
+        _ = try BackupService.createBundle(
+            database: queue, databasePath: LibraryPackage.databaseURL(in: package), coversDirectory: nil,
+            reason: .manual, backupsRoot: f.backupsRoot)
+        try queue.close()
+        f.openError = LibraryOpenError(stage: .updating, underlying: CocoaError(.fileWriteUnknown))
+        await f.coordinator.start()
+        await f.coordinator.loadRestoreOptions()
+        return package
+    }
+
+    /// S1: nothing opens, creates or switches while a restore replaces the library's database.
+    @Test func whileARestoreRunsNothingElseOpensAndOpensWait() async throws {
+        let f = try Fixture(now: fixedNow)
+        _ = try await failedWithBackup(f)
+        let restore = try #require(f.coordinator.restore)
+        let other = try LibraryPackage.createEmpty(
+            named: "Other", libraryId: "lib-o", in: f.root.appendingPathComponent("disk"), now: Date())
+        let screenBefore = f.coordinator.screen
+
+        f.coordinator.markRestoreRunning(true)
+        #expect(f.coordinator.isBusy)
+        #expect(f.coordinator.busyReason == "“Main Library” is being restored. Wait until it finishes.")
+        await f.coordinator.handleOpen(other)                 // Finder / Dock / Open Recent
+        #expect(await f.coordinator.createLibrary(named: "New") == .busy(f.coordinator.busyReason ?? ""))
+        f.coordinator.requestNewLibrary()
+        f.coordinator.chooseLibraryFile()
+        await f.coordinator.retryFailedOpen()
+        f.coordinator.chooseAnotherLibrary()
+        #expect(f.opened.isEmpty)
+        #expect(f.coordinator.screen == screenBefore)
+        #expect(f.coordinator.newLibraryRequest == nil && f.coordinator.libraryFileRequest == nil)
+        #expect(f.coordinator.restore === restore, "the model and its pool stay while the restore runs")
+
+        // The restore ends without restoring (an incomplete bundle is refused by the existing
+        // path): the waiting file opens then.
+        f.coordinator.markRestoreRunning(false)
+        f.openError = nil
+        let incomplete = BackupInfo(
+            url: f.root.appendingPathComponent("missing"), createdAt: fixedNow, reason: .manual, schemaVersion: nil,
+            trackCount: nil, databaseSizeBytes: nil, isComplete: false, libraryId: "lib-a")
+        await f.coordinator.restoreFromBackup(incomplete)
+        #expect(f.opened == [.package(f.canonical(other))])
+    }
+
+    /// S1: a successful restore relaunches while still busy and opens nothing afterwards.
+    @Test func aSuccessfulRestoreRelaunchesWhileBusy() async throws {
+        let f = try Fixture(now: fixedNow)
+        let package = try await failedWithBackup(f)
+        let restore = try #require(f.coordinator.restore)
+        let info = try #require(restore.restorable.first)
+        await f.coordinator.restoreFromBackup(info)
+        #expect(f.relaunches == 1)
+        #expect(f.busyAtRelaunch == true)
+        #expect(f.coordinator.isBusy, "stays busy until MLM is gone")
+        #expect(f.pendingPath == f.canonical(package).path, "the restored library opens after the relaunch")
+        #expect(f.opened.isEmpty)
+    }
+
+    /// S1 + N1: while an adoption runs, opens wait, creating is refused and a second start is ignored.
+    @Test func whileAnAdoptionRunsOpensWaitAndASecondStartIsIgnored() async throws {
+        let f = try Fixture(now: fixedNow)
+        try f.makeLegacy()
+        let other = try LibraryPackage.createEmpty(
+            named: "Other", libraryId: "lib-o", in: f.root.appendingPathComponent("disk"), now: Date())
+        await f.coordinator.start()
+        let coordinator = f.coordinator!
+        let adoption = Task { await coordinator.adoptLegacyLibrary(named: "Main Library") }
+        while !coordinator.adoptionState.isRunning { await Task.yield() }
+        // Still on the main actor without suspending: the adoption can't have finished.
+        await coordinator.handleOpen(other)
+        #expect(await coordinator.createLibrary(named: "New") == .busy("The library file is being set up. Wait until it finishes."))
+        await coordinator.adoptLegacyLibrary(named: "Main Library")   // ignored, no "already in progress" failure
+        await adoption.value
+        guard case .succeeded = coordinator.adoptionState else {
+            Issue.record("expected succeeded, got \(coordinator.adoptionState)")
+            return
+        }
+        #expect(f.opened.isEmpty)
+        await coordinator.finishAdoption()
+        // The library file opens, then the waiting file asks to switch.
+        #expect(f.opened.count == 1)
+        #expect(coordinator.pendingSwitch?.url == f.canonical(other))
+    }
+
+    /// S3: an adoption journal that is left behind is a row of its own, with Try Again and Details.
+    @Test func anInterruptedSetupIsARowNotAnEmptyPicker() async throws {
+        let f = try Fixture(now: fixedNow)
+        try f.makeLegacy()
+        try f.adoption.begin(named: "Archive")
+        try f.adoption.advance(through: .staged)
+        f.coordinator.refreshPicker()
+        let row = try #require(f.row("setup-interrupted"))
+        #expect(row.listedName == "Archive (setup interrupted)")
+        #expect(!row.canOpen)
+        #expect(f.row("legacy") == nil)
+        guard case .setupInterrupted(let details) = row.state else {
+            Issue.record("expected setupInterrupted, got \(row.state)")
+            return
+        }
+        #expect(details.contains("adoption-journal.json"))
+
+        // Try Again runs the launch's resume: before the rename it is undone and offered again.
+        await f.coordinator.retryInterruptedSetup()
+        #expect(!f.adoption.isInProgress)
+        #expect(f.coordinator.adoptionOffer)
+        #expect(f.row("legacy") != nil)
+        #expect(FileManager.default.fileExists(atPath: f.legacyURL.path))
+    }
+
+    /// S3: after `.setupInterrupted`, Choose Another Library shows that row too.
+    @Test func aFailedResumeLeadsToThePickerWithTheInterruptedRow() async throws {
+        let f = try Fixture(now: fixedNow)
+        try f.makeLegacy()
+        try f.adoption.begin(named: "Archive")
+        try Data("not a journal".utf8).write(to: f.adoption.journalURL)
+        await f.coordinator.start()
+        guard case .failed(let failure) = f.coordinator.screen else {
+            Issue.record("expected failed, got \(f.coordinator.screen)")
+            return
+        }
+        #expect(failure.cause == .setupInterrupted)
+        f.coordinator.chooseAnotherLibrary()
+        let row = try #require(f.row("setup-interrupted"))
+        #expect(row.listedName == "Main Library (setup interrupted)")
+        #expect(f.opened.isEmpty)
+    }
+
+    /// S4: a switch is refused while a restore runs; nothing relaunches.
+    @Test func aSwitchIsRefusedWhileARestoreRuns() async throws {
+        let f = try Fixture(now: fixedNow)
+        let a = try f.makePackage("A", id: "lib-a")
+        let b = try f.makePackage("B", id: "lib-b")
+        try f.register(a, id: "lib-a", name: "A")
+        await f.coordinator.start()
+        await f.coordinator.handleOpen(b)
+        f.operations = [runningOperation(.restore, "Restore backup of 4 Oct 2026")]
+        f.coordinator.confirmSwitch()
+        #expect(f.relaunches == 0)
+        #expect(f.coordinator.switchProblem == .refused("MLM can’t switch libraries while “A” is being restored."))
+        #expect(try f.registry().lastActiveLibraryId == "lib-a")
+    }
+
+    /// S8: `Set Up Later` is remembered; a saved folder clears it.
+    @Test func setUpLaterIsRemembered() async throws {
+        let f = try Fixture(now: fixedNow)
+        f.needsSetup = true
+        await f.coordinator.start()
+        #expect(await f.coordinator.createLibrary(named: "Main Library") == nil)
+        #expect(f.coordinator.setup != nil)
+        await f.coordinator.setUpLater()
+        #expect(f.coordinator.setup == nil)
+        #expect(f.setUpLaterWrites == [true])
+    }
+
+    /// N2: a library created for a switch that can't be listed is taken away again.
+    @Test func aCreatedLibraryThatCantBeListedIsRemovedAgain() async throws {
+        let f = try Fixture(now: fixedNow)
+        let a = try f.makePackage("A", id: "lib-a")
+        try f.register(a, id: "lib-a", name: "A")
+        await f.coordinator.start()
+        #expect(await f.coordinator.createLibrary(named: "Second") == nil)
+        // The list can't be saved any more (its folder became read-only).
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: f.root.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: f.root.path) }
+        f.coordinator.confirmSwitch()
+        #expect(f.relaunches == 0)
+        #expect(!FileManager.default.fileExists(atPath: f.store.librariesDirectory.appendingPathComponent("Second.mlibm").path))
+        guard case .creationFailed(let name, let message)? = f.coordinator.switchProblem else {
+            Issue.record("expected creationFailed, got \(String(describing: f.coordinator.switchProblem))")
+            return
+        }
+        #expect(name == "Second")
+        #expect(message.contains("was removed again"))
+    }
+
+    /// N3: a symlink to a listed library is that library — never a copy, never re-pointed.
+    @Test func aSymlinkToTheOriginalIsNotACopy() async throws {
+        let f = try Fixture(now: fixedNow)
+        let original = try f.makePackage("Main Library", id: "lib-a")
+        try f.register(original, id: "lib-a", name: "Main Library")
+        let link = f.root.appendingPathComponent("Shortcut.mlibm")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: original)
+        await f.coordinator.open(packageAt: link)
+        #expect(f.coordinator.switchProblem == nil)
+        #expect(f.opened == [.package(f.canonical(original))])
+        #expect(try f.registry().entry(withId: "lib-a")?.url == f.canonical(original))
+        #expect(try f.registry().libraries.count == 1)
     }
 }

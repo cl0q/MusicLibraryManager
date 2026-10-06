@@ -122,7 +122,7 @@ struct LibraryPickerView: View {
         if row.state == .notFound {
             Button("Locate…") { launch.locate(row) }
         }
-        if row.kind != .legacy {
+        if row.isRegistered || row.kind == .unlisted {
             Divider()
             Button("Remove from List") { launch.removeFromList(row) }
         }
@@ -149,8 +149,12 @@ struct LibraryPickerView: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: Spacing.s) {
             HStack(spacing: Spacing.s) {
-                Button("New Library…") { launch.requestNewLibrary() }
-                Button("Open Other…") { launch.chooseLibraryFile() }
+                Group {
+                    Button("New Library…") { launch.requestNewLibrary() }
+                    Button("Open Other…") { launch.chooseLibraryFile() }
+                }
+                .disabled(launch.isBusy)
+                .help(launch.busyReason ?? "")
                 Spacer()
                 if let refusal = selectedRow?.openRefusal {
                     Text(refusal)
@@ -259,13 +263,10 @@ private struct LibraryPickerRowView: View {
                         HStack(spacing: Spacing.s) {
                             Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([row.url]) }
                         }
-                        DisclosureGroup("Details") {
-                            Text(details)
-                                .font(.caption.monospaced())
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .font(.caption)
+                        DetailsDisclosure(text: details)
+                    }
+                    if case .setupInterrupted(let details) = row.state {
+                        DetailsDisclosure(text: details)
                     }
                 }
                 .padding(.leading, 32 + Spacing.m)
@@ -287,19 +288,16 @@ private struct LibraryPickerRowView: View {
     private var stateLine: some View {
         switch row.state {
         case .notFound:
-            Label("Not found", systemImage: "questionmark.folder")
-                .symbolRenderingMode(.palette)
-                .foregroundStyle(.red, .primary)
+            StateLabel(text: "Not found", systemImage: "questionmark.folder", tint: .red)
                 .font(.caption)
         case .notConnected:
-            Label(row.stateText ?? "", systemImage: "externaldrive.badge.xmark")
-                .symbolRenderingMode(.palette)
-                .foregroundStyle(.orange, .primary)
+            StateLabel(text: row.stateText ?? "", systemImage: "externaldrive.badge.xmark", tint: .orange)
                 .font(.caption)
         case .mismatch:
-            Label(row.stateText ?? "", systemImage: "exclamationmark.triangle")
-                .symbolRenderingMode(.palette)
-                .foregroundStyle(.orange, .primary)
+            StateLabel(text: row.stateText ?? "", systemImage: "exclamationmark.triangle", tint: .orange)
+                .font(.caption)
+        case .setupInterrupted:
+            StateLabel(text: "Setup interrupted", systemImage: "exclamationmark.triangle", tint: .orange)
                 .font(.caption)
         case .available, .needsSetup:
             if let caption = facts?.caption(isLegacy: row.kind == .legacy) {
@@ -328,6 +326,9 @@ private struct LibraryPickerRowView: View {
             }
         case .needsSetup:
             Button("Set Up…") { launch.offerAdoption() }
+        case .setupInterrupted:
+            Button("Try Again") { Task { await launch.retryInterruptedSetup() } }
+                .disabled(launch.isBusy)
         case .available, .mismatch:
             EmptyView()
         }

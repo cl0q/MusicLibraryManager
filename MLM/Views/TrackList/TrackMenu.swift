@@ -155,14 +155,22 @@ struct TrackMenu: View {
 }
 
 /// Add to Playlist ▸ (CM-SUB-PLAYLIST, UC-CM-11) — one builder for the track context menu, the
-/// Track menu and the selection bar: `New Playlist…`, then the playlists (the current one is
-/// already left out by the caller, UC-CM-08).
+/// Track menu and the selection bar: `New Playlist…` — `Recent` (the three playlists tracks
+/// were added to last) — the sidebar structure (playlist folders as submenus, playlists in
+/// sidebar order, W3-PL). `playlists` are the ones offered (the current one is already left
+/// out by the caller, UC-CM-08); the structure comes from `tree` or the window's sidebar.
 struct AddToPlaylistMenuItems: View {
     let playlists: [Playlist]
     /// `⇧⌘N` next to `New Playlist…` (see `TrackMenu.showsKeyEquivalents`).
     var showsKeyEquivalents = true
+    /// The sidebar's structure and recent playlists (the Track menu passes them; views read
+    /// the window's `SidebarModel`).
+    var tree: PlaylistSidebarTree? = nil
+    var recent: [Playlist]? = nil
     let newPlaylist: () -> Void
     let add: (Int64) -> Void
+
+    @Environment(SidebarModel.self) private var sidebar: SidebarModel?
 
     var body: some View {
         let item = Button("New Playlist…", action: newPlaylist)
@@ -172,13 +180,40 @@ struct AddToPlaylistMenuItems: View {
         } else {
             item
         }
+        let offered = Set(playlists.compactMap(\.id))
+        let recentOffered = (recent ?? sidebar?.recentPlaylists() ?? []).filter { $0.id.map(offered.contains) ?? false }
+        if !recentOffered.isEmpty {
+            Divider()
+            Section("Recent") {
+                ForEach(recentOffered) { playlistButton($0) }
+            }
+        }
         if !playlists.isEmpty {
             Divider()
-            ForEach(playlists) { playlist in
-                Button(playlist.name) {
-                    if let id = playlist.id { add(id) }
+            let structure = tree ?? sidebar?.tree
+            if let nodes = structure?.nodes, !nodes.isEmpty {
+                ForEach(nodes) { node in
+                    switch node {
+                    case .playlist(let playlist):
+                        if playlist.id.map(offered.contains) ?? false { playlistButton(playlist) }
+                    case .folder(let folder, let children):
+                        let inside = children.filter { $0.id.map(offered.contains) ?? false }
+                        if !inside.isEmpty {
+                            Menu(folder.name) {
+                                ForEach(inside) { playlistButton($0) }
+                            }
+                        }
+                    }
                 }
+            } else {
+                ForEach(playlists) { playlistButton($0) }
             }
+        }
+    }
+
+    private func playlistButton(_ playlist: Playlist) -> some View {
+        Button(playlist.name) {
+            if let id = playlist.id { add(id) }
         }
     }
 }

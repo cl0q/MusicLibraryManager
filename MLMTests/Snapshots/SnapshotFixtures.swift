@@ -84,19 +84,18 @@ enum SnapshotFixtures {
                 store.playlists().first,
                 named: "populated playlist"
             )
+            // W3-PL card: facts line and the §15.5 words (`Not downloaded · 1 track`).
+            let summary = PlaylistSummary(playlistID: 1, totalTracks: 2, localTracks: 1, notDownloadedTracks: 1)
             return AnyView(PlaylistCard(
-                playlist: playlist,
-                source: nil,
-                trackCount: 2,
-                downloadStatus: PlaylistDownloadStatus(
-                    playlistID: 1, totalTracks: 2, localTracks: 1,
-                    downloadingTracks: 0, failedTracks: 0, notDownloadedTracks: 1
+                item: PlaylistGridItem(
+                    playlist: playlist,
+                    summary: summary,
+                    status: PlaylistStatus.make(summary: summary, echo: nil, expiredSignIn: nil),
+                    source: nil
                 ),
-                isRenaming: false,
-                renameText: .constant(""),
-                onTap: {}, onRename: {}, onConfirmRename: {}, onCancelRename: {},
-                onTogglePin: {}, onDelete: {}
-            ))
+                renameText: .constant("")
+            )
+            .frame(width: 180))
         }),
         Fixture(id: "ingest-preview", size: .init(width: 700, height: 580), makeView: { _ in
             let preview = IngestPreview(
@@ -342,6 +341,9 @@ enum SnapshotFixtures {
         "TrackList/SelectionBar.swift": "Deferred: the Liquid Glass selection bar needs a window with a live selection; its rules are unit-tested (SelectionBarStateTests).",
         "Playlists/PlaylistDetailView.swift": "Deferred: lifecycle reloads, source sync and cover work not isolated by table fixture.",
         "Playlists/PlaylistDetailViewLoader.swift": "Deferred: loader async outcomes require controlled ready/not-found/failure injection.",
+        "Playlists/PlaylistActions.swift": "Deferred: the playlist menu builder reads the shell environment; its sections are unit-tested (PlaylistMenuModelTests).",
+        "Playlists/PlaylistLinkSheet.swift": "Deferred: the Link sheet checks a live source link; its wording is unit-tested.",
+        "Playlists/PlaylistM3UImportSheet.swift": "Deferred: the M3U preview reads a file and the library; its plan is unit-tested (PlaylistFolderEditsTests).",
         "Playlists/PlaylistsView.swift": "Deferred: live playlist/cover loading and root view state need a preloaded composition.",
         "ReelsInbox/ReelsInboxView.swift": "Deferred: AVKit/Shazam/Vision work and detached tasks require service/clock seams.",
         "Search/SearchResultsView.swift": "Deferred: Library-scope results read the open library and the shell environment (W2-I); its model is unit-tested.",
@@ -396,8 +398,10 @@ enum SnapshotFixtures {
         "Inspector/InspectorAudioTab.swift": "Deferred: waveform extraction, analysis and similarity read files and the database.",
         "Inspector/InspectorFileTab.swift": "Deferred: file location, size and diagnostics read the disk and the database.",
         "Sync/NewSyncProfileSheet.swift": "Deferred: concrete SyncViewModel and device detection; needs passive sync model.",
-        "Sources/RemotePlaylistsView.swift": "Deferred: concrete remote providers fetch on presentation; inject provider clients.",
-        "Sources/SourcesView.swift": "Deferred: source model requires OAuth/token clients; needs inert account-status composition.",
+        "Import/QuickAddSheet.swift": "Deferred: Add from Link is a sheet looking links up through yt-dlp; QuickAddModel is unit-tested (W3-ADD).",
+        "Import/ImportPlaylistSheet.swift": "Deferred: the import sheet reads source accounts and providers; ImportPlaylistModel is unit-tested (W3-ADD).",
+        "Import/SourceSignInView.swift": "Deferred: the browser sign-in hand-off waits for a real OAuth callback; SourceSignInModel is unit-tested (W3-ADD).",
+        "Import/ImportSheetsHost.swift": "Deferred: presents the Add menu sheets on the main window; nothing drawn of its own (W3-ADD).",
         "Sync/Pickers/PlaylistPickerSheet.swift": "Deferred: concrete SyncViewModel requires filesystem TranscodeCache and standard-default-reading SyncService.",
         "Sync/SyncContentSections.swift": "Deferred: same concrete SyncViewModel boundary; needs passive expanded-content model.",
         "Sync/SyncFailedDisclosure.swift": "Deferred: concrete sync VM plus async row lookup; inject passive failed-row state.",
@@ -422,6 +426,10 @@ DiscoveryInbox/DiscoveryInboxView.swift
 DragDrop/DropTargetModifier.swift
 Folders/FoldersView.swift
 Folders/FolderTreeView.swift
+Import/ImportPlaylistSheet.swift
+Import/ImportSheetsHost.swift
+Import/QuickAddSheet.swift
+Import/SourceSignInView.swift
 Inspector/InfoTrackRequest.swift
 Inspector/InspectorAnalysis.swift
 Inspector/InspectorAudioTab.swift
@@ -449,9 +457,12 @@ Player/PlaybackWindowSupport.swift
 Player/PlayerBar.swift
 Player/PlayerDisplay.swift
 Player/PreviewWaveformScrubber.swift
+Playlists/PlaylistActions.swift
 Playlists/PlaylistCard.swift
 Playlists/PlaylistDetailView.swift
 Playlists/PlaylistDetailViewLoader.swift
+Playlists/PlaylistLinkSheet.swift
+Playlists/PlaylistM3UImportSheet.swift
 Playlists/PlaylistsView.swift
 Playlists/PlaylistTable.swift
 Queue/QueueEditCommands.swift
@@ -496,8 +507,6 @@ Shell/TrailingColumnView.swift
 Shell/UndoCenter.swift
 Sidebar/LibraryFooter.swift
 Sidebar/SidebarView.swift
-Sources/RemotePlaylistsView.swift
-Sources/SourcesView.swift
 Sync/DeviceIngestResultsView.swift
 Sync/IngestPreviewView.swift
 Sync/NewSyncProfileSheet.swift

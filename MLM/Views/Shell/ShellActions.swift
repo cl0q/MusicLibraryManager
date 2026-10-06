@@ -23,6 +23,10 @@ final class ShellActions {
 
     /// The undoable playlist and sync-profile edits (W2-F), on the library's `UndoCenter`.
     @ObservationIgnored let edits: ShellEdits
+    /// The Add menu's sheets (`Add from Link…`, `Import Playlist from Source…`) and `Refresh
+    /// from Sources` (W3-ADD); also the search field's `QuickAddPresenting`.
+    let imports: ImportSheetsPresenter
+    @ObservationIgnored private let undo: UndoCenter
 
     init(
         container: DependencyContainer,
@@ -35,8 +39,33 @@ final class ShellActions {
         self.navigation = navigation
         self.sidebar = sidebar
         self.statusBar = statusBar
+        self.undo = undo
         edits = ShellEdits(dependencies: .live(container), undo: undo, window: .main)
+        imports = ImportSheetsPresenter(container: container, statusBar: statusBar, navigation: navigation)
+        let edits = self.edits
+        imports.addToPlaylist = { playlistID, trackID in
+            Task { await edits.addTracks([trackID], toPlaylist: playlistID) }
+        }
     }
+
+    // MARK: Add menu (W3-ADD)
+
+    /// `Add from Link…` ⌘U (S-QUICKADD).
+    func addFromLink() {
+        imports.addFromLink()
+    }
+
+    /// `Import Playlist from Source…` ⇧⌘I (S-IMPORT).
+    func importPlaylistFromSource() {
+        imports.importPlaylistFromSource()
+    }
+
+    /// `Refresh from Sources` (enabled only with a connected source, UC-TB-05).
+    func refreshFromSources() {
+        imports.refreshFromSources()
+    }
+
+    var canRefreshFromSources: Bool { imports.canRefreshFromSources }
 
     var hasLibrary: Bool { container.isInitialized }
 
@@ -73,10 +102,101 @@ final class ShellActions {
 
     // MARK: Import
 
-    /// `Import Files or Folder…`: opens the folder panel; the import runs as an Activity
-    /// operation through the existing `ImportViewModel`.
+    /// `Import Files or Folder…`: opens the system panel (files and folders); the import runs
+    /// as an Activity operation through the existing `ImportViewModel`.
     func chooseImportFolder() {
         isChoosingImportFolder = true
+    }
+
+    /// The panel's choice (W3-ADD; it took only folders before). A folder inside the library
+    /// folder is scanned where it is, as before. Everything else — files, folders elsewhere —
+    /// is **copied** into the library folder's organised layout and imported from there
+    /// (`LibraryFileCopier`; originals are never moved or deleted), one `Scan` operation. Undo
+    /// removes the imported tracks from the library; the copied files stay (said in the
+    /// confirmation). Without a library folder the files are imported where they are.
+    func importChosen(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        Task { await importChosenNow(urls) }
+    }
+
+    private func importChosenNow(_ urls: [URL]) async {
+        let rootPath = (try? await container.configRepository?.getLibraryRoot()) ?? nil
+        let root = rootPath.map { URL(fileURLWithPath: $0) }
+        var copyItems: [URL] = []
+        for url in urls {
+            let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+            if isDirectory, let root, LibraryFileCopier.isInside(url, root: root) {
+                importFolder(url)
+            } else if isDirectory, root == nil {
+                importFolder(url)
+            } else {
+                copyItems.append(url)
+            }
+        }
+        guard !copyItems.isEmpty else { return }
+        let files = await Task.detached(priority: .userInitiated) { Self.audioFiles(in: copyItems) }.value
+        guard !files.isEmpty else {
+            statusBar.post(DropWords.notAudio(copyItems.map(\.lastPathComponent)))
+            return
+        }
+        guard let viewModel = makeImportViewModel() else {
+            statusBar.post(Self.importUnavailableMessage(folder: copyItems[0].lastPathComponent))
+            return
+        }
+        let title = copyItems.count == 1 && files.count > 1
+            ? "Import “\(copyItems[0].lastPathComponent)”"
+            : "Import \(ActivityNoun.file.counted(files.count))"
+        guard let root else {
+            // No library folder: nothing to copy into; imported where they are (as before).
+            await viewModel.importFiles(files, title: title)
+            return
+        }
+        let drive = LibraryDriveState.current(container)
+        if drive.isOffline, let name = drive.volumeName {
+            statusBar.post("Can’t import — “\(name)” is not connected")
+            return
+        }
+        // Tracks this import adds carry a `date_added` from now on (ISO 8601 sorts as text).
+        let startedAt = ISO8601DateFormatter().string(from: Date())
+        guard let outcome = await viewModel.importFilesCopyingIntoLibrary(
+            files, title: title, copier: LibraryFileCopier(libraryRoot: root)) else { return }
+        await recordCopiedImportUndo(paths: outcome.placement.toImport.map(\.path), since: startedAt,
+                                     copied: outcome.placement.copied)
+    }
+
+    /// Undo of a copying import (database only): removes the tracks this import added; the
+    /// copied files stay in the library folder. Redo imports them again.
+    private func recordCopiedImportUndo(paths: [String], since startedAt: String, copied: Int) async {
+        guard let tracks = container.trackRepository, let service = container.importService else { return }
+        let added = ((try? await tracks.fetchTracksByOriginalPaths(paths)) ?? [])
+            .filter { ($0.dateAdded ?? "") >= startedAt }
+            .compactMap(\.id)
+        guard !added.isEmpty else { return }
+        let files = paths.map { URL(fileURLWithPath: $0) }
+        undo.record(
+            "Import \(ActivityNoun.track.counted(added.count).capitalized)",
+            message: Self.copiedImportMessage(imported: added.count, copied: copied),
+            done: added,
+            undo: { ids in
+                try await tracks.delete(ids: ids)
+                NotificationCenter.default.post(name: .libraryDidDeleteTracks, object: nil, userInfo: ["deletedIDs": ids])
+                return files
+            },
+            redo: { files in
+                _ = try await service.importFiles(files, onProgress: nil)
+                NotificationCenter.default.post(name: .libraryDidImport, object: nil)
+                return ((try? await tracks.fetchTracksByOriginalPaths(files.map(\.path))) ?? []).compactMap(\.id)
+            }
+        )
+    }
+
+    /// `Imported 4 tracks · 4 files copied into the library folder (Undo keeps the files)`.
+    nonisolated static func copiedImportMessage(imported: Int, copied: Int) -> String {
+        var text = "Imported \(ActivityNoun.track.counted(imported))"
+        if copied > 0 {
+            text += " · \(ActivityNoun.file.counted(copied)) copied into the library folder (Undo keeps the files)"
+        }
+        return text
     }
 
     func importFolder(_ url: URL) {
@@ -183,16 +303,6 @@ final class ShellActions {
             await viewModel.importLibrary()
             await container.libraryViewModel?.refresh()
             isScanningLibraryFolder = false
-        }
-    }
-
-    // MARK: Sources (temporary)
-
-    /// Shows the former Sources section (accounts, playlist import) as a pushed page until
-    /// W3-SET / W3-ADD replace it.
-    func showSources() {
-        if navigation.currentRoute != .sources {
-            navigation.push(.sources)
         }
     }
 

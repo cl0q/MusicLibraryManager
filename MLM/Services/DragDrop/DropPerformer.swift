@@ -83,6 +83,18 @@ struct DropPerformer {
                     say(refusal)
                 }
             }
+        case .movePlaylistItems(let items, let folderID, let before):
+            Task { await edits?.movePlaylistItems(items, into: folderID, before: before) }
+        case .newPlaylistInFolder(let ids, let folderID):
+            Task { await edits?.newPlaylist(inFolder: folderID, trackIDs: ids) }
+        case .importFilesAsNewPlaylistInFolder(let urls, let folderID):
+            Task {
+                guard let shell else { return }
+                let ids = await shell.importDropped(urls)
+                if !ids.isEmpty { await shell.edits.newPlaylist(inFolder: folderID, trackIDs: ids) }
+            }
+        case .importM3UInFolder(let url, let folderID):
+            DropCenter.shared.requestM3UImport(url, droppedOnPlaylist: nil, inFolder: folderID)
         case .refuse(let message):
             if let message { say(message) }
         }
@@ -123,14 +135,48 @@ final class DropCenter {
     struct M3UImport: Identifiable, Equatable {
         let id = UUID()
         let url: URL
-        /// The playlist it was dropped on (W3-PL's sheet imports into it; today's import engine
-        /// chooses its playlist by the file name).
+        /// The playlist the tracks go into (dropped on it, or `Import M3U into This Playlist…`);
+        /// nil = a new playlist named after the file (PP-PLAYLISTS-01: never chosen by the
+        /// file's name).
         let playlistID: Int64?
+        /// For a new playlist: the playlist folder it goes into (dropped on a folder).
+        var folderID: Int64? = nil
     }
 
     var m3uImport: M3UImport?
 
-    func requestM3UImport(_ url: URL, droppedOnPlaylist playlistID: Int64?) {
-        m3uImport = M3UImport(url: url, playlistID: playlistID)
+    /// `Import M3U…` / `Import M3U into This Playlist…` asked for the file panel; the window's
+    /// `.fileImporter` answers into `m3uChoice` (nil playlist = a new playlist).
+    var isChoosingM3U = false
+    private(set) var m3uChoicePlaylistID: Int64?
+
+    /// Export ▸ Playlist as M3U…: the playlist whose file the window's `.fileExporter` writes.
+    var m3uExport: M3UExportRequest?
+
+    func requestM3UImport(_ url: URL, droppedOnPlaylist playlistID: Int64?, inFolder folderID: Int64? = nil) {
+        m3uImport = M3UImport(url: url, playlistID: playlistID, folderID: folderID)
     }
+
+    /// Opens the file panel for an M3U, whose tracks go into `playlistID` (nil = new playlist).
+    func chooseM3U(into playlistID: Int64?) {
+        m3uChoicePlaylistID = playlistID
+        isChoosingM3U = true
+    }
+
+    /// The panel's answer: the preview sheet for the chosen file.
+    func m3uChosen(_ url: URL) {
+        requestM3UImport(url, droppedOnPlaylist: m3uChoicePlaylistID)
+    }
+}
+
+/// A playlist to write as an M3U file.
+struct M3UExportRequest: Identifiable, Equatable {
+    let id = UUID()
+    let playlistID: Int64
+    let name: String
+    let document: M3UDocument
+    /// Tracks without a file, left out of the file (said in the status bar).
+    let leftOut: Int
+
+    static func == (lhs: M3UExportRequest, rhs: M3UExportRequest) -> Bool { lhs.id == rhs.id }
 }

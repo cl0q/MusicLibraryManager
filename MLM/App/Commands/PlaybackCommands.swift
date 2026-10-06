@@ -12,6 +12,7 @@ struct PlaybackCommands: Commands {
     @FocusedValue(\.trackSelection) private var focusedSelection
     @FocusedValue(\.navigationModel) private var navigation
     @FocusedValue(\.shellActions) private var shellActions
+    @FocusedValue(\.playlistPage) private var playlistPage
 
     var body: some Commands {
         CommandMenu(MenuBarMenu.playback.rawValue) {
@@ -22,16 +23,22 @@ struct PlaybackCommands: Commands {
                 navigation: navigation,
                 activate: shellActions?.activateTrack
             )
+            // A playlist page whose table hasn't focus: Play / Shuffle “‹playlist›” (W3-PL).
+            let page = list == nil ? playlistPage : nil
+            let viewName = list?.name ?? page.map { "“\($0.playlist.name)”" }
+            let canPlayView = list?.canPlay == true || page?.canPlay == true
 
             // With nothing loaded, Play plays the current view (UC-MENU-05).
             CommandButton(.playPause,
                           title: playback?.isPlaying == true ? "Pause" : "Play",
-                          enabled: hasTrack || previewing || playback?.canResumeQueue == true || list?.canPlay == true) {
+                          enabled: hasTrack || previewing || playback?.canResumeQueue == true || canPlayView) {
                 // A waiting queue (its disk came back) continues before the view plays.
                 if let playback, playback.hasTrack || playback.preview.isActive || playback.canResumeQueue {
                     playback.togglePlayPause()
+                } else if let list {
+                    list.play()
                 } else {
-                    list?.play()
+                    page?.play()
                 }
             }
             // Also clears a `Can’t play — …` line when nothing is loaded (S10).
@@ -75,10 +82,10 @@ struct PlaybackCommands: Commands {
 
             let cantPlayReason = TrackTableLiveState.drive(DependencyContainer.shared).cantPlayReason
             CommandButton(.shuffleView,
-                          title: PlayableList.title(MenuCommand.shuffleView.title, list),
-                          enabled: list?.canPlay == true,
+                          title: viewName.map { "\(MenuCommand.shuffleView.title) \($0)" } ?? MenuCommand.shuffleView.title,
+                          enabled: canPlayView,
                           disabledReason: cantPlayReason) {
-                list?.shuffle()
+                if let list { list.shuffle() } else { page?.shuffle() }
             }
             CommandSubmenu(.repeatMode, enabled: playback != nil) {
                 ForEach(PlaybackRepeatMode.allCases, id: \.self) { mode in
@@ -92,10 +99,10 @@ struct PlaybackCommands: Commands {
             Divider()
 
             CommandButton(.playView,
-                          title: PlayableList.title(MenuCommand.playView.title, list),
-                          enabled: list?.canPlay == true,
+                          title: viewName.map { "\(MenuCommand.playView.title) \($0)" } ?? MenuCommand.playView.title,
+                          enabled: canPlayView,
                           disabledReason: cantPlayReason) {
-                list?.play()
+                if let list { list.play() } else { page?.play() }
             }
         }
     }

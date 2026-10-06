@@ -13,9 +13,8 @@ struct FirstRunSetupView: View {
     @State private var isCreating = false
 
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var liveProblem: NewLibraryError? {
-        trimmedName.isEmpty ? nil : launch.newLibraryProblem(named: trimmedName, in: directory)
-    }
+    /// Name taken / not writable, checked while typing (off the main actor, N5).
+    @State private var liveProblem: NewLibraryError?
 
     var body: some View {
         SetupColumn(step: 1, title: "Create your library",
@@ -44,6 +43,8 @@ struct FirstRunSetupView: View {
             .disabled(trimmedName.isEmpty || liveProblem != nil || isCreating)
         }
         .onChange(of: name) { _, _ in error = nil }
+        .newLibraryCheck(name: name, directory: directory, defaultDirectory: launch.store.librariesDirectory,
+                         problem: $liveProblem)
     }
 }
 
@@ -85,7 +86,7 @@ private struct FolderStep: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         } footer: {
-            Button("Set Up Later") { launch.endSetup() }
+            Button("Set Up Later") { Task { await launch.setUpLater() } }
             Spacer()
             if case .notConnected = model.reachability {
                 Button("Scan When Connected") {
@@ -157,17 +158,13 @@ private struct FolderStep: View {
             switch model.reachability {
             case .notConnected(let volume)?:
                 VStack(spacing: Spacing.xxs) {
-                    Label(text, systemImage: "externaldrive.badge.xmark")
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(.orange, .primary)
+                    StateLabel(text: text, systemImage: "externaldrive.badge.xmark", tint: .orange)
                     Text("MLM remembers the folder and scans it when “\(volume)” is connected.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
             case .missing?:
-                Label(text, systemImage: "questionmark.folder")
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(.red, .primary)
+                StateLabel(text: text, systemImage: "questionmark.folder", tint: .red)
             default:
                 Label(text, systemImage: "checkmark.circle")
                     .foregroundStyle(.secondary)
@@ -325,9 +322,7 @@ struct InlineProblem: View {
     init(_ message: String) { self.message = message }
 
     var body: some View {
-        Label(message, systemImage: "exclamationmark.triangle")
-            .symbolRenderingMode(.palette)
-            .foregroundStyle(.orange, .primary)
+        StateLabel(text: message, systemImage: "exclamationmark.triangle", tint: .orange)
             .font(.callout)
             .fixedSize(horizontal: false, vertical: true)
     }

@@ -11,6 +11,23 @@ extension FocusedValues {
     /// A linked playlist that can be refreshed from its source, published by the playlist page
     /// on screen (Track ▸ Refresh from ‹Source› ⌘R).
     @Entry var playlistSourceRefresh: PlaylistSourceRefresh?
+    /// The playlist page on screen (W3-PL): Playback ▸ Play / Shuffle “‹playlist›”, Track ▸
+    /// Download ‹n› Tracks with nothing selected (UC-KEY-14), Export ▸ Playlist as M3U….
+    @Entry var playlistPage: PlaylistPageCommands?
+    /// The playlists selected in All Playlists (Export ▸ Playlist as M3U… with one selected).
+    @Entry var selectedPlaylists: [Playlist]?
+}
+
+/// What the playlist page on screen offers the menu bar.
+struct PlaylistPageCommands {
+    let playlist: Playlist
+    /// Not-downloaded tracks (`Download ‹n› Tracks`).
+    let notDownloaded: Int
+    /// Something can play now (a local track, the disk connected).
+    let canPlay: Bool
+    let play: @MainActor () -> Void
+    let shuffle: @MainActor () -> Void
+    let downloadAll: @MainActor () -> Void
 }
 
 /// `Refresh from ‹Source›` of the playlist page on screen.

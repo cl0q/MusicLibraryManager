@@ -218,12 +218,16 @@ struct ContentView: View {
         }
         // Window-wide Esc for a preview, playback's status-bar notes, Locate File… (W2-C).
         .playbackWindowSupport()
-        .fileImporter(isPresented: $actions.isChoosingImportFolder, allowedContentTypes: [.folder]) { result in
-            if case .success(let url) = result {
-                shell.actions.importFolder(url)
+        // Import Files or Folder… takes files and folders (W3-ADD; UC-SHEET-25 message).
+        .fileImporter(isPresented: $actions.isChoosingImportFolder, allowedContentTypes: [.folder, .audio],
+                      allowsMultipleSelection: true) { result in
+            if case .success(let urls) = result {
+                shell.actions.importChosen(urls)
             }
         }
-        .fileDialogMessage("Choose a folder. MLM imports the music files inside it into the library.")
+        .fileDialogMessage("Choose audio files or a folder to import.")
+        // Add from Link… and Import Playlist from Source… (W3-ADD).
+        .importSheets(shell.actions.imports, search: shell.search)
         .sheet(isPresented: $actions.isCreatingSyncProfile) {
             NewSyncProfileSheet { profile in
                 if let id = profile.id {
@@ -273,28 +277,8 @@ struct ContentView: View {
             guard let queries = await TrackSearchQueries.current() else { return [:] }
             return (try? await queries.libraryTrackIDs(for: results)) ?? [:]
         }
-
-        QuickAddRouter.shared.interim = QuickAddRouter.Interim(
-            lookUp: { link in await LiveSearchSuggestionProvider().lookUp(link) },
-            download: { link, metadata in
-                guard let service = SearchDownloadService.live() else { return .failed("no library is open") }
-                return await service.download(link, metadata: metadata)
-            },
-            revealInLibrary: { [weak search] id in
-                if let search { SearchReveal.showInAllTracks(id, search: search) }
-            },
-            importPlaylist: { source, url in
-                let remote: RemotePlaylistSource = switch source {
-                case .youtube: .youtube
-                case .soundcloud: .soundcloud
-                case .spotify: .spotify
-                }
-                if source != .spotify { RemotePlaylistLinkRequest.shared.request(url, source: source) }
-                AppDelegate.shared?.showRemotePlaylistsWindow(source: remote)
-                return source != .spotify
-            },
-            post: { statusBar.post($0) }
-        )
+        // Links go to the Add menu's sheets (`QuickAddRouter.shared.presenter`, installed by
+        // `.importSheets`, W3-ADD).
     }
 
     private var isAllTracks: Bool {

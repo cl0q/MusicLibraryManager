@@ -21,14 +21,25 @@ struct DestinationView: View {
     @Environment(SidebarModel.self) private var sidebar
 
     var body: some View {
-        ContentScaffold(showsDriveBanner: destination.listsTracks) {
-            content
-        } selectionBar: {
-            // Shown only over a track table that registers (playlist detail; W2-G).
-            TrackSelectionBar()
+        switch destination {
+        // The playlist pages build their own scaffold: the detail header and the grid's scope
+        // bar are theirs (W3-PL, UC-LAYOUT-01/06).
+        case .allPlaylists:
+            PlaylistsView()
+        case .playlist(let id):
+            PlaylistDetailViewLoader(playlistId: id, onBack: { navigation.select(.allPlaylists) },
+                                     onTrackDoubleClick: onTrackActivated)
+                .id(id)
+        default:
+            ContentScaffold(showsDriveBanner: destination.listsTracks) {
+                content
+            } selectionBar: {
+                // Shown only over a track table that registers (W2-G).
+                TrackSelectionBar()
+            }
+            .hostsTrackSelectionBar()
+            .modifier(WindowTitleModifier())
         }
-        .hostsTrackSelectionBar()
-        .modifier(WindowTitleModifier())
     }
 
     @ViewBuilder
@@ -55,16 +66,9 @@ struct DestinationView: View {
             DiscoverView()
         case .review:
             ReviewQueueView(focusTrackID: reviewFocusTrackID)
-        case .allPlaylists:
-            PlaylistsView(onTrackDoubleClick: onTrackActivated)
-                .statusBarText(StatusBarText.playlists(sidebar.playlists.count))
-        case .playlist(let id):
-            PlaylistDetailViewLoader(
-                playlistId: id,
-                onBack: { navigation.select(.allPlaylists) },
-                onTrackDoubleClick: onTrackActivated
-            )
-            .id(id)
+        case .allPlaylists, .playlist:
+            // Hosted by `body` (own scaffold).
+            Color.clear
         case .syncProfile(let id):
             SyncProfileHost(profileID: id)
         }
@@ -84,27 +88,31 @@ struct RouteView: View {
     @Environment(NavigationModel.self) private var navigation
 
     var body: some View {
-        ContentScaffold(showsDriveBanner: route.listsTracks) {
-            content
-        } selectionBar: {
-            TrackSelectionBar()
+        Group {
+            if case .playlist(let id, let showFailedTracks) = route {
+                // Own scaffold: the playlist's detail header (W3-PL, UC-LAYOUT-06).
+                PlaylistDetailViewLoader(playlistId: id, initiallyShowFailedTracks: showFailedTracks,
+                                         onBack: { navigation.goBack() }, onTrackDoubleClick: onTrackActivated)
+                    .id(id)
+            } else {
+                ContentScaffold(showsDriveBanner: route.listsTracks) {
+                    content
+                } selectionBar: {
+                    TrackSelectionBar()
+                }
+                .hostsTrackSelectionBar()
+                .modifier(WindowTitleModifier())
+            }
         }
-        .hostsTrackSelectionBar()
-        .modifier(WindowTitleModifier())
         .navigationBarBackButtonHidden(true)
     }
 
     @ViewBuilder
     private var content: some View {
         switch route {
-        case .playlist(let id, let showFailedTracks):
-            PlaylistDetailViewLoader(
-                playlistId: id,
-                initiallyShowFailedTracks: showFailedTracks,
-                onBack: { navigation.goBack() },
-                onTrackDoubleClick: onTrackActivated
-            )
-            .id(id)
+        case .playlist:
+            // Hosted by `body` (own scaffold).
+            Color.clear
         case .album:
             PendingDestinationView(
                 title: "Album",
@@ -123,8 +131,6 @@ struct RouteView: View {
                 systemImage: "point.3.connected.trianglepath.dotted",
                 description: "Similar tracks aren’t available yet."
             )
-        case .sources:
-            SourcesView()
         }
     }
 }

@@ -329,57 +329,31 @@ struct QuickAddRouterTests {
         #expect(presenter.links == [.playlist(source: .soundcloud, url: "https://soundcloud.com/a/sets/b")])
     }
 
-    @Test func interimDownloadsATrackAndSaysSo() async {
-        let router = QuickAddRouter()
-        var posted: [String] = []
-        let downloaded = SearchTestBox<[LinkSuggestion]>([])
-        router.interim.download = { link, _ in
-            downloaded.value.append(link)
-            return .started(trackID: 1, title: "Good Lies")
+    /// W3-ADD replaced the interim path (direct download, the remote-playlists window): every
+    /// link — track, playlist, Spotify playlist, unsupported — goes to the sheets with what the
+    /// field already knew.
+    @Test func everyKindOfLinkGoesToThePresenterWithItsLookup() {
+        final class Recorder: QuickAddPresenting {
+            var calls: [(LinkSuggestion, LinkLookup?)] = []
+            func presentQuickAdd(for link: LinkSuggestion, lookup: LinkLookup?) { calls.append((link, lookup)) }
         }
-        router.interim.post = { posted.append($0) }
-        router.open(url: "https://youtu.be/x", lookup: LinkLookup(metadata: LinkMetadata(title: "Good Lies")))
-        await router.task?.value
-        #expect(downloaded.value.count == 1)
-        #expect(posted == ["Download started — “Good Lies”"])
-    }
-
-    @Test func interimShowsATrackTheLibraryHas() async {
         let router = QuickAddRouter()
-        var revealed: [Int64] = []
-        var posted: [String] = []
-        router.interim.revealInLibrary = { revealed.append($0) }
-        router.interim.post = { posted.append($0) }
-        router.interim.download = { _, _ in Issue.record("must not download"); return .busy }
-        router.open(url: "https://youtu.be/x", lookup: LinkLookup(metadata: LinkMetadata(title: "So U Kno"), libraryTrackID: 5))
-        await router.task?.value
-        #expect(revealed == [5])
-        #expect(posted == ["“So U Kno” is already in your library"])
-    }
-
-    @Test func interimPlaylistsGoToTheImportOrSayWhere() {
-        let router = QuickAddRouter()
-        var opened: [(LinkSource, String)] = []
-        var posted: [String] = []
-        router.interim.importPlaylist = { source, url in
-            opened.append((source, url))
-            return source != .spotify
-        }
-        router.interim.post = { posted.append($0) }
-        router.open(url: "https://www.youtube.com/playlist?list=PL1")
-        #expect(opened.first?.0 == .youtube)
-        #expect(posted.isEmpty)
+        let presenter = Recorder()
+        router.presenter = presenter
+        let lookup = LinkLookup(metadata: LinkMetadata(title: "Good Lies"), libraryTrackID: 5)
+        router.open(url: "https://youtu.be/x", lookup: lookup)
         router.open(url: "https://open.spotify.com/playlist/1")
-        #expect(posted == [QuickAddRouter.spotifyPlaylistMessage])
         router.open(url: "https://bandcamp.com/x")
-        #expect(posted.last == "MLM can’t download from this site")
+        #expect(presenter.calls.map(\.0) == [
+            .track(source: .youtube, url: "https://youtu.be/x"),
+            .playlist(source: .spotify, url: "https://open.spotify.com/playlist/1"),
+            .unsupported(host: "bandcamp.com", url: "https://bandcamp.com/x"),
+        ])
+        #expect(presenter.calls[0].1 == lookup)
     }
 
-    @Test func aWaitingPlaylistLinkIsTakenOnceBySource() {
-        let request = RemotePlaylistLinkRequest()
-        request.request("https://soundcloud.com/a/sets/b", source: .soundcloud)
-        #expect(request.take(.youtube) == nil)
-        #expect(request.take(.soundcloud) == "https://soundcloud.com/a/sets/b")
-        #expect(request.take(.soundcloud) == nil)
+    @Test func withoutAWindowNothingHappens() {
+        let router = QuickAddRouter()
+        router.open(url: "https://youtu.be/x")   // no presenter: no crash, no download
     }
 }

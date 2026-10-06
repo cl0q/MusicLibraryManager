@@ -50,6 +50,9 @@ struct LaunchFailure: Equatable, Sendable {
         case libraryList(newerVersion: Bool)
         /// An interrupted library file setup couldn't be finished.
         case setupInterrupted
+        /// The database opened and is up to date, but starting the library failed afterwards
+        /// (e.g. reading its settings). Nothing is claimed about the file (S7).
+        case startup
     }
 
     let name: String
@@ -77,7 +80,15 @@ struct LaunchFailure: Equatable, Sendable {
             return "The file that lists your libraries couldn’t be read or saved. Your libraries and music files are not affected."
         case .setupInterrupted:
             return "MLM couldn’t finish the library file setup that was interrupted last time. Your previous library is not changed."
+        case .startup:
+            return "MLM couldn’t open the library. Your music files are not affected. The details below say what went wrong."
         }
+    }
+
+    /// `Try Again` is the default only where trying again is harmless; after a failed update
+    /// it would start the update again, so `Choose Another Library` is the default (S2).
+    var tryAgainIsDefault: Bool {
+        cause != .update
     }
 
     /// `Choose Another Library` leads somewhere only when the list of libraries works.
@@ -90,16 +101,18 @@ struct LaunchFailure: Equatable, Sendable {
     var mayOfferRestore: Bool {
         switch cause {
         case .unreadable, .backupBeforeUpdate, .update: return location != nil
-        case .libraryList, .setupInterrupted: return false
+        case .libraryList, .setupInterrupted, .startup: return false
         }
     }
 
-    /// Which open phase the error came from decides what is safe to say.
-    static func cause(after phase: LibraryOpenPhase?) -> Cause {
-        switch phase {
-        case .backingUp?: return .backupBeforeUpdate
-        case .updating?: return .update
-        default: return .unreadable
+    /// The step the error came from decides what is safe to say (S7): only errors that
+    /// `DatabaseManager` marked with their step say more than "couldn’t open".
+    static func cause(for error: Error) -> Cause {
+        guard let openError = error as? LibraryOpenError else { return .startup }
+        switch openError.stage {
+        case .opening: return .unreadable
+        case .backingUp: return .backupBeforeUpdate
+        case .updating: return .update
         }
     }
 }
@@ -110,9 +123,12 @@ enum NewLibraryError: Equatable, Sendable {
     case nameTaken(String)
     case notWritable(folder: String)
     case failed(name: String, cause: String)
+    /// A restore or a library file setup is running (S1).
+    case busy(String)
 
     var message: String {
         switch self {
+        case .busy(let reason): return reason
         case .emptyName: return "Enter a name for the library."
         case .nameTaken(let name): return "A library named “\(name)” already exists there. Choose another name."
         case .notWritable(let folder): return "MLM can’t write to “\(folder)”. Choose another location."
@@ -170,6 +186,8 @@ final class LibraryLaunchCoordinator {
         case creationFailed(name: String, message: String)
         /// The list of libraries couldn't be updated; nothing changed.
         case listNotSaved(name: String)
+        /// A switch refused while work that must not be cut off runs (S4); `OK` only.
+        case refused(String)
     }
 
     /// `Switch to “‹name›”?` — waiting for `Switch and Relaunch` / `Cancel`.
@@ -296,6 +314,43 @@ final class LibraryLaunchCoordinator {
     /// Phases the current open went through, in order (the loading screen shows the last).
     private(set) var openPhases: [LibraryOpenPhase] = []
 
+    /// A restore from the failed state is replacing the library's database (S1).
+    private(set) var isRestoreRunning = false
+    /// The name given to the running adoption (for the quit refusal).
+    private var adoptingName: String?
+    /// Details of the last failed library file setup (the interrupted row's `Details`).
+    private var lastAdoptionError: String?
+
+    /// A restore or a library file setup is changing library files: nothing else may open,
+    /// create or switch a library until it ends (S1). Library files opened meanwhile wait.
+    var isBusy: Bool { isRestoreRunning || adoptionState.isRunning }
+
+    /// Why library commands are disabled while `isBusy` (UC-COPY-13).
+    var busyReason: String? {
+        if isRestoreRunning {
+            return "“\(restore?.libraryName ?? workSubjectName ?? "The library")” is being restored. Wait until it finishes."
+        }
+        if adoptionState.isRunning { return "The library file is being set up. Wait until it finishes." }
+        return nil
+    }
+
+    /// The open library's name — `nil` while none is open (then nothing is promised to
+    /// continue in it).
+    var openLibraryName: String? {
+        guard screen == .opened else { return nil }
+        return activeLibraryName
+            ?? activePackageURL?.deletingPathExtension().lastPathComponent
+            ?? LibraryPickerRows.legacyName
+    }
+
+    /// The library that running work is about: the one being restored or set up, else the
+    /// open one (`Quit MLM?`, the quit refusal).
+    var workSubjectName: String? {
+        if isRestoreRunning, let name = restore?.libraryName { return name }
+        if adoptionState.isRunning, let adoptingName { return adoptingName }
+        return openLibraryName
+    }
+
     private var hasStarted = false
     /// A library file opened before launch started (double-click to launch).
     private var launchOpenURL: URL?
@@ -314,11 +369,14 @@ final class LibraryLaunchCoordinator {
     private let relaunch: () -> Void
     private let needsSetup: () async -> Bool
     private let setupServices: LibrarySetupModel.Services
+    private let activeOperations: () -> [ActivityOperation]
 
     /// - Parameters:
     ///   - openLibrary: opens the location into the container, reporting its phases.
-    ///   - needsSetup: after an open — the library is empty and has no library folder, so the
-    ///     window continues with setup step 2 (V-SETUP).
+    ///   - needsSetup: after an open — the library is empty, has no library folder and its
+    ///     setup wasn't left with `Set Up Later`, so the window continues with setup step 2.
+    ///   - activeOperations: Activity's running work (a switch is refused while a restore,
+    ///     a library file setup or a path migration runs — S4).
     init(
         store: LibraryRegistryStore = LibraryRegistryStore(),
         adoption: LibraryAdoption,
@@ -328,8 +386,10 @@ final class LibraryLaunchCoordinator {
         reportFailure: @escaping (Error) -> Void,
         relaunch: @escaping () -> Void,
         needsSetup: @escaping () async -> Bool = { false },
-        setupServices: LibrarySetupModel.Services = .live
+        setupServices: LibrarySetupModel.Services = .live,
+        activeOperations: @escaping () -> [ActivityOperation] = { [] }
     ) {
+        self.activeOperations = activeOperations
         self.store = store
         self.adoption = adoption
         self.now = now
@@ -354,10 +414,15 @@ final class LibraryLaunchCoordinator {
         needsSetup: {
             let container = DependencyContainer.shared
             guard !container.hasLibraryRoot, let pool = container.databaseManager?.pool else { return false }
-            let count = try? await pool.read { db in try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM tracks") ?? 0 }
-            return count == 0
-        }
+            return await LibrarySetupModel.needsSetup(pool)
+        },
+        activeOperations: { ActivityCenter.shared.activeOperations }
     )
+
+    /// Refuses a switch while work that must not be cut off runs (S4); `nil` = allowed.
+    var switchRefusal: String? {
+        RunningWorkSummary(operations: activeOperations()).refusal(libraryName: workSubjectName, switching: true)
+    }
 
     // MARK: - Launch
 
@@ -415,7 +480,7 @@ final class LibraryLaunchCoordinator {
 
     /// A library file that arrived while the app was busy.
     private func drainQueuedOpen() async {
-        guard !adoptionOffer, let queued = queuedOpenURL.take() else { return }
+        guard !adoptionOffer, !isBusy, let queued = queuedOpenURL.take() else { return }
         await handleOpen(queued)
     }
 
@@ -433,14 +498,15 @@ final class LibraryLaunchCoordinator {
             launchOpenURL = url
             return
         }
-        if adoptionOffer {
-            // `Set up your library file` comes first; the file is opened afterwards.
+        if adoptionOffer || isBusy {
+            // `Set up your library file`, or a restore / setup that is changing library files,
+            // comes first; the file is opened afterwards (S1).
             queuedOpenURL = url
             return
         }
         switch screen {
         case .opened:
-            guard url.path != activePackageURL?.path else { return }
+            guard url.resolvingSymlinksInPath().path != activePackageURL?.resolvingSymlinksInPath().path else { return }
             pendingSwitch = .open(url, name: displayName(forPackage: url))
         case .resolving, .loading:
             queuedOpenURL = url
@@ -453,6 +519,10 @@ final class LibraryLaunchCoordinator {
     func confirmSwitch() {
         guard let request = pendingSwitch else { return }
         pendingSwitch = nil
+        if let refusal = switchRefusal {
+            switchProblem = .refused(refusal)
+            return
+        }
         switch request.target {
         case .open(let url):
             if case .failed(let problem) = switchLibrary(to: url) { switchProblem = problem }
@@ -467,7 +537,17 @@ final class LibraryLaunchCoordinator {
                     name: request.name, message: Self.creationFailureMessage(error, folder: directory))
                 return
             }
-            if case .failed(let problem) = switchLibrary(to: package) { switchProblem = problem }
+            if case .failed = switchLibrary(to: package) {
+                // The file was made a moment ago, is empty and isn't on the list: take it away
+                // again so nothing half-made stays behind (N2).
+                let canonical = Self.canonical(package)
+                if (try? store.load(now: now()).registry.entry(at: canonical)) == nil {
+                    try? FileManager.default.removeItem(at: canonical)
+                }
+                switchProblem = .creationFailed(
+                    name: request.name,
+                    message: "MLM couldn’t add it to its list of libraries, so the new library file was removed again. Nothing was added to your libraries.")
+            }
         }
     }
 
@@ -515,13 +595,27 @@ final class LibraryLaunchCoordinator {
         if let activeLibraryId, let entry = registry.entry(withId: activeLibraryId) {
             activeLibraryName = entry.displayName
         }
-        let legacy = FileManager.default.fileExists(atPath: legacyDatabaseURL.path) && !adoption.isInProgress
+        // An adoption journal left behind (interrupted, or a rollback that failed) is shown as
+        // its own row instead of the old install, never as "No libraries yet" (S3).
+        let interrupted = adoption.isInProgress
+        let legacy = FileManager.default.fileExists(atPath: legacyDatabaseURL.path) && !interrupted
         pickerRows = LibraryPickerRows.build(
             registry: registry,
             legacyDatabase: legacy ? legacyDatabaseURL : nil,
+            interruptedSetup: interrupted ? InterruptedSetup(
+                name: adoption.pendingName() ?? LibraryPickerRows.legacyName,
+                journal: adoption.journalURL,
+                details: lastAdoptionError ?? "Setup journal: \(adoption.journalURL.path)") : nil,
             mismatches: mismatches,
             unlisted: unlisted
         )
+    }
+
+    /// `Try Again` on `‹name› (setup interrupted)`: finishes the setup past its point of no
+    /// return, or undoes it and offers it again (the launch's own resume, S3).
+    func retryInterruptedSetup() async {
+        guard !isBusy, adoption.isInProgress else { return }
+        await resumeAdoption()
     }
 
     // MARK: - Picker (V-PICKER)
@@ -540,18 +634,21 @@ final class LibraryLaunchCoordinator {
 
     /// `Open`, double-click or Return on a row.
     func openRow(_ row: LibraryPickerRow) async {
-        guard row.canOpen else { return }
+        guard row.canOpen, !isBusy else { return }
         lastRemoval = nil
         switch row.kind {
         case .legacy:
             await openLegacyLibrary()
         case .registered, .unlisted:
             await open(packageAt: row.url)
+        case .interruptedSetup:
+            break
         }
     }
 
     /// The old install opened as it is — what `Not Now` did before (no change to what opens).
     func openLegacyLibrary() async {
+        guard !isBusy else { return }
         adoptionOffer = false
         adoptionState = .idle
         await finishOpening(.legacy(legacyDatabaseURL), name: LibraryPickerRows.legacyName)
@@ -578,7 +675,7 @@ final class LibraryLaunchCoordinator {
             unlisted.removeAll { $0.url.standardizedFileURL.path == row.url.standardizedFileURL.path }
             refreshPicker()
             return true
-        case .legacy:
+        case .legacy, .interruptedSetup:
             return false
         case .registered(let libraryId):
             guard var registry = try? store.load(now: now()).registry,
@@ -619,6 +716,7 @@ final class LibraryLaunchCoordinator {
 
     /// `Open Other…` / File ▸ `Open Library…` / footer `Open Library…`.
     func chooseLibraryFile() {
+        guard !isBusy else { return }
         libraryFileRequest = LibraryFileRequest(purpose: .open)
     }
 
@@ -697,7 +795,7 @@ final class LibraryLaunchCoordinator {
             showPicker(focus: PickerFocus(name: name, url: url))
         case .invalid(let file):
             screen = .invalid(file)
-        case .duplicateCopy, .creationFailed, .listNotSaved:
+        case .duplicateCopy, .creationFailed, .listNotSaved, .refused:
             showPicker()
             switchProblem = problem
         }
@@ -710,7 +808,7 @@ final class LibraryLaunchCoordinator {
 
     /// `Try Again` on the failed state.
     func retryFailedOpen() async {
-        guard case .failed(let failure) = screen else { return }
+        guard case .failed(let failure) = screen, !isBusy else { return }
         closeRestore()
         switch failure.location {
         case .package(let url)?:
@@ -724,6 +822,7 @@ final class LibraryLaunchCoordinator {
 
     /// `Choose Another Library` (failed, invalid).
     func chooseAnotherLibrary() {
+        guard !isBusy else { return }
         closeRestore()
         showPicker()
     }
@@ -731,7 +830,7 @@ final class LibraryLaunchCoordinator {
     /// `New Library…` (menu, footer, picker).
     func requestNewLibrary(named name: String = "New Library") {
         // The first run's step 1 is the form already.
-        guard screen != .firstRunSetup else { return }
+        guard screen != .firstRunSetup, !isBusy else { return }
         switchProblem = nil
         newLibraryRequest = NewLibraryRequest(defaultName: name)
     }
@@ -742,12 +841,17 @@ final class LibraryLaunchCoordinator {
 
     /// Checks a new library's name and location before anything is created.
     func newLibraryProblem(named name: String, in directory: URL? = nil) -> NewLibraryError? {
+        Self.newLibraryProblem(named: name, in: directory ?? store.librariesDirectory)
+    }
+
+    /// The same check, for a background task (the forms check while typing, off the main
+    /// actor — N5).
+    nonisolated static func newLibraryProblem(named name: String, in directory: URL) -> NewLibraryError? {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return .emptyName }
-        let directory = directory ?? store.librariesDirectory
         let package = directory.appendingPathComponent(LibraryPackage.fileName(forLibraryName: name))
         if FileManager.default.fileExists(atPath: package.path) { return .nameTaken(name) }
-        if !Self.isWritable(directory) { return .notWritable(folder: directory.lastPathComponent) }
+        if !isWritable(directory) { return .notWritable(folder: directory.lastPathComponent) }
         return nil
     }
 
@@ -758,6 +862,7 @@ final class LibraryLaunchCoordinator {
     func createLibrary(named name: String, in directory: URL? = nil) async -> NewLibraryError? {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let directory = directory ?? store.librariesDirectory
+        if let busyReason { return .busy(busyReason) }
         if let problem = newLibraryProblem(named: name, in: directory) { return problem }
         if screen == .opened {
             newLibraryRequest = nil
@@ -777,8 +882,15 @@ final class LibraryLaunchCoordinator {
         return nil
     }
 
-    /// `Done`, `Set Up Later`, `Continue in Background` on the setup.
+    /// `Done`, `Continue in Background` on the setup.
     func endSetup() {
+        setup = nil
+    }
+
+    /// `Set Up Later`: leaves an empty All Tracks and isn't asked again for this library at
+    /// the next launch (THOUGHTS §7.18, review S8) — until a library folder is set.
+    func setUpLater() async {
+        await setup?.setUpLater()
         setup = nil
     }
 
@@ -793,6 +905,10 @@ final class LibraryLaunchCoordinator {
 
     /// `Create Library File`. Runs off the main thread; the legacy database is not open.
     func adoptLegacyLibrary(named name: String) async {
+        // One at a time (N1); never while a restore runs.
+        guard !isBusy else { return }
+        adoptingName = name
+        lastAdoptionError = nil
         adoptionState = .running(.backingUp)
         let adoption = self.adoption
         // Activity (W3-ACT): app-level `Create library file “‹name›”` (no library is open yet);
@@ -818,7 +934,11 @@ final class LibraryLaunchCoordinator {
                 let package = Self.canonical(package)
                 await finishOpening(.package(package), name: displayName(forPackage: package))
             } else {
+                lastAdoptionError = String(describing: error)
                 adoptionState = .failed(details: String(describing: error))
+                // A rollback that failed too leaves the journal: the picker shows the
+                // interrupted setup instead of the old install (S3).
+                if screen == .picker { refreshPicker() }
             }
         }
     }
@@ -870,6 +990,7 @@ final class LibraryLaunchCoordinator {
                 await finishOpening(.package(package), name: displayName(forPackage: package))
             } else {
                 reportFailure(error)
+                lastAdoptionError = String(describing: error)
                 screen = .failed(LaunchFailure(
                     name: name, location: nil, cause: .setupInterrupted, details: String(describing: error)))
             }
@@ -883,8 +1004,8 @@ final class LibraryLaunchCoordinator {
     func switchLibrary(to url: URL) -> SwitchOutcome {
         let url = Self.canonical(url)
         switch prepare(packageAt: url) {
-        case .ready:
-            pendingOpen.set(url.path)
+        case .ready(let location, _):
+            pendingOpen.set(location.packageURL?.path ?? url.path)
             relaunch()
             return .relaunching
         case .problem(let problem):
@@ -925,9 +1046,30 @@ final class LibraryLaunchCoordinator {
         restore = model
     }
 
+    /// Releases the failed library's database. Never while its restore runs (S1): nothing
+    /// that would reach here can start then, and the model stays until the restore ends.
     private func closeRestore() {
-        restore?.close()
+        guard !isRestoreRunning, let model = restore else { return }
+        model.close()
         restore = nil
+    }
+
+    /// `Restore and Relaunch` in S-LAUNCH-RESTORE: the existing restore. While it runs no
+    /// library can be opened, created or switched to (S1); a library file opened meanwhile
+    /// waits and is handled if the restore fails (on success MLM relaunches).
+    func restoreFromBackup(_ info: BackupInfo) async {
+        guard let model = restore, !isBusy else { return }
+        markRestoreRunning(true)
+        await model.restore(info)
+        // Restored: MLM is relaunching (or must, after a failed swap) — stay busy, open nothing.
+        if model.backups.phase == .relaunching || model.backups.isRelaunchRequired { return }
+        markRestoreRunning(false)
+        await drainQueuedOpen()
+    }
+
+    /// The restore's busy state (also what the tests drive).
+    func markRestoreRunning(_ running: Bool) {
+        isRestoreRunning = running
     }
 
     // MARK: - Internals
@@ -968,6 +1110,7 @@ final class LibraryLaunchCoordinator {
     }
 
     private func finishOpening(_ location: LibraryLocation, name: String) async {
+        guard !isRestoreRunning else { return }
         closeRestore()
         if case .loading = screen {
             applyPhase(.reading, generation: openGeneration)
@@ -977,7 +1120,8 @@ final class LibraryLaunchCoordinator {
         let generation = openGeneration
         let phasesBefore = openPhases
         // Every reported phase, in the order the open path reported them (exact, whatever the
-        // main queue got to show) — for the failure sentence and `openPhases`.
+        // main queue got to show) — for `openPhases`. The failure sentence follows the error's
+        // own step (`LibraryOpenError`), not the last phase (S7).
         let reported = Mutex<[LibraryOpenPhase]>([])
         let progress: LibraryOpenProgress = { [weak self] phase in
             reported.withLock { $0.append(phase) }
@@ -1007,7 +1151,7 @@ final class LibraryLaunchCoordinator {
             screen = .failed(LaunchFailure(
                 name: name,
                 location: location,
-                cause: LaunchFailure.cause(after: reported.withLock { $0.last }),
+                cause: LaunchFailure.cause(for: error),
                 details: "\(error)\n\((location.databaseURL.path as NSString).abbreviatingWithTildeInPath)"))
         }
     }
@@ -1025,6 +1169,12 @@ final class LibraryLaunchCoordinator {
                 cause: .libraryList(newerVersion: error is LibraryRegistryStore.LoadError),
                 details: "\(error)\n\(store.fileURL.path)"))
         }
+        // A symlink (or alias path) to a listed library is that library, at its listed path
+        // (N3): never a copy, never re-pointed.
+        let resolved = url.resolvingSymlinksInPath().path
+        let url = registry.entry(at: url)?.url
+            ?? registry.libraries.first { $0.url.resolvingSymlinksInPath().path == resolved }?.url
+            ?? url
         let registeredAtPath = registry.entry(at: url)
         let displayName = registeredAtPath?.displayName ?? fileName
 
@@ -1047,9 +1197,10 @@ final class LibraryLaunchCoordinator {
         }
 
         let libraryId = validated.manifest.libraryId
-        // A Finder copy carries its original's id while the original still exists.
+        // A Finder copy carries its original's id while the original still exists. Paths are
+        // compared resolved, so a symlink to the original is never taken for a copy (N3).
         if let other = registry.entry(withId: libraryId),
-           other.url.standardizedFileURL.path != url.standardizedFileURL.path,
+           other.url.resolvingSymlinksInPath().path != url.resolvingSymlinksInPath().path,
            FileManager.default.fileExists(atPath: other.url.path) {
             return .problem(.duplicateCopy(name: fileName, originalName: other.displayName, url: url))
         }
@@ -1088,7 +1239,7 @@ final class LibraryLaunchCoordinator {
     }
 
     /// The folder (or its nearest existing parent) can be written.
-    static func isWritable(_ directory: URL) -> Bool {
+    nonisolated static func isWritable(_ directory: URL) -> Bool {
         var url = directory.standardizedFileURL
         let fileManager = FileManager.default
         while !fileManager.fileExists(atPath: url.path) {

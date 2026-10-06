@@ -70,6 +70,26 @@ enum LibraryOpenPhase: Equatable, Sendable {
 /// Receives the phases of one open, from whatever thread the open runs on.
 typealias LibraryOpenProgress = @Sendable (LibraryOpenPhase) -> Void
 
+/// An error of `DatabaseManager(databaseURL:…)` with the step it came from, so the failure
+/// screen says what is true (W3-LAUNCH review S7): before the pre-update backup nothing was
+/// written; a failed backup means nothing was updated; a failed update had a backup first.
+/// Any other error while opening a library is not one of these.
+struct LibraryOpenError: Error, CustomStringConvertible {
+    enum Stage: Equatable, Sendable {
+        /// Opening the database and reading its migrations.
+        case opening
+        /// The pre-update backup (`Before update`).
+        case backingUp
+        /// Running the migrations.
+        case updating
+    }
+
+    let stage: Stage
+    let underlying: Error
+
+    var description: String { String(describing: underlying) }
+}
+
 /// Runs the pending migrations one by one so the loading screen can say `3 of 5`.
 ///
 /// The result is the same as `migrator.migrate(writer)`: the same migrations, in registration

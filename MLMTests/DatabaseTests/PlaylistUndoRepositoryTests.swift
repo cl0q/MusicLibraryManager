@@ -232,13 +232,15 @@ struct PlaylistUndoRepositoryTests {
         #expect(try await count(db, "playlist_sync_snapshots", playlist: id) == 0)
     }
 
-    @Test func theLikedPlaylistIsNotDeletedBySnapshotDelete() async throws {
+    /// W3-PL: Delete is offered for the Liked playlist too (UC §23 C10) — and restorable.
+    @Test func theLikedPlaylistCanBeDeletedBySnapshotDeleteAndRestored() async throws {
         let (_, repo) = try makeRepo()
         let liked = try await repo.findOrCreateLikedPlaylist(name: "Liked from SoundCloud", sourceId: 1, externalId: nil)
-        await #expect(throws: PlaylistRepositoryError.self) {
-            _ = try await repo.deleteReturningSnapshot(id: liked.id!)
-        }
-        #expect(try await repo.fetch(id: liked.id!) != nil)
+        let snapshot = try await repo.deleteReturningSnapshot(id: liked.id!)
+        #expect(try await repo.fetch(id: liked.id!) == nil)
+        let restored = try await repo.restore(snapshot)
+        #expect(restored.playlist.id == liked.id)
+        #expect(restored.playlist.isLiked == 1)
     }
 
     @Test func deletionImpactCountsTracksAndNamesTheSyncProfiles() async throws {

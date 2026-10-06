@@ -46,6 +46,11 @@ final class SourcesViewModel {
     private var soundCloudClient: SoundCloudClient?
     private var spotifyClient: SpotifyClient?
     private var appleMusicClient: AppleMusicClient?
+    /// `Refresh from ‹Source›` (W3-ADD): the refresh lives in `SourceRefreshService`, shared with
+    /// the Add menu's `Refresh from Sources`.
+    private var refreshService: SourceRefreshService?
+    private let trackRepository: TrackRepository?
+    private let playlistRepository: PlaylistRepository?
 
     // MARK: - Init
 
@@ -63,6 +68,8 @@ final class SourcesViewModel {
         self.oauthManager = oauthManager
         self.tokenAccessStatus = tokenAccessStatus
         self.tokenRefreshService = tokenRefreshService
+        self.trackRepository = trackRepository
+        self.playlistRepository = playlistRepository
 
         // Initialize source clients if dependencies are available
         if let oauth = oauthManager, let trackRepo = trackRepository {
@@ -251,6 +258,27 @@ final class SourcesViewModel {
         }
     }
 
+    /// The browser sign-in (S-SRC-OAUTH) — the one entry point for `Connect` / `Reconnect` in
+    /// the import sheets and Settings ▸ Sources. Throws the failure (`CancellationError` when
+    /// the caller's task was cancelled); on success the source is connected.
+    @MainActor
+    func signIn(_ service: TokenStorage.Service) async throws {
+        switch service {
+        case .soundcloud:
+            guard let client = soundCloudClient else { throw SoundCloudClient.SoundCloudError.notAuthenticated }
+            try await client.authorize()
+        case .spotify:
+            guard let client = spotifyClient else { throw SpotifyClient.SpotifyError.notAuthenticated }
+            try await client.authorize()
+        case .appleMusic:
+            guard let client = appleMusicClient else { throw SpotifyClient.SpotifyError.notAuthenticated }
+            try await client.authorize()
+        }
+        connectionStatus[service] = true
+        errors.removeValue(forKey: service)
+        accounts?.didConnect(service)
+    }
+
     // MARK: - Reconnect
 
     /// Reconnect a source whose keychain token is currently inaccessible.
@@ -303,69 +331,36 @@ final class SourcesViewModel {
 
     // MARK: - Sync
 
-    /// Sync tracks from a connected source.
+    /// Refresh one connected source (`Refresh from ‹Source›`) through `SourceRefreshService`
+    /// (W3-ADD): one Activity operation, new likes as `Not downloaded`, linked playlists
+    /// refreshed — the same refresh as the Add menu's `Refresh from Sources`.
     @MainActor
     func syncSource(_ service: TokenStorage.Service) async {
         guard isConnected(service), !isSyncing(service) else { return }
+        if refreshService == nil, let oauthManager, let trackRepository {
+            refreshService = SourceRefreshService(refresher: LiveSourceLibraryRefresher(
+                tokenStorage: tokenStorage, oauthManager: oauthManager, trackRepository: trackRepository,
+                sourceRepository: sourceRepository, playlistRepository: playlistRepository))
+        }
+        guard let refreshService else { return }
 
         errors.removeValue(forKey: service)
         syncingServices.insert(service)
-        // Activity (W3-ACT): `Refresh from ‹Source›` — one operation per source, no Cancel (none
-        // exists for it).
-        let sourceName: String = switch service {
-        case .soundcloud: "SoundCloud"
-        case .spotify: "Spotify"
-        case .appleMusic: "Apple Music"
-        }
-        let job = ActivityCenter.shared.begin(.sourceRefresh, title: "Refresh from \(sourceName)",
-                                              subject: .settings(.sources), messageName: "Refresh")
-
-        do {
-            var newTracks = 0
-
-            switch service {
-            case .soundcloud:
-                guard let client = soundCloudClient else { break }
-                newTracks = try await client.syncLikes()
-                _ = try await client.syncPlaylists()
-
-            case .spotify:
-                guard let client = spotifyClient else { break }
-                newTracks = try await client.syncLikedSongs()
-                _ = try await client.syncPlaylists()
-
-            case .appleMusic:
-                guard let client = appleMusicClient else { break }
-                newTracks = try await client.syncLibrary()
-                _ = try await client.syncPlaylists()
-            }
-
-            // Reload counts
+        defer { syncingServices.remove(service) }
+        switch await refreshService.refresh(service) {
+        case .refreshed:
             await loadSources()
-            job.finish(ActivityResult(counts: [ActivityCount(.done, newTracks, newTracks == 1 ? "new track" : "new tracks")]))
-
-            if newTracks > 0 {
-                // Notify library to refresh the Remote tab
-                NotificationCenter.default.post(
-                    name: .libraryDidImport,
-                    object: nil,
-                    userInfo: ["succeeded": newTracks, "skipped": 0]
-                )
-            }
-        } catch SoundCloudClient.SoundCloudError.tokenExpired {
-            // Tokens already deleted in the client. Flip the UI to disconnected
-            // so the Connect button reappears.
+        case .signInExpired:
+            // The client deleted the rejected tokens; the source is no longer connected.
             connectionStatus[service] = false
-            errors[service] = SoundCloudClient.SoundCloudError.tokenExpired.errorDescription
+            errors[service] = "Sign-in expired (\(service.displayName))"
             // W3-SET: `Sign-in expired`, not `Disconnected`, until the user reconnects.
             accounts?.recordRefreshRejected(service)
-            job.fail(cause: "Sign-in expired (\(sourceName))", fix: .reconnect(source: sourceName))
-        } catch {
-            errors[service] = error.localizedDescription
-            job.fail(cause: error.localizedDescription, fix: .runAgain)
+        case .failed(let cause):
+            errors[service] = cause
+        case .alreadyRunning:
+            break
         }
-
-        syncingServices.remove(service)
     }
 
     // MARK: - Helpers

@@ -1,30 +1,9 @@
 import Foundation
 import Observation
 
-// MARK: - State words (UC §15.3)
-
-/// The state of one source account — exactly three words (UC §15.3, DEC-043):
-/// `Connected`, `Disconnected`, `Sign-in expired`. An unreadable keychain sign-in and a
-/// refresh the provider rejected are `Sign-in expired`, each with its own sentence.
-enum SourceAccountState: Equatable, Sendable {
-    case connected
-    case disconnected
-    case signInExpired(SignInExpiredCause)
-
-    /// The verbatim state word.
-    var word: String {
-        switch self {
-        case .connected: "Connected"
-        case .disconnected: "Disconnected"
-        case .signInExpired: "Sign-in expired"
-        }
-    }
-
-    var isSignInExpired: Bool {
-        if case .signInExpired = self { return true }
-        return false
-    }
-}
+// The state enum is `SourceAccountState` (MLM/Services/Sources/SourceAccountStates.swift, shared
+// with the import sheets): `Connected` / `Disconnected` / `Sign-in expired` (`keychainLocked` is
+// a `Sign-in expired` with its own sentence). This file is the one model that produces it.
 
 /// Why a sign-in can't be used.
 enum SignInExpiredCause: String, Equatable, Sendable {
@@ -47,15 +26,6 @@ enum StoredSignIn: Equatable, Sendable {
     case unreadable
 }
 
-/// What the import sheet (W3-ADD) and other places read; `SourceAccounts` is the one
-/// implementation in the app.
-@MainActor
-protocol SourceAccountStateProviding: AnyObject {
-    func state(for service: TokenStorage.Service) -> SourceAccountState
-    /// Every service whose sign-in can't be used now (`Sign-in expired`).
-    var unusableSignIns: Set<TokenStorage.Service> { get }
-}
-
 // MARK: - The one source of truth
 
 /// The account state of every source on this Mac (accounts belong to the Mac, not to a library —
@@ -72,7 +42,7 @@ protocol SourceAccountStateProviding: AnyObject {
 /// - `didConnect` / `didDisconnect` — the user's actions.
 @MainActor
 @Observable
-final class SourceAccounts: SourceAccountStateProviding {
+final class SourceAccounts {
     static let shared = SourceAccounts()
 
     /// `UserDefaults` key of the remembered rejections (service raw values).
@@ -96,36 +66,47 @@ final class SourceAccounts: SourceAccountStateProviding {
     // MARK: Output
 
     func state(for service: TokenStorage.Service) -> SourceAccountState {
-        if refreshRejected.contains(service) { return .signInExpired(.refreshRejected) }
-        if keychainLocked.contains(service) { return .signInExpired(.keychainLocked) }
+        if refreshRejected.contains(service) { return .signInExpired }
+        if keychainLocked.contains(service) { return .keychainLocked }
         switch stored[service] ?? .none {
         case .none: return .disconnected
-        case .valid: return .connected
-        case .expiredWithoutRefresh: return .signInExpired(.expired)
-        case .unreadable: return .signInExpired(.keychainLocked)
+        case .valid: return .connected(account: nil)
+        case .expiredWithoutRefresh: return .signInExpired
+        case .unreadable: return .keychainLocked
         }
     }
 
+    /// Why the sign-in can't be used, or `nil` when it can (or there is none).
+    func expiredCause(for service: TokenStorage.Service) -> SignInExpiredCause? {
+        if refreshRejected.contains(service) { return .refreshRejected }
+        if keychainLocked.contains(service) || stored[service] == .unreadable { return .keychainLocked }
+        if stored[service] == .expiredWithoutRefresh { return .expired }
+        return nil
+    }
+
+    /// Every service whose sign-in can't be used now (`Sign-in expired`).
     var unusableSignIns: Set<TokenStorage.Service> {
-        Set(TokenStorage.Service.allCases.filter { state(for: $0).isSignInExpired })
+        Set(TokenStorage.Service.allCases.filter { state(for: $0).needsSignIn })
     }
 
     /// The sentence after the state word in Settings ▸ Sources (UC §15.3).
     ///
     /// - Parameter lastRefreshed: when the source was last refreshed (`last refreshed today, 09:14`).
-    static func detail(for state: SourceAccountState, service: TokenStorage.Service,
+    static func detail(for state: SourceAccountState, cause: SignInExpiredCause?, service: TokenStorage.Service,
                        lastRefreshed: String? = nil) -> String {
         switch state {
         case .connected:
             return lastRefreshed.map { "last refreshed \($0)" } ?? ""
         case .disconnected:
             return "imports and refreshes from \(service.displayName) need a sign-in"
-        case .signInExpired(.keychainLocked):
+        case .keychainLocked:
             return "MLM can’t read the saved sign-in. Reconnect asks once for permission"
-        case .signInExpired(.refreshRejected):
+        case .signInExpired where cause == .refreshRejected:
             return "\(service.displayName) refused the saved sign-in · imports and refreshes from \(service.displayName) are paused"
-        case .signInExpired(.expired):
+        case .signInExpired:
             return "imports and refreshes from \(service.displayName) are paused"
+        case .notAvailable:
+            return ""
         }
     }
 

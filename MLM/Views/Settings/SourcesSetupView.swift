@@ -97,13 +97,13 @@ struct SourcesSetupView: View {
         return LabeledContent {
             HStack {
                 switch state {
-                case .connected:
+                case .connected, .notAvailable:
                     EmptyView()
                 case .disconnected:
                     Button("Connect…") { connect(service) }
                         .disabled(!canConnect(service) || isConnecting)
                         .help(connectHelp(service))
-                case .signInExpired:
+                case .signInExpired, .keychainLocked:
                     Button("Reconnect") { connect(service) }
                         .disabled(!canConnect(service) || isConnecting)
                         .help(connectHelp(service))
@@ -125,8 +125,9 @@ struct SourcesSetupView: View {
                     } else {
                         HStack(spacing: 4) {
                             SettingsState(text: state.word, systemImage: Self.symbol(state),
-                                          tone: state == .connected ? .ok : (state.isSignInExpired ? .problem : .neutral))
-                            let detail = SourceAccounts.detail(for: state, service: service, lastRefreshed: lastRefreshed)
+                                          tone: state.isConnected ? .ok : (state.needsSignIn ? .problem : .neutral))
+                            let detail = SourceAccounts.detail(for: state, cause: accounts.expiredCause(for: service),
+                                                               service: service, lastRefreshed: lastRefreshed)
                             if !detail.isEmpty { Text("· \(detail)") }
                         }
                         if let error = sources?.error(for: service) {
@@ -141,8 +142,8 @@ struct SourcesSetupView: View {
     static func symbol(_ state: SourceAccountState) -> String? {
         switch state {
         case .connected: "checkmark.circle"
-        case .disconnected: nil
-        case .signInExpired: "exclamationmark.triangle"
+        case .disconnected, .notAvailable: nil
+        case .signInExpired, .keychainLocked: "exclamationmark.triangle"
         }
     }
 
@@ -222,7 +223,7 @@ struct SourcesSetupView: View {
         guard let sources else { return }
         connecting.insert(service)
         Task {
-            if accounts.state(for: service).isSignInExpired {
+            if accounts.state(for: service).needsSignIn {
                 await sources.reconnectSource(service)
             } else {
                 await sources.connectSource(service)

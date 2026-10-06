@@ -1,6 +1,7 @@
 import Foundation
 import GRDB
 import AppKit
+import Synchronization
 
 /// Reason a backup was created.
 enum BackupReason: String, Codable, Sendable {
@@ -510,6 +511,7 @@ final class BackupService: Sendable {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
             if process.isRunning {
+                QuitGuard.shared.terminationWasCancelled()
                 process.terminate()
                 AppLogger.shared.error("Relaunch was cancelled; MLM kept running", source: "App")
             }
@@ -558,6 +560,15 @@ final class BackupService: Sendable {
             return nil
         }
 
+        // `Try Again` on a failed update (W3-LAUNCH review S2): the same database with the same
+        // applied migrations was already backed up before this update in this session — that
+        // bundle still protects it; don't write another one.
+        let sessionKey = databasePath.standardizedFileURL.path
+        if let previous = preMigrationBackupsThisSession.withLock({ $0[sessionKey] }),
+           previous.applied == applied, fileManager.fileExists(atPath: previous.url.path) {
+            return previous.url
+        }
+
         let scope = scope(of: pool, destinationOverride: destinationOverride, backupsRoot: backupsRoot)
         let destination = scope.destination
         let libraryId: String? = scope.libraryId
@@ -574,12 +585,17 @@ final class BackupService: Sendable {
             fileManager: fileManager,
             now: { Date() }
         )
+        preMigrationBackupsThisSession.withLock { $0[sessionKey] = (applied, info.url) }
         // Best-effort: a failed prune never aborts startup.
         if let keep = configuredRetention(of: pool).keep {
             _ = try? pruneBundles(in: scope, keep: keep, fileManager: fileManager)
         }
         return info.url
     }
+
+    /// The pre-update backups written by this process: database path → the applied migrations
+    /// it was taken at, and its bundle.
+    private static let preMigrationBackupsThisSession = Mutex<[String: (applied: Set<String>, url: URL)]>([:])
 
     // MARK: - Backup without a container (library adoption)
 
@@ -810,6 +826,9 @@ final class BackupService: Sendable {
         return infos.sorted { $0.createdAt > $1.createdAt }
     }
 
+    /// Reasons whose bundles are pruned only against bundles of the same reason (S2).
+    static let protectedReasons: Set<BackupReason> = [.preMigration, .preAdoption, .preRestore]
+
     private static func pruneBundles(in scope: BundleScope, keep: Int, fileManager: FileManager) throws -> [URL] {
         let all = try listBundles(in: scope, fileManager: fileManager)
         guard all.count > keep else { return [] }
@@ -817,10 +836,6 @@ final class BackupService: Sendable {
         // Split into incomplete (oldest first) and complete (oldest first).
         let incomplete = all.filter { !$0.isComplete }.sorted { $0.createdAt < $1.createdAt }
         let complete = all.filter { $0.isComplete }.sorted { $0.createdAt < $1.createdAt }
-
-        // The newest complete bundle is never removed: a library always keeps one backup it can
-        // be restored from (W3-SET).
-        let protected = all.first(where: \.isComplete)?.url
 
         var toRemove: [BackupInfo] = []
         var remaining = all.count
@@ -831,11 +846,25 @@ final class BackupService: Sendable {
             toRemove.append(info)
             remaining -= 1
         }
-        // Then complete, oldest first.
-        for info in complete where info.url != protected {
-            guard remaining > keep else { break }
-            toRemove.append(info)
-            remaining -= 1
+        // Then complete, oldest first. Bundles of a reason that protects a step (`Before
+        // update`, `Before library file setup`, `Before restore`) are counted per reason: the
+        // newest `keep` of each such reason stay, and the other bundles are counted without
+        // them, so repeated pre-update backups never push out manual or scheduled ones and
+        // vice versa (W3-LAUNCH review S2). Every group keeps at least its newest bundle, so a
+        // library never loses its last backup.
+        let keepEach = max(keep, 1)
+        var groups: [BackupReason?: [BackupInfo]] = [:]
+        for info in complete {
+            let group = info.reason.flatMap { protectedReasons.contains($0) ? $0 : nil }
+            groups[group, default: []].append(info)
+        }
+        for group in groups.values {
+            var left = group.count
+            for info in group {   // oldest first
+                guard left > keepEach else { break }
+                toRemove.append(info)
+                left -= 1
+            }
         }
 
         var removed: [URL] = []

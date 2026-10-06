@@ -52,9 +52,9 @@ final class ShellEdits {
     /// Default name of a new playlist (UC §23 C5).
     static let untitledPlaylistName = "Untitled Playlist"
 
-    private let dependencies: Dependencies
-    private let undo: UndoCenter
-    private let effects: PlaylistEffects
+    let dependencies: Dependencies
+    let undo: UndoCenter
+    let effects: PlaylistEffects
 
     /// - Parameter window: the current main window's models (`ShellWindowModels.main` in the app).
     init(dependencies: Dependencies, undo: UndoCenter, window: ShellWindowModels) {

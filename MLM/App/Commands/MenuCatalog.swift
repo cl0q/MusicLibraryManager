@@ -196,21 +196,20 @@ enum MenuCommand: String, CaseIterable, Sendable {
             Entry(menu: .file, title: "New Playlist from Selection", shortcut: .cmd("n", .shift), wiring: .app)
         case .newPlaylistFolder:
             Entry(menu: .file, title: "New Playlist Folder", shortcut: .cmd("n", .option),
-                  wiring: .pending(owner: "W3-PL", reason: "Playlist folders aren’t available yet."))
+                  wiring: .app)
         case .newSyncProfile: Entry(menu: .file, title: "New Sync Profile…", shortcut: nil, wiring: .app)
         case .addFromLink:
-            Entry(menu: .file, title: "Add from Link…", shortcut: .cmd("u"),
-                  wiring: .pending(owner: "W3-ADD", reason: "Adding a track from a link isn’t available yet. To import a playlist from a link, use Import Playlist from Source… in this menu."))
+            Entry(menu: .file, title: "Add from Link…", shortcut: .cmd("u"), wiring: .app)
         case .importPlaylistFromSource:
             Entry(menu: .file, title: "Import Playlist from Source…", shortcut: .cmd("i", .shift), wiring: .app)
         case .importFilesOrFolder: Entry(menu: .file, title: "Import Files or Folder…", shortcut: nil, wiring: .app)
         case .importM3U:
             Entry(menu: .file, title: "Import M3U…", shortcut: nil,
-                  wiring: .pending(owner: "W3-PL", reason: "To import an M3U file now, open a playlist and choose Import M3U… there."))
+                  wiring: .app)
         case .export: Entry(menu: .file, title: "Export", shortcut: nil, wiring: .app)
         case .exportPlaylistAsM3U:
             Entry(menu: .file, title: "Playlist as M3U…", shortcut: nil,
-                  wiring: .pending(owner: "W3-PL", reason: "Exporting a playlist as M3U isn’t available yet."), parent: .export)
+                  wiring: .app, parent: .export)
         case .createMLTrainingSet:
             Entry(menu: .file, title: "Create ML Training Set…", shortcut: nil,
                   wiring: .pending(owner: "W3-GEN", reason: "To export a Create ML training set now, use the genre tools in Settings ▸ Advanced."),
@@ -300,8 +299,7 @@ enum MenuCommand: String, CaseIterable, Sendable {
 
         // MARK: Library (M-LIBRARY)
         case .refreshFromSources:
-            Entry(menu: .library, title: "Refresh from Sources", shortcut: nil,
-                  wiring: .pending(owner: "W3-ADD", reason: "Refreshing all sources at once isn’t available yet. Open a linked playlist to refresh it."))
+            Entry(menu: .library, title: "Refresh from Sources", shortcut: nil, wiring: .app)
         case .scanLibraryFolder: Entry(menu: .library, title: "Scan Library Folder", shortcut: nil, wiring: .app)
         case .findDuplicates:
             Entry(menu: .library, title: "Find Duplicates", shortcut: nil,

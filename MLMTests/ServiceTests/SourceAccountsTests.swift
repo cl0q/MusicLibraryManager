@@ -17,19 +17,19 @@ struct SourceAccountsTests {
     }
 
     @Test func threeWordsOnly() {
-        #expect(SourceAccountState.connected.word == "Connected")
+        #expect(SourceAccountState.connected(account: nil).word == "Connected")
         #expect(SourceAccountState.disconnected.word == "Disconnected")
-        #expect(SourceAccountState.signInExpired(.keychainLocked).word == "Sign-in expired")
-        #expect(SourceAccountState.signInExpired(.refreshRejected).word == "Sign-in expired")
+        #expect(SourceAccountState.keychainLocked.word == "Sign-in expired")
+        #expect(SourceAccountState.signInExpired.word == "Sign-in expired")
     }
 
     @Test func keychainReadingsMapToStates() {
         let accounts = SourceAccounts(defaults: makeDefaults())
         #expect(accounts.state(for: .soundcloud) == .disconnected, "never read: nothing to say")
         accounts.apply([.soundcloud: .valid, .spotify: .expiredWithoutRefresh, .appleMusic: .unreadable])
-        #expect(accounts.state(for: .soundcloud) == .connected)
-        #expect(accounts.state(for: .spotify) == .signInExpired(.expired))
-        #expect(accounts.state(for: .appleMusic) == .signInExpired(.keychainLocked))
+        #expect(accounts.state(for: .soundcloud) == .connected(account: nil))
+        #expect(accounts.state(for: .spotify) == .signInExpired)
+        #expect(accounts.state(for: .appleMusic) == .keychainLocked)
         #expect(accounts.unusableSignIns == [.spotify, .appleMusic])
     }
 
@@ -45,11 +45,11 @@ struct SourceAccountsTests {
         let accounts = SourceAccounts(defaults: defaults)
         accounts.apply([.spotify: .valid])
         accounts.recordRefreshRejected(.spotify)
-        #expect(accounts.state(for: .spotify) == .signInExpired(.refreshRejected))
+        #expect(accounts.state(for: .spotify) == .signInExpired)
         // Remembered across launches.
-        #expect(SourceAccounts(defaults: defaults).state(for: .spotify) == .signInExpired(.refreshRejected))
+        #expect(SourceAccounts(defaults: defaults).state(for: .spotify) == .signInExpired)
         accounts.didConnect(.spotify)
-        #expect(accounts.state(for: .spotify) == .connected)
+        #expect(accounts.state(for: .spotify) == .connected(account: nil))
         #expect(SourceAccounts(defaults: defaults).refreshRejected.isEmpty)
 
         accounts.recordRefreshRejected(.soundcloud)
@@ -61,7 +61,7 @@ struct SourceAccountsTests {
         let accounts = SourceAccounts(defaults: makeDefaults())
         accounts.recordRefreshRejected(.soundcloud)
         accounts.recordRefreshSucceeded(.soundcloud)
-        #expect(accounts.state(for: .soundcloud) == .connected)
+        #expect(accounts.state(for: .soundcloud) == .connected(account: nil))
     }
 
     @Test func accessStatusForwardsToTheOneModel() {
@@ -70,13 +70,13 @@ struct SourceAccountsTests {
         accounts.apply([.soundcloud: .valid, .spotify: .valid])
         status.markInaccessible(.soundcloud)
         status.recordRefreshRejected(.spotify)
-        #expect(accounts.state(for: .soundcloud) == .signInExpired(.keychainLocked))
+        #expect(accounts.state(for: .soundcloud) == .keychainLocked)
         // The sidebar reads `inaccessibleServices`: it now covers the rejected refresh too.
         #expect(status.inaccessibleServices == [.soundcloud, .spotify])
         #expect(status.isInaccessible(.soundcloud))
         #expect(!status.isInaccessible(.spotify), "the keychain backoff stays keychain-only")
         status.markAccessible(.soundcloud)
-        #expect(accounts.state(for: .soundcloud) == .connected)
+        #expect(accounts.state(for: .soundcloud) == .connected(account: nil))
     }
 
     @Test func sidebarLineFollowsTheModel() {
@@ -96,10 +96,12 @@ struct SourceAccountsTests {
     }
 
     @Test func detailSentences() {
-        #expect(SourceAccounts.detail(for: .signInExpired(.expired), service: .spotify)
+        #expect(SourceAccounts.detail(for: .signInExpired, cause: .expired, service: .spotify)
                 == "imports and refreshes from Spotify are paused")
-        #expect(SourceAccounts.detail(for: .connected, service: .soundcloud, lastRefreshed: "today, 09:14")
-                == "last refreshed today, 09:14")
+        #expect(SourceAccounts.detail(for: .signInExpired, cause: .refreshRejected, service: .spotify)
+                .hasPrefix("Spotify refused the saved sign-in"))
+        #expect(SourceAccounts.detail(for: .connected(account: nil), cause: nil, service: .soundcloud,
+                                      lastRefreshed: "today, 09:14") == "last refreshed today, 09:14")
     }
 
     @Test func spotifyIsRegisteredForRefreshOnlyWithAClientID() async {
