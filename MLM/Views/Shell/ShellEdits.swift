@@ -797,7 +797,13 @@ extension ShellEdits {
                 return copy
             },
             undo: { copy in
-                if let id = copy.id { try await repository.delete(id: id) }
+                if let id = copy.id {
+                    // Undo would drop the copy's sync history and leave its files unaccounted for.
+                    if try await !repository.fetchSyncState(profileId: id).isEmpty {
+                        throw UndoNothingLeft(note: "Can’t undo — “\(copy.name)” has synced since")
+                    }
+                    try await repository.delete(id: id)
+                }
                 await didChange(profileID)
                 return ()
             },

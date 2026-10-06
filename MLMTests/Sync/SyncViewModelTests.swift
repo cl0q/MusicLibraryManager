@@ -109,6 +109,52 @@ struct SyncViewModelTests {
         #expect(try await env.sync.fetchAll().map(\.name) == ["iPod"])
     }
 
+    @Test func undoOfDuplicateRefusesOnceTheCopyHasSynced() async throws {
+        let env = try await SyncTestEnv()
+        let a = try await env.profile("iPod", device: try env.device("A"))
+        await env.edits.duplicateSyncProfile(a.id!, name: "iPod")
+        let copy = try #require(try await env.sync.fetchAll().first { $0.name == "iPod copy" })
+        try env.localTrack(1, title: "One")
+        try await env.db.write { db in
+            try db.execute(sql: """
+                INSERT INTO sync_state (profile_id, track_id, synced_checksum, synced_size, synced_timestamp)
+                VALUES (?, 1, 'x', 1, '2026-02-01 00:00:00')
+            """, arguments: [copy.id!])
+        }
+        env.undoManager.undo()
+        await env.undo.waitUntilIdle()
+        #expect(try await env.sync.fetchAll().map(\.name).sorted() == ["iPod", "iPod copy"], "the copy stays")
+        #expect(env.status.message?.text == "Can’t undo — “iPod copy” has synced since")
+    }
+
+    @Test func deletingAProfileWaitsForItsRunningSync() async throws {
+        let destinations = ScriptedDestinations(disconnectAfter: 1)  // only the start guard sees the device
+        let env = try await SyncTestEnv(destinations: destinations)
+        let device = try env.device("A")
+        let a = try await env.profile("A", device: device)
+        try env.localTrack(1, title: "One")
+        try await env.add([1], to: a)
+        // The run waits for the device, slowly, until it is cancelled.
+        destinations.onWait = { _ in
+            try? await Task.sleep(for: .milliseconds(20))
+            return false
+        }
+        let vm = env.viewModel()
+        await vm.loadProfiles()
+        vm.syncNow(vm.profile(a.id!)!)
+        try await waitUntil { destinations.waits >= 1 }
+
+        await vm.deleteProfile(vm.profile(a.id!)!)
+
+        #expect(!env.service.isRunning, "the run ended before the rows were deleted")
+        #expect(vm.profiles.isEmpty)
+        let leftovers = try await env.db.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM sync_state WHERE profile_id = ?", arguments: [a.id!])
+        }
+        #expect(leftovers == 0)
+        #expect(try await env.results.fetch(profileID: a.id!) == nil, "no result is written for a deleted profile")
+    }
+
     @Test func optionsSaveAtOnceAndKeepTheirKeys() async throws {
         let env = try await SyncTestEnv()
         let a = try await env.profile("A", device: try env.device("A"))

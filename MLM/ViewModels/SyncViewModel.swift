@@ -446,6 +446,9 @@ final class SyncViewModel {
     func deleteProfile(_ profile: SyncProfile) async {
         guard let id = profile.id else { return }
         if let run = run(for: profile) { ActivityCenter.shared.cancel(run.operationID) }
+        if syncService.runningProfileId == id { syncService.cancelSync() }
+        // The run may still be writing `sync_state` rows and its result: delete only after it ended.
+        await runs[id]?.value
         cancelPlanUpdate(id)
         do {
             try await syncRepository.delete(id: id)
