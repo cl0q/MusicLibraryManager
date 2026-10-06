@@ -76,8 +76,11 @@ struct ReviewPresentationTests {
             $0.keptFormat = "flac"; $0.hiddenCount = 2
             $0.playlistRows = (0..<3).map { _ in .init(id: 1, playlistId: 1, trackId: 1, position: "a", addedAt: nil, change: .repointed) }
         }) == "FLAC kept · 2 versions hidden from lists · 3 playlist entries re-pointed")
-        #expect(ReviewPresentation.outcome(record(.keepSelected, mode: .trash) { $0.keptFormat = "m4a"; $0.hiddenCount = 1 })
-            == "M4A kept · 1 version moved to the Trash")
+        #expect(ReviewPresentation.outcome(record(.keepSelected, mode: .trash) {
+            $0.keptFormat = "m4a"; $0.hiddenCount = 3
+            $0.trashed = [.init(trackId: 2, from: "/lib/a", trashURL: "/Trash/a")]
+            $0.trashSkipped = 1; $0.trashNotFound = 1
+        }) == "M4A kept · 1 version moved to the Trash · 1 skipped · 1 not found", "real numbers, not the hidden count")
         #expect(ReviewPresentation.outcome(record(.keepAll)) == "Nothing changed · not proposed again")
         #expect(ReviewPresentation.outcome(record(.merge) {
             $0.changedFields = ["Album", "Year"]
@@ -114,22 +117,85 @@ struct ReviewConsequencesTests {
         #expect(ReviewConsequences.fileURL(organizedPath: nil, libraryRoot: "/lib") == nil)
     }
 
-    @Test func eachFileIsItsOwnTryAndFailuresAreCounted() {
+    private static let guards = ReviewConsequences.TrashGuards(keptURL: URL(fileURLWithPath: "/lib/kept.flac"),
+                                                               libraryRoot: URL(fileURLWithPath: "/lib"))
+
+    private static func candidate(_ id: Int64, _ path: String?) -> ReviewConsequences.TrashCandidate {
+        .init(id: id, url: path.map { URL(fileURLWithPath: $0) })
+    }
+
+    @Test func eachFileIsItsOwnTryAndFailuresAreCounted() async {
         let files = FakeReviewFiles(existing: ["/lib/a.mp3", "/lib/b.mp3"])
         files.failing = ["/lib/b.mp3"]
-        let report = ReviewConsequences(files: files).trash([
-            (1, URL(fileURLWithPath: "/lib/a.mp3")), (2, URL(fileURLWithPath: "/lib/b.mp3")),
-            (3, URL(fileURLWithPath: "/lib/gone.mp3")), (4, nil),
-        ])
+        let report = await ReviewConsequences(files: files).trash([
+            Self.candidate(1, "/lib/a.mp3"), Self.candidate(2, "/lib/b.mp3"),
+            Self.candidate(3, "/lib/gone.mp3"), Self.candidate(4, nil),
+        ], guards: Self.guards)
         #expect(report.trashed.map(\.trackId) == [1])
         #expect(report.failures == 1, "a file that is already gone or has no path is not a failure")
+        #expect(report.notFound == 1)
+        #expect(report.noFile == 1)
         #expect(report.trashed.first?.trashURL == "/Trash/a.mp3")
     }
 
-    @Test func putBackReportsWhatIsNoLongerInTheTrash() {
+    @Test func aFileSharedWithTheKeptVersionIsSkipped() async {
+        let files = FakeReviewFiles(existing: ["/lib/kept.flac", "/lib/alias.flac", "/lib/Kept.FLAC.copy"])
+        files.identities = ["/lib/alias.flac": "inode-7", "/lib/kept.flac": "inode-7"]
+        let report = await ReviewConsequences(files: files).trash([
+            Self.candidate(1, "/lib/kept.flac"), Self.candidate(2, "/lib/alias.flac"),
+        ], guards: Self.guards)
+        #expect(report.trashed.isEmpty)
+        #expect(report.skipped.map(\.reason) == [.sharesFileWithKept, .sharesFileWithKept])
+        #expect(ReviewConsequences.SkipReason.sharesFileWithKept.sentence == "shares its file with the kept version")
+        #expect(files.trashed.isEmpty)
+    }
+
+    @Test func aCaseDifferentPathOfTheKeptFileIsTheSameFile() async {
+        let files = FakeReviewFiles(existing: ["/lib/Kept.flac"])
+        let report = await ReviewConsequences(files: files).trash([Self.candidate(1, "/lib/Kept.flac")], guards: Self.guards)
+        #expect(report.skipped.map(\.reason) == [.sharesFileWithKept])
+    }
+
+    @Test func aFileAnotherListedTrackUsesIsSkipped() async {
+        let files = FakeReviewFiles(existing: ["/lib/shared.mp3", "/lib/own.mp3"])
+        var guards = Self.guards
+        guards.otherListed = [URL(fileURLWithPath: "/lib/shared.mp3")]
+        let report = await ReviewConsequences(files: files).trash([Self.candidate(1, "/lib/shared.mp3"), Self.candidate(2, "/lib/own.mp3")],
+                                                                  guards: guards)
+        #expect(report.trashed.map(\.trackId) == [2])
+        #expect(report.skipped == [.init(id: 1, reason: .sharedWithListedTrack)])
+    }
+
+    @Test func aFileOutsideTheLibraryOrASymlinkIsSkipped() async {
+        let files = FakeReviewFiles(existing: ["/elsewhere/a.mp3", "/lib/link.mp3", "/library-other/b.mp3"])
+        files.symlinks = ["/lib/link.mp3"]
+        let report = await ReviewConsequences(files: files).trash([
+            Self.candidate(1, "/elsewhere/a.mp3"), Self.candidate(2, "/lib/link.mp3"), Self.candidate(3, "/library-other/b.mp3"),
+        ], guards: Self.guards)
+        #expect(report.trashed.isEmpty)
+        #expect(report.skipped.map(\.reason) == [.outsideLibrary, .symbolicLink, .outsideLibrary], "a sibling folder with the same prefix is outside")
+    }
+
+    @Test func everyMoveIsRecordedRightAfterItHappens() async {
+        let files = FakeReviewFiles(existing: ["/lib/a.mp3", "/lib/b.mp3"])
+        final class Log: @unchecked Sendable {
+            let lock = NSLock()
+            var entries: [(recorded: Int64, trashedSoFar: Int)] = []
+        }
+        let log = Log()
+        let report = await ReviewConsequences(files: files).trash([Self.candidate(1, "/lib/a.mp3"), Self.candidate(2, "/lib/b.mp3")],
+                                                                  guards: Self.guards) { item in
+            log.lock.withLock { log.entries.append((item.trackId, files.trashed.count)) }
+        }
+        #expect(report.trashed.count == 2)
+        #expect(log.entries.map(\.recorded) == [1, 2])
+        #expect(log.entries.map(\.trashedSoFar) == [1, 2], "recorded between the moves, not after the batch")
+    }
+
+    @Test func putBackReportsWhatIsNoLongerInTheTrash() async {
         let files = FakeReviewFiles(existing: ["/lib/a.mp3", "/lib/b.mp3"])
         let consequences = ReviewConsequences(files: files)
-        let report = consequences.trash([(1, URL(fileURLWithPath: "/lib/a.mp3")), (2, URL(fileURLWithPath: "/lib/b.mp3"))])
+        let report = await consequences.trash([Self.candidate(1, "/lib/a.mp3"), Self.candidate(2, "/lib/b.mp3")], guards: Self.guards)
         files.removeFromTrash("b.mp3")
         let back = consequences.putBack(report.trashed)
         #expect(back.restored == 1)
@@ -137,10 +203,10 @@ struct ReviewConsequencesTests {
         #expect(files.fileExists(atPath: "/lib/a.mp3"))
     }
 
-    @Test func aTakenOriginalPlaceIsNotOverwritten() {
+    @Test func aTakenOriginalPlaceIsNotOverwritten() async {
         let files = FakeReviewFiles(existing: ["/lib/a.mp3"])
         let consequences = ReviewConsequences(files: files)
-        let report = consequences.trash([(1, URL(fileURLWithPath: "/lib/a.mp3"))])
+        let report = await consequences.trash([Self.candidate(1, "/lib/a.mp3")], guards: Self.guards)
         _ = files.fileExists(atPath: "/lib/a.mp3")
         // Something else was put at the original place meanwhile.
         try? files.moveBack(from: URL(fileURLWithPath: "/nowhere"), to: URL(fileURLWithPath: "/lib/a.mp3"))

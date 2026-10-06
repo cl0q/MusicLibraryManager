@@ -9,11 +9,19 @@ final class FakeReviewFiles: ReviewFileManaging, @unchecked Sendable {
     private var existing: Set<String>
     /// Paths whose move to the Trash fails.
     var failing: Set<String> = []
+    /// Paths that are symbolic links.
+    var symlinks: Set<String> = []
+    /// Path → file identity (two paths with the same value are the same file).
+    var identities: [String: String] = [:]
     private(set) var trashed: [String] = []
 
     init(existing: [String]) { self.existing = Set(existing) }
 
     func fileExists(atPath path: String) -> Bool { lock.withLock { existing.contains(path) } }
+
+    func fileIdentity(atPath path: String) -> String? { lock.withLock { identities[path] } }
+
+    func isSymbolicLink(atPath path: String) -> Bool { lock.withLock { symlinks.contains(path) } }
 
     func trash(_ url: URL) throws -> URL? {
         try lock.withLock {

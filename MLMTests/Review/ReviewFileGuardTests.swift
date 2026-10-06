@@ -90,4 +90,23 @@ struct ReviewFileGuardTests {
         #expect(env.status.message?.text.hasSuffix("1 group skipped — the recommended version has no file") == true)
         #expect(env.model.duplicates.map(\.title) == ["Beta"], "the skipped group stays pending")
     }
+
+    @Test func trashModeLeavesAFileTheKeptVersionSharesAndSaysSo() async throws {
+        let env = try ReviewEnv.make(existingFiles: ["/lib/Overmono/shared.flac"])
+        let group = try await env.addGroup(title: "So U Kno", versions: flacMp3)
+        try await env.db.write { db in
+            try db.execute(sql: "UPDATE tracks SET organized_path = 'Overmono/shared.flac' WHERE id IN (?, ?)",
+                           arguments: [group.ids[0], group.ids[1]])
+        }
+        await env.model.reload()
+        env.model.setUnkeptMode(.trash)
+        let item = try #require(env.model.duplicates.first)
+        await env.model.apply([env.model.plan(keep: group.ids[0], in: item, action: .keepRecommended)],
+                              actionName: "Keep Recommended Version", undo: env.undo)
+        #expect(env.files.trashed.isEmpty, "the kept version's file is never trashed")
+        #expect(env.status.message?.text == "Kept the FLAC version of “So U Kno” · 0 versions moved to the Trash · 1 skipped")
+        let record = try #require(try await env.decisions.decisions()[group.key])
+        #expect(record.consequences.trashSkipped == 1)
+        #expect(record.consequences.trashed.isEmpty)
+    }
 }

@@ -383,6 +383,10 @@ final class ReviewModel {
     struct Applied: Sendable {
         var outcomes: [ReviewDecisionOutcome]
         var trashFailures: Int { outcomes.reduce(0) { $0 + $1.consequences.trashFailures } }
+        var trashed: Int { outcomes.reduce(0) { $0 + $1.consequences.trashed.count } }
+        var trashSkipped: Int { outcomes.reduce(0) { $0 + $1.consequences.trashSkipped } }
+        var trashNotFound: Int { outcomes.reduce(0) { $0 + $1.consequences.trashNotFound } }
+        var trashNoFile: Int { outcomes.reduce(0) { $0 + $1.consequences.trashNoFile } }
         var hidden: Int { outcomes.reduce(0) { $0 + $1.hiddenCount } }
         var playlistEntries: Int { outcomes.reduce(0) { $0 + $1.consequences.repointedPlaylistEntries } }
     }
@@ -451,14 +455,15 @@ final class ReviewModel {
     static func message(for plans: [ReviewGroupPlan], applied: Applied, mode: UnkeptMode) -> String {
         if plans.count > 1 {
             return ReviewPresentation.bulkMessage(groups: applied.outcomes.count, hidden: applied.hidden, mode: mode,
-                                                  playlistEntries: applied.playlistEntries, trashFailures: applied.trashFailures)
+                                                  playlistEntries: applied.playlistEntries, trashFailures: applied.trashFailures,
+                                                  trashed: applied.trashed, skipped: applied.trashSkipped,
+                                                  notFound: applied.trashNotFound, noFile: applied.trashNoFile)
         }
         guard let plan = plans.first, let outcome = applied.outcomes.first else { return "" }
         switch plan.request.action {
         case .keepRecommended, .keepSelected:
             return ReviewPresentation.keptMessage(
-                format: outcome.keptFormat, title: plan.title, hidden: outcome.hiddenCount, mode: mode,
-                playlistEntries: outcome.consequences.repointedPlaylistEntries, trashFailures: outcome.consequences.trashFailures)
+                format: outcome.keptFormat, title: plan.title, consequences: outcome.consequences, mode: mode)
         case .keepAll:
             return ReviewPresentation.keptAllMessage(count: plan.versionCount, title: plan.title)
         case .merge:
@@ -491,22 +496,52 @@ final class ReviewModel {
         return outcomes
     }
 
-    /// Trash mode, after the commit: per file, failures counted (the database stays decided).
+    /// Trash mode, after the commit and off the main actor: per file, each move recorded right
+    /// after it happens; failures, skipped, missing and file-less versions counted separately
+    /// (the database stays decided).
     private func moveToTrash(_ outcomes: [ReviewDecisionOutcome]) async throws -> [ReviewDecisionOutcome] {
         let root = await dependencies.libraryRoot()
-        let ids = outcomes.flatMap(\.unkeptTrackIDs)
-        let tracks = try await dependencies.decisions.tracks(ids: ids)
-        let byID = Dictionary(uniqueKeysWithValues: tracks.compactMap { track in track.id.map { ($0, track) } })
+        let rootURL = root.flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+        let decisions = dependencies.decisions
         var result = outcomes
         for index in result.indices {
-            let targets = result[index].unkeptTrackIDs.map { id in
-                (id: id, url: ReviewConsequences.fileURL(organizedPath: byID[id]?.organizedPath, libraryRoot: root))
+            let outcome = result[index]
+            let ids = outcome.unkeptTrackIDs + (outcome.keptTrackID.map { [$0] } ?? [])
+            let tracks = try await decisions.tracks(ids: ids)
+            let byID = Dictionary(uniqueKeysWithValues: tracks.compactMap { track in track.id.map { ($0, track) } })
+            let candidates = outcome.unkeptTrackIDs.map { id in
+                ReviewConsequences.TrashCandidate(id: id, url: ReviewConsequences.fileURL(organizedPath: byID[id]?.organizedPath, libraryRoot: root))
             }
-            let report = dependencies.consequences.trash(targets)
-            try await dependencies.decisions.recordTrashed(decisionID: result[index].decisionID, trashed: report.trashed,
-                                                           failures: report.failures)
+            let keptURL = outcome.keptTrackID.flatMap { id in
+                ReviewConsequences.fileURL(organizedPath: byID[id]?.organizedPath, libraryRoot: root)
+            }
+            // Other listed tracks that use one of the files (the kept version is one of them).
+            var spellings = Set<String>()
+            for candidate in candidates {
+                guard let url = candidate.url else { continue }
+                spellings.formUnion(ReviewConsequences.pathSpellings(of: url, rawPath: byID[candidate.id]?.organizedPath, libraryRoot: root))
+            }
+            let sharing = try await decisions.listedTracks(organizedPaths: spellings)
+            let others = sharing.compactMap { track in
+                ReviewConsequences.fileURL(organizedPath: track.organizedPath, libraryRoot: root)
+            }
+            let guards = ReviewConsequences.TrashGuards(keptURL: keptURL, libraryRoot: rootURL, otherListed: others)
+            let decisionID = outcome.decisionID
+            let report = await dependencies.consequences.trash(candidates, guards: guards) { item in
+                do { try await decisions.recordTrashed(decisionID: decisionID, item: item) } catch {
+                    AppLogger.shared.error("Review: couldn’t record a Trash move: \(error.localizedDescription)", source: "Review")
+                }
+            }
+            try await decisions.recordTrashCounts(decisionID: decisionID, failures: report.failures, skipped: report.skipped.count,
+                                                  notFound: report.notFound, noFile: report.noFile)
+            for skip in report.skipped {
+                AppLogger.shared.info("Review: the file of version \(skip.id) was left in place — it \(skip.reason.sentence)", source: "Review")
+            }
             result[index].consequences.trashed = report.trashed
             result[index].consequences.trashFailures = report.failures
+            result[index].consequences.trashSkipped = report.skipped.count
+            result[index].consequences.trashNotFound = report.notFound
+            result[index].consequences.trashNoFile = report.noFile
         }
         return result
     }

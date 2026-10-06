@@ -97,6 +97,31 @@ struct ReviewDecisionConsequences: Codable, Equatable, Sendable {
     var hiddenCount = 0
     /// Files that couldn't be moved to the Trash.
     var trashFailures = 0
+    /// Versions whose file was left alone (shared with another track, outside the library, a link).
+    var trashSkipped = 0
+    /// Versions whose file was already gone.
+    var trashNotFound = 0
+    /// Versions without a file.
+    var trashNoFile = 0
+
+    init() {}
+
+    /// Every key is optional, so decisions stored by earlier builds still decode.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        flags = try c.decodeIfPresent([Flag].self, forKey: .flags) ?? []
+        playlistRows = try c.decodeIfPresent([PlaylistRow].self, forKey: .playlistRows) ?? []
+        syncRows = try c.decodeIfPresent([SyncRow].self, forKey: .syncRows) ?? []
+        trashed = try c.decodeIfPresent([Trashed].self, forKey: .trashed) ?? []
+        tags = try c.decodeIfPresent([TagChange].self, forKey: .tags) ?? []
+        changedFields = try c.decodeIfPresent([String].self, forKey: .changedFields) ?? []
+        keptFormat = try c.decodeIfPresent(String.self, forKey: .keptFormat)
+        hiddenCount = try c.decodeIfPresent(Int.self, forKey: .hiddenCount) ?? 0
+        trashFailures = try c.decodeIfPresent(Int.self, forKey: .trashFailures) ?? 0
+        trashSkipped = try c.decodeIfPresent(Int.self, forKey: .trashSkipped) ?? 0
+        trashNotFound = try c.decodeIfPresent(Int.self, forKey: .trashNotFound) ?? 0
+        trashNoFile = try c.decodeIfPresent(Int.self, forKey: .trashNoFile) ?? 0
+    }
 
     var repointedPlaylistEntries: Int { playlistRows.count }
     var repointedSyncRows: Int { syncRows.count }
@@ -117,6 +142,7 @@ struct ReviewDecisionRequest: Sendable {
 
 struct ReviewDecisionOutcome: Equatable, Sendable {
     var decisionID: Int64
+    var keptTrackID: Int64? = nil
     var unkeptTrackIDs: [Int64]
     var keptFormat: String?
     var consequences: ReviewDecisionConsequences
@@ -300,7 +326,7 @@ final class ReviewDecisionRepository: Sendable {
                     """, arguments: [pair.a, pair.b, decisionID])
             }
             try Self.setQueueStatus(db, groupKey: request.groupKey, from: "pending", to: "resolved")
-            return ReviewDecisionOutcome(decisionID: decisionID, unkeptTrackIDs: unkept,
+            return ReviewDecisionOutcome(decisionID: decisionID, keptTrackID: keeps ? request.keptTrackID : nil, unkeptTrackIDs: unkept,
                                          keptFormat: consequences.keptFormat, consequences: consequences)
         }
     }
@@ -364,18 +390,43 @@ final class ReviewDecisionRepository: Sendable {
         }
     }
 
-    /// Record the files that went to the Trash (after the commit) and how many didn't.
-    func recordTrashed(decisionID: Int64, trashed: [ReviewDecisionConsequences.Trashed], failures: Int) async throws {
+    /// Record one file that went to the Trash — called right after each move, so the Trash URL
+    /// survives a crash before the batch ends.
+    func recordTrashed(decisionID: Int64, item: ReviewDecisionConsequences.Trashed) async throws {
+        try await edit(decisionID: decisionID) { $0.trashed.removeAll { $0.trackId == item.trackId }; $0.trashed.append(item) }
+    }
+
+    /// Record the counts of what didn't move (after the batch).
+    func recordTrashCounts(decisionID: Int64, failures: Int, skipped: Int, notFound: Int, noFile: Int) async throws {
+        try await edit(decisionID: decisionID) {
+            $0.trashFailures = failures
+            $0.trashSkipped = skipped
+            $0.trashNotFound = notFound
+            $0.trashNoFile = noFile
+        }
+    }
+
+    private func edit(decisionID: Int64, _ change: @escaping @Sendable (inout ReviewDecisionConsequences) -> Void) async throws {
         try await database.write { db in
             guard let row = try Row.fetchOne(db, sql: "SELECT consequences_json FROM review_decisions WHERE id = ?",
                                              arguments: [decisionID]) else { return }
             let json: String = row["consequences_json"]
             var consequences = (try? JSONDecoder().decode(ReviewDecisionConsequences.self, from: Data(json.utf8)))
                 ?? ReviewDecisionConsequences()
-            consequences.trashed = trashed
-            consequences.trashFailures = failures
+            change(&consequences)
             try db.execute(sql: "UPDATE review_decisions SET consequences_json = ? WHERE id = ?",
                            arguments: [String(decoding: try JSONEncoder().encode(consequences), as: UTF8.self), decisionID])
+        }
+    }
+
+    /// The listed tracks (not hidden by Review) whose `organized_path` is one of `spellings`.
+    func listedTracks(organizedPaths spellings: Set<String>) async throws -> [Track] {
+        guard !spellings.isEmpty else { return [] }
+        return try await database.read { db in
+            let marks = spellings.map { _ in "?" }.joined(separator: ", ")
+            return try Track.fetchAll(db, sql: """
+                SELECT * FROM tracks WHERE hidden_by_review = 0 AND organized_path IN (\(marks))
+                """, arguments: StatementArguments(Array(spellings)))
         }
     }
 

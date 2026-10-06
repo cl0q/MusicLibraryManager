@@ -168,10 +168,13 @@ enum ReviewPresentation {
 
     // MARK: Status-bar confirmations (the mockup's `MLM.say` calls)
 
-    static func keptMessage(format: String?, title: String, hidden: Int, mode: UnkeptMode, playlistEntries: Int, trashFailures: Int) -> String {
+    static func keptMessage(format: String?, title: String, consequences c: ReviewDecisionConsequences, mode: UnkeptMode) -> String {
+        let hidden = c.hiddenCount
+        let playlistEntries = c.repointedPlaylistEntries
+        let trashFailures = c.trashFailures
         let word = format.map { $0.trimmingCharacters(in: .whitespaces).uppercased() }.flatMap { $0.isEmpty ? nil : $0 }
         var text = word.map { "Kept the \($0) version of “\(title)”" } ?? "Kept one version of “\(title)”"
-        text += " · " + movedOrHidden(count: hidden, mode: mode)
+        text += " · " + movedOrHidden(count: hidden, mode: mode, consequences: c)
         if playlistEntries > 0 { text += " · \(playlistEntries) playlist \(playlistEntries == 1 ? "entry" : "entries") re-pointed" }
         if trashFailures > 0 { text += " · " + couldntTrash(trashFailures) }
         return text
@@ -181,9 +184,12 @@ enum ReviewPresentation {
         "Kept all \(count) versions of “\(title)” — not duplicates"
     }
 
-    static func bulkMessage(groups: Int, hidden: Int, mode: UnkeptMode, playlistEntries: Int, trashFailures: Int) -> String {
+    static func bulkMessage(groups: Int, hidden: Int, mode: UnkeptMode, playlistEntries: Int, trashFailures: Int,
+                            trashed: Int = 0, skipped: Int = 0, notFound: Int = 0, noFile: Int = 0) -> String {
         var text = "Kept the recommended version in \(groups) groups · "
-            + (mode == .trash ? "\(hidden) files moved to the Trash" : "\(hidden) versions hidden from lists")
+            + (mode == .trash
+                ? "\(trashed) \(trashed == 1 ? "file" : "files") moved to the Trash" + trashExtras(skipped: skipped, notFound: notFound, noFile: noFile)
+                : "\(hidden) versions hidden from lists")
             + " · \(playlistEntries) playlist entries re-pointed"
         if trashFailures > 0 { text += " · " + couldntTrash(trashFailures) }
         return text
@@ -219,10 +225,23 @@ enum ReviewPresentation {
         "Can’t undo the Trash move — \(count) \(count == 1 ? "file is" : "files are") no longer in the Trash"
     }
 
-    private static func movedOrHidden(count: Int, mode: UnkeptMode) -> String {
+    /// `· 1 skipped · 1 not found · 2 without a file` — only what is not zero.
+    static func trashExtras(skipped: Int, notFound: Int, noFile: Int) -> String {
+        var parts: [String] = []
+        if skipped > 0 { parts.append("\(skipped) skipped") }
+        if notFound > 0 { parts.append("\(notFound) not found") }
+        if noFile > 0 { parts.append("\(noFile) without a file") }
+        return parts.isEmpty ? "" : " · " + parts.joined(separator: " · ")
+    }
+
+    private static func movedOrHidden(count: Int, mode: UnkeptMode, consequences c: ReviewDecisionConsequences? = nil) -> String {
         switch mode {
-        case .trash: "\(count) \(count == 1 ? "version" : "versions") moved to the Trash"
-        case .hidden: "\(count) \(count == 1 ? "version" : "versions") hidden from lists"
+        case .trash:
+            // The real numbers: what went to the Trash, not how many versions were hidden.
+            let moved = c?.trashed.count ?? count
+            return "\(moved) \(moved == 1 ? "version" : "versions") moved to the Trash"
+                + (c.map { trashExtras(skipped: $0.trashSkipped, notFound: $0.trashNotFound, noFile: $0.trashNoFile) } ?? "")
+        case .hidden: return "\(count) \(count == 1 ? "version" : "versions") hidden from lists"
         }
     }
 
@@ -235,7 +254,7 @@ enum ReviewPresentation {
         switch record.action {
         case .keepRecommended, .keepSelected:
             var text = "\((c.keptFormat ?? "One version").uppercased()) kept · "
-                + movedOrHidden(count: c.hiddenCount, mode: record.unkeptMode ?? .hidden)
+                + movedOrHidden(count: c.hiddenCount, mode: record.unkeptMode ?? .hidden, consequences: c)
             if c.repointedPlaylistEntries > 0 {
                 text += " · \(c.repointedPlaylistEntries) playlist \(c.repointedPlaylistEntries == 1 ? "entry" : "entries") re-pointed"
             }
