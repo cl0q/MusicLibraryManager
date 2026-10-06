@@ -107,6 +107,13 @@ final class TrackListModel {
         commit(Prepared.make(input.buildRows(), order: sortOrder))
     }
 
+    /// Replace the rows with prebuilt rows at once (small lists only: fixtures, previews).
+    func setRowsNow(_ newRows: [TrackRow]) {
+        latestInput = .rows(newRows)
+        generation += 1
+        commit(Prepared.make(newRows, order: sortOrder))
+    }
+
     /// Replace the rows with prebuilt rows (natural order).
     func setRows(_ newRows: [TrackRow]) async {
         latestInput = .rows(newRows)

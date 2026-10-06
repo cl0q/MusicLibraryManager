@@ -51,7 +51,7 @@ final class AlbumDetailModel {
     }
 
     /// A page that shows given content without a database.
-    static func preloaded(album: Album, members: [AlbumMember], editions: [AlbumEditionInfo] = []) async -> AlbumDetailModel {
+    static func preloaded(album: Album, members: [AlbumMember], editions: [AlbumEditionInfo] = []) -> AlbumDetailModel {
         let model = AlbumDetailModel(albumID: album.id ?? 0, albums: nil)
         model.isPreloaded = true
         model.album = album
@@ -59,7 +59,9 @@ final class AlbumDetailModel {
         model.editions = editions
         model.summary = AlbumDetailModel.summary(of: album, members: members)
         model.phase = .loaded
-        await model.rebuildRows()
+        let layout = AlbumLayout.make(members: members)
+        model.layout = layout
+        model.list.setRowsNow(AlbumLayout.rows(layout, members: members, album: album))
         return model
     }
 
