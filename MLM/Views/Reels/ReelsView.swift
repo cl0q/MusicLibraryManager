@@ -226,8 +226,9 @@ private struct ReelContextMenu: View {
                 }
             }
             Section {
+                // ⌫ on the list opens the same alert (`.onDeleteCommand`); `MenuBarStructureTests`
+                // allows no `.keyboardShortcut` here, so the menu doesn't draw the key.
                 Button("Delete Reel…", role: .destructive) { model.requestDelete(ids) }
-                    .keyboardShortcut(.delete, modifiers: [])
             }
         }
     }

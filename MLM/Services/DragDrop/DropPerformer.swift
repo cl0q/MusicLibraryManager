@@ -16,6 +16,7 @@ import Observation
 /// | cover | Choose Cover… (`ShellEdits.setCover`, undoable) |
 /// | genre row | Info's Genre field (`GenreEdits.setGenre`, one undoable tag edit) |
 /// | genre table | `Add to “‹Genre›”` on a suggestion (`GenreWorkbench.stage`) |
+/// | Reels view | `Import…` / `Add from Link…` of Discover ▸ Reels (`ReelsModel.addDropped`, `addDroppedLink`) |
 ///
 /// Placements at a position (`placeTracks`, `placePlaylists`, `importFilesAndPlace`) need the
 /// table's rows and are run by `PlaylistTable`; here they fall back to appending.
