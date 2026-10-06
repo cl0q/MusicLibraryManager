@@ -1304,7 +1304,7 @@ final class SyncService {
                 m3u += "#EXTMLM-PLAYLIST:\(plUuid)\n"
             }
             // Collect snapshot entries for iOS dialect (WP3)
-            var snapshotEntries: [(uuid: String?, path: String)] = []
+            var snapshotEntries: [(uuid: String?, path: String, trackId: Int64?)] = []
             for track in tracks {
                 let duration = track.duration ?? 0
                 let destPath = TranscodeCache.buildProfilePath(
@@ -1394,10 +1394,8 @@ final class SyncService {
                     m3u += "#EXTMLM:\(trackUuid)\n"
                 }
                 m3u += "\(fullPath)\n"
-                // Record for snapshot (iOS dialect only)
-                if isIOS {
-                    snapshotEntries.append((uuid: track.mlmUuid, path: fullPath))
-                }
+                // Record for the snapshot (every dialect): what the device file lists now.
+                snapshotEntries.append((uuid: track.mlmUuid, path: fullPath, trackId: track.id))
             }
 
             // Apply precomposed NFC Unicode normalization to the entire playlist contents
@@ -1415,10 +1413,14 @@ final class SyncService {
 
             try normalizedM3U.write(to: playlistPath, atomically: true, encoding: .utf8)
 
-            // Persist snapshot for iOS dialect (WP3) — enables ingest diff
-            if isIOS, let playlistId = playlist.id {
-                let snapshotJson: [[String: String?]] = snapshotEntries.map {
-                    ["uuid": $0.uuid, "path": $0.path]
+            // Persist the snapshot for every dialect — it is what "MLM wrote this" means when
+            // the device's playlist files are read back.
+            if let playlistId = playlist.id {
+                let snapshotJson: [[String: Any]] = snapshotEntries.map {
+                    var entry: [String: Any] = ["path": $0.path]
+                    if let uuid = $0.uuid { entry["uuid"] = uuid }
+                    if let trackId = $0.trackId { entry["track_id"] = trackId }
+                    return entry
                 }
                 let data = try JSONSerialization.data(withJSONObject: snapshotJson)
                 let json = String(data: data, encoding: .utf8) ?? "[]"

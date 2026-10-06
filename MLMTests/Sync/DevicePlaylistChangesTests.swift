@@ -68,6 +68,9 @@ struct DevicePlaylistChangesTests {
                 """, arguments: [profile.id!, id])
             }
         }
+        // MLM wrote Songs 1–3 into the device file (the sync's snapshot).
+        try await writeSnapshot(env, profile: profile, playlistID: playlist.id!,
+                                paths: [1: "Artist/Song 1.mp3", 2: "Artist/Song 2.mp3", 3: "Artist/Song 3.mp3"])
         // On the device the user removed Song 2, added Song 5 and reordered.
         let m3u = "#EXTM3U\nArtist/Song 3.mp3\nArtist/Song 1.mp3\nArtist/Song 5.mp3\n"
             + (withUnmatched ? "Unknown/track 07.m4a\n" : "")
@@ -77,6 +80,13 @@ struct DevicePlaylistChangesTests {
         try FileManager.default.createDirectory(at: hidden, withIntermediateDirectories: true)
         try "#EXTM3U\nArtist/Song 1.mp3\n".write(to: hidden.appendingPathComponent("Internal.m3u8"), atomically: true, encoding: .utf8)
         return (profile, playlist.id!, device)
+    }
+
+    /// What `generatePlaylists` records for a written playlist file.
+    private func writeSnapshot(_ env: SyncTestEnv, profile: SyncProfile, playlistID: Int64, paths: KeyValuePairs<Int64, String>) async throws {
+        let ingest = PlaylistIngestService(trackRepository: env.tracks, playlistRepository: env.playlists, database: env.db)
+        try await ingest.writeSnapshot(profileId: profile.id!, playlistId: playlistID, playlistUuid: nil,
+                                       entries: paths.map { .init(uuid: nil, path: $0.value, trackId: $0.key) })
     }
 
     private func service(_ env: SyncTestEnv) -> DevicePlaylistChangeService {
@@ -146,10 +156,40 @@ struct DevicePlaylistChangesTests {
                 VALUES (?, 1, 'x', 1, '2026-02-01 00:00:00')
             """, arguments: [profile.id!])
         }
+        try await writeSnapshot(env, profile: profile, playlistID: playlist.id!, paths: [1: "Artist/Artist - Title.m4a"])
         try "#EXTM3U\nArtist/Artist - Title.m4a\n".write(to: device.appendingPathComponent("Road.m3u8"), atomically: true, encoding: .utf8)
         let scan = try await service(env).scan(profile: profile)
         #expect(scan.cards.isEmpty, "no removal, no unmatched entry")
         #expect(scan.unchanged == 1)
+    }
+
+    @Test func aRunWithoutASnapshotProposesNoRemoval() async throws {
+        // A cancelled run: sync_state is newer than the playlist file, no snapshot was written.
+        let env = try await SyncTestEnv()
+        let (profile, playlistID, device) = try await seed(env)
+        try await env.db.write { db in
+            try db.execute(sql: "DELETE FROM playlist_sync_snapshots")
+            try db.execute(sql: "UPDATE sync_state SET synced_timestamp = '2026-09-01 00:00:00'")
+        }
+        _ = playlistID
+        try "#EXTM3U\nArtist/Song 3.mp3\nArtist/Song 1.mp3\n".write(to: device.appendingPathComponent("Road.m3u8"),
+                                                                    atomically: true, encoding: .utf8)
+        let card = try #require(try await service(env).scan(profile: profile).cards.first)
+        #expect(card.diff.removed.isEmpty, "nothing was recorded as written, so nothing can be removed")
+        #expect(card.diff.orderDiffers)
+    }
+
+    @Test func aFileOfAnotherProfileInTheSameFolderProposesNoRemoval() async throws {
+        let env = try await SyncTestEnv()
+        let (profile, _, device) = try await seed(env)
+        // "Gym" exists in the library but is not one of this profile's playlists.
+        _ = try await env.playlists.createNumbered(baseName: "Gym", trackIds: [1, 2, 3])
+        try "#EXTM3U\nArtist/Song 1.mp3\n".write(to: device.appendingPathComponent("Gym.m3u8"), atomically: true, encoding: .utf8)
+        let scan = try await service(env).scan(profile: profile)
+        let gym = try #require(scan.cards.first { $0.id == "Gym.m3u8" })
+        #expect(gym.isNew, "not matched to a playlist the profile doesn’t sync")
+        #expect(gym.diff.removed.isEmpty)
+        #expect(gym.mlm.isEmpty)
     }
 
     @Test func applyIsOneUndoStepThatRestoresTheExactRows() async throws {
@@ -204,6 +244,7 @@ struct DevicePlaylistChangesTests {
         let env = try await SyncTestEnv()
         let (profile, playlistID, device) = try await seed(env)
         let doomed = try await env.playlists.createNumbered(baseName: "Doomed", trackIds: [1])
+        try await env.sync.addPlaylist(profileId: profile.id!, playlistId: doomed.id!)
         try "#EXTM3U\nArtist/Song 5.mp3\n".write(to: device.appendingPathComponent("Doomed.m3u8"), atomically: true, encoding: .utf8)
         let service = service(env)
         let model = DevicePlaylistChangesModel(profile: profile, service: service, isReachable: { _ in true })

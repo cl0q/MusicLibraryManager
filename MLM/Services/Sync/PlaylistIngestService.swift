@@ -220,6 +220,13 @@ final class PlaylistIngestService: Sendable {
     struct SnapshotEntry: Codable, Equatable {
         let uuid: String?
         let path: String
+        /// The library track written at this path (absent in snapshots of older versions).
+        var trackId: Int64? = nil
+
+        enum CodingKeys: String, CodingKey {
+            case uuid, path
+            case trackId = "track_id"
+        }
     }
 
     // MARK: - Diff
