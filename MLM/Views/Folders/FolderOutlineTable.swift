@@ -27,7 +27,7 @@ struct FolderOutlineTable: View {
 
     @Environment(\.container) private var container
 
-    static let columns: [TrackColumnID] = TrackColumnID.allCases.filter { $0 != .number }
+    static let columns: [TrackColumnID] = TrackColumnID.standardColumns.filter { $0 != .number }
 
     var body: some View {
         ScrollViewReader { proxy in

@@ -1471,6 +1471,41 @@ final class DatabaseManager: Sendable {
                 UPDATE tracks SET is_pending_recommendation = 1
                 WHERE id IN (SELECT discovered_track_id FROM track_discovery_log WHERE status = 'new')
             """)
+        // Migration v54_review_hidden (W3-REV fixes): hiding gets its own
+        // column. `is_duplicate = 1` exists on many rows from older scans
+        // that were never user decisions, so lists must not hide by it.
+        // `hidden_by_review` is set only by a Review decision. No backfill.
+        // Decided pairs get a `kind`; uniqueness becomes
+        // (track_a, track_b, kind) (rebuild, SQLite cannot alter a PK).
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v54_review_hidden") { db in
+            if try !db.columns(in: "tracks").contains(where: { $0.name == "hidden_by_review" }) {
+                try db.execute(sql: "ALTER TABLE tracks ADD COLUMN hidden_by_review INTEGER NOT NULL DEFAULT 0")
+            }
+            try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_tracks_hidden_by_review ON tracks(hidden_by_review)")
+            let pairColumns = try db.columns(in: "review_decided_pairs").map(\.name)
+            if !pairColumns.contains("kind") {
+                try db.execute(sql: """
+                    CREATE TABLE review_decided_pairs_v2 (
+                        track_a INTEGER NOT NULL,
+                        track_b INTEGER NOT NULL,
+                        decision_id INTEGER NOT NULL,
+                        kind TEXT NOT NULL DEFAULT 'duplicate',
+                        PRIMARY KEY (track_a, track_b, kind)
+                    )
+                """)
+                try db.execute(sql: """
+                    INSERT OR IGNORE INTO review_decided_pairs_v2 (track_a, track_b, decision_id, kind)
+                    SELECT p.track_a, p.track_b, p.decision_id, COALESCE(d.kind, 'duplicate')
+                    FROM review_decided_pairs p LEFT JOIN review_decisions d ON d.id = p.decision_id
+                """)
+                try db.execute(sql: "DROP TABLE review_decided_pairs")
+                try db.execute(sql: "ALTER TABLE review_decided_pairs_v2 RENAME TO review_decided_pairs")
+                try db.execute(sql: """
+                    CREATE INDEX IF NOT EXISTS idx_review_decided_pairs_decision
+                    ON review_decided_pairs(decision_id)
+                """)
+            }
         }
 
         return migrator

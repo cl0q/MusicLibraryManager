@@ -68,6 +68,7 @@ struct ReviewView: View {
             model = created
         }
         guard let model else { return }
+        model.scan.statusBar = statusBar
         writesTags = await TagWriteSetting.isEnabled(container.configRepository)
         await model.scan.loadLastScan()
         await model.reload()
@@ -313,18 +314,23 @@ struct ReviewView: View {
 
     private func decide(_ plans: [ReviewGroupPlan], _ actionName: String) {
         guard let model else { return }
+        // Where the decided group was in the list, so the group that follows it is selected.
+        let before = (tab == .conflicts ? model.visibleConflicts : model.visibleDuplicates).map(\.key)
+        let index = selection.flatMap { before.firstIndex(of: $0) }
         Task {
             await model.apply(plans, actionName: actionName, undo: undo, statusBar: statusBar)
             // The next group stays selected so ↓ Return works through the list.
             if let selection, model.group(withKey: selection) == nil {
-                self.selection = nextSelection(model, after: selection)
+                self.selection = nextSelection(model, previousIndex: index)
             }
         }
     }
 
-    private func nextSelection(_ model: ReviewModel, after key: String) -> String? {
+    /// The group now at the place the decided one had (the next one), or the last one.
+    private func nextSelection(_ model: ReviewModel, previousIndex: Int?) -> String? {
         let list = tab == .conflicts ? model.visibleConflicts : model.visibleDuplicates
-        return list.first?.key
+        guard !list.isEmpty else { return nil }
+        return list[min(previousIndex ?? 0, list.count - 1)].key
     }
 
     // MARK: Apply Recommended to All… (A-REV-APPLYALL)
@@ -336,17 +342,19 @@ struct ReviewView: View {
     private var applyAllButton: String { ReviewPresentation.applyAllButton(groups: applyGroups.count) }
 
     private var applyAllMessage: String {
-        let kept = applyGroups.filter { !$0.recommendsKeepAll }
+        let skipped = applyGroups.filter { ReviewModel.recommendedHasNoFile($0) }.count
+        let kept = applyGroups.filter { !$0.recommendsKeepAll && !ReviewModel.recommendedHasNoFile($0) }
         let others = kept.reduce(0) { $0 + $1.members.count - 1 }
         let entries = kept.reduce(0) { sum, group in
             sum + group.members.reduce(0) { $0 + ($1.id == group.recommendedID ? 0 : (group.usedIn[$1.id ?? -1] ?? 0)) }
         }
-        return ReviewPresentation.applyAllMessage(others: others, playlistEntries: entries, mode: model?.effectiveMode ?? .hidden)
+        let text = ReviewPresentation.applyAllMessage(others: others, playlistEntries: entries, mode: model?.effectiveMode ?? .hidden)
+        return skipped > 0 ? text + " " + ReviewPresentation.groupsSkippedNoFile(skipped) + "." : text
     }
 
     private func applyRecommendedToAll() {
         guard let model else { return }
-        let plans = model.visibleDuplicates.map { model.plan(keepRecommendedIn: $0) }
+        let plans = model.visibleDuplicates.filter { !ReviewModel.recommendedHasNoFile($0) }.map { model.plan(keepRecommendedIn: $0) }
         decide(plans, "Keep Recommended Versions")
     }
 }

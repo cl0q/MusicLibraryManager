@@ -14,6 +14,8 @@ struct ReviewGroupList: View {
     let decide: ReviewDecide
     let search: ToolbarSearchModel?
 
+    @Environment(\.container) private var container
+
     private static let whyWidth: CGFloat = 230
     private static let recommendationWidth: CGFloat = 290
     private static let actionWidth: CGFloat = 150
@@ -49,8 +51,23 @@ struct ReviewGroupList: View {
                 primary(group)
                 return .handled
             }
+            // Space on a group previews the picked version (never Play/Pause, THOUGHTS §10).
+            .onKeyPress(.space) {
+                guard let group = selectedGroup, group.kind == .duplicate else { return .ignored }
+                previewPick(of: group)
+                return .handled
+            }
             .accessibilityIdentifier("review_groups")
         }
+    }
+
+    /// The same preview the track table uses, for the version picked in the group.
+    private func previewPick(of group: ReviewGroupItem) {
+        let pickID = model.pick(for: group)
+        guard let track = group.members.first(where: { $0.id == pickID }),
+              let row = TrackRowBuilder.build([track]).first else { return }
+        container.playbackViewModel?.preview.toggle(
+            owner: "review.group.\(group.key)", candidate: PreviewCandidate.make(rows: [row], live: .idle))
     }
 
     private var selectedGroup: ReviewGroupItem? {

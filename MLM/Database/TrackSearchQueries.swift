@@ -172,7 +172,7 @@ struct TrackSearchQueries: Sendable {
             let column = kind == .artist ? "artist" : kind == .album ? "album" : "genre"
             let trimmed = partial.trimmingCharacters(in: .whitespaces)
             var arguments = StatementArguments()
-            var filter = "TRIM(COALESCE(\(column), '')) != ''"
+            var filter = "\(TrackVisibility.listedSQL) AND TRIM(COALESCE(\(column), '')) != ''"
             if !trimmed.isEmpty {
                 filter += " AND \(column) LIKE ?"
                 arguments += ["%\(trimmed)%"]
@@ -218,7 +218,7 @@ struct TrackSearchQueries: Sendable {
         var arguments = StatementArguments()
         for word in SearchAvailabilityWord.allCases {
             let (sql, args) = TrackSearchSQL.predicate(for: SearchFilter(tokens: [.availability(word)]))
-            columns.append("COALESCE(SUM(CASE WHEN \(sql) THEN 1 ELSE 0 END), 0)")
+            columns.append("COALESCE(SUM(CASE WHEN (\(sql)) AND \(TrackVisibility.listedSQL) THEN 1 ELSE 0 END), 0)")
             arguments += args
         }
         let sql = "SELECT \(columns.joined(separator: ", ")) FROM tracks"

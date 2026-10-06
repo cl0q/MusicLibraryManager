@@ -24,7 +24,7 @@ struct ReviewDecisionsMigrationTests {
         }
         #expect(decisions == ["id", "group_key", "kind", "decision", "kept_track_id", "unkept_mode",
                               "consequences_json", "decided_at"])
-        #expect(pairs == ["track_a", "track_b", "decision_id"])
+        #expect(pairs == ["track_a", "track_b", "decision_id", "kind"], "kind added by v54")
         #expect(indexes.contains("idx_review_decided_pairs_decision"))
         let fk = try queue.read { db in try Bool.fetchOne(db, sql: "PRAGMA foreign_keys") }
         #expect(fk == false, "foreign keys stay disabled")
@@ -33,6 +33,7 @@ struct ReviewDecisionsMigrationTests {
     @Test func registeredOnceAfterTheLatestExistingMigration() throws {
         let migrations = DatabaseManager.buildMigrator().migrations
         #expect(migrations.filter { $0 == Self.v48 }.count == 1)
+        #expect(migrations.contains(Self.v48))
         let previousIndex = try #require(migrations.firstIndex(of: Self.previous))
         let index = try #require(migrations.firstIndex(of: Self.v48))
         #expect(previousIndex < index)

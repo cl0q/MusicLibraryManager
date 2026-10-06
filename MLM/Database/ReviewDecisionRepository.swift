@@ -97,6 +97,31 @@ struct ReviewDecisionConsequences: Codable, Equatable, Sendable {
     var hiddenCount = 0
     /// Files that couldn't be moved to the Trash.
     var trashFailures = 0
+    /// Versions whose file was left alone (shared with another track, outside the library, a link).
+    var trashSkipped = 0
+    /// Versions whose file was already gone.
+    var trashNotFound = 0
+    /// Versions without a file.
+    var trashNoFile = 0
+
+    init() {}
+
+    /// Every key is optional, so decisions stored by earlier builds still decode.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        flags = try c.decodeIfPresent([Flag].self, forKey: .flags) ?? []
+        playlistRows = try c.decodeIfPresent([PlaylistRow].self, forKey: .playlistRows) ?? []
+        syncRows = try c.decodeIfPresent([SyncRow].self, forKey: .syncRows) ?? []
+        trashed = try c.decodeIfPresent([Trashed].self, forKey: .trashed) ?? []
+        tags = try c.decodeIfPresent([TagChange].self, forKey: .tags) ?? []
+        changedFields = try c.decodeIfPresent([String].self, forKey: .changedFields) ?? []
+        keptFormat = try c.decodeIfPresent(String.self, forKey: .keptFormat)
+        hiddenCount = try c.decodeIfPresent(Int.self, forKey: .hiddenCount) ?? 0
+        trashFailures = try c.decodeIfPresent(Int.self, forKey: .trashFailures) ?? 0
+        trashSkipped = try c.decodeIfPresent(Int.self, forKey: .trashSkipped) ?? 0
+        trashNotFound = try c.decodeIfPresent(Int.self, forKey: .trashNotFound) ?? 0
+        trashNoFile = try c.decodeIfPresent(Int.self, forKey: .trashNoFile) ?? 0
+    }
 
     var repointedPlaylistEntries: Int { playlistRows.count }
     var repointedSyncRows: Int { syncRows.count }
@@ -117,6 +142,8 @@ struct ReviewDecisionRequest: Sendable {
 
 struct ReviewDecisionOutcome: Equatable, Sendable {
     var decisionID: Int64
+    var groupKey = ""
+    var keptTrackID: Int64? = nil
     var unkeptTrackIDs: [Int64]
     var keptFormat: String?
     var consequences: ReviewDecisionConsequences
@@ -141,9 +168,18 @@ enum ReviewDecisionError: LocalizedError, Equatable {
     case nothingPending
     case invalidKeep
     case noDecision
+    /// The version to keep has no local file while another version has one.
+    case keptVersionHasNoFile(title: String)
+    /// `consequences_json` can't be read: Undo and Restore refuse and keep the row.
+    case unreadableRecord
+    /// A newer live decision covers one of this decision's versions.
+    case newerDecisionCovers
 
     var errorDescription: String? {
         switch self {
+        case .unreadableRecord: "Can’t undo — the decision record is unreadable"
+        case .newerDecisionCovers: "Can’t restore — a newer decision covers these versions"
+        case .keptVersionHasNoFile(let title): ReviewPresentation.cantKeepFileMissing(title: title)
         case .nothingPending: "This group has already been decided."
         case .invalidKeep: "Choose one version to keep before deciding this group."
         case .noDecision: "Earlier decision cannot be restored"
@@ -166,20 +202,25 @@ final class ReviewDecisionRepository: Sendable {
 
     // MARK: Reading
 
-    /// Every decided pair.
-    func decidedPairs() async throws -> Set<ReviewPair> {
-        try await database.read { db in try Self.decidedPairs(db) }
+    /// Every decided pair — of one kind, or (`nil`) of any kind.
+    func decidedPairs(kind: ReviewDecisionKind? = nil) async throws -> Set<ReviewPair> {
+        try await database.read { db in try Self.decidedPairs(db, kind: kind) }
     }
 
-    static func decidedPairs(_ db: Database) throws -> Set<ReviewPair> {
+    static func decidedPairs(_ db: Database, kind: ReviewDecisionKind? = nil) throws -> Set<ReviewPair> {
         guard try db.tableExists("review_decided_pairs") else { return [] }
-        let rows = try Row.fetchAll(db, sql: "SELECT track_a, track_b FROM review_decided_pairs")
+        let rows: [Row]
+        if let kind {
+            rows = try Row.fetchAll(db, sql: "SELECT track_a, track_b FROM review_decided_pairs WHERE kind = ?", arguments: [kind.rawValue])
+        } else {
+            rows = try Row.fetchAll(db, sql: "SELECT track_a, track_b FROM review_decided_pairs")
+        }
         return Set(rows.map { ReviewPair($0["track_a"] as Int64, $0["track_b"] as Int64) })
     }
 
-    /// Every pair of the group is covered by a decision.
-    func isDecided(group memberIDs: [Int64]) async throws -> Bool {
-        let decided = try await decidedPairs()
+    /// Every pair of the group is covered by a decision of `kind`.
+    func isDecided(group memberIDs: [Int64], kind: ReviewDecisionKind? = nil) async throws -> Bool {
+        let decided = try await decidedPairs(kind: kind)
         return !ReviewPair.hasUndecidedPair(memberIDs, decided: decided)
     }
 
@@ -201,12 +242,17 @@ final class ReviewDecisionRepository: Sendable {
         }
     }
 
-    private static func record(_ row: Row) -> ReviewDecisionRecord? {
+    /// `strict`: a record whose consequences can't be decoded is `nil` (Undo refuses) instead of
+    /// an empty one (listings).
+    private static func record(_ row: Row) -> ReviewDecisionRecord? { record(row, strict: false) }
+
+    private static func record(_ row: Row, strict: Bool) -> ReviewDecisionRecord? {
         guard let kind = ReviewDecisionKind(rawValue: row["kind"]),
               let action = ReviewDecisionAction(rawValue: row["decision"]) else { return nil }
         let json: String = row["consequences_json"]
-        let consequences = (try? JSONDecoder().decode(ReviewDecisionConsequences.self, from: Data(json.utf8)))
-            ?? ReviewDecisionConsequences()
+        let decoded = try? JSONDecoder().decode(ReviewDecisionConsequences.self, from: Data(json.utf8))
+        if strict, decoded == nil { return nil }
+        let consequences = decoded ?? ReviewDecisionConsequences()
         return ReviewDecisionRecord(
             id: row["id"], groupKey: row["group_key"], kind: kind, action: action,
             keptTrackID: row["kept_track_id"],
@@ -242,12 +288,38 @@ final class ReviewDecisionRepository: Sendable {
     @discardableResult
     func decide(_ request: ReviewDecisionRequest, now: Date = Date()) async throws -> ReviewDecisionOutcome {
         let stamp = ISO8601DateFormatter().string(from: now)
+        return try await database.write { db in try Self.decide(in: db, request, stamp: stamp) }
+    }
+
+    /// Decide several groups in **one** transaction: any error (a refusal, a database error)
+    /// commits nothing. A group that isn't pending any more (decided elsewhere) is skipped.
+    func decideAll(_ requests: [ReviewDecisionRequest], now: Date = Date()) async throws -> [ReviewDecisionOutcome] {
+        let stamp = ISO8601DateFormatter().string(from: now)
         return try await database.write { db in
+            var outcomes: [ReviewDecisionOutcome] = []
+            for request in requests {
+                do {
+                    outcomes.append(try Self.decide(in: db, request, stamp: stamp))
+                } catch ReviewDecisionError.nothingPending {
+                    continue
+                }
+            }
+            return outcomes
+        }
+    }
+
+    private static func decide(in db: Database, _ request: ReviewDecisionRequest, stamp: String) throws -> ReviewDecisionOutcome {
+        do {
             guard try Self.pendingRowCount(db, groupKey: request.groupKey) > 0 else { throw ReviewDecisionError.nothingPending }
             let members = Array(Set(request.memberIDs)).sorted()
             let keeps = request.action == .keepRecommended || request.action == .keepSelected
             if keeps {
                 guard let kept = request.keptTrackID, members.contains(kept) else { throw ReviewDecisionError.invalidKeep }
+            }
+            let byIDEarly = try Self.tracksByID(db, ids: members)
+            if keeps, let kept = request.keptTrackID {
+                guard byIDEarly[kept] != nil else { throw ReviewDecisionError.invalidKeep }
+                if let refusal = Self.keepRefusal(kept: kept, in: byIDEarly) { throw refusal }
             }
             var consequences = ReviewDecisionConsequences()
             consequences.tags = request.tags
@@ -265,17 +337,17 @@ final class ReviewDecisionRepository: Sendable {
                 consequences.keptFormat = byID[kept]?.format
                 for id in members where byID[id] != nil {
                     if id == kept {
-                        try db.execute(sql: "UPDATE tracks SET is_duplicate = 0, variant_of = NULL WHERE id = ?", arguments: [id])
+                        try db.execute(sql: "UPDATE tracks SET is_duplicate = 0, hidden_by_review = 0, variant_of = NULL WHERE id = ?", arguments: [id])
                     } else {
                         unkept.append(id)
-                        try db.execute(sql: "UPDATE tracks SET is_duplicate = 1, variant_of = ? WHERE id = ?", arguments: [kept, id])
+                        try db.execute(sql: "UPDATE tracks SET is_duplicate = 1, hidden_by_review = 1, variant_of = ? WHERE id = ?", arguments: [kept, id])
                     }
                 }
                 consequences.hiddenCount = unkept.count
                 try Self.repoint(db, unkept: unkept, to: kept, into: &consequences)
             } else {
                 for id in members where byID[id] != nil {
-                    try db.execute(sql: "UPDATE tracks SET is_duplicate = 0, variant_of = NULL WHERE id = ?", arguments: [id])
+                    try db.execute(sql: "UPDATE tracks SET is_duplicate = 0, hidden_by_review = 0, variant_of = NULL WHERE id = ?", arguments: [id])
                 }
             }
 
@@ -287,13 +359,35 @@ final class ReviewDecisionRepository: Sendable {
                                  keeps ? request.keptTrackID : nil, keeps ? request.unkeptMode?.rawValue : nil, json, stamp])
             let decisionID = db.lastInsertedRowID
             for pair in ReviewPair.pairs(of: members) {
+                // Per kind; an older decision's pair keeps its owner (undoing this one never
+                // removes it).
                 try db.execute(sql: """
-                    INSERT OR REPLACE INTO review_decided_pairs (track_a, track_b, decision_id) VALUES (?, ?, ?)
-                    """, arguments: [pair.a, pair.b, decisionID])
+                    INSERT OR IGNORE INTO review_decided_pairs (track_a, track_b, decision_id, kind) VALUES (?, ?, ?, ?)
+                    """, arguments: [pair.a, pair.b, decisionID, request.kind.rawValue])
             }
             try Self.setQueueStatus(db, groupKey: request.groupKey, from: "pending", to: "resolved")
-            return ReviewDecisionOutcome(decisionID: decisionID, unkeptTrackIDs: unkept,
+            return ReviewDecisionOutcome(decisionID: decisionID, groupKey: request.groupKey, keptTrackID: keeps ? request.keptTrackID : nil, unkeptTrackIDs: unkept,
                                          keptFormat: consequences.keptFormat, consequences: consequences)
+        }
+    }
+
+    private static func tracksByID(_ db: Database, ids: [Int64]) throws -> [Int64: Track] {
+        let found = try Track.filter(ids.contains(Track.Columns.id)).fetchAll(db)
+        return Dictionary(uniqueKeysWithValues: found.compactMap { track in track.id.map { ($0, track) } })
+    }
+
+    /// Keeping a version without a local file over one that has a file is refused.
+    static func keepRefusal(kept: Int64, in tracks: [Int64: Track]) -> ReviewDecisionError? {
+        guard let keptTrack = tracks[kept], !DuplicateReviewRecommendation.hasRealFile(keptTrack) else { return nil }
+        let othersHaveFile = tracks.contains { $0.key != kept && DuplicateReviewRecommendation.hasRealFile($0.value) }
+        return othersHaveFile ? .keptVersionHasNoFile(title: keptTrack.title) : nil
+    }
+
+    /// Would `decide` refuse this request now (kept version without a file)?
+    func refusal(for request: ReviewDecisionRequest) async throws -> ReviewDecisionError? {
+        guard request.action == .keepRecommended || request.action == .keepSelected, let kept = request.keptTrackID else { return nil }
+        return try await database.read { db in
+            Self.keepRefusal(kept: kept, in: try Self.tracksByID(db, ids: request.memberIDs))
         }
     }
 
@@ -336,18 +430,48 @@ final class ReviewDecisionRepository: Sendable {
         }
     }
 
-    /// Record the files that went to the Trash (after the commit) and how many didn't.
-    func recordTrashed(decisionID: Int64, trashed: [ReviewDecisionConsequences.Trashed], failures: Int) async throws {
+    /// Record one file that went to the Trash — called right after each move, so the Trash URL
+    /// survives a crash before the batch ends.
+    func recordTrashed(decisionID: Int64, item: ReviewDecisionConsequences.Trashed) async throws {
+        try await edit(decisionID: decisionID) { $0.trashed.removeAll { $0.trackId == item.trackId }; $0.trashed.append(item) }
+    }
+
+    /// Record the exact previous values a merge's tag edit returned (after it ran).
+    func recordTags(decisionID: Int64, tags: [ReviewDecisionConsequences.TagChange]) async throws {
+        try await edit(decisionID: decisionID) { $0.tags = tags }
+    }
+
+    /// Record the counts of what didn't move (after the batch).
+    func recordTrashCounts(decisionID: Int64, failures: Int, skipped: Int, notFound: Int, noFile: Int) async throws {
+        try await edit(decisionID: decisionID) {
+            $0.trashFailures = failures
+            $0.trashSkipped = skipped
+            $0.trashNotFound = notFound
+            $0.trashNoFile = noFile
+        }
+    }
+
+    private func edit(decisionID: Int64, _ change: @escaping @Sendable (inout ReviewDecisionConsequences) -> Void) async throws {
         try await database.write { db in
             guard let row = try Row.fetchOne(db, sql: "SELECT consequences_json FROM review_decisions WHERE id = ?",
                                              arguments: [decisionID]) else { return }
             let json: String = row["consequences_json"]
             var consequences = (try? JSONDecoder().decode(ReviewDecisionConsequences.self, from: Data(json.utf8)))
                 ?? ReviewDecisionConsequences()
-            consequences.trashed = trashed
-            consequences.trashFailures = failures
+            change(&consequences)
             try db.execute(sql: "UPDATE review_decisions SET consequences_json = ? WHERE id = ?",
                            arguments: [String(decoding: try JSONEncoder().encode(consequences), as: UTF8.self), decisionID])
+        }
+    }
+
+    /// The listed tracks (not hidden by Review) whose `organized_path` is one of `spellings`.
+    func listedTracks(organizedPaths spellings: Set<String>) async throws -> [Track] {
+        guard !spellings.isEmpty else { return [] }
+        return try await database.read { db in
+            let marks = spellings.map { _ in "?" }.joined(separator: ", ")
+            return try Track.fetchAll(db, sql: """
+                SELECT * FROM tracks WHERE hidden_by_review IS NOT 1 AND organized_path IN (\(marks))
+                """, arguments: StatementArguments(Array(spellings)))
         }
     }
 
@@ -357,40 +481,73 @@ final class ReviewDecisionRepository: Sendable {
     /// the decided pairs and the decision row gone. Returns what it was, so the caller can
     /// move files back from the Trash and put tag values back.
     @discardableResult
-    func undo(decisionID: Int64) async throws -> ReviewDecisionRecord {
+    func undo(decisionID: Int64, refusingWhenNewerDecisionCovers: Bool = false) async throws -> ReviewDecisionRecord {
         try await database.write { db in
-            guard let record = try Row.fetchOne(db, sql: "SELECT * FROM review_decisions WHERE id = ?", arguments: [decisionID])
-                .flatMap(Self.record) else { throw ReviewDecisionError.noDecision }
+            guard let row = try Row.fetchOne(db, sql: "SELECT * FROM review_decisions WHERE id = ?", arguments: [decisionID])
+            else { throw ReviewDecisionError.noDecision }
+            guard let record = Self.record(row, strict: true) else { throw ReviewDecisionError.unreadableRecord }
             let c = record.consequences
+            if refusingWhenNewerDecisionCovers {
+                // Restore (out of order): refuse when a newer live decision covers one of the versions.
+                let mine = Set(c.flags.map(\.trackId))
+                let newer = try Row.fetchAll(db, sql: "SELECT * FROM review_decisions WHERE id > ?", arguments: [decisionID])
+                for other in newer {
+                    guard let later = Self.record(other) else { continue }
+                    if !mine.isDisjoint(with: later.consequences.flags.map(\.trackId)) { throw ReviewDecisionError.newerDecisionCovers }
+                }
+            }
             for flag in c.flags {
-                try db.execute(sql: "UPDATE tracks SET is_duplicate = ?, variant_of = ? WHERE id = ?",
+                try db.execute(sql: "UPDATE tracks SET is_duplicate = ?, hidden_by_review = 0, variant_of = ? WHERE id = ?",
                                arguments: [flag.isDuplicate, flag.variantOf, flag.trackId])
             }
             let kept = record.keptTrackID
+            func exists(_ table: String, _ column: String, _ id: Int64) throws -> Bool {
+                try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM \(table) WHERE \(column) = ?)", arguments: [id]) ?? false
+            }
             for row in c.playlistRows.reversed() {
+                // The version the row belonged to may have been deleted since.
+                guard try exists("tracks", "id", row.trackId) else { continue }
                 switch row.change {
                 case .repointed:
                     guard let kept else { continue }
-                    try db.execute(sql: "UPDATE playlist_tracks SET track_id = ? WHERE id = ? AND playlist_id = ? AND track_id = ?",
-                                   arguments: [row.trackId, row.id, row.playlistId, kept])
-                case .deleted:
-                    let taken = try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM playlist_tracks WHERE id = ?)", arguments: [row.id]) ?? false
                     let present = try Bool.fetchOne(db, sql: """
                         SELECT EXISTS(SELECT 1 FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?)
                         """, arguments: [row.playlistId, row.trackId]) ?? false
-                    let playlistExists = try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM playlists WHERE id = ?)", arguments: [row.playlistId]) ?? false
-                    guard playlistExists, !present else { continue }
+                    if present {
+                        // The user added the old version again meanwhile: drop the re-pointed row.
+                        try db.execute(sql: "DELETE FROM playlist_tracks WHERE id = ? AND playlist_id = ? AND track_id = ?",
+                                       arguments: [row.id, row.playlistId, kept])
+                    } else {
+                        try db.execute(sql: "UPDATE playlist_tracks SET track_id = ? WHERE id = ? AND playlist_id = ? AND track_id = ?",
+                                       arguments: [row.trackId, row.id, row.playlistId, kept])
+                    }
+                case .deleted:
+                    let taken = try exists("playlist_tracks", "id", row.id)
+                    let present = try Bool.fetchOne(db, sql: """
+                        SELECT EXISTS(SELECT 1 FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?)
+                        """, arguments: [row.playlistId, row.trackId]) ?? false
+                    guard try exists("playlists", "id", row.playlistId), !present else { continue }
                     try db.execute(sql: "INSERT INTO playlist_tracks (id, playlist_id, track_id, position, added_at) VALUES (?, ?, ?, ?, ?)",
                                    arguments: [taken ? nil : row.id, row.playlistId, row.trackId, row.position, row.addedAt])
                 }
             }
             for row in c.syncRows.reversed() {
+                guard try exists("tracks", "id", row.trackId) else { continue }
                 switch row.change {
                 case .repointed:
                     guard let kept else { continue }
-                    try db.execute(sql: "UPDATE sync_profile_tracks SET track_id = ? WHERE profile_id = ? AND track_id = ?",
-                                   arguments: [row.trackId, row.profileId, kept])
+                    let present = try Bool.fetchOne(db, sql: """
+                        SELECT EXISTS(SELECT 1 FROM sync_profile_tracks WHERE profile_id = ? AND track_id = ?)
+                        """, arguments: [row.profileId, row.trackId]) ?? false
+                    if present {
+                        try db.execute(sql: "DELETE FROM sync_profile_tracks WHERE profile_id = ? AND track_id = ?",
+                                       arguments: [row.profileId, kept])
+                    } else {
+                        try db.execute(sql: "UPDATE sync_profile_tracks SET track_id = ? WHERE profile_id = ? AND track_id = ?",
+                                       arguments: [row.trackId, row.profileId, kept])
+                    }
                 case .deleted:
+                    guard try exists("sync_profiles", "id", row.profileId) else { continue }
                     try db.execute(sql: "INSERT OR IGNORE INTO sync_profile_tracks (profile_id, track_id) VALUES (?, ?)",
                                    arguments: [row.profileId, row.trackId])
                 }

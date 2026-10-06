@@ -526,6 +526,12 @@ enum DuplicateReviewRecommendation {
     }
 
     private static func isPreferred(_ lhs: Track, _ rhs: Track) -> Bool {
+        // A version with a real file comes first: a lossless version whose file is missing (or
+        // never downloaded) is not a version to keep over one that plays.
+        let lhsFile = hasRealFile(lhs)
+        let rhsFile = hasRealFile(rhs)
+        if lhsFile != rhsFile { return lhsFile }
+
         let lhsLossless = isLossless(lhs)
         let rhsLossless = isLossless(rhs)
         if lhsLossless != rhsLossless { return lhsLossless }
@@ -537,10 +543,6 @@ enum DuplicateReviewRecommendation {
         let lhsCompleteness = metadataCompleteness(lhs)
         let rhsCompleteness = metadataCompleteness(rhs)
         if lhsCompleteness != rhsCompleteness { return lhsCompleteness > rhsCompleteness }
-
-        let lhsLocal = lhs.organizedPath?.isEmpty == false
-        let rhsLocal = rhs.organizedPath?.isEmpty == false
-        if lhsLocal != rhsLocal { return lhsLocal }
 
         return (lhs.id ?? Int64.max) < (rhs.id ?? Int64.max)
     }
@@ -560,12 +562,14 @@ enum DuplicateReviewRecommendation {
            tracks.contains(where: { metadataCompleteness($0) < metadataCompleteness(track) }) {
             reasons.append("more complete metadata")
         }
-        if track.organizedPath?.isEmpty == false,
-           tracks.contains(where: { $0.organizedPath?.isEmpty != false }) {
+        if hasRealFile(track), tracks.contains(where: { !hasRealFile($0) }) {
             reasons.append("local library copy")
         }
         return reasons
     }
+
+    /// Downloaded and not known to be missing (`availability() == .local`).
+    static func hasRealFile(_ track: Track) -> Bool { track.availability() == .local }
 
     private static func isLossless(_ track: Track) -> Bool {
         ["flac", "alac", "wav", "aiff", "aif"].contains(track.format.lowercased())

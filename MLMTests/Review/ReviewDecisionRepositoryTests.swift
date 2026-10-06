@@ -192,11 +192,22 @@ struct ReviewDecisionRepositoryTests {
         let f = try Self.makeFixture(members: 2)
         let outcome = try await f.decisions.decide(Self.request(f, mode: .trash))
         let trashed = ReviewDecisionConsequences.Trashed(trackId: f.ids[1], from: "/lib/a.mp3", trashURL: "/Trash/a.mp3")
-        try await f.decisions.recordTrashed(decisionID: outcome.decisionID, trashed: [trashed], failures: 1)
+        try await f.decisions.recordTrashed(decisionID: outcome.decisionID, item: trashed)
+        try await f.decisions.recordTrashCounts(decisionID: outcome.decisionID, failures: 1, skipped: 2, notFound: 3, noFile: 4)
         let record = try #require(try await f.decisions.decision(id: outcome.decisionID))
         #expect(record.unkeptMode == .trash)
         #expect(record.consequences.trashed == [trashed])
         #expect(record.consequences.trashFailures == 1)
+        #expect(record.consequences.trashSkipped == 2)
+        #expect(record.consequences.trashNotFound == 3)
+        #expect(record.consequences.trashNoFile == 4)
+    }
+
+    @Test func decisionsStoredBeforeTheTrashCountersStillDecode() throws {
+        let old = #"{"flags":[],"playlistRows":[],"syncRows":[],"trashed":[],"tags":[],"changedFields":[],"hiddenCount":2,"trashFailures":0}"#
+        let decoded = try JSONDecoder().decode(ReviewDecisionConsequences.self, from: Data(old.utf8))
+        #expect(decoded.hiddenCount == 2)
+        #expect(decoded.trashSkipped == 0)
     }
 
     // MARK: Rescan (PP-SOURCES-01)

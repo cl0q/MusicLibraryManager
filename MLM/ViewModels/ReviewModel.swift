@@ -30,9 +30,11 @@ struct ReviewResolvedRow: Identifiable, Equatable {
     /// Restore needs the decision's recorded consequences; earlier decisions have none.
     let decisionID: Int64?
     let memberIDs: [Int64]
+    /// A pre-v48 decision that kept a `resolutionSnapshot` (`AnalysisRepository.undoReviewResolution`).
+    var hasLegacySnapshot = false
 
     var id: String { key }
-    var canRestore: Bool { decisionID != nil }
+    var canRestore: Bool { decisionID != nil || hasLegacySnapshot }
     var groupName: String { "“\(title)”" }
 }
 
@@ -269,8 +271,11 @@ final class ReviewModel {
 
     static func item(for group: ReviewGroup, members: [Track], usage: [Int64: Int]) -> ReviewGroupItem? {
         let recommendation = group.details?.recommendation
-        let best = DuplicateReviewRecommendation.recommendedTrack(in: members)
-        let recommendedTrack = recommendation?.trackId.flatMap { id in members.first { $0.id == id } } ?? best
+        // Recomputed from the current rows: availability may have changed since the scan.
+        let recommendedTrack = DuplicateReviewRecommendation.recommendedTrack(in: members)
+        let reasons = recommendation?.action == .keepBoth
+            ? (recommendation?.reasons ?? [])
+            : (DuplicateReviewRecommendation.recommendation(for: members, keepBoth: false)?.reasons ?? [])
         guard let recommendedID = recommendedTrack?.id ?? members.first?.id else { return nil }
         let others = members.filter { $0.id != recommendedID }
         let similarity = group.details?.evidence?.fingerprintSimilarity ?? group.details?.similarityScore
@@ -280,7 +285,7 @@ final class ReviewModel {
             members: members,
             recommendedID: recommendedID,
             recommendsKeepAll: recommendation?.action == .keepBoth,
-            why: ReviewPresentation.why(reasons: recommendation?.reasons ?? [], recommended: recommendedTrack, others: others),
+            why: ReviewPresentation.why(reasons: reasons, recommended: recommendedTrack, others: others),
             matchPercent: similarity.map { Int(($0 * 100).rounded()) },
             usedIn: usage)
     }
@@ -296,7 +301,8 @@ final class ReviewModel {
             date: decision.flatMap { Self.parse($0.decidedAt) } ?? item.resolvedAt.flatMap(Self.parse),
             outcome: ReviewPresentation.outcome(decision),
             decisionID: decision?.id,
-            memberIDs: group.memberTrackIDs)
+            memberIDs: group.memberTrackIDs,
+            hasLegacySnapshot: decision == nil && group.items.contains { $0.reviewDetails?.resolutionSnapshot != nil })
     }
 
     /// `2026-10-03T17:02:00Z` or SQLite's `2026-10-03 17:02:00` (UTC).
@@ -340,7 +346,6 @@ final class ReviewModel {
     /// `Apply Merge`: every differing field gets the chosen value on every version.
     func plan(mergeIn group: ReviewGroupItem) -> ReviewGroupPlan {
         var applications: [ReviewGroupPlan.TagApplication] = []
-        var oldValues: [ReviewDecisionConsequences.TagChange] = []
         var changed: [String] = []
         for (field, text) in mergedValues(group) {
             let value = field.value(from: text)
@@ -348,17 +353,20 @@ final class ReviewModel {
             guard !needing.isEmpty else { continue }
             changed.append(field.label)
             applications.append(.init(field: field.tagField, value: value, trackIDs: needing.compactMap(\.id)))
-            for track in needing {
-                guard let id = track.id else { continue }
-                oldValues.append(.init(trackId: id, field: field.tagField.rawValue, old: TrackTagValue.stored(field.tagField, of: track)))
-            }
         }
         var request = ReviewDecisionRequest(groupKey: group.key, kind: .conflict, action: .merge,
                                             memberIDs: group.memberIDs)
-        request.tags = oldValues
         request.changedFields = changed
         return ReviewGroupPlan(request: request, tagApplications: applications, title: group.title,
                                versionCount: group.members.count)
+    }
+
+    /// The recommended version has no file while another version has one: `Apply Recommended to
+    /// All…` skips the group (deciding it is refused).
+    static func recommendedHasNoFile(_ group: ReviewGroupItem) -> Bool {
+        guard !group.recommendsKeepAll, let recommended = group.recommended else { return false }
+        return !DuplicateReviewRecommendation.hasRealFile(recommended)
+            && group.members.contains { $0.id != recommended.id && DuplicateReviewRecommendation.hasRealFile($0) }
     }
 
     /// The mode a decision uses: Trash only while the drive is connected.
@@ -369,17 +377,43 @@ final class ReviewModel {
     struct Applied: Sendable {
         var outcomes: [ReviewDecisionOutcome]
         var trashFailures: Int { outcomes.reduce(0) { $0 + $1.consequences.trashFailures } }
+        var trashed: Int { outcomes.reduce(0) { $0 + $1.consequences.trashed.count } }
+        var trashSkipped: Int { outcomes.reduce(0) { $0 + $1.consequences.trashSkipped } }
+        var trashNotFound: Int { outcomes.reduce(0) { $0 + $1.consequences.trashNotFound } }
+        var trashNoFile: Int { outcomes.reduce(0) { $0 + $1.consequences.trashNoFile } }
         var hidden: Int { outcomes.reduce(0) { $0 + $1.hiddenCount } }
         var playlistEntries: Int { outcomes.reduce(0) { $0 + $1.consequences.repointedPlaylistEntries } }
     }
 
     /// Decide `plans` as one undo step. Returns whether anything was decided.
     @discardableResult
-    func apply(_ plans: [ReviewGroupPlan], actionName: String, undo: UndoCenter?, statusBar: StatusBarCenter? = nil) async -> Bool {
-        guard !plans.isEmpty else { return false }
+    func apply(_ requested: [ReviewGroupPlan], actionName: String, undo: UndoCenter?, statusBar: StatusBarCenter? = nil) async -> Bool {
+        guard !requested.isEmpty else { return false }
+        // Keeping a version without a file over one that has a file is refused (never decided).
+        var allowed: [ReviewGroupPlan] = []
+        var refusals: [ReviewDecisionError] = []
+        for plan in requested {
+            if let refusal = try? await dependencies.decisions.refusal(for: plan.request) {
+                refusals.append(refusal)
+            } else {
+                allowed.append(plan)
+            }
+        }
+        let bar = statusBar ?? undo?.statusBar
+        if allowed.isEmpty {
+            if requested.count == 1, let refusal = refusals.first {
+                bar?.post(refusal.localizedDescription)
+            } else {
+                bar?.post(ReviewPresentation.groupsSkippedNoFile(refusals.count))
+            }
+            return false
+        }
+        let skipped = requested.count > 1 ? refusals.count : 0
+        let plans = allowed
         let mode = plans.first?.request.unkeptMode ?? .hidden
         let message: @MainActor (Applied) -> String = { applied in
-            Self.message(for: plans, applied: applied, mode: mode)
+            let text = Self.message(for: plans, applied: applied, mode: mode)
+            return skipped > 0 ? text + " · " + ReviewPresentation.groupsSkippedNoFile(skipped) : text
         }
         guard let undo else {
             let applied = Applied(outcomes: (try? await execute(plans)) ?? [])
@@ -390,7 +424,7 @@ final class ReviewModel {
         let done: Applied?
         do {
             done = try await undo.perform(
-                actionName, failure: "Couldn’t save the decision",
+                actionName, failure: requested.count > 1 ? nil : "Couldn’t save the decision",
                 do: { [self] in
                     let outcomes = try await execute(plans)
                     return outcomes.isEmpty ? nil : Applied(outcomes: outcomes)
@@ -399,6 +433,7 @@ final class ReviewModel {
                 redo: { [self] _ in Applied(outcomes: try await execute(plans)) },
                 message: message)
         } catch {
+            if requested.count > 1 { bar?.post(ReviewPresentation.bulkFailed) }
             await reload()
             return false
         }
@@ -415,14 +450,15 @@ final class ReviewModel {
     static func message(for plans: [ReviewGroupPlan], applied: Applied, mode: UnkeptMode) -> String {
         if plans.count > 1 {
             return ReviewPresentation.bulkMessage(groups: applied.outcomes.count, hidden: applied.hidden, mode: mode,
-                                                  playlistEntries: applied.playlistEntries, trashFailures: applied.trashFailures)
+                                                  playlistEntries: applied.playlistEntries, trashFailures: applied.trashFailures,
+                                                  trashed: applied.trashed, skipped: applied.trashSkipped,
+                                                  notFound: applied.trashNotFound, noFile: applied.trashNoFile)
         }
         guard let plan = plans.first, let outcome = applied.outcomes.first else { return "" }
         switch plan.request.action {
         case .keepRecommended, .keepSelected:
             return ReviewPresentation.keptMessage(
-                format: outcome.keptFormat, title: plan.title, hidden: outcome.hiddenCount, mode: mode,
-                playlistEntries: outcome.consequences.repointedPlaylistEntries, trashFailures: outcome.consequences.trashFailures)
+                format: outcome.keptFormat, title: plan.title, consequences: outcome.consequences, mode: mode)
         case .keepAll:
             return ReviewPresentation.keptAllMessage(count: plan.versionCount, title: plan.title)
         case .merge:
@@ -432,18 +468,43 @@ final class ReviewModel {
         }
     }
 
-    /// The writes of a step: tags, then the decision (one transaction), then — after the commit —
-    /// the files.
+    /// The writes of a step: the decision(s) in **one** transaction, then the tag edit of a merge
+    /// (with the exact previous values it returns, recorded into the decision), then — after the
+    /// commit — the files. If the tag edit fails, the decision is taken back.
     private func execute(_ plans: [ReviewGroupPlan]) async throws -> [ReviewDecisionOutcome] {
         var outcomes: [ReviewDecisionOutcome] = []
-        for plan in plans {
-            for application in plan.tagApplications {
-                try await dependencies.tagEdit().perform(application.value, field: application.field, trackIDs: application.trackIDs)
+        if plans.count > 1 {
+            outcomes = try await dependencies.decisions.decideAll(plans.map(\.request))
+        } else {
+            for plan in plans {
+                do {
+                    outcomes.append(try await dependencies.decisions.decide(plan.request))
+                } catch ReviewDecisionError.nothingPending {
+                    continue  // decided meanwhile (another window, Restore): nothing to do for this group
+                }
             }
+        }
+        let plansByKey = Dictionary(plans.map { ($0.request.groupKey, $0) }, uniquingKeysWith: { first, _ in first })
+        for index in outcomes.indices {
+            guard let plan = plansByKey[outcomes[index].groupKey], !plan.tagApplications.isEmpty else { continue }
+            var changes: [ReviewDecisionConsequences.TagChange] = []
             do {
-                outcomes.append(try await dependencies.decisions.decide(plan.request))
-            } catch ReviewDecisionError.nothingPending {
-                continue  // decided meanwhile (another window, Restore): nothing to do for this group
+                for application in plan.tagApplications {
+                    guard let step = try await dependencies.tagEdit().perform(
+                        application.value, field: application.field, trackIDs: application.trackIDs) else { continue }
+                    changes += step.snapshots.map { .init(trackId: $0.trackID, field: step.field.rawValue, old: $0.value) }
+                }
+                try await dependencies.decisions.recordTags(decisionID: outcomes[index].decisionID, tags: changes)
+                outcomes[index].consequences.tags = changes
+            } catch {
+                try? await restoreTags(changes)
+                for done in outcomes.prefix(through: index).reversed() {
+                    if let record = try? await dependencies.decisions.undo(decisionID: done.decisionID), done.decisionID != outcomes[index].decisionID {
+                        try? await restoreTags(record.consequences.tags)
+                    }
+                }
+                await reload()
+                throw error
             }
         }
         if plans.contains(where: { $0.request.unkeptMode == .trash }) {
@@ -455,22 +516,52 @@ final class ReviewModel {
         return outcomes
     }
 
-    /// Trash mode, after the commit: per file, failures counted (the database stays decided).
+    /// Trash mode, after the commit and off the main actor: per file, each move recorded right
+    /// after it happens; failures, skipped, missing and file-less versions counted separately
+    /// (the database stays decided).
     private func moveToTrash(_ outcomes: [ReviewDecisionOutcome]) async throws -> [ReviewDecisionOutcome] {
         let root = await dependencies.libraryRoot()
-        let ids = outcomes.flatMap(\.unkeptTrackIDs)
-        let tracks = try await dependencies.decisions.tracks(ids: ids)
-        let byID = Dictionary(uniqueKeysWithValues: tracks.compactMap { track in track.id.map { ($0, track) } })
+        let rootURL = root.flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+        let decisions = dependencies.decisions
         var result = outcomes
         for index in result.indices {
-            let targets = result[index].unkeptTrackIDs.map { id in
-                (id: id, url: ReviewConsequences.fileURL(organizedPath: byID[id]?.organizedPath, libraryRoot: root))
+            let outcome = result[index]
+            let ids = outcome.unkeptTrackIDs + (outcome.keptTrackID.map { [$0] } ?? [])
+            let tracks = try await decisions.tracks(ids: ids)
+            let byID = Dictionary(uniqueKeysWithValues: tracks.compactMap { track in track.id.map { ($0, track) } })
+            let candidates = outcome.unkeptTrackIDs.map { id in
+                ReviewConsequences.TrashCandidate(id: id, url: ReviewConsequences.fileURL(organizedPath: byID[id]?.organizedPath, libraryRoot: root))
             }
-            let report = dependencies.consequences.trash(targets)
-            try await dependencies.decisions.recordTrashed(decisionID: result[index].decisionID, trashed: report.trashed,
-                                                           failures: report.failures)
+            let keptURL = outcome.keptTrackID.flatMap { id in
+                ReviewConsequences.fileURL(organizedPath: byID[id]?.organizedPath, libraryRoot: root)
+            }
+            // Other listed tracks that use one of the files (the kept version is one of them).
+            var spellings = Set<String>()
+            for candidate in candidates {
+                guard let url = candidate.url else { continue }
+                spellings.formUnion(ReviewConsequences.pathSpellings(of: url, rawPath: byID[candidate.id]?.organizedPath, libraryRoot: root))
+            }
+            let sharing = try await decisions.listedTracks(organizedPaths: spellings)
+            let others = sharing.compactMap { track in
+                ReviewConsequences.fileURL(organizedPath: track.organizedPath, libraryRoot: root)
+            }
+            let guards = ReviewConsequences.TrashGuards(keptURL: keptURL, libraryRoot: rootURL, otherListed: others)
+            let decisionID = outcome.decisionID
+            let report = await dependencies.consequences.trash(candidates, guards: guards) { item in
+                do { try await decisions.recordTrashed(decisionID: decisionID, item: item) } catch {
+                    AppLogger.shared.error("Review: couldn’t record a Trash move: \(error.localizedDescription)", source: "Review")
+                }
+            }
+            try await decisions.recordTrashCounts(decisionID: decisionID, failures: report.failures, skipped: report.skipped.count,
+                                                  notFound: report.notFound, noFile: report.noFile)
+            for skip in report.skipped {
+                AppLogger.shared.info("Review: the file of version \(skip.id) was left in place — it \(skip.reason.sentence)", source: "Review")
+            }
             result[index].consequences.trashed = report.trashed
             result[index].consequences.trashFailures = report.failures
+            result[index].consequences.trashSkipped = report.skipped.count
+            result[index].consequences.trashNotFound = report.notFound
+            result[index].consequences.trashNoFile = report.noFile
         }
         return result
     }
@@ -517,9 +608,22 @@ final class ReviewModel {
     /// `Restore`: the same inverse as Undo for one group, outside the undo stack.
     @discardableResult
     func restore(_ row: ReviewResolvedRow, statusBar: StatusBarCenter?) async -> Bool {
+        if row.decisionID == nil, row.hasLegacySnapshot {
+            do {
+                try await dependencies.analysis.undoReviewResolution(groupKey: row.key)
+                dependencies.postChange(false, false)
+                statusBar?.post(ReviewPresentation.restoredMessage(title: row.title))
+                await reload()
+                return true
+            } catch {
+                statusBar?.post("Couldn’t restore “\(row.title)”")
+                await reload()
+                return false
+            }
+        }
         guard let decisionID = row.decisionID else { return false }
         do {
-            let record = try await dependencies.decisions.undo(decisionID: decisionID)
+            let record = try await dependencies.decisions.undo(decisionID: decisionID, refusingWhenNewerDecisionCovers: true)
             try await restoreTags(record.consequences.tags)
             let report = dependencies.consequences.putBack(record.consequences.trashed)
             let playlists = !record.consequences.playlistRows.isEmpty || !record.consequences.syncRows.isEmpty
@@ -529,6 +633,10 @@ final class ReviewModel {
                 : ReviewPresentation.restoredMessage(title: row.title))
             await reload()
             return true
+        } catch let error as ReviewDecisionError where error == .newerDecisionCovers || error == .unreadableRecord {
+            statusBar?.post(error == .unreadableRecord ? "Can’t restore — the decision record is unreadable" : error.localizedDescription)
+            await reload()
+            return false
         } catch {
             statusBar?.post("Couldn’t restore “\(row.title)”")
             await reload()

@@ -71,6 +71,8 @@ final class ReviewScanRunner {
     /// Bumped when a scan ends; views reload their groups.
     private(set) var finishedCount = 0
 
+    /// Where `Scan cancelled…` is said (set by the view / the start with confirmation).
+    @ObservationIgnored var statusBar: StatusBarCenter?
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var handle: ActivityOperationHandle?
     @ObservationIgnored private let center: ActivityCenter
@@ -128,6 +130,7 @@ final class ReviewScanRunner {
         handle = job
         task = Task { [weak self] in
             guard await job.waitForTurn() else {
+                self?.statusBar?.post(ReviewPresentation.scanCancelled)
                 self?.ended()
                 return
             }
@@ -139,6 +142,7 @@ final class ReviewScanRunner {
     /// `Run Scan` from the header, ⌘R or Library ▸ Find Duplicates: starts the scan and says so
     /// in the status bar (never navigates, P3).
     func startWithConfirmation(statusBar: StatusBarCenter?) {
+        self.statusBar = statusBar ?? self.statusBar
         guard start() else { return }
         statusBar?.post("Scan started — it continues in the background", actions: [
             StatusAction("Show in Activity") { ActivityRouter.shared.showPopover() },
@@ -163,6 +167,7 @@ final class ReviewScanRunner {
             }
             if Task.isCancelled {
                 job.cancelled()
+                statusBar?.post(ReviewPresentation.scanCancelled)
             } else {
                 let found = ReviewLastScan(date: Date(timeIntervalSince1970: now().timeIntervalSince1970.rounded(.down)), comparisons: result.pairsCompared,
                                            duplicateGroups: result.duplicatesFound, conflicts: result.conflictsFlagged)
@@ -175,6 +180,7 @@ final class ReviewScanRunner {
             }
         } catch is CancellationError {
             job.cancelled()
+            statusBar?.post(ReviewPresentation.scanCancelled)
         } catch {
             AppLogger.shared.error("Duplicate scan failed: \(error.localizedDescription)", source: "Dedup")
             failure = ReviewScanFailure(headline: "The last scan didn’t finish.", details: error.localizedDescription)
