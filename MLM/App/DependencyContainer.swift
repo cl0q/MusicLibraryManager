@@ -145,8 +145,9 @@ final class DependencyContainer {
     ///
     /// Called once per launch by `LibraryLaunchCoordinator` (A0 D4: one library per process;
     /// switching relaunches).
-    func initialize(location: LibraryLocation) async throws {
-        let dbManager = try DatabaseManager(databaseURL: location.databaseURL)
+    /// `progress` feeds the loading screen's phase line (W3-LAUNCH); it changes nothing.
+    func initialize(location: LibraryLocation, progress: LibraryOpenProgress? = nil) async throws {
+        let dbManager = try DatabaseManager(databaseURL: location.databaseURL, progress: progress)
         self.databaseManager = dbManager
 
         let dbPool = dbManager.pool

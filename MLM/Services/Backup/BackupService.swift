@@ -408,7 +408,8 @@ final class BackupService: Sendable {
         coversDirectory: URL? = nil,
         destinationOverride: URL? = nil,
         backupsRoot: URL = defaultBackupsRoot,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        willBackUp: (() -> Void)? = nil
     ) throws -> URL? {
         let migrator = DatabaseManager.buildMigrator()
         let applied = try pool.read { db in
@@ -423,6 +424,8 @@ final class BackupService: Sendable {
         let destination = scope.destination
         let libraryId: String? = scope.libraryId
 
+        // The loading screen's `Backing up before update…` (W3-LAUNCH); reporting only.
+        willBackUp?()
         let info = try writeBundle(
             database: pool,
             databasePath: databasePath,
