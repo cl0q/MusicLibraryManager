@@ -7,9 +7,10 @@ import Foundation
 /// "Refreshed from SoundCloud — 3 new tracks, nothing removed"; B3-PLAN §5 question 5 — open,
 /// add-only implemented). Offered for every linked playlist (was: YouTube URLs and Liked only).
 ///
-/// - Liked playlists use their source's likes sync, which rewrites the playlist in the
-///   source's order and drops tracks; every row it dropped is put back exactly afterwards
-///   (same position, `added_at` and row id), so the net effect is add-only.
+/// - The Liked playlist (SoundCloud only — W3-PL review S3): the likes are synced into the
+///   library and only the liked tracks the playlist doesn't hold yet are **appended**; existing
+///   rows keep their position, `added_at` and row id (review S2 — the likes sync's own
+///   replace-in-place never runs on this path).
 /// - Other linked playlists: the source's list is read, entries not in the library become
 ///   not-downloaded tracks (no source name as album, DEC-013), and the playlist's missing
 ///   tracks are appended in the source's order.
@@ -19,8 +20,9 @@ import Foundation
 struct PlaylistRefreshService {
     /// The remote side, injectable for tests (no network in tests).
     struct Remote {
-        /// The source's likes sync for a Liked playlist (rewrites its track list).
-        var syncLiked: @MainActor (_ source: Source) async throws -> Void
+        /// The liked tracks that have a file, in the source's order, after syncing the likes
+        /// into the library (never touching the playlist).
+        var likedTracks: @MainActor (_ source: Source) async throws -> [Int64]
         /// The tracks of a linked playlist at its source, in the source's order.
         var listTracks: @MainActor (_ playlist: Playlist, _ source: Source) async throws -> [RemotePlaylistTrack]
     }
@@ -46,9 +48,19 @@ struct PlaylistRefreshService {
     let sources: SourceRepository
     let remote: Remote
 
-    /// Whether a playlist can be refreshed at all (`Refresh from ‹Source›` is offered).
-    nonisolated static func canRefresh(_ playlist: Playlist) -> Bool {
-        playlist.sourceId != nil && (playlist.isLiked == 1 || !(playlist.externalId ?? "").isEmpty)
+    /// Whether `Refresh from ‹Source›` can do something for the playlist (W3-PL review S3; a
+    /// context menu never shows a dead item): a source row that exists (`sourceName` = its
+    /// stored name; the device-ingest sentinel `-1` has none) and a provider that can refresh —
+    /// SoundCloud likes, or a linked SoundCloud / YouTube / Spotify playlist.
+    nonisolated static func canRefresh(_ playlist: Playlist, sourceName: String?) -> Bool {
+        guard let sourceID = playlist.sourceId, sourceID > 0, let sourceName else { return false }
+        let identity = PlaylistSourceIdentity(sourceName: sourceName)
+        if playlist.isLiked == 1 { return identity == .soundcloud }
+        guard !(playlist.externalId ?? "").isEmpty else { return false }
+        switch identity {
+        case .soundcloud, .youtube, .spotify: return true
+        case .appleMusic, .other: return false
+        }
     }
 
     /// Refreshes the playlist; returns how many tracks were added to it.
@@ -60,14 +72,14 @@ struct PlaylistRefreshService {
         guard let before = try await playlists.snapshot(id: playlistID) else { throw PlaylistRepositoryError.playlistNotFound }
         let had = Set(before.entries.map(\.trackId))
 
+        guard Self.canRefresh(playlist, sourceName: source.name) else {
+            throw RefreshError.unsupported(source.playlistSourceIdentity.displayName)
+        }
+
         if playlist.isLiked == 1 {
-            try await remote.syncLiked(source)
-            // Add-only: put back every row the sync dropped, exactly.
-            if let after = try await playlists.snapshot(id: playlistID) {
-                let kept = Set(after.entries.map(\.trackId))
-                let dropped = before.entries.filter { !kept.contains($0.trackId) }
-                if !dropped.isEmpty { _ = try await playlists.restoreEntries(dropped) }
-            }
+            // Add-only: append the liked tracks that aren't in it yet; nothing else changes.
+            let liked = try await remote.likedTracks(source)
+            _ = try await playlists.appendTracksReturningEntries(playlistId: playlistID, trackIds: liked)
         } else {
             let remoteTracks = try await remote.listTracks(playlist, source)
             var ids: [Int64] = []
@@ -102,25 +114,16 @@ extension PlaylistRefreshService.Remote {
     @MainActor
     static func live(_ container: DependencyContainer) -> Self {
         Self(
-            syncLiked: { source in
+            likedTracks: { source in
                 guard let tokenStorage = container.tokenStorage, let trackRepo = container.trackRepository,
-                      let sourceRepo = container.sourceRepository else { throw PlaylistRefreshService.RefreshError.sourceMissing }
-                switch source.sourceType {
-                case .soundcloud:
-                    guard let oauth = container.oauthManager else { throw PlaylistRefreshService.RefreshError.sourceMissing }
-                    _ = try await SoundCloudClient(tokenStorage: tokenStorage, oauthManager: oauth, trackRepository: trackRepo,
-                                                   sourceRepository: sourceRepo, playlistRepository: container.playlistRepository)
-                        .syncLikes()
-                case .spotify:
-                    guard let oauth = container.oauthManager else { throw PlaylistRefreshService.RefreshError.sourceMissing }
-                    _ = try await SpotifyClient(tokenStorage: tokenStorage, oauthManager: oauth, trackRepository: trackRepo,
-                                                sourceRepository: sourceRepo).syncLikedSongs()
-                case .appleMusic:
-                    _ = try await AppleMusicClient(tokenStorage: tokenStorage, trackRepository: trackRepo,
-                                                   sourceRepository: sourceRepo).syncLibrary()
-                case .unknown:
+                      let sourceRepo = container.sourceRepository, let oauth = container.oauthManager
+                else { throw PlaylistRefreshService.RefreshError.sourceMissing }
+                guard source.sourceType == .soundcloud else {
                     throw PlaylistRefreshService.RefreshError.unsupported(source.playlistSourceIdentity.displayName)
                 }
+                return try await SoundCloudClient(tokenStorage: tokenStorage, oauthManager: oauth, trackRepository: trackRepo,
+                                                  sourceRepository: sourceRepo, playlistRepository: container.playlistRepository)
+                    .likedPlayableTrackIDs()
             },
             listTracks: { playlist, source in
                 guard let externalID = playlist.externalId else { throw PlaylistRefreshService.RefreshError.notLinked }

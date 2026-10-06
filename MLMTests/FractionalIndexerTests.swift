@@ -8,8 +8,10 @@ import Testing
     }
 
     @Test func testInsertAtEnd() {
+        // W3-PL review B3: appends take the next digit (`b`), not the port's `a0|a0` (three
+        // characters per appended row; Tauri, the reason for byte-identity, is gone).
         let result = FractionalIndexer.positionBetween(left: "a0", right: nil)
-        #expect(result == "a0|a0")
+        #expect(result == "b")
     }
 
     @Test func testInsertAtBeginningBeforeA0() {

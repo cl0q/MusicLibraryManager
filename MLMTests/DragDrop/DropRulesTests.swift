@@ -128,7 +128,7 @@ struct DropRulesTests {
         #expect(DropRules.decide(two, onto: .player, context: open) == .playNextPlaylists([2, 1]))
         // W3-PL: the header / empty area moves playlists to the top level, at the end.
         #expect(DropRules.decide(two, onto: .playlistsSection, context: open)
-                == .movePlaylistItems([.playlist(2), .playlist(1)], folderID: nil, before: nil))
+                == .movePlaylistItemsToTop([.playlist(2), .playlist(1)]))
     }
 
     // MARK: Finder files and folders

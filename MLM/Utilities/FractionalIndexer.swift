@@ -1,37 +1,45 @@
 import Foundation
 
-/// A Swift port of the base-62 fractional indexing logic used in the Rust backend.
-/// This ensures consistent and deterministic position calculation between macOS and Tauri clients.
+/// Fractional positions (string keys in byte order, as SQLite's `BINARY` collation sorts them)
+/// for playlist rows and the sidebar's playlist order. Started as a port of the Rust backend's
+/// base-62 indexer (Tauri is gone since `b2ba103`, so byte-identity with it no longer matters).
 ///
-/// **Root fix (W3-PL):** the ported midpoint is wrong for some pairs — it can return its left
-/// bound (`a0|V`, `a1`), a key below the left bound (`a0|a0`, `a1`) or, before a key that starts
-/// with a digit, one above the right bound (`nil`, `000000000000`). `positionBetween` now checks
-/// the port's answer and, only when it isn't strictly between the bounds, computes one that is
-/// (`strictBetween`). Every answer the port got right stays byte-identical, so existing
-/// positions and the Tauri client keep agreeing.
+/// **The rule (W3-PL review round):**
+/// 1. After the last key (`left`, nil): `strictBetween(left, nil)` — the next digit, one extra
+///    character per ~61 appends (the port's `left|a0` grew three characters per row).
+/// 2. Otherwise the port's midpoint is kept only when it is strictly between the bounds *and*
+///    leaves room on both sides (`strictBetween(left, port)` and `strictBetween(port, right)`
+///    exist) — so no later insert there runs out of keys.
+/// 3. Else `strictBetween(left, right)`, a key strictly between that never ends in `0`.
+/// 4. When no key exists (`right` = `left` + `0…0`, e.g. before `000000000000`) `key(between:and:)`
+///    returns nil: callers renumber the siblings (`evenlySpaced`) and try again — never write an
+///    out-of-order key.
 struct FractionalIndexer {
     static let alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
     static let delimiter: Character = "|"
 
-    /// Generates a fractional index position between left and right positions.
-    ///
-    /// Uses string-based lexicographic ordering for unlimited precision.
-    /// Cases:
-    /// - (nil, nil) -> "a0" (first position)
-    /// - (Some(left), nil) -> append "|a0" to left (insert after)
-    /// - (nil, Some(right)) -> "a0" if right > "a0", else compute midpoint before right
-    /// - (Some(left), Some(right)) -> compute midpoint string between left and right
-    ///
-    /// The result is strictly between the bounds (byte order, as SQLite's `BINARY` collation
-    /// sorts it) whenever `left < right`; for bounds that are not ordered the port's answer is
-    /// returned unchanged.
-    static func positionBetween(left: String?, right: String?) -> String {
+    /// Keys longer than this are renumbered the next time their list is edited (they come from
+    /// long legacy append chains).
+    static let renumberLength = 256
+
+    /// A key strictly between the bounds (nil bounds are open) by the rule above, or nil when
+    /// none exists — then renumber the siblings first.
+    static func key(between left: String?, and right: String?) -> String? {
+        if let left, right == nil { return strictBetween(left, nil) }
+        if let left, let right, !Array(left.utf8).lexicographicallyPrecedes(Array(right.utf8)) { return nil }
         let ported = portedPositionBetween(left: left, right: right)
-        // In order — and, at the open start, not a key nothing fits before (the port's `0`).
-        if isStrictlyBetween(ported, left, right), left != nil || strictBetween(nil, ported) != nil {
+        if isStrictlyBetween(ported, left, right),
+           strictBetween(left, ported) != nil,
+           strictBetween(ported, right) != nil {
             return ported
         }
-        return strictBetween(left, right) ?? ported
+        return strictBetween(left, right)
+    }
+
+    /// `key(between:and:)` for callers that can't renumber; when no key exists it returns the
+    /// port's answer (out of order). Writers use `key(between:and:)` and renumber instead.
+    static func positionBetween(left: String?, right: String?) -> String {
+        key(between: left, and: right) ?? portedPositionBetween(left: left, right: right)
     }
 
     /// `position` sorts after `left` and before `right` (nil bounds are open), byte order.
@@ -177,7 +185,9 @@ struct FractionalIndexer {
         var index = 0
         // Bounded by: the left bound while `key` equals its prefix; the right one while `upper`.
         var followsLeft = true
-        while index < 4096 {
+        // Ends within max(left, right length) + 1 steps: past the left bound with the right one
+        // dropped, a digit always fits; on the right bound's prefix it returns nil at its end.
+        while true {
             let lo = followsLeft && index < a.count ? Int(a[index]) : -1
             let hi: Int
             if let upper {
@@ -191,7 +201,7 @@ struct FractionalIndexer {
             }
             if !fits.isEmpty {
                 let pick: Int
-                if hi == 256, lo >= 0 {
+                if hi == 256, lo >= 0 || (followsLeft && !a.isEmpty) {
                     pick = fits[0]                 // after the left bound: its next digit
                 } else if lo == -1, hi < 256 {
                     pick = fits[fits.count - 1]    // before the right bound: its previous digit
@@ -220,6 +230,5 @@ struct FractionalIndexer {
             }
             index += 1
         }
-        return nil
     }
 }

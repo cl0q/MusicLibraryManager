@@ -34,9 +34,10 @@ struct PlaylistFoldersMigrationTests {
     @Test func registeredOnceAfterTheLatestExistingMigration() throws {
         let migrations = DatabaseManager.buildMigrator().migrations
         #expect(migrations.filter { $0 == Self.v45 }.count == 1)
-        #expect(migrations.last == Self.v45)
+        let v41Index = try #require(migrations.firstIndex(of: "v41_remote_provider_identity"))
         let previousIndex = try #require(migrations.firstIndex(of: Self.previous))
         let v45Index = try #require(migrations.firstIndex(of: Self.v45))
+        #expect(v41Index < v45Index)
         #expect(previousIndex < v45Index, "registered after v46 — existing migrations are never reordered")
     }
 

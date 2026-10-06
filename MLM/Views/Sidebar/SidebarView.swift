@@ -140,8 +140,9 @@ struct SidebarView: View {
             guard note.userInfo?["coverRevalidation"] == nil, (note.userInfo?["origin"] as? String) != "coverService" else { return }
             Task { await reloadPlaylists() }
         }
-        // The rows' second lines follow downloads and file checks (one aggregate query).
-        .onReceive(NotificationCenter.default.publisher(for: .downloadStateDidChange)) { _ in
+        // The rows' second lines follow downloads (Activity's progress, coalesced ≤ 4/s) and
+        // file checks — one aggregate query each time (W3-PL review S6).
+        .onChange(of: ActivityCenter.shared.downloadProgressKey) { _, _ in
             Task { await model.reloadSummaries(container.playlistRepository) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .trackAvailabilityDidChange)) { _ in
@@ -309,7 +310,7 @@ struct SidebarView: View {
                 playlistLabel(playlist, id: id, systemImage: icon)
                     .help(playlist.name)
                     .tag(SidebarDestination.playlist(id))
-                    // CM-SIDEBAR-PINNED, the one playlist-menu builder (UC-CM-02).
+                    // The sidebar playlist row menu (UC §10.2), the one playlist-menu builder (UC-CM-02).
                     .contextMenu {
                         PlaylistMenu(playlists: [playlist], place: .sidebarRow) {
                             startRename(.playlist(id), currentName: playlist.name)

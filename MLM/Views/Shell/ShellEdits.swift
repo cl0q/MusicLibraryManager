@@ -137,21 +137,10 @@ final class ShellEdits {
                     return result
                 },
                 undo: { added in
-                    let removed = try await repository.removeEntries(added.entries)
-                    // Removed meanwhile by something else: nothing left to undo (no empty Redo).
-                    guard !removed.isEmpty else {
-                        throw UndoNothingLeft(note: "Nothing to undo — the tracks are no longer in “\(name)”")
-                    }
-                    await effects.changed(playlistID, repository: repository)
-                    return removed
+                    try await Self.undoAppend(added, playlistID: playlistID, name: name, repository: repository, effects: effects)
                 },
-                redo: { removed in
-                    let restored = try await repository.restoreEntries(removed)
-                    guard !restored.isEmpty else {
-                        throw UndoNothingLeft(note: "Nothing to redo — the tracks can’t go back into “\(name)”")
-                    }
-                    await effects.changed(playlistID, repository: repository)
-                    return PlaylistAppendResult(entries: restored, alreadyPresent: 0)
+                redo: { undone in
+                    try await Self.redoAppend(undone, playlistID: playlistID, name: name, repository: repository, effects: effects)
                 },
                 message: { Self.addedMessage(added: $0.entries.count, alreadyPresent: $0.alreadyPresent, playlist: name) + messageSuffix }
             )
@@ -161,6 +150,37 @@ final class ShellEdits {
         } catch {
             // Reported in the status bar by the center.
         }
+    }
+
+    /// What undoing an append removed, and the keys a renumbering had replaced.
+    struct AppendUndone: Sendable {
+        let removed: [PlaylistTrack]
+        let renumbered: [PlaylistPositionChange]
+    }
+
+    /// Removes exactly the appended rows, then puts back the keys a renumbering replaced.
+    static func undoAppend(_ added: PlaylistAppendResult, playlistID: Int64, name: String,
+                           repository: PlaylistRepository, effects: PlaylistEffects) async throws -> AppendUndone {
+        let removed = try await repository.removeEntries(added.entries)
+        // Removed meanwhile by something else: nothing left to undo (no empty Redo).
+        guard !removed.isEmpty else {
+            throw UndoNothingLeft(note: "Nothing to undo — the tracks are no longer in “\(name)”")
+        }
+        _ = try await repository.setPositions(playlistId: playlistID, added.renumbered.map { ($0.trackID, $0.from) })
+        await effects.changed(playlistID, repository: repository)
+        return AppendUndone(removed: removed, renumbered: added.renumbered)
+    }
+
+    /// Re-keys like the append did, then restores its rows exactly.
+    static func redoAppend(_ undone: AppendUndone, playlistID: Int64, name: String,
+                           repository: PlaylistRepository, effects: PlaylistEffects) async throws -> PlaylistAppendResult {
+        _ = try await repository.setPositions(playlistId: playlistID, undone.renumbered.map { ($0.trackID, $0.to) })
+        let restored = try await repository.restoreEntries(undone.removed)
+        guard !restored.isEmpty else {
+            throw UndoNothingLeft(note: "Nothing to redo — the tracks can’t go back into “\(name)”")
+        }
+        await effects.changed(playlistID, repository: repository)
+        return PlaylistAppendResult(entries: restored, alreadyPresent: 0, renumbered: undone.renumbered)
     }
 
     /// `Added 3 tracks to “Warm-up”` · `Added 2 tracks to “Warm-up” · 1 was already in it`
@@ -258,7 +278,8 @@ final class ShellEdits {
         } else {
             impact = nil
         }
-        return .make(name: playlist.name, impact: impact ?? PlaylistDeletionImpact(trackCount: 0, syncProfileNames: []))
+        return .make(name: playlist.name, impact: impact ?? PlaylistDeletionImpact(trackCount: 0, syncProfileNames: []),
+                     isLiked: playlist.isLiked == 1)
     }
 
     /// Deletes the playlist after the confirmation; restorable with Undo until MLM quits.
@@ -395,7 +416,9 @@ struct PlaylistDeletionConfirmation: Equatable, Sendable {
     let title: String
     let message: String
 
-    static func make(name: String, impact: PlaylistDeletionImpact) -> PlaylistDeletionConfirmation {
+    /// - Parameter isLiked: a Liked playlist; the message says a later Refresh from Sources
+    ///   creates it again (UC §23 C10, W3-PL review S1).
+    static func make(name: String, impact: PlaylistDeletionImpact, isLiked: Bool = false) -> PlaylistDeletionConfirmation {
         let leaves: String
         switch impact.syncProfileNames.count {
         case 0:
@@ -415,7 +438,8 @@ struct PlaylistDeletionConfirmation: Equatable, Sendable {
         }
         return PlaylistDeletionConfirmation(
             title: "Delete “\(name)”?",
-            message: "\(leaves) \(stays) You can undo this until you quit MLM."
+            message: "\(leaves) \(stays)" + (isLiked ? " A later Refresh from Sources creates it again." : "")
+                + " You can undo this until you quit MLM."
         )
     }
 }
@@ -437,16 +461,14 @@ extension ShellEdits {
     // MARK: Place in a playlist (D-PLD-REORDER, D-PLD-INSERT)
 
     /// A track's position before and after a placement.
-    struct PlacementMove: Equatable, Sendable {
-        let trackID: Int64
-        let from: String
-        let to: String
-    }
+    typealias PlacementMove = PlaylistPositionChange
 
-    /// What a placement did: members moved, rows inserted, and where the first track landed.
+    /// What a placement did: members moved, rows inserted, rows a renumbering re-keyed, and
+    /// where the first track landed.
     struct PlacementDone: Sendable {
         let moves: [PlacementMove]
         let inserted: [PlaylistTrack]
+        var renumbered: [PlacementMove] = []
         /// 1-based position of the first placed track afterwards.
         let position: Int
     }
@@ -455,68 +477,53 @@ extension ShellEdits {
     struct PlacementUndone: Sendable {
         let moves: [PlacementMove]
         let removed: [PlaylistTrack]
+        var renumbered: [PlacementMove] = []
     }
 
     /// Places `plan.trackIDs` before `plan.beforeTrackID` (or at the end) in the playlist —
-    /// members move, others are inserted — as one step. Undo puts every moved track back at its
-    /// exact earlier position and removes exactly the rows this inserted; Redo restores those
-    /// rows (same row ids, positions, added dates) and the new positions.
+    /// members move, others are inserted — as one step, in one transaction
+    /// (`PlaylistRepository.placeTracksReturningChanges`: never an out-of-order key; a playlist
+    /// without room is renumbered first). Undo puts every moved track back at its exact earlier
+    /// position, removes exactly the rows this inserted and restores the keys a renumbering
+    /// replaced; Redo re-applies all of it.
     func placeTracks(_ plan: PlaylistDropPlan, inPlaylist playlistID: Int64, name: String) async {
         guard let repository = dependencies.playlists() else { return }
         let effects = self.effects
-        let tracks = dependencies.tracks()
         let isReorder = plan.kind == .reorder
         _ = try? await undo.perform(
             isReorder ? DropWords.reorderActionName(name) : DropWords.addActionName(name),
             failure: isReorder ? "Couldn’t reorder “\(name)”" : "Couldn’t add \(StatusBarText.tracks(plan.trackIDs.count)) to “\(name)”",
             do: { () async throws -> PlacementDone? in
-                guard let before = try await repository.snapshot(id: playlistID) else {
-                    throw UndoTargetMissing(quotedName: "“\(name)”")
-                }
-                let members = Set(before.entries.map(\.trackId))
-                var ids = plan.trackIDs
-                // Never a row for a track that left the library meanwhile.
-                let newIDs = ids.filter { !members.contains($0) }
-                if !newIDs.isEmpty, let tracks {
-                    let existing = Set(try await tracks.fetchTracks(ids: Set(newIDs)).compactMap(\.id))
-                    ids = ids.filter { members.contains($0) || existing.contains($0) }
-                }
-                guard !ids.isEmpty else { return nil }
-                let placements = PlaylistPlacement.positions(
-                    for: ids, before: plan.beforeTrackID,
-                    in: before.entries.map { (trackID: $0.trackId, position: Optional($0.position)) }
-                )
-                try await repository.placeTracks(playlistId: playlistID, placements: placements)
-                guard let after = try await repository.snapshot(id: playlistID) else { return nil }
-                let oldPosition = Dictionary(before.entries.map { ($0.trackId, $0.position) }, uniquingKeysWith: { first, _ in first })
-                let moves = placements.compactMap { placement in
-                    oldPosition[placement.trackId].map { PlacementMove(trackID: placement.trackId, from: $0, to: placement.position) }
-                }
-                let placed = Set(ids)
-                let inserted = after.entries.filter { placed.contains($0.trackId) && !members.contains($0.trackId) }
-                let first = after.entries.firstIndex { placed.contains($0.trackId) } ?? 0
+                guard let result = try await repository.placeTracksReturningChanges(
+                    playlistId: playlistID, trackIds: plan.trackIDs, before: plan.beforeTrackID
+                ) else { return nil }
                 await effects.changed(playlistID, repository: repository)
-                return PlacementDone(moves: moves, inserted: inserted, position: first + 1)
+                return PlacementDone(moves: result.moves, inserted: result.inserted, renumbered: result.renumbered,
+                                     position: result.position)
             },
             undo: { done in
                 let removed = try await repository.removeEntries(done.inserted)
                 let moves = try await Self.presentMoves(done.moves, playlistID: playlistID, repository: repository)
-                try await repository.placeTracks(playlistId: playlistID, placements: moves.map { ($0.trackID, $0.from) })
+                let renumbered = try await Self.presentMoves(done.renumbered, playlistID: playlistID, repository: repository)
+                _ = try await repository.setPositions(playlistId: playlistID, moves.map { ($0.trackID, $0.from) })
+                _ = try await repository.setPositions(playlistId: playlistID, renumbered.map { ($0.trackID, $0.from) })
                 guard !removed.isEmpty || !moves.isEmpty else {
                     throw UndoNothingLeft(note: "Nothing to undo — the tracks are no longer in “\(name)”")
                 }
                 await effects.changed(playlistID, repository: repository)
-                return PlacementUndone(moves: moves, removed: removed)
+                return PlacementUndone(moves: moves, removed: removed, renumbered: renumbered)
             },
             redo: { undone in
-                let restored = try await repository.restoreEntries(undone.removed)
+                let renumbered = try await Self.presentMoves(undone.renumbered, playlistID: playlistID, repository: repository)
+                _ = try await repository.setPositions(playlistId: playlistID, renumbered.map { ($0.trackID, $0.to) })
                 let moves = try await Self.presentMoves(undone.moves, playlistID: playlistID, repository: repository)
-                try await repository.placeTracks(playlistId: playlistID, placements: moves.map { ($0.trackID, $0.to) })
+                _ = try await repository.setPositions(playlistId: playlistID, moves.map { ($0.trackID, $0.to) })
+                let restored = try await repository.restoreEntries(undone.removed)
                 guard !restored.isEmpty || !moves.isEmpty else {
                     throw UndoNothingLeft(note: "Nothing to redo — the tracks can’t go back into “\(name)”")
                 }
                 await effects.changed(playlistID, repository: repository)
-                return PlacementDone(moves: moves, inserted: restored, position: 1)
+                return PlacementDone(moves: moves, inserted: restored, renumbered: renumbered, position: 1)
             },
             message: { done in
                 isReorder

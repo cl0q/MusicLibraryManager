@@ -32,13 +32,10 @@ struct InspectorQueries: Sendable {
                 }
             }
             guard !counts.isEmpty else { return [] }
-            let playlistIDs = Array(counts.keys)
-            let placeholders = Array(repeating: "?", count: playlistIDs.count).joined(separator: ", ")
-            return try Row.fetchAll(db, sql: """
-                SELECT id, name FROM playlists WHERE id IN (\(placeholders)) ORDER BY is_pinned DESC, name COLLATE NOCASE
-                """, arguments: StatementArguments(playlistIDs)).map { row in
-                let id: Int64 = row["id"]
-                return Membership(playlistID: id, name: row["name"], count: counts[id] ?? 0)
+            // The sidebar's order (`PlaylistRepository.fetchAll`, W3-PL; pinning is retired).
+            return try PlaylistRepository.sidebarOrdered(db).compactMap { playlist in
+                guard let id = playlist.id, let count = counts[id] else { return nil }
+                return Membership(playlistID: id, name: playlist.name, count: count)
             }
         }
     }
