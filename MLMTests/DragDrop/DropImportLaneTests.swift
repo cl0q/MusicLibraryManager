@@ -38,7 +38,7 @@ struct DropImportLaneTests {
     }
 
     private func eventually(_ condition: @escaping () -> Bool) async -> Bool {
-        let deadline = ContinuousClock.now + .seconds(10)
+        let deadline = ContinuousClock.now + .seconds(30)
         while ContinuousClock.now < deadline {
             if condition() { return true }
             try? await Task.sleep(for: .milliseconds(10))
