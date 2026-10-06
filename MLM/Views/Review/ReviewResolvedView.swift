@@ -63,6 +63,10 @@ struct ReviewResolvedView: View {
                 }
             }
             .width(min: 140, ideal: 240)
+            TableColumn("Decision") { row in
+                Text(row.decision).lineLimit(1)
+            }
+            .width(min: 100, ideal: 130, max: 170)
             TableColumn("Outcome") { row in
                 Text(row.outcome).foregroundStyle(.secondary).lineLimit(2)
             }

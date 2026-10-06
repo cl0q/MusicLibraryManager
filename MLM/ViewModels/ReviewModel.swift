@@ -26,6 +26,8 @@ struct ReviewResolvedRow: Identifiable, Equatable {
     let artist: String
     let date: Date?
     let outcome: String
+    /// What was decided, in one phrase (`Kept recommended`, `Not duplicates`, `Merged`, …).
+    var decision: String = ReviewPresentation.noDecisionWord
     /// Restore needs the decision's recorded consequences; earlier decisions have none.
     let decisionID: Int64?
     let memberIDs: [Int64]
@@ -315,6 +317,7 @@ final class ReviewModel {
             artist: snapshot?.artist ?? "",
             date: decision.flatMap { Self.parse($0.decidedAt) } ?? item.resolvedAt.flatMap(Self.parse),
             outcome: ReviewPresentation.outcome(decision),
+            decision: ReviewPresentation.decisionWord(decision),
             decisionID: decision?.id,
             memberIDs: group.memberTrackIDs,
             hasLegacySnapshot: decision == nil && group.items.contains { $0.reviewDetails?.resolutionSnapshot != nil })

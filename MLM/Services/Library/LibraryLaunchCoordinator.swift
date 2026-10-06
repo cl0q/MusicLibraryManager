@@ -1005,6 +1005,8 @@ final class LibraryLaunchCoordinator {
         let url = Self.canonical(url)
         switch prepare(packageAt: url) {
         case .ready(let location, _):
+            // A running duplicate scan belongs to this library: cancelled, nothing kept (IMP-108).
+            ReviewScanRunner.shared.libraryDidChange()
             pendingOpen.set(location.packageURL?.path ?? url.path)
             relaunch()
             return .relaunching

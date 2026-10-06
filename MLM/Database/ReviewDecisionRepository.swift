@@ -568,7 +568,7 @@ final class ReviewDecisionRepository: Sendable {
 
     private static func pendingRowCount(_ db: Database, groupKey: String) throws -> Int {
         if let id = legacyID(groupKey) {
-            return try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM review_queue WHERE id = ? AND status = 'pending'", arguments: [id]) ?? 0
+            return try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM review_queue WHERE id = ? AND status = 'pending' AND group_key IS NULL", arguments: [id]) ?? 0
         }
         return try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM review_queue WHERE group_key = ? AND status = 'pending'",
                                 arguments: [groupKey]) ?? 0
@@ -577,7 +577,7 @@ final class ReviewDecisionRepository: Sendable {
     private static func setQueueStatus(_ db: Database, groupKey: String, from: String, to: String) throws {
         let resolvedAt = to == "pending" ? "NULL" : "datetime('now')"
         if let id = legacyID(groupKey) {
-            try db.execute(sql: "UPDATE review_queue SET status = ?, resolved_at = \(resolvedAt) WHERE id = ? AND status = ?",
+            try db.execute(sql: "UPDATE review_queue SET status = ?, resolved_at = \(resolvedAt) WHERE id = ? AND status = ? AND group_key IS NULL",
                            arguments: [to, id, from])
         } else {
             try db.execute(sql: "UPDATE review_queue SET status = ?, resolved_at = \(resolvedAt) WHERE group_key = ? AND status = ?",
