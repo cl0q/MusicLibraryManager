@@ -84,19 +84,18 @@ enum SnapshotFixtures {
                 store.playlists().first,
                 named: "populated playlist"
             )
+            // W3-PL card: facts line and the §15.5 words (`Not downloaded · 1 track`).
+            let summary = PlaylistSummary(playlistID: 1, totalTracks: 2, localTracks: 1, notDownloadedTracks: 1)
             return AnyView(PlaylistCard(
-                playlist: playlist,
-                source: nil,
-                trackCount: 2,
-                downloadStatus: PlaylistDownloadStatus(
-                    playlistID: 1, totalTracks: 2, localTracks: 1,
-                    downloadingTracks: 0, failedTracks: 0, notDownloadedTracks: 1
+                item: PlaylistGridItem(
+                    playlist: playlist,
+                    summary: summary,
+                    status: PlaylistStatus.make(summary: summary, echo: nil, expiredSignIn: nil),
+                    source: nil
                 ),
-                isRenaming: false,
-                renameText: .constant(""),
-                onTap: {}, onRename: {}, onConfirmRename: {}, onCancelRename: {},
-                onTogglePin: {}, onDelete: {}
-            ))
+                renameText: .constant("")
+            )
+            .frame(width: 180))
         }),
         Fixture(id: "ingest-preview", size: .init(width: 700, height: 580), makeView: { _ in
             let preview = IngestPreview(

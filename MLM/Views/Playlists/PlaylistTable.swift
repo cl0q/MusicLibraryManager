@@ -5,11 +5,14 @@ import UniformTypeIdentifiers
 /// The playlist detail's track table: the shared `TrackListTable` in its playlist context —
 /// `#` column in playlist order, Added = added to this playlist (UC-TABLE-19), ⌫ removes from
 /// the playlist as one undo step (UC-UNDO-06), drag-to-reorder and drops while in playlist
-/// order (today's reorder; W3-PL / W2-H extend it through `onInsert`).
+/// order, drops at the insertion line (W2-H) and the `Download failed` scope (W3-PL).
 struct PlaylistTable: View {
     let playlist: Playlist
     @Bindable var viewModel: PlaylistDetailViewModel
     var onTrackDoubleClick: ((Track, [Track]) -> Void)?
+    /// The `Download failed` scope (V-PLD.E14): only failed rows, each with its reason and the
+    /// attempts left on a second line (UC-TABLE-13).
+    var failedOnly = false
 
     @State private var list = TrackListModel(sortOrder: TrackSortOrder(column: .number, ascending: true))
     @Environment(UndoCenter.self) private var undo: UndoCenter?
@@ -47,6 +50,7 @@ struct PlaylistTable: View {
                 handleInsert(at: index, providers: providers, displayRows: rows)
             }
         )
+        .showingFailureDetail(failedOnly)
     }
 
     /// Reload when the playlist's tracks, the filter or the added dates change.
@@ -56,13 +60,18 @@ struct PlaylistTable: View {
         hasher.combine(viewModel.displayedTracks.count)
         hasher.combine(viewModel.searchFilter)
         hasher.combine(viewModel.addedAtByTrackID.count)
+        hasher.combine(failedOnly)
         return hasher.finalize()
     }
 
     private func load() async {
-        let visible: Set<Int64>? = viewModel.searchFilter.isEmpty
+        var visible: Set<Int64>? = viewModel.searchFilter.isEmpty
             ? nil
             : Set(viewModel.displayedTracks.compactMap(\.id))
+        if failedOnly {
+            let failed = Set(viewModel.failedTracks.compactMap(\.id))
+            visible = visible.map { $0.intersection(failed) } ?? failed
+        }
         await list.setTracks(
             viewModel.tracks,
             context: TrackRowBuildContext(addedMeaning: .container, containerAddedDates: viewModel.addedAtByTrackID),
@@ -97,7 +106,7 @@ struct PlaylistTable: View {
         let order = viewModel.tracks.compactMap(\.id)
         let shown = displayRows.map(\.id)
         let isPlaylistOrder = self.isPlaylistOrder
-        let isFiltered = !viewModel.searchFilter.isEmpty
+        let isFiltered = !viewModel.searchFilter.isEmpty || failedOnly
         let sortedBy = self.sortedBy
         let performer = DropPerformer(container: container, shell: shell, statusBar: statusBar, undo: undo ?? .main)
         Task { @MainActor in
@@ -146,8 +155,17 @@ struct PlaylistTable: View {
     }
 }
 
-/// Mirrors the table's selection into the view model (the header's `Remove n` button) from a
-/// leaf, so a selection change never re-evaluates the playlist table's body.
+private extension TrackListConfiguration {
+    /// The `Download failed` scope's second line under failed rows (UC-TABLE-13).
+    func showingFailureDetail(_ shows: Bool) -> TrackListConfiguration {
+        var copy = self
+        copy.showsFailureDetail = shows
+        return copy
+    }
+}
+
+/// Mirrors the table's selection into the view model from a leaf, so a selection change never
+/// re-evaluates the playlist table's body.
 private struct SelectionMirror: View {
     let list: TrackListModel
     let viewModel: PlaylistDetailViewModel

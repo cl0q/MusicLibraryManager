@@ -3,49 +3,24 @@ import Foundation
 import GRDB
 @testable import MLM
 
-/// Tests for `PlaylistViewModel`'s 8-pin pre-check, transient hint state,
-/// cover-drop-error state, and the notification-post side effect on togglePin.
-///
-/// Phase 36, Plan 03. The view-model layer is pure Swift state on top of
-/// `PlaylistRepository`; we use an in-memory GRDB queue so the tests stay
-/// hermetic. Filesystem-touching cover operations remain in the service
-/// suite (`PlaylistCoverServiceTests`).
+/// Playlist provenance and download-health buckets. The grid's view model (`PlaylistViewModel`,
+/// with its pin limit and cover-drop banner) is gone (W3-PL): the grid reads `SidebarModel`
+/// and `PlaylistGridRules` (`PlaylistPresentationTests`); a refused cover says so on the card.
 @MainActor
 struct PlaylistViewModelTests {
 
     // MARK: - Helpers
 
-    private func makeViewModel() throws -> (DatabaseQueue, PlaylistRepository, PlaylistViewModel) {
+    private func makeRepositories() throws -> (DatabaseQueue, PlaylistRepository, SidebarModel) {
         let db = try DatabaseManager.inMemory()
-        let repo = PlaylistRepository(database: db)
-        let sourceRepo = SourceRepository(database: db)
-        let vm = PlaylistViewModel(
-            playlistRepository: repo,
-            sourceRepository: sourceRepo
-        )
-        return (db, repo, vm)
+        let sidebar = SidebarModel(defaults: UserDefaults(suiteName: "PlaylistViewModelTests-\(UUID().uuidString)")!)
+        return (db, PlaylistRepository(database: db), sidebar)
     }
 
-    // MARK: - Transient hint state surface
-    // The 8-pin limit and its tests are gone with pinning (DEC-003, S-PL-BANNER-PINLIMIT removed).
-
-    @Test func coverDropErrorMessage_startsNil() throws {
-        let (_, _, vm) = try makeViewModel()
-        #expect(vm.coverDropErrorMessage == nil)
-    }
-
-    // MARK: - flagCoverDropRejected
-
-    @Test func flagCoverDropRejected_setsBannerCopy() async throws {
-        let (_, _, vm) = try makeViewModel()
-        vm.flagCoverDropRejected()
-        #expect(vm.coverDropErrorMessage == "Couldn't read that image. Try a PNG or JPEG file.")
-    }
-
-    // MARK: - Source provenance
+    // MARK: - Source provenance (the grid resolves it from one sources-table snapshot)
 
     @Test func loadPlaylists_resolvesSourceFromSourcesTable() async throws {
-        let (db, repo, vm) = try makeViewModel()
+        let (db, repo, sidebar) = try makeRepositories()
         let sourceRepo = SourceRepository(database: db)
         let source = try await sourceRepo.upsert(name: "youtube", userId: "local")
         let playlist = try await repo.findOrCreateSourcePlaylist(
@@ -54,19 +29,20 @@ struct PlaylistViewModelTests {
             externalId: "youtube-playlist-1"
         )
 
-        await vm.loadPlaylists()
+        await sidebar.reloadSources(sourceRepo)
+        await sidebar.reloadPlaylists(repo)
 
-        #expect(vm.source(for: playlist)?.playlistSourceIdentity == .youtube)
-        #expect(vm.source(for: playlist)?.playlistSourceIdentity.displayName == "YouTube")
+        let name = try #require(playlist.sourceId.flatMap { sidebar.sourceNames[$0] })
+        #expect(PlaylistSourceIdentity(sourceName: name) == .youtube)
+        #expect(PlaylistSourceIdentity(sourceName: name).displayName == "YouTube")
+        #expect(sidebar.hasLoadedPlaylists)
     }
 
     @Test func loadPlaylists_keepsLocalPlaylistWithoutProvenance() async throws {
-        let (_, repo, vm) = try makeViewModel()
+        let (_, repo, sidebar) = try makeRepositories()
         let playlist = try await repo.create(name: "Local favorites")
-
-        await vm.loadPlaylists()
-
-        #expect(vm.source(for: playlist) == nil)
+        await sidebar.reloadPlaylists(repo)
+        #expect(sidebar.playlists.first { $0.id == playlist.id }?.sourceId == nil)
     }
 
     @Test func playlistSourceIdentity_mapsKnownSourceNames() {
@@ -90,7 +66,7 @@ struct PlaylistViewModelTests {
     }
 
     @Test func downloadStatus_usesExclusiveAvailabilityBuckets() async throws {
-        let (db, repo, _) = try makeViewModel()
+        let (db, repo, _) = try makeRepositories()
         let playlist = try await repo.create(name: "Download health")
         let playlistID = try #require(playlist.id)
 

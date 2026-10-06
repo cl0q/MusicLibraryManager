@@ -88,7 +88,16 @@ final class SidebarModel {
     func reloadPlaylists(fetch: () async throws -> [Playlist]) async -> [Int64] {
         playlistReloadGeneration += 1
         let generation = playlistReloadGeneration
-        guard let loaded = try? await fetch(), generation == playlistReloadGeneration else { return [] }
+        let result: [Playlist]?
+        do {
+            result = try await fetch()
+        } catch {
+            if generation == playlistReloadGeneration { playlistLoadFailed = true }
+            return []
+        }
+        guard let loaded = result, generation == playlistReloadGeneration else { return [] }
+        playlistLoadFailed = false
+        hasLoadedPlaylists = true
         let before = Set(playlists.compactMap(\.id))
         playlists = loaded
         let after = Set(loaded.compactMap(\.id))
@@ -121,6 +130,11 @@ final class SidebarModel {
     }
 
     // MARK: Playlist folders, tree, summaries (W3-PL, DEC-003)
+
+    /// The first load finished (the grid shows placeholder cards until then, V-PL.E16).
+    private(set) var hasLoadedPlaylists = false
+    /// The last load failed (V-PL.N02 `Can’t load the playlists`).
+    private(set) var playlistLoadFailed = false
 
     /// The playlist folders, in sidebar order.
     private(set) var folders: [PlaylistFolder] = []
