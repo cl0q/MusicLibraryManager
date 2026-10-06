@@ -91,15 +91,13 @@ struct ArtworkBackfillServiceTests {
             track.organizedPath = "Artist/Album/Track.m4a"
             try track.insert(db)
         }
-        // Rapid double-post should not cause double backfill
+        // Rapid double-post should not cause double backfill. Both observer tasks are queued on
+        // the main actor before the first backfill can resume from its first await, so the second
+        // always finds the first running and leaves it alone — a count, not a wait for silence.
         center.post(name: .libraryDidImport, object: nil)
         center.post(name: .libraryDidImport, object: nil)
-        // Wait for the backfill to have run (idle before it starts is not idle after it),
-        // then confirm it stays idle (no second backfill started).
-        #expect(await waitUntil { svc.progress.total == 1 }, "the first post starts one backfill")
-        #expect(await waitUntil { !svc.isBackfilling }, "the backfill returns to idle")
-        try await Task.sleep(for: .milliseconds(200))
-        #expect(svc.isBackfilling == false)
+        #expect(await waitUntil { svc.backfillRuns >= 1 && !svc.isBackfilling }, "the backfill ran and returned to idle")
+        #expect(svc.backfillRuns == 1, "the second post was coalesced into the running backfill")
         #expect(svc.progress.total == 1)
     }
 

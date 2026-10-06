@@ -26,6 +26,9 @@ final class ArtworkBackfillService {
     /// True while the backfill TaskGroup is running.
     var isBackfilling = false
 
+    /// How many backfill runs have started (tests count them to prove coalescing).
+    private(set) var backfillRuns = 0
+
     /// Progress counter for optional toolbar UI (D-16 discretion).
     var progress: (current: Int, total: Int) = (0, 0)
 
@@ -261,6 +264,7 @@ final class ArtworkBackfillService {
 
     private func backfillMissing(turboMode: Bool = false, progressHandler: ((MaintenanceProgressTracker.ProgressState) -> Void)? = nil) async {
         isBackfilling = true
+        backfillRuns += 1
         progress = (0, 0)
         defer {
             isBackfilling = false
