@@ -29,6 +29,8 @@ struct SourceAccountProblemView: View {
                 problem
             }
         }
+        // A sign-in left waiting never keeps the browser redirect's port (review H5).
+        .onDisappear { signIn?.cancel() }
     }
 
     @ViewBuilder

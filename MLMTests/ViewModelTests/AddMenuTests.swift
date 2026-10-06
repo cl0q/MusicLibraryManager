@@ -170,7 +170,7 @@ struct SourceSignInModelTests {
         var continued = false
         let model = SourceSignInModel(service: .soundcloud, accounts: accounts,
                                       sleep: { _ in try await Task.sleep(for: .seconds(3600)) },
-                                      post: { posted.append($0) })
+                                      post: { posted.append($0) }, gate: SignInGate())
         #expect(model.title == "Sign in to SoundCloud")
         model.start { continued = true }
         #expect(model.phase == .waiting)
@@ -187,7 +187,8 @@ struct SourceSignInModelTests {
             await withTaskCancellationHandler { await gate.wait() } onCancel: { Task { @MainActor in cancelled.value = true; gate.open() } }
             try Task.checkCancellation()
         }
-        let model = SourceSignInModel(service: .spotify, accounts: accounts, sleep: { _ in try await Task.sleep(for: .seconds(3600)) })
+        let model = SourceSignInModel(service: .spotify, accounts: accounts, sleep: { _ in try await Task.sleep(for: .seconds(3600)) },
+                                      gate: SignInGate())
         model.start()
         await waitUntil { gate.isWaiting }
         model.cancel()
@@ -202,10 +203,50 @@ struct SourceSignInModelTests {
             await withTaskCancellationHandler { await gate.wait() } onCancel: { Task { @MainActor in gate.open() } }
             try Task.checkCancellation()
         }
-        let model = SourceSignInModel(service: .spotify, accounts: accounts, sleep: { _ in })
+        let model = SourceSignInModel(service: .spotify, accounts: accounts, sleep: { _ in }, gate: SignInGate())
         model.start()
         await waitUntil { model.phase == .timedOut }
         #expect(SourceSignInModel.timedOutText == "Sign-in wasn’t finished")
+    }
+
+    /// Review H5: one browser sign-in at a time; a released model frees the browser wait.
+    @Test func aSecondSignInIsRefusedWhileOneWaitsAndAReleasedModelEndsItsWait() async {
+        let gate = SignInGate()
+        let accounts = ImportTestAccounts()
+        let browser = ImportTestGate()
+        let ended = SignInCancelFlag()
+        accounts.onSignIn = {
+            await withTaskCancellationHandler { await browser.wait() } onCancel: { Task { @MainActor in ended.value = true; browser.open() } }
+            try Task.checkCancellation()
+        }
+        var first: SourceSignInModel? = SourceSignInModel(service: .soundcloud, accounts: accounts,
+                                                          sleep: { _ in try await Task.sleep(for: .seconds(3600)) }, gate: gate)
+        first?.start()
+        await waitUntil { browser.isWaiting }
+
+        let second = SourceSignInModel(service: .spotify, accounts: accounts, sleep: { _ in try await Task.sleep(for: .seconds(3600)) },
+                                       gate: gate)
+        second.start()
+        #expect(second.phase == .failed(SourceSignInModel.alreadyWaitingText))
+        #expect(SourceSignInModel.alreadyWaitingText == "A sign-in is already waiting in your browser")
+
+        first = nil   // the view went away
+        await waitUntil { ended.value }
+        #expect(!gate.isHeld)
+        #expect(first == nil)
+    }
+
+    @Test func theLoopbackWaitIsRefusedWhileAnotherWaits() async throws {
+        let one = LoopbackOAuthServer(port: 0)
+        let waiting = Task { try await one.waitForCallback() }
+        await waitUntil { LoopbackOAuthServer.isWaiting }
+        await #expect(throws: LoopbackOAuthError.self) {
+            _ = try await LoopbackOAuthServer(port: 0).waitForCallback()
+        }
+        waiting.cancel()
+        let result = try? await waiting.value
+        #expect(result == nil, "Cancel ends the wait")
+        #expect(!LoopbackOAuthServer.isWaiting, "the slot (and the port) are free again")
     }
 }
 
