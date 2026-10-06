@@ -84,7 +84,13 @@ struct ArtworkBackfillServiceTests {
     }
 
     @Test func testCoalescesDuplicateRequests() async throws {
-        let (_, svc, center) = try await makeService()
+        let (db, svc, center) = try await makeService()
+        try await db.write { db in
+            var track = Track(artist: "Artist", album: "Album", title: "Track", format: "m4a",
+                              originalPath: "/nonexistent/track.m4a")
+            track.organizedPath = "Artist/Album/Track.m4a"
+            try track.insert(db)
+        }
         // Rapid double-post should not cause double backfill
         center.post(name: .libraryDidImport, object: nil)
         center.post(name: .libraryDidImport, object: nil)
