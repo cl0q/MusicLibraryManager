@@ -180,18 +180,34 @@ final class TranscodeCache: @unchecked Sendable {
         }
     }
 
-    /// Verify that a cached .m4a file is a valid AAC/MP4/M4A file and not a renamed MP3/FLAC file.
-    func verifyCacheCodec(_ url: URL) async -> Bool {
-        guard let ffmpeg = ProcessRunner.findExecutable("ffmpeg") else { return true } // Fallback to true if ffmpeg unavailable
+    /// What a codec probe of a file found.
+    enum CodecProbe: Equatable, Sendable {
+        /// ffprobe named the first stream's codec (and, when known, its bit rate).
+        case codec(String, bitrate: Int?)
+        /// No ffprobe: nothing can be judged, the file counts as fine.
+        case unavailable
+        /// ffprobe ran but could not read a codec: the file counts as invalid.
+        case failed
+    }
+
+    /// Whether a probed codec is what a cached/device `.m4a` must hold (AAC/MP4).
+    static func isAcceptableCacheCodec(_ codec: String) -> Bool {
+        let codec = codec.lowercased()
+        return codec.contains("aac") || codec.contains("mp4")
+    }
+
+    /// Probe the first stream's codec of a file with ffprobe (IMP-104 caches the result).
+    func probeCodec(_ url: URL) async -> CodecProbe {
+        guard let ffmpeg = ProcessRunner.findExecutable("ffmpeg") else { return .unavailable }
         let ffprobe = ffmpeg.replacingOccurrences(of: "ffmpeg", with: "ffprobe")
-        guard FileManager.default.isExecutableFile(atPath: ffprobe) else { return true }
-        
+        guard FileManager.default.isExecutableFile(atPath: ffprobe) else { return .unavailable }
+
         do {
             let result = try await ProcessRunner.run(
                 ffprobe,
                 arguments: [
                     "-v", "quiet",
-                    "-show_entries", "stream=codec_name",
+                    "-show_entries", "stream=codec_name,bit_rate",
                     "-of", "json",
                     url.path
                 ]
@@ -201,12 +217,21 @@ final class TranscodeCache: @unchecked Sendable {
                 if let streams = json?["streams"] as? [[String: Any]],
                    let stream = streams.first {
                     let codec = (stream["codec_name"] as? String ?? "").lowercased()
-                    // Cached files always end in .m4a and must be AAC/MP4
-                    return codec.contains("aac") || codec.contains("mp4")
+                    let bitrate = (stream["bit_rate"] as? String).flatMap { Int($0) }
+                    return .codec(codec, bitrate: bitrate)
                 }
             }
         } catch {}
-        return false
+        return .failed
+    }
+
+    /// Verify that a cached .m4a file is a valid AAC/MP4/M4A file and not a renamed MP3/FLAC file.
+    func verifyCacheCodec(_ url: URL) async -> Bool {
+        switch await probeCodec(url) {
+        case .unavailable: return true // Fallback to true if ffmpeg unavailable
+        case .failed: return false
+        case .codec(let codec, _): return Self.isAcceptableCacheCodec(codec)
+        }
     }
 
     // MARK: - Cache UUID Tagging

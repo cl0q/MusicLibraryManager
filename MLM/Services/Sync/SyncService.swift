@@ -222,6 +222,10 @@ final class SyncService {
     /// Every file the current run tried to copy, in order (a test seam: an interrupted run
     /// resumed by the same operation never copies a file twice).
     private(set) var attemptedTrackIds: [Int64] = []
+    /// The cached device codec sweep (v56, IMP-104).
+    let probeCache: SyncProbeCacheRepository
+    /// Replaces the ffprobe call of the codec sweep (a test seam; `nil` = the transcode cache's ffprobe).
+    var codecProbe: (@Sendable (URL) async -> TranscodeCache.CodecProbe)?
     /// Syncs run one at a time; a second one is `Queued` (UC-JOB-03).
     static let lane = ActivityLane("sync")
 
@@ -238,7 +242,8 @@ final class SyncService {
         self.syncRepository = syncRepository
         self.configRepository = configRepository
         self.transcodeCache = transcodeCache
-        
+        self.probeCache = SyncProbeCacheRepository(database: syncRepository.databaseWriter)
+
         if let rawValue = UserDefaults.standard.string(forKey: "sync_turbo_level"),
            let level = SyncTurboLevel(rawValue: rawValue) {
             self.syncTurboLevel = level
@@ -463,38 +468,81 @@ final class SyncService {
             guard FileManager.default.fileExists(atPath: destination.path) else { return nil }
             return (trackId, destination)
         }
-        guard !destinations.isEmpty else { return [] }
-
-        let workerCount = min(syncTurboLevel.workerCount(), destinations.count)
-        let cache = transcodeCache
-        return try await withThrowingTaskGroup(of: Int64?.self) { group in
-            var nextIndex = 0
-
-            func addNextDestination() {
-                let destination = destinations[nextIndex]
-                nextIndex += 1
-                group.addTask {
-                    try Task.checkCancellation()
-                    return await cache.verifyCacheCodec(destination.1) ? nil : destination.0
-                }
-            }
-
-            for _ in 0..<workerCount {
-                addNextDestination()
-            }
-
-            var invalidTrackIds = Set<Int64>()
-            while let trackId = try await group.next() {
-                try Task.checkCancellation()
-                if let trackId {
-                    invalidTrackIds.insert(trackId)
-                }
-                if nextIndex < destinations.count {
-                    addNextDestination()
-                }
-            }
-            return invalidTrackIds
+        guard !destinations.isEmpty else {
+            if let profileId = profile.id { try? await probeCache.prune(profileId: profileId, keeping: []) }
+            return []
         }
+
+        // IMP-104: a device file is probed again only when its size or mtime changed.
+        let profileId = profile.id
+        var cached: [String: SyncProbeEntry] = [:]
+        if let profileId { cached = (try? await probeCache.entries(profileId: profileId)) ?? [:] }
+        var invalidTrackIds = Set<Int64>()
+        var toProbe: [(trackId: Int64, url: URL, size: Int64, mtime: Double)] = []
+        for (trackId, url) in destinations {
+            let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+            let size = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
+            let mtime = (attributes?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+            if let hit = cached[url.path], hit.size == size, hit.mtime == mtime {
+                if !TranscodeCache.isAcceptableCacheCodec(hit.codec) { invalidTrackIds.insert(trackId) }
+            } else {
+                toProbe.append((trackId, url, size, mtime))
+            }
+        }
+
+        let probe: @Sendable (URL) async -> TranscodeCache.CodecProbe
+        if let codecProbe {
+            probe = codecProbe
+        } else {
+            let cache = transcodeCache
+            probe = { await cache.probeCodec($0) }
+        }
+        var fresh: [SyncProbeEntry] = []
+        if !toProbe.isEmpty {
+            let workerCount = min(syncTurboLevel.workerCount(), toProbe.count)
+            let probed: [(Int, TranscodeCache.CodecProbe)] = try await withThrowingTaskGroup(
+                of: (Int, TranscodeCache.CodecProbe).self
+            ) { group in
+                var nextIndex = 0
+                func addNext() {
+                    let index = nextIndex
+                    let url = toProbe[index].url
+                    nextIndex += 1
+                    group.addTask {
+                        try Task.checkCancellation()
+                        return (index, await probe(url))
+                    }
+                }
+                for _ in 0..<workerCount { addNext() }
+                var results: [(Int, TranscodeCache.CodecProbe)] = []
+                while let result = try await group.next() {
+                    try Task.checkCancellation()
+                    results.append(result)
+                    if nextIndex < toProbe.count { addNext() }
+                }
+                return results
+            }
+            for (index, result) in probed {
+                let item = toProbe[index]
+                switch result {
+                case .unavailable:
+                    break
+                case .failed:
+                    invalidTrackIds.insert(item.trackId)
+                case .codec(let codec, let bitrate):
+                    if !TranscodeCache.isAcceptableCacheCodec(codec) { invalidTrackIds.insert(item.trackId) }
+                    if !codec.isEmpty {
+                        fresh.append(SyncProbeEntry(devicePath: item.url.path, size: item.size, mtime: item.mtime,
+                                                    codec: codec, bitrate: bitrate))
+                    }
+                }
+            }
+        }
+        if let profileId {
+            try? await probeCache.store(fresh, profileId: profileId)
+            try? await probeCache.prune(profileId: profileId, keeping: Set(destinations.map { $0.1.path }))
+        }
+        return invalidTrackIds
     }
 
     private static func previewInputHash(

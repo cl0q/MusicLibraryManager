@@ -54,6 +54,8 @@ final class SyncRepository: Sendable {
             try db.execute(sql: "DELETE FROM playlist_sync_snapshots WHERE profile_id = ?", arguments: [id])
             // v47 (W3-SYNC): the profile's last sync result goes with it.
             try db.execute(sql: "DELETE FROM sync_profile_results WHERE profile_id = ?", arguments: [id])
+            // v56 (IMP-104): the device codec cache of the profile.
+            try db.execute(sql: "DELETE FROM sync_probe_cache WHERE profile_id = ?", arguments: [id])
             try SyncProfile.deleteOne(db, id: id)
         }
     }
@@ -271,6 +273,14 @@ final class SyncRepository: Sendable {
         try await database.write { db in
             var sets: [String] = []
             var args: [DatabaseValueConvertible?] = []
+
+            // v56 (IMP-104): a new destination is a different device, so what was probed is stale.
+            if let outputFolder,
+               let current = try String.fetchOne(db, sql: "SELECT output_folder FROM sync_profiles WHERE id = ?",
+                                                 arguments: [profileId]),
+               current != outputFolder {
+                try db.execute(sql: "DELETE FROM sync_probe_cache WHERE profile_id = ?", arguments: [profileId])
+            }
 
             if let name {
                 sets.append("name = ?")
