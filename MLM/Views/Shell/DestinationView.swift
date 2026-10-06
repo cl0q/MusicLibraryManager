@@ -44,6 +44,10 @@ struct DestinationView: View {
         // Review builds its own scaffold: its scope bar, banners and the scan line (W3-REV).
         case .review:
             ReviewView(focusTrackID: reviewFocusTrackID, onTrackActivated: onTrackActivated)
+        // Discover builds its own scaffold: its scope bar, the held-recommendations header and the
+        // selection bar over its tables (W3-DISC-A).
+        case .discover:
+            DiscoverView(onTrackActivated: onTrackActivated)
         default:
             ContentScaffold(showsDriveBanner: destination.listsTracks) {
                 content
@@ -75,7 +79,8 @@ struct DestinationView: View {
             // Hosted by `body` (own scaffold).
             Color.clear
         case .discover:
-            DiscoverView()
+            // Hosted by `body` (own scaffold).
+            Color.clear
         case .review:
             // Hosted by `body` (own scaffold).
             Color.clear

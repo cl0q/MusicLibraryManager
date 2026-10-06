@@ -80,7 +80,8 @@ struct TrackSelectionBar: View {
             container: configuration.listContext.container,
             canActivate: configuration.activate != nil,
             canRemoveFromContainer: configuration.removeFromContainer != nil,
-            canAddToSyncProfile: true
+            canAddToSyncProfile: configuration.canAddToSyncProfile,
+            extras: configuration.menuExtras?.items(rows) ?? .none
         )
         let live = source.live.state
         guard let state = SelectionBarState.make(
@@ -174,7 +175,73 @@ private struct SelectionBarCapsule: View {
         var showsTitles: Bool { self == .titles }
     }
 
+    private var configuration: TrackListConfiguration { presentation.source.configuration }
+
+    /// Held recommendations act on the verdicts (V-INBOX.N06): `Keep` · `Keep and Add to Playlist ▾`
+    /// · `Dismiss`, one undo step per batch.
+    private var isRecommendations: Bool { configuration.listContext.container == .recommendations }
+
+    @ViewBuilder
     private func row(_ layout: Layout) -> some View {
+        if isRecommendations {
+            recommendationRow(layout)
+        } else {
+            standardRow(layout)
+        }
+    }
+
+    private func recommendationRow(_ layout: Layout) -> some View {
+        let extras = configuration.menuExtras?.items(rows) ?? .none
+        let perform = configuration.menuExtras?.perform
+        let rows = self.rows
+        return HStack(spacing: Spacing.xxs) {
+            countText(showsDuration: layout != .compact)
+                .padding(.trailing, Spacing.s)
+            if let keep = extras.addTo.first {
+                Button { perform?(keep.id, rows) } label: {
+                    verdictLabel(keep.title, "checkmark.circle", layout)
+                }
+                .help("Keep K")
+            }
+            Menu {
+                AddToPlaylistMenuItems(
+                    playlists: SelectionBarState.playlists(TrackMenuSources.shared.playlists, for: configuration.listContext.container),
+                    showsKeyEquivalents: false,
+                    newPlaylist: { perform?("keepAndAdd:new", rows) },
+                    add: { perform?("keepAndAdd:\($0)", rows) }
+                )
+            } label: {
+                verdictLabel("Keep and Add to Playlist", "text.badge.plus", layout)
+            }
+            .menuStyle(.button)
+            .menuIndicator(.visible)
+            .fixedSize()
+            .help("Keep and Add to Playlist")
+            if let dismiss = extras.remove.first {
+                Button { perform?(dismiss.id, rows) } label: {
+                    verdictLabel(dismiss.title, "trash", layout)
+                }
+                .disabled(!dismiss.isEnabled)
+                .help(dismiss.isEnabled ? "Dismiss ⌫" : "Dismiss is unavailable while the library’s drive is not connected")
+            }
+        }
+        .fixedSize()
+    }
+
+    @ViewBuilder
+    private func verdictLabel(_ title: String, _ symbol: String, _ layout: Layout) -> some View {
+        let content = Label(title, systemImage: symbol)
+            .padding(.horizontal, Spacing.xs)
+            .padding(.vertical, Spacing.xxs)
+            .contentShape(.capsule)
+        if layout.showsTitles {
+            content.labelStyle(.titleOnly)
+        } else {
+            content.labelStyle(.iconOnly)
+        }
+    }
+
+    private func standardRow(_ layout: Layout) -> some View {
         HStack(spacing: Spacing.xxs) {
             countText(showsDuration: layout != .compact)
                 .padding(.trailing, Spacing.s)

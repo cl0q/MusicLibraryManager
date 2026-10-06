@@ -73,6 +73,11 @@ struct TrackListConfiguration {
     var menuExtras: TrackMenuExtrasProvider?
     /// `Add to Sync Profile ▸` is in the track menu (Review's version rows leave it out, W3-REV).
     var canAddToSyncProfile = true
+    /// A row without an energy bucket reads `Analyzing…` instead of `—` (Recommendations, V-INBOX.N04).
+    var showsAnalysingEnergy = false
+    /// Plain letter keys of the focused table (`K` = Keep, UC-KEY-29): handled when no modifier is
+    /// held and a selection exists; the closure gets the shown selected rows.
+    var characterKeys: [Character: ([TrackRow]) -> Void] = [:]
 }
 
 /// A place's own track-menu items and what they do (`TrackMenuItem.extra`).

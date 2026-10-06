@@ -20,6 +20,12 @@ enum TrackListContainer: Equatable, Sendable {
     /// The versions of one Review group (W3-REV): no `Remove from ‹Container›`, the track menu
     /// keeps `Remove from Library…`.
     case reviewGroup(key: String)
+    /// Discover ▸ Recommendations (W3-DISC-A): held downloads waiting for a verdict. ⌫ dismisses
+    /// (UC-KEY-17); there is no `Remove from Library…` — a held track isn't in the library yet.
+    case recommendations
+    /// `Similar to “‹title›”` (W3-DISC-A): the library tracks that sound like `trackID`. Nothing
+    /// in it removes a track from the library (V-SIMILAR.N07, PP-INSPECTOR-21).
+    case similar(trackID: Int64)
     /// Search results, sheet tables and other lists without a container.
     case none
 }
@@ -341,7 +347,7 @@ struct TrackCommandState: Equatable, Sendable {
         let inContainer: Bool
         switch summary.container {
         case .playlist, .queue, .syncProfile, .genre: inContainer = true
-        case .library, .folder, .reviewGroup, .none: inContainer = false
+        case .library, .folder, .reviewGroup, .recommendations, .similar, .none: inContainer = false
         }
 
         canPlay = capabilities.canActivate && summary.firstIsLocal
@@ -355,7 +361,7 @@ struct TrackCommandState: Equatable, Sendable {
         canRemoveFromContainer = inContainer && capabilities.canRemoveFromContainer
         // Remove from Library does not exist in the queue or a sync profile (UC-CM-07).
         switch summary.container {
-        case .queue, .syncProfile: canRemoveFromLibrary = false
+        case .queue, .syncProfile, .recommendations, .similar: canRemoveFromLibrary = false
         default: canRemoveFromLibrary = true
         }
         canDeselectAll = capabilities.canDeselect
@@ -388,6 +394,8 @@ struct TrackCommandState: Equatable, Sendable {
         case .queue: "Select tracks under Next to remove them from the queue."
         case .playlist, .syncProfile, .genre: "These tracks can’t be removed here yet."
         case .reviewGroup: "A version is decided on, not removed from its group. Remove from Library… deletes it."
+        case .recommendations: "Dismiss moves a recommendation you don’t want to the Trash."
+        case .similar: "Nothing in this view removes a track from your library."
         case .none: "This list has nothing to remove tracks from."
         }
     }
@@ -398,7 +406,7 @@ struct TrackCommandState: Equatable, Sendable {
         switch container {
         case .playlist(_, let name), .syncProfile(_, let name), .genre(_, let name): "Remove from “\(name)”"
         case .queue: "Remove from Queue"
-        case .library, .folder, .reviewGroup, .none: MenuCommand.removeFromContainer.title
+        case .library, .folder, .reviewGroup, .recommendations, .similar, .none: MenuCommand.removeFromContainer.title
         }
     }
 }

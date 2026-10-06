@@ -14,6 +14,9 @@ enum TrackColumnID: String, CaseIterable, Codable, Sendable, Identifiable {
     /// (`Recommended — highest quality`), `location` = the file's folder, `usedIn` = playlists
     /// using it (`‹n› playlists`). Never in `standardColumns`.
     case version, location, usedIn
+    /// Discover ▸ Recommendations (W3-DISC-A, V-INBOX.E06e): where the suggestion came from — a
+    /// word with the 6 pt brand dot. Never in `standardColumns`; `Match` (`92 %`) is the one above.
+    case source
 
     var id: String { rawValue }
 
@@ -44,6 +47,7 @@ enum TrackColumnID: String, CaseIterable, Codable, Sendable, Identifiable {
         case .version: "Version"
         case .location: "Location"
         case .usedIn: "Used in"
+        case .source: "Source"
         }
     }
 
@@ -90,6 +94,7 @@ enum TrackColumnID: String, CaseIterable, Codable, Sendable, Identifiable {
         case .version: (190, 250, 340)
         case .location: (140, 260, nil)
         case .usedIn: (70, 90, 140)
+        case .source: (80, 104, 140)
         }
     }
 }
@@ -147,6 +152,7 @@ struct TrackSortOrder: Equatable, Hashable, Codable, Sendable, RawRepresentable 
         case .version: return KeyPathComparator(\TrackRow.versionSortKey, order: order)
         case .location: return KeyPathComparator(\TrackRow.locationSortKey, order: order)
         case .usedIn: return KeyPathComparator(\TrackRow.usedInSortKey, order: order)
+        case .source: return KeyPathComparator(\TrackRow.sourceSortKey, order: order)
         }
     }
 
@@ -182,6 +188,7 @@ extension TrackColumnID {
         case .version: \TrackRow.versionSortKey
         case .location: \TrackRow.locationSortKey
         case .usedIn: \TrackRow.usedInSortKey
+        case .source: \TrackRow.sourceSortKey
         }
     }
 }

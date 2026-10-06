@@ -237,6 +237,12 @@ struct TrackListActions {
         configuration.menuExtras?.perform(id, rows)
     }
 
+    /// `Find Similar`: push `Similar to “‹title›”` for the one track (the Track menu does the same).
+    func findSimilar(_ rows: [TrackRow]) {
+        guard rows.count == 1, let row = rows.first else { return }
+        navigation?.push(.similar(trackID: row.id))
+    }
+
     func removeFromLibrary(_ rows: [TrackRow]) {
         TrackCommandActions.removeFromLibrary(rows.map(\.track), container: container)
     }

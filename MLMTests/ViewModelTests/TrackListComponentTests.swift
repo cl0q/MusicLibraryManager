@@ -241,14 +241,15 @@ struct TrackListComponentTests {
     }
 
     @Test func noDeadItemsFromLaterPackages() {
-        // Go to Album, Find Similar, Share… don't exist yet (Preview and Locate File… arrived
-        // with W2-C, Go to Artist with W2-I, Add to Queue with W2-D).
+        // Go to Album and Share… don't exist yet (Preview and Locate File… arrived with W2-C, Go to
+        // Artist with W2-I, Add to Queue with W2-D, Find Similar with W3-DISC-A).
         let all = menu([track(1)], playlist).items + menu([track(2, missing: true)], library).items
         let titles = all.map { "\($0)" }.joined(separator: " ")
-        for absent in ["goToAlbum", "findSimilar", "share"] {
+        for absent in ["goToAlbum", "share"] {
             #expect(!titles.contains(absent))
         }
         #expect(all.contains(.addToQueue))
+        #expect(all.contains(.findSimilar))
         #expect(all.contains(.preview(enabled: true)) && all.contains(.locateFile))
         // Preview needs exactly one track (UC-CM-04).
         #expect(!menu([track(1), track(2)], library).items.contains { if case .preview = $0 { true } else { false } })

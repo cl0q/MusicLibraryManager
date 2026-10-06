@@ -118,6 +118,18 @@ struct TrackMenu: View {
             Button("Download Again") { actions.downloadAgain(rows) }
         case .locateFile:
             Button("Locate File…") { actions.locateFile(rows) }
+        case .findSimilar:
+            // Navigates (the verb says so, UC-CM-09): pushes `Similar to “‹title›”`.
+            Button("Find Similar") { actions.findSimilar(rows) }
+        case .keepAndAddToPlaylist:
+            Menu("Keep and Add to Playlist") {
+                AddToPlaylistMenuItems(
+                    playlists: playlists,
+                    showsKeyEquivalents: false,
+                    newPlaylist: { actions.performExtra("keepAndAdd:new", rows) },
+                    add: { actions.performExtra("keepAndAdd:\($0)", rows) }
+                )
+            }
         case .showInFinder(let enabled):
             let item = Button("Show in Finder") { actions.showInFinder(rows) }
                 .disabled(!enabled, reason: offlineVolumeName.map(TrackMenu.notConnectedHelp))
@@ -252,9 +264,12 @@ protocol TrackMenuActions {
     func clearHistory()
     /// A place's own item (`TrackMenuItem.extra`, W3-GEN).
     func performExtra(_ id: String, _ rows: [TrackRow])
+    /// `Find Similar` (W3-DISC-A).
+    func findSimilar(_ rows: [TrackRow])
 }
 
 extension TrackMenuActions {
+    func findSimilar(_ rows: [TrackRow]) {}
     func moveToEndOfQueue(_ rows: [TrackRow]) {}
     func showInContext(_ rows: [TrackRow]) {}
     func clearHistory() {}

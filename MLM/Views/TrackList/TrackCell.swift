@@ -8,6 +8,9 @@ struct TrackTableCellOptions {
     var dimsPosition = false
     /// Album values link to the album (UC-TABLE-18; `nil` until W4-2).
     var openAlbum: ((TrackRow) -> Void)?
+    /// A row without an energy bucket says `Analyzing…` (Discover ▸ Recommendations, V-INBOX.N04):
+    /// its automatic analysis is still running.
+    var showsAnalysingEnergy = false
 }
 
 extension EnvironmentValues {
@@ -57,7 +60,11 @@ struct TrackCell: View {
         case .bpm:
             value(row.bpmText, dimmed: dimmed, numeric: true)
         case .energy:
-            TrackMeter(level: row.energyLevel).opacity(dimmed ? 0.5 : 1)
+            if options.showsAnalysingEnergy, row.energyLevel == nil {
+                Text("Analyzing…").foregroundStyle(.secondary).lineLimit(1)
+            } else {
+                TrackMeter(level: row.energyLevel).opacity(dimmed ? 0.5 : 1)
+            }
         case .dance:
             TrackMeter(level: row.danceLevel).opacity(dimmed ? 0.5 : 1)
         case .genre:
@@ -86,6 +93,8 @@ struct TrackCell: View {
             ReviewLocationCell(row: row, dimmed: dimmed)
         case .usedIn:
             ReviewUsedInCell(rowID: row.id)
+        case .source:
+            RecommendationSourceCell(rowID: row.id)
         }
     }
 
