@@ -35,10 +35,8 @@ enum SourceAccountState: Equatable, Sendable {
 
 /// Where the Add menu and the import sheets read source accounts from.
 ///
-/// **Swap point (W3-SET):** W3-SET owns the account-state model (`Connected` / `Disconnected` /
-/// `Sign-in expired` per source). Until it lands, `SourcesViewModelAccountStates` reads the
-/// state from `SourcesViewModel` as before. When W3-SET's model exists, make it conform to this
-/// protocol and change the one line in `ImportServices.makeAccountStates`.
+/// W3-SET: the states come from the one account-state model, `SourceAccounts`;
+/// `SourcesViewModelAccountStates` adds the sheets' actions (sign-in, keychain access) on top.
 @MainActor
 protocol SourceAccountStateReading: AnyObject {
     func state(of service: TokenStorage.Service) -> SourceAccountState
@@ -83,12 +81,14 @@ final class SourcesViewModelAccountStates: SourceAccountStateReading {
         self.tokenRefreshService = tokenRefreshService
     }
 
+    /// W3-SET: the one account-state model (`SourceAccounts`) answers, so the sheets, Settings ▸
+    /// Sources and the sidebar can't disagree (§11.1 #9).
+    private var accounts: SourceAccounts { tokenAccessStatus?.accounts ?? .shared }
+
     func state(of service: TokenStorage.Service) -> SourceAccountState {
         _ = generation
         if service == .appleMusic { return .notAvailable }
-        if viewModel.isTokenInaccessible(service), !expired.contains(service) { return .keychainLocked }
-        if expired.contains(service) { return .signInExpired }
-        return viewModel.isConnected(service) ? .connected(account: nil) : .disconnected
+        return accounts.state(for: service)
     }
 
     func reload() async {
@@ -98,12 +98,14 @@ final class SourcesViewModelAccountStates: SourceAccountStateReading {
 
     func markSignInExpired(_ service: TokenStorage.Service) {
         expired.insert(service)
+        accounts.recordRefreshRejected(service)
         generation += 1
     }
 
     func signIn(_ service: TokenStorage.Service) async throws {
         try await viewModel.signIn(service)
         expired.remove(service)
+        accounts.didConnect(service)
         tokenAccessStatus?.markAccessible(service)
         await tokenRefreshService?.clearBackoff(service: service)
         await reload()
@@ -113,6 +115,7 @@ final class SourcesViewModelAccountStates: SourceAccountStateReading {
         guard let tokenStorage,
               (try? tokenStorage.getCredentials(service: service, interactive: true)) != nil else {
             expired.insert(service)
+            accounts.recordRefreshRejected(service)
             generation += 1
             return false
         }

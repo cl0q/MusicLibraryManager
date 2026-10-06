@@ -39,6 +39,8 @@ final class SourcesViewModel {
     private let oauthManager: OAuthManager?
     private let tokenAccessStatus: TokenAccessStatus?
     private let tokenRefreshService: TokenRefreshService?
+    /// The one account-state model (W3-SET), reached through the shared access status.
+    @MainActor private var accounts: SourceAccounts? { tokenAccessStatus?.accounts }
 
     // Source clients (lazy-initialized)
     private var soundCloudClient: SoundCloudClient?
@@ -136,6 +138,11 @@ final class SourcesViewModel {
         return String(timestamp.prefix(10))
     }
 
+    /// When the source was last refreshed (Settings ▸ Sources: `last refreshed today, 09:14`).
+    func lastSyncDate(for service: TokenStorage.Service) -> Date? {
+        lastSyncTimestamps[service].flatMap { ISO8601DateFormatter().date(from: $0) }
+    }
+
     /// Error message for a source.
     func error(for service: TokenStorage.Service) -> String? {
         errors[service]
@@ -166,6 +173,7 @@ final class SourcesViewModel {
         // Check Keychain for stored credentials, and keep the shared access
         // state in sync (also covers services not registered with the
         // background refresh loop).
+        var readings: [TokenStorage.Service: StoredSignIn] = [:]
         for service in TokenStorage.Service.allCases {
             connectionStatus[service] = tokenStorage.hasCredentials(service: service)
             do {
@@ -177,7 +185,10 @@ final class SourcesViewModel {
                 // Unreadable for another reason — hasCredentials above
                 // already answered the UI question.
             }
+            readings[service] = SourceAccounts.reading(tokenStorage, service: service)
         }
+        // W3-SET: the one account-state model gets the same reading.
+        accounts?.apply(readings)
 
         // Load track counts from sources table
         do {
@@ -237,6 +248,7 @@ final class SourcesViewModel {
             }
 
             connectionStatus[service] = true
+            accounts?.didConnect(service)
         } catch {
             errors[service] = error.localizedDescription
             AppLogger.shared.error(
@@ -264,6 +276,7 @@ final class SourcesViewModel {
         }
         connectionStatus[service] = true
         errors.removeValue(forKey: service)
+        accounts?.didConnect(service)
     }
 
     // MARK: - Reconnect
@@ -310,6 +323,7 @@ final class SourcesViewModel {
             trackCounts.removeValue(forKey: service)
             lastSyncTimestamps.removeValue(forKey: service)
             tokenAccessStatus?.markAccessible(service)
+            accounts?.didDisconnect(service)
         } catch {
             errors[service] = error.localizedDescription
         }
@@ -340,6 +354,8 @@ final class SourcesViewModel {
             // The client deleted the rejected tokens; the source is no longer connected.
             connectionStatus[service] = false
             errors[service] = "Sign-in expired (\(service.displayName))"
+            // W3-SET: `Sign-in expired`, not `Disconnected`, until the user reconnects.
+            accounts?.recordRefreshRejected(service)
         case .failed(let cause):
             errors[service] = cause
         case .alreadyRunning:

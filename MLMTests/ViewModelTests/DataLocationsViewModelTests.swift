@@ -63,12 +63,29 @@ struct DataLocationsViewModelTests {
             try fm.createDirectory(at: library, withIntermediateDirectories: true)
             try Data(count: 4096).write(to: library.appendingPathComponent("song.flac"))
 
+            // W3-SET: the locations this Mac keeps (ST-STORAGE.N02/N03).
+            let list = root.appendingPathComponent("libraries.json")
+            try Data(count: 12).write(to: list)
+            let artwork = root.appendingPathComponent("artwork_cache")
+            try fm.createDirectory(at: artwork, withIntermediateDirectories: true)
+            try Data(count: 100).write(to: artwork.appendingPathComponent("a.jpg"))
+            let migrations = root.appendingPathComponent("PathMigrations")
+            try fm.createDirectory(at: migrations, withIntermediateDirectories: true)
+            try Data(count: 30).write(to: migrations.appendingPathComponent("m.json"))
+            let logs = root.appendingPathComponent("Logs")
+            try fm.createDirectory(at: logs, withIntermediateDirectories: true)
+            try Data(count: 50).write(to: logs.appendingPathComponent("mlm.log"))
+
             locations = DataLocations(
                 database: database,
                 playlistCovers: covers,
                 credentialsFile: credentials,
                 transcodeCache: cache,
-                libraryFolder: library
+                libraryFolder: library,
+                libraryList: list,
+                caches: [artwork, root.appendingPathComponent("waveforms-missing")],
+                pathMigrations: migrations,
+                logFile: logs.appendingPathComponent("mlm.log")
             )
         }
 
@@ -196,7 +213,7 @@ struct DataLocationsViewModelTests {
         let fx = try Fixture()
         defer { fx.cleanup() }
         try FileManager.default.removeItem(at: fx.locations.credentialsFile)
-        try FileManager.default.removeItem(at: fx.locations.playlistCovers)
+        try FileManager.default.removeItem(at: fx.locations.playlistCovers!)
         let vm = fx.makeViewModel()
 
         await vm.refresh()
@@ -405,5 +422,48 @@ struct DataLocationsViewModelTests {
             == "Recent changes are kept in a separate file (-wal) and merged into the database automatically.")
         #expect(Copy.footer
             == "Library files and the credentials file remain on your Mac if you delete the app. Audio files are never moved by this tab.")
+    }
+
+    // MARK: - W3-SET: regrouped locations and the sizes chart
+
+    @Test func macLocationsAreMeasured() async throws {
+        let fx = try Fixture()
+        defer { fx.cleanup() }
+        let vm = fx.makeViewModel()
+        await vm.refresh()
+        #expect(vm.row(.libraryList).sizeBytes == 12)
+        #expect(vm.row(.caches).state == .available, "one existing cache folder is enough")
+        #expect((vm.row(.caches).sizeBytes ?? 0) > 0)
+        #expect((vm.row(.pathMigrations).sizeBytes ?? 0) > 0)
+        #expect(vm.row(.logs).url?.lastPathComponent == "mlm.log")
+        #expect((vm.row(.logs).sizeBytes ?? 0) > 0)
+        let names = vm.macSegments.map(\.name)
+        #expect(names.contains("Backups") && names.contains("Caches") && names.contains("Path migration backups"))
+        #expect(vm.macTotalBytes == vm.macSegments.map(\.bytes).reduce(0, +))
+    }
+
+    @Test func noLibraryKeepsTheMacRows() async throws {
+        let fx = try Fixture()
+        defer { fx.cleanup() }
+        var locations = fx.locations
+        locations.database = nil
+        locations.playlistCovers = nil
+        locations.libraryFolder = nil
+        let vm = fx.makeViewModel(locations: locations)
+        await vm.refresh()
+        #expect(vm.row(.database).state == .notSet)
+        #expect(vm.row(.credentialsFile).state == .available)
+        #expect(vm.row(.libraryList).state == .available)
+    }
+
+    @Test func driveBarAddsOtherFiles() async throws {
+        let fx = try Fixture()
+        defer { fx.cleanup() }
+        let vm = fx.makeViewModel()
+        await vm.refresh()
+        // The temporary folder's volume is the Mac's own disk.
+        #expect(vm.driveTitle == "On this Mac’s disk")
+        #expect(vm.driveSegments.last?.name == "Other files")
+        #expect(vm.driveCapacityText?.contains(" free") == true)
     }
 }

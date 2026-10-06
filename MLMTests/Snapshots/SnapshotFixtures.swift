@@ -350,9 +350,12 @@ enum SnapshotFixtures {
         "Search/OnlineSearchResultsView.swift": "Deferred: Online-scope results ask live sources (W2-I); OnlineSearchModel is unit-tested with fake sources.",
         "Search/SearchSuggestionList.swift": "Deferred: search suggestions render only inside the window's toolbar search field (W2-I).",
         "Search/SearchFocusHandoff.swift": "Non-view: moves focus from the search field to the visible table (AppKit, W2-I).",
-        "Settings/BackupSettingsView.swift": "Deferred: container-backed backup service and folder/Finder panels require an inert backup model.",
-        "Settings/DataLocationsView.swift": "Deferred: container-backed paths, backup service and filesystem sizes require an inert locations model.",
-        "Settings/LibrarySetupView.swift": "Deferred: import/filesystem state and folder panels require inert import model.",
+        "Settings/BackupSettingsView.swift": "Deferred: container-backed backup service and folder/Finder panels require an inert backup model; BackupSettingsViewModel is unit-tested (W3-SET).",
+        "Settings/DataLocationsView.swift": "Deferred: container-backed paths, filesystem sizes and a Swift Charts bar require an inert locations model (W3-SET).",
+        "Settings/LibrarySetupView.swift": "Deferred: import/filesystem state, the rename and folder sheets need an inert library model; LibraryRename is unit-tested (W3-SET).",
+        "Settings/PlaybackSettingsView.swift": "Deferred: AppStorage playback keys and the shared Maintenance coverage need an injected preference store (W3-SET).",
+        "Settings/AdvancedSettingsView.swift": "Deferred: credentials-file existence, the logger and the interim genre tools need injected locations (W3-SET).",
+        "Settings/SettingsRows.swift": "Deferred: shared Settings rows (paths, state words, Show in Finder, How to Install popover, folder panel); rendered within their tabs (W3-SET).",
         "Launch/LaunchRootView.swift": "Deferred: switches on the shared launch coordinator's screen; needs an injected coordinator (W3-LAUNCH).",
         "Launch/LibraryPickerView.swift": "Deferred: the picker reads the launch coordinator's registry rows and mount events; needs a fixture registry (W3-LAUNCH).",
         "Launch/LibraryAdoptionSheet.swift": "Deferred: a sheet driven by the launch coordinator's adoption state (W3-LAUNCH).",
@@ -361,9 +364,9 @@ enum SnapshotFixtures {
         "Launch/LibrarySetupFlowView.swift": "Deferred: setup steps read the launch coordinator and the import model (W3-LAUNCH).",
         "Launch/NewLibrarySheet.swift": "Deferred: a sheet validating against the launch coordinator's libraries folder (W3-LAUNCH).",
         "Launch/LibraryFileIcon.swift": "Non-view: the library-file icon image and the .mlibm type for the open panel (W3-LAUNCH).",
-        "Settings/MaintenanceView.swift": "Deferred: reads shared BatchControl/maintenance queues and paths; inject passive state.",
+        "Settings/MaintenanceView.swift": "Deferred: reads the shared Maintenance runner, coverage and Activity history; MaintenanceJobs is unit-tested (W3-SET).",
         "Settings/SettingsView.swift": "Deferred: AppStorage selection and PlaybackSettings read real defaults; inject preference store.",
-        "Settings/SourcesSetupView.swift": "Deferred: AppStorage cookie and credential state require isolated preferences and auth provider.",
+        "Settings/SourcesSetupView.swift": "Deferred: account states, tool probes and the cookie need isolated preferences and an auth provider; SourceAccounts and DownloadToolsModel are unit-tested (W3-SET).",
         "Settings/GeneralSettingsView.swift": "Deferred: reads the shared library launch coordinator's registry setting; inject a registry store.",
         "Settings/SettingsTab.swift": "Non-view: settings tab enum and router.",
         "Sidebar/LibraryFooter.swift": "Deferred: reads the launch coordinator singleton and live library counts; needs injected library identity.",
@@ -472,11 +475,14 @@ Search/OnlineSearchResultsView.swift
 Search/SearchFocusHandoff.swift
 Search/SearchResultsView.swift
 Search/SearchSuggestionList.swift
+Settings/AdvancedSettingsView.swift
 Settings/BackupSettingsView.swift
 Settings/DataLocationsView.swift
 Settings/GeneralSettingsView.swift
 Settings/LibrarySetupView.swift
 Settings/MaintenanceView.swift
+Settings/PlaybackSettingsView.swift
+Settings/SettingsRows.swift
 Settings/SettingsTab.swift
 Settings/SettingsView.swift
 Settings/SourcesSetupView.swift

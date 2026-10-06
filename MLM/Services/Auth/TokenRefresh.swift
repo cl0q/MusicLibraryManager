@@ -191,6 +191,8 @@ actor TokenRefreshService {
                     refreshToken: refreshToken
                 )
             }
+        } catch let error where Self.isRejection(error) {
+            await recordRejected(service: service, error: error)
         } catch TokenStorage.KeychainError.itemInaccessible(let status) {
             await recordInaccessible(service: service, status: status, now: now)
         } catch {
@@ -282,6 +284,9 @@ actor TokenRefreshService {
             )
         }
 
+        // W3-SET: a successful refresh clears a remembered rejection (`Sign-in expired`).
+        await accessStatus.recordRefreshSucceeded(registration.service)
+
         AppLogger.shared.info(
             "Refreshed \(registration.service.displayName) token",
             source: "TokenRefresh"
@@ -299,7 +304,31 @@ actor TokenRefreshService {
             return
         }
 
-        try await performRefresh(registration: registration, refreshToken: refreshToken)
+        do {
+            try await performRefresh(registration: registration, refreshToken: refreshToken)
+        } catch where Self.isRejection(error) {
+            await recordRejected(service: service, error: error)
+            throw error
+        }
+    }
+
+    // MARK: - Refresh failures (W3-SET)
+
+    /// Whether a refresh failure means the sign-in can't be renewed (the provider answered
+    /// 400 / 401 — `invalid_grant`, revoked access). Network failures and server errors are
+    /// transient: offline is normal, nothing is marked expired for them.
+    static func isRejection(_ error: Error) -> Bool {
+        guard case OAuthManager.OAuthError.tokenExchangeFailed(let statusCode, _) = error else { return false }
+        return statusCode == 400 || statusCode == 401
+    }
+
+    /// The sign-in is `Sign-in expired` until a refresh succeeds or the user reconnects.
+    private func recordRejected(service: TokenStorage.Service, error: Error) async {
+        await accessStatus.recordRefreshRejected(service)
+        AppLogger.shared.warn(
+            "\(service.displayName) refused the saved sign-in (\(error.localizedDescription)) — Sign-in expired",
+            source: "TokenRefresh"
+        )
     }
 }
 

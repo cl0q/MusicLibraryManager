@@ -450,7 +450,8 @@ final class ActivityCenter {
     /// How a queued operation names the one it waits for: `“Liked on SoundCloud”` (its
     /// subject) or its title.
     static func turnName(_ operation: ActivityOperation) -> String {
-        if let name = operation.subject.name, operation.subject.kind != .none { return "“\(name)”" }
+        // A Settings tab names no work (`“Maintenance”`): the title does (W3-SET).
+        if let name = operation.subject.name, ![.none, .settings].contains(operation.subject.kind) { return "“\(name)”" }
         return operation.title
     }
 

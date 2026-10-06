@@ -1,13 +1,13 @@
 import SwiftUI
 
 /// The `Settings` scene's content (W-SETTINGS, UC-WIN-03/04/05, DEC-035): eight tabs in the
-/// order of `SettingsTab`, each hosting an existing pane unchanged (their redesign is W3-SET).
+/// order of `SettingsTab`, each a native `Form` with `.formStyle(.grouped)` (W3-SET).
 ///
 /// - The selection lives in `SettingsRouter.shared`, so deep links (`openSettings(tab:)`) and
 ///   ⌘, land on the right tab; the window title is the selected tab's name (system).
-/// - With no library open, the tabs that belong to a library are dimmed and one line at the
-///   top says so, with `Choose Library…` (UC-WIN-05); General, Playback and Sources keep
-///   working.
+/// - With no library open, one line at the top says so, with `Choose Library…` (UC-WIN-05);
+///   the tabs that belong to a library are dimmed, the others dim only their per-library
+///   sections (General, Playback, Sources, Storage Location and Advanced keep working).
 struct SettingsView: View {
     @Environment(\.container) private var container
 
@@ -23,8 +23,9 @@ struct SettingsView: View {
             pane(.maintenance) { MaintenanceView() }
             pane(.advanced) { AdvancedSettingsView() }
         }
-        .frame(minWidth: 600, idealWidth: 720, maxWidth: .infinity, minHeight: 500, idealHeight: 560, maxHeight: .infinity)
+        .frame(minWidth: 640, idealWidth: 720, maxWidth: .infinity, minHeight: 500, idealHeight: 620, maxHeight: .infinity)
         .installsMainWindowPresenter()
+        .modifier(ActivityWindowOpenerInstaller())
     }
 
     /// One tab: the pane, dimmed when it belongs to a library and none is open.
@@ -67,71 +68,5 @@ private struct NoLibraryOpenLine: View {
         .overlay(alignment: .bottom) {
             Divider()
         }
-    }
-}
-
-// MARK: - Advanced
-
-/// Settings ▸ Advanced. Until W3-GEN builds the Genres destination, it still hosts the genre
-/// tools (formerly the Advanced tab's only content) under a labelled header, so they stay
-/// reachable; W3-SET fills Advanced with its designed content (ST-ADVANCED).
-private struct AdvancedSettingsView: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("Genres")
-                    .font(.headline)
-                Text("These genre tools move to Genres in the main window’s sidebar.")
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, Spacing.l)
-            .padding(.vertical, Spacing.m)
-            Divider()
-            GrooveStudioView()
-        }
-    }
-}
-
-// MARK: - Playback Settings
-
-struct PlaybackSettingsView: View {
-    @State private var historySize: Int = UserDefaults.standard.integer(forKey: "playback_history_size") > 0
-        ? UserDefaults.standard.integer(forKey: "playback_history_size")
-        : 50
-    @State private var contextCap: Int = UserDefaults.standard.integer(forKey: "playback_context_cap") > 0
-        ? UserDefaults.standard.integer(forKey: "playback_context_cap")
-        : 100
-    @AppStorage("playback_lufs_normalization") private var lufsNormalization: Bool = false
-
-    var body: some View {
-        Form {
-            Section("History") {
-                Stepper(
-                    "History size: \(historySize)",
-                    value: $historySize,
-                    in: 10...500
-                )
-                .onChange(of: historySize) { _, newValue in
-                    UserDefaults.standard.set(newValue, forKey: "playback_history_size")
-                }
-            }
-
-            Section("Queue") {
-                Stepper(
-                    "Queue cap: \(contextCap)",
-                    value: $contextCap,
-                    in: 10...1000
-                )
-                .onChange(of: contextCap) { _, newValue in
-                    UserDefaults.standard.set(newValue, forKey: "playback_context_cap")
-                }
-            }
-
-            Section("Audio") {
-                Toggle("Normalize loudness (LUFS)", isOn: $lufsNormalization)
-            }
-        }
-        .formStyle(.grouped)
-        .padding()
     }
 }

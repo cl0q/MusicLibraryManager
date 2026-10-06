@@ -175,6 +175,12 @@ struct ExternalToolHealth: Sendable {
         case scdl
         case ffmpeg
         case ffprobe
+        /// Chromaprint's command-line tool (fingerprint analysis). W3-SET: shown in Settings ▸
+        /// Sources ▸ Download tools; not part of `downloadPipeline`.
+        case fpcalc
+
+        /// The tools `checkAll` reports (the download / transcode pipeline).
+        static let downloadPipeline: [Tool] = [.ytdlp, .scdl, .ffmpeg, .ffprobe]
     }
 
     let environment: ToolEnvironment
@@ -188,7 +194,7 @@ struct ExternalToolHealth: Sendable {
     /// are reported as `.unknown` (installed but staleness indeterminate).
     func checkAll(latestVersions: [Tool: String]) async -> [ToolHealth] {
         var results: [ToolHealth] = []
-        for tool in Tool.allCases {
+        for tool in Tool.downloadPipeline {
             let report = await check(tool, latestVersion: latestVersions[tool])
             results.append(report)
         }
@@ -451,7 +457,7 @@ struct ExternalToolHealth: Sendable {
         switch tool {
         case .ytdlp, .scdl:
             return ["--version"]
-        case .ffmpeg, .ffprobe:
+        case .ffmpeg, .ffprobe, .fpcalc:
             return ["-version"]
         }
     }
@@ -466,6 +472,8 @@ struct ExternalToolHealth: Sendable {
             return "ffmpeg is not installed. Install with `brew install ffmpeg`."
         case .ffprobe:
             return "ffprobe is not installed. Install with `brew install ffmpeg`."
+        case .fpcalc:
+            return "fpcalc is not installed. Install with `brew install chromaprint`."
         }
     }
 
@@ -479,6 +487,8 @@ struct ExternalToolHealth: Sendable {
             return "ffmpeg \(installedVersion) is outdated (latest: \(latestVersion)). Update with `brew upgrade ffmpeg`."
         case .ffprobe:
             return "ffprobe \(installedVersion) is outdated (latest: \(latestVersion)). Update with `brew upgrade ffmpeg`."
+        case .fpcalc:
+            return "fpcalc \(installedVersion) is outdated (latest: \(latestVersion)). Update with `brew upgrade chromaprint`."
         }
     }
 }

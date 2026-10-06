@@ -136,7 +136,7 @@ struct LibraryFinderIntegrationTests {
 
     @Test func libraryTabShowsTheLibraryFileSection() throws {
         let src = try source("MLM/Views/Settings/LibrarySetupView.swift")
-        for string in ["Library file", "Show in Finder"] {
+        for string in ["Library file", "ShowInFinderButton(url: package)", "Rename…"] {
             #expect(src.contains(string), "missing Library tab copy: \(string)")
         }
         // The launch choice is about MLM, not one library: Settings ▸ General (W1-2, UC-WIN-04).

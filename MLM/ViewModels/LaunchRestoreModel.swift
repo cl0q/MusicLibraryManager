@@ -69,7 +69,10 @@ final class LaunchRestoreModel {
             poolCloser: { try pool.close() }
         )
         let backups = BackupSettingsViewModel(
-            service: service, configRepository: ConfigRepository(database: pool), relaunch: relaunch)
+            service: service, configRepository: ConfigRepository(database: pool), relaunch: relaunch,
+            // No library is open at the launch failure: no library work can be running, so the
+            // Settings restore guard (W3-SET, PP-SETTINGS-15) doesn't apply here.
+            activeOperations: { [] })
         await backups.refresh()
         let model = LaunchRestoreModel(libraryName: libraryName, backups: backups, pool: pool)
         guard !model.restorable.isEmpty else {
