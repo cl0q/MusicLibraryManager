@@ -874,12 +874,16 @@ final class SyncService {
 
         isRunning = true
         runningProfileId = profileId
-        defer {
+        activityJob = operationId
+        // The order at the end of a run: its result is written, then this state is reset, then the
+        // Activity operation ends — so a queued run that starts on the operation's end finds the
+        // service idle. Idempotent; the `defer` is the net for any exit not routed through it.
+        func resetRunState() {
             isRunning = false
             runningProfileId = nil
+            activityJob = nil
         }
-        activityJob = operationId
-        defer { activityJob = nil }
+        defer { resetRunState() }
         operationId?.update(completed: 0, total: total)
 
         var result = SyncResult()
@@ -899,7 +903,7 @@ final class SyncService {
                                       plan: preview.summary, operationID: operationId?.id)
         }
 
-        let libraryRoot = try await finalisingOperationOnThrow(operationId) { try await configRepository.getLibraryRoot() ?? "" }
+        let libraryRoot = try await finalisingOperationOnThrow(operationId, beforeFail: resetRunState) { try await configRepository.getLibraryRoot() ?? "" }
         // Which volume this run writes to; a wait for the device ends only when it is back.
         let volumeIdentity = destinations.volumeIdentity(profile.outputFolder)
         let workerCount = syncTurboLevel.workerCount()
@@ -1118,15 +1122,9 @@ final class SyncService {
             }
         }
 
-        // 3. Generate M3U8 playlists (M3U8 gate — SYNC-v2-20) and 4. the iOS manifest.
-        do {
-            if profile.generateM3U8 && !result.wasCancelled {
-                try await finalisingOperationOnThrow(operationId) { try await generatePlaylists(profileId: profileId, profile: profile, libraryRoot: libraryRoot) }
-            }
-            if profile.playlistFormatEnum == .ios && !result.wasCancelled {
-                try await finalisingOperationOnThrow(operationId) { try await generateManifest(profileId: profileId, profile: profile, libraryRoot: libraryRoot) }
-            }
-        } catch {
+        // 3. Generate M3U8 playlists (M3U8 gate — SYNC-v2-20) and 4. the iOS manifest. When one
+        //    throws: the failed result is written, the state reset, then the operation fails.
+        let recordPlaylistFailure: () async -> Void = {
             if !isRetry {
                 try? await results?.finish(
                     profileID: profileId, outcome: .failed, endedAt: Date(), copiedCount: result.syncedCount,
@@ -1134,21 +1132,17 @@ final class SyncService {
                     skipped: result.skippedTracks,
                     failureCause: "Couldn’t write the playlist files on “\(deviceName)”")
             }
-            throw error
+            resetRunState()
+        }
+        if profile.generateM3U8 && !result.wasCancelled {
+            try await finalisingOperationOnThrow(operationId, beforeFail: recordPlaylistFailure) { try await generatePlaylists(profileId: profileId, profile: profile, libraryRoot: libraryRoot) }
+        }
+        if profile.playlistFormatEnum == .ios && !result.wasCancelled {
+            try await finalisingOperationOnThrow(operationId, beforeFail: recordPlaylistFailure) { try await generateManifest(profileId: profileId, profile: profile, libraryRoot: libraryRoot) }
         }
 
         currentFile = ""
         progress = 1.0
-
-        // End the Activity operation — always, also when cancelled (PP-ACTIVITY-01).
-        if let operationId {
-            let activityResult = Self.activityResult(result)
-            if result.wasCancelled || cancellationRequested {
-                operationId.cancelled(activityResult)
-            } else {
-                operationId.finish(activityResult)
-            }
-        }
 
         // This profile's result (v47) — never another profile's (PP-SYNC-02).
         if isRetry {
@@ -1159,6 +1153,18 @@ final class SyncService {
                 profileID: profileId, outcome: result.wasCancelled ? .cancelled : .completed, endedAt: Date(),
                 copiedCount: result.syncedCount, removedCount: result.removedCount,
                 failures: Self.resultFailures(result), skipped: result.skippedTracks)
+        }
+
+        // Reset, then end the Activity operation — always, also when cancelled (PP-ACTIVITY-01).
+        let wasCancelled = result.wasCancelled || cancellationRequested
+        resetRunState()
+        if let operationId {
+            let activityResult = Self.activityResult(result)
+            if wasCancelled {
+                operationId.cancelled(activityResult)
+            } else {
+                operationId.finish(activityResult)
+            }
         }
 
         return result
@@ -1208,10 +1214,12 @@ final class SyncService {
     /// terminalise it because `operationId` is local to `executeSync`.
     private func finalisingOperationOnThrow<T>(
         _ operationId: ActivityOperationHandle?,
+        beforeFail: () async -> Void = {},
         _ work: () async throws -> T
     ) async rethrows -> T {
         do { return try await work() }
         catch {
+            await beforeFail()
             operationId?.fail(cause: error.localizedDescription, fix: .runAgain)
             throw error
         }
