@@ -86,11 +86,21 @@ struct AlbumPageQueriesTests {
         // The track path deletes the rows of the removed tracks (manual cascades).
         let tracks = TrackRepository(database: lib.db)
         try await tracks.delete(ids: emptyTracks + [keptTracks[0]])
-        #expect(try await lib.albums.fetch(id: empty) != nil, "the track path leaves the album row")
-        #expect(try await lib.albums.deleteEmpty(ids: [empty, kept]) == 1)
-        #expect(try await lib.albums.fetch(id: empty) == nil)
+        #expect(try await lib.albums.fetch(id: empty) == nil, "the track-delete cascade prunes the emptied album")
+        #expect(try await lib.albums.deleteEmpty(ids: [empty, kept]) == 0, "nothing left to prune; the album with a member stays")
         #expect(try await lib.albums.fetch(id: kept) != nil)
         #expect(try await lib.joins.rows(of: kept).map(\.trackId) == [keptTracks[1]])
+    }
+
+    @Test func deletingTheLastTrackKeepsABaseThatStillHasEditions() async throws {
+        let lib = try Library()
+        let (base, baseTracks) = try await lib.album("Base", count: 1)
+        let (edition, _) = try await lib.album("Base Deluxe", count: 1)
+        try await lib.db.write { db in
+            try db.execute(sql: "UPDATE albums SET variant_of = ?, variant_kind = 'deluxe' WHERE id = ?", arguments: [base, edition])
+        }
+        try await TrackRepository(database: lib.db).delete(ids: baseTracks)
+        #expect(try await lib.albums.fetch(id: base) != nil, "a base of editions is kept")
     }
 
     @Test func coverPathAndEditionPreferenceCanBeSetAndCleared() async throws {

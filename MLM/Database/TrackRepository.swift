@@ -540,6 +540,14 @@ final class TrackRepository: Sendable {
             let hasAlbumTracks = try db.tableExists("album_tracks")   // v50 (W4-1)
             let hasAlbumSuggestions = try db.tableExists("album_suggestions")   // v52 (W4-3)
             let hasHiddenColumn = try db.columns(in: "tracks").contains { $0.name == "hidden_by_review" }
+            // Albums these tracks belonged to: pruned below when nothing is left in them.
+            var albumIDs = Set<Int64>()
+            for id in uniqueIDs {
+                if hasAlbumTracks {
+                    albumIDs.formUnion(try Int64.fetchAll(db, sql: "SELECT album_id FROM album_tracks WHERE track_id = ?", arguments: [id]))
+                }
+                if let linked = try Int64.fetchOne(db, sql: "SELECT album_id FROM tracks WHERE id = ?", arguments: [id]) { albumIDs.insert(linked) }
+            }
             for id in uniqueIDs {
                 if hasSavedQueue {
                     try db.execute(sql: "DELETE FROM playback_queue_entries WHERE track_id = ?", arguments: [id])
@@ -576,6 +584,8 @@ final class TrackRepository: Sendable {
                 try db.execute(sql: "UPDATE track_discovery_log SET seed_track_id = NULL WHERE seed_track_id = ?", arguments: [id])
                 try Track.deleteOne(db, id: id)
             }
+            // A base album left with no track goes with its last one (a base of editions stays).
+            try AlbumRepository.pruneEmpty(db, ids: albumIDs)
         }
     }
 

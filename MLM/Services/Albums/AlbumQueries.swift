@@ -141,16 +141,7 @@ extension AlbumRepository {
     /// version, a track whose file couldn't be trashed — stay. Returns how many went.
     @discardableResult
     func deleteEmpty(ids: [Int64]) async throws -> Int {
-        var removed = 0
-        for id in Set(ids) {
-            let members = try await database.read { db in
-                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM album_tracks WHERE album_id = ?", arguments: [id]) ?? 0
-            }
-            guard members == 0 else { continue }
-            try await delete(id: id)
-            removed += 1
-        }
-        return removed
+        try await database.write { db in try Self.pruneEmpty(db, ids: ids) }
     }
 }
 
