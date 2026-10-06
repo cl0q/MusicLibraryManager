@@ -97,10 +97,108 @@ final class SidebarModel {
         return before.subtracting(after).sorted()
     }
 
+    /// Reloads the playlists, the playlist folders (W3-PL) and the playlists' summaries together.
     @discardableResult
     func reloadPlaylists(_ repository: PlaylistRepository?) async -> [Int64] {
         guard let repository else { return [] }
-        return await reloadPlaylists(fetch: { try await repository.fetchAll() })
+        let folderRepository = repository.folders
+        var loadedFolders: [PlaylistFolder]?
+        var loadedSummaries: [Int64: PlaylistSummary]?
+        let removed = await reloadPlaylists(fetch: {
+            loadedFolders = try await folderRepository.fetchFolders()
+            loadedSummaries = try? await repository.fetchSummaries()
+            return try await repository.fetchAll()
+        })
+        if let loadedFolders {
+            folders = loadedFolders
+            if let requested = folderRenameRequest, !loadedFolders.contains(where: { $0.id == requested }) {
+                folderRenameRequest = nil
+            }
+        }
+        if let loadedSummaries { summaries = loadedSummaries }
+        tree = PlaylistSidebarTree.build(folders: folders, playlists: playlists)
+        return removed
+    }
+
+    // MARK: Playlist folders, tree, summaries (W3-PL, DEC-003)
+
+    /// The playlist folders, in sidebar order.
+    private(set) var folders: [PlaylistFolder] = []
+    /// The Playlists section in the user's order.
+    private(set) var tree = PlaylistSidebarTree.empty
+    /// Every playlist's counts, duration and last-added date — one SQL aggregate (UC-TABLE-21).
+    private(set) var summaries: [Int64: PlaylistSummary] = [:]
+
+    /// Re-reads only the summaries (downloads, file checks): the rows' second lines follow.
+    func reloadSummaries(_ repository: PlaylistRepository?) async {
+        guard let repository, let loaded = try? await repository.fetchSummaries() else { return }
+        if loaded != summaries { summaries = loaded }
+    }
+
+    /// Up to three playlists tracks were added to most recently (`Add to Playlist ▸ Recent`,
+    /// UC-CM-11), newest first; `excluding` the current playlist.
+    func recentPlaylists(excluding excluded: Int64? = nil, limit: Int = 3) -> [Playlist] {
+        let byID = Dictionary(playlists.compactMap { p in p.id.map { ($0, p) } }, uniquingKeysWith: { first, _ in first })
+        return summaries.values
+            .filter { $0.lastAddedAt != nil && $0.playlistID != excluded && byID[$0.playlistID] != nil }
+            .sorted { ($0.lastAddedAt ?? "") > ($1.lastAddedAt ?? "") }
+            .prefix(limit)
+            .compactMap { byID[$0.playlistID] }
+    }
+
+    func folderName(_ id: Int64) -> String? {
+        folders.first { $0.id == id }?.name
+    }
+
+    // MARK: Folder expansion (UC-SIDE-02/08: remembered per library, not in the database)
+
+    @ObservationIgnored private var collapsedFoldersLoadedFor: String?
+    private(set) var collapsedFolders: Set<Int64> = []
+
+    static func collapsedFoldersKey(libraryID: String) -> String {
+        "sidebar.collapsedPlaylistFolders.\(libraryID)"
+    }
+
+    private func loadCollapsedFoldersIfNeeded() {
+        guard collapsedFoldersLoadedFor != libraryKey else { return }
+        collapsedFoldersLoadedFor = libraryKey
+        let stored = defaults.array(forKey: Self.collapsedFoldersKey(libraryID: libraryKey)) as? [Int] ?? []
+        collapsedFolders = Set(stored.map(Int64.init))
+    }
+
+    func isFolderExpanded(_ id: Int64) -> Bool {
+        loadCollapsedFoldersIfNeeded()
+        return !collapsedFolders.contains(id)
+    }
+
+    func setFolderExpanded(_ id: Int64, _ expanded: Bool) {
+        loadCollapsedFoldersIfNeeded()
+        if expanded { collapsedFolders.remove(id) } else { collapsedFolders.insert(id) }
+        defaults.set(collapsedFolders.map { Int($0) }.sorted(), forKey: Self.collapsedFoldersKey(libraryID: libraryKey))
+    }
+
+    // MARK: Name a new folder inline (S-PLFOLDER-NEW)
+
+    /// A new folder whose sidebar name should go into edit mode once it is listed.
+    private(set) var folderRenameRequest: Int64?
+
+    func requestRename(folder id: Int64) {
+        folderRenameRequest = id
+        setExpanded(.playlists, true)
+    }
+
+    func takeFolderRenameRequest() -> PlaylistFolder? {
+        guard let id = folderRenameRequest, let folder = folders.first(where: { $0.id == id }) else { return nil }
+        folderRenameRequest = nil
+        return folder
+    }
+
+    /// Ask the sidebar to show a playlist's row selected and scrolled into view (Show in All
+    /// Playlists selects the card instead; this is for a playlist inside a collapsed folder).
+    func reveal(playlist id: Int64) {
+        if let folder = tree.folder(containing: id), let folderID = folder.id, !isFolderExpanded(folderID) {
+            setFolderExpanded(folderID, true)
+        }
     }
 
     // MARK: Playlist second line (UC-SIDE-06)
