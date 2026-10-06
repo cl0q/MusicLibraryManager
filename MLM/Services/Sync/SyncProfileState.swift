@@ -122,6 +122,11 @@ struct SyncProfileState: Equatable, Sendable {
 
     static func count(_ n: Int) -> String { n.formatted(.number) }
 
+    /// `1 playlist to update` / `3 playlists to update` (IMP-105).
+    static func playlistsText(_ n: Int) -> String {
+        "\(count(n)) \(n == 1 ? "playlist" : "playlists") to update"
+    }
+
     static func day(_ date: Date) -> String {
         date.formatted(.dateTime.day().month(.abbreviated).year())
     }
@@ -183,6 +188,9 @@ struct SyncProfileState: Equatable, Sendable {
                 return "Synced \(relative(lastSyncedAt, now: input.now)) · \(count(failedCount)) failed"
             }
             if let plan = input.plan, plan.add > 0, input.hasContent { return "\(count(plan.add)) to add" }
+            if let plan = input.plan, plan.playlistsToUpdate > 0, input.hasContent {
+                return playlistsText(plan.playlistsToUpdate)
+            }
             if let lastSyncedAt { return "Synced \(relative(lastSyncedAt, now: input.now))" }
             return "Connected"  // IMP-007
         }()
@@ -198,6 +206,9 @@ struct SyncProfileState: Equatable, Sendable {
         var facts: [String] = []
         if isConnected, let plan = input.plan, plan.add > 0, input.hasContent, input.run == nil {
             facts.append("\(count(plan.add)) to add")
+        }
+        if isConnected, let plan = input.plan, plan.playlistsToUpdate > 0, input.hasContent, input.run == nil {
+            facts.append(playlistsText(plan.playlistsToUpdate))
         }
         if !isConnected, let seen = result?.lastConnectedAt {
             facts.append("last connected \(day(seen))")
@@ -222,7 +233,8 @@ struct SyncProfileState: Equatable, Sendable {
             guard let plan = input.plan, input.hasContent else { return nil }
             let remove = plan.cleanUp ? "Remove \(count(plan.remove))" : "Remove 0 — Clean up is off"
             let space = spaceSentence ?? "\(bytes(plan.addBytes)) of \(bytes(plan.freeBytes)) free"
-            return "Add \(count(plan.add)) · \(remove) · Skip \(count(plan.skip)) · \(space)"
+            let playlists = plan.playlistsToUpdate > 0 ? " · \(playlistsText(plan.playlistsToUpdate))" : ""
+            return "Add \(count(plan.add)) · \(remove) · Skip \(count(plan.skip))\(playlists) · \(space)"
         }()
         let planStatus: String? = {
             guard input.plan != nil, input.hasContent else { return nil }
@@ -249,7 +261,7 @@ struct SyncProfileState: Equatable, Sendable {
             if driveAway { return "Can’t sync — \(driveName) is not connected" }
             guard let plan = input.plan else { return "Updating plan…" }
             if let spaceSentence { return spaceSentence }
-            if plan.add == 0 && (plan.remove == 0 || !plan.cleanUp) {
+            if plan.add == 0 && (plan.remove == 0 || !plan.cleanUp) && plan.playlistsToUpdate == 0 {
                 return "Everything in this profile is on \(device)."
             }
             return nil

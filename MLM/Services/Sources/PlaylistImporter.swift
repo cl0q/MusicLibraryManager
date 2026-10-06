@@ -194,6 +194,19 @@ struct ImportLibraryQueries: Sendable {
         }
     }
 
+    /// The Liked playlist of this source with its source row, if it has one — never created
+    /// here (`Refresh from Sources` only appends to a Liked playlist that exists).
+    func likedPlaylist(sourceName: String) async throws -> (playlist: Playlist, source: Source)? {
+        try await database.read { db in
+            guard let playlist = try Playlist.fetchOne(db, sql: """
+                SELECT p.* FROM playlists p JOIN sources s ON s.id = p.source_id
+                WHERE s.name = ? AND p.is_liked = 1 ORDER BY p.id LIMIT 1
+                """, arguments: [sourceName]),
+                  let sourceID = playlist.sourceId, let source = try Source.fetchOne(db, id: sourceID) else { return nil }
+            return (playlist, source)
+        }
+    }
+
     /// Which of these paths (lower-cased A–Z, `LibraryFileCopier.pathKeys`) already are a
     /// track's `original_path`, compared case-insensitively (review H3).
     func knownOriginalPaths(_ keys: [String]) async -> Set<String> {

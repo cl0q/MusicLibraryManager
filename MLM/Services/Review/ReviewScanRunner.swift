@@ -80,14 +80,21 @@ final class ReviewScanRunner {
     @ObservationIgnored private let makeScan: @MainActor () -> Scan?
     @ObservationIgnored private let now: () -> Date
     @ObservationIgnored private let didChange: () -> Void
+    /// The open library's id: a scan belongs to the library it started in (IMP-108).
+    @ObservationIgnored private let libraryID: @MainActor () -> String?
+    @ObservationIgnored private var scanLibraryID: String?
+    /// A library switch ended this scan: its result is dropped, never written to another library.
+    @ObservationIgnored private var discardsResult = false
 
     init(
         center: ActivityCenter = .shared,
         config: @escaping @MainActor () -> ConfigRepository? = { DependencyContainer.shared.configRepository },
         scan: @escaping @MainActor () -> Scan? = ReviewScanRunner.liveScan,
         now: @escaping () -> Date = Date.init,
-        didChange: @escaping () -> Void = { NotificationCenter.default.post(name: .reviewQueueDidChange, object: nil) }
+        didChange: @escaping () -> Void = { NotificationCenter.default.post(name: .reviewQueueDidChange, object: nil) },
+        libraryID: @escaping @MainActor () -> String? = { DependencyContainer.shared.activeLibrary?.libraryId }
     ) {
+        self.libraryID = libraryID
         self.center = center
         self.config = config
         self.makeScan = scan
@@ -123,6 +130,8 @@ final class ReviewScanRunner {
         guard !isActive, let scan = makeScan() else { return false }
         isActive = true
         failure = nil
+        discardsResult = false
+        scanLibraryID = libraryID()
         let job = center.begin(
             .duplicateScan, title: "Scan for duplicates", subject: .review, itemNoun: .item,
             controls: ActivityControls(cancel: { [weak self] in Task { @MainActor in self?.cancel() } }),
@@ -155,6 +164,14 @@ final class ReviewScanRunner {
         if let handle, center.operation(id: handle.id)?.state == .queued { center.cancel(handle.id) }
     }
 
+    /// The library is being switched or replaced (IMP-108): a running scan is cancelled and its
+    /// proposals and last-scan line are discarded; they are never written to the next library.
+    func libraryDidChange() {
+        guard isActive else { return }
+        discardsResult = true
+        cancel()
+    }
+
     /// Waits for the running scan (tests).
     func waitUntilIdle() async {
         await task?.value
@@ -165,7 +182,7 @@ final class ReviewScanRunner {
             let result = try await scan { completed, total in
                 job.update(completed: completed, total: total, currentItem: nil)
             }
-            if Task.isCancelled {
+            if Task.isCancelled || discardsResult || libraryID() != scanLibraryID {
                 job.cancelled()
                 statusBar?.post(ReviewPresentation.scanCancelled)
             } else {
@@ -191,6 +208,8 @@ final class ReviewScanRunner {
     }
 
     private func ended() {
+        discardsResult = false
+        scanLibraryID = nil
         isActive = false
         handle = nil
         task = nil

@@ -348,6 +348,9 @@ final class AnalysisRepository: Sendable {
                       AND action_type IN ('fingerprint_dedup', 'metadata_conflict')
                     """
             )
+            // Pre-v48 rows carry no group key (`legacy:<rowid>`): they get the stable key of
+            // their pair now, so the legacy key is never addressed again (IMP-108).
+            try Self.stampLegacyGroupKeys(db)
             // Decisions are per kind: a merged conflict can later be proposed as a duplicate.
             let decidedDuplicates = try ReviewDecisionRepository.decidedPairs(db, kind: .duplicate)
             let decidedConflicts = try ReviewDecisionRepository.decidedPairs(db, kind: .conflict)
@@ -368,6 +371,22 @@ final class AnalysisRepository: Sendable {
                 if item.actionType == "metadata_conflict" { conflicts += 1 } else { duplicates += 1 }
             }
             return (duplicates, conflicts)
+        }
+    }
+
+    /// Gives every scan row without a group key (made before v33/v48) the stable key of its
+    /// pair of tracks (`duplicate:<a>:<b>`); a row with no related track keeps none. After this
+    /// `legacy:<rowid>` addresses nothing (the legacy paths only match rows without a key).
+    static func stampLegacyGroupKeys(_ db: Database) throws {
+        let rows = try Row.fetchAll(db, sql: """
+            SELECT id, track_id, related_track_id FROM review_queue
+            WHERE group_key IS NULL AND action_type IN ('fingerprint_dedup', 'metadata_conflict')
+            """)
+        for row in rows {
+            let track: Int64 = row["track_id"]
+            guard let related: Int64 = row["related_track_id"], related != track else { continue }
+            let key = DuplicateReviewGrouping.groupKey(for: [track, related])
+            try db.execute(sql: "UPDATE review_queue SET group_key = ? WHERE id = ?", arguments: [key, row["id"] as Int64])
         }
     }
 
@@ -422,7 +441,7 @@ final class AnalysisRepository: Sendable {
         if let legacyID = legacyReviewID(from: groupKey) {
             return try ReviewItem.fetchAll(
                 db,
-                sql: "SELECT * FROM review_queue WHERE id = ? AND status = ?",
+                sql: "SELECT * FROM review_queue WHERE id = ? AND status = ? AND group_key IS NULL",
                 arguments: [legacyID, status]
             )
         }
@@ -442,7 +461,7 @@ final class AnalysisRepository: Sendable {
         let timeSQL = resolvedAt ? "datetime('now')" : "NULL"
         if let legacyID = legacyReviewID(from: groupKey) {
             try db.execute(
-                sql: "UPDATE review_queue SET status = ?, resolved_at = \(timeSQL) WHERE id = ?",
+                sql: "UPDATE review_queue SET status = ?, resolved_at = \(timeSQL) WHERE id = ? AND group_key IS NULL",
                 arguments: [status, legacyID]
             )
         } else {

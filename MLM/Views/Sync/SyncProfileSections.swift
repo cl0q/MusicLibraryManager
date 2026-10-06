@@ -335,6 +335,12 @@ struct SyncProfileSections: View {
             }
             .selectionDisabled()
         }
+        if preview.playlistsToUpdate > 0 {
+            HStack {
+                Text(SyncProfileState.playlistsText(preview.playlistsToUpdate)).bold()
+                Text("playlist files on the device are rewritten — no tracks are copied for them").foregroundStyle(.secondary)
+            }
+        }
         if !preview.filesToRemove.isEmpty {
             DisclosureGroup {
                 ForEach(preview.filesToRemove.prefix(500)) { file in fileRow(file) }

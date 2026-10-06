@@ -263,6 +263,11 @@ enum SnapshotFixtures {
         Fixture(id: "review-albums-empty", size: .init(width: 1_100, height: 360), makeView: { _ in
             try reviewAlbumsView(rows: 0, lookedUp: false)
         }),
+        // Review ▸ Duplicates (W5-F2, IMP-108): two collapsed groups — one with a lossless
+        // recommendation, one the scan says are probably different versions.
+        Fixture(id: "review-duplicates", size: .init(width: 1_100, height: 220), backend: .appKit, makeView: { _ in
+            try reviewDuplicatesView()
+        }),
         Fixture(id: "status-chip-remote", size: .init(width: 300, height: 100), makeView: { _ in
             AnyView(try require(StatusChip(availability: .notDownloaded), named: "Remote status chip").padding(20))
         }),
@@ -284,6 +289,36 @@ enum SnapshotFixtures {
             }
         ),
     ]
+
+    /// Review ▸ Duplicates: the group list over a temporary-database model, two groups, collapsed.
+    static func reviewDuplicatesView() throws -> AnyView {
+        let env = try ReviewEnv.make()
+        func track(_ id: Int64, _ title: String, _ artist: String, _ format: String, _ bitrate: Int) -> Track {
+            var track = Track(artist: artist, album: "Good Lies", title: title, format: format,
+                              originalPath: "/orig/\(id).\(format)")
+            track.id = id
+            track.bitrate = bitrate
+            track.organizedPath = "\(artist)/\(title).\(format)"
+            track.duration = 200
+            return track
+        }
+        let groups = [
+            ReviewGroupItem(
+                key: "duplicate:1:2", kind: .duplicate,
+                members: [track(1, "So U Know", "Overmono", "flac", 1_411), track(2, "So U Know", "Overmono", "mp3", 320)],
+                recommendedID: 1, recommendsKeepAll: false, why: "lossless format, higher bitrate",
+                matchPercent: 97, usedIn: [1: 2, 2: 0]),
+            ReviewGroupItem(
+                key: "duplicate:3:4:5", kind: .duplicate,
+                members: [track(3, "Arpo", "Karenn", "mp3", 256), track(4, "Arpo", "Karenn", "mp3", 256),
+                          track(5, "Arpo", "Karenn", "m4a", 256)],
+                recommendedID: 3, recommendsKeepAll: true, why: "same quality, most complete tags",
+                matchPercent: 91, usedIn: [3: 0, 4: 1, 5: 0]),
+        ]
+        return AnyView(ReviewGroupList(
+            model: env.model, groups: groups, expanded: .constant([]), selection: .constant(nil),
+            writesTags: false, onTrackActivated: { _, _ in }, decide: { _, _ in }, search: nil))
+    }
 
     /// Review ▸ Albums over a temporary database: the model is preloaded, the table is the shared SwiftUI one.
     static func reviewAlbumsView(rows: Int, lookedUp: Bool) throws -> AnyView {
@@ -336,7 +371,7 @@ enum SnapshotFixtures {
         "Shared/StatusChip.swift",
         "Shared/TrackCoverView.swift", "DragDrop/DropTargetModifier.swift", "Launch/LibraryLoadingView.swift",
         "Shared/TrackMetadataPresentation.swift", "Sync/SyncProfileSheets.swift",
-        "TrackDetail/WaveformView.swift", "Review/ReviewAlbumsView.swift",
+        "TrackDetail/WaveformView.swift", "Review/ReviewAlbumsView.swift", "Review/ReviewGroupList.swift",
     ]
 
     private static let exclusions: [String: String] = [
@@ -361,6 +396,7 @@ enum SnapshotFixtures {
         "TrackList/TrackPrimaryAction.swift": "Non-view: primary action per row kind and play-when-ready (W2-A).",
         "TrackList/TrackMenu.swift": "Deferred: menus require interactive presentation; current bitmap hosts do not open them.",
         "Sync/Pickers/PlaylistPickerModel.swift": "Non-view: selection model.",
+        "Shared/StreamPreviewControls.swift": "Deferred: Preview / Stop buttons read the live preview controller and the container; the rules are PreviewMachine and StreamPreview tests (W5-F2).",
         "Shared/SelectionCreationSheets.swift": "Non-view: identifiable selection wrapper (the sheet merged into Sync/NewSyncProfileSheet, W3-SYNC).",
         "TrackDetail/WaveformHelpers.swift": "Non-view: waveform math; production WaveformView is captured.",
         "Activity/ActivityLogsView.swift": "Deferred: global logger and AppKit text representable need fixed attributed-log input.",
@@ -452,7 +488,6 @@ enum SnapshotFixtures {
         "Import/SourceSignInView.swift": "Deferred: the browser sign-in hand-off waits for a real OAuth callback; SourceSignInModel is unit-tested (W3-ADD).",
         "Import/ImportSheetsHost.swift": "Deferred: presents the Add menu sheets on the main window; nothing drawn of its own (W3-ADD).",
         "Review/ReviewView.swift": "Deferred: the page reads the library database, the scan\u{2019}s Activity echo and the drive; ReviewModel / ReviewPresentation are unit-tested on temporary databases (W3-REV).",
-        "Review/ReviewGroupList.swift": "Deferred: the group list hosts live comparisons; its decisions are ReviewModel plans, unit-tested (W3-REV).",
         "Review/ReviewComparison.swift": "Deferred: the comparison is the shared track table over live tracks plus the conflict grid; ReviewModel plans are unit-tested (W3-REV).",
         "Review/ReviewResolvedView.swift": "Deferred: Resolved reads the decision history; its rows and outcomes are unit-tested (ReviewPresentationTests, W3-REV).",
         "Review/ReviewVersionCells.swift": "Deferred: cells of the shared track table (version radio, location, used in); the words they show are ReviewPresentation, unit-tested (W3-REV).",
@@ -576,6 +611,7 @@ Settings/SourcesSetupView.swift
 Shared/DownloadRetryBudget.swift
 Shared/SelectionCreationSheets.swift
 Shared/StatusChip.swift
+Shared/StreamPreviewControls.swift
 Shared/TrackCoverView.swift
 Shared/TrackMetadataPresentation.swift
 Shell/ContentScaffold.swift

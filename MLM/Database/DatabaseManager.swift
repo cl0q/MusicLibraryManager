@@ -1563,6 +1563,36 @@ final class DatabaseManager: Sendable {
             try AlbumSuggestionMigration.v52(db)
         }
 
+        // ──────────────────────────────────────────────────────────────
+        // Migration v56_sync_followups (W5-F2, IMP-104, IMP-106): the device codec sweep is
+        // cached per profile (`sync_probe_cache`: a device file is re-probed only when its size
+        // or mtime changed) and the sync profiles get a user order (`sync_profiles.position`,
+        // backfilled 1…n by name). Guarded so a partially applied run migrates cleanly.
+        // ──────────────────────────────────────────────────────────────
+        migrator.registerMigration("v56_sync_followups") { db in
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS sync_probe_cache (
+                    profile_id INTEGER NOT NULL,
+                    device_path TEXT NOT NULL,
+                    size INTEGER NOT NULL,
+                    mtime REAL NOT NULL,
+                    codec TEXT NOT NULL,
+                    bitrate INTEGER,
+                    probed_at TEXT NOT NULL,
+                    PRIMARY KEY (profile_id, device_path)
+                )
+            """)
+            let columns = try db.columns(in: "sync_profiles").map(\.name)
+            if !columns.contains("position") {
+                try db.execute(sql: "ALTER TABLE sync_profiles ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
+                let ids = try Int64.fetchAll(db, sql: "SELECT id FROM sync_profiles ORDER BY name, id")
+                for (index, id) in ids.enumerated() {
+                    try db.execute(sql: "UPDATE sync_profiles SET position = ? WHERE id = ?",
+                                   arguments: [index + 1, id])
+                }
+            }
+        }
+
         return migrator
     }
 

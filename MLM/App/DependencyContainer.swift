@@ -162,6 +162,8 @@ final class DependencyContainer {
     /// switching relaunches).
     /// `progress` feeds the loading screen's phase line (W3-LAUNCH); it changes nothing.
     func initialize(location: LibraryLocation, progress: LibraryOpenProgress? = nil) async throws {
+        // A scan of the library that was open is dropped, never written to this one (IMP-108).
+        await ReviewScanRunner.shared.libraryDidChange()
         let dbManager = try DatabaseManager(databaseURL: location.databaseURL, progress: progress)
         self.databaseManager = dbManager
 

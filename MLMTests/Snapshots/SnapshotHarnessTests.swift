@@ -86,14 +86,17 @@ final class SnapshotsTests: XCTestCase {
         // Merged W4-2 + W4-3: 144 files, 26 fixtures, 20 rendered, 84 deferred.
         // W4-2b added Albums/{AlbumInfoSheet, AlbumMergeSheet, AlbumPickerSheet, AlbumTrackPickerSheet}
         // (deferred): 144 → 148 files, 84 → 88 deferred.
-        XCTAssertEqual(paths.count, 148, "Re-audit inventory changes explicitly.")
+        // W5-F2 rendered Review/ReviewGroupList.swift (`review-duplicates`): 26 → 27 fixtures,
+        // 20 → 21 rendered, 88 → 87 deferred. W5-F2 also added Shared/StreamPreviewControls.swift
+        // (deferred): 148 → 149 files, 87 → 88 deferred.
+        XCTAssertEqual(paths.count, 149, "Re-audit inventory changes explicitly.")
         XCTAssertEqual(Set(SnapshotFixtures.inventory.map(\.path)), paths)
         XCTAssertEqual(SnapshotFixtures.inventory.count, paths.count)
         XCTAssertFalse(SnapshotFixtures.inventory.contains { $0.disposition.isEmpty })
         XCTAssertEqual(Set(SnapshotFixtures.fixtures.map(\.id)).count, SnapshotFixtures.fixtures.count)
         XCTAssertFalse(SnapshotFixtures.fixtures.isEmpty)
-        XCTAssertEqual(SnapshotFixtures.fixtures.count, 26)
-        XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 20)
+        XCTAssertEqual(SnapshotFixtures.fixtures.count, 27)
+        XCTAssertEqual(SnapshotFixtures.renderedPaths.count, 21)
         XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Non-view:") }.count, 40)
         XCTAssertEqual(SnapshotFixtures.inventory.filter { $0.disposition.hasPrefix("Deferred:") }.count, 88)
         for fixture in SnapshotFixtures.fixtures where fixture.expectedTableRows != nil {

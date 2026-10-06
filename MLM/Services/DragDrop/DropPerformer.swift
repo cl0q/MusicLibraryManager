@@ -103,6 +103,8 @@ struct DropPerformer {
             Task { await edits?.movePlaylistItems(items, into: folderID, before: before) }
         case .movePlaylistItemsToTop(let items):
             Task { await edits?.movePlaylistItemsToTop(items) }
+        case .moveSyncProfiles(let ids, let before):
+            Task { await edits?.moveSyncProfiles(ids, before: before) }
         case .newPlaylistInFolder(let ids, let folderID):
             Task { await edits?.newPlaylist(inFolder: folderID, trackIDs: ids) }
         case .importFilesAsNewPlaylistInFolder(let urls, let folderID):
@@ -142,8 +144,24 @@ extension TrackDragPayload {
     /// entry ids of rows dragged inside the Queue panel.
     var queueRows: [QueueRowDrag] {
         // A folder of Folders that wasn't expanded (the Queue panel's own drop) carries no track.
-        items.filter { !$0.isFolder }
+        items.filter { !$0.isFolder && !$0.isAlbum }
             .map { QueueRowDrag(trackId: $0.trackId, sourcePlaylistId: $0.sourcePlaylistId, queueEntryId: $0.queueEntryId) }
+    }
+
+    /// `queueRows(_:container:)` for items that may be folder rows of Folders or album cards
+    /// (IMP-107, D-FOLD): they stand for their listed tracks — in-library, in outline / album
+    /// order — exactly as when dropped on the player (`DropLoader`). Items that are plain tracks
+    /// pass through unchanged.
+    @MainActor
+    static func expandedQueueRows(
+        _ items: [TrackDragItem], container: DependencyContainer,
+        expandFolders: @MainActor ([TrackDragItem]) async -> [TrackDragItem] = { await FolderDragExpansion.expand($0) },
+        expandAlbums: @MainActor ([TrackDragItem]) async -> [TrackDragItem] = { await AlbumDragExpansion.expand($0) }
+    ) async -> [QueueRowDrag] {
+        var expanded = items
+        if expanded.contains(where: \.isFolder) { expanded = await expandFolders(expanded) }
+        if expanded.contains(where: \.isAlbum) { expanded = await expandAlbums(expanded) }
+        return queueRows(expanded, container: container)
     }
 
     /// Items dropped on the Queue panel as the queue's drop type — none when they come from

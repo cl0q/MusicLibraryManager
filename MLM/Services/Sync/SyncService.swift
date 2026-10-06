@@ -63,12 +63,17 @@ final class SyncService {
         var cleanupEnabled: Bool = true
         /// The library folder's disk was connected when the plan was made.
         var isLibraryReachable: Bool = true
+        /// Playlists of the profile whose file on the device is out of date: members or order
+        /// changed since MLM last wrote it (IMP-105). A run with only these rewrites the
+        /// playlist files and copies nothing.
+        var playlistsToUpdate: Int = 0
 
         /// `Add · Remove · Skip · space` for the profile page and the stored result (v47).
         var summary: SyncPlanSummary {
             SyncPlanSummary(add: filesToAdd.count, remove: filesToRemove.count, skip: filesToSkip.count,
                             addBytes: totalNewSize, removeBytes: cleanupEnabled ? totalRemoveSize : 0,
-                            freeBytes: deviceAvailableSpace, cleanUp: cleanupEnabled, totalTracks: totalTracks)
+                            freeBytes: deviceAvailableSpace, cleanUp: cleanupEnabled, totalTracks: totalTracks,
+                            playlistsToUpdate: playlistsToUpdate)
         }
     }
 
@@ -139,6 +144,8 @@ final class SyncService {
         let tracksByID: [Int64: Track]
         let isDeviceConnected: Bool
         let isLibraryReachable: Bool
+        /// Members vs last written snapshot per playlist (IMP-105; empty without playlist files).
+        let playlistStates: [PlaylistUpdateState]
         let hash: String
 
         var total: Int { trackIds.count + syncedTrackIds.subtracting(trackIds).count }
@@ -222,6 +229,10 @@ final class SyncService {
     /// Every file the current run tried to copy, in order (a test seam: an interrupted run
     /// resumed by the same operation never copies a file twice).
     private(set) var attemptedTrackIds: [Int64] = []
+    /// The cached device codec sweep (v56, IMP-104).
+    let probeCache: SyncProbeCacheRepository
+    /// Replaces the ffprobe call of the codec sweep (a test seam; `nil` = the transcode cache's ffprobe).
+    var codecProbe: (@Sendable (URL) async -> TranscodeCache.CodecProbe)?
     /// Syncs run one at a time; a second one is `Queued` (UC-JOB-03).
     static let lane = ActivityLane("sync")
 
@@ -238,7 +249,8 @@ final class SyncService {
         self.syncRepository = syncRepository
         self.configRepository = configRepository
         self.transcodeCache = transcodeCache
-        
+        self.probeCache = SyncProbeCacheRepository(database: syncRepository.databaseWriter)
+
         if let rawValue = UserDefaults.standard.string(forKey: "sync_turbo_level"),
            let level = SyncTurboLevel(rawValue: rawValue) {
             self.syncTurboLevel = level
@@ -375,6 +387,12 @@ final class SyncService {
             }
         }
 
+        // Playlist files that would change (IMP-105): members that are on the device after the run.
+        if !input.playlistStates.isEmpty {
+            let onDevice = syncedTrackIds.union(preview.filesToAdd.map(\.trackId))
+            preview.playlistsToUpdate = PlaylistUpdateState.count(input.playlistStates, onDevice: onDevice)
+        }
+
         // Space check
         if let attrs = try? FileManager.default.attributesOfFileSystem(forPath: outputURL.path) {
             let available = (attrs[.systemFreeSize] as? Int64) ?? 0
@@ -422,6 +440,15 @@ final class SyncService {
         })
         let isLibraryReachable = libraryRoot.isEmpty || destinations.isLibraryReachable(libraryRoot)
 
+        // IMP-105: a playlist whose members or order changed since its file was written is a plan
+        // item of its own — and part of the cache key, so a reorder alone refreshes the plan.
+        var playlistStates: [PlaylistUpdateState] = []
+        if profile.generateM3U8 {
+            playlistStates = try await syncRepository.databaseWriter.read { db in
+                try PlaylistUpdateState.fetch(db, profileID: profileId)
+            }
+        }
+
         return PreviewInput(
             profile: profile,
             libraryRoot: libraryRoot,
@@ -430,6 +457,7 @@ final class SyncService {
             tracksByID: tracksByID,
             isDeviceConnected: isDeviceConnected,
             isLibraryReachable: isLibraryReachable,
+            playlistStates: playlistStates,
             hash: Self.previewInputHash(
                 profile: profile,
                 libraryRoot: libraryRoot,
@@ -438,6 +466,7 @@ final class SyncService {
                 tracksByID: tracksByID,
                 isDeviceConnected: isDeviceConnected
             ) + (isLibraryReachable ? "|lib" : "|nolib")
+                + (playlistStates.isEmpty ? "" : "|" + playlistStates.map(\.hashComponent).joined(separator: ";"))
         )
     }
 
@@ -463,38 +492,81 @@ final class SyncService {
             guard FileManager.default.fileExists(atPath: destination.path) else { return nil }
             return (trackId, destination)
         }
-        guard !destinations.isEmpty else { return [] }
-
-        let workerCount = min(syncTurboLevel.workerCount(), destinations.count)
-        let cache = transcodeCache
-        return try await withThrowingTaskGroup(of: Int64?.self) { group in
-            var nextIndex = 0
-
-            func addNextDestination() {
-                let destination = destinations[nextIndex]
-                nextIndex += 1
-                group.addTask {
-                    try Task.checkCancellation()
-                    return await cache.verifyCacheCodec(destination.1) ? nil : destination.0
-                }
-            }
-
-            for _ in 0..<workerCount {
-                addNextDestination()
-            }
-
-            var invalidTrackIds = Set<Int64>()
-            while let trackId = try await group.next() {
-                try Task.checkCancellation()
-                if let trackId {
-                    invalidTrackIds.insert(trackId)
-                }
-                if nextIndex < destinations.count {
-                    addNextDestination()
-                }
-            }
-            return invalidTrackIds
+        guard !destinations.isEmpty else {
+            if let profileId = profile.id { try? await probeCache.prune(profileId: profileId, keeping: []) }
+            return []
         }
+
+        // IMP-104: a device file is probed again only when its size or mtime changed.
+        let profileId = profile.id
+        var cached: [String: SyncProbeEntry] = [:]
+        if let profileId { cached = (try? await probeCache.entries(profileId: profileId)) ?? [:] }
+        var invalidTrackIds = Set<Int64>()
+        var toProbe: [(trackId: Int64, url: URL, size: Int64, mtime: Double)] = []
+        for (trackId, url) in destinations {
+            let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+            let size = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
+            let mtime = (attributes?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+            if let hit = cached[url.path], hit.size == size, hit.mtime == mtime {
+                if !TranscodeCache.isAcceptableCacheCodec(hit.codec) { invalidTrackIds.insert(trackId) }
+            } else {
+                toProbe.append((trackId, url, size, mtime))
+            }
+        }
+
+        let probe: @Sendable (URL) async -> TranscodeCache.CodecProbe
+        if let codecProbe {
+            probe = codecProbe
+        } else {
+            let cache = transcodeCache
+            probe = { await cache.probeCodec($0) }
+        }
+        var fresh: [SyncProbeEntry] = []
+        if !toProbe.isEmpty {
+            let workerCount = min(syncTurboLevel.workerCount(), toProbe.count)
+            let probed: [(Int, TranscodeCache.CodecProbe)] = try await withThrowingTaskGroup(
+                of: (Int, TranscodeCache.CodecProbe).self
+            ) { group in
+                var nextIndex = 0
+                func addNext() {
+                    let index = nextIndex
+                    let url = toProbe[index].url
+                    nextIndex += 1
+                    group.addTask {
+                        try Task.checkCancellation()
+                        return (index, await probe(url))
+                    }
+                }
+                for _ in 0..<workerCount { addNext() }
+                var results: [(Int, TranscodeCache.CodecProbe)] = []
+                while let result = try await group.next() {
+                    try Task.checkCancellation()
+                    results.append(result)
+                    if nextIndex < toProbe.count { addNext() }
+                }
+                return results
+            }
+            for (index, result) in probed {
+                let item = toProbe[index]
+                switch result {
+                case .unavailable:
+                    break
+                case .failed:
+                    invalidTrackIds.insert(item.trackId)
+                case .codec(let codec, let bitrate):
+                    if !TranscodeCache.isAcceptableCacheCodec(codec) { invalidTrackIds.insert(item.trackId) }
+                    if !codec.isEmpty {
+                        fresh.append(SyncProbeEntry(devicePath: item.url.path, size: item.size, mtime: item.mtime,
+                                                    codec: codec, bitrate: bitrate))
+                    }
+                }
+            }
+        }
+        if let profileId {
+            try? await probeCache.store(fresh, profileId: profileId)
+            try? await probeCache.prune(profileId: profileId, keeping: Set(destinations.map { $0.1.path }))
+        }
+        return invalidTrackIds
     }
 
     private static func previewInputHash(
@@ -862,7 +934,7 @@ final class SyncService {
         // Never write into a path whose disk is gone (a folder under /Volumes would be created on
         // the Mac's own disk). Checked before the space: a missing device is "not connected",
         // never "not enough space".
-        if !filesToAdd.isEmpty || !filesToRemove.isEmpty,
+        if !filesToAdd.isEmpty || !filesToRemove.isEmpty || preview.playlistsToUpdate > 0,
            !destinations.isDestinationReachable(profile.outputFolder) {
             operationId?.fail(cause: "“\(deviceName)” is not connected", fix: .runAgain)
             throw SyncRunError.destinationNotConnected(deviceName)

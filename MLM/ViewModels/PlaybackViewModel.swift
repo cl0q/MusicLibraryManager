@@ -238,6 +238,10 @@ final class PlaybackViewModel {
     /// The preview player is running (detects its natural end).
     @ObservationIgnored private var previewAudioRunning = false
     @ObservationIgnored private var previewController: PreviewController?
+    /// How a stream preview's link becomes audio (IMP-109); tests bring a fake.
+    @ObservationIgnored var streamPreview: StreamPreviewProvider = .live
+    /// The temporary audio file of the running stream preview; deleted when it ends.
+    @ObservationIgnored private var streamPreviewFile: URL?
     @ObservationIgnored private var previewAdapter: PreviewAudioAdapter?
     /// Set by a list right before it activates a row (⌘L returns to it); `trackID == nil`
     /// matches the next playback whatever track it starts with (Shuffle).
@@ -1835,6 +1839,20 @@ extension PlaybackViewModel {
     /// File and analysed drop of a track to preview (a use-time check, off the main actor).
     @MainActor
     func resolvePreview(_ track: Track) async -> Result<ResolvedPreview, PreviewResolveFailure> {
+        if track.isPreviewStream {
+            guard let page = URL(string: track.originalPath) else {
+                return .failure(.stream(title: track.title, cause: StreamResolveError.unsupportedLink.cause))
+            }
+            removeStreamPreviewFile()
+            switch await streamPreview.audioFile(for: page, title: track.title) {
+            case .success(let file):
+                removeStreamPreviewFile()
+                streamPreviewFile = file
+                return .success(ResolvedPreview(url: file, dropOffset: nil))
+            case .failure(let failure):
+                return .failure(failure)
+            }
+        }
         let root = await environment.libraryRoot()
         switch await PlaybackFileResolver.lookupOffMain(track, libraryRoot: root, probe: environment.probe) {
         case .file(let url):
@@ -1850,9 +1868,18 @@ extension PlaybackViewModel {
         }
     }
 
+    /// Deletes the temporary audio of a stream preview (nothing of it is kept, IMP-109).
+    @MainActor
+    private func removeStreamPreviewFile() {
+        guard let file = streamPreviewFile else { return }
+        streamPreviewFile = nil
+        try? FileManager.default.removeItem(at: file)
+    }
+
     @MainActor
     fileprivate func previewDidChange() {
         if previewController?.isActive != true {
+            removeStreamPreviewFile()
             previewWaveformTask?.cancel()
             previewWaveform = []
             previewPosition = 0

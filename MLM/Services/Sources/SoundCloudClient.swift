@@ -938,6 +938,35 @@ final class SoundCloudClient: Sendable {
         return track
     }
 
+    /// The direct audio URL of a track for a stream preview (IMP-109): its permalink is resolved,
+    /// then the first byte of its `stream_url` is requested with the token so the final address
+    /// after SoundCloud's redirect is known. Nothing is downloaded or stored.
+    func previewStreamURL(trackURL: String) async throws -> URL {
+        let track: SoundCloudTrack
+        do {
+            track = try await resolveTrack(url: trackURL)
+        } catch SoundCloudError.notAuthenticated, SoundCloudError.tokenExpired {
+            throw StreamResolveError.notSignedIn
+        } catch SoundCloudError.apiError(let code, _) where code == 404 {
+            throw StreamResolveError.noStream
+        }
+        guard let stream = track.streamUrl, let streamURL = URL(string: stream), isApprovedAPIURL(streamURL) else {
+            throw StreamResolveError.noStream
+        }
+        guard let credentials = try tokenStorage.getCredentials(service: .soundcloud) else {
+            throw StreamResolveError.notSignedIn
+        }
+        var request = URLRequest(url: streamURL)
+        request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("bytes=0-0", forHTTPHeaderField: "Range")
+        request.timeoutInterval = 15
+        let (_, response) = try await httpRequesting.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw StreamResolveError.noStream
+        }
+        return http.url ?? streamURL
+    }
+
     func resolvePlaylist(url rawURL: String) async throws -> SoundCloudPlaylist {
         let trimmed = rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {

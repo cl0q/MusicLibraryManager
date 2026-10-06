@@ -276,6 +276,22 @@ enum ReviewPresentation {
         }
     }
 
+    /// The Resolved `Decision` column (IMP-108): what was decided, before the outcome says what
+    /// it did. A decision from before decisions were recorded shows a dash.
+    static let noDecisionWord = "—"
+    static let albumSetWord = "Album set"
+    static let noAlbumWord = "No album"
+
+    static func decisionWord(_ record: ReviewDecisionRecord?) -> String {
+        guard let record else { return noDecisionWord }
+        switch record.action {
+        case .keepRecommended: return "Kept recommended"
+        case .keepSelected: return "Kept selected"
+        case .keepAll, .keepBoth: return "Not duplicates"
+        case .merge: return "Merged"
+        }
+    }
+
     /// `Duplicate` / `Conflict`.
     static func kindWord(_ kind: ReviewGroupItem.Kind) -> String { kind == .duplicate ? "Duplicate" : "Conflict" }
 
