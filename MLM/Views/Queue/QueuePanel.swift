@@ -49,6 +49,21 @@ private struct QueuePanelList: View {
 
     private var undo: UndoCenter { undoCenter ?? .main }
 
+    /// Tracks, Queue rows, folder rows of Folders and album cards dropped on the queue: the
+    /// folders and albums stand for their listed tracks (IMP-107, D-FOLD-FOLDER-TO-QUEUE).
+    private func dropOnQueue(_ items: [TrackDragItem], at target: QueueDropTarget) {
+        guard items.contains(where: { $0.isFolder || $0.isAlbum }) else {
+            QueueEditCommands.drop(TrackDragPayload.queueRows(items, container: container),
+                                   at: target, playback: playback, undo: undo, container: container)
+            return
+        }
+        let container = container, playback = playback, undo = undo
+        Task { @MainActor in
+            let rows = await TrackDragPayload.expandedQueueRows(items, container: container)
+            QueueEditCommands.drop(rows, at: target, playback: playback, undo: undo, container: container)
+        }
+    }
+
     var body: some View {
         let live = TrackTableLiveState.drive(container)
         let sources = TrackMenuSources.shared
@@ -70,9 +85,7 @@ private struct QueuePanelList: View {
                 }
                 // The top of the panel: tracks dropped here play next (P-QUEUE.N12).
                 .dropDestination(for: TrackDragItem.self) { items, _ in
-                    QueueEditCommands.drop(TrackDragPayload.queueRows(items, container: container),
-                                           at: QueueDropTarget.position(.top), playback: playback, undo: undo,
-                                           container: container)
+                    dropOnQueue(items, at: QueueDropTarget.position(.top))
                 }
                 if content.nowPlaying == nil {
                     QueueEmptyText(title: QueuePanelWords.notPlaying, sentence: nil)
@@ -84,9 +97,7 @@ private struct QueuePanelList: View {
                 }
                 // Named by the row the line sits next to, resolved when the drop applies.
                 .dropDestination(for: TrackDragItem.self) { items, offset in
-                    QueueEditCommands.drop(TrackDragPayload.queueRows(items, container: container),
-                                           at: content.dropTarget(forDropAt: offset), playback: playback,
-                                           undo: undo, container: container)
+                    dropOnQueue(items, at: content.dropTarget(forDropAt: offset))
                 }
             } header: {
                 nextHeader(content)
