@@ -194,6 +194,23 @@ struct ImportLibraryQueries: Sendable {
         }
     }
 
+    /// Which of these paths (lower-cased A–Z, `LibraryFileCopier.pathKeys`) already are a
+    /// track's `original_path`, compared case-insensitively (review H3).
+    func knownOriginalPaths(_ keys: [String]) async -> Set<String> {
+        guard !keys.isEmpty else { return [] }
+        return (try? await database.read { db in
+            var found = Set<String>()
+            for start in stride(from: 0, to: keys.count, by: 400) {
+                let chunk = Array(keys[start..<min(start + 400, keys.count)])
+                let placeholders = chunk.map { _ in "?" }.joined(separator: ",")
+                found.formUnion(try String.fetchAll(db, sql: """
+                    SELECT LOWER(original_path) FROM tracks WHERE LOWER(original_path) IN (\(placeholders))
+                    """, arguments: StatementArguments(chunk)))
+            }
+            return found
+        }) ?? []
+    }
+
     /// External ids of this source's playlists that are already imported (step 1's marker).
     func importedPlaylistIDs(source: LinkSource) async throws -> Set<String> {
         try await database.read { db in

@@ -108,60 +108,84 @@ final class ShellActions {
         isChoosingImportFolder = true
     }
 
-    /// The panel's choice (W3-ADD; it took only folders before). A folder inside the library
-    /// folder is scanned where it is, as before. Everything else — files, folders elsewhere —
-    /// is **copied** into the library folder's organised layout and imported from there
-    /// (`LibraryFileCopier`; originals are never moved or deleted), one `Scan` operation. Undo
-    /// removes the imported tracks from the library; the copied files stay (said in the
-    /// confirmation). Without a library folder the files are imported where they are.
+    /// The panel's choice (W3-ADD; it took only folders before), and the one behaviour of every
+    /// file import gesture — Finder drops (`importDropped`) and, for W3-SET, Settings ▸ Library
+    /// `Import Files or Folder…` call it too (review S6). A folder inside the library folder is
+    /// scanned where it is, as before. Everything else — files, folders elsewhere — is
+    /// **copied** into the library folder's organised layout and imported from there
+    /// (`LibraryFileCopier`; originals are never moved or deleted), one `Scan` operation. Files
+    /// that already are tracks are not imported again. Undo removes the imported tracks from the
+    /// library; the copied files stay (said in the confirmation). Without a library folder the
+    /// files are imported where they are.
     func importChosen(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
-        Task { await importChosenNow(urls) }
+        Task { await importFiles(urls) }
     }
 
-    private func importChosenNow(_ urls: [URL]) async {
+    /// `importChosen`'s work. Returns the chosen files' tracks in order — imported now or
+    /// already in the library — so a drop on a playlist can add them.
+    @discardableResult
+    func importFiles(_ urls: [URL], intoPlaylist playlistName: String? = nil,
+                     scanFoldersInLibraryInPlace: Bool = true) async -> [Int64] {
         let rootPath = (try? await container.configRepository?.getLibraryRoot()) ?? nil
         let root = rootPath.map { URL(fileURLWithPath: $0) }
         var copyItems: [URL] = []
         for url in urls {
             let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
-            if isDirectory, let root, LibraryFileCopier.isInside(url, root: root) {
-                importFolder(url)
-            } else if isDirectory, root == nil {
+            if scanFoldersInLibraryInPlace, isDirectory, url.pathExtension.lowercased() != "mlibm",
+               root.map({ LibraryFileCopier.isInside(url, root: $0) }) ?? true {
                 importFolder(url)
             } else {
                 copyItems.append(url)
             }
         }
-        guard !copyItems.isEmpty else { return }
+        guard !copyItems.isEmpty else { return [] }
         let files = await Task.detached(priority: .userInitiated) { Self.audioFiles(in: copyItems) }.value
         guard !files.isEmpty else {
             statusBar.post(DropWords.notAudio(copyItems.map(\.lastPathComponent)))
-            return
+            return []
         }
+        let isOneFolder = copyItems.count == 1 && (try? copyItems[0].resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
         guard let viewModel = makeImportViewModel() else {
             statusBar.post(Self.importUnavailableMessage(folder: copyItems[0].lastPathComponent))
-            return
+            return []
         }
-        let title = copyItems.count == 1 && files.count > 1
-            ? "Import “\(copyItems[0].lastPathComponent)”"
+        let title = playlistName != nil || isOneFolder
+            ? DropWords.importTitle(files: files.count, folderName: isOneFolder ? copyItems[0].lastPathComponent : nil,
+                                    playlist: playlistName)
             : "Import \(ActivityNoun.file.counted(files.count))"
         guard let root else {
             // No library folder: nothing to copy into; imported where they are (as before).
-            await viewModel.importFiles(files, title: title)
-            return
+            guard await viewModel.importFiles(files, title: title) != nil else { return [] }
+            return await trackIDs(forPaths: files.map(\.path))
         }
         let drive = LibraryDriveState.current(container)
         if drive.isOffline, let name = drive.volumeName {
             statusBar.post("Can’t import — “\(name)” is not connected")
-            return
+            return []
         }
         // Tracks this import adds carry a `date_added` from now on (ISO 8601 sorts as text).
         let startedAt = ISO8601DateFormatter().string(from: Date())
+        let queries = container.databaseManager.map { ImportLibraryQueries(database: $0.pool) }
+        let tracks = container.trackRepository
+        let copier = LibraryFileCopier(libraryRoot: root, knownPaths: { await queries?.knownOriginalPaths($0) ?? [] })
         guard let outcome = await viewModel.importFilesCopyingIntoLibrary(
-            files, title: title, copier: LibraryFileCopier(libraryRoot: root)) else { return }
+            files, title: title, copier: copier,
+            repoint: { original, organized in
+                // A renamed copy (`Title 2.ext`) points at itself, not at the plain name (S5).
+                guard var track = try? await tracks?.fetchTracksByOriginalPaths([original]).first else { return }
+                track.organizedPath = organized
+                try? await tracks?.update(track)
+            }) else { return [] }
         await recordCopiedImportUndo(paths: outcome.placement.toImport.map(\.path), since: startedAt,
                                      copied: outcome.placement.copied)
+        return await trackIDs(forPaths: files.compactMap { outcome.placement.importedPath[$0.path] })
+    }
+
+    private func trackIDs(forPaths paths: [String]) async -> [Int64] {
+        guard let tracks = container.trackRepository, !paths.isEmpty else { return [] }
+        let known = (try? await tracks.fetchTracksByOriginalPaths(paths)) ?? []
+        return Self.orderedIDs(of: known, paths: paths)
     }
 
     /// Undo of a copying import (database only): removes the tracks this import added; the
@@ -216,30 +240,16 @@ final class ShellActions {
     }
 
     /// Finder files and folders dropped on MLM (D-LIB-FINDER-IN, W2-H): the same import as
-    /// Import Files or Folder… — one Activity operation (`Scan`, the import lane: it queues
-    /// behind a running import), whose start and end messages come from Activity (UC-JOB-08).
-    /// Folders are read for their audio files; other files are left out.
+    /// Import Files or Folder… (review S6: files from outside the library folder are copied in,
+    /// PATTERN-DND.N09) — one Activity operation (`Scan`, the import lane: it queues behind a
+    /// running import), whose start and end messages come from Activity (UC-JOB-08). Folders
+    /// are read for their audio files; other files are left out.
     ///
     /// - Returns: the dropped tracks' ids in drop order — imported now or already in the
     ///   library — so a drop on a playlist can add them; empty when nothing could be imported.
     @discardableResult
     func importDropped(_ urls: [URL], intoPlaylist playlistName: String? = nil) async -> [Int64] {
-        let files = await Task.detached(priority: .userInitiated) { Self.audioFiles(in: urls) }.value
-        guard !files.isEmpty else {
-            statusBar.post(DropWords.notAudio(urls.map(\.lastPathComponent)))
-            return []
-        }
-        let isOneFolder = urls.count == 1 && (try? urls[0].resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
-        let name = isOneFolder ? urls[0].lastPathComponent : nil
-        guard let viewModel = makeImportViewModel() else {
-            statusBar.post(Self.importUnavailableMessage(folder: name ?? urls[0].lastPathComponent))
-            return []
-        }
-        let title = DropWords.importTitle(files: files.count, folderName: name, playlist: playlistName)
-        guard await viewModel.importFiles(files, title: title) != nil,
-              let tracks = container.trackRepository else { return [] }
-        let known = (try? await tracks.fetchTracksByOriginalPaths(files.map(\.path))) ?? []
-        return Self.orderedIDs(of: known, paths: files.map(\.path))
+        await importFiles(urls, intoPlaylist: playlistName, scanFoldersInLibraryInPlace: false)
     }
 
     /// The audio files of dropped items, in drop order: a folder's files sorted by path, a file
