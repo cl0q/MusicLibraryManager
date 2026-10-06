@@ -112,11 +112,18 @@ final class ImportViewModel {
 
     /// Compares `folder` with the stored track locations (`organized_path`, relative to the
     /// library folder; an absolute path outside it is checked as it is). Reads no file contents.
-    nonisolated static func compare(folder: URL, organizedPaths: [String],
+    nonisolated static func compare(folder: URL, organizedPaths: [String], oldRoot: String? = nil,
                                     fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> FolderComparison {
         let root = folder.standardizedFileURL.path
+        let old = oldRoot.map { ($0 as NSString).standardizingPath }
         var found = 0
         for path in organizedPaths where !path.isEmpty {
+            // An absolute path under the old folder moves with the folder (review nit): it counts
+            // only when the same place exists below the new one.
+            if let old, path.hasPrefix(old + "/") {
+                if fileExists(root + "/" + path.dropFirst(old.count + 1)) { found += 1 }
+                continue
+            }
             if path.hasPrefix("/"), fileExists(path) {
                 found += 1
                 continue
@@ -127,14 +134,34 @@ final class ImportViewModel {
         return FolderComparison(found: found, total: organizedPaths.filter { !$0.isEmpty }.count)
     }
 
+    /// Work that reads or moves the library's files blocks a folder change (review S5).
+    static let folderChangeBlockingKinds: Set<ActivityKind> = [
+        .download, .recommendationDownload, .reelsDownload, .folderScan, .pathMigration, .sync, .tagWrite,
+    ]
+
+    /// `MLM can’t change the library folder while 1 download is running. …`, or `nil`.
+    static func folderChangeRefusal(operations: [ActivityOperation]) -> String? {
+        let summary = RunningWorkSummary(operations: operations.filter { folderChangeBlockingKinds.contains($0.kind) })
+        guard !summary.isEmpty else { return nil }
+        var text = "MLM can’t change the library folder while \(summary.runningPhrase) running. Let the work finish or cancel it in Activity first."
+        for line in summary.lines { text += "\n• " + line }
+        if summary.moreCount > 0 { text += "\n• and \(summary.moreCount.formatted(.number)) more" }
+        return text
+    }
+
     /// `Change Folder`: the new folder becomes the base of every track's location (existing tracks
     /// keep their relative paths); the file check runs after (`.libraryRootDidChange` →
     /// `LibraryAvailabilityMonitor`), then — when asked — a scan of the new folder.
     @MainActor
     func changeLibraryFolder(to folder: URL, scanAfterwards: Bool) async {
-        await setLibraryRoot(folder.standardizedFileURL.path)
+        let oldRoot = libraryRoot
+        let newRoot = folder.standardizedFileURL.path
+        await setLibraryRoot(newRoot)
         guard errorMessage == nil, scanAfterwards else { return }
-        await importLibrary()
+        // B2: files that are known tracks at the same place below the new folder are re-pointed,
+        // never added a second time.
+        let remap = oldRoot.flatMap { $0.isEmpty ? nil : LibraryRootRemap(oldRoot: $0, newRoot: newRoot) }
+        await runImport(directory: folder, title: "Scan “\(folder.lastPathComponent)”", remap: remap)
     }
 
     // MARK: - Import
@@ -325,7 +352,7 @@ final class ImportViewModel {
     @MainActor
     @discardableResult
     private func runImport(directory: URL, files: [URL]? = nil, title: String,
-                           prepare: PrepareFiles? = nil, subject: ActivitySubject? = nil) async -> ImportService.ImportResult? {
+                           prepare: PrepareFiles? = nil, subject: ActivitySubject? = nil, remap: LibraryRootRemap? = nil) async -> ImportService.ImportResult? {
         // Activity (W3-ACT): `Scan “‹folder›”`; Cancel stops after the current file and keeps
         // what was imported (`ImportService` checks cancellation per file). One box per run, so
         // cancelling a queued import never stops the running one (W2-H).
@@ -374,7 +401,7 @@ final class ImportViewModel {
                 } else if let files {
                     result = try await self.importService.importFiles(files, onProgress: onProgress)
                 } else {
-                    result = try await self.importService.importDirectory(directory, onProgress: onProgress)
+                    result = try await self.importService.importDirectory(directory, remap: remap, onProgress: onProgress)
                 }
 
                 await MainActor.run {

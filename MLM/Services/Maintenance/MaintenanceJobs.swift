@@ -109,6 +109,16 @@ final class MaintenanceJobs {
     private(set) var lastMigration: OrganizedPathMigrationService.MigrationSummary?
     /// The last apply / rollback, for the block's own result line.
     private(set) var pathResult: String?
+    /// `Reread tags from files` asks first (review S2); set by the row and by Library ▸
+    /// Maintenance ▸, answered by Settings ▸ Maintenance.
+    var rereadConfirmationRequested = false
+
+    /// A-SET-REREAD (W3-SET review S2): the question with the count.
+    static func rereadTitle(tracks: Int) -> String {
+        "Reread tags of \(tracks == 1 ? "1 track" : "\(tracks.formatted()) tracks") from their files?"
+    }
+
+    static let rereadMessage = "Edits made in MLM that were not written to files are replaced. Tracks with tag edits that are still waiting to be written are left as they are."
 
     @ObservationIgnored let runner: MaintenanceJobRunner
     @ObservationIgnored private let container: () -> DependencyContainer
@@ -415,48 +425,153 @@ final class MaintenanceJobs {
 
     // MARK: Transcode cache
 
-    /// `2,140 files · 18.2 GB` of the transcode cache (read off the main actor).
+    /// `2,140 files · 18.2 GB` — only the cache's own files (`TranscodeCacheSafety`), read off the
+    /// main actor.
     nonisolated static func cacheSummary(_ directory: URL) -> (files: Int, bytes: Int64)? {
-        guard let enumerator = FileManager.default.enumerator(
-            at: directory, includingPropertiesForKeys: [.isRegularFileKey, .totalFileAllocatedSizeKey, .fileAllocatedSizeKey],
-            options: [.skipsHiddenFiles]) else { return nil }
-        var files = 0
+        guard FileManager.default.fileExists(atPath: directory.path) else { return nil }
         var bytes: Int64 = 0
-        for case let url as URL in enumerator {
-            let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .totalFileAllocatedSizeKey, .fileAllocatedSizeKey])
-            guard values?.isRegularFile == true else { continue }
-            files += 1
+        let files = TranscodeCacheSafety.cacheFiles(in: directory)
+        for url in files {
+            let values = try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey])
             bytes += Int64(values?.totalFileAllocatedSize ?? values?.fileAllocatedSize ?? 0)
         }
-        return (files, bytes)
+        return (files.count, bytes)
     }
 
-    /// `Clear Cache` (A-SET-CACHECLEAR): deletes the transcoded copies — never the music files.
-    /// Refused while a sync reads the cache or a move runs.
-    @discardableResult
-    func clearTranscodeCache() async -> Bool {
+    /// Why the transcode cache folder `folder` can't be cleared or moved now, or `nil`
+    /// (review B1): a running move or sync, or a folder that isn't a dedicated cache folder.
+    func cacheRefusal(for folder: URL) async -> String? {
         let c = container()
-        guard let cache = c.transcodeCache, c.transcodeCacheMoveBlockedReason == nil else { return false }
+        if let reason = c.transcodeCacheMoveBlockedReason { return reason }
+        let root = (try? await c.configRepository?.getLibraryRoot()).flatMap { $0 }.flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+        let pool = c.databaseManager?.pool
+        return await TranscodeCacheSafety.refusal(for: folder, libraryRoot: root) { prefix, absolute in
+            (try? await pool?.read { db in
+                try Bool.fetchOne(db, sql: """
+                    SELECT EXISTS (SELECT 1 FROM tracks
+                                   WHERE organized_path LIKE ? ESCAPE '\' OR organized_path LIKE ? ESCAPE '\')
+                    """, arguments: [TranscodeCacheSafety.likePrefix(prefix), TranscodeCacheSafety.likePrefix(absolute)])
+            }) ?? true
+        }
+    }
+
+    /// `Clear Cache` (A-SET-CACHECLEAR): deletes the cache's own transcoded copies — never another
+    /// file. Refused (with the reason) while a sync reads the cache or a move runs, and for a
+    /// folder that isn't a dedicated cache folder. Returns the refusal, or `nil` when it ran.
+    @discardableResult
+    func clearTranscodeCache() async -> String? {
+        let c = container()
+        guard let cache = c.transcodeCache else { return "There is no transcode cache." }
         let directory = cache.cacheDir
+        if let refusal = await cacheRefusal(for: directory) { return refusal }
         let job = runner.center.begin(.transcodeCacheMove, title: "Clear the transcode cache",
                                       subject: .settings(.maintenance), itemNoun: .file, graceful: true)
         let removed = await Task.detached(priority: .utility) { () -> Int in
             Self.removeCachedFiles(in: directory)
         }.value
         job.finish(ActivityResult(counts: [ActivityCount(.done, removed, removed == 1 ? "copy deleted" : "copies deleted")]))
-        return true
+        return nil
     }
 
-    /// Removes the regular files directly in and below `directory`, keeping the folder.
+    /// `Change…` of the cache folder: both the current and the chosen folder must be dedicated
+    /// cache folders; then the existing move (which moves only cache files) runs.
+    func relocateTranscodeCache(to folder: URL) async -> String? {
+        let c = container()
+        if let current = c.transcodeCache?.cacheDir, let refusal = await cacheRefusal(for: current) { return refusal }
+        if let refusal = await cacheRefusal(for: folder) { return refusal }
+        c.relocateTranscodeCache(to: folder.path)
+        return nil
+    }
+
+    /// Removes the cache's own files directly in `directory` (`TranscodeCacheSafety.isCacheFileName`):
+    /// non-recursive, never a directory, never another file.
     nonisolated static func removeCachedFiles(in directory: URL) -> Int {
-        guard let enumerator = FileManager.default.enumerator(
-            at: directory, includingPropertiesForKeys: [.isRegularFileKey], options: []) else { return 0 }
         var removed = 0
-        for case let url as URL in enumerator {
-            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
+        for url in TranscodeCacheSafety.cacheFiles(in: directory) {
             if (try? FileManager.default.removeItem(at: url)) != nil { removed += 1 }
         }
         return removed
+    }
+}
+
+// MARK: - Transcode cache safety (review B1)
+
+/// What MLM may treat as its transcode cache. The cache folder is user-chosen and may sit inside
+/// the library folder (a hidden `.mlm_transcode_cache`), so deleting or moving "everything in it"
+/// could reach the music: only the cache's own file names are touched, and folders that aren't a
+/// dedicated cache folder are refused.
+enum TranscodeCacheSafety {
+    /// `‹track id›_‹kbps›[_norm][_art‹px›].m4a` and the legacy `‹track id›.m4a`
+    /// (`TranscodeCache.cachePath`).
+    static func isCacheFileName(_ name: String) -> Bool {
+        name.range(of: #"^\d+(_\d+(_norm)?(_art\d+)?)?\.m4a$"#, options: .regularExpression) != nil
+    }
+
+    /// The cache's own regular files directly in `directory` (not recursive, no directories).
+    static func cacheFiles(in directory: URL, fileManager: FileManager = .default) -> [URL] {
+        let names = (try? fileManager.contentsOfDirectory(atPath: directory.path)) ?? []
+        return names.filter(isCacheFileName).map { directory.appendingPathComponent($0) }.filter { url in
+            (try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])).map {
+                $0.isRegularFile == true && $0.isSymbolicLink != true
+            } ?? false
+        }
+    }
+
+    /// `%` and `_` escaped for `LIKE … ESCAPE '\'`, plus the trailing wildcard.
+    static func likePrefix(_ prefix: String) -> String {
+        prefix.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "%", with: "\\%")
+            .replacingOccurrences(of: "_", with: "\\_") + "%"
+    }
+
+    /// A path without a trailing slash, symlinks resolved.
+    static func key(_ url: URL) -> String {
+        let path = url.standardizedFileURL.resolvingSymlinksInPath().path
+        return path.count > 1 && path.hasSuffix("/") ? String(path.dropLast()) : path
+    }
+
+    /// The root, a volume root, `/Volumes`, the home folder, Application Support or a system folder.
+    static func structuralRefusal(
+        for folder: URL,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        appSupport: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    ) -> String? {
+        let lower = key(folder).lowercased()
+        let components = lower.split(separator: "/")
+        let isVolumeRoot = components.count == 2 && components[0] == "volumes"
+        guard lower == "/" || lower == key(home).lowercased() || lower == key(appSupport).lowercased()
+                || lower == "/volumes" || isVolumeRoot
+                || ["/users", "/library", "/system", "/applications"].contains(lower) else { return nil }
+        return "“\(folder.lastPathComponent)” is a disk or system folder, not a transcode cache."
+    }
+
+    /// Why `folder` can't be the transcode cache that MLM clears or moves, or `nil`.
+    ///
+    /// - Parameter holdsTracks: whether a track's `organized_path` lies inside the folder, given its
+    ///   path relative to the library folder (with a trailing `/`) and its absolute path (with `/`).
+    static func refusal(
+        for folder: URL,
+        libraryRoot: URL?,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        appSupport: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0],
+        holdsTracks: (_ relativePrefix: String, _ absolutePrefix: String) async -> Bool
+    ) async -> String? {
+        if let structural = structuralRefusal(for: folder, home: home, appSupport: appSupport) { return structural }
+        let target = key(folder)
+        let name = "“\(folder.lastPathComponent)”"
+        let lower = target.lowercased()
+        guard let libraryRoot else { return nil }
+        let root = key(libraryRoot).lowercased()
+        if lower == root { return "\(name) is the library folder, not a transcode cache." }
+        if root.hasPrefix(lower + "/") { return "\(name) contains the library folder, not only transcoded copies." }
+        if lower.hasPrefix(root + "/") {
+            // Inside the library folder: only a dedicated cache folder.
+            if folder.lastPathComponent.hasPrefix(".mlm") { return nil }
+            let relative = String(target.dropFirst(root.count + 1)) + "/"
+            if await holdsTracks(relative, target + "/") {
+                return "\(name) holds tracks of the library, so it can’t be the transcode cache."
+            }
+        }
+        return nil
     }
 }
 

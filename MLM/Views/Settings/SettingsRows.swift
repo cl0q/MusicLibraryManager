@@ -23,7 +23,9 @@ struct SettingsPath: View {
 
 /// A state word with its symbol: `Connected`, `Not connected — on “Lexxar”`, `Not found`.
 struct SettingsState: View {
-    enum Tone { case neutral, ok, problem }
+    /// `problem`: orange (needs attention — not connected, sign-in expired, a tool missing);
+    /// `error`: red (failed, not found — UC-COLOR-05).
+    enum Tone { case neutral, ok, problem, error }
 
     let text: String
     var systemImage: String?
@@ -45,6 +47,7 @@ struct SettingsState: View {
         case .neutral: AnyShapeStyle(.secondary)
         case .ok: AnyShapeStyle(.green)
         case .problem: AnyShapeStyle(.orange)
+        case .error: AnyShapeStyle(.red)
         }
     }
 }
@@ -55,8 +58,10 @@ extension SettingsState {
         switch reach {
         case .onThisMac, .connected:
             self.init(text: reach.text, systemImage: reach.systemImage, tone: .ok)
-        case .notConnected, .notFound:
+        case .notConnected:
             self.init(text: reach.text, systemImage: reach.systemImage, tone: .problem)
+        case .notFound:
+            self.init(text: reach.text, systemImage: reach.systemImage, tone: .error)
         case .notSet:
             self.init(text: reach.text, systemImage: nil, tone: .neutral)
         }

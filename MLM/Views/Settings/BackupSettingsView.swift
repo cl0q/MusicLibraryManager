@@ -283,7 +283,7 @@ private struct BackupSettingsForm: View {
                 } else {
                     HStack(spacing: 4) {
                         Text(viewModel.detailLine(for: info) + " ·")
-                        SettingsState(text: "Incomplete — can’t be restored", systemImage: "exclamationmark.triangle", tone: .problem)
+                        SettingsState(text: "Incomplete — can’t be restored", systemImage: "exclamationmark.triangle", tone: .error)
                     }
                 }
             }
@@ -314,7 +314,7 @@ private struct BackupSettingsForm: View {
             Button("Show Logs") { ActivityWindowOpener.open(tab: .logs) }
         } label: {
             VStack(alignment: .leading, spacing: 4) {
-                SettingsState(text: message, systemImage: "exclamationmark.triangle", tone: .problem)
+                SettingsState(text: message, systemImage: "exclamationmark.triangle", tone: .error)
                 if let details = viewModel.errorDetails {
                     DisclosureGroup("Details") {
                         Text(details)

@@ -23,7 +23,7 @@ struct PlaybackSettingsView: View {
                             Text("Works for analysed tracks — \(MaintenanceCoverage.analysed(coverage.replayGain, of: coverage.tracksWithFile))")
                             if coverage.replayGain < coverage.tracksWithFile {
                                 Text("·")
-                                Button("Run loudness analysis…") {
+                                Button("Run loudness analysis") {
                                     SettingsRouter.shared.select(.maintenance)
                                 }
                                 .buttonStyle(.link)

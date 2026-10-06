@@ -12,6 +12,7 @@ struct SourcesSetupView: View {
     @State private var sources: SourcesViewModel?
     @State private var pendingDisconnect: TokenStorage.Service?
     @State private var connecting: Set<TokenStorage.Service> = []
+    @State private var signInError: [TokenStorage.Service: String] = [:]
     @State private var credentialsFileFound = true
 
     private var accounts: SourceAccounts { .shared }
@@ -130,7 +131,7 @@ struct SourcesSetupView: View {
                                                                service: service, lastRefreshed: lastRefreshed)
                             if !detail.isEmpty { Text("· \(detail)") }
                         }
-                        if let error = sources?.error(for: service) {
+                        if let error = signInError[service] ?? sources?.error(for: service) {
                             Text("Couldn’t connect — \(error)")
                         }
                     }
@@ -219,17 +220,34 @@ struct SourcesSetupView: View {
 
     /// `Connect…` / `Reconnect`: the keychain once (Reconnect), then the browser sign-in; returns
     /// here (DEC-004).
+    /// `Connect…` / `Reconnect` (review S1): a locked keychain item is read once with permission;
+    /// a refused or expired sign-in and a new connection go straight to the browser sign-in, whose
+    /// success clears the refusal (`signIn` → `didConnect`).
     private func connect(_ service: TokenStorage.Service) {
         guard let sources else { return }
         connecting.insert(service)
         Task {
-            if accounts.state(for: service).needsSignIn {
-                await sources.reconnectSource(service)
-            } else {
-                await sources.connectSource(service)
+            defer { connecting.remove(service) }
+            switch ReconnectStep.step(for: accounts.state(for: service)) {
+            case .allowKeychainAccess:
+                if let storage = container.tokenStorage,
+                   (try? storage.getCredentials(service: service, interactive: true)) != nil {
+                    container.tokenAccessStatus?.markAccessible(service)
+                    accounts.markKeychainReadable(service)
+                    await container.tokenRefreshService?.clearBackoff(service: service)
+                } else {
+                    accounts.recordKeychainDenied(service)
+                }
+            case .browserSignIn:
+                signInError[service] = nil
+                do {
+                    try await sources.signIn(service)
+                } catch is CancellationError {
+                } catch {
+                    signInError[service] = error.localizedDescription
+                }
             }
             await sources.loadSources()
-            connecting.remove(service)
         }
     }
 
@@ -275,10 +293,13 @@ private struct QobuzCookieSection: View {
                         .labelsHidden()
                         .frame(width: 160)
                         .onSubmit(save)
+                        // Review S8: the credentials file's value takes precedence; the field is
+                        // read-only while it is set there.
+                        .disabled(setInCredentialsFile)
                     Button("Save", action: save)
-                        .disabled(trimmed.isEmpty || trimmed == stored)
+                        .disabled(setInCredentialsFile || trimmed.isEmpty || trimmed == stored)
                     Button("Clear…", role: .destructive) { confirmsClear = true }
-                        .disabled(stored == nil)
+                        .disabled(setInCredentialsFile || stored == nil)
                 }
             } label: {
                 SettingsRowLabel("Access cookie") { status }
@@ -341,7 +362,7 @@ private struct QobuzCookieSection: View {
 
     /// Return or `Save`; an empty value is never saved (ST-SRC.E06) — `Clear…` removes it.
     private func save() {
-        guard !trimmed.isEmpty else { return }
+        guard !setInCredentialsFile, !trimmed.isEmpty else { return }
         UserDefaults.standard.set(trimmed, forKey: SquidWtfClient.userDefaultsKey)
         SquidWtfClient.isCookieExpired = false
         let now = Date()

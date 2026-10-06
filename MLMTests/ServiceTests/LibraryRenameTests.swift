@@ -155,4 +155,104 @@ struct LibraryRenameTests {
         #expect(closed == 1 && relaunched == 1)
         #expect(pending?.hasSuffix("Club Sets.mlibm") == true, "the renamed library opens after the relaunch")
     }
+
+    // MARK: Review S4 / S6 / nits
+
+    @Test func aFailedMoveRestoresTheManifest() throws {
+        let f = try Fixture()
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: f.libraries.path)
+            f.cleanup()
+        }
+        // The folder can't take a new name; the package itself (and its manifest) stays writable.
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: f.libraries.path)
+        #expect(throws: LibraryRename.Problem.self) {
+            try LibraryRename.rename(package: f.package, to: "Club Sets", libraryId: f.libraryId,
+                                     store: f.store, pathMigrationsDirectory: f.migrations)
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: f.libraries.path)
+        #expect(FileManager.default.fileExists(atPath: f.package.path))
+        #expect(try f.manifestName(at: f.package) == "Main Library")
+        #expect(try f.store.load().registry.entry(withId: f.libraryId)?.name == "Main Library")
+    }
+
+    @Test func aFailedVerificationMovesTheFileBack() throws {
+        let f = try Fixture()
+        defer { f.cleanup() }
+        try FileManager.default.removeItem(at: LibraryPackage.databaseURL(in: f.package))
+        #expect(throws: LibraryRename.Problem.self) {
+            try LibraryRename.rename(package: f.package, to: "Club Sets", libraryId: f.libraryId,
+                                     store: f.store, pathMigrationsDirectory: f.migrations)
+        }
+        #expect(FileManager.default.fileExists(atPath: f.package.path))
+        #expect(!FileManager.default.fileExists(atPath: f.libraries.appendingPathComponent("Club Sets.mlibm").path))
+        #expect(try f.manifestName(at: f.package) == "Main Library")
+    }
+
+    @Test func aPartialRepointIsRolledBack() throws {
+        let f = try Fixture()
+        let locked = f.migrations.appendingPathComponent("organized-path-migration-b.json")
+        defer {
+            try? FileManager.default.setAttributes([.immutable: false], ofItemAtPath: locked.path)
+            f.cleanup()
+        }
+        try FileManager.default.createDirectory(at: f.migrations, withIntermediateDirectories: true)
+        let old = LibraryPackage.databaseURL(in: f.package).path
+        for name in ["organized-path-migration-a.json", "organized-path-migration-b.json", "organized-path-migration-c.json"] {
+            try JSONSerialization.data(withJSONObject: ["databasePath": old]).write(to: f.migrations.appendingPathComponent(name))
+        }
+        // One record can't be replaced: the re-point stops part-way.
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: locked.path)
+        #expect(throws: LibraryRename.Problem.self) {
+            try LibraryRename.rename(package: f.package, to: "Club Sets", libraryId: f.libraryId,
+                                     store: f.store, pathMigrationsDirectory: f.migrations)
+        }
+        for name in ["organized-path-migration-a.json", "organized-path-migration-b.json", "organized-path-migration-c.json"] {
+            let json = try JSONSerialization.jsonObject(with: Data(contentsOf: f.migrations.appendingPathComponent(name))) as? [String: Any]
+            #expect(json?["databasePath"] as? String == old, "\(name) points at the old database again")
+        }
+        #expect(FileManager.default.fileExists(atPath: f.package.path))
+        #expect(try f.store.load().registry.entry(withId: f.libraryId)?.name == "Main Library")
+    }
+
+    @Test func aPoolThatFailsToCloseRequiresARelaunch() throws {
+        let f = try Fixture()
+        defer { f.cleanup() }
+        var pending: String?
+        var relaunched = 0
+        let outcome = LibraryRename.renameOpenLibrary(
+            package: f.package, currentName: "Main Library", to: "Club Sets", libraryId: f.libraryId, store: f.store,
+            activeOperations: [], closeDatabase: { throw CocoaError(.fileWriteUnknown) },
+            pendingOpen: LibraryLaunchCoordinator.PendingOpenStore(take: { pending }, set: { pending = $0 }),
+            relaunch: { relaunched += 1 }, pathMigrationsDirectory: f.migrations)
+        #expect(outcome == .relaunchRequired, "never “nothing changed, try again” after the writer may have closed")
+        #expect(pending == f.package.path, "MLM reopens the library under its old name")
+        #expect(relaunched == 0, "the alert relaunches")
+        #expect(FileManager.default.fileExists(atPath: f.package.path))
+    }
+
+    @Test func anotherLibrarysListEntryIsNeverDropped() throws {
+        let f = try Fixture()
+        defer { f.cleanup() }
+        var registry = try f.store.load().registry
+        registry.upsert(libraryId: "other", url: f.libraries.appendingPathComponent("Club Sets.mlibm"), name: "Club Sets")
+        try f.store.save(registry)
+        #expect(throws: LibraryRename.Problem.listedElsewhere(fileName: "Club Sets.mlibm")) {
+            try LibraryRename.rename(package: f.package, to: "Club Sets", libraryId: f.libraryId,
+                                     store: f.store, pathMigrationsDirectory: f.migrations)
+        }
+        #expect(try f.store.load().registry.entry(withId: "other") != nil)
+    }
+
+    @Test func aUnicodeNormalisationOnlyRenameRenamesTheFile() throws {
+        let f = try Fixture(name: "cafe\u{301}")   // NFD, lower case
+        defer { f.cleanup() }
+        // Only the normalisation differs: the same name (Swift compares canonically), not "taken".
+        #expect(LibraryRename.problem(newName: "caf\u{E9}", currentName: "cafe\u{301}", package: f.package) == .sameName)
+        // Normalisation and letter case: renamed through a temporary name.
+        let renamed = try LibraryRename.rename(package: f.package, to: "Caf\u{E9}", libraryId: f.libraryId,   // NFC
+                                               store: f.store, pathMigrationsDirectory: f.migrations)
+        #expect(FileManager.default.fileExists(atPath: renamed.path))
+        #expect(try f.manifestName(at: renamed) == "Caf\u{E9}")
+    }
 }

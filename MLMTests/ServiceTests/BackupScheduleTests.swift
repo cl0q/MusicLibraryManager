@@ -105,6 +105,27 @@ struct BackupScheduleTests {
         #expect(try f.bundles().count == 1)
     }
 
+    @Test func onQuitSkipsAnUnreachableDestination() async throws {
+        let f = try await Fixture()
+        defer { f.cleanup() }
+        let service = f.service()
+        try await service.setSchedule(.onQuit)
+        try await f.config.set(key: "backup_destination", value: "/Volumes/MLM-Not-Mounted-\(UUID().uuidString)/Backups")
+        #expect(service.backUpOnQuitIfScheduled() == nil)
+        #expect(!BackupService.isOnMountedLocalVolume(URL(fileURLWithPath: "/Volumes/MLM-Not-Mounted-x/B")))
+        #expect(BackupService.isOnMountedLocalVolume(f.destination))
+    }
+
+    @Test func onQuitAsksTheReachabilityCheck() async throws {
+        let f = try await Fixture()
+        defer { f.cleanup() }
+        let service = f.service()
+        try await service.setSchedule(.onQuit)
+        #expect(service.backUpOnQuitIfScheduled(isReachable: { _ in false }) == nil)
+        #expect(try f.bundles().isEmpty)
+        #expect(service.backUpOnQuitIfScheduled(timeout: 20, isReachable: { _ in true }) != nil)
+    }
+
     @Test func onQuitAfterTheDatabaseClosedDoesNothing() async throws {
         let f = try await Fixture()
         defer { f.cleanup() }
@@ -138,7 +159,7 @@ struct BackupScheduleTests {
         #expect(try f.bundles().count == 12)
     }
 
-    @Test func aSmallerNumberAppliesAtOnce() async throws {
+    @Test func aSmallerNumberAppliesAfterTheNextBackup() async throws {
         let f = try await Fixture()
         defer { f.cleanup() }
         let service = f.service()
@@ -146,9 +167,10 @@ struct BackupScheduleTests {
             _ = try await service.createBackup(reason: .manual)
             f.clock.advance(60)
         }
-        let removed = try await service.setRetention(.last5)
-        #expect(removed.count == 3)
-        #expect(try f.bundles().count == 5)
+        try await service.setRetention(.last5)
+        #expect(try f.bundles().count == 8, "changing Keep deletes nothing (review S3)")
+        _ = try await service.createBackup(reason: .manual)
+        #expect(try f.bundles().count == 5, "the next successful backup applies it")
     }
 
     @Test func theNewestCompleteBackupIsNeverPruned() async throws {

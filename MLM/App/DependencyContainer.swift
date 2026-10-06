@@ -560,6 +560,15 @@ final class DependencyContainer {
 
         let oldDir = transcodeCache.cacheDir.standardizedFileURL
         let newDir = URL(fileURLWithPath: newPath).standardizedFileURL
+        // The library-specific checks run in `MaintenanceJobs.relocateTranscodeCache(to:)`; this
+        // one guards every caller against disk and system folders (review B1).
+        for folder in [oldDir, newDir] {
+            let structural = TranscodeCacheSafety.structuralRefusal(for: folder)
+            if let structural {
+                AppLogger.shared.error("Cache migration refused: \(structural)", source: "Sync")
+                return
+            }
+        }
 
         if oldDir == newDir {
             AppLogger.shared.info("Cache migration: The new path is already in use. No action is required.", source: "Sync")
@@ -634,8 +643,8 @@ enum TranscodeCacheMove {
         var moved: [Moved] = []
         do {
             try fileManager.createDirectory(at: newDir, withIntermediateDirectories: true)
-            let files = try fileManager.contentsOfDirectory(at: oldDir, includingPropertiesForKeys: nil)
-                .filter { $0.pathExtension.lowercased() == "m4a" }
+            // Only the cache's own files (review B1): never a music file next to them.
+            let files = TranscodeCacheSafety.cacheFiles(in: oldDir, fileManager: fileManager)
             for (index, file) in files.enumerated() {
                 if isCancelled() { return .cancelled(movedBack: moveBack(moved, fileManager: fileManager)) }
                 progress(index, files.count, file.lastPathComponent)

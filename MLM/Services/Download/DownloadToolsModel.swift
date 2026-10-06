@@ -112,7 +112,20 @@ final class DownloadToolsModel {
 
     /// Probes every listed tool; a second call while one runs does nothing.
     func check() async {
-        guard !isChecking else { return }
+        // A second caller waits for the running check instead of reading stale rows.
+        if let running = runningCheck {
+            await running.value
+            return
+        }
+        let task = Task { await performCheck() }
+        runningCheck = task
+        await task.value
+        runningCheck = nil
+    }
+
+    @ObservationIgnored private var runningCheck: Task<Void, Never>?
+
+    private func performCheck() async {
         isChecking = true
         defer { isChecking = false }
         let health = health

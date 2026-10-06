@@ -95,7 +95,7 @@ struct ActivityJobAdapterTests {
         #expect(run("fingerprint", nil) == nil, "a run that never started leaves no trace")
         #expect(MaintenanceJob(action: "fingerprint").isCancellable)
         #expect(!MaintenanceJob(action: "path-apply").isCancellable, "a path migration can't stop half-way")
-        #expect(!MaintenanceJob(action: "rescan").isCancellable)
+        #expect(MaintenanceJob(action: "rescan").isCancellable, "W3-SET review S2: Reread tags stops after the current file")
         #expect(MaintenanceJob(action: "artwork-musicbrainz").kind == .artwork)
     }
 

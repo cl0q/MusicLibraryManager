@@ -14,6 +14,20 @@ enum SignInExpiredCause: String, Equatable, Sendable {
     case refreshRejected
     /// The keychain item can't be read without asking (a changed app signature).
     case keychainLocked
+    /// The user denied the keychain prompt this session (never persisted, never called a refusal
+    /// by the provider): the browser sign-in is the way back.
+    case keychainDenied
+}
+
+/// What `Reconnect` does for a state (review S1): a locked keychain item is read once with
+/// permission; a refused or expired sign-in goes straight to the browser sign-in.
+enum ReconnectStep: Equatable, Sendable {
+    case allowKeychainAccess
+    case browserSignIn
+
+    static func step(for state: SourceAccountState) -> ReconnectStep {
+        state == .keychainLocked ? .allowKeychainAccess : .browserSignIn
+    }
 }
 
 /// What the keychain holds for one service, read without prompting.
@@ -52,6 +66,8 @@ final class SourceAccounts {
     private(set) var stored: [TokenStorage.Service: StoredSignIn] = [:]
     private(set) var keychainLocked: Set<TokenStorage.Service> = []
     private(set) var refreshRejected: Set<TokenStorage.Service>
+    /// Keychain prompts the user denied this session (not persisted).
+    private(set) var keychainDenied: Set<TokenStorage.Service> = []
     /// Whether the keychain was read at least once.
     private(set) var hasLoaded = false
 
@@ -66,7 +82,7 @@ final class SourceAccounts {
     // MARK: Output
 
     func state(for service: TokenStorage.Service) -> SourceAccountState {
-        if refreshRejected.contains(service) { return .signInExpired }
+        if refreshRejected.contains(service) || keychainDenied.contains(service) { return .signInExpired }
         if keychainLocked.contains(service) { return .keychainLocked }
         switch stored[service] ?? .none {
         case .none: return .disconnected
@@ -79,6 +95,7 @@ final class SourceAccounts {
     /// Why the sign-in can't be used, or `nil` when it can (or there is none).
     func expiredCause(for service: TokenStorage.Service) -> SignInExpiredCause? {
         if refreshRejected.contains(service) { return .refreshRejected }
+        if keychainDenied.contains(service) { return .keychainDenied }
         if keychainLocked.contains(service) || stored[service] == .unreadable { return .keychainLocked }
         if stored[service] == .expiredWithoutRefresh { return .expired }
         return nil
@@ -101,6 +118,8 @@ final class SourceAccounts {
             return "imports and refreshes from \(service.displayName) need a sign-in"
         case .keychainLocked:
             return "MLM can’t read the saved sign-in. Reconnect asks once for permission"
+        case .signInExpired where cause == .keychainDenied:
+            return "MLM wasn’t allowed to read the saved sign-in · Reconnect signs in again in the browser"
         case .signInExpired where cause == .refreshRejected:
             return "\(service.displayName) refused the saved sign-in · imports and refreshes from \(service.displayName) are paused"
         case .signInExpired:
@@ -131,7 +150,14 @@ final class SourceAccounts {
 
     func markKeychainReadable(_ service: TokenStorage.Service) {
         keychainLocked.remove(service)
+        keychainDenied.remove(service)
         if stored[service] == .unreadable { stored[service] = .valid }
+    }
+
+    /// The keychain prompt was denied: `Sign-in expired` for this session, without claiming the
+    /// provider refused anything (review S1).
+    func recordKeychainDenied(_ service: TokenStorage.Service) {
+        keychainDenied.insert(service)
     }
 
     func recordRefreshRejected(_ service: TokenStorage.Service) {
@@ -142,6 +168,7 @@ final class SourceAccounts {
     func recordRefreshSucceeded(_ service: TokenStorage.Service) {
         stored[service] = .valid
         keychainLocked.remove(service)
+        keychainDenied.remove(service)
         guard refreshRejected.remove(service) != nil else { return }
         persistRejected()
     }
@@ -153,6 +180,7 @@ final class SourceAccounts {
     func didDisconnect(_ service: TokenStorage.Service) {
         stored[service] = StoredSignIn.none
         keychainLocked.remove(service)
+        keychainDenied.remove(service)
         if refreshRejected.remove(service) != nil { persistRejected() }
     }
 

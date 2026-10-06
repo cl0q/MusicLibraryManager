@@ -125,7 +125,7 @@ struct SettingsSceneTests {
             ("MLM/Views/Search/OnlineSearchResultsView.swift", "openSettings(tab: .sources)", 2),
             ("MLM/Views/Activity/ActivityToolbarItem.swift", "openSettings(tab: .backup)", 1),
             ("MLM/Views/Launch/LibrarySetupFlowView.swift", "openSettings(tab: .library)", 1),
-            ("MLM/App/Commands/LibraryMenuCommands.swift", "openSettings(tab: .maintenance)", 1),
+            ("MLM/App/Commands/LibraryMenuCommands.swift", "openSettings(tab: .maintenance)", 2),
             ("MLM/App/Commands/LibraryMenuCommands.swift", "openSettings(tab: .library)", 1),
             ("MLM/App/Commands/LibraryMenuCommands.swift", "openSettings(tab: .backup)", 2),
         ]

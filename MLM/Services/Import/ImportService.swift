@@ -16,7 +16,42 @@ protocol ImportServicing: Sendable {
     ) async throws -> ImportService.ImportResult
 }
 
+/// The library folder changed from `oldRoot` to `newRoot` (S-SET-LIBFOLDER, W3-SET B2): a scanned
+/// file whose place relative to the new folder matches a known track is that track — its
+/// `original_path` is re-pointed instead of a second row being added.
+struct LibraryRootRemap: Sendable, Equatable {
+    let oldRoot: String
+    let newRoot: String
+
+    /// `x/y.m4a` for a file below `newRoot`, else `nil`.
+    func relativePath(of path: String) -> String? {
+        let root = Self.trimmed(newRoot)
+        guard path.hasPrefix(root + "/") else { return nil }
+        return String(path.dropFirst(root.count + 1))
+    }
+
+    /// The same place below the old folder.
+    func oldAbsolutePath(forRelative relative: String) -> String {
+        Self.trimmed(oldRoot) + "/" + relative
+    }
+
+    private static func trimmed(_ root: String) -> String {
+        let standardized = (root as NSString).standardizingPath
+        return standardized.hasSuffix("/") && standardized.count > 1 ? String(standardized.dropLast()) : standardized
+    }
+}
+
 extension ImportServicing {
+    /// A scan of the new library folder after a folder change (W3-SET B2). Services without a
+    /// re-point step (test fakes) scan as usual.
+    func importDirectory(
+        _ directory: URL,
+        remap: LibraryRootRemap?,
+        onProgress: (@Sendable (ImportService.ImportProgress) -> Void)?
+    ) async throws -> ImportService.ImportResult {
+        try await importDirectory(directory, onProgress: onProgress)
+    }
+
     /// Services that only import directories (test fakes) import no loose files.
     func importFiles(
         _ audioFiles: [URL],
@@ -153,17 +188,35 @@ final class ImportService: Sendable {
         _ directory: URL,
         onProgress: (@Sendable (ImportProgress) -> Void)? = nil
     ) async throws -> ImportResult {
+        try await importDirectory(directory, remap: nil, onProgress: onProgress)
+    }
+
+    /// `importDirectory` after a library-folder change: files that are known tracks at their
+    /// place relative to the new folder are re-pointed, not added (W3-SET B2).
+    func importDirectory(
+        _ directory: URL,
+        remap: LibraryRootRemap?,
+        onProgress: (@Sendable (ImportProgress) -> Void)? = nil
+    ) async throws -> ImportResult {
         // Phase 1: Scan for audio files
         onProgress?(ImportProgress(total: 0, processed: 0, phase: "Scanning...", currentFile: nil))
         let audioFiles = try Self.scanDirectory(directory)
         try Task.checkCancellation()
-        return try await importFiles(audioFiles, onProgress: onProgress)
+        return try await importFiles(audioFiles, remap: remap, onProgress: onProgress)
     }
 
     /// Phases 2–4 for a list of audio files (a scanned directory, or files dropped from Finder):
     /// extract, sanitize, insert. Files already in the library are skipped and counted.
     func importFiles(
         _ audioFiles: [URL],
+        onProgress: (@Sendable (ImportProgress) -> Void)? = nil
+    ) async throws -> ImportResult {
+        try await importFiles(audioFiles, remap: nil, onProgress: onProgress)
+    }
+
+    private func importFiles(
+        _ audioFiles: [URL],
+        remap: LibraryRootRemap?,
         onProgress: (@Sendable (ImportProgress) -> Void)? = nil
     ) async throws -> ImportResult {
         guard !audioFiles.isEmpty else {
@@ -245,7 +298,7 @@ final class ImportService: Sendable {
         guard !Task.isCancelled else {
             return ImportResult(succeeded: 0, failed: failures.count, skipped: 0, failures: failures, totalScanned: audioFiles.count, cancelled: true, committed: 0)
         }
-        let (succeeded, skipped, dbFailures, insertedTracks, wasCancelled) = await saveBatches(successfulMetadata)
+        let (succeeded, skipped, dbFailures, insertedTracks, wasCancelled) = await saveBatches(successfulMetadata, remap: remap)
         failures.append(contentsOf: dbFailures)
 
         onProgress?(ImportProgress(
@@ -285,9 +338,15 @@ final class ImportService: Sendable {
     ///
     /// - Parameter metadata: Array of extracted metadata
     /// - Returns: (succeeded count, skipped count, failure messages, successfully inserted tracks)
-    private func saveBatches(_ metadata: [TrackMetadata]) async -> (Int, Int, [String], [Track], Bool) {
+    func saveBatches(_ metadata: [TrackMetadata], remap: LibraryRootRemap? = nil) async -> (Int, Int, [String], [Track], Bool) {
         var totalSucceeded = 0
         var totalSkipped = 0
+        var totalRepointed = 0
+        defer {
+            if totalRepointed > 0 {
+                AppLogger.shared.info("Import after a library-folder change: \(totalRepointed) re-pointed", source: "Import")
+            }
+        }
         var failures: [String] = []
         var allInsertedTracks: [Track] = []
 
@@ -296,9 +355,11 @@ final class ImportService: Sendable {
                 return (totalSucceeded, totalSkipped, failures, allInsertedTracks, true)
             }
             do {
-                let (succeeded, skipped, insertedTracks) = try await saveBatch(batch)
+                let (succeeded, skipped, insertedTracks, repointed) = try await saveBatch(batch, remap: remap)
                 totalSucceeded += succeeded
-                totalSkipped += skipped
+                // A re-pointed file is already in the library.
+                totalSkipped += skipped + repointed
+                totalRepointed += repointed
                 allInsertedTracks.append(contentsOf: insertedTracks)
             } catch {
                 failures.append("Database error for batch of \(batch.count): \(error.localizedDescription)")
@@ -319,10 +380,11 @@ final class ImportService: Sendable {
     ///
     /// - Parameter batch: Metadata to insert
     /// - Returns: (succeeded count, skipped count, successfully inserted tracks)
-    private func saveBatch(_ batch: [TrackMetadata]) async throws -> (Int, Int, [Track]) {
+    private func saveBatch(_ batch: [TrackMetadata], remap: LibraryRootRemap?) async throws -> (Int, Int, [Track], Int) {
         try await database.write { db in
             var succeeded = 0
             var skipped = 0
+            var repointed = 0
             var insertedTracks: [Track] = []
 
             for metadata in batch {
@@ -348,6 +410,32 @@ final class ImportService: Sendable {
                 if exists {
                     skipped += 1
                     continue
+                }
+
+                // After a library-folder change (W3-SET B2): the same place below the new folder
+                // is a known track — its old-folder `original_path`, or its `organized_path`
+                // (letter case ignored, as on the Mac's case-insensitive volumes). Re-point it;
+                // nothing else of the row changes (no new row, `date_added` kept).
+                if let remap, let relative = remap.relativePath(of: standardized) {
+                    let old = remap.oldAbsolutePath(forRelative: relative)
+                    let oldCandidates = Array(Set([old, old.precomposedStringWithCanonicalMapping,
+                                                   old.decomposedStringWithCanonicalMapping]))
+                    let relativeForms = Array(Set([relative, relative.precomposedStringWithCanonicalMapping,
+                                                   relative.decomposedStringWithCanonicalMapping].map { $0.lowercased() }))
+                    let marks = oldCandidates.map { _ in "?" }.joined(separator: ",")
+                    let relMarks = relativeForms.map { _ in "?" }.joined(separator: ",")
+                    var arguments = StatementArguments(oldCandidates)
+                    arguments += StatementArguments(relativeForms)
+                    if let id = try Int64.fetchOne(db, sql: """
+                        SELECT id FROM tracks
+                        WHERE original_path IN (\(marks)) OR lower(organized_path) IN (\(relMarks))
+                        ORDER BY id LIMIT 1
+                        """, arguments: arguments) {
+                        try db.execute(sql: "UPDATE tracks SET original_path = ? WHERE id = ?",
+                                       arguments: [metadata.originalPath, id])
+                        repointed += 1
+                        continue
+                    }
                 }
 
                 // Generate organized path
@@ -391,7 +479,7 @@ final class ImportService: Sendable {
                 }
             }
 
-            return (succeeded, skipped, insertedTracks)
+            return (succeeded, skipped, insertedTracks, repointed)
         }
     }
 
