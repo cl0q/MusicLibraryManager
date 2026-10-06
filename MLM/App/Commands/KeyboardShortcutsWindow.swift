@@ -125,7 +125,6 @@ enum KeyboardMap {
         ]),
         Group(title: "MLM", rows: [
             .menu(.closeWindow), .menu(.minimize), .menu(.hideApp), .menu(.hideOthers), .menu(.quit),
-            .menu(.mlmHelp),
         ]),
     ]
 }
