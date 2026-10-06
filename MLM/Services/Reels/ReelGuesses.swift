@@ -113,6 +113,25 @@ enum ReelGuesses {
         return kept
     }
 
+    /// The guesses of `source` replaced by `new`, everything else kept, in the one order
+    /// (Shazam, text, file name) with the same song listed once.
+    static func replacing(_ source: ReelGuessSource, with new: [ReelGuess], in existing: [ReelGuess]) -> [ReelGuess] {
+        func rank(_ source: ReelGuessSource) -> Int {
+            switch source {
+            case .shazam: 0
+            case .text: 1
+            case .fileName: 2
+            }
+        }
+        let all = existing.filter { $0.source != source } + new
+        let ordered = all.enumerated().sorted { a, b in
+            rank(a.element.source) != rank(b.element.source) ? rank(a.element.source) < rank(b.element.source) : a.offset < b.offset
+        }.map(\.element)
+        var kept: [ReelGuess] = []
+        for guess in ordered where !kept.contains(where: { ReelGuess.sameSong($0, guess) }) { kept.append(guess) }
+        return kept
+    }
+
     /// `0:07`, `1:02`.
     static func timecode(_ seconds: TimeInterval) -> String {
         let whole = max(0, Int(seconds.rounded(.down)))

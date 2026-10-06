@@ -54,6 +54,9 @@ enum DropTarget: Equatable, Sendable {
     /// A genre's track table (D-STUDIO-TRACK-TO-GENRE): tracks are **staged** for the genre
     /// (`Save n Changes` commits them).
     case genreTable(key: String, name: String)
+    /// The whole Discover ▸ Reels view, also when the list is not empty (W3-DISC-B, V-REELS.N02):
+    /// `.mp4` / `.mov` files and folders are added as reels, a reel link is fetched.
+    case reels
     /// The window anywhere no other target takes the drag.
     case window
 }
@@ -158,6 +161,10 @@ enum DropDecision: Equatable, Sendable {
     case importM3U(URL, playlistID: Int64?)
     /// A link: Add from Link… / the playlist import (`QuickAddRouter`).
     case openLink(URL, playlistID: Int64?)
+    /// Videos and folders onto the Reels view: listed where they are (`ReelsModel.addDropped`).
+    case addReels([URL])
+    /// A reel link onto the Reels view: fetched as an Activity operation (`Fetching reel…`).
+    case fetchReelLink(URL)
     /// A `.mlibm`: open or switch library (`MainWindowPresenter.openLibrary`). `ignored`: other
     /// files dropped with it (named in the status bar, D-LIBFILE-OPEN).
     case openLibraryFile(URL, ignored: Int)
@@ -242,6 +249,8 @@ enum DropRules {
             // Only tracks get a genre (UC-DND matrix column "Genre row"; playlists and genres
             // dragged onto a genre row: `—`).
             return true
+        case (.reels, .files), (.reels, .link):
+            return true
         default:
             return false
         }
@@ -300,6 +309,9 @@ enum DropRules {
             case .sidebarPlaylist(let id, _): return .openLink(url, playlistID: id)
             case .playlistTable(let id, _, _): return .openLink(url, playlistID: id)
             case .playlistsSection, .window: return .openLink(url, playlistID: nil)
+            case .reels:
+                // Only a reel link is taken here; any other says why (the sheet's words).
+                return ReelLinkParser.parse(url.absoluteString) == nil ? .refuse(ReelLinkParser.refusal) : .fetchReelLink(url)
             default: return .refuse(nil)
             }
         }
@@ -318,7 +330,7 @@ enum DropRules {
         case .playlistFolder(let id, _): return .newPlaylistInFolder(ids, folderID: id)
         case .genreRow(_, let name): return .setGenre(ids, genreName: name)
         case .genreTable(let key, let name): return .stageForGenre(ids, genreKey: key, genreName: name)
-        case .fixedRow, .playlistCover, .playlistCard, .window, .playlistOrder, .playlistCardInManualOrder, .folderRow:
+        case .fixedRow, .playlistCover, .playlistCard, .window, .playlistOrder, .playlistCardInManualOrder, .folderRow, .reels:
             return .refuse(nil)
         }
     }
@@ -363,7 +375,7 @@ enum DropRules {
         case .player:
             return ids.isEmpty ? .refuse(nil) : .playNextPlaylists(ids)
         case .playlistsSection, .fixedRow, .playlistCover, .playlistCard, .window,
-             .playlistFolder, .playlistOrder, .playlistCardInManualOrder, .folderRow, .genreRow, .genreTable:
+             .playlistFolder, .playlistOrder, .playlistCardInManualOrder, .folderRow, .genreRow, .genreTable, .reels:
             return .refuse(nil)
         }
     }
@@ -377,6 +389,12 @@ enum DropRules {
             case .syncProfile, .player, .playlistCover, .playlistCard: break
             default: return libraryFileDecision(files) ?? .refuse(nil)
             }
+        }
+
+        // The Reels view takes videos and folders (listed where they are, V-REELS.N02).
+        if target == .reels {
+            let taken = files.filter { $0.kind == .folder || ReelImporter.isVideo($0.url) }
+            return taken.isEmpty ? .refuse(ReelImporter.notAVideoSentence(files.map(\.name))) : .addReels(taken.map(\.url))
         }
 
         if case .playlistCover(let id, let name) = target {
@@ -394,7 +412,7 @@ enum DropRules {
             case .playlistsSection, .window, .fixedRow, .folderRow: return .importM3U(m3u.url, playlistID: nil)
             case .playlistFolder(let id, _): return .importM3UInFolder(m3u.url, folderID: id)
             case .syncProfile, .player, .playlistCover, .playlistCard, .playlistOrder, .playlistCardInManualOrder,
-                 .genreRow, .genreTable:
+                 .genreRow, .genreTable, .reels:
                 return .refuse(nil)
             }
         }
@@ -424,7 +442,7 @@ enum DropRules {
         case .folderRow(let path, _): return .importFilesIntoLibrary(urls, folderPath: path)
         case .playlistFolder(let id, _): return .importFilesAsNewPlaylistInFolder(urls, folderID: id)
         case .syncProfile, .player, .playlistCover, .playlistCard, .playlistOrder, .playlistCardInManualOrder,
-             .genreRow, .genreTable:
+             .genreRow, .genreTable, .reels:
             return .refuse(nil)
         }
     }

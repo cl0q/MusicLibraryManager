@@ -76,6 +76,10 @@ struct DropPerformer {
         case .openLink(let url, _):
             // The playlist it was dropped on can't be preselected until W3-ADD's sheets exist.
             QuickAddRouter.shared.open(url: url.absoluteString)
+        case .addReels(let urls):
+            ReelsDropRouter.shared.addFiles(urls)
+        case .fetchReelLink(let url):
+            ReelsDropRouter.shared.fetchLink(url)
         case .openLibraryFile(let url, let ignored):
             MainWindowPresenter.shared.openLibrary(url, launch: .shared)
             if ignored > 0 { statusBar?.post(DropWords.ignoredWithLibrary(ignored)) }
