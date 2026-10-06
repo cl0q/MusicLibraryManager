@@ -40,7 +40,7 @@ struct SearchResultsView: View {
 /// Grouped results (V-SEARCH.E09): Tracks (the shared track table: Status, sorting, selection,
 /// context menu, Space preview, Return plays), Playlists, Folders — each with its first few
 /// hits and `Show All`, which shows the full list in its own place with the query applied.
-/// Sections without hits are left out; Albums wait for W4.
+/// Albums sit between Tracks and Playlists (UC-SEARCH-02). Sections without hits are left out.
 struct LibrarySearchResultsView: View {
     let search: ToolbarSearchModel
     let model: LibrarySearchModel
@@ -116,11 +116,11 @@ struct LibrarySearchResultsView: View {
                     EmptyView()
                 }
                 .frame(height: LibrarySearchMetrics.tableHeight(rows: results.tracks.count))
-                if results.playlistTotal > 0 || results.folderTotal > 0 {
+                if results.albumTotal > 0 || results.playlistTotal > 0 || results.folderTotal > 0 {
                     Divider()
                 }
             }
-            if results.playlistTotal > 0 || results.folderTotal > 0 {
+            if results.albumTotal > 0 || results.playlistTotal > 0 || results.folderTotal > 0 {
                 namedSections(results)
             } else {
                 Spacer(minLength: 0)
@@ -130,6 +130,23 @@ struct LibrarySearchResultsView: View {
 
     private func namedSections(_ results: LibrarySearchResults) -> some View {
         List(selection: $selectedRow) {
+            if results.albumTotal > 0 {
+                Section {
+                    ForEach(results.albums) { listing in
+                        HStack(spacing: Spacing.s) {
+                            Label(listing.album.title, systemImage: "square.stack")
+                            Text(listing.album.albumArtist.isEmpty ? listing.album.artist : listing.album.albumArtist)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        .tag(LibraryResultRow.album(listing.id))
+                    }
+                } header: {
+                    listHeader("Albums", total: results.albumTotal, showsAll: results.albumTotal > results.albums.count) {
+                        search.show(filter.applicable(to: .albums), in: .albums)
+                    }
+                }
+            }
             if results.playlistTotal > 0 {
                 Section {
                     ForEach(results.playlists) { playlist in
@@ -175,6 +192,9 @@ struct LibrarySearchResultsView: View {
     /// Double-click / Return on a playlist or folder hit: go there (UC-PRIM-05).
     private func open(_ row: LibraryResultRow) {
         switch row {
+        case .album(let id):
+            search.scope = .thisView
+            navigation.push(.album(id))
         case .playlist(let id):
             search.scope = .thisView
             navigation.select(.playlist(id))
@@ -218,8 +238,9 @@ struct LibrarySearchResultsView: View {
     }
 }
 
-/// A playlist or folder row of the Library results.
+/// An album, playlist or folder row of the Library results.
 enum LibraryResultRow: Hashable {
+    case album(Int64)
     case playlist(Int64)
     case folder(String)
 }
