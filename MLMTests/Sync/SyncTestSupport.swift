@@ -42,6 +42,11 @@ final class ScriptedDestinations: SyncDestinationChecking, @unchecked Sendable {
         lock.withLock { if back { connected = true } }
     }
 
+    /// Scripts the next disconnect: `allowance` more `true` answers, then the device is gone.
+    func script(disconnectAfter allowance: Int?) {
+        lock.withLock { self.allowance = allowance; connected = true }
+    }
+
     func disconnect() { lock.withLock { connected = false } }
 }
 

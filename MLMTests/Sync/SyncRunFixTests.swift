@@ -160,6 +160,37 @@ struct SyncRunFixTests {
         #expect(center.operations.filter { $0.kind == .sync }.count == 1)
     }
 
+    @Test func aRunInterruptedDuringCleanUpStillCopiesAfterTheDeviceReturns() async throws {
+        let destinations = ScriptedDestinations()
+        let env = try await SyncTestEnv(destinations: destinations)
+        let device = try env.device("IPOD")
+        let profile = try await env.profile("iPod", device: device)
+        try await env.sync.updateSettings(profileId: profile.id!, cleanupRemovedFiles: true)
+        for (id, title) in [(1, "Old One"), (2, "Old Two"), (3, "New Three"), (4, "New Four")] {
+            try env.localTrack(Int64(id), title: title)
+        }
+        try await env.add([1, 2], to: profile)
+        _ = try await env.service.executeSync(profileId: profile.id!)
+        #expect(env.files(in: device).count == 2)
+        // Both old tracks leave the profile, two new ones join.
+        try await env.sync.removeTrack(profileId: profile.id!, trackId: 1)
+        try await env.sync.removeTrack(profileId: profile.id!, trackId: 2)
+        try await env.add([3, 4], to: profile)
+        // The start guard and the first removal see the device; it is gone before the second.
+        destinations.script(disconnectAfter: 2)
+        destinations.onWait = { _ in true }
+
+        let result = try await env.service.executeSync(profileId: profile.id!)
+
+        #expect(result.interruptions == 1)
+        #expect(result.removedCount == 2)
+        #expect(result.syncedCount == 2, "every planned copy is made after the device returns")
+        #expect(result.failedCount == 0)
+        #expect(try await env.syncedTrackIDs(profile) == [3, 4])
+        #expect(env.files(in: device).count == 2)
+        #expect(try await env.results.fetch(profileID: profile.id!)?.outcome == .completed)
+    }
+
     @Test func aResumedRunCopiesOnlyWhatIsNotOnTheDevice() async throws {
         let env = try await SyncTestEnv()
         let device = try env.device("IPOD")

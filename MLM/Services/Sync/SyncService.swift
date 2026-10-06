@@ -1045,7 +1045,9 @@ final class SyncService {
                 break
             }
             var interrupted = Set<Int64>()
+            var copiesRan = false
             if pendingRemovals.isEmpty {
+                copiesRan = true
                 for outcome in await runCopies(pendingCopies) {
                     if case .interrupted(let id) = outcome {
                         interrupted.insert(id)
@@ -1058,7 +1060,10 @@ final class SyncService {
             if pendingRemovals.isEmpty && interrupted.isEmpty { break }
             // The device was removed: wait for it as the same operation (UC-JOB-10); nothing
             // is marked failed. Only the files not copied yet are tried again.
-            pendingCopies = pendingCopies.filter { interrupted.contains($0.trackId) }
+            // (When the device went away during the clean-up, no copy was tried yet: all stay.)
+            if copiesRan {
+                pendingCopies = pendingCopies.filter { interrupted.contains($0.trackId) }
+            }
             result.interruptions += 1
             AppLogger.shared.info(
                 "Sync interrupted: “\(deviceName)” disconnected — \(copiedSoFar) copied, \(pendingCopies.count + pendingRemovals.count) waiting",
