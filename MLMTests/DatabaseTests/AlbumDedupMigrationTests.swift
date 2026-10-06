@@ -157,7 +157,16 @@ struct AlbumDedupMigrationTests {
 
     // MARK: The real migrator on a copy (W3-LAUNCH's approach)
 
-    @Test func theRealMigratorOnACopyTakesThePreMigrationBackupAndMerges() throws {
+    @Test func theRealMigratorOnACopyOfAV55DatabaseTakesTheBackupAndMerges() throws {
+        try realMigratorRun(from: AlbumTracksMigrationTests.previous)
+    }
+
+    /// A database as the v49 build left it: v53–v55 are pending as well as v50 and v51.
+    @Test func theRealMigratorOnACopyOfAV49DatabaseTakesTheBackupAndMerges() throws {
+        try realMigratorRun(from: "v49_pending_recommendations")
+    }
+
+    private func realMigratorRun(from identifier: String) throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("AlbumDedupMigrationTests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -167,7 +176,7 @@ struct AlbumDedupMigrationTests {
         let fixture = root.appendingPathComponent("fixture.db")
         do {
             let queue = try DatabaseQueue(path: fixture.path, configuration: AlbumTracksMigrationTests.configuration)
-            try DatabaseManager.buildMigrator().migrate(queue, upTo: AlbumTracksMigrationTests.previous)
+            try DatabaseManager.buildMigrator().migrate(queue, upTo: identifier)
             try queue.write { db in
                 try Self.album(db, artist: Self.nfc, title: "Lemonade")
                 try Self.album(db, artist: Self.nfd, title: "Lemonade")

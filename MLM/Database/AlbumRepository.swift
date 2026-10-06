@@ -3,7 +3,8 @@ import GRDB
 
 /// Repository for album detection, variants, and sibling discovery.
 final class AlbumRepository: Sendable {
-    private let database: any DatabaseWriter
+    /// Internal so the grid queries (`AlbumRepository+Listing.swift`) read the same database.
+    let database: any DatabaseWriter
 
     init(database: any DatabaseWriter) {
         self.database = database
