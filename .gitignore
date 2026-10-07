@@ -38,3 +38,11 @@ streaming2ipod/
 
 # Agent configuration
 .antigravitycli/
+
+# Other agent tools, worktrees and local outputs
+.claude/worktrees/
+.opencode/
+.qwen/
+.playwright-mcp/
+graphify-out/
+test.log
