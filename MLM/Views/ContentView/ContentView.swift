@@ -64,9 +64,10 @@ struct ContentView: View {
                 .modifier(LibraryFilePresentation(launch: launch))
                 // Remove from Library… — one confirmation for the Track menu and context menus.
                 .modifier(LibraryRemovalAlert())
+                // Reads the navigation model, so it must sit inside its environment injection below.
+                .modifier(TrackRemovalFailureAlert())
                 .installsMainWindowPresenter()
                 .environment(shell.navigation)
-                .modifier(TrackRemovalFailureAlert())
                 .environment(shell.trailing)
                 .environment(shell.statusBar)
                 .environment(shell.sidebar)

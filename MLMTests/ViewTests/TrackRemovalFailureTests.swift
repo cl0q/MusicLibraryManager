@@ -54,5 +54,10 @@ struct TrackRemovalFailureTests {
         #expect(actions.contains("struct TrackRemovalFailureAlert: ViewModifier"))
         let content = try String(contentsOf: root.appendingPathComponent("MLM/Views/ContentView/ContentView.swift"), encoding: .utf8)
         #expect(content.contains(".modifier(TrackRemovalFailureAlert())"))
+        // Regression: applied outside `.environment(shell.navigation)` its non-optional
+        // `@Environment(NavigationModel.self)` found nothing and crashed the main window at launch.
+        let alert = try #require(content.range(of: ".modifier(TrackRemovalFailureAlert())"))
+        let navigation = try #require(content.range(of: ".environment(shell.navigation)"))
+        #expect(alert.lowerBound < navigation.lowerBound)
     }
 }

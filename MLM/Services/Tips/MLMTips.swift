@@ -77,11 +77,19 @@ enum MLMTips {
             return
         }
         let monitor = MLMTipMonitor(
-            sheetOpen: { NSApp.windows.contains { $0.attachedSheet != nil } || NSApp.modalWindow != nil },
+            sheetOpen: { anySheetOpen(in: NSApp) },
             previewPlaying: { DependencyContainer.shared.playbackViewModel?.preview.isActive == true },
             apply: { quiet in MLMTips.isQuiet = quiet })
         monitor.start()
         Self.monitor = monitor
+    }
+
+    /// Whether a sheet or modal is up. `configure` runs in `MLMApp.init()`, before AppKit has
+    /// created the application, so `NSApp` is still nil there: count that as busy until it exists.
+    @MainActor
+    static func anySheetOpen(in app: NSApplication?) -> Bool {
+        guard let app else { return true }
+        return app.windows.contains { $0.attachedSheet != nil } || app.modalWindow != nil
     }
 
     /// Help ▸ Show Tips Again and Settings ▸ Advanced ▸ Show Tips Again (UC-KIT-27). TipKit can

@@ -86,6 +86,13 @@ struct W5GapCommandsTests {
         #expect(!MLMTipGate.isQuiet(sheetOpen: true, previewPlaying: true))
     }
 
+    /// Regression: `MLMTips.configure()` runs in `MLMApp.init()` while `NSApp` is still nil; reading
+    /// it there crashed every launch.
+    @Test func noApplicationYetCountsAsBusy() {
+        #expect(MLMTips.anySheetOpen(in: nil))
+        #expect(!MLMTipGate.isQuiet(sheetOpen: MLMTips.anySheetOpen(in: nil), previewPlaying: false))
+    }
+
     @Test func theMonitorReportsChangesOnly() {
         var sheet = false
         var preview = false
